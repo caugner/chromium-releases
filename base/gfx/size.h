@@ -7,9 +7,7 @@
 
 #include "build/build_config.h"
 
-#ifdef UNIT_TEST
 #include <iostream>
-#endif
 
 #if defined(OS_WIN)
 typedef struct tagSIZE SIZE;
@@ -35,6 +33,11 @@ class Size {
   void SetSize(int width, int height) {
     width_ = width;
     height_ = height;
+  }
+
+  void Enlarge(int width, int height) {
+    width_ += width;
+    height_ += height;
   }
 
   void set_width(int width) { width_ = width; }
@@ -65,13 +68,8 @@ class Size {
 
 }  // namespace gfx
 
-#ifdef UNIT_TEST
-
 inline std::ostream& operator<<(std::ostream& out, const gfx::Size& s) {
   return out << s.width() << "x" << s.height();
 }
 
-#endif  // #ifdef UNIT_TEST
-
 #endif // BASE_GFX_SIZE_H__
-

@@ -32,21 +32,23 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/sqlite_utils.h"
 #include "chrome/common/thumbnail_score.h"
+#include "chrome/common/url_constants.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
-#include "chromium_strings.h"
-#include "generated_resources.h"
-
+using base::Time;
 using history::HistoryBackend;
 
 // Sends messages from the backend to us on the main thread. This must be a
@@ -97,9 +99,11 @@ HistoryService::HistoryService()
     : thread_(new ChromeThread(ChromeThread::HISTORY)),
       profile_(NULL),
       backend_loaded_(false) {
-  if (NotificationService::current()) {  // Is NULL when running generate_profile.
+  // Is NULL when running generate_profile.
+  if (NotificationService::current()) {
     NotificationService::current()->AddObserver(
-        this, NOTIFY_HISTORY_URLS_DELETED, Source<Profile>(profile_));
+        this, NotificationType::HISTORY_URLS_DELETED,
+        Source<Profile>(profile_));
   }
 }
 
@@ -108,7 +112,7 @@ HistoryService::HistoryService(Profile* profile)
       profile_(profile),
       backend_loaded_(false) {
   NotificationService::current()->AddObserver(
-      this, NOTIFY_HISTORY_URLS_DELETED, Source<Profile>(profile_));
+      this, NotificationType::HISTORY_URLS_DELETED, Source<Profile>(profile_));
 }
 
 HistoryService::~HistoryService() {
@@ -116,20 +120,23 @@ HistoryService::~HistoryService() {
   Cleanup();
 
   // Unregister for notifications.
-  if (NotificationService::current()) {  // Is NULL when running generate_profile.
+  // Is NULL when running generate_profile.
+  if (NotificationService::current()) {
     NotificationService::current()->RemoveObserver(
-        this, NOTIFY_HISTORY_URLS_DELETED, Source<Profile>(profile_));
+        this, NotificationType::HISTORY_URLS_DELETED,
+        Source<Profile>(profile_));
   }
 }
 
-bool HistoryService::Init(const std::wstring& history_dir,
+bool HistoryService::Init(const FilePath& history_dir,
                           BookmarkService* bookmark_service) {
   if (!thread_->Start())
     return false;
 
   // Create the history backend.
   scoped_refptr<HistoryBackend> backend(
-      new HistoryBackend(history_dir, new BackendDelegate(this),
+      new HistoryBackend(history_dir,
+                         new BackendDelegate(this),
                          bookmark_service));
   history_backend_.swap(backend);
 
@@ -469,6 +476,12 @@ void HistoryService::UpdateDownload(int64 received_bytes,
                     received_bytes, state, db_handle);
 }
 
+void HistoryService::UpdateDownloadPath(const std::wstring& path,
+                                        int64 db_handle) {
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateDownloadPath,
+                    path, db_handle);
+}
+
 void HistoryService::RemoveDownload(int64 db_handle) {
   ScheduleAndForget(PRIORITY_NORMAL,
                     &HistoryBackend::RemoveDownload, db_handle);
@@ -519,7 +532,7 @@ HistoryService::Handle HistoryService::GetVisitCountToHost(
 void HistoryService::Observe(NotificationType type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  if (type != NOTIFY_HISTORY_URLS_DELETED) {
+  if (type != NotificationType::HISTORY_URLS_DELETED) {
     NOTREACHED();
     return;
   }
@@ -561,12 +574,13 @@ bool HistoryService::CanAddURL(const GURL& url) const {
   if (!url.is_valid())
     return false;
 
-  if (url.SchemeIs("javascript") ||
-      url.SchemeIs("chrome-resource") ||
-      url.SchemeIs("view-source"))
+  if (url.SchemeIs(chrome::kJavaScriptScheme) ||
+      url.SchemeIs(chrome::kChromeUIScheme) ||
+      url.SchemeIs(chrome::kViewSourceScheme) ||
+      url.SchemeIs(chrome::kChromeInternalScheme))
     return false;
 
-  if (url.SchemeIs("about")) {
+  if (url.SchemeIs(chrome::kAboutScheme)) {
     std::string path = url.path();
     if (path.empty() || LowerCaseEqualsASCII(path, "blank"))
       return false;
@@ -588,14 +602,23 @@ void HistoryService::SetInMemoryBackend(
 }
 
 void HistoryService::NotifyTooNew() {
+#if defined(OS_WIN)
   // Find the last browser window to display our message box from.
   Browser* cur_browser = BrowserList::GetLastActive();
-  HWND cur_hwnd = cur_browser ? cur_browser->GetTopLevelHWND() : NULL;
+  // TODO(brettw): Do this some other way or beng will kick you. e.g. move to
+  //               BrowserView.
+  HWND parent_hwnd =
+      reinterpret_cast<HWND>(cur_browser->window()->GetNativeHandle());
+  HWND cur_hwnd = cur_browser ? parent_hwnd : NULL;
 
   std::wstring title = l10n_util::GetString(IDS_PRODUCT_NAME);
   std::wstring message = l10n_util::GetString(IDS_PROFILE_TOO_NEW_ERROR);
   MessageBox(cur_hwnd, message.c_str(), title.c_str(),
              MB_OK | MB_ICONWARNING | MB_TOPMOST);
+#else
+  // TODO(port): factor this out into platform-specific code.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void HistoryService::DeleteURL(const GURL& url) {
@@ -641,7 +664,7 @@ void HistoryService::BroadcastNotifications(
 void HistoryService::OnDBLoaded() {
   LOG(INFO) << "History backend finished loading";
   backend_loaded_ = true;
-  NotificationService::current()->Notify(NOTIFY_HISTORY_LOADED,
+  NotificationService::current()->Notify(NotificationType::HISTORY_LOADED,
                                          Source<Profile>(profile_),
                                          Details<HistoryService>(this));
 }

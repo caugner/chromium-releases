@@ -26,18 +26,12 @@
 #ifndef WEBKIT_GLUE_WEBFRAME_IMPL_H_
 #define WEBKIT_GLUE_WEBFRAME_IMPL_H_
 
-#include <string>
-
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/gfx/platform_canvas.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "webkit/glue/webdatasource_impl.h"
+#include "skia/ext/platform_canvas.h"
+#include "webkit/glue/password_autocomplete_listener.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webframeloaderclient_impl.h"
-#include "webkit/glue/webplugin_delegate.h"
-#include "webkit/glue/webview_delegate.h"
 
 MSVC_PUSH_WARNING_LEVEL(0);
 #include "ResourceHandleClient.h"
@@ -46,8 +40,11 @@ MSVC_PUSH_WARNING_LEVEL(0);
 MSVC_POP_WARNING();
 
 class AltErrorPageResourceFetcher;
+class ChromePrintContext;
+class WebDataSourceImpl;
 class WebErrorImpl;
 class WebHistoryItemImpl;
+class WebPluginDelegate;
 class WebRequest;
 class WebView;
 class WebViewImpl;
@@ -69,7 +66,7 @@ class BitmapPlatformDeviceWin;
 }
 
 // Implementation of WebFrame, note that this is a reference counted object.
-class WebFrameImpl : public WebFrame {
+class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
  public:
   WebFrameImpl();
   ~WebFrameImpl();
@@ -94,22 +91,28 @@ class WebFrameImpl : public WebFrame {
                                           const GURL& error_page_url,
                                           bool replace,
                                           const GURL& fake_url);
-  virtual bool GetPreviousState(GURL* url, std::wstring* title,
-                                std::string* history_state) const;
-  virtual bool GetCurrentState(GURL* url, std::wstring* title,
-                               std::string* history_state) const;
-  virtual bool HasCurrentState() const;
+  virtual void ExecuteScript(const webkit_glue::WebScriptSource& source);
+  virtual void ExecuteScriptInNewContext(
+      const webkit_glue::WebScriptSource* sources, int num_sources);
+  virtual bool InsertCSSStyles(const std::string& css);
+  virtual bool GetPreviousHistoryState(std::string* history_state) const;
+  virtual bool GetCurrentHistoryState(std::string* history_state) const;
+  virtual bool HasCurrentHistoryState() const;
   virtual GURL GetURL() const;
   virtual GURL GetFavIconURL() const;
   virtual GURL GetOSDDURL() const;
+  virtual scoped_refptr<class FeedList> GetFeedList() const;
   virtual WebDataSource* GetDataSource() const;
   virtual WebDataSource* GetProvisionalDataSource() const;
   virtual void StopLoading();
   virtual WebFrame* GetOpener() const;
   virtual WebFrame* GetParent() const;
+  virtual WebFrame* GetTop() const;
   virtual WebFrame* GetChildFrame(const std::wstring& xpath) const;
   virtual WebView* GetView() const;
-  virtual gfx::BitmapPlatformDevice CaptureImage(bool scroll_to_zero);
+  virtual std::string GetSecurityOrigin() const;
+  virtual bool CaptureImage(scoped_ptr<skia::BitmapPlatformDevice>* image,
+                            bool scroll_to_zero);
 
   // This method calls createRuntimeObject (in KJS::Bindings::Instance), which
   // increments the refcount of the NPObject passed in.
@@ -118,13 +121,13 @@ class WebFrameImpl : public WebFrame {
 
   virtual void* GetFrameImplementation() { return frame(); }
 
+  virtual NPObject* GetWindowNPObject();
+
   virtual void GetContentAsPlainText(int max_chars, std::wstring* text) const;
   virtual bool Find(const FindInPageRequest& request,
                     bool wrap_within_frame,
                     gfx::Rect* selection_rect);
-  virtual bool FindNext(const FindInPageRequest& request,
-                        bool wrap_within_frame);
-  virtual void StopFinding();
+  virtual void StopFinding(bool clear_selection);
   virtual void ScopeStringMatches(FindInPageRequest request, bool reset);
   virtual void CancelPendingScopingEffort();
   virtual void ResetMatchCount();
@@ -134,10 +137,13 @@ class WebFrameImpl : public WebFrame {
   virtual void Cut();
   virtual void Paste();
   virtual void Replace(const std::wstring& text);
+  virtual void ToggleSpellCheck();
+  virtual bool SpellCheckEnabled();
   virtual void Delete();
   virtual void Undo();
   virtual void Redo();
   virtual void ClearSelection();
+  virtual std::string GetSelection(bool as_html);
 
   virtual void SetInViewSourceMode(bool enable);
 
@@ -152,7 +158,9 @@ class WebFrameImpl : public WebFrame {
 
   virtual WebTextInput* GetTextInput();
 
-  virtual bool ExecuteCoreCommandByName(const std::string& name, const std::string& value);
+  virtual bool ExecuteCoreCommandByName(const std::string& name,
+                                        const std::string& value);
+  virtual bool IsCoreCommandEnabled(const std::string& name);
 
   virtual void AddMessageToConsole(const std::wstring& msg,
                                    ConsoleMessageLevel level);
@@ -161,29 +169,18 @@ class WebFrameImpl : public WebFrame {
 
   virtual gfx::Size ScrollOffset() const;
 
-  virtual bool SetPrintingMode(bool printing,
-                               float page_width_min,
-                               float page_width_max,
-                               int* width);
-  virtual int ComputePageRects(const gfx::Size& page_size_px);
-  virtual void GetPageRect(int page, gfx::Rect* page_size) const;
-  virtual bool SpoolPage(int page,
-                         PlatformContextSkia* context);
+  virtual bool BeginPrint(const gfx::Size& page_size_px,
+                          int* page_count);
+  virtual float PrintPage(int page, skia::PlatformCanvas* canvas);
+  virtual void EndPrint();
 
-  // Reformats this frame for printing or for screen display, depending on
-  // |printing| flag. Acts recursively on inner frames.
-  // Note: It fails if the main frame failed to load. It will succeed even if a
-  // child frame failed to load.
-  void SetPrinting(bool printing, float page_width_min, float page_width_max);
-
-  void CreateChildFrame(const WebCore::FrameLoadRequest&,
-                        WebCore::HTMLFrameOwnerElement* owner_element,
-                        bool allows_scrolling, int margin_width,
-                        int margin_height, WebCore::Frame*& new_frame);
+  PassRefPtr<WebCore::Frame> CreateChildFrame(
+      const WebCore::FrameLoadRequest&,
+      WebCore::HTMLFrameOwnerElement* owner_element);
 
   // WebFrameImpl
   void Layout();
-  void Paint(gfx::PlatformCanvas* canvas, const gfx::Rect& rect);
+  void Paint(skia::PlatformCanvas* canvas, const gfx::Rect& rect);
 
   bool IsLoading();
 
@@ -200,7 +197,7 @@ class WebFrameImpl : public WebFrame {
   }
 
   WebCore::Frame* frame() const {
-    return frame_.get();
+    return frame_;
   }
 
   static WebFrameImpl* FromFrame(WebCore::Frame* frame);
@@ -224,43 +221,40 @@ class WebFrameImpl : public WebFrame {
   WebDataSourceImpl* GetDataSourceImpl() const;
   WebDataSourceImpl* GetProvisionalDataSourceImpl() const;
 
-  // Gets the tickmarks for drawing on the scrollbars of a particular frame.
-  const Vector<RefPtr<WebCore::Range> >& tickmarks() const {
-    return tickmarks_;
-  }
-
-  // Returns whether a range representing a tickmark should be highlighted.
-  // We use this to avoid highlighting ranges that are currently hidden.
-  static bool RangeShouldBeHighlighted(WebCore::Range* range);
-
-  const WebCore::Node* inspected_node() const {
-    return inspected_node_;
-  }
-
-  void selectNodeFromInspector(WebCore::Node* node);
-
-  // Returns which frame has an active tickmark. This function should only be
+  // Returns which frame has an active match. This function should only be
   // called on the main frame, as it is the only frame keeping track. Returned
-  // value can be NULL if no frame has an active tickmark.
-  const WebFrameImpl* active_tickmark_frame() const {
-    return active_tickmark_frame_;
+  // value can be NULL if no frame has an active match.
+  const WebFrameImpl* active_match_frame() const {
+    return active_match_frame_;
   }
 
-  // Returns the index of the active tickmark for this frame.
-  size_t active_tickmark_index() const {
-    return active_tickmark_;
-  }
+  // When a Find operation ends, we want to set the selection to what was active
+  // and set focus to the first focusable node we find (starting with the first
+  // node in the matched range and going up the inheritance chain). If we find
+  // nothing to focus we focus the first focusable node in the range. This
+  // allows us to set focus to a link (when we find text inside a link), which
+  // allows us to navigate by pressing Enter after closing the Find box.
+  void SetFindEndstateFocusAndSelection();
 
   // Sets whether the WebFrameImpl allows its document to be scrolled.
   // If the parameter is true, allow the document to be scrolled.
-  // Otherwise, disallow scrolling
+  // Otherwise, disallow scrolling.
   void SetAllowsScrolling(bool flag);
 
-  // Returns true if the frame CSS is in "printing" mode.
-  bool printing() const { return printing_; }
+  // Registers a listener for the specified user name input element.  The
+  // listener will receive notifications for blur and when autocomplete should
+  // be triggered.
+  // The WebFrameImpl becomes the owner of the passed listener.
+  void RegisterPasswordListener(
+      PassRefPtr<WebCore::HTMLInputElement> user_name_input_element,
+      webkit_glue::PasswordAutocompleteListener* listener);
 
-  virtual bool HasUnloadListener();
-  virtual bool IsReloadAllowingStaleData() const;
+  // Returns the password autocomplete listener associated with the passed
+  // user name input element, or NULL if none available.
+  // Note that the returned listener is owner by the WebFrameImpl and should not
+  // be kept around as it is deleted when the page goes away.
+  webkit_glue::PasswordAutocompleteListener* GetPasswordListener(
+      WebCore::HTMLInputElement* user_name_input_element);
 
  protected:
   friend class WebFrameLoaderClient;
@@ -291,16 +285,16 @@ class WebFrameImpl : public WebFrame {
 
   WebFrameLoaderClient frame_loader_client_;
 
-  // Holding a reference back to the WebViewImpl is necessary to ensure that
-  // its HWND is not destroyed before all of the WebCore::Widgets, which refer
-  // to the WebViewImpl's HWND as their containingWindow.  However, this ref
-  // creates a cycle between the WebViewImpl and the top-most WebFrameImpl.  We
-  // break this cycle in our Closing method.
-  scoped_refptr<WebViewImpl> webview_impl_;
+  // This is a factory for creating cancelable tasks for this frame that run
+  // asynchronously in order to scope string matches during a find operation.
+  ScopedRunnableMethodFactory<WebFrameImpl> scope_matches_factory_;
 
-  // The WebCore frame associated with this frame.  MAY BE NULL if the frame
-  // has been detached from the DOM.
-  WTF::RefPtr<WebCore::Frame> frame_;
+  // This is a weak pointer to our containing WebViewImpl.
+  WebViewImpl* webview_impl_;
+
+  // This is a weak pointer to our corresponding WebCore frame.  A reference to
+  // ourselves is held while frame_ is valid.  See our Closing method.
+  WebCore::Frame* frame_;
 
   // This holds the request passed to LoadRequest, for access by the
   // WebFrameLoaderClient.  Unfortunately we have no other way to pass this
@@ -315,52 +309,33 @@ class WebFrameImpl : public WebFrame {
   // a pointer back to the appropriate plugin.
   WebPluginDelegate* plugin_delegate_;
 
-  // Frame construction parameters
-  bool allows_scrolling_;
-  int margin_width_;
-  int margin_height_;
-
   // Handling requests from TextInputController on this frame.
   scoped_ptr<WebTextInputImpl> webtextinput_impl_;
 
-  // This vector maintains a list of Ranges representing locations for search
-  // string matches that were found in the frame during a FindInPage operation.
-  Vector<RefPtr<WebCore::Range> > tickmarks_;
+  // A way for the main frame to keep track of which frame has an active
+  // match. Should be NULL for all other frames.
+  WebFrameImpl* active_match_frame_;
 
-  // The node selected in the web inspector. Used for highlighting it on the page.
-  WebCore::Node* inspected_node_;
+  // The range of the active match for the current frame.
+  RefPtr<WebCore::Range> active_match_;
 
-  // The index of the active tickmark for the current frame.
-  size_t active_tickmark_;
+  // The index of the active match.
+  int active_match_index_;
 
   // This flag is used by the scoping effort to determine if we need to figure
-  // out which rectangle is the active tickmark. Once we find the active
+  // out which rectangle is the active match. Once we find the active
   // rectangle we clear this flag.
   bool locating_active_rect_;
 
-  // This rectangle is used during the scoping effort to figure out what rect
-  // got selected during the Find operation. In other words, first the Find
-  // operation iterates to the next match and then scoping will happen for all
-  // matches. When we encounter this rectangle during scoping we mark that
-  // tickmark as active (see active_tickmark_). This avoids having to iterate
-  // through a potentially very large tickmark vector to see which hit is
-  // active. An empty rect means that we don't know the rectangle for the
-  // selection (ie. because the selection controller couldn't tell us what the
-  // bounding box for it is) and the scoping effort should mark the first
-  // match it finds as the active rectangle.
-  WebCore::IntRect active_selection_rect_;
-
-  // This range represents the range that got selected during the Find or
-  // FindNext operation. We will set this range as the selection (unless the
-  // user selects something between Find/FindNext operations) so that we can
-  // continue from where we left off.
-  RefPtr<WebCore::Range> last_active_range_;
+  // The scoping effort can time out and we need to keep track of where we
+  // ended our last search so we can continue from where we left of.
+  RefPtr<WebCore::Range> resume_scoping_from_range_;
 
   // Keeps track of the last string this frame searched for. This is used for
   // short-circuiting searches in the following scenarios: When a frame has
   // been searched and returned 0 results, we don't need to search that frame
   // again if the user is just adding to the search (making it more specific).
-  std::wstring last_search_string_;
+  string16 last_search_string_;
 
   // Keeps track of how many matches this frame has found so far, so that we
   // don't loose count between scoping efforts, and is also used (in conjunction
@@ -371,11 +346,7 @@ class WebFrameImpl : public WebFrame {
   // This variable keeps a cumulative total of matches found so far for ALL the
   // frames on the page, and is only incremented by calling IncreaseMatchCount
   // (on the main frame only). It should be -1 for all other frames.
-  int total_matchcount_;
-
-  // A way for the main frame to keep track of which frame has an active
-  // tickmark. Should be NULL for all other frames.
-  WebFrameImpl* active_tickmark_frame_;
+  size_t total_matchcount_;
 
   // This variable keeps a cumulative total of how many frames are currently
   // scoping, and is incremented/decremented on the main frame only.
@@ -390,10 +361,6 @@ class WebFrameImpl : public WebFrame {
   // and the frame area.
   int next_invalidate_after_;
 
-  // This is a factory for creating cancelable tasks for this frame that run
-  // asynchronously in order to scope string matches during a find operation.
-  ScopedRunnableMethodFactory<WebFrameImpl> scope_matches_factory_;
-
  private:
   // A bit mask specifying area of the frame to invalidate.
   enum AreaToInvalidate {
@@ -406,13 +373,13 @@ class WebFrameImpl : public WebFrame {
   // Invalidates a certain area within the frame.
   void InvalidateArea(AreaToInvalidate area);
 
-  // Invalidates the tickmark area represented by the range passed in.
-  void InvalidateTickmark(RefPtr<WebCore::Range> tickmark);
+  // Add a WebKit TextMatch-highlight marker to nodes in a range.
+  void AddMarker(WebCore::Range* range);
 
   // Returns the ordinal of the first match in the frame specified. This
   // function enumerates the frames, starting with the main frame and up to (but
   // not including) the frame passed in as a parameter and counts how many
-  // tickmarks there are.
+  // matches have been found.
   int OrdinalOfFirstMatchForFrame(WebFrameImpl* frame) const;
 
   // Determines whether the scoping effort is required for a particular frame.
@@ -421,6 +388,9 @@ class WebFrameImpl : public WebFrame {
   // was searched.
   bool ShouldScopeMatches(FindInPageRequest request);
 
+  // Only for test_shell
+  int PendingFrameUnloadEventCount() const;
+
   // Determines whether to invalidate the content area and scrollbar.
   void InvalidateIfNecessary();
 
@@ -428,11 +398,18 @@ class WebFrameImpl : public WebFrame {
                            const WebCore::SubstituteData& data,
                            bool replace);
 
-  // In "printing" mode. Used as a state check.
-  bool printing_;
+  // Clears the map of password listeners.
+  void ClearPasswordListeners();
 
-  // For each printed page, the view of the document in pixels.
-  Vector<WebCore::IntRect> pages_;
+  // Valid between calls to BeginPrint() and EndPrint(). Containts the print
+  // information. Is used by PrintPage().
+  scoped_ptr<ChromePrintContext> print_context_;
+
+  // The input fields that are interested in edit events and their associated
+  // listeners.
+  typedef HashMap<RefPtr<WebCore::HTMLInputElement>,
+      webkit_glue::PasswordAutocompleteListener*> PasswordListenerMap;
+  PasswordListenerMap password_listeners_;
 
   DISALLOW_COPY_AND_ASSIGN(WebFrameImpl);
 };

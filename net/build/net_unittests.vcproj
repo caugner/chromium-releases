@@ -148,7 +148,7 @@
 			Name="support"
 			>
 			<File
-				RelativePath=".\precompiled_net.cc"
+				RelativePath="precompiled_net.cc"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -168,7 +168,7 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath=".\precompiled_net.h"
+				RelativePath="precompiled_net.h"
 				>
 			</File>
 			<File
@@ -227,6 +227,26 @@
 				Name="http"
 				>
 				<File
+					RelativePath="..\http\des_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\http\http_auth_cache_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\http\http_auth_handler_basic_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\http\http_auth_handler_digest_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\http\http_auth_unittest.cc"
+					>
+				</File>
+				<File
 					RelativePath="..\http\http_cache_unittest.cc"
 					>
 				</File>
@@ -255,10 +275,6 @@
 					>
 				</File>
 				<File
-					RelativePath="..\http\http_transaction_winhttp_unittest.cc"
-					>
-				</File>
-				<File
 					RelativePath="..\http\http_util_unittest.cc"
 					>
 				</File>
@@ -266,18 +282,10 @@
 					RelativePath="..\http\http_vary_data_unittest.cc"
 					>
 				</File>
-				<File
-					RelativePath="..\http\winhttp_request_throttle_unittest.cc"
-					>
-				</File>
 			</Filter>
 			<Filter
 				Name="base"
 				>
-				<File
-					RelativePath="..\base\auth_cache_unittest.cc"
-					>
-				</File>
 				<File
 					RelativePath="..\base\base64_unittest.cc"
 					>
@@ -308,6 +316,14 @@
 				</File>
 				<File
 					RelativePath="..\base\escape_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\base\file_stream_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\base\filter_unittest.cc"
 					>
 				</File>
 				<File
@@ -343,7 +359,7 @@
 					>
 				</File>
 				<File
-					RelativePath="..\base\sdch_filter_unitest.cc"
+					RelativePath="..\base\sdch_filter_unittest.cc"
 					>
 				</File>
 				<File
@@ -356,6 +372,10 @@
 				</File>
 				<File
 					RelativePath="..\base\tcp_client_socket_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\base\tcp_pinger_unittest.cc"
 					>
 				</File>
 				<File
@@ -376,6 +396,14 @@
 				</File>
 			</Filter>
 			<Filter
+				Name="ftp"
+				>
+				<File
+					RelativePath="..\ftp\ftp_auth_cache_unittest.cc"
+					>
+				</File>
+			</Filter>
+			<Filter
 				Name="url_request"
 				>
 				<File
@@ -390,6 +418,22 @@
 			<Filter
 				Name="proxy"
 				>
+				<File
+					RelativePath="..\proxy\proxy_list_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\proxy\proxy_script_fetcher_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\proxy\proxy_resolver_v8_unittest.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\proxy\proxy_server_unittest.cc"
+					>
+				</File>
 				<File
 					RelativePath="..\proxy\proxy_service_unittest.cc"
 					>

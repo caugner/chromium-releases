@@ -5,13 +5,14 @@
 #ifndef NET_BASE_UPLOAD_DATA_STREAM_H_
 #define NET_BASE_UPLOAD_DATA_STREAM_H_
 
+#include "net/base/file_stream.h"
 #include "net/base/upload_data.h"
 
 namespace net {
 
 class UploadDataStream {
  public:
-  UploadDataStream(const UploadData* data);
+  explicit UploadDataStream(const UploadData* data);
   ~UploadDataStream();
 
   // Returns the stream's buffer and buffer length.
@@ -22,9 +23,6 @@ class UploadDataStream {
   // call modifies the stream's buffer so that it contains the next segment of
   // the upload data to be consumed.
   void DidConsume(size_t num_bytes);
-
-  // Call to reset the stream position to the beginning.
-  void Reset();
 
   // Returns the total size of the data stream and the current position.
   uint64 size() const { return total_size_; }
@@ -50,9 +48,9 @@ class UploadDataStream {
   // a TYPE_BYTES element.
   size_t next_element_offset_;
 
-  // A handle to the currently open file (or INVALID_HANDLE_VALUE) for
-  // next_element_ if the next element is a TYPE_FILE element.
-  HANDLE next_element_handle_;
+  // A stream to the currently open file, for next_element_ if the next element
+  // is a TYPE_FILE element.
+  FileStream next_element_stream_;
 
   // The number of bytes remaining to be read from the currently open file
   // if the next element is of TYPE_FILE.
@@ -68,4 +66,3 @@ class UploadDataStream {
 }  // namespace net
 
 #endif  // NET_BASE_UPLOAD_DATA_STREAM_H_
-

@@ -9,8 +9,8 @@
 #include "chrome/common/animation.h"
 #include "chrome/common/slide_animation.h"
 #include "chrome/common/throb_animation.h"
-#include "chrome/views/button.h"
-#include "chrome/views/menu.h"
+#include "chrome/views/controls/button/image_button.h"
+#include "chrome/views/controls/menu/menu.h"
 #include "chrome/views/view.h"
 
 class TabContents;
@@ -22,7 +22,8 @@ class TabContents;
 //  A View that renders a Tab, either in a TabStrip or in a DraggedTabView.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class TabRenderer : public ChromeViews::View,
+class TabRenderer : public views::View,
+                    public views::ButtonListener,
                     public AnimationDelegate {
  public:
   // Possible animation states.
@@ -54,7 +55,7 @@ class TabRenderer : public ChromeViews::View,
   void StopPulse();
 
   // Returns the minimum possible size of a single unselected Tab.
-  static gfx::Size GetMinimumSize();
+  static gfx::Size GetMinimumUnselectedSize();
   // Returns the minimum possible size of a selected Tab. Selected tabs must
   // always show a close button and have a larger minimum size than unselected
   // tabs.
@@ -63,20 +64,27 @@ class TabRenderer : public ChromeViews::View,
   // available.
   static gfx::Size GetStandardSize();
 
+  // Loads the images to be used for the tab background. Uses the images for
+  // Vista if |use_vista_images| is true.
+  static void LoadTabImages(bool use_vista_images);
+
  protected:
-  ChromeViews::Button* close_button() const { return close_button_; }
+  views::ImageButton* close_button() const { return close_button_; }
   const gfx::Rect& title_bounds() const { return title_bounds_; }
 
   // Returns the title of the Tab.
   std::wstring GetTitle() const;
 
+  // views::ButtonListener overrides:
+  virtual void ButtonPressed(views::Button* sender) {}
+
  private:
-  // Overridden from ChromeViews::View:
+  // Overridden from views::View:
   virtual void Paint(ChromeCanvas* canvas);
   virtual void Layout();
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
-  virtual void OnMouseEntered(const ChromeViews::MouseEvent& event);
-  virtual void OnMouseExited(const ChromeViews::MouseEvent& event);
+  virtual void OnMouseEntered(const views::MouseEvent& event);
+  virtual void OnMouseExited(const views::MouseEvent& event);
+  virtual void ThemeChanged();
 
   // Overridden from AnimationDelegate:
   virtual void AnimationProgressed(const Animation* animation);
@@ -125,7 +133,7 @@ class TabRenderer : public ChromeViews::View,
   int animation_frame_;
 
   // Close Button.
-  ChromeViews::Button* close_button_;
+  views::ImageButton* close_button_;
 
   // Hover animation.
   scoped_ptr<SlideAnimation> hover_animation_;
@@ -147,6 +155,18 @@ class TabRenderer : public ChromeViews::View,
   };
   TabData data_;
 
+  struct TabImage {
+    SkBitmap* image_l;
+    SkBitmap* image_c;
+    SkBitmap* image_r;
+    int l_width;
+    int r_width;
+  };
+  static TabImage tab_active;
+  static TabImage tab_inactive;
+  static TabImage tab_inactive_otr;
+  static TabImage tab_hover;
+
   // Whether we're showing the icon. It is cached so that we can detect when it
   // changes and layout appropriately.
   bool showing_icon_;
@@ -167,8 +187,10 @@ class TabRenderer : public ChromeViews::View,
 
   bool should_display_crashed_favicon_;
 
+  static void InitClass();
+  static bool initialized_;
+
   DISALLOW_EVIL_CONSTRUCTORS(TabRenderer);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_TABS_TAB_RENDERER_H__
-

@@ -9,14 +9,13 @@
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/external_protocol_handler.h"
-#include "chrome/browser/tab_util.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/l10n_util.h"
-#include "chrome/views/message_box_view.h"
-#include "chrome/views/window.h"
-
-#include "chromium_strings.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/message_box_view.h"
+#include "chrome/views/window/window.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
 namespace {
 
@@ -31,17 +30,17 @@ const int kMessageWidth = 400;
 void ExternalProtocolDialog::RunExternalProtocolDialog(
     const GURL& url, const std::wstring& command, int render_process_host_id,
     int routing_id) {
-  TabContents* tab_contents = tab_util::GetTabContentsByID(
+  WebContents* web_contents = tab_util::GetWebContentsByID(
       render_process_host_id, routing_id);
   ExternalProtocolDialog* handler =
-      new ExternalProtocolDialog(tab_contents, url, command);
+      new ExternalProtocolDialog(web_contents, url, command);
 }
 
 ExternalProtocolDialog::~ExternalProtocolDialog() {
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// ExternalProtocolDialog, ChromeViews::DialogDelegate implementation:
+// ExternalProtocolDialog, views::DialogDelegate implementation:
 
 int ExternalProtocolDialog::GetDialogButtons() const {
   return DIALOGBUTTON_OK | DIALOGBUTTON_CANCEL;
@@ -64,7 +63,7 @@ std::wstring ExternalProtocolDialog::GetWindowTitle() const {
   return l10n_util::GetString(IDS_EXTERNAL_PROTOCOL_TITLE);
 }
 
-void ExternalProtocolDialog::WindowClosing() {
+void ExternalProtocolDialog::DeleteDelegate() {
   delete this;
 }
 
@@ -82,7 +81,7 @@ bool ExternalProtocolDialog::Accept() {
   return true;
 }
 
-ChromeViews::View* ExternalProtocolDialog::GetContentsView() {
+views::View* ExternalProtocolDialog::GetContentsView() {
   return message_box_view_;
 }
 
@@ -110,13 +109,13 @@ ExternalProtocolDialog::ExternalProtocolDialog(TabContents* tab_contents,
                                          kMessageWidth);
   HWND root_hwnd;
   if (tab_contents_) {
-    root_hwnd = GetAncestor(tab_contents_->GetContentHWND(), GA_ROOT);
+    root_hwnd = GetAncestor(tab_contents_->GetContentNativeView(), GA_ROOT);
   } else {
     // Dialog is top level if we don't have a tab_contents associated with us.
     root_hwnd = NULL;
   }
 
-  ChromeViews::Window::CreateChromeWindow(root_hwnd, gfx::Rect(), this)->Show();
+  views::Window::CreateChromeWindow(root_hwnd, gfx::Rect(), this)->Show();
 }
 
 /* static */
@@ -139,4 +138,3 @@ std::wstring ExternalProtocolDialog::GetApplicationForProtocol(
     return std::wstring();
   }
 }
-

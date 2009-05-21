@@ -12,7 +12,7 @@
 #include <shlobj.h>
 
 #include "base/file_util.h"
-#include "base/gfx/bitmap_header.h"
+#include "base/gfx/gdi_util.h"
 #include "base/gfx/png_encoder.h"
 #include "base/logging.h"
 #include "base/registry.h"
@@ -20,12 +20,15 @@
 #include "base/string_util.h"
 #include "base/win_util.h"
 #include "chrome/common/l10n_util.h"
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
+#include "net/base/mime_util.h"
 
 // Ensure that we pick up this link library.
 #pragma comment(lib, "dwmapi.lib")
 
 namespace win_util {
+
+const int kAutoHideTaskbarThicknessPx = 2;
 
 namespace {
 
@@ -115,7 +118,8 @@ std::wstring FormatSystemDate(const SYSTEMTIME& date,
   return output;
 }
 
-bool ConvertToLongPath(const std::wstring& short_path, std::wstring* long_path) {
+bool ConvertToLongPath(const std::wstring& short_path,
+                       std::wstring* long_path) {
   wchar_t long_path_buf[MAX_PATH];
   DWORD return_value = GetLongPathName(short_path.c_str(), long_path_buf,
                                        MAX_PATH);
@@ -160,13 +164,19 @@ void ShowItemInFolder(const std::wstring& full_path) {
   if (dir == L"" || !file_util::PathExists(full_path))
     return;
 
+  // ParseDisplayName will fail if the directory is "C:", it must be "C:\\".
+  FilePath dir_path(dir);
+  file_util::EnsureEndsWithSeparator(&dir_path);
+  dir = dir_path.value();
+
   typedef HRESULT (WINAPI *SHOpenFolderAndSelectItemsFuncPtr)(
               PCIDLIST_ABSOLUTE pidl_Folder,
               UINT cidl,
               PCUITEMID_CHILD_ARRAY pidls,
               DWORD flags);
 
-  static SHOpenFolderAndSelectItemsFuncPtr open_folder_and_select_itemsPtr = NULL;
+  static SHOpenFolderAndSelectItemsFuncPtr open_folder_and_select_itemsPtr =
+    NULL;
   static bool initialize_open_folder_proc = true;
   if (initialize_open_folder_proc) {
     initialize_open_folder_proc = false;
@@ -217,33 +227,33 @@ void ShowItemInFolder(const std::wstring& full_path) {
 
 // Open an item via a shell execute command. Error code checking and casting
 // explanation: http://msdn2.microsoft.com/en-us/library/ms647732.aspx
-bool OpenItemViaShell(const std::wstring& full_path, bool ask_for_app) {
+bool OpenItemViaShell(const FilePath& full_path, bool ask_for_app) {
   HINSTANCE h = ::ShellExecuteW(
-      NULL, NULL, full_path.c_str(), NULL,
-      file_util::GetDirectoryFromPath(full_path).c_str(), SW_SHOWNORMAL);
+      NULL, NULL, full_path.value().c_str(), NULL,
+      full_path.DirName().value().c_str(), SW_SHOWNORMAL);
 
   LONG_PTR error = reinterpret_cast<LONG_PTR>(h);
   if (error > 32)
     return true;
 
   if ((error == SE_ERR_NOASSOC) && ask_for_app)
-    return OpenItemWithExternalApp(full_path);
+    return OpenItemWithExternalApp(full_path.value());
 
   return false;
 }
 
-bool OpenItemViaShellNoZoneCheck(const std::wstring& full_path,
+bool OpenItemViaShellNoZoneCheck(const FilePath& full_path,
                                  bool ask_for_app) {
   SHELLEXECUTEINFO sei = { sizeof(sei) };
   sei.fMask = SEE_MASK_NOZONECHECKS | SEE_MASK_FLAG_DDEWAIT;
   sei.nShow = SW_SHOWNORMAL;
   sei.lpVerb = NULL;
-  sei.lpFile = full_path.c_str();
+  sei.lpFile = full_path.value().c_str();
   if (::ShellExecuteExW(&sei))
     return true;
   LONG_PTR error = reinterpret_cast<LONG_PTR>(sei.hInstApp);
   if ((error == SE_ERR_NOASSOC) && ask_for_app)
-    return OpenItemWithExternalApp(full_path);
+    return OpenItemWithExternalApp(full_path.value());
   return false;
 }
 
@@ -275,11 +285,11 @@ static bool GetRegistryDescriptionFromExtension(const std::wstring& file_ext,
   return false;
 }
 
-// Set up a filter for a "Save As" dialog, which will consist of 'file_ext' file
-// extension, 'ext_desc' as the text description of the 'file_ext' type, and
-// (optionally) the default 'All Files' view. The purpose of the filter is to
-// show only files of a particular type in a Windows "Save As" dialog box. The
-// resulting filter is stored in 'buffer', which is a vector since multiple
+// Set up a filter for a Save/Open dialog, which will consist of 'file_ext'
+// file extension, 'ext_desc' as the text description of the 'file_ext' type,
+// and (optionally) the default 'All Files' view. The purpose of the filter is
+// to show only files of a particular type in a Windows Save/Open dialog box.
+// The resulting filter is stored in 'buffer', which is a vector since multiple
 // NULLs are embedded. The  filters created here are:
 //   1. only files that have 'file_ext' as their extension
 //   2. all files (only added if 'include_all_files' is true)
@@ -288,10 +298,10 @@ static bool GetRegistryDescriptionFromExtension(const std::wstring& file_ext,
 //   ext_desc: "Text Document"
 //   returned (in buffer): "Text Document\0*.txt\0All Files\0*.*\0\0"
 // This is painful to build, as you will soon see.
-static void FormatSaveAsFilterForExtension(const std::wstring& file_ext,
-                                           const std::wstring& ext_desc,
-                                           bool include_all_files,
-                                           std::vector<wchar_t>* buffer) {
+static void FormatFilterForExtension(const std::wstring& file_ext,
+                                     const std::wstring& ext_desc,
+                                     bool include_all_files,
+                                     std::vector<wchar_t>* buffer) {
   DCHECK(buffer);
 
   // Force something reasonable to appear in the dialog box if there is no
@@ -341,35 +351,62 @@ static void FormatSaveAsFilterForExtension(const std::wstring& file_ext,
   (*buffer)[offset] = L'\0';  // Double NULL required.
 }
 
-bool SaveFileAs(HWND owner,
-                const std::wstring& suggested_name,
-                std::wstring* final_name) {
+std::wstring GetFileFilterFromPath(const std::wstring& file_name) {
   std::wstring reg_description;
-  std::wstring file_ext = file_util::GetFileExtensionFromPath(suggested_name);
+  std::wstring file_ext = file_util::GetFileExtensionFromPath(file_name);
   if (!file_ext.empty()) {
     file_ext = L"." + file_ext;
     GetRegistryDescriptionFromExtension(file_ext, &reg_description);
   }
 
   std::vector<wchar_t> filter;
-  FormatSaveAsFilterForExtension(file_ext, reg_description, true, &filter);
+  FormatFilterForExtension(file_ext, reg_description, true, &filter);
+  return std::wstring(&filter[0], filter.size());
+}
 
+std::wstring GetFileFilterFromExtensions(const std::wstring& extensions,
+                                         bool include_all_files) {
+  DCHECK(extensions.find(L'.') != std::wstring::npos);
+  std::wstring first_extension = extensions.substr(extensions.find(L'.'));
+  size_t first_separator_index = first_extension.find(L';');
+  if (first_separator_index != std::wstring::npos)
+    first_extension = first_extension.substr(0, first_separator_index);
+
+  std::wstring description;
+  GetRegistryDescriptionFromExtension(first_extension, &description);
+  if (description.empty())
+    description = L"*." + first_extension;
+
+  std::vector<wchar_t> filter;
+  FormatFilterForExtension(extensions, description, true, &filter);
+  return std::wstring(&filter[0], filter.size());
+}
+
+bool SaveFileAs(HWND owner,
+                const std::wstring& suggested_name,
+                std::wstring* final_name) {
+  std::wstring filter = GetFileFilterFromPath(suggested_name);
   unsigned index = 1;
   return SaveFileAsWithFilter(owner,
                               suggested_name,
-                              &filter[0],
+                              filter,
                               L"",
+                              false,
                               &index,
                               final_name);
 }
 
 bool SaveFileAsWithFilter(HWND owner,
                           const std::wstring& suggested_name,
-                          const wchar_t* filter,
+                          const std::wstring& filter,
                           const std::wstring& def_ext,
+                          bool ignore_suggested_ext,
                           unsigned* index,
                           std::wstring* final_name) {
   DCHECK(final_name);
+  // Having an empty filter makes for a bad user experience. We should always
+  // specify a filter when saving.
+  DCHECK(!filter.empty());
   std::wstring file_part = file_util::GetFilenameFromPath(suggested_name);
 
   // The size of the in/out buffer in number of characters we pass to win32
@@ -390,7 +427,7 @@ bool SaveFileAsWithFilter(HWND owner,
   save_as.hwndOwner = owner;
   save_as.hInstance = NULL;
 
-  save_as.lpstrFilter = &filter[0];
+  save_as.lpstrFilter = filter.empty() ? NULL : filter.c_str();
 
   save_as.lpstrCustomFilter = NULL;
   save_as.nMaxCustFilter = 0;
@@ -427,18 +464,70 @@ bool SaveFileAsWithFilter(HWND owner,
   final_name->assign(save_as.lpstrFile);
   *index = save_as.nFilterIndex;
 
-  std::wstring file_ext = file_util::GetFileExtensionFromPath(suggested_name);
-  if (save_as.nFileExtension == 0) {
-    // No extension is specified. Append the default extension.
-    final_name->append(file_ext);
-  } else if (save_as.nFileExtension == wcslen(save_as.lpstrFile)) {
-    // The path ends with a ".". This is not supported on windows and since
-    // we don't use a windows API to create the file, it will make the file
-    // impossible to open.
-    final_name->resize(final_name->size() - 1);
+  // Figure out what filter got selected from the vector with embedded nulls.
+  // NOTE: The filter contains a string with embedded nulls, such as:
+  // JPG Image\0*.jpg\0All files\0*.*\0\0
+  // The filter index is 1-based index for which pair got selected. So, using
+  // the example above, if the first index was selected we need to skip 1
+  // instance of null to get to "*.jpg".
+  std::vector<std::wstring> filters;
+  if (!filter.empty() && save_as.nFilterIndex > 0)
+    SplitString(filter, '\0', &filters);
+  std::wstring filter_selected;
+  if (!filters.empty())
+    filter_selected = filters[(2 * (save_as.nFilterIndex - 1)) + 1];
+
+  // Get the extension that was suggested to the user (when the Save As dialog
+  // was opened). For saving web pages, we skip this step since there may be
+  // 'extension characters' in the title of the web page.
+  std::wstring suggested_ext;
+  if (!ignore_suggested_ext)
+    suggested_ext = file_util::GetFileExtensionFromPath(suggested_name);
+
+  // If we can't get the extension from the suggested_name, we use the default
+  // extension passed in. This is to cover cases like when saving a web page,
+  // where we get passed in a name without an extension and a default extension
+  // along with it.
+  if (suggested_ext.empty())
+    suggested_ext = def_ext;
+
+  *final_name =
+      AppendExtensionIfNeeded(*final_name, filter_selected, suggested_ext);
+  return true;
+}
+
+std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
+                                     const std::wstring& filter_selected,
+                                     const std::wstring& suggested_ext) {
+  std::wstring return_value = filename;
+
+  // Get the extension the user ended up selecting.
+  std::wstring selected_ext = file_util::GetFileExtensionFromPath(filename);
+
+  if (filter_selected.empty() || filter_selected == L"*.*") {
+    // If the user selects 'All files' we respect any extension given to us from
+    // the File Save dialog. We also strip any trailing dots, which matches
+    // Windows Explorer and is needed because Windows doesn't allow filenames
+    // to have trailing dots. The GetSaveFileName dialog will not return a
+    // string with only one or more dots.
+    size_t index = return_value.find_last_not_of(L'.');
+    if (index < return_value.size() - 1)
+      return_value.resize(index + 1);
+  } else {
+    // User selected a specific filter (not *.*) so we need to check if the
+    // extension provided has the same mime type. If it doesn't we append the
+    // extension.
+    std::string suggested_mime_type, selected_mime_type;
+    if (suggested_ext != selected_ext &&
+        (!net::GetMimeTypeFromExtension(suggested_ext, &suggested_mime_type) ||
+         !net::GetMimeTypeFromExtension(selected_ext, &selected_mime_type) ||
+         suggested_mime_type != selected_mime_type)) {
+      return_value.append(L".");
+      return_value.append(suggested_ext);
+    }
   }
 
-  return true;
+  return return_value;
 }
 
 // Adjust the window to fit, returning true if the window was resized or moved.
@@ -539,6 +628,16 @@ void CenterAndSizeWindow(HWND parent, HWND window, const SIZE& pref,
   }
 }
 
+bool EdgeHasAutoHideTaskbar(UINT edge, HMONITOR monitor) {
+  APPBARDATA taskbar_data = { 0 };
+  taskbar_data.cbSize = sizeof APPBARDATA;
+  taskbar_data.uEdge = edge;
+  HWND taskbar = reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAR,
+                                                        &taskbar_data));
+  return ::IsWindow(taskbar) &&
+      (MonitorFromWindow(taskbar, MONITOR_DEFAULTTONEAREST) == monitor);
+}
+
 HANDLE GetSectionFromProcess(HANDLE section, HANDLE process, bool read_only) {
   HANDLE valid_section = NULL;
   DWORD access = STANDARD_RIGHTS_REQUIRED | FILE_MAP_READ;
@@ -579,10 +678,14 @@ void EnsureRectIsVisibleInRect(const gfx::Rect& parent_rect,
   // windows in hyperspace.
   // TODO(mpcomplete): I don't see what the second check in each 'if' does that
   // isn't handled by the LAST set of 'ifs'.  Maybe we can remove it.
-  if (child_rect->x() < 0 || child_rect->x() > parent_rect.right())
-    child_rect->set_x(padding);
-  if (child_rect->y() < 0 || child_rect->y() > parent_rect.bottom())
-    child_rect->set_y(padding);
+  if (child_rect->x() < parent_rect.x() ||
+      child_rect->x() > parent_rect.right()) {
+    child_rect->set_x(parent_rect.x() + padding);
+  }
+  if (child_rect->y() < parent_rect.y() ||
+      child_rect->y() > parent_rect.bottom()) {
+    child_rect->set_y(parent_rect.y() + padding);
+  }
 
   // LAST, nudge the window back up into the client area if its x,y position is
   // within the parent bounds but its width/height place it off-screen.
@@ -613,7 +716,9 @@ void SetChildBounds(HWND child_window, HWND parent_window,
         IsWindowVisible(insert_after_window))
       window = insert_after_window;
 
-    HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    POINT window_point = { bounds.x(), bounds.y() };
+    HMONITOR monitor = MonitorFromPoint(window_point,
+                                        MONITOR_DEFAULTTONEAREST);
     if (monitor) {
       MONITORINFO mi = {0};
       mi.cbSize = sizeof(mi);
@@ -649,11 +754,11 @@ bool IsNumPadDigit(int key_code, bool extended_key) {
   if (key_code >= VK_NUMPAD0 && key_code <= VK_NUMPAD9)
     return true;
 
-  // Check for num pad keys without Num Lock.
+  // Check for num pad keys without NumLock.
   // Note: there is no easy way to know if a the key that was pressed comes from
   //       the num pad or the rest of the keyboard.  Investigating how
   //       TranslateMessage() generates the WM_KEYCHAR from an
-  //       ALT + <numpad sequences> it appears it looks at the extended key flag
+  //       ALT + <NumPad sequences> it appears it looks at the extended key flag
   //       (which is on if the key pressed comes from one of the 3 clusters to
   //       the left of the numeric keypad).  So we use it as well.
   return !extended_key &&
@@ -805,5 +910,11 @@ int MessageBox(HWND hwnd,
   return ::MessageBox(hwnd, text_ptr, caption_ptr, actual_flags);
 }
 
-}  // namespace win_util
+ChromeFont GetWindowTitleFont() {
+  NONCLIENTMETRICS ncm;
+  win_util::GetNonClientMetrics(&ncm);
+  ScopedHFONT caption_font(CreateFontIndirect(&(ncm.lfCaptionFont)));
+  return ChromeFont::CreateFont(caption_font);
+}
 
+}  // namespace win_util

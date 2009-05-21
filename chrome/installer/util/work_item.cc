@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 #include "chrome/installer/util/work_item.h"
+
 #include "chrome/installer/util/copy_tree_work_item.h"
 #include "chrome/installer/util/create_dir_work_item.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/delete_tree_work_item.h"
+#include "chrome/installer/util/delete_reg_value_work_item.h"
+#include "chrome/installer/util/move_tree_work_item.h"
+#include "chrome/installer/util/self_reg_work_item.h"
 #include "chrome/installer/util/set_reg_value_work_item.h"
 #include "chrome/installer/util/work_item_list.h"
 
@@ -32,9 +36,22 @@ CreateRegKeyWorkItem* WorkItem::CreateCreateRegKeyWorkItem(
   return new CreateRegKeyWorkItem(predefined_root, path);
 }
 
+DeleteRegValueWorkItem* WorkItem::CreateDeleteRegValueWorkItem(
+    HKEY predefined_root, std::wstring key_path,
+    std::wstring value_name, bool is_str_type) {
+  return new DeleteRegValueWorkItem(predefined_root, key_path,
+                                    value_name, is_str_type);
+}
+
 DeleteTreeWorkItem* WorkItem::CreateDeleteTreeWorkItem(std::wstring root_path,
                                                        std::wstring key_path) {
   return new DeleteTreeWorkItem(root_path, key_path);
+}
+
+MoveTreeWorkItem* WorkItem::CreateMoveTreeWorkItem(std::wstring source_path,
+                                                   std::wstring dest_path,
+                                                   std::wstring temp_dir) {
+  return new MoveTreeWorkItem(source_path, dest_path, temp_dir);
 }
 
 SetRegValueWorkItem* WorkItem::CreateSetRegValueWorkItem(
@@ -51,6 +68,11 @@ SetRegValueWorkItem* WorkItem::CreateSetRegValueWorkItem(
                                value_name, value_data, overwrite);
 }
 
+SelfRegWorkItem* WorkItem::CreateSelfRegWorkItem(const std::wstring& dll_path,
+                                                 bool do_register) {
+  return new SelfRegWorkItem(dll_path, do_register);
+}
+
 WorkItemList* WorkItem::CreateWorkItemList() {
   return new WorkItemList();
 }
@@ -58,4 +80,3 @@ WorkItemList* WorkItem::CreateWorkItemList() {
 std::wstring WorkItem::Dump() {
   return std::wstring(L"Work Item");
 }
-

@@ -157,11 +157,15 @@
 				>
 			</File>
 			<File
-				RelativePath=".\gfx\chrome_font.cc"
+				RelativePath=".\gfx\chrome_canvas_win.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\gfx\chrome_font.h"
+				>
+			</File>
+			<File
+				RelativePath=".\gfx\chrome_font_win.cc"
 				>
 			</File>
 			<File
@@ -197,19 +201,19 @@
 				>
 			</File>
 			<File
-				RelativePath=".\gfx\path.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\gfx\path.h"
 				>
 			</File>
 			<File
-				RelativePath=".\gfx\url_elider.cc"
+				RelativePath=".\gfx\path_win.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\gfx\url_elider.h"
+				RelativePath=".\gfx\text_elider.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\gfx\text_elider.h"
 				>
 			</File>
 			<File
@@ -221,10 +225,6 @@
 			Name="ipc"
 			>
 			<File
-				RelativePath=".\ipc_channel.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\ipc_channel.h"
 				>
 			</File>
@@ -234,6 +234,10 @@
 			</File>
 			<File
 				RelativePath=".\ipc_channel_proxy.h"
+				>
+			</File>
+			<File
+				RelativePath=".\ipc_channel_win.cc"
 				>
 			</File>
 			<File
@@ -281,10 +285,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\plugin_messages.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\plugin_messages.h"
 				>
 			</File>
@@ -293,15 +293,39 @@
 				>
 			</File>
 			<File
-				RelativePath=".\render_messages.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\render_messages.h"
 				>
 			</File>
 			<File
 				RelativePath=".\render_messages_internal.h"
+				>
+			</File>
+			<File
+				RelativePath=".\worker_messages.h"
+				>
+			</File>
+			<File
+				RelativePath=".\worker_messages_internal.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="extensions"
+			>
+			<File
+				RelativePath=".\extensions\url_pattern.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\url_pattern.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\user_script.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\user_script.h"
 				>
 			</File>
 		</Filter>
@@ -314,11 +338,39 @@
 			>
 		</File>
 		<File
+			RelativePath=".\bindings_policy.h"
+			>
+		</File>
+		<File
 			RelativePath=".\child_process.cc"
 			>
 		</File>
 		<File
 			RelativePath=".\child_process.h"
+			>
+		</File>
+		<File
+			RelativePath=".\child_process_host.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\child_process_host.h"
+			>
+		</File>
+		<File
+			RelativePath=".\child_process_info.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\child_process_info.h"
+			>
+		</File>
+		<File
+			RelativePath=".\child_thread.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\child_thread.h"
 			>
 		</File>
 		<File
@@ -343,6 +395,14 @@
 		</File>
 		<File
 			RelativePath=".\chrome_paths.h"
+			>
+		</File>
+		<File
+			RelativePath=".\chrome_paths_internal.h"
+			>
+		</File>
+		<File
+			RelativePath=".\chrome_paths_win.cc"
 			>
 		</File>
 		<File
@@ -390,19 +450,11 @@
 			>
 		</File>
 		<File
-			RelativePath=".\clipboard_service.cc"
-			>
-		</File>
-		<File
 			RelativePath=".\clipboard_service.h"
 			>
 		</File>
 		<File
 			RelativePath=".\common_glue.cc"
-			>
-		</File>
-		<File
-			RelativePath=".\common_resources.h"
 			>
 		</File>
 		<File
@@ -422,14 +474,6 @@
 			>
 		</File>
 		<File
-			RelativePath=".\env_util.cc"
-			>
-		</File>
-		<File
-			RelativePath=".\env_util.h"
-			>
-		</File>
-		<File
 			RelativePath=".\env_vars.cc"
 			>
 		</File>
@@ -443,14 +487,6 @@
 		</File>
 		<File
 			RelativePath=".\gears_api.h"
-			>
-		</File>
-		<File
-			RelativePath=".\jpeg_codec.cc"
-			>
-		</File>
-		<File
-			RelativePath=".\jpeg_codec.h"
 			>
 		</File>
 		<File
@@ -478,6 +514,14 @@
 			>
 		</File>
 		<File
+			RelativePath=".\l10n_util_win.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\l10n_util_win.h"
+			>
+		</File>
+		<File
 			RelativePath=".\libxml_utils.cc"
 			>
 		</File>
@@ -494,6 +538,10 @@
 			>
 		</File>
 		<File
+			RelativePath=".\main_function_params.h"
+			>
+		</File>
+		<File
 			RelativePath=".\message_router.cc"
 			>
 		</File>
@@ -506,7 +554,23 @@
 			>
 		</File>
 		<File
+			RelativePath=".\native_web_keyboard_event.h"
+			>
+		</File>
+		<File
+			RelativePath=".\native_web_keyboard_event_win.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\navigation_types.h"
+			>
+		</File>
+		<File
 			RelativePath=".\notification_details.h"
+			>
+		</File>
+		<File
+			RelativePath=".\notification_observer.h"
 			>
 		</File>
 		<File
@@ -530,7 +594,7 @@
 			>
 		</File>
 		<File
-			RelativePath=".\notification_types.h"
+			RelativePath=".\notification_type.h"
 			>
 		</File>
 		<File
@@ -543,6 +607,10 @@
 		</File>
 		<File
 			RelativePath=".\page_transition_types.h"
+			>
+		</File>
+		<File
+			RelativePath=".\page_zoom.h"
 			>
 		</File>
 		<File
@@ -594,11 +662,11 @@
 			>
 		</File>
 		<File
-			RelativePath=".\rand_util.cc"
+			RelativePath=".\property_bag.cc"
 			>
 		</File>
 		<File
-			RelativePath=".\rand_util.h"
+			RelativePath=".\property_bag.h"
 			>
 		</File>
 		<File
@@ -614,11 +682,23 @@
 			>
 		</File>
 		<File
+			RelativePath=".\resource_bundle_win.cc"
+			>
+		</File>
+		<File
 			RelativePath=".\resource_dispatcher.cc"
 			>
 		</File>
 		<File
 			RelativePath=".\resource_dispatcher.h"
+			>
+		</File>
+		<File
+			RelativePath=".\sandbox_init_wrapper.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\sandbox_init_wrapper.h"
 			>
 		</File>
 		<File
@@ -670,10 +750,6 @@
 			>
 		</File>
 		<File
-			RelativePath=".\text_zoom.h"
-			>
-		</File>
-		<File
 			RelativePath=".\throb_animation.cc"
 			>
 		</File>
@@ -695,6 +771,30 @@
 		</File>
 		<File
 			RelativePath=".\time_format.h"
+			>
+		</File>
+		<File
+			RelativePath=".\transport_dib.h"
+			>
+		</File>
+		<File
+			RelativePath=".\transport_dib_win.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\unzip.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\unzip.h"
+			>
+		</File>
+		<File
+			RelativePath=".\url_constants.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\url_constants.h"
 			>
 		</File>
 		<File

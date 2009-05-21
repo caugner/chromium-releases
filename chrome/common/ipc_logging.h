@@ -5,12 +5,15 @@
 #ifndef CHROME_COMMON_IPC_LOGGING_H_
 #define CHROME_COMMON_IPC_LOGGING_H_
 
-#include "base/lock.h"
-#include "base/object_watcher.h"
-#include "base/singleton.h"
 #include "chrome/common/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
+
+#include "base/lock.h"
+#include "base/message_loop.h"
+#include "base/singleton.h"
+#include "base/waitable_event_watcher.h"
+#include "chrome/common/ipc_message_utils.h"
 
 class MessageLoop;
 
@@ -21,12 +24,13 @@ class Message;
 // One instance per process.  Needs to be created on the main thread (the UI
 // thread in the browser) but OnPreDispatchMessage/OnPostDispatchMessage
 // can be called on other threads.
-class Logging : public base::ObjectWatcher::Delegate {
+class Logging : public base::WaitableEventWatcher::Delegate,
+                public MessageLoop::DestructionObserver {
  public:
   // Implemented by consumers of log messages.
   class Consumer {
    public:
-    virtual void Log(const IPC::LogData& data) = 0;
+    virtual void Log(const LogData& data) = 0;
   };
 
   void SetConsumer(Consumer* consumer);
@@ -36,11 +40,11 @@ class Logging : public base::ObjectWatcher::Delegate {
 
   void Enable();
   void Disable();
-  bool inline Enabled() const;
+  bool Enabled() const { return enabled_; }
 
   // Called by child processes to give the logger object the channel to send
   // logging data to the browser process.
-  void SetIPCSender(IPC::Message::Sender* sender);
+  void SetIPCSender(Message::Sender* sender);
 
   // Called in the browser process when logging data from a child process is
   // received.
@@ -62,11 +66,21 @@ class Logging : public base::ObjectWatcher::Delegate {
   static void GetMessageText(uint16 type, std::wstring* name,
                              const Message* message, std::wstring* params);
 
-  // ObjectWatcher::Delegate implementation
-  void OnObjectSignaled(HANDLE object);
+  // WaitableEventWatcher::Delegate implementation
+  void OnWaitableEventSignaled(base::WaitableEvent* event);
+
+  // MessageLoop::DestructionObserver implementation
+  void WillDestroyCurrentMessageLoop();
+
+  typedef void (*LogFunction)(uint16 type,
+                             std::wstring* name,
+                             const Message* msg,
+                             std::wstring* params);
+
+  static void SetLoggerFunctions(LogFunction *functions);
 
  private:
-  friend struct DefaultSingletonTraits<IPC::Logging>;
+  friend struct DefaultSingletonTraits<Logging>;
   Logging();
 
   std::wstring GetEventName(int browser_pid, bool enabled);
@@ -75,19 +89,21 @@ class Logging : public base::ObjectWatcher::Delegate {
 
   void RegisterWaitForEvent(bool enabled);
 
-  base::ObjectWatcher watcher_;
+  base::WaitableEventWatcher watcher_;
 
-  HANDLE logging_event_on_;
-  HANDLE logging_event_off_;
+  scoped_ptr<base::WaitableEvent> logging_event_on_;
+  scoped_ptr<base::WaitableEvent> logging_event_off_;
   bool enabled_;
 
   std::vector<LogData> queued_logs_;
   bool queue_invoke_later_pending_;
 
-  IPC::Message::Sender* sender_;
+  Message::Sender* sender_;
   MessageLoop* main_thread_;
 
   Consumer* consumer_;
+
+  static LogFunction *log_function_mapping_;
 };
 
 }  // namespace IPC
@@ -95,4 +111,3 @@ class Logging : public base::ObjectWatcher::Delegate {
 #endif // IPC_MESSAGE_LOG_ENABLED
 
 #endif  // CHROME_COMMON_IPC_LOGGING_H_
-

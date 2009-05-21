@@ -3,17 +3,22 @@
 // found in the LICENSE file.
 
 // Defines the public interface of the disk cache. For more details see
-// http://wiki/Main/ChromeDiskCacheBackend
+// http://dev.chromium.org/developers/design-documents/disk-cache
 
-#ifndef NET_DISK_CACHE_DISK_CACHE_H__
-#define NET_DISK_CACHE_DISK_CACHE_H__
+#ifndef NET_DISK_CACHE_DISK_CACHE_H_
+#define NET_DISK_CACHE_DISK_CACHE_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/platform_file.h"
 #include "base/time.h"
 #include "net/base/completion_callback.h"
+
+namespace net {
+class IOBuffer;
+}
 
 namespace disk_cache {
 
@@ -67,11 +72,11 @@ class Backend {
 
   // Marks a range of entries for deletion. This supports unbounded deletes in
   // either direction by using null Time values for either argument.
-  virtual bool DoomEntriesBetween(const Time initial_time,
-                                  const Time end_time) = 0;
+  virtual bool DoomEntriesBetween(const base::Time initial_time,
+                                  const base::Time end_time) = 0;
 
   // Marks all entries accessed since initial_time for deletion.
-  virtual bool DoomEntriesSince(const Time initial_time) = 0;
+  virtual bool DoomEntriesSince(const base::Time initial_time) = 0;
 
   // Enumerate the cache.  Initialize iter to NULL before calling this method
   // the first time.  That will cause the enumeration to start at the head of
@@ -110,10 +115,10 @@ class Entry {
   virtual std::string GetKey() const = 0;
 
   // Returns the time when this cache entry was last used.
-  virtual Time GetLastUsed() const = 0;
+  virtual base::Time GetLastUsed() const = 0;
 
   // Returns the time when this cache entry was last modified.
-  virtual Time GetLastModified() const = 0;
+  virtual base::Time GetLastModified() const = 0;
 
   // Returns the size of the cache data with the given index.
   virtual int32 GetDataSize(int index) const = 0;
@@ -123,12 +128,13 @@ class Entry {
   // operation is complete.  Otherwise, completion_callback will be
   // called on the current thread once the read completes.  Returns the
   // number of bytes read or a network error code. If a completion callback is
-  // provided then it will be called if this function returns ERR_IO_PENDING.
+  // provided then it will be called if this function returns ERR_IO_PENDING,
+  // and a reference to |buf| will be retained until the callback is called.
   // Note that the callback will be invoked in any case, even after Close has
   // been called; in other words, the caller may close this entry without
   // having to wait for all the callbacks, and still rely on the cleanup
   // performed from the callback code.
-  virtual int ReadData(int index, int offset, char* buf, int buf_len,
+  virtual int ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
                        net::CompletionCallback* completion_callback) = 0;
 
   // Copies cache data from the given buffer of length |buf_len|.  If
@@ -136,16 +142,39 @@ class Entry {
   // operation is complete.  Otherwise, completion_callback will be
   // called on the current thread once the write completes.  Returns the
   // number of bytes written or a network error code. If a completion callback
-  // is provided then it will be called if this function returns ERR_IO_PENDING.
+  // is provided then it will be called if this function returns ERR_IO_PENDING,
+  // and a reference to |buf| will be retained until the callback is called.
   // Note that the callback will be invoked in any case, even after Close has
   // been called; in other words, the caller may close this entry without
   // having to wait for all the callbacks, and still rely on the cleanup
   // performed from the callback code.
   // If truncate is true, this call will truncate the stored data at the end of
   // what we are writing here.
-  virtual int WriteData(int index, int offset, const char* buf, int buf_len,
+  virtual int WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
                         net::CompletionCallback* completion_callback,
                         bool truncate) = 0;
+
+  // Prepares a target stream as an external file, returns a corresponding
+  // base::PlatformFile if successful, returns base::kInvalidPlatformFileValue
+  // if fails. If this call returns a valid base::PlatformFile value (i.e.
+  // not base::kInvalidPlatformFileValue), there is no guarantee that the file
+  // is truncated. Implementor can always return base::kInvalidPlatformFileValue
+  // if external file is not available in that particular implementation.
+  // The caller should close the file handle returned by this method or there
+  // will be a leak.
+  // With a stream prepared as an external file, the stream would always be
+  // kept in an external file since creation, even if the stream has 0 bytes.
+  // So we need to be cautious about using this option for preparing a stream or
+  // we will end up having a lot of empty cache files. Calling this method also
+  // means that all data written to the stream will always be written to file
+  // directly *without* buffering.
+  virtual base::PlatformFile UseExternalFile(int index) = 0;
+
+  // Returns an asynchronous read file handle for the cache stream referenced by
+  // |index|. Values other than base::kInvalidPlatformFileValue are successful
+  // and the file handle should be managed by the caller, i.e. the caller should
+  // close the handle after use or there will be a leak.
+  virtual base::PlatformFile GetPlatformFile(int index) = 0;
 
  protected:
   virtual ~Entry() {}
@@ -153,5 +182,4 @@ class Entry {
 
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_DISK_CACHE_H__
-
+#endif  // NET_DISK_CACHE_DISK_CACHE_H_

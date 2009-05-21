@@ -7,63 +7,50 @@
 #include <string>
 
 #include "base/clipboard.h"
+#include "base/lazy_instance.h"
+#include "base/string16.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/glue/scoped_clipboard_writer_glue.h"
 
 #include "SkBitmap.h"
 
 // Clipboard glue
-// Basically just proxy the calls off to the clipboard
+
+#if defined(OS_WIN)
+void ScopedClipboardWriterGlue::WriteBitmapFromPixels(
+    const void* pixels, const gfx::Size& size) {
+  ScopedClipboardWriter::WriteBitmapFromPixels(pixels, size);
+}
+#endif
+
+ScopedClipboardWriterGlue::~ScopedClipboardWriterGlue() {
+}
 
 namespace webkit_glue {
 
-Clipboard clipboard;
+base::LazyInstance<Clipboard> clipboard(base::LINKER_INITIALIZED);
 
-void webkit_glue::ClipboardClear() {
-  clipboard.Clear();
+Clipboard* ClipboardGetClipboard() {
+  return clipboard.Pointer();
 }
 
-void webkit_glue::ClipboardWriteText(const std::wstring& text) {
-  clipboard.WriteText(text);
+bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format) {
+  return ClipboardGetClipboard()->IsFormatAvailable(format);
 }
 
-void webkit_glue::ClipboardWriteHTML(const std::wstring& html,
-                                     const GURL& url) {
-  clipboard.WriteHTML(html, url.spec());
+void ClipboardReadText(string16* result) {
+  ClipboardGetClipboard()->ReadText(result);
 }
 
-void webkit_glue::ClipboardWriteBookmark(const std::wstring& title,
-                                         const GURL& url) {
-  clipboard.WriteBookmark(title, url.spec());
+void ClipboardReadAsciiText(std::string* result) {
+  ClipboardGetClipboard()->ReadAsciiText(result);
 }
 
-void webkit_glue::ClipboardWriteBitmap(const SkBitmap& bitmap) {
-  SkAutoLockPixels bitmap_lock(bitmap); 
-  clipboard.WriteBitmap(bitmap.getPixels(),
-                        gfx::Size(bitmap.width(), bitmap.height()));
-}
-
-void webkit_glue::ClipboardWriteWebSmartPaste() {
-  clipboard.WriteWebSmartPaste();
-}
-
-bool webkit_glue::ClipboardIsFormatAvailable(unsigned int format) {
-  return clipboard.IsFormatAvailable(format);
-}
-
-void webkit_glue::ClipboardReadText(std::wstring* result) {
-  clipboard.ReadText(result);
-}
-
-void webkit_glue::ClipboardReadAsciiText(std::string* result) {
-  clipboard.ReadAsciiText(result);
-}
-
-void webkit_glue::ClipboardReadHTML(std::wstring* markup, GURL* url) {
+void ClipboardReadHTML(string16* markup, GURL* url) {
   std::string url_str;
-  clipboard.ReadHTML(markup, url ? &url_str : NULL);
+  ClipboardGetClipboard()->ReadHTML(markup, url ? &url_str : NULL);
   if (url)
     *url = GURL(url_str);
 }
 
 }  // namespace webkit_glue
-

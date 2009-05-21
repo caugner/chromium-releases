@@ -4,10 +4,12 @@
 
 #include "chrome/browser/importer/ie_importer.h"
 
+#include <atlbase.h>
 #include <intshcut.h>
 #include <pstore.h>
 #include <shlobj.h>
 #include <urlhist.h>
+
 #include <algorithm>
 
 #include "base/file_util.h"
@@ -16,14 +18,16 @@
 #include "base/time.h"
 #include "base/win_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/ie7_password.h"
-#include "chrome/browser/template_url_model.h"
+#include "chrome/browser/password_manager/ie7_password.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/time_format.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/common/win_util.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 
-#include "generated_resources.h"
+using base::Time;
 
 namespace {
 
@@ -54,6 +58,7 @@ const GUID IEImporter::kUnittestGUID = { 0xa79029d6, 0x753e, 0x4e27,
 void IEImporter::StartImport(ProfileInfo profile_info,
                              uint16 items,
                              ProfileWriter* writer,
+                             MessageLoop* delagate_loop,
                              ImporterHost* host) {
   writer_ = writer;
   source_path_ = profile_info.source_path;
@@ -106,7 +111,9 @@ void IEImporter::ImportFavorites() {
 
   if (!bookmarks.empty() && !cancelled()) {
     main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddBookmarkEntry, bookmarks));
+        &ProfileWriter::AddBookmarkEntry, bookmarks,
+        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE),
+        first_run() ? ProfileWriter::FIRST_RUN : 0));
   }
 }
 
@@ -123,8 +130,14 @@ void IEImporter::ImportPasswordsIE6() {
   // and GetProcAddress() functions.
   typedef HRESULT (WINAPI *PStoreCreateFunc)(IPStore**, DWORD, DWORD, DWORD);
   HMODULE pstorec_dll = LoadLibrary(L"pstorec.dll");
+  if (!pstorec_dll)
+    return;
   PStoreCreateFunc PStoreCreateInstance =
       (PStoreCreateFunc)GetProcAddress(pstorec_dll, "PStoreCreateInstance");
+  if (!PStoreCreateInstance) {
+    FreeLibrary(pstorec_dll);
+    return;
+  }
 
   CComPtr<IPStore> pstore;
   HRESULT result = PStoreCreateInstance(&pstore, 0, 0, 0);
@@ -182,8 +195,8 @@ void IEImporter::ImportPasswordsIE6() {
       continue;
 
     GURL url(ac_list[i].key.c_str());
-    if (!(LowerCaseEqualsASCII(url.scheme(), "http") ||
-        LowerCaseEqualsASCII(url.scheme(), "https"))) {
+    if (!(LowerCaseEqualsASCII(url.scheme(), chrome::kHttpScheme) ||
+        LowerCaseEqualsASCII(url.scheme(), chrome::kHttpsScheme))) {
       continue;
     }
 
@@ -260,7 +273,10 @@ void IEImporter::ImportPasswordsIE7() {
 
 // Reads history information from COM interface.
 void IEImporter::ImportHistory() {
-  const std::string kSchemes[] = {"http", "https", "ftp", "file"};
+  const std::string kSchemes[] = {chrome::kHttpScheme,
+                                  chrome::kHttpsScheme,
+                                  chrome::kFtpScheme,
+                                  chrome::kFileScheme};
   int total_schemes = arraysize(kSchemes);
 
   CComPtr<IUrlHistoryStg2> url_history_stg2;
@@ -439,7 +455,7 @@ bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo *info) {
   // is not recording in Vista's registry. So in Vista, we assume the Links
   // folder is under Favorites folder since it looks like there is not name
   // different in every language version of Windows Vista.
-  if (win_util::GetWinVersion() != win_util::WINVERSION_VISTA) {
+  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
     // The Link folder name is stored in the registry.
     DWORD buffer_length = sizeof(buffer);
     if (!ReadFromRegistry(HKEY_CURRENT_USER,
@@ -451,12 +467,6 @@ bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo *info) {
     info->links_folder = L"Links";
   }
 
-  // Gets the creation time of the user's profile folder.
-  if (FAILED(SHGetFolderPath(NULL, CSIDL_PROFILE, NULL,
-                             SHGFP_TYPE_CURRENT, buffer)))
-    return false;
-  info->profile_creation_time = GetFileCreationTime(buffer);
-
   return true;
 }
 
@@ -464,12 +474,13 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
                                       BookmarkVector* bookmarks) {
   std::wstring ie_folder = l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE);
   BookmarkVector toolbar_bookmarks;
-  std::wstring file;
+  FilePath file;
   std::vector<std::wstring> file_list;
-  file_util::FileEnumerator file_enumerator(info.path, true,
+  file_util::FileEnumerator file_enumerator(
+      FilePath::FromWStringHack(info.path), true,
       file_util::FileEnumerator::FILES);
-  while (!(file = file_enumerator.Next()).empty() && !cancelled())
-    file_list.push_back(file);
+  while (!(file = file_enumerator.Next()).value().empty() && !cancelled())
+    file_list.push_back(file.ToWStringHack());
 
   // Keep the bookmarks in alphabetical order.
   std::sort(file_list.begin(), file_list.end());
@@ -479,15 +490,6 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
     std::wstring filename = file_util::GetFilenameFromPath(*it);
     std::wstring extension = file_util::GetFileExtensionFromPath(filename);
     if (!LowerCaseEqualsASCII(extension, "url"))
-      continue;
-
-    // We don't import default bookmarks from IE, e.g. "Customize links",
-    // "Free Hotmail". To detect these, we compare the creation time of the
-    // .url file with that of the profile folder. The file's creation time
-    // should be 2 minute later (to allow jitter).
-    Time creation = GetFileCreationTime(*it);
-    if (info.profile_creation_time != Time() &&
-        creation - info.profile_creation_time <= TimeDelta::FromMinutes(2))
       continue;
 
     // Skip the bookmark with invalid URL.
@@ -503,9 +505,9 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
     ProfileWriter::BookmarkEntry entry;
     entry.title = filename.substr(0, filename.size() - (extension.size() + 1));
     entry.url = url;
-    entry.creation_time = creation;
+    entry.creation_time = GetFileCreationTime(*it);
     if (!relative_path.empty())
-      SplitString(relative_path, file_util::kPathSeparator, &entry.path);
+      file_util::PathComponents(relative_path, &entry.path);
 
     // Flatten the bookmarks in Link folder onto bookmark toolbar. Otherwise,
     // put it into "Other bookmarks".
@@ -564,4 +566,3 @@ int IEImporter::CurrentIEVersion() const {
   }
   return version;
 }
-

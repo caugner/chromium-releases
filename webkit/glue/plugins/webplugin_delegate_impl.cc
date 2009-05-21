@@ -4,27 +4,33 @@
 
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
+#include <string>
+#include <vector>
+
 #include "base/file_util.h"
+#include "base/iat_patch.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "base/gfx/point.h"
 #include "base/stats_counters.h"
+#include "base/string_util.h"
+#include "base/win_util.h"
 #include "webkit/default_plugin/plugin_impl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
+#include "webkit/glue/webkit_glue.h"
 
-static StatsCounter windowless_queue(L"Plugin.ThrottleQueue");
+namespace {
 
-static const wchar_t kNativeWindowClassName[] = L"NativeWindowClass";
-static const wchar_t kWebPluginDelegateProperty[] =
-    L"WebPluginDelegateProperty";
-static const wchar_t kPluginNameAtomProperty[] = L"PluginNameAtom";
-static const wchar_t kDummyActivationWindowName[] = L"DummyWindowForActivation";
-static const wchar_t kPluginOrigProc[] = L"OriginalPtr";
-static const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
+const wchar_t kWebPluginDelegateProperty[] = L"WebPluginDelegateProperty";
+const wchar_t kPluginNameAtomProperty[] = L"PluginNameAtom";
+const wchar_t kDummyActivationWindowName[] = L"DummyWindowForActivation";
+const wchar_t kPluginOrigProc[] = L"OriginalPtr";
+const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
 
 // The fastest we are willing to process WM_USER+1 events for Flash.
 // Flash can easily exceed the limits of our CPU if we don't throttle it.
@@ -35,16 +41,33 @@ static const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
 // time currently required to paint Flash plugins.  There isn't a good
 // way to count the time spent in aggregate plugin painting, however, so
 // this seems to work well enough.
-static const int kFlashWMUSERMessageThrottleDelayMs = 5;
+const int kFlashWMUSERMessageThrottleDelayMs = 5;
 
-std::list<MSG> WebPluginDelegateImpl::throttle_queue_;
+// Flash displays popups in response to user clicks by posting a WM_USER
+// message to the plugin window. The handler for this message displays
+// the popup. To ensure that the popups allowed state is sent correctly
+// to the renderer we reset the popups allowed state in a timer.
+const int kWindowedPluginPopupTimerMs = 50;
 
-WebPluginDelegateImpl* WebPluginDelegateImpl::current_plugin_instance_ = NULL;
+// The current instance of the plugin which entered the modal loop.
+WebPluginDelegateImpl* g_current_plugin_instance = NULL;
 
-WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
-    const std::wstring& filename,
+base::LazyInstance<std::list<MSG> > g_throttle_queue(base::LINKER_INITIALIZED);
+
+// Helper object for patching the TrackPopupMenu API.
+base::LazyInstance<iat_patch::IATPatchFunction> g_iat_patch_track_popup_menu(
+    base::LINKER_INITIALIZED);
+
+// Helper object for patching the SetCursor API.
+base::LazyInstance<iat_patch::IATPatchFunction> g_iat_patch_set_cursor(
+    base::LINKER_INITIALIZED);
+
+}  // namespace
+
+WebPluginDelegate* WebPluginDelegate::Create(
+    const FilePath& filename,
     const std::string& mime_type,
-    HWND containing_window) {
+    gfx::NativeView containing_view) {
   scoped_refptr<NPAPI::PluginLib> plugin =
       NPAPI::PluginLib::CreatePluginLib(filename);
   if (plugin.get() == NULL)
@@ -56,7 +79,7 @@ WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
 
   scoped_refptr<NPAPI::PluginInstance> instance =
       plugin->CreateInstance(mime_type);
-  return new WebPluginDelegateImpl(containing_window, instance.get());
+  return new WebPluginDelegateImpl(containing_view, instance.get());
 }
 
 bool WebPluginDelegateImpl::IsPluginDelegateWindow(HWND window) {
@@ -104,16 +127,18 @@ bool WebPluginDelegateImpl::IsDummyActivationWindow(HWND window) {
 
 LRESULT CALLBACK WebPluginDelegateImpl::HandleEventMessageFilterHook(
     int code, WPARAM wParam, LPARAM lParam) {
-
-  DCHECK(current_plugin_instance_);
-  current_plugin_instance_->OnModalLoopEntered();
+  if (g_current_plugin_instance) {
+    g_current_plugin_instance->OnModalLoopEntered();
+  } else {
+    NOTREACHED();
+  }
   return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
 WebPluginDelegateImpl::WebPluginDelegateImpl(
-    HWND containing_window,
+    gfx::NativeView containing_view,
     NPAPI::PluginInstance *instance)
-    : parent_(containing_window),
+    : parent_(containing_view),
       instance_(instance),
       quirks_(0),
       plugin_(NULL),
@@ -124,34 +149,43 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       plugin_wnd_proc_(NULL),
       last_message_(0),
       is_calling_wndproc(false),
-      initial_plugin_resize_done_(false),
       dummy_window_for_activation_(NULL),
       handle_event_message_filter_hook_(NULL),
       handle_event_pump_messages_event_(NULL),
       handle_event_depth_(0),
       user_gesture_message_posted_(false),
 #pragma warning(suppress: 4355)  // can use this
-      user_gesture_msg_factory_(this),
-      load_manually_(false),
-      first_geometry_update_(true) {
+      user_gesture_msg_factory_(this) {
   memset(&window_, 0, sizeof(window_));
 
   const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
-  std::wstring filename = file_util::GetFilenameFromPath(plugin_info.file);
+  std::string filename =
+      WideToUTF8(StringToLowerASCII(plugin_info.path.BaseName().value()));
 
   if (instance_->mime_type() == "application/x-shockwave-flash" ||
-      filename == L"npswf32.dll") {
+      filename == "npswf32.dll") {
     // Flash only requests windowless plugins if we return a Mozilla user
     // agent.
     instance_->set_use_mozilla_user_agent();
-    instance_->set_throttle_invalidate(true);
     quirks_ |= PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE;
+    quirks_ |= PLUGIN_QUIRK_PATCH_SETCURSOR;
+  } else if (filename == "nppdf32.dll") {
+    // Check for the version number above or equal 9.
+    std::vector<std::wstring> version;
+    SplitString(plugin_info.version, L'.', &version);
+    if (version.size() > 0) {
+      int major = static_cast<int>(StringToInt64(version[0]));
+      if (major >= 9) {
+        quirks_ |= PLUGIN_QUIRK_DIE_AFTER_UNLOAD;
+      }
+    }
+    quirks_ |= PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS;
   } else if (plugin_info.name.find(L"Windows Media Player") !=
              std::wstring::npos) {
     // Windows Media Player needs two NPP_SetWindow calls.
     quirks_ |= PLUGIN_QUIRK_SETWINDOW_TWICE;
   } else if (instance_->mime_type() == "audio/x-pn-realaudio-plugin" ||
-             filename == L"nppl3260.dll") {
+             filename == "nppl3260.dll") {
     quirks_ |= PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY;
   } else if (plugin_info.name.find(L"VLC Multimedia Plugin") !=
              std::wstring::npos) {
@@ -160,12 +194,18 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
     quirks_ |= PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY;
     // VLC 0.8.6d and 0.8.6e crash if multiple instances are created.
     quirks_ |= PLUGIN_QUIRK_DONT_ALLOW_MULTIPLE_INSTANCES;
+  } else if (filename == "npctrl.dll") {
+    // Explanation for this quirk can be found in
+    // WebPluginDelegateImpl::Initialize.
+    quirks_ |= PLUGIN_QUIRK_PATCH_TRACKPOPUP_MENU;
+    quirks_ |= PLUGIN_QUIRK_PATCH_SETCURSOR;
   }
 }
 
 WebPluginDelegateImpl::~WebPluginDelegateImpl() {
   if (::IsWindow(dummy_window_for_activation_)) {
     ::DestroyWindow(dummy_window_for_activation_);
+    TRACK_HWND_DESTRUCTION(dummy_window_for_activation_);
   }
 
   DestroyInstance();
@@ -201,6 +241,9 @@ bool WebPluginDelegateImpl::Initialize(const GURL& url,
     }
   }
 
+  if (quirks_ & PLUGIN_QUIRK_DIE_AFTER_UNLOAD)
+    webkit_glue::SetForcefullyTerminatePluginProcess(true);
+
   bool start_result = instance_->Start(url, argn, argv, argc, load_manually);
 
   NPAPI::PluginInstance::SetInitializingInstance(old_instance);
@@ -224,9 +267,35 @@ bool WebPluginDelegateImpl::Initialize(const GURL& url,
   }
 
   plugin->SetWindow(windowed_handle_, handle_event_pump_messages_event_);
-
-  load_manually_ = load_manually;
   plugin_url_ = url.spec();
+
+  // The windowless version of the Silverlight plugin calls the
+  // WindowFromPoint API and passes the result of that to the
+  // TrackPopupMenu API call as the owner window. This causes the API
+  // to fail as the API expects the window handle to live on the same
+  // thread as the caller. It works in the other browsers as the plugin
+  // lives on the browser thread. Our workaround is to intercept the
+  // TrackPopupMenu API for Silverlight and replace the window handle
+  // with the dummy activation window.
+  if (windowless_ && !g_iat_patch_track_popup_menu.Pointer()->is_patched() &&
+      (quirks_ & PLUGIN_QUIRK_PATCH_TRACKPOPUP_MENU)) {
+    g_iat_patch_track_popup_menu.Pointer()->Patch(
+        GetPluginPath().value().c_str(), "user32.dll", "TrackPopupMenu",
+        WebPluginDelegateImpl::TrackPopupMenuPatch);
+  }
+
+  // Windowless plugins can set cursors by calling the SetCursor API. This
+  // works because the thread inputs of the browser UI thread and the plugin
+  // thread are attached. We intercept the SetCursor API for windowless plugins
+  // and remember the cursor being set. This is shipped over to the browser
+  // in the HandleEvent call, which ensures that the cursor does not change
+  // when a windowless plugin instance changes the cursor in a background tab.
+  if (windowless_ && !g_iat_patch_set_cursor.Pointer()->is_patched() &&
+      (quirks_ & PLUGIN_QUIRK_PATCH_SETCURSOR)) {
+    g_iat_patch_set_cursor.Pointer()->Patch(
+        GetPluginPath().value().c_str(), "user32.dll", "SetCursor",
+        WebPluginDelegateImpl::SetCursorPatch);
+  }
   return true;
 }
 
@@ -247,31 +316,30 @@ void WebPluginDelegateImpl::DestroyInstance() {
 
     instance_->set_web_plugin(NULL);
 
+    if (instance_->plugin_lib()) {
+      // Unpatch if this is the last plugin instance.
+      if (instance_->plugin_lib()->instance_count() == 1) {
+        if (g_iat_patch_set_cursor.Pointer()->is_patched()) {
+          g_iat_patch_set_cursor.Pointer()->Unpatch();
+        }
+
+        if (g_iat_patch_track_popup_menu.Pointer()->is_patched()) {
+          g_iat_patch_track_popup_menu.Pointer()->Unpatch();
+        }
+      }
+    }
+
     instance_ = 0;
   }
 }
 
-void WebPluginDelegateImpl::UpdateGeometry(const gfx::Rect& window_rect,
-                                           const gfx::Rect& clip_rect,
-                                           bool visible) {
+void WebPluginDelegateImpl::UpdateGeometry(
+    const gfx::Rect& window_rect,
+    const gfx::Rect& clip_rect) {
   if (windowless_) {
-    window_.window =
-        reinterpret_cast<void *>(::GetDC(instance_->window_handle()));
     WindowlessUpdateGeometry(window_rect, clip_rect);
-    ::ReleaseDC(instance_->window_handle(),
-                reinterpret_cast<HDC>(window_.window));
   } else {
-    WindowedUpdateGeometry(window_rect, clip_rect, visible);
-  }
-
-  // Initiate a download on the plugin url. This should be done for the
-  // first update geometry sequence.
-  if (first_geometry_update_) {
-    first_geometry_update_ = false;
-    // An empty url corresponds to an EMBED tag with no src attribute.
-    if (!load_manually_ && !plugin_url_.empty()) {
-      instance_->SendStream(plugin_url_.c_str(), false, NULL);
-    }
+    WindowedUpdateGeometry(window_rect, clip_rect);
   }
 }
 
@@ -308,10 +376,6 @@ int WebPluginDelegateImpl::GetProcessId() {
   return ::GetCurrentProcessId();
 }
 
-HWND WebPluginDelegateImpl::GetWindowHandle() {
-  return instance()->window_handle();
-}
-
 void WebPluginDelegateImpl::SendJavaScriptStream(const std::string& url,
                                                  const std::wstring& result,
                                                  bool success,
@@ -324,6 +388,12 @@ void WebPluginDelegateImpl::SendJavaScriptStream(const std::string& url,
 void WebPluginDelegateImpl::DidReceiveManualResponse(
     const std::string& url, const std::string& mime_type,
     const std::string& headers, uint32 expected_length, uint32 last_modified) {
+  if (!windowless_) {
+    // Calling NPP_WriteReady before NPP_SetWindow causes movies to not load in
+    // Flash.  See http://b/issue?id=892174.
+    DCHECK(windowed_did_set_window_);
+  }
+
   instance()->DidReceiveManualResponse(url, mime_type, headers,
                                        expected_length, last_modified);
 }
@@ -341,8 +411,8 @@ void WebPluginDelegateImpl::DidManualLoadFail() {
   instance()->DidManualLoadFail();
 }
 
-std::wstring WebPluginDelegateImpl::GetPluginPath() {
-  return instance()->plugin_lib()->plugin_info().file;
+FilePath WebPluginDelegateImpl::GetPluginPath() {
+  return instance()->plugin_lib()->plugin_info().path;
 }
 
 void WebPluginDelegateImpl::InstallMissingPlugin() {
@@ -353,10 +423,10 @@ void WebPluginDelegateImpl::InstallMissingPlugin() {
   instance()->NPP_HandleEvent(&evt);
 }
 
-void WebPluginDelegateImpl::WindowedUpdateGeometry(const gfx::Rect& window_rect,
-                                                   const gfx::Rect& clip_rect,
-                                                   bool visible) {
-  if (WindowedReposition(window_rect, clip_rect, visible) ||
+void WebPluginDelegateImpl::WindowedUpdateGeometry(
+    const gfx::Rect& window_rect,
+    const gfx::Rect& clip_rect) {
+  if (WindowedReposition(window_rect, clip_rect) ||
       !windowed_did_set_window_) {
     // Let the plugin know that it has been moved
     WindowedSetWindow();
@@ -373,7 +443,7 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
     WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
     kNativeWindowClassName,
     0,
-    WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+    WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
     0,
     0,
     0,
@@ -382,8 +452,24 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
     0,
     GetModuleHandle(NULL),
     0);
+  TRACK_HWND_CREATION(windowed_handle_);
   if (windowed_handle_ == 0)
     return false;
+
+  if (IsWindow(parent_)) {
+    // This is a tricky workaround for Issue 2673 in chromium "Flash: IME not
+    // available". To use IMEs in this window, we have to make Windows attach
+    // IMEs to this window (i.e. load IME DLLs, attach them to this process,
+    // and add their message hooks to this window). Windows attaches IMEs while
+    // this process creates a top-level window. On the other hand, to layout
+    // this window correctly in the given parent window (RenderWidgetHostHWND),
+    // this window should be a child window of the parent window.
+    // To satisfy both of the above conditions, this code once creates a
+    // top-level window and change it to a child window of the parent window.
+    SetWindowLongPtr(windowed_handle_, GWL_STYLE,
+                     WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+    SetParent(windowed_handle_, parent_);
+  }
 
   BOOL result = SetProp(windowed_handle_, kWebPluginDelegateProperty, this);
   DCHECK(result == TRUE) << "SetProp failed, last error = " << GetLastError();
@@ -426,6 +512,7 @@ void WebPluginDelegateImpl::WindowedDestroyWindow() {
     }
 
     DestroyWindow(windowed_handle_);
+    TRACK_HWND_DESTRUCTION(windowed_handle_);
     windowed_handle_ = 0;
   }
 }
@@ -435,11 +522,12 @@ void WebPluginDelegateImpl::WindowedDestroyWindow() {
 // the queue.
 // static
 void WebPluginDelegateImpl::ClearThrottleQueueForWindow(HWND window) {
+  std::list<MSG>* throttle_queue = g_throttle_queue.Pointer();
+
   std::list<MSG>::iterator it;
-  for (it = throttle_queue_.begin(); it != throttle_queue_.end(); ) {
+  for (it = throttle_queue->begin(); it != throttle_queue->end(); ) {
     if (it->hwnd == window) {
-      it = throttle_queue_.erase(it);
-      windowless_queue.Decrement();
+      it = throttle_queue->erase(it);
     } else {
       it++;
     }
@@ -454,10 +542,11 @@ void WebPluginDelegateImpl::OnThrottleMessage() {
   // message it finds for each plugin.  It is important to service
   // all active plugins with each pass through the throttle, otherwise
   // we see video jankiness.
+  std::list<MSG>* throttle_queue = g_throttle_queue.Pointer();
   std::map<HWND, int> processed;
 
-  std::list<MSG>::iterator it = throttle_queue_.begin();
-  while (it != throttle_queue_.end()) {
+  std::list<MSG>::iterator it = throttle_queue->begin();
+  while (it != throttle_queue->end()) {
     const MSG& msg = *it;
     if (processed.find(msg.hwnd) == processed.end()) {
       WNDPROC proc = reinterpret_cast<WNDPROC>(msg.time);
@@ -467,14 +556,13 @@ void WebPluginDelegateImpl::OnThrottleMessage() {
 	  if (IsWindow(msg.hwnd))
           CallWindowProc(proc, msg.hwnd, msg.message, msg.wParam, msg.lParam);
       processed[msg.hwnd] = 1;
-      it = throttle_queue_.erase(it);
-      windowless_queue.Decrement();
+      it = throttle_queue->erase(it);
     } else {
       it++;
     }
   }
 
-  if (throttle_queue_.size() > 0)
+  if (throttle_queue->size() > 0)
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         NewRunnableFunction(&WebPluginDelegateImpl::OnThrottleMessage),
         kFlashWMUSERMessageThrottleDelayMs);
@@ -491,10 +579,12 @@ void WebPluginDelegateImpl::ThrottleMessage(WNDPROC proc, HWND hwnd,
   msg.message = message;
   msg.wParam = wParam;
   msg.lParam = lParam;
-  throttle_queue_.push_back(msg);
-  windowless_queue.Increment();
 
-  if (throttle_queue_.size() == 1) {
+  std::list<MSG>* throttle_queue = g_throttle_queue.Pointer();
+
+  throttle_queue->push_back(msg);
+
+  if (throttle_queue->size() == 1) {
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         NewRunnableFunction(&WebPluginDelegateImpl::OnThrottleMessage),
         kFlashWMUSERMessageThrottleDelayMs);
@@ -575,6 +665,7 @@ bool WebPluginDelegateImpl::CreateDummyWindowForActivation() {
     0,
     GetModuleHandle(NULL),
     0);
+  TRACK_HWND_CREATION(dummy_window_for_activation_);
 
   if (dummy_window_for_activation_ == 0)
     return false;
@@ -593,62 +684,41 @@ bool WebPluginDelegateImpl::CreateDummyWindowForActivation() {
   return true;
 }
 
-void WebPluginDelegateImpl::MoveWindow(HWND window,
-                                       const gfx::Rect& window_rect,
-                                       const gfx::Rect& clip_rect,
-                                       bool visible) {
-  HRGN hrgn = ::CreateRectRgn(clip_rect.x(),
-                              clip_rect.y(),
-                              clip_rect.right(),
-                              clip_rect.bottom());
-
-  // Note: System will own the hrgn after we call SetWindowRgn,
-  // so we don't need to call DeleteObject(hrgn)
-  ::SetWindowRgn(window, hrgn, FALSE);
-
-  unsigned long flags = 0;
-  if (visible)
-    flags |= SWP_SHOWWINDOW;
-  else
-    flags |= SWP_HIDEWINDOW;
-
-  ::SetWindowPos(window,
-                 NULL,
-                 window_rect.x(),
-                 window_rect.y(),
-                 window_rect.width(),
-                 window_rect.height(),
-                 flags);
-}
-
-bool WebPluginDelegateImpl::WindowedReposition(const gfx::Rect& window_rect,
-                                               const gfx::Rect& clip_rect,
-                                               bool visible) {
+bool WebPluginDelegateImpl::WindowedReposition(
+    const gfx::Rect& window_rect,
+    const gfx::Rect& clip_rect) {
   if (!windowed_handle_) {
     NOTREACHED();
     return false;
   }
 
-  if (window_rect_ == window_rect && clip_rect_ == clip_rect &&
-      initial_plugin_resize_done_)
+  if (window_rect_ == window_rect && clip_rect_ == clip_rect)
     return false;
+
+  // There are a few parts to managing the plugin windows:
+  //   - Initial geometry, show / resize / position the window.
+  //   - Geometry updates, resize the window.
+  //   - Geometry updates, move the window or update the clipping region.
+  // This code should handle the first two, positioning and sizing the window
+  // initially, and resizing it when the size changes.  Clipping and moving are
+  // handled separately by WebPlugin, after it has called this code.  This
+  // allows window moves, like scrolling, to be synchronized with painting.
+  // See WebPluginImpl::setFrameRect().
+  if (window_rect.size() != window_rect_.size()) {
+    ::SetWindowPos(windowed_handle_,
+                   NULL,
+                   0,
+                   0,
+                   window_rect.width(),
+                   window_rect.height(),
+                   SWP_SHOWWINDOW);
+  }
 
   window_rect_ = window_rect;
   clip_rect_ = clip_rect;
 
-  if (!initial_plugin_resize_done_) {
-    // We need to ensure that the plugin process continues to reposition
-    // the plugin window until we receive an indication that it is now visible.
-    // Subsequent repositions will be done by the browser.
-    if (visible)
-      initial_plugin_resize_done_ = true;
-    // We created the window with 0 width and height since we didn't know it
-    // at the time.  Now that we know the geometry, we we can update its size
-    // since the browser only calls SetWindowPos when scrolling occurs.
-    MoveWindow(windowed_handle_, window_rect, clip_rect, visible);
-    // Ensure that the entire window gets repainted.
-    ::InvalidateRect(windowed_handle_, NULL, FALSE);
-  }
+  // Ensure that the entire window gets repainted.
+  ::InvalidateRect(windowed_handle_, NULL, FALSE);
 
   return true;
 }
@@ -703,7 +773,7 @@ ATOM WebPluginDelegateImpl::RegisterNativeWindowClass() {
   WNDCLASSEX wcex;
   wcex.cbSize         = sizeof(WNDCLASSEX);
   wcex.style          = CS_DBLCLKS;
-  wcex.lpfnWndProc    = DefWindowProc;
+  wcex.lpfnWndProc    = DummyWindowProc;
   wcex.cbClsExtra     = 0;
   wcex.cbWndExtra     = 0;
   wcex.hInstance      = GetModuleHandle(NULL);
@@ -722,6 +792,17 @@ ATOM WebPluginDelegateImpl::RegisterNativeWindowClass() {
   return RegisterClassEx(&wcex);
 }
 
+LRESULT CALLBACK WebPluginDelegateImpl::DummyWindowProc(
+    HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+  // This is another workaround for Issue 2673 in chromium "Flash: IME not
+  // available". Somehow, the CallWindowProc() function does not dispatch
+  // window messages when its first parameter is a handle representing the
+  // DefWindowProc() function. To avoid this problem, this code creates a
+  // wrapper function which just encapsulates the DefWindowProc() function
+  // and set it as the window procedure of a windowed plug-in.
+  return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
 LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
   WebPluginDelegateImpl* delegate = reinterpret_cast<WebPluginDelegateImpl*>(
@@ -732,7 +813,7 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
   }
 
   if (message == delegate->last_message_ &&
-      delegate->quirks() & PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY &&
+      delegate->GetQuirks() & PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY &&
       delegate->is_calling_wndproc) {
     // Real may go into a state where it recursively dispatches the same event
     // when subclassed.  See https://bugzilla.mozilla.org/show_bug.cgi?id=192914
@@ -741,6 +822,34 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
     // looks like it's in recursion.
     return TRUE;
   }
+
+  static UINT custom_msg = RegisterWindowMessage(kPaintMessageName);
+  if (message == custom_msg) {
+    // Get the invalid rect which is in screen coordinates and convert to
+    // window coordinates.
+    gfx::Rect invalid_rect;
+    invalid_rect.set_x(wparam >> 16);
+    invalid_rect.set_y(wparam & 0xFFFF);
+    invalid_rect.set_width(lparam >> 16);
+    invalid_rect.set_height(lparam & 0xFFFF);
+
+    RECT window_rect;
+    GetWindowRect(hwnd, &window_rect);
+    invalid_rect.Offset(-window_rect.left, -window_rect.top);
+
+    // The plugin window might have non-client area.   If we don't pass in
+    // RDW_FRAME then the children don't receive WM_NCPAINT messages while
+    // scrolling, which causes painting problems (http://b/issue?id=923945).
+    RedrawWindow(hwnd, &invalid_rect.ToRECT(), NULL,
+                 RDW_UPDATENOW | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME);
+    return FALSE;
+  }
+
+  // Maintain a local/global stack for the g_current_plugin_instance variable
+  // as this may be a nested invocation.
+  WebPluginDelegateImpl* last_plugin_instance = g_current_plugin_instance;
+
+  g_current_plugin_instance = delegate;
 
   switch (message) {
     case WM_NCDESTROY: {
@@ -756,9 +865,10 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
     // usage.  See https://bugzilla.mozilla.org/show_bug.cgi?id=132759.  We
     // prevent this by throttling the messages.
     case WM_USER + 1: {
-      if (delegate->quirks() & PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE) {
+      if (delegate->GetQuirks() & PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE) {
         WebPluginDelegateImpl::ThrottleMessage(delegate->plugin_wnd_proc_, hwnd,
                                                message, wparam, lparam);
+        g_current_plugin_instance = last_plugin_instance;
         return FALSE;
       }
       break;
@@ -771,20 +881,22 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
   delegate->last_message_ = message;
   delegate->is_calling_wndproc = true;
 
-  if (!delegate->user_gesture_message_posted_ && 
+  if (!delegate->user_gesture_message_posted_ &&
        IsUserGestureMessage(message)) {
     delegate->user_gesture_message_posted_ = true;
 
     delegate->instance()->PushPopupsEnabledState(true);
 
-    MessageLoop::current()->PostTask(FROM_HERE,
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
         delegate->user_gesture_msg_factory_.NewRunnableMethod(
-            &WebPluginDelegateImpl::OnUserGestureEnd));
+            &WebPluginDelegateImpl::OnUserGestureEnd),
+        kWindowedPluginPopupTimerMs);
   }
 
   LRESULT result = CallWindowProc(delegate->plugin_wnd_proc_, hwnd, message,
                                   wparam, lparam);
   delegate->is_calling_wndproc = false;
+  g_current_plugin_instance = last_plugin_instance;
   return result;
 }
 
@@ -800,6 +912,7 @@ void WebPluginDelegateImpl::WindowlessUpdateGeometry(
 
   // We will inform the instance of this change when we call NPP_SetWindow.
   clip_rect_ = clip_rect;
+  cutout_rects_.clear();
 
   if (window_rect_ != window_rect) {
     window_rect_ = window_rect;
@@ -831,8 +944,12 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   damage_rect_win.right  = damage_rect_win.left + damage_rect.width();
   damage_rect_win.bottom = damage_rect_win.top + damage_rect.height();
 
-  window_.window = (void*)hdc;
+  // We need to pass the HDC to the plugin via NPP_SetWindow in the
+  // first paint to ensure that it initiates rect invalidations.
+  if (window_.window == NULL)
+    windowless_needs_set_window_ = true;
 
+  window_.window = hdc;
   // TODO(darin): we should avoid calling NPP_SetWindow here since it may
   // cause page layout to be invalidated.
 
@@ -846,7 +963,7 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   // NOTE: NPAPI is not 64bit safe.  It puts pointers into 32bit values.
   paint_event.wParam = PtrToUlong(hdc);
   paint_event.lParam = PtrToUlong(&damage_rect_win);
-  static StatsRate plugin_paint(L"Plugin.Paint");
+  static StatsRate plugin_paint("Plugin.Paint");
   StatsScope<StatsRate> scope(plugin_paint);
   instance()->NPP_HandleEvent(&paint_event);
 }
@@ -921,7 +1038,12 @@ bool WebPluginDelegateImpl::HandleEvent(NPEvent* event,
   bool old_task_reentrancy_state =
       MessageLoop::current()->NestableTasksAllowed();
 
-  current_plugin_instance_ = this;
+
+  // Maintain a local/global stack for the g_current_plugin_instance variable
+  // as this may be a nested invocation.
+  WebPluginDelegateImpl* last_plugin_instance = g_current_plugin_instance;
+
+  g_current_plugin_instance = this;
 
   handle_event_depth_++;
 
@@ -934,13 +1056,20 @@ bool WebPluginDelegateImpl::HandleEvent(NPEvent* event,
 
   bool ret = instance()->NPP_HandleEvent(event) != 0;
 
+  if (event->event == WM_MOUSEMOVE) {
+    // Snag a reference to the current cursor ASAP in case the plugin modified
+    // it. There is a nasty race condition here with the multiprocess browser
+    // as someone might be setting the cursor in the main process as well.
+    *cursor = current_windowless_cursor_;
+  }
+
   if (pop_user_gesture) {
     instance()->PopPopupsEnabledState();
   }
 
   handle_event_depth_--;
 
-  current_plugin_instance_ = NULL;
+  g_current_plugin_instance = last_plugin_instance;
 
   MessageLoop::current()->SetNestableTasksAllowed(old_task_reentrancy_state);
 
@@ -956,46 +1085,11 @@ bool WebPluginDelegateImpl::HandleEvent(NPEvent* event,
     ResetEvent(handle_event_pump_messages_event_);
   }
 
-  if (::IsWindow(prev_focus_window)) {
+  if (event->event == WM_RBUTTONUP && ::IsWindow(prev_focus_window)) {
     ::SetFocus(prev_focus_window);
   }
 
-  if (WM_MOUSEMOVE == event->event) {
-    HCURSOR actual_cursor = ::GetCursor();
-    *cursor = GetCursorType(actual_cursor);
-  }
-
   return ret;
-}
-
-WebCursor::Type WebPluginDelegateImpl::GetCursorType(
-    HCURSOR cursor) const {
-  static HCURSOR standard_cursors[] = {
-    LoadCursor(NULL, IDC_ARROW),
-    LoadCursor(NULL, IDC_IBEAM),
-    LoadCursor(NULL, IDC_WAIT),
-    LoadCursor(NULL, IDC_CROSS),
-    LoadCursor(NULL, IDC_UPARROW),
-    LoadCursor(NULL, IDC_SIZE),
-    LoadCursor(NULL, IDC_ICON),
-    LoadCursor(NULL, IDC_SIZENWSE),
-    LoadCursor(NULL, IDC_SIZENESW),
-    LoadCursor(NULL, IDC_SIZEWE),
-    LoadCursor(NULL, IDC_SIZENS),
-    LoadCursor(NULL, IDC_SIZEALL),
-    LoadCursor(NULL, IDC_NO),
-    LoadCursor(NULL, IDC_HAND),
-    LoadCursor(NULL, IDC_APPSTARTING),
-    LoadCursor(NULL, IDC_HELP),
-  };
-
-  for (int cursor_index = 0; cursor_index < arraysize(standard_cursors);
-      cursor_index++) {
-    if (cursor == standard_cursors[cursor_index])
-      return static_cast<WebCursor::Type>(cursor_index);
-  }
-
-  return WebCursor::ARROW;
 }
 
 WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
@@ -1006,7 +1100,7 @@ WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
   if (existing_stream) {
     NPAPI::PluginStream* plugin_stream =
         reinterpret_cast<NPAPI::PluginStream*>(existing_stream);
-    
+
     plugin_stream->CancelRequest();
 
     return plugin_stream->AsResourceClient();
@@ -1068,3 +1162,40 @@ void WebPluginDelegateImpl::OnUserGestureEnd() {
   instance()->PopPopupsEnabledState();
 }
 
+BOOL WINAPI WebPluginDelegateImpl::TrackPopupMenuPatch(
+    HMENU menu, unsigned int flags, int x, int y, int reserved,
+    HWND window, const RECT* rect) {
+  if (g_current_plugin_instance) {
+    unsigned long window_process_id = 0;
+    unsigned long window_thread_id =
+        GetWindowThreadProcessId(window, &window_process_id);
+    // TrackPopupMenu fails if the window passed in belongs to a different
+    // thread.
+    if (::GetCurrentThreadId() != window_thread_id) {
+      window = g_current_plugin_instance->dummy_window_for_activation_;
+    }
+  }
+  return TrackPopupMenu(menu, flags, x, y, reserved, window, rect);
+}
+
+HCURSOR WINAPI WebPluginDelegateImpl::SetCursorPatch(HCURSOR cursor) {
+  // The windowless flash plugin periodically calls SetCursor in a wndproc
+  // instantiated on the plugin thread. This causes annoying cursor flicker
+  // when the mouse is moved on a foreground tab, with a windowless plugin
+  // instance in a background tab. We just ignore the call here.
+  if (!g_current_plugin_instance)
+    return GetCursor();
+
+  if (!g_current_plugin_instance->IsWindowless()) {
+    return SetCursor(cursor);
+  }
+
+  // It is ok to pass NULL here to GetCursor as we are not looking for cursor
+  // types defined by Webkit.
+  HCURSOR previous_cursor =
+      g_current_plugin_instance->current_windowless_cursor_.GetCursor(NULL);
+
+  g_current_plugin_instance->current_windowless_cursor_.InitFromExternalCursor(
+      cursor);
+  return previous_cursor;
+}

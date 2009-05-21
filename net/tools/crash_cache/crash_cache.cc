@@ -7,20 +7,23 @@
 // works properly on debug mode, because the crash functionality is not compiled
 // on release builds of the cache.
 
-#include <windows.h>
 #include <string>
 
 #include "base/at_exit.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 #include "net/disk_cache/rankings.h"
+
+using base::Time;
 
 enum Errors {
   GENERIC = -1,
@@ -37,39 +40,25 @@ int RunSlave(RankCrashes action) {
   std::wstring exe;
   PathService::Get(base::FILE_EXE, &exe);
 
-  std::wstring command = StringPrintf(L"%ls %d", exe.c_str(), action);
+  CommandLine cmdline(exe);
+  cmdline.AppendLooseValue(ASCIIToWide(IntToString(action)));
 
-  STARTUPINFO startup_info = {0};
-  startup_info.cb = sizeof(startup_info);
-  PROCESS_INFORMATION process_info;
-
-  // I really don't care about this call modifying the string.
-  if (!::CreateProcess(exe.c_str(), const_cast<wchar_t*>(command.c_str()), NULL,
-                       NULL, FALSE, 0, NULL, NULL, &startup_info,
-                       &process_info)) {
+  base::ProcessHandle handle;
+  if (!base::LaunchApp(cmdline, false, false, &handle)) {
     printf("Unable to run test %d\n", action);
     return GENERIC;
   }
 
-  DWORD reason = ::WaitForSingleObject(process_info.hProcess, INFINITE);
+  int exit_code;
 
-  int code;
-  bool ok = ::GetExitCodeProcess(process_info.hProcess,
-                                 reinterpret_cast<PDWORD>(&code)) ? true :
-                                                                    false;
-
-  ::CloseHandle(process_info.hProcess);
-  ::CloseHandle(process_info.hThread);
-
-  if (!ok) {
+  if (!base::WaitForExitCode(handle, &exit_code)) {
     printf("Unable to get return code, test %d\n", action);
     return GENERIC;
   }
+  if (ALL_GOOD != exit_code)
+    printf("Test %d failed, code %d\n", action, exit_code);
 
-  if (ALL_GOOD != code)
-    printf("Test %d failed, code %d\n", action, code);
-
-  return code;
+  return exit_code;
 }
 
 // Main loop for the master process.
@@ -121,6 +110,9 @@ bool CreateTargetFolder(const std::wstring& path, RankCrashes action,
 
   *full_path = path;
   file_util::AppendToPath(full_path, folders[action]);
+
+  if (file_util::PathExists(*full_path))
+    return false;
 
   return file_util::CreateDirectory(*full_path);
 }
@@ -293,7 +285,7 @@ int SlaveCode(const std::wstring& path, RankCrashes action) {
 
 int main(int argc, const char* argv[]) {
   // Setup an AtExitManager so Singleton objects will be destructed.
-  base::AtExitManager at_exit_manager; 
+  base::AtExitManager at_exit_manager;
 
   if (argc < 2)
     return MasterCode();
@@ -314,4 +306,3 @@ int main(int argc, const char* argv[]) {
 
   return SlaveCode(path, action);
 }
-

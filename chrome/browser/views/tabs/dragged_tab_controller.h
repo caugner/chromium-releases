@@ -7,14 +7,18 @@
 
 #include "base/gfx/rect.h"
 #include "base/message_loop.h"
-#include "chrome/browser/tab_contents_delegate.h"
+#include "base/timer.h"
+#include "chrome/browser/dock_info.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/tabs/tab_renderer.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 
-namespace ChromeViews {
+namespace views {
 class MouseEvent;
 class View;
 }
+class BrowserWindow;
 class DraggedTabView;
 class HWNDPhotobooth;
 class SkBitmap;
@@ -53,8 +57,8 @@ class DraggedTabController : public TabContentsDelegate,
   // Complete the current drag session. If the drag session was canceled
   // because the user pressed Escape or something interrupted it, |canceled|
   // is true so the helper can revert the state to the world before the drag
-  // begun.
-  void EndDrag(bool canceled);
+  // begun. Returns whether the tab has been destroyed.
+  bool EndDrag(bool canceled);
 
   // Retrieve the source Tab if the TabContents specified matches the one being
   // dragged by this controller, or NULL if the specified TabContents is not
@@ -65,6 +69,9 @@ class DraggedTabController : public TabContentsDelegate,
   bool IsDragSourceTab(Tab* tab) const;
 
  private:
+  class DockDisplayer;
+  friend class DockDisplayer;
+
   // Enumeration of the ways a drag session can end.
   enum EndDragType {
     // Drag session exited normally: the user released the mouse.
@@ -80,6 +87,7 @@ class DraggedTabController : public TabContentsDelegate,
   // Overridden from TabContentsDelegate:
   virtual void OpenURLFromTab(TabContents* source,
                               const GURL& url,
+                              const GURL& referrer,
                               WindowOpenDisposition disposition,
                               PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
@@ -117,6 +125,8 @@ class DraggedTabController : public TabContentsDelegate,
   // current mouse position.
   gfx::Point GetWindowCreatePoint() const;
 
+  void UpdateDockInfo(const gfx::Point& screen_point);
+
   // Replaces the TabContents being dragged with the specified |new_contents|.
   // This can occur if the active TabContents for the tab being dragged is
   // replaced, e.g. if a transition from one TabContentsType to another occurs
@@ -144,7 +154,9 @@ class DraggedTabController : public TabContentsDelegate,
 
   // Returns the compatible TabStrip that is under the specified point (screen
   // coordinates), or NULL if there is none.
-  TabStrip* GetTabStripForPoint(const gfx::Point& screen_point) const;
+  TabStrip* GetTabStripForPoint(const gfx::Point& screen_point);
+
+  DockInfo GetDockInfoAtPoint(const gfx::Point& screen_point);
 
   // Returns the specified |tabstrip| if it contains the specified point
   // (screen coordinates), NULL if it does not.
@@ -174,8 +186,8 @@ class DraggedTabController : public TabContentsDelegate,
   // dragged TabContents.
   Tab* GetTabMatchingDraggedContents(TabStrip* tabstrip) const;
 
-  // Does the work for EndDrag.
-  void EndDragImpl(EndDragType how_end);
+  // Does the work for EndDrag. Returns whether the tab has been destroyed.
+  bool EndDragImpl(EndDragType how_end);
 
   // If the drag was aborted for some reason, this function is called to un-do
   // the changes made during the drag operation.
@@ -192,7 +204,7 @@ class DraggedTabController : public TabContentsDelegate,
   gfx::Point GetCursorScreenPoint() const;
 
   // Returns the bounds (in screen coordinates) of the specified View.
-  gfx::Rect GetViewScreenBounds(ChromeViews::View* tabstrip) const;
+  gfx::Rect GetViewScreenBounds(views::View* tabstrip) const;
 
   // Utility to convert the specified TabStripModel index to something valid
   // for the attached TabStrip.
@@ -211,6 +223,10 @@ class DraggedTabController : public TabContentsDelegate,
   // Completes the drag session after the view has animated to its final
   // position.
   void OnAnimateToBoundsComplete();
+
+  void DockDisplayerDestroyed(DockDisplayer* controller);
+
+  void BringWindowUnderMouseToFront();
 
   // The TabContents being dragged. This can get replaced during the drag if
   // the associated NavigationController is navigated to a different
@@ -270,7 +286,7 @@ class DraggedTabController : public TabContentsDelegate,
   // The last view that had focus in the window containing |source_tab_|. This
   // is saved so that focus can be restored properly when a drag begins and
   // ends within this same window.
-  ChromeViews::View* old_focused_view_;
+  views::View* old_focused_view_;
 
   bool in_destructor_;
 
@@ -278,8 +294,17 @@ class DraggedTabController : public TabContentsDelegate,
   // time of the last re-order event.
   int last_move_screen_x_;
 
+  DockInfo dock_info_;
+
+  std::set<HWND> dock_windows_;
+  std::vector<DockDisplayer*> dock_controllers_;
+
+  // Timer used to bring the window under the cursor to front. If the user
+  // stops moving the mouse for a brief time over a browser window, it is
+  // brought to front.
+  base::OneShotTimer<DraggedTabController> bring_to_front_timer_;
+
   DISALLOW_COPY_AND_ASSIGN(DraggedTabController);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_CONTROLLER_H_
-

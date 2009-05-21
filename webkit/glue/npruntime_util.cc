@@ -8,10 +8,11 @@
 
 // Import the definition of PrivateIdentifier
 #if USE(V8_BINDING)
-#include "webkit/port/bindings/v8/np_v8object.h"
+#include "NPV8Object.h"
 #elif USE(JAVASCRIPTCORE_BINDINGS)
-#include "bindings/c/c_utility.h"
-using KJS::Bindings::PrivateIdentifier;
+#include "bridge/c/c_utility.h"
+#undef LOG
+using JSC::Bindings::PrivateIdentifier;
 #endif
 
 #include "base/pickle.h"
@@ -52,7 +53,7 @@ bool DeserializeNPIdentifier(const Pickle& pickle, void** pickle_iter,
     int data_len;
     if (!pickle.ReadData(pickle_iter, &data, &data_len))
       return false;
-    DCHECK_EQ(data_len, strlen(data) + 1);
+    DCHECK_EQ((static_cast<size_t>(data_len)), strlen(data) + 1);
     *identifier = NPN_GetStringIdentifier(data);
   } else {
     int number;
@@ -64,4 +65,3 @@ bool DeserializeNPIdentifier(const Pickle& pickle, void** pickle_iter,
 }
 
 }  // namespace webkit_glue
-

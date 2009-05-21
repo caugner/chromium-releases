@@ -4,164 +4,66 @@
 
 #include "net/proxy/proxy_service.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#include <winhttp.h>
-#endif
-
 #include <algorithm>
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
+#include "net/proxy/proxy_config_service_fixed.h"
+#include "net/proxy/proxy_script_fetcher.h"
+#if defined(OS_WIN)
+#include "net/proxy/proxy_config_service_win.h"
+#include "net/proxy/proxy_resolver_winhttp.h"
+#elif defined(OS_MACOSX)
+#include "net/proxy/proxy_resolver_mac.h"
+#endif
+#include "net/proxy/proxy_resolver.h"
+#include "net/proxy/proxy_resolver_v8.h"
+
+using base::TimeDelta;
+using base::TimeTicks;
 
 namespace net {
 
-// ProxyConfig ----------------------------------------------------------------
-
-// static
-ProxyConfig::ID ProxyConfig::last_id_ = ProxyConfig::INVALID_ID;
-
-ProxyConfig::ProxyConfig()
-    : auto_detect(false),
-      id_(++last_id_) {
-}
-
-bool ProxyConfig::Equals(const ProxyConfig& other) const {
-  // The two configs can have different IDs.  We are just interested in if they
-  // have the same settings.
-  return auto_detect == other.auto_detect &&
-         pac_url == other.pac_url &&
-         proxy_server == other.proxy_server &&
-         proxy_bypass == other.proxy_bypass;
-}
-
-// ProxyList ------------------------------------------------------------------
-void ProxyList::SetVector(const std::vector<std::string>& proxies) {
-  proxies_.clear();
-  std::vector<std::string>::const_iterator iter = proxies.begin();
-  for (; iter != proxies.end(); ++iter) {
-    std::string proxy_sever;
-    TrimWhitespace(*iter, TRIM_ALL, &proxy_sever);
-    proxies_.push_back(proxy_sever);
+// Config getter that fails every time.
+class ProxyConfigServiceNull : public ProxyConfigService {
+ public:
+  virtual int GetProxyConfig(ProxyConfig* config) {
+    return ERR_NOT_IMPLEMENTED;
   }
+};
+
+// Strip away any reference fragments and the username/password, as they
+// are not relevant to proxy resolution.
+static GURL SanitizeURLForProxyResolver(const GURL& url) {
+  // TODO(eroman): The following duplicates logic from
+  // HttpUtil::SpecForRequest. Should probably live in net_util.h
+  GURL::Replacements replacements;
+  replacements.ClearUsername();
+  replacements.ClearPassword();
+  replacements.ClearRef();
+  return url.ReplaceComponents(replacements);
 }
 
-void ProxyList::Set(const std::string& proxy_list) {
-  // Extract the different proxies from the list.
-  std::vector<std::string> proxies;
-  SplitString(proxy_list, L';', &proxies);
-  SetVector(proxies);
-}
+// Runs on the PAC thread to notify the proxy resolver of the fetched PAC
+// script contents. This task shouldn't outlive ProxyService, since
+// |resolver| is owned by ProxyService.
+class NotifyFetchCompletionTask : public Task {
+ public:
+  NotifyFetchCompletionTask(ProxyResolver* resolver, const std::string& bytes)
+      : resolver_(resolver), bytes_(bytes) {}
 
-void ProxyList::RemoveBadProxies(const ProxyRetryInfoMap& proxy_retry_info) {
-  std::vector<std::string> new_proxy_list;
-  std::vector<std::string>::const_iterator iter = proxies_.begin();
-  for (; iter != proxies_.end(); ++iter) {
-    ProxyRetryInfoMap::const_iterator bad_proxy =
-        proxy_retry_info.find(*iter);
-    if (bad_proxy != proxy_retry_info.end()) {
-      // This proxy is bad. Check if it's time to retry.
-      if (bad_proxy->second.bad_until >= TimeTicks::Now()) {
-        // still invalid.
-        continue;
-      }
-    }
-    new_proxy_list.push_back(*iter);
+  virtual void Run() {
+    resolver_->SetPacScript(bytes_);
   }
 
-  proxies_ = new_proxy_list;
-}
-
-std::string ProxyList::Get() const {
-  if (!proxies_.empty())
-    return proxies_[0];
-
-  return std::string();
-}
-
-std::string ProxyList::GetList() const {
-  std::string proxy_list;
-  std::vector<std::string>::const_iterator iter = proxies_.begin();
-  for (; iter != proxies_.end(); ++iter) {
-    if (!proxy_list.empty())
-      proxy_list += L';';
-
-    proxy_list += *iter;
-  }
-
-  return proxy_list;
-}
-
-bool ProxyList::Fallback(ProxyRetryInfoMap* proxy_retry_info) {
-  // Number of minutes to wait before retrying a bad proxy server.
-  const TimeDelta kProxyRetryDelay = TimeDelta::FromMinutes(5);
-
-  if (proxies_.empty()) {
-    NOTREACHED();
-    return false;
-  }
-
-  // Mark this proxy as bad.
-  ProxyRetryInfoMap::iterator iter = proxy_retry_info->find(proxies_[0]);
-  if (iter != proxy_retry_info->end()) {
-    // TODO(nsylvain): This is not the first time we get this. We should
-    // double the retry time. Bug 997660.
-    iter->second.bad_until = TimeTicks::Now() + iter->second.current_delay;
-  } else {
-    ProxyRetryInfo retry_info;
-    retry_info.current_delay = kProxyRetryDelay;
-    retry_info.bad_until = TimeTicks().Now() + retry_info.current_delay;
-    (*proxy_retry_info)[proxies_[0]] = retry_info;
-  }
-
-  // Remove this proxy from our list.
-  proxies_.erase(proxies_.begin());
-
-  return !proxies_.empty();
-}
-
-// ProxyInfo ------------------------------------------------------------------
-
-ProxyInfo::ProxyInfo()
-    : config_id_(ProxyConfig::INVALID_ID),
-      config_was_tried_(false) {
-}
-
-void ProxyInfo::Use(const ProxyInfo& other) {
-  proxy_list_ = other.proxy_list_;
-}
-
-void ProxyInfo::UseDirect() {
-  proxy_list_.Set(std::string());
-}
-
-void ProxyInfo::UseNamedProxy(const std::string& proxy_server) {
-  proxy_list_.Set(proxy_server);
-}
-
-#if defined(OS_WIN)
-void ProxyInfo::Apply(HINTERNET request_handle) {
-  WINHTTP_PROXY_INFO pi;
-  std::wstring proxy;  // We need to declare this variable here because
-                       // lpszProxy needs to be valid in WinHttpSetOption.
-  if (is_direct()) {
-    pi.dwAccessType = WINHTTP_ACCESS_TYPE_NO_PROXY;
-    pi.lpszProxy = WINHTTP_NO_PROXY_NAME;
-    pi.lpszProxyBypass = WINHTTP_NO_PROXY_BYPASS;
-  } else {
-    proxy = ASCIIToWide(proxy_list_.Get());
-    pi.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
-    pi.lpszProxy = const_cast<LPWSTR>(proxy.c_str());
-    // NOTE: Specifying a bypass list here would serve no purpose.
-    pi.lpszProxyBypass = WINHTTP_NO_PROXY_BYPASS;
-  }
-  WinHttpSetOption(request_handle, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
-}
-#endif
+ private:
+  ProxyResolver* resolver_;
+  std::string bytes_;
+};
 
 // ProxyService::PacRequest ---------------------------------------------------
 
@@ -171,31 +73,42 @@ void ProxyInfo::Apply(HINTERNET request_handle) {
 class ProxyService::PacRequest :
     public base::RefCountedThreadSafe<ProxyService::PacRequest> {
  public:
+  // |service| -- the ProxyService that owns this request.
+  // |url|     -- the url of the query.
+  // |results| -- the structure to fill with proxy resolve results.
   PacRequest(ProxyService* service,
-             const std::string& pac_url,
+             const GURL& url,
+             ProxyInfo* results,
              CompletionCallback* callback)
       : service_(service),
         callback_(callback),
-        results_(NULL),
-        config_id_(service->config_id()),
-        pac_url_(pac_url),
-        origin_loop_(NULL) {
-    // We need to remember original loop if only in case of asynchronous call
-    if (callback_)
-      origin_loop_ = MessageLoop::current();
+        results_(results),
+        url_(url),
+        is_started_(false),
+        origin_loop_(MessageLoop::current()) {
+    DCHECK(callback);
   }
 
-  void Query(const std::string& url, ProxyInfo* results) {
-    results_ = results;
-    // If we have a valid callback then execute Query asynchronously
-    if (callback_) {
-      AddRef();  // balanced in QueryComplete
-      service_->pac_thread()->message_loop()->PostTask(FROM_HERE,
-          NewRunnableMethod(this, &ProxyService::PacRequest::DoQuery,
-                            service_->resolver(), url, pac_url_));
-    } else {
-      DoQuery(service_->resolver(), url, pac_url_);
-    }
+  // Start the resolve proxy request on the PAC thread.
+  void Query() {
+    is_started_ = true;
+    AddRef();  // balanced in QueryComplete
+
+    GURL query_url = SanitizeURLForProxyResolver(url_);
+    const GURL& pac_url = service_->config_.pac_url;
+    results_->config_id_ = service_->config_.id();
+
+    service_->pac_thread()->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &ProxyService::PacRequest::DoQuery,
+                          service_->resolver(), query_url, pac_url));
+  }
+
+  // Run the request's callback on the current message loop.
+  void PostCallback(int result_code) {
+    AddRef();  // balanced in DoCallback
+    MessageLoop::current()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &ProxyService::PacRequest::DoCallback,
+            result_code));
   }
 
   void Cancel() {
@@ -206,70 +119,169 @@ class ProxyService::PacRequest :
     results_ = NULL;
   }
 
+  // Returns true if Cancel() has been called.
+  bool was_cancelled() const { return callback_ == NULL; }
+
  private:
-  // Runs on the PAC thread if a valid callback is provided.
+  friend class ProxyService;
+
+  // Runs on the PAC thread.
   void DoQuery(ProxyResolver* resolver,
-               const std::string& query_url,
-               const std::string& pac_url) {
+               const GURL& query_url,
+               const GURL& pac_url) {
     int rv = resolver->GetProxyForURL(query_url, pac_url, &results_buf_);
-    if (origin_loop_) {
-      origin_loop_->PostTask(FROM_HERE,
-          NewRunnableMethod(this, &PacRequest::QueryComplete, rv));
-    } else {
-      QueryComplete(rv);
-    }
+    origin_loop_->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &PacRequest::QueryComplete, rv));
   }
 
-  // If a valid callback is provided, this runs on the origin thread to
-  // indicate that the completion callback should be run.
+  // Runs the completion callback on the origin thread.
   void QueryComplete(int result_code) {
-    if (service_)
-      service_->DidCompletePacRequest(config_id_, result_code);
+    // The PacRequest may have been cancelled after it was started.
+    if (!was_cancelled()) {
+      service_->DidCompletePacRequest(results_->config_id_, result_code);
 
-    if (result_code == OK && results_) {
-      results_->Use(results_buf_);
-      results_->RemoveBadProxies(service_->proxy_retry_info_);
-    }
-
-    if (callback_)
+      if (result_code == OK) {
+        results_->Use(results_buf_);
+        results_->RemoveBadProxies(service_->proxy_retry_info_);
+      }
       callback_->Run(result_code);
 
-    if (origin_loop_) {
-      Release();  // balances the AddRef in Query.  we may get deleted after
-                  // we return.
+      // We check for cancellation once again, in case the callback deleted
+      // the owning ProxyService (whose destructor will in turn cancel us).
+      if (!was_cancelled())
+        service_->RemoveFrontOfRequestQueue(this);
     }
+
+    Release();  // balances the AddRef in Query.  we may get deleted after
+                // we return.
+  }
+
+  // Runs the completion callback on the origin thread.
+  void DoCallback(int result_code) {
+    if (!was_cancelled()) {
+      callback_->Run(result_code);
+    }
+    Release();  // balances the AddRef in PostCallback.
   }
 
   // Must only be used on the "origin" thread.
   ProxyService* service_;
   CompletionCallback* callback_;
   ProxyInfo* results_;
-  ProxyConfig::ID config_id_;
+  GURL url_;
+  bool is_started_;
 
   // Usable from within DoQuery on the PAC thread.
   ProxyInfo results_buf_;
-  std::string pac_url_;
   MessageLoop* origin_loop_;
 };
 
 // ProxyService ---------------------------------------------------------------
 
-ProxyService::ProxyService(ProxyResolver* resolver)
-    : resolver_(resolver),
-      config_is_bad_(false) {
-  UpdateConfig();
+ProxyService::ProxyService(ProxyConfigService* config_service,
+                           ProxyResolver* resolver)
+    : config_service_(config_service),
+      resolver_(resolver),
+      config_is_bad_(false),
+      config_has_been_updated_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(proxy_script_fetcher_callback_(
+          this, &ProxyService::OnScriptFetchCompletion)),
+      fetched_pac_config_id_(ProxyConfig::INVALID_ID),
+      fetched_pac_error_(OK),
+      in_progress_fetch_config_id_(ProxyConfig::INVALID_ID) {
+}
+
+// static
+ProxyService* ProxyService::Create(const ProxyInfo* pi) {
+  if (pi) {
+    // The ProxyResolver is set to NULL, since it should never be called
+    // (because the configuration will never require PAC).
+    return new ProxyService(new ProxyConfigServiceFixed(*pi), NULL);
+  }
+#if defined(OS_WIN)
+  return new ProxyService(new ProxyConfigServiceWin(),
+                          new ProxyResolverWinHttp());
+#elif defined(OS_MACOSX)
+  return new ProxyService(new ProxyConfigServiceMac(),
+                          new ProxyResolverMac());
+#else
+  // TODO(port): implement ProxyConfigServiceLinux as well as make use of
+  // ProxyResolverV8 once it's implemented.
+  // See:
+  // - http://code.google.com/p/chromium/issues/detail?id=8143
+  // - http://code.google.com/p/chromium/issues/detail?id=2764
+  return CreateNull();
+#endif
+}
+
+// static
+ProxyService* ProxyService::CreateUsingV8Resolver(
+    const ProxyInfo* pi, URLRequestContext* url_request_context) {
+  if (pi) {
+    // The ProxyResolver is set to NULL, since it should never be called
+    // (because the configuration will never require PAC).
+    return new ProxyService(new ProxyConfigServiceFixed(*pi), NULL);
+  }
+
+  // Choose the system configuration service appropriate for each platform.
+  ProxyConfigService* config_service;
+#if defined(OS_WIN)
+  config_service = new ProxyConfigServiceWin();
+#elif defined(OS_MACOSX)
+  config_service = new ProxyConfigServiceMac();
+#else
+  // TODO(port): implement ProxyConfigServiceLinux.
+  // See: http://code.google.com/p/chromium/issues/detail?id=8143
+  return CreateNull();
+#endif
+
+  // Create a ProxyService that uses V8 to evaluate PAC scripts.
+  ProxyService* proxy_service = new ProxyService(
+      config_service, new ProxyResolverV8());
+
+  // Configure PAC script downloads to be issued using |url_request_context|.
+  proxy_service->SetProxyScriptFetcher(
+      ProxyScriptFetcher::Create(url_request_context));
+
+  return proxy_service;
+}
+
+// static
+ProxyService* ProxyService::CreateNull() {
+  // The ProxyResolver is set to NULL, since it should never be called
+  // (because the configuration will never require PAC).
+  return new ProxyService(new ProxyConfigServiceNull, NULL);
 }
 
 int ProxyService::ResolveProxy(const GURL& url, ProxyInfo* result,
                                CompletionCallback* callback,
                                PacRequest** pac_request) {
-  // The overhead of calling WinHttpGetIEProxyConfigForCurrentUser is very low.
-  const TimeDelta kProxyConfigMaxAge = TimeDelta::FromSeconds(5);
+  DCHECK(callback);
 
-  // Periodically check for a new config.
-  if ((TimeTicks::Now() - config_last_update_time_) > kProxyConfigMaxAge)
-    UpdateConfig();
+  // Check if the request can be completed right away. This is the case when
+  // using a direct connection, or when the config is bad.
+  UpdateConfigIfOld();
+  int rv = TryToCompleteSynchronously(url, result);
+  if (rv != ERR_IO_PENDING)
+    return rv;
+
+  // Otherwise, push the request into the work queue.
+  scoped_refptr<PacRequest> req = new PacRequest(this, url, result, callback);
+  pending_requests_.push_back(req);
+  ProcessPendingRequests(req.get());
+
+  // Completion will be notifed through |callback|, unless the caller cancels
+  // the request using |pac_request|.
+  if (pac_request)
+    *pac_request = req.get();
+  return rv;  // ERR_IO_PENDING
+}
+
+int ProxyService::TryToCompleteSynchronously(const GURL& url,
+                                             ProxyInfo* result) {
   result->config_id_ = config_.id();
+
+  DCHECK(config_.id() != ProxyConfig::INVALID_ID);
 
   // Fallback to a "direct" (no proxy) connection if the current configuration
   // is known to be bad.
@@ -281,7 +293,7 @@ int ProxyService::ResolveProxy(const GURL& url, ProxyInfo* result,
     // Remember that we are trying to use the current proxy configuration.
     result->config_was_tried_ = true;
 
-    if (!config_.proxy_server.empty()) {
+    if (!config_.proxy_rules.empty()) {
       if (ShouldBypassProxyForURL(url)) {
         result->UseDirect();
       } else {
@@ -290,7 +302,7 @@ int ProxyService::ResolveProxy(const GURL& url, ProxyInfo* result,
         // "scheme1=url:port;scheme2=url:port", etc.
         std::string url_scheme = url.scheme();
 
-        StringTokenizer proxy_server_list(config_.proxy_server, ";");
+        StringTokenizer proxy_server_list(config_.proxy_rules, ";");
         while (proxy_server_list.GetNext()) {
           StringTokenizer proxy_server_for_scheme(
               proxy_server_list.token_begin(), proxy_server_list.token_end(),
@@ -321,37 +333,111 @@ int ProxyService::ResolveProxy(const GURL& url, ProxyInfo* result,
       return OK;
     }
 
-    if (!config_.pac_url.empty() || config_.auto_detect) {
-      if (callback) {
-        // Create PAC thread for asynchronous mode.
-        if (!pac_thread_.get()) {
-          pac_thread_.reset(new base::Thread("pac-thread"));
-          pac_thread_->Start();
-        }
-      } else {
-        // If this request is synchronous, then there's no point
-        // in returning PacRequest instance
-        DCHECK(!pac_request);
+    if (config_.pac_url.is_valid() || config_.auto_detect) {
+      // If we failed to download the PAC script, return the network error
+      // from the failed download. This is only going to happen for the first
+      // request after the failed download -- after that |config_is_bad_| will
+      // be set to true, so we short-cuircuit sooner.
+      if (fetched_pac_error_ != OK && !IsFetchingPacScript()) {
+        DidCompletePacRequest(fetched_pac_config_id_, fetched_pac_error_);
+        return fetched_pac_error_;
       }
-
-      scoped_refptr<PacRequest> req =
-          new PacRequest(this, config_.pac_url, callback);
-      // TODO(darin): We should strip away any reference fragment since it is
-      // not relevant, and moreover it could contain non-ASCII bytes.
-      req->Query(url.spec(), result);
-
-      if (callback) {
-        if (pac_request)
-          *pac_request = req;
-        return ERR_IO_PENDING;  // Wait for callback.
-      }
-      return OK;
+      return ERR_IO_PENDING;
     }
   }
 
   // otherwise, we have no proxy config
   result->UseDirect();
   return OK;
+}
+
+void ProxyService::InitPacThread() {
+  if (!pac_thread_.get()) {
+    pac_thread_.reset(new base::Thread("pac-thread"));
+    pac_thread_->Start();
+  }
+}
+
+ProxyService::~ProxyService() {
+  // Cancel the inprogress request (if any), and free the rest.
+  for (PendingRequestsQueue::iterator it = pending_requests_.begin();
+       it != pending_requests_.end();
+       ++it) {
+    (*it)->Cancel();
+  }
+}
+
+void ProxyService::ProcessPendingRequests(PacRequest* recent_req) {
+  if (pending_requests_.empty())
+    return;
+
+  // While the PAC script is being downloaded, requests are blocked.
+  if (IsFetchingPacScript())
+    return;
+
+  // Get the next request to process (FIFO).
+  PacRequest* req = pending_requests_.front().get();
+  if (req->is_started_)
+    return;
+
+  // The configuration may have changed since |req| was added to the
+  // queue. It could be this request now completes synchronously.
+  if (req != recent_req) {
+    UpdateConfigIfOld();
+    int rv = TryToCompleteSynchronously(req->url_, req->results_);
+    if (rv != ERR_IO_PENDING) {
+      req->PostCallback(rv);
+      RemoveFrontOfRequestQueue(req);
+      return;
+    }
+  }
+
+  // Check if a new PAC script needs to be downloaded.
+  DCHECK(config_.id() != ProxyConfig::INVALID_ID);
+  if (!resolver_->does_fetch() && config_.id() != fetched_pac_config_id_) {
+    // For auto-detect we use the well known WPAD url.
+    GURL pac_url = config_.auto_detect ?
+        GURL("http://wpad/wpad.dat") : config_.pac_url;
+
+    in_progress_fetch_config_id_ = config_.id();
+
+    proxy_script_fetcher_->Fetch(
+        pac_url, &in_progress_fetch_bytes_, &proxy_script_fetcher_callback_);
+    return;
+  }
+
+  // The only choice left now is to actually run the ProxyResolver on
+  // the PAC thread.
+  InitPacThread();
+  req->Query();
+}
+
+void ProxyService::RemoveFrontOfRequestQueue(PacRequest* expected_req) {
+  DCHECK(pending_requests_.front().get() == expected_req);
+  pending_requests_.pop_front();
+
+  // Start next work item.
+  ProcessPendingRequests(NULL);
+}
+
+void ProxyService::OnScriptFetchCompletion(int result) {
+  DCHECK(IsFetchingPacScript());
+  DCHECK(!resolver_->does_fetch());
+
+  // Notify the ProxyResolver of the new script data (will be empty string if
+  // result != OK).
+  InitPacThread();
+  pac_thread()->message_loop()->PostTask(FROM_HERE,
+      new NotifyFetchCompletionTask(
+          resolver_.get(), in_progress_fetch_bytes_));
+
+  fetched_pac_config_id_ = in_progress_fetch_config_id_;
+  fetched_pac_error_ = result;
+  in_progress_fetch_config_id_ = ProxyConfig::INVALID_ID;
+  in_progress_fetch_bytes_.clear();
+
+  // Start a pending request if any.
+  ProcessPendingRequests(NULL);
 }
 
 int ProxyService::ReconsiderProxyAfterError(const GURL& url,
@@ -389,7 +475,7 @@ int ProxyService::ReconsiderProxyAfterError(const GURL& url,
   if (!was_direct && result->Fallback(&proxy_retry_info_))
     return OK;
 
-  if (!config_.auto_detect && !config_.proxy_server.empty()) {
+  if (!config_.auto_detect && !config_.proxy_rules.empty()) {
     // If auto detect is on, then we should try a DIRECT connection
     // as the attempt to reach the proxy failed.
     return ERR_FAILED;
@@ -404,8 +490,35 @@ int ProxyService::ReconsiderProxyAfterError(const GURL& url,
   return OK;
 }
 
-void ProxyService::CancelPacRequest(PacRequest* pac_request) {
-  pac_request->Cancel();
+// There are four states of the request we need to handle:
+// (1) Not started (just sitting in the queue).
+// (2) Executing PacRequest::DoQuery in the PAC thread.
+// (3) Waiting for PacRequest::QueryComplete to be run on the origin thread.
+// (4) Waiting for PacRequest::DoCallback to be run on the origin thread.
+void ProxyService::CancelPacRequest(PacRequest* req) {
+  DCHECK(req);
+
+  bool is_active_request = req->is_started_ && !pending_requests_.empty() &&
+      pending_requests_.front().get() == req;
+
+  req->Cancel();
+
+  if (is_active_request) {
+    RemoveFrontOfRequestQueue(req);
+    return;
+  }
+
+  // Otherwise just delete the request from the queue.
+  PendingRequestsQueue::iterator it = std::find(
+      pending_requests_.begin(), pending_requests_.end(), req);
+  if (it != pending_requests_.end()) {
+    pending_requests_.erase(it);
+  }
+}
+
+void ProxyService::SetProxyScriptFetcher(
+    ProxyScriptFetcher* proxy_script_fetcher) {
+  proxy_script_fetcher_.reset(proxy_script_fetcher);
 }
 
 void ProxyService::DidCompletePacRequest(int config_id, int result_code) {
@@ -421,16 +534,10 @@ void ProxyService::DidCompletePacRequest(int config_id, int result_code) {
 }
 
 void ProxyService::UpdateConfig() {
-#if !defined(WIN_OS)
-  if (!resolver_) {
-    // Tied to the NOTIMPLEMENTED in HttpNetworkLayer::HttpNetworkLayer()
-    NOTIMPLEMENTED();
-    return;
-  }
-#endif
+  config_has_been_updated_ = true;
 
   ProxyConfig latest;
-  if (resolver_->GetProxyConfig(&latest) != OK)
+  if (config_service_->GetProxyConfig(&latest) != OK)
     return;
   config_last_update_time_ = TimeTicks::Now();
 
@@ -444,23 +551,34 @@ void ProxyService::UpdateConfig() {
   proxy_retry_info_.clear();
 }
 
+void ProxyService::UpdateConfigIfOld() {
+  // The overhead of calling ProxyConfigService::GetProxyConfig is very low.
+  const TimeDelta kProxyConfigMaxAge = TimeDelta::FromSeconds(5);
+
+  // Periodically check for a new config.
+  if (!config_has_been_updated_ ||
+      (TimeTicks::Now() - config_last_update_time_) > kProxyConfigMaxAge)
+    UpdateConfig();
+}
+
 bool ProxyService::ShouldBypassProxyForURL(const GURL& url) {
   std::string url_domain = url.scheme();
   if (!url_domain.empty())
     url_domain += "://";
 
   url_domain += url.host();
+  // This isn't superfluous; GURL case canonicalization doesn't hit the embedded
+  // percent-encoded characters.
   StringToLowerASCII(&url_domain);
 
-  StringTokenizer proxy_server_bypass_list(config_.proxy_bypass, ";");
-  while (proxy_server_bypass_list.GetNext()) {
-    std::string bypass_url_domain = proxy_server_bypass_list.token();
-    if (bypass_url_domain == "<local>") {
-      // Any name without a DOT (.) is considered to be local.
-      if (url.host().find('.') == std::string::npos)
-        return true;
-      continue;
-    }
+  if (config_.proxy_bypass_local_names) {
+    if (url.host().find('.') == std::string::npos)
+      return true;
+  }
+
+  for(std::vector<std::string>::const_iterator i = config_.proxy_bypass.begin();
+      i != config_.proxy_bypass.end(); ++i) {
+    std::string bypass_url_domain = *i;
 
     // The proxy server bypass list can contain entities with http/https
     // If no scheme is specified then it indicates that all schemes are
@@ -478,10 +596,75 @@ bool ProxyService::ShouldBypassProxyForURL(const GURL& url) {
 
     if (MatchPattern(url_domain, bypass_url_domain))
       return true;
+
+    // Some systems (the Mac, for example) allow CIDR-style specification of
+    // proxy bypass for IP-specified hosts (e.g.  "10.0.0.0/8"; see
+    // http://www.tcd.ie/iss/internet/osx_proxy.php for a real-world example).
+    // That's kinda cool so we'll provide that for everyone.
+    // TODO(avi): implement here
   }
 
   return false;
 }
 
-}  // namespace net
+SyncProxyServiceHelper::SyncProxyServiceHelper(MessageLoop* io_message_loop,
+                                               ProxyService* proxy_service)
+    : io_message_loop_(io_message_loop),
+      proxy_service_(proxy_service),
+      event_(false, false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+          this, &SyncProxyServiceHelper::OnCompletion)) {
+  DCHECK(io_message_loop_ != MessageLoop::current());
+}
 
+int SyncProxyServiceHelper::ResolveProxy(const GURL& url,
+                                         ProxyInfo* proxy_info) {
+  DCHECK(io_message_loop_ != MessageLoop::current());
+
+  io_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &SyncProxyServiceHelper::StartAsyncResolve, url));
+
+  event_.Wait();
+
+  if (result_ == net::OK) {
+    *proxy_info = proxy_info_;
+  }
+  return result_;
+}
+
+int SyncProxyServiceHelper::ReconsiderProxyAfterError(const GURL& url,
+                                                      ProxyInfo* proxy_info) {
+  DCHECK(io_message_loop_ != MessageLoop::current());
+
+  io_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &SyncProxyServiceHelper::StartAsyncReconsider, url));
+
+  event_.Wait();
+
+  if (result_ == net::OK) {
+    *proxy_info = proxy_info_;
+  }
+  return result_;
+}
+
+void SyncProxyServiceHelper::StartAsyncResolve(const GURL& url) {
+  result_ = proxy_service_->ResolveProxy(url, &proxy_info_, &callback_, NULL);
+  if (result_ != net::ERR_IO_PENDING) {
+    OnCompletion(result_);
+  }
+}
+
+void SyncProxyServiceHelper::StartAsyncReconsider(const GURL& url) {
+  result_ = proxy_service_->ReconsiderProxyAfterError(
+      url, &proxy_info_, &callback_, NULL);
+  if (result_ != net::ERR_IO_PENDING) {
+    OnCompletion(result_);
+  }
+}
+
+void SyncProxyServiceHelper::OnCompletion(int rv) {
+  result_ = rv;
+  event_.Signal();
+}
+
+}  // namespace net

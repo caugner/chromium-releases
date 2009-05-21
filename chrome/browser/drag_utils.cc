@@ -9,18 +9,19 @@
 #include <shobjidl.h>
 
 #include "base/file_util.h"
-#include "base/gfx/bitmap_header.h"
+#include "base/gfx/gdi_util.h"
 #include "base/gfx/point.h"
 #include "base/string_util.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/chrome_font.h"
+#include "chrome/common/l10n_util.h"
 #include "chrome/common/os_exchange_data.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/common/win_util.h"
-#include "chrome/views/text_button.h"
+#include "chrome/views/controls/button/text_button.h"
 #include "googleurl/src/gurl.h"
+#include "grit/theme_resources.h"
 
 namespace drag_utils {
 
@@ -81,56 +82,6 @@ static HBITMAP CreateBitmapFromCanvas(const ChromeCanvas& canvas,
   return bitmap;
 }
 
-void CreateDragImageForLink(const GURL& url,
-                            const std::wstring& title,
-                            IDataObject* data_object) {
-  // First calculate our dimensions.
-  ChromeFont title_font =
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont).
-          DeriveFont(0, ChromeFont::BOLD);
-  ChromeFont url_font =
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::SmallFont);
-  const int title_height = title_font.height();
-  const int url_height = url_font.height();
-  const int width = kLinkDragImageMaxWidth;
-  const int height = kLinkDragImageVPadding * 2 + kLinkDragImageVSpacing +
-      title_height + url_height;
-
-  // Now create a canvas and render the dragged representation into it.
-  ChromeCanvas canvas(width, height, true);
-
-  // Paint the alpha layer
-  canvas.FillRectInt(SK_ColorWHITE, 0, 0,
-                     kLinkDragImageMaxWidth, height); // kLinkDragImageTransparentColor
-
-  // Paint the background
-  SkPaint paint;
-  paint.setFlags(SkPaint::kAntiAlias_Flag);
-  paint.setStyle(SkPaint::kFill_Style);
-  paint.setColor(kLinkDragImageBGColor);
-  SkRect bounds_rect;
-  bounds_rect.set(0, 0, SkIntToScalar(width), SkIntToScalar(height));
-  canvas.drawRoundRect(bounds_rect, 3, 3, paint);
-
-  // Paint the link title
-  canvas.DrawStringInt(title, title_font, kLinkDragImageTextColor,
-                       kLinkDragImageHPadding, kLinkDragImageVPadding,
-                       kLinkDragImageMaxWidth - 2 * kLinkDragImageHPadding,
-                       title_height);
-
-  // Paint the link URL
-  canvas.DrawStringInt(UTF8ToWide(url.spec()), url_font,
-                       kLinkDragImageTextColor, kLinkDragImageHPadding,
-                       kLinkDragImageVPadding + title_height +
-                           kLinkDragImageVSpacing,
-                       kLinkDragImageMaxWidth - 2 * kLinkDragImageHPadding,
-                       url_height);
-
-  SetDragImageOnDataObject(canvas, kLinkDragImageMaxWidth, height,
-                           kLinkDragImageMaxWidth / 2,
-                           height - kLinkDragImageVPadding, data_object);
-}
-
 void SetURLAndDragImage(const GURL& url,
                         const std::wstring& title,
                         const SkBitmap& icon,
@@ -140,8 +91,8 @@ void SetURLAndDragImage(const GURL& url,
   data->SetURL(url, title);
 
   // Create a button to render the drag image for us.
-  ChromeViews::TextButton button(
-      title.empty() ? UTF8ToWide(url.spec()) : title);
+  views::TextButton button(NULL,
+                           title.empty() ? UTF8ToWide(url.spec()) : title);
   button.set_max_width(BookmarkBarView::kMaxButtonWidth);
   if (icon.isNull()) {
     button.SetIcon(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
@@ -149,14 +100,14 @@ void SetURLAndDragImage(const GURL& url,
   } else {
     button.SetIcon(icon);
   }
-  CSize pref;
-  button.GetPreferredSize(&pref);
-  button.SetBounds(0, 0, pref.cx, pref.cy);
+  gfx::Size prefsize = button.GetPreferredSize();
+  button.SetBounds(0, 0, prefsize.width(), prefsize.height());
 
   // Render the image.
-  ChromeCanvas canvas(pref.cx, pref.cy, false);
+  ChromeCanvas canvas(prefsize.width(), prefsize.height(), false);
   button.Paint(&canvas, true);
-  SetDragImageOnDataObject(canvas, pref.cx, pref.cy, pref.cx / 2, pref.cy / 2,
+  SetDragImageOnDataObject(canvas, prefsize.width(), prefsize.height(),
+                           prefsize.width() / 2, prefsize.height() / 2,
                            data);
 }
 
@@ -172,16 +123,19 @@ void CreateDragImageForFile(const std::wstring& file_name,
   ChromeFont font = rb.GetFont(ResourceBundle::BaseFont);
 
   const int width = kFileDragImageMaxWidth;
-  const int height = font.height() + icon->height() + kLinkDragImageVPadding;
+  // Add +2 here to allow room for the halo.
+  const int height = font.height() + icon->height() +
+                     kLinkDragImageVPadding + 2;
   ChromeCanvas canvas(width, height, false /* translucent */);
 
   // Paint the icon.
   canvas.DrawBitmapInt(*icon, (width - icon->width()) / 2, 0);
 
-  // Paint the file name.
-  canvas.DrawStringInt(name, font, kFileDragImageTextColor,
-                       0, icon->height() + kLinkDragImageVPadding,
-                       width, font.height(), ChromeCanvas::TEXT_ALIGN_CENTER);
+  // Paint the file name. We inset it one pixel to allow room for the halo.
+  canvas.DrawStringWithHalo(name, font, kFileDragImageTextColor, SK_ColorWHITE,
+                            1, icon->height() + kLinkDragImageVPadding + 1,
+                            width - 2, font.height(),
+                            ChromeCanvas::TEXT_ALIGN_CENTER);
 
   SetDragImageOnDataObject(canvas, width, height, width / 2,
                            kLinkDragImageVPadding, data_object);
@@ -205,4 +159,3 @@ void SetDragImageOnDataObject(const ChromeCanvas& canvas,
 }
 
 } // namespace drag_utils
-

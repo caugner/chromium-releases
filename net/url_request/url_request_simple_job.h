@@ -2,19 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H__
-#define NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H__
+#ifndef NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H_
+#define NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H_
 
-#include "net/url_request/url_request.h"
+#include <string>
+
 #include "net/url_request/url_request_job.h"
+
+class URLRequest;
 
 class URLRequestSimpleJob : public URLRequestJob {
  public:
-  URLRequestSimpleJob(URLRequest* request);
+  explicit URLRequestSimpleJob(URLRequest* request);
 
   virtual void Start();
-  virtual bool ReadRawData(char* buf, int buf_size, int *bytes_read);
-  virtual bool GetMimeType(std::string* mime_type);
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
+  virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetCharset(std::string* charset);
 
  protected:
@@ -32,5 +35,4 @@ class URLRequestSimpleJob : public URLRequestJob {
   int data_offset_;
 };
 
-#endif  // NET_URL_REQUEST_URL_REQUEST_DATA_JOB_H__
-
+#endif  // NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H_

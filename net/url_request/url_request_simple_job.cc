@@ -6,6 +6,7 @@
 
 #include "base/message_loop.h"
 #include "net/base/net_errors.h"
+#include "net/url_request/url_request_status.h"
 
 URLRequestSimpleJob::URLRequestSimpleJob(URLRequest* request)
     : URLRequestJob(request),
@@ -19,7 +20,7 @@ void URLRequestSimpleJob::Start() {
       this, &URLRequestSimpleJob::StartAsync));
 }
 
-bool URLRequestSimpleJob::GetMimeType(std::string* mime_type) {
+bool URLRequestSimpleJob::GetMimeType(std::string* mime_type) const {
   *mime_type = mime_type_;
   return true;
 }
@@ -29,13 +30,13 @@ bool URLRequestSimpleJob::GetCharset(std::string* charset) {
   return true;
 }
 
-bool URLRequestSimpleJob::ReadRawData(char* buf, int buf_size,
+bool URLRequestSimpleJob::ReadRawData(net::IOBuffer* buf, int buf_size,
                                       int* bytes_read) {
   DCHECK(bytes_read);
   int remaining = static_cast<int>(data_.size()) - data_offset_;
   if (buf_size > remaining)
     buf_size = remaining;
-  memcpy(buf, data_.data() + data_offset_, buf_size);
+  memcpy(buf->data(), data_.data() + data_offset_, buf_size);
   data_offset_ += buf_size;
   *bytes_read = buf_size;
   return true;
@@ -54,4 +55,3 @@ void URLRequestSimpleJob::StartAsync() {
                                       net::ERR_INVALID_URL));
   }
 }
-

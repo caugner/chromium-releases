@@ -15,6 +15,9 @@ enum OptionsPage {
   OPTIONS_PAGE_DEFAULT = -1,
   OPTIONS_PAGE_GENERAL,
   OPTIONS_PAGE_CONTENT,
+#ifdef CHROME_PERSONALIZATION
+  OPTIONS_PAGE_USER_DATA,
+#endif
   OPTIONS_PAGE_ADVANCED,
   OPTIONS_PAGE_COUNT
 };
@@ -33,4 +36,3 @@ void ShowOptionsWindow(OptionsPage page,
                        Profile* profile);
 
 #endif  // #ifndef CHROME_BROWSER_OPTIONS_WINDOW_H__
-

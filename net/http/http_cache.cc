@@ -7,19 +7,28 @@
 #include <algorithm>
 
 #include "base/compiler_specific.h"
+
+#if defined(OS_POSIX)
+#include <unistd.h>
+#endif
+
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/http/http_util.h"
+
+using base::Time;
 
 namespace net {
 
@@ -151,22 +160,23 @@ HttpCache::ActiveEntry::ActiveEntry(disk_cache::Entry* e)
 }
 
 HttpCache::ActiveEntry::~ActiveEntry() {
-  disk_entry->Close();
+  if (disk_entry)
+    disk_entry->Close();
 }
 
 //-----------------------------------------------------------------------------
 
-class HttpCache::Transaction : public HttpTransaction,
-                               public base::RefCounted<HttpCache::Transaction> {
+class HttpCache::Transaction
+    : public HttpTransaction, public RevocableStore::Revocable {
  public:
   explicit Transaction(HttpCache* cache)
-      : request_(NULL),
+      : RevocableStore::Revocable(&cache->transactions_),
+        request_(NULL),
         cache_(cache),
         entry_(NULL),
         network_trans_(NULL),
         callback_(NULL),
         mode_(NONE),
-        read_buf_(NULL),
         read_offset_(0),
         effective_load_flags_(0),
         final_upload_progress_(0),
@@ -175,18 +185,20 @@ class HttpCache::Transaction : public HttpTransaction,
         ALLOW_THIS_IN_INITIALIZER_LIST(
             network_read_callback_(this, &Transaction::OnNetworkReadCompleted)),
         ALLOW_THIS_IN_INITIALIZER_LIST(
-            cache_read_callback_(this, &Transaction::OnCacheReadCompleted)) {
-    AddRef();  // Balanced in Destroy
+            cache_read_callback_(new CancelableCompletionCallback<Transaction>(
+                this, &Transaction::OnCacheReadCompleted))) {
   }
 
+  // Clean up the transaction.
+  virtual ~Transaction();
+
   // HttpTransaction methods:
-  virtual void Destroy();
   virtual int Start(const HttpRequestInfo*, CompletionCallback*);
   virtual int RestartIgnoringLastError(CompletionCallback*);
   virtual int RestartWithAuth(const std::wstring& username,
                               const std::wstring& password,
                               CompletionCallback* callback);
-  virtual int Read(char* buf, int buf_len, CompletionCallback*);
+  virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback*);
   virtual const HttpResponseInfo* GetResponseInfo() const;
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress(void) const;
@@ -274,13 +286,16 @@ class HttpCache::Transaction : public HttpTransaction,
   // Called to write data to the cache entry.  If the write fails, then the
   // cache entry is destroyed.  Future calls to this function will just do
   // nothing without side-effect.
-  void WriteToEntry(int index, int offset, const char* data, int data_len);
+  void WriteToEntry(int index, int offset, IOBuffer* data, int data_len);
 
   // Called to write response_ to the cache entry.
   void WriteResponseInfoToEntry();
 
+  // Called to truncate response content in the entry.
+  void TruncateResponseData();
+
   // Called to append response data to the cache entry.
-  void AppendResponseDataToEntry(const char* data, int data_len);
+  void AppendResponseDataToEntry(IOBuffer* data, int data_len);
 
   // Called when we are done writing to the cache entry.
   void DoneWritingToEntry(bool success);
@@ -298,41 +313,38 @@ class HttpCache::Transaction : public HttpTransaction,
   scoped_ptr<HttpRequestInfo> custom_request_;
   HttpCache* cache_;
   HttpCache::ActiveEntry* entry_;
-  HttpTransaction* network_trans_;
+  scoped_ptr<HttpTransaction> network_trans_;
   CompletionCallback* callback_;  // consumer's callback
   HttpResponseInfo response_;
   HttpResponseInfo auth_response_;
   std::string cache_key_;
   Mode mode_;
-  char* read_buf_;
+  scoped_refptr<IOBuffer> read_buf_;
   int read_offset_;
   int effective_load_flags_;
   uint64 final_upload_progress_;
   CompletionCallbackImpl<Transaction> network_info_callback_;
   CompletionCallbackImpl<Transaction> network_read_callback_;
-  CompletionCallbackImpl<Transaction> cache_read_callback_;
+  scoped_refptr<CancelableCompletionCallback<Transaction> >
+      cache_read_callback_;
 };
 
-void HttpCache::Transaction::Destroy() {
-  if (entry_) {
-    if (mode_ & WRITE) {
-      // Assume that this is not a successful write.
-      cache_->DoneWritingToEntry(entry_, false);
+HttpCache::Transaction::~Transaction() {
+  if (!revoked()) {
+    if (entry_) {
+      cache_->DoneWithEntry(entry_, this);
     } else {
-      cache_->DoneReadingFromEntry(entry_, this);
+      cache_->RemovePendingTransaction(this);
     }
-  } else {
-    cache_->RemovePendingTransaction(this);
   }
 
-  if (network_trans_)
-    network_trans_->Destroy();
+  // If there is an outstanding callback, mark it as cancelled so running it
+  // does nothing.
+  cache_read_callback_->Cancel();
 
   // We could still have a cache read in progress, so we just null the cache_
   // pointer to signal that we are dead.  See OnCacheReadCompleted.
   cache_ = NULL;
-
-  Release();
 }
 
 int HttpCache::Transaction::Start(const HttpRequestInfo* request,
@@ -342,6 +354,9 @@ int HttpCache::Transaction::Start(const HttpRequestInfo* request,
 
   // ensure that we only have one asynchronous call at a time.
   DCHECK(!callback_);
+
+  if (revoked())
+    return ERR_UNEXPECTED;
 
   SetRequest(request);
 
@@ -384,6 +399,9 @@ int HttpCache::Transaction::RestartIgnoringLastError(
   // ensure that we only have one asynchronous call at a time.
   DCHECK(!callback_);
 
+  if (revoked())
+    return ERR_UNEXPECTED;
+
   int rv = RestartNetworkRequest();
 
   if (rv == ERR_IO_PENDING)
@@ -402,6 +420,9 @@ int HttpCache::Transaction::RestartWithAuth(
   // Ensure that we only have one asynchronous call at a time.
   DCHECK(!callback_);
 
+  if (revoked())
+    return ERR_UNEXPECTED;
+
   // Clear the intermediate response since we are going to start over.
   auth_response_ = HttpResponseInfo();
 
@@ -413,13 +434,16 @@ int HttpCache::Transaction::RestartWithAuth(
   return rv;
 }
 
-int HttpCache::Transaction::Read(char* buf, int buf_len,
+int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
                                  CompletionCallback* callback) {
   DCHECK(buf);
   DCHECK(buf_len > 0);
   DCHECK(callback);
 
   DCHECK(!callback_);
+
+  if (revoked())
+    return ERR_UNEXPECTED;
 
   // If we have an intermediate auth response at this point, then it means the
   // user wishes to read the network response (the error page).  If there is a
@@ -435,7 +459,7 @@ int HttpCache::Transaction::Read(char* buf, int buf_len,
   switch (mode_) {
     case NONE:
     case WRITE:
-      DCHECK(network_trans_);
+      DCHECK(network_trans_.get());
       rv = network_trans_->Read(buf, buf_len, &network_read_callback_);
       read_buf_ = buf;
       if (rv >= 0)
@@ -443,14 +467,14 @@ int HttpCache::Transaction::Read(char* buf, int buf_len,
       break;
     case READ:
       DCHECK(entry_);
-      AddRef();  // Balanced in OnCacheReadCompleted
+      cache_read_callback_->AddRef();  // Balanced in OnCacheReadCompleted.
       rv = entry_->disk_entry->ReadData(kResponseContentIndex, read_offset_,
-                                        buf, buf_len, &cache_read_callback_);
+                                        buf, buf_len, cache_read_callback_);
       read_buf_ = buf;
       if (rv >= 0) {
         OnCacheReadCompleted(rv);
       } else if (rv != ERR_IO_PENDING) {
-        Release();
+        cache_read_callback_->Release();
       }
       break;
     default:
@@ -471,7 +495,7 @@ const HttpResponseInfo* HttpCache::Transaction::GetResponseInfo() const {
 }
 
 LoadState HttpCache::Transaction::GetLoadState() const {
-  if (network_trans_)
+  if (network_trans_.get())
     return network_trans_->GetLoadState();
   if (entry_ || !request_)
     return LOAD_STATE_IDLE;
@@ -479,13 +503,16 @@ LoadState HttpCache::Transaction::GetLoadState() const {
 }
 
 uint64 HttpCache::Transaction::GetUploadProgress() const {
-  if (network_trans_)
+  if (network_trans_.get())
     return network_trans_->GetUploadProgress();
   return final_upload_progress_;
 }
 
 int HttpCache::Transaction::AddToEntry() {
   ActiveEntry* entry = NULL;
+
+  if (revoked())
+    return ERR_UNEXPECTED;
 
   if (mode_ == WRITE) {
     cache_->DoomEntry(cache_key_);
@@ -585,6 +612,15 @@ void HttpCache::Transaction::SetRequest(const HttpRequestInfo* request) {
   if (cache_->mode() == RECORD)
     effective_load_flags_ |= LOAD_BYPASS_CACHE;
 
+  // If HttpCache has type MEDIA make sure LOAD_ENABLE_DOWNLOAD_FILE is set,
+  // otherwise make sure LOAD_ENABLE_DOWNLOAD_FILE is not set when HttpCache
+  // has type other than MEDIA.
+  if (cache_->type() == HttpCache::MEDIA) {
+    DCHECK(effective_load_flags_ & LOAD_ENABLE_DOWNLOAD_FILE);
+  } else {
+    DCHECK(!(effective_load_flags_ & LOAD_ENABLE_DOWNLOAD_FILE));
+  }
+
   // Some headers imply load flags.  The order here is significant.
   //
   //   LOAD_DISABLE_CACHE   : no cache read or write
@@ -669,10 +705,10 @@ int HttpCache::Transaction::BeginCacheValidation() {
 
 int HttpCache::Transaction::BeginNetworkRequest() {
   DCHECK(mode_ & WRITE || mode_ == NONE);
-  DCHECK(!network_trans_);
+  DCHECK(!network_trans_.get());
 
-  network_trans_ = cache_->network_layer_->CreateTransaction();
-  if (!network_trans_)
+  network_trans_.reset(cache_->network_layer_->CreateTransaction());
+  if (!network_trans_.get())
     return net::ERR_FAILED;
 
   int rv = network_trans_->Start(request_, &network_info_callback_);
@@ -683,7 +719,7 @@ int HttpCache::Transaction::BeginNetworkRequest() {
 
 int HttpCache::Transaction::RestartNetworkRequest() {
   DCHECK(mode_ & WRITE || mode_ == NONE);
-  DCHECK(network_trans_);
+  DCHECK(network_trans_.get());
 
   int rv = network_trans_->RestartIgnoringLastError(&network_info_callback_);
   if (rv != ERR_IO_PENDING)
@@ -695,7 +731,7 @@ int HttpCache::Transaction::RestartNetworkRequestWithAuth(
     const std::wstring& username,
     const std::wstring& password) {
   DCHECK(mode_ & WRITE || mode_ == NONE);
-  DCHECK(network_trans_);
+  DCHECK(network_trans_.get());
 
   int rv = network_trans_->RestartWithAuth(username, password,
                                            &network_info_callback_);
@@ -772,11 +808,18 @@ int HttpCache::Transaction::ReadResponseInfoFromEntry() {
   if (!HttpCache::ReadResponseInfo(entry_->disk_entry, &response_))
     return ERR_FAILED;
 
+  // If the cache object is used for media file, we want the file handle of
+  // response data.
+  if (cache_->type() == HttpCache::MEDIA) {
+    response_.response_data_file =
+        entry_->disk_entry->GetPlatformFile(kResponseContentIndex);
+  }
+
   return OK;
 }
 
 void HttpCache::Transaction::WriteToEntry(int index, int offset,
-                                          const char* data, int data_len) {
+                                          IOBuffer* data, int data_len) {
   if (!entry_)
     return;
 
@@ -819,13 +862,35 @@ void HttpCache::Transaction::WriteResponseInfoToEntry() {
   }
 }
 
-void HttpCache::Transaction::AppendResponseDataToEntry(const char* data,
+void HttpCache::Transaction::AppendResponseDataToEntry(IOBuffer* data,
                                                        int data_len) {
   if (!entry_)
     return;
 
   int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
   WriteToEntry(kResponseContentIndex, current_size, data, data_len);
+}
+
+void HttpCache::Transaction::TruncateResponseData() {
+  if (!entry_)
+    return;
+
+  // If the cache is for media files, we try to prepare the response data
+  // file as an external file and truncate it afterwards.
+  // Recipient of ResponseInfo should judge from |response_.response_data_file|
+  // to tell whether an external file of response data is available for reading
+  // or not.
+  // TODO(hclam): we should prepare the target stream as extern file only
+  // if we get a valid response from server, i.e. 200. We don't want empty
+  // cache files for redirection or external files for erroneous requests.
+  response_.response_data_file = base::kInvalidPlatformFileValue;
+  if (cache_->type() == HttpCache::MEDIA) {
+    response_.response_data_file =
+        entry_->disk_entry->UseExternalFile(kResponseContentIndex);
+  }
+
+  // Truncate the stream.
+  WriteToEntry(kResponseContentIndex, 0, NULL, 0);
 }
 
 void HttpCache::Transaction::DoneWritingToEntry(bool success) {
@@ -844,6 +909,11 @@ void HttpCache::Transaction::DoneWritingToEntry(bool success) {
 void HttpCache::Transaction::OnNetworkInfoAvailable(int result) {
   DCHECK(result != ERR_IO_PENDING);
 
+  if (revoked()) {
+    HandleResult(ERR_UNEXPECTED);
+    return;
+  }
+
   if (result == OK) {
     const HttpResponseInfo* new_response = network_trans_->GetResponseInfo();
     if (new_response->headers->response_code() == 401 ||
@@ -854,15 +924,20 @@ void HttpCache::Transaction::OnNetworkInfoAvailable(int result) {
       if (mode_ == READ_WRITE) {
         if (new_response->headers->response_code() == 304) {
           // Update cached response based on headers in new_response
+          // TODO(wtc): should we update cached certificate
+          // (response_.ssl_info), too?
           response_.headers->Update(*new_response->headers);
-          WriteResponseInfoToEntry();
+          if (response_.headers->HasHeaderValue("cache-control", "no-store")) {
+            cache_->DoomEntry(cache_key_);
+          } else {
+            WriteResponseInfoToEntry();
+          }
 
           if (entry_) {
             cache_->ConvertWriterToReader(entry_);
             // We no longer need the network transaction, so destroy it.
             final_upload_progress_ = network_trans_->GetUploadProgress();
-            network_trans_->Destroy();
-            network_trans_ = NULL;
+            network_trans_.reset();
             mode_ = READ;
           }
         } else {
@@ -874,8 +949,8 @@ void HttpCache::Transaction::OnNetworkInfoAvailable(int result) {
         response_ = *new_response;
         WriteResponseInfoToEntry();
 
-        // Truncate the response data
-        WriteToEntry(kResponseContentIndex, 0, NULL, 0);
+        // Truncate response data
+        TruncateResponseData();
 
         // If this response is a redirect, then we can stop writing now.  (We
         // don't need to cache the response body of a redirect.)
@@ -892,6 +967,11 @@ void HttpCache::Transaction::OnNetworkInfoAvailable(int result) {
 void HttpCache::Transaction::OnNetworkReadCompleted(int result) {
   DCHECK(mode_ & WRITE || mode_ == NONE);
 
+  if (revoked()) {
+    HandleResult(ERR_UNEXPECTED);
+    return;
+  }
+
   if (result > 0) {
     AppendResponseDataToEntry(read_buf_, result);
   } else if (result == 0) {  // end of file
@@ -901,36 +981,53 @@ void HttpCache::Transaction::OnNetworkReadCompleted(int result) {
 }
 
 void HttpCache::Transaction::OnCacheReadCompleted(int result) {
-  // If Destroy was called while waiting for this callback, then cache_ will be
-  // NULL.  In that case, we don't want to do anything but cleanup.
-  if (cache_) {
-    if (result > 0) {
-      read_offset_ += result;
-    } else if (result == 0) {  // end of file
-      cache_->DoneReadingFromEntry(entry_, this);
-      entry_ = NULL;
-    }
-    HandleResult(result);
+  DCHECK(cache_);
+  cache_read_callback_->Release();  // Balance the AddRef() from Start().
+
+  if (revoked()) {
+    HandleResult(ERR_UNEXPECTED);
+    return;
   }
-  Release();
+
+  if (result > 0) {
+    read_offset_ += result;
+  } else if (result == 0) {  // end of file
+    cache_->DoneReadingFromEntry(entry_, this);
+    entry_ = NULL;
+  }
+  HandleResult(result);
 }
 
 //-----------------------------------------------------------------------------
 
-HttpCache::HttpCache(const ProxyInfo* proxy_info,
+HttpCache::HttpCache(ProxyService* proxy_service,
                      const std::wstring& cache_dir,
                      int cache_size)
     : disk_cache_dir_(cache_dir),
       mode_(NORMAL),
-      network_layer_(HttpNetworkLayer::CreateFactory(proxy_info)),
+      type_(COMMON),
+      network_layer_(HttpNetworkLayer::CreateFactory(proxy_service)),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
       in_memory_cache_(false),
       cache_size_(cache_size) {
 }
 
-HttpCache::HttpCache(const ProxyInfo* proxy_info, int cache_size)
+HttpCache::HttpCache(HttpNetworkSession* session,
+                     const std::wstring& cache_dir,
+                     int cache_size)
+    : disk_cache_dir_(cache_dir),
+      mode_(NORMAL),
+      type_(COMMON),
+      network_layer_(HttpNetworkLayer::CreateFactory(session)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
+      in_memory_cache_(false),
+      cache_size_(cache_size) {
+}
+
+HttpCache::HttpCache(ProxyService* proxy_service, int cache_size)
     : mode_(NORMAL),
-      network_layer_(HttpNetworkLayer::CreateFactory(proxy_info)),
+      type_(COMMON),
+      network_layer_(HttpNetworkLayer::CreateFactory(proxy_service)),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
       in_memory_cache_(true),
       cache_size_(cache_size) {
@@ -939,6 +1036,7 @@ HttpCache::HttpCache(const ProxyInfo* proxy_info, int cache_size)
 HttpCache::HttpCache(HttpTransactionFactory* network_layer,
                      disk_cache::Backend* disk_cache)
     : mode_(NORMAL),
+      type_(COMMON),
       network_layer_(network_layer),
       disk_cache_(disk_cache),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
@@ -954,6 +1052,9 @@ HttpCache::~HttpCache() {
   while (!active_entries_.empty()) {
     ActiveEntry* entry = active_entries_.begin()->second;
     entry->will_process_pending_queue = false;
+    entry->pending_queue.clear();
+    entry->readers.clear();
+    entry->writer = NULL;
     DeactivateEntry(entry);
   }
 
@@ -984,10 +1085,6 @@ HttpCache* HttpCache::GetCache() {
   return this;
 }
 
-AuthCache* HttpCache::GetAuthCache() {
-  return network_layer_->GetAuthCache();
-}
-
 void HttpCache::Suspend(bool suspend) {
   network_layer_->Suspend(suspend);
 }
@@ -997,16 +1094,14 @@ bool HttpCache::ReadResponseInfo(disk_cache::Entry* disk_entry,
                                  HttpResponseInfo* response_info) {
   int size = disk_entry->GetDataSize(kResponseInfoIndex);
 
-  std::string data;
-  int rv = disk_entry->ReadData(kResponseInfoIndex, 0,
-                                WriteInto(&data, size + 1),
-                                size, NULL);
+  scoped_refptr<IOBuffer> buffer = new IOBuffer(size);
+  int rv = disk_entry->ReadData(kResponseInfoIndex, 0, buffer, size, NULL);
   if (rv != size) {
     DLOG(ERROR) << "ReadData failed: " << rv;
     return false;
   }
 
-  Pickle pickle(data.data(), static_cast<int>(data.size()));
+  Pickle pickle(buffer->data(), size);
   void* iter = NULL;
 
   // read flags and verify version
@@ -1024,6 +1119,7 @@ bool HttpCache::ReadResponseInfo(disk_cache::Entry* disk_entry,
   if (!pickle.ReadInt64(&iter, &time_val))
     return false;
   response_info->request_time = Time::FromInternalValue(time_val);
+  response_info->was_cached = true;  // Set status to show cache resurrection.
 
   // read response-time
   if (!pickle.ReadInt64(&iter, &time_val))
@@ -1080,7 +1176,18 @@ bool HttpCache::WriteResponseInfo(disk_cache::Entry* disk_entry,
   pickle.WriteInt64(response_info->request_time.ToInternalValue());
   pickle.WriteInt64(response_info->response_time.ToInternalValue());
 
-  response_info->headers->Persist(&pickle, skip_transient_headers);
+  net::HttpResponseHeaders::PersistOptions persist_options =
+      net::HttpResponseHeaders::PERSIST_RAW;
+
+  if (skip_transient_headers) {
+    persist_options =
+        net::HttpResponseHeaders::PERSIST_SANS_COOKIES |
+        net::HttpResponseHeaders::PERSIST_SANS_CHALLENGES |
+        net::HttpResponseHeaders::PERSIST_SANS_HOP_BY_HOP |
+        net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE;
+  }
+
+  response_info->headers->Persist(&pickle, persist_options);
 
   if (response_info->ssl_info.cert) {
     response_info->ssl_info.cert->Persist(&pickle);
@@ -1092,7 +1199,8 @@ bool HttpCache::WriteResponseInfo(disk_cache::Entry* disk_entry,
   if (response_info->vary_data.is_valid())
     response_info->vary_data.Persist(&pickle);
 
-  const char* data = static_cast<const char*>(pickle.data());
+  scoped_refptr<WrappedIOBuffer> data = new WrappedIOBuffer(
+      reinterpret_cast<const char*>(pickle.data()));
   int len = static_cast<int>(pickle.size());
 
   return disk_entry->WriteData(kResponseInfoIndex, 0, data, len, NULL,
@@ -1176,21 +1284,36 @@ HttpCache::ActiveEntry* HttpCache::ActivateEntry(
   return entry;
 }
 
+#if defined(OS_WIN)
+#pragma optimize("", off)
+#endif
+// Avoid optimizing local_entry out of the code.
 void HttpCache::DeactivateEntry(ActiveEntry* entry) {
-  DCHECK(!entry->will_process_pending_queue);
-  DCHECK(!entry->doomed);
-  DCHECK(!entry->writer);
-  DCHECK(entry->readers.empty());
-  DCHECK(entry->pending_queue.empty());
+  // TODO(rvargas): remove this code and go back to DCHECKS once we find out
+  // why are we crashing. I'm just trying to gather more info for bug 3931.
+  ActiveEntry local_entry = *entry;
+  size_t readers_size = local_entry.readers.size();
+  size_t pending_size = local_entry.pending_queue.size();
 
   ActiveEntriesMap::iterator it =
       active_entries_.find(entry->disk_entry->GetKey());
-  DCHECK(it != active_entries_.end());
-  DCHECK(it->second == entry);
+  CHECK(it != active_entries_.end());
+  CHECK(it->second == entry);
+
+  if (local_entry.will_process_pending_queue || local_entry.doomed ||
+      local_entry.writer || readers_size || pending_size) {
+    CHECK(false);
+  }
 
   active_entries_.erase(it);
   delete entry;
+
+  // Avoid closing the disk_entry again on the destructor.
+  local_entry.disk_entry = NULL;
 }
+#if defined(OS_WIN)
+#pragma optimize("", on)
+#endif
 
 int HttpCache::AddTransactionToEntry(ActiveEntry* entry, Transaction* trans) {
   DCHECK(entry);
@@ -1224,10 +1347,26 @@ int HttpCache::AddTransactionToEntry(ActiveEntry* entry, Transaction* trans) {
   // We do this before calling EntryAvailable to force any further calls to
   // AddTransactionToEntry to add their transaction to the pending queue, which
   // ensures FIFO ordering.
-  if (!entry->pending_queue.empty())
+  if (!entry->writer && !entry->pending_queue.empty())
     ProcessPendingQueue(entry);
 
   return trans->EntryAvailable(entry);
+}
+
+void HttpCache::DoneWithEntry(ActiveEntry* entry, Transaction* trans) {
+  // If we already posted a task to move on to the next transaction and this was
+  // the writer, there is nothing to cancel.
+  if (entry->will_process_pending_queue && entry->readers.empty())
+    return;
+
+  if (entry->writer) {
+    // TODO(rvargas): convert this to a DCHECK.
+    CHECK(trans == entry->writer);
+    // Assume that this is not a successful write.
+    DoneWritingToEntry(entry, false);
+  } else {
+    DoneReadingFromEntry(entry, trans);
+  }
 }
 
 void HttpCache::DoneWritingToEntry(ActiveEntry* entry, bool success) {
@@ -1238,6 +1377,9 @@ void HttpCache::DoneWritingToEntry(ActiveEntry* entry, bool success) {
   if (success) {
     ProcessPendingQueue(entry);
   } else {
+    // TODO(rvargas): convert this to a DCHECK.
+    CHECK(!entry->will_process_pending_queue);
+
     // We failed to create this entry.
     TransactionList pending_queue;
     pending_queue.swap(entry->pending_queue);
@@ -1310,8 +1452,8 @@ void HttpCache::ProcessPendingQueue(ActiveEntry* entry) {
 void HttpCache::OnProcessPendingQueue(ActiveEntry* entry) {
   entry->will_process_pending_queue = false;
 
-  if (entry->writer)
-    return;
+  // TODO(rvargas): Convert this to a DCHECK.
+  CHECK(!entry->writer);
 
   // If no one is interested in this entry, then we can de-activate it.
   if (entry->pending_queue.empty()) {
@@ -1333,4 +1475,3 @@ void HttpCache::OnProcessPendingQueue(ActiveEntry* entry) {
 //-----------------------------------------------------------------------------
 
 }  // namespace net
-

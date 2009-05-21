@@ -6,11 +6,12 @@
 #define WEBKIT_GLUE_DRAGCLIENT_IMPL_H__
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 
-#pragma warning(push, 0)
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "DragClient.h"
 #include "DragActions.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 namespace WebCore {
 class ClipBoard;
@@ -34,7 +35,7 @@ public:
   virtual WebCore::DragDestinationAction actionMaskForDrag(WebCore::DragData*);
   virtual WebCore::DragSourceAction dragSourceActionMaskForPoint(
       const WebCore::IntPoint& window_point);
-  
+
   virtual void startDrag(WebCore::DragImageRef drag_image,
                          const WebCore::IntPoint& drag_image_origin,
                          const WebCore::IntPoint& event_pos,
@@ -42,8 +43,8 @@ public:
                          WebCore::Frame* frame,
                          bool is_link_drag = false);
   virtual WebCore::DragImageRef createDragImageForLink(
-      WebCore::KURL&, const WebCore::String& label, WebCore::Frame*); 
-  
+      WebCore::KURL&, const WebCore::String& label, WebCore::Frame*);
+
   virtual void dragControllerDestroyed();
 
 private:
@@ -52,4 +53,3 @@ private:
 };
 
 #endif  // #ifndef WEBKIT_GLUE_DRAGCLIENT_IMPL_H__
-

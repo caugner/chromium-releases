@@ -6,13 +6,9 @@
 
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "grit/webkit_strings.h"
 #include "webkit/default_plugin/plugin_impl.h"
 #include "webkit/glue/webkit_glue.h"
-// This file is generated when the webkit_strings.grd file is compiled
-// It is generated under chrome/webkit/<debug\release>/obj/localized_strings
-// folder. This path is added to the include path in the associated vsprops
-// file.
-#include "webkit_strings.h"
 
 bool PluginInstallDialog::Initialize(PluginInstallerImpl* plugin_impl,
                                      const std::wstring& plugin_name) {
@@ -88,7 +84,7 @@ HWND PluginInstallDialog::Create(HWND parent_window, LPARAM init_param) {
     dialog_template_struct = rtl_layout_dialog_template_struct;
   }
 
-  HWND dialog_window = 
+  HWND dialog_window =
       CreateDialogIndirectParam(
           instance_handle,
           reinterpret_cast<DLGTEMPLATE*>(dialog_template_struct),
@@ -175,4 +171,3 @@ void PluginInstallDialog::AdjustTextDirectionality(std::wstring* text) const {
     text->append(L"\x202C");
   }
 }
-

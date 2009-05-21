@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
 // This emulates the global message loop for the test URL request class, since
@@ -56,7 +57,7 @@ URLRequestTestJob::URLRequestTestJob(URLRequest* request)
 }
 
 // Force the response to set a reasonable MIME type
-bool URLRequestTestJob::GetMimeType(std::string* mime_type) {
+bool URLRequestTestJob::GetMimeType(std::string* mime_type) const {
   DCHECK(mime_type);
   *mime_type = "text/html";
   return true;
@@ -93,7 +94,8 @@ void URLRequestTestJob::StartAsync() {
   this->NotifyHeadersComplete();
 }
 
-bool URLRequestTestJob::ReadRawData(char* buf, int buf_size, int *bytes_read) {
+bool URLRequestTestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
+                                    int *bytes_read) {
   if (stage_ == WAITING) {
     async_buf_ = buf;
     async_buf_size_ = buf_size;
@@ -112,7 +114,7 @@ bool URLRequestTestJob::ReadRawData(char* buf, int buf_size, int *bytes_read) {
   if (to_read + offset_ > static_cast<int>(data_.length()))
     to_read = static_cast<int>(data_.length()) - offset_;
 
-  memcpy(buf, &data_.c_str()[offset_], to_read);
+  memcpy(buf->data(), &data_.c_str()[offset_], to_read);
   offset_ += to_read;
 
   *bytes_read = to_read;
@@ -128,12 +130,8 @@ void URLRequestTestJob::GetResponseInfo(net::HttpResponseInfo* info) {
 }
 
 void URLRequestTestJob::Kill() {
-  if (request_) {
-    // Note that this state will still cause a NotifyDone to get called
-    // in ProcessNextOperation, which is required for jobs.
-    stage_ = ALL_DATA;
-    pending_jobs.push_back(scoped_refptr<URLRequestTestJob>(this));
-  }
+  stage_ = DONE;
+  URLRequestJob::Kill();
 }
 
 bool URLRequestTestJob::ProcessNextOperation() {
@@ -177,4 +175,3 @@ bool URLRequestTestJob::ProcessOnePendingMessage() {
 
   return true;
 }
-

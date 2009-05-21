@@ -23,10 +23,7 @@ BrowserDistribution* BrowserDistribution::GetDistribution() {
 }
 
 void BrowserDistribution::DoPostUninstallOperations(
-    const installer::Version& version) {
-}
-
-void BrowserDistribution::DoPreUninstallOperations() {
+    const installer::Version& version, const std::wstring& local_data_path) {
 }
 
 std::wstring BrowserDistribution::GetApplicationName() {
@@ -41,9 +38,17 @@ std::wstring BrowserDistribution::GetPublisherName() {
   return L"Chromium";
 }
 
+std::wstring BrowserDistribution::GetAppDescription() {
+  return L"Browse the web";
+}
+
 int BrowserDistribution::GetInstallReturnCode(
     installer_util::InstallStatus install_status) {
   return install_status;
+}
+
+std::wstring BrowserDistribution::GetStateKey() {
+  return L"Software\\Chromium";
 }
 
 std::wstring BrowserDistribution::GetUninstallLinkName() {
@@ -61,4 +66,3 @@ std::wstring BrowserDistribution::GetVersionKey() {
 void BrowserDistribution::UpdateDiffInstallStatus(bool system_install,
     bool incremental_install, installer_util::InstallStatus install_status) {
 }
-

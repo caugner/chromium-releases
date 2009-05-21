@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H__
-#define CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H__
+#ifndef CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H_
+#define CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H_
 
 #include <map>
 #include <set>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/url_database.h"
-#include "chrome/views/tree_node_model.h"
+#include "chrome/views/controls/tree/tree_node_model.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 struct sqlite3;
@@ -36,7 +37,7 @@ class StarredURLDatabase : public URLDatabase {
   FRIEND_TEST(HistoryTest, CreateStarGroup);
 
   // Writes bookmarks to the specified file.
-  bool MigrateBookmarksToFile(const std::wstring& path);
+  bool MigrateBookmarksToFile(const FilePath& path);
 
   // Returns the database and statement cache for the functions in this
   // interface. The decendent of this class implements these functions to
@@ -73,7 +74,7 @@ class StarredURLDatabase : public URLDatabase {
                              const std::wstring& title,
                              UIStarID parent_group_id,
                              int visual_order,
-                             Time date_modified);
+                             base::Time date_modified);
 
   // Adjusts the visual order of all children of parent_group_id with a
   // visual_order >= start_visual_order by delta. For example,
@@ -91,7 +92,7 @@ class StarredURLDatabase : public URLDatabase {
                                UIStarID group_id,
                                UIStarID parent_group_id,
                                const std::wstring& title,
-                               const Time& date_added,
+                               const base::Time& date_added,
                                int visual_order,
                                StarredEntry::Type type);
 
@@ -114,7 +115,7 @@ class StarredURLDatabase : public URLDatabase {
   StarID CreateStarredEntry(StarredEntry* entry);
 
   // Used when checking integrity of starred table.
-  typedef ChromeViews::TreeNodeWithValue<history::StarredEntry> StarredNode;
+  typedef views::TreeNodeWithValue<history::StarredEntry> StarredNode;
 
   // Returns the max group id, or 0 if there is an error.
   UIStarID GetMaxGroupID();
@@ -175,12 +176,11 @@ class StarredURLDatabase : public URLDatabase {
 
   // Does the work of migrating bookmarks to a temporary file that
   // BookmarkStorage will read from.
-  bool MigrateBookmarksToFileImpl(const std::wstring& path);
+  bool MigrateBookmarksToFileImpl(const FilePath& path);
 
-  DISALLOW_EVIL_CONSTRUCTORS(StarredURLDatabase);
+  DISALLOW_COPY_AND_ASSIGN(StarredURLDatabase);
 };
 
 }  // namespace history
 
-#endif  // CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H__
-
+#endif  // CHROME_BROWSER_HISTORY_STARRED_URL_DATABASE_H_

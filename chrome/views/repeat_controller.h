@@ -5,9 +5,10 @@
 #ifndef CHROME_VIEWS_REPEAT_CONTROLLER_H_
 #define CHROME_VIEWS_REPEAT_CONTROLLER_H_
 
+#include "base/scoped_ptr.h"
 #include "base/timer.h"
 
-namespace ChromeViews {
+namespace views {
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -47,6 +48,6 @@ class RepeatController {
   DISALLOW_COPY_AND_ASSIGN(RepeatController);
 };
 
-}  // namespace ChromeViews
+}  // namespace views
 
 #endif  // #ifndef CHROME_VIEWS_REPEAT_CONTROLLER_H_

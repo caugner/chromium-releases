@@ -36,22 +36,39 @@
 #include <vector>
 
 #include "base/lock.h"
-#include "base/scoped_ptr.h"
+#include "base/pickle.h"
 #include "base/stats_counters.h"
 
 //------------------------------------------------------------------------------
 // Provide easy general purpose histogram in a macro, just like stats counters.
-// These macros all use 50 buckets.
+// The first two macros use 50 buckets.
 
 #define HISTOGRAM_TIMES(name, sample) do { \
-    static Histogram counter((name), TimeDelta::FromMilliseconds(1), \
-                             TimeDelta::FromSeconds(10), 50); \
+    static Histogram counter((name), base::TimeDelta::FromMilliseconds(1), \
+                             base::TimeDelta::FromSeconds(10), 50); \
     counter.AddTime(sample); \
   } while (0)
 
 #define HISTOGRAM_COUNTS(name, sample) do { \
     static Histogram counter((name), 1, 1000000, 50); \
     counter.Add(sample); \
+  } while (0)
+
+#define HISTOGRAM_COUNTS_100(name, sample) do { \
+    static Histogram counter((name), 1, 100, 50); \
+    counter.Add(sample); \
+  } while (0)
+
+#define HISTOGRAM_PERCENTAGE(name, under_one_hundred) do { \
+    static LinearHistogram counter((name), 1, 100, 101); \
+    counter.Add(under_one_hundred); \
+  } while (0)
+
+// For folks that need real specific times, use this, but you'll only get
+// samples that are in the range (overly large samples are discarded).
+#define HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
+    if ((sample) < (max)) counter.AddTime(sample); \
   } while (0)
 
 //------------------------------------------------------------------------------
@@ -85,12 +102,19 @@
 #define DHISTOGRAM_COUNTS(name, sample) HISTOGRAM_COUNTS(name, sample)
 #define DASSET_HISTOGRAM_COUNTS(name, sample) ASSET_HISTOGRAM_COUNTS(name, \
                                                                      sample)
+#define DHISTOGRAM_PERCENTAGE(name, under_one_hundred) HISTOGRAM_PERCENTAGE(\
+    name, under_one_hundred)
+#define DHISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) \
+    HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count)
 
 #else  // NDEBUG
 
 #define DHISTOGRAM_TIMES(name, sample) do {} while (0)
 #define DHISTOGRAM_COUNTS(name, sample) do {} while (0)
 #define DASSET_HISTOGRAM_COUNTS(name, sample) do {} while (0)
+#define DHISTOGRAM_PERCENTAGE(name, under_one_hundred) do {} while (0)
+#define DHISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) \
+    do {} while (0)
 
 #endif  // NDEBUG
 
@@ -102,19 +126,37 @@
 
 static const int kUmaTargetedHistogramFlag = 0x1;
 
+// This indicates the histogram is shadow copy of renderer histrogram
+// constructed by unpick method and updated regularly from renderer upload
+// of histograms.
+static const int kRendererHistogramFlag = 1 << 4;
+
 #define UMA_HISTOGRAM_TIMES(name, sample) do { \
-    static Histogram counter((name), TimeDelta::FromMilliseconds(1), \
-                             TimeDelta::FromSeconds(10), 50); \
+    static Histogram counter((name), base::TimeDelta::FromMilliseconds(1), \
+                             base::TimeDelta::FromSeconds(10), 50); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    counter.AddTime(sample); \
+  } while (0)
+
+#define UMA_HISTOGRAM_MEDIUM_TIMES(name, sample) do { \
+    static Histogram counter((name), base::TimeDelta::FromMilliseconds(10), \
+                             base::TimeDelta::FromMinutes(3), 50); \
     counter.SetFlags(kUmaTargetedHistogramFlag); \
     counter.AddTime(sample); \
   } while (0)
 
 // Use this macro when times can routinely be much longer than 10 seconds.
 #define UMA_HISTOGRAM_LONG_TIMES(name, sample) do { \
-    static Histogram counter((name), TimeDelta::FromMilliseconds(1), \
-                             TimeDelta::FromHours(1), 50); \
+    static Histogram counter((name), base::TimeDelta::FromMilliseconds(1), \
+                             base::TimeDelta::FromHours(1), 50); \
     counter.SetFlags(kUmaTargetedHistogramFlag); \
     counter.AddTime(sample); \
+  } while (0)
+
+#define UMA_HISTOGRAM_CLIPPED_TIMES(name, sample, min, max, bucket_count) do { \
+    static Histogram counter((name), min, max, bucket_count); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    if ((sample) < (max)) counter.AddTime(sample); \
   } while (0)
 
 #define UMA_HISTOGRAM_COUNTS(name, sample) do { \
@@ -141,6 +183,12 @@ static const int kUmaTargetedHistogramFlag = 0x1;
     counter.Add(sample); \
   } while (0)
 
+#define UMA_HISTOGRAM_PERCENTAGE(name, under_one_hundred) do { \
+    static LinearHistogram counter((name), 1, 100, 101); \
+    counter.SetFlags(kUmaTargetedHistogramFlag); \
+    counter.Add(under_one_hundred); \
+  } while (0)
+
 //------------------------------------------------------------------------------
 
 class Histogram : public StatsRate {
@@ -153,6 +201,11 @@ class Histogram : public StatsRate {
   typedef std::vector<Sample> Ranges;
 
   static const int kHexRangePrintingFlag;
+
+  enum BucketLayout {
+    EXPONENTIAL,
+    LINEAR
+  };
 
   //----------------------------------------------------------------------------
   // Statistic values, developed over the life of the histogram.
@@ -169,7 +222,7 @@ class Histogram : public StatsRate {
 
     // Accessor methods.
     Count counts(size_t i) const { return counts_[i]; }
-    Count TotalCount() const ;
+    Count TotalCount() const;
     int64 sum() const { return sum_; }
     int64 square_sum() const { return square_sum_; }
 
@@ -177,7 +230,10 @@ class Histogram : public StatsRate {
     void Add(const SampleSet& other);
     void Subtract(const SampleSet& other);
 
-   private:
+    bool Serialize(Pickle* pickle) const;
+    bool Deserialize(void** iter, const Pickle& pickle);
+
+   protected:
     // Actual histogram data is stored in buckets, showing the count of values
     // that fit into each bucket.
     Counts counts_;
@@ -189,17 +245,19 @@ class Histogram : public StatsRate {
   };
   //----------------------------------------------------------------------------
 
-  Histogram(const wchar_t* name, Sample minimum,
+  Histogram(const char* name, Sample minimum,
             Sample maximum, size_t bucket_count);
-  Histogram(const wchar_t* name, TimeDelta minimum,
-            TimeDelta maximum, size_t bucket_count);
-  ~Histogram();
+  Histogram(const char* name, base::TimeDelta minimum,
+            base::TimeDelta maximum, size_t bucket_count);
+  virtual ~Histogram();
 
   // Hooks to override stats counter methods.  This ensures that we gather all
   // input the stats counter sees.
   virtual void Add(int value);
 
-  // The following methods provide a graphical histogram displays.
+  void AddSampleSet(const SampleSet& sample);
+
+  // The following methods provide graphical histogram displays.
   void WriteHTMLGraph(std::string* output) const;
   void WriteAscii(bool graph_it, const std::string& newline,
                   std::string* output) const;
@@ -208,7 +266,28 @@ class Histogram : public StatsRate {
   // 0x1 Currently used to mark this histogram to be recorded by UMA..
   // 0x8000 means print ranges in hex.
   void SetFlags(int flags) { flags_ |= flags; }
+  void ClearFlags(int flags) { flags_ &= ~flags; }
   int flags() const { return flags_; }
+
+  virtual BucketLayout histogram_type() const { return EXPONENTIAL; }
+
+  // Convenience methods for serializing/deserializing the histograms.
+  // Histograms from Renderer process are serialized and sent to the browser.
+  // Browser process reconstructs the histogram from the pickled version
+  // accumulates the browser-side shadow copy of histograms (that mirror
+  // histograms created in the renderer).
+
+  // Serialize the given snapshot of a Histogram into a String. Uses
+  // Pickle class to flatten the object.
+  static std::string SerializeHistogramInfo(const Histogram& histogram,
+                                            const SampleSet& snapshot);
+  // The following method accepts a list of pickled histograms and
+  // builds a histogram and updates shadow copy of histogram data in the
+  // browser process.
+  static void DeserializeHistogramList(
+      const std::vector<std::string>& histograms);
+  static bool DeserializeHistogramInfo(const std::string& state);
+
 
   //----------------------------------------------------------------------------
   // Accessors for serialization and testing.
@@ -216,8 +295,8 @@ class Histogram : public StatsRate {
   const std::string histogram_name() const { return histogram_name_; }
   Sample declared_min() const { return declared_min_; }
   Sample declared_max() const { return declared_max_; }
-  Sample ranges(size_t i) const { return ranges_[i];}
-  size_t bucket_count() const { return bucket_count_; }
+  virtual Sample ranges(size_t i) const { return ranges_[i];}
+  virtual size_t bucket_count() const { return bucket_count_; }
   // Snapshot the current complete set of sample data.
   // Override with atomic/locked snapshot if needed.
   virtual void SnapshotSample(SampleSet* sample) const;
@@ -268,7 +347,7 @@ class Histogram : public StatsRate {
 
   // Write a common header message describing this histogram.
   void WriteAsciiHeader(const SampleSet& snapshot,
-                        Count sample_count, std::string* output) const ;
+                        Count sample_count, std::string* output) const;
 
   // Write information about previous, current, and next buckets.
   // Information such as cumulative percentage, etc.
@@ -314,7 +393,7 @@ class Histogram : public StatsRate {
   // Indicate if successfully registered.
   bool registered_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Histogram);
+  DISALLOW_COPY_AND_ASSIGN(Histogram);
 };
 
 //------------------------------------------------------------------------------
@@ -327,15 +406,18 @@ class LinearHistogram : public Histogram {
     Sample sample;
     const char* description;  // Null means end of a list of pairs.
   };
-  LinearHistogram(const wchar_t* name, Sample minimum,
-            Sample maximum, size_t bucket_count);
-  LinearHistogram(const wchar_t* name, TimeDelta minimum,
-            TimeDelta maximum, size_t bucket_count);
+  LinearHistogram(const char* name, Sample minimum,
+                  Sample maximum, size_t bucket_count);
+
+  LinearHistogram(const char* name, base::TimeDelta minimum,
+                  base::TimeDelta maximum, size_t bucket_count);
   ~LinearHistogram() {}
 
   // Store a list of number/text values for use in rendering the histogram.
   // The last element in the array has a null in its "description" slot.
   void SetRangeDescriptions(const DescriptionPair descriptions[]);
+
+  virtual BucketLayout histogram_type() const { return LINEAR; }
 
  protected:
   // Initialize ranges_ mapping.
@@ -359,9 +441,23 @@ class LinearHistogram : public Histogram {
   typedef std::map<Sample, std::string> BucketDescriptionMap;
   BucketDescriptionMap bucket_description_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(LinearHistogram);
+  DISALLOW_COPY_AND_ASSIGN(LinearHistogram);
 };
 
+//------------------------------------------------------------------------------
+
+// BooleanHistogram is a histogram for booleans.
+class BooleanHistogram : public LinearHistogram {
+ public:
+  explicit BooleanHistogram(const char* name)
+    : LinearHistogram(name, 0, 2, 3) {
+  }
+
+  virtual void AddBoolean(bool value) { Add(value ? 1 : 0); }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BooleanHistogram);
+};
 
 //------------------------------------------------------------------------------
 // This section provides implementation for ThreadSafeHistogram.
@@ -369,7 +465,7 @@ class LinearHistogram : public Histogram {
 
 class ThreadSafeHistogram : public Histogram {
  public:
-  ThreadSafeHistogram(const wchar_t* name, Sample minimum,
+  ThreadSafeHistogram(const char* name, Sample minimum,
                       Sample maximum, size_t bucket_count);
 
   // Provide the analog to Add()
@@ -379,12 +475,12 @@ class ThreadSafeHistogram : public Histogram {
   // Provide locked versions to get precise counts.
   virtual void Accumulate(Sample value, Count count, size_t index);
 
-  virtual void SnapshotSample(SampleSet* sample);
+  virtual void SnapshotSample(SampleSet* sample) const;
 
  private:
-  Lock lock_;
+  mutable Lock lock_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ThreadSafeHistogram);
+  DISALLOW_COPY_AND_ASSIGN(ThreadSafeHistogram);
 };
 
 //------------------------------------------------------------------------------
@@ -394,7 +490,7 @@ class ThreadSafeHistogram : public Histogram {
 
 class StatisticsRecorder {
  public:
-  typedef std::vector<const Histogram*> Histograms;
+  typedef std::vector<Histogram*> Histograms;
 
   StatisticsRecorder();
 
@@ -405,9 +501,9 @@ class StatisticsRecorder {
 
   // Register, or add a new histogram to the collection of statistics.
   // Return true if registered.
-  static bool Register(const Histogram& histogram);
+  static bool Register(Histogram* histogram);
   // Unregister, or remove, a histogram from the collection of statistics.
-  static void UnRegister(const Histogram& histogram);
+  static void UnRegister(Histogram* histogram);
 
   // Methods for printing histograms.  Only histograms which have query as
   // a substring are written to output (an empty string will process all
@@ -418,11 +514,9 @@ class StatisticsRecorder {
   // Method for extracting histograms which were marked for use by UMA.
   static void GetHistograms(Histograms* output);
 
-  static void set_dump_on_exit(bool enable) { dump_on_exit_ = enable; }
+  static Histogram* GetHistogram(const std::string& query);
 
- private:
-  typedef std::map<std::string, const Histogram*> HistogramMap;
-  // We keep all registered histograms in a map, from name to histogram.
+  static void set_dump_on_exit(bool enable) { dump_on_exit_ = enable; }
 
   // GetSnapshot copies some of the pointers to registered histograms into the
   // caller supplied vector (Histograms).  Only histograms with names matching
@@ -430,15 +524,20 @@ class StatisticsRecorder {
   // pointer to be copied.
   static void GetSnapshot(const std::string& query, Histograms* snapshot);
 
+
+ private:
+  // We keep all registered histograms in a map, from name to histogram.
+  typedef std::map<std::string, Histogram*> HistogramMap;
+
   static HistogramMap* histograms_;
+
   // lock protects access to the above map.
   static Lock* lock_;
 
   // Dump all known histograms to log.
   static bool dump_on_exit_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(StatisticsRecorder);
+  DISALLOW_COPY_AND_ASSIGN(StatisticsRecorder);
 };
 
 #endif  // BASE_HISTOGRAM_H__
-

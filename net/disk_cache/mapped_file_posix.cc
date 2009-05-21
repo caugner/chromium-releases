@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <sys/mman.h>
 
+#include "base/logging.h"
 #include "net/disk_cache/disk_cache.h"
 
 namespace disk_cache {
@@ -20,7 +21,7 @@ void* MappedFile::Init(const std::wstring name, size_t size) {
     size = GetLength();
 
   buffer_ = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                 os_file(), 0);
+                 platform_file(), 0);
   init_ = true;
   DCHECK(reinterpret_cast<int>(buffer_) != -1);
   if (reinterpret_cast<int>(buffer_) == -1)
@@ -51,4 +52,3 @@ bool MappedFile::Store(const FileBlock* block) {
 }
 
 }  // namespace disk_cache
-

@@ -12,12 +12,12 @@
 #include "base/pickle.h"
 #include "base/scoped_handle.h"
 #include "base/string_util.h"
-#include "net/base/net_util.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/stl_util-inl.h"
 #include "chrome/common/win_util.h"
 #include "googleurl/src/gurl.h"
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
+#include "net/base/net_util.h"
 
 // Creates a new STGMEDIUM object to hold the specified text. The caller
 // owns the resulting object. The "Bytes" version does not NULL terminate, the
@@ -330,16 +330,25 @@ void OSExchangeData::SetFileContents(const std::wstring& filename,
       ClipboardUtil::GetFileDescriptorFormat()->cfFormat, storage));
 
   // Add CFSTR_FILECONTENTS
-  storage = GetStorageForString(file_contents);
+  storage = GetStorageForBytes(file_contents.data(), file_contents.length());
   contents_.push_back(new StoredDataInfo(
       ClipboardUtil::GetFileContentFormatZero()->cfFormat, storage));
 }
 
-void OSExchangeData::SetCFHtml(const std::wstring& cf_html) {
-  std::string utf8 = WideToUTF8(cf_html);
-  STGMEDIUM* storage = GetStorageForBytes(utf8.c_str(), utf8.size());
+void OSExchangeData::SetHtml(const std::wstring& html, const GURL& base_url) {
+  // Add both MS CF_HTML and text/html format.  CF_HTML should be in utf-8.
+  std::string utf8_html = WideToUTF8(html);
+  std::string url = base_url.is_valid() ? base_url.spec() : std::string();
+
+  std::string cf_html = ClipboardUtil::HtmlToCFHtml(utf8_html, url);
+  STGMEDIUM* storage = GetStorageForBytes(cf_html.c_str(), cf_html.size());
   contents_.push_back(new StoredDataInfo(
       ClipboardUtil::GetHtmlFormat()->cfFormat, storage));
+
+  STGMEDIUM* storage_plain = GetStorageForBytes(utf8_html.c_str(),
+                                                utf8_html.size());
+  contents_.push_back(new StoredDataInfo(
+      ClipboardUtil::GetTextHtmlFormat()->cfFormat, storage_plain));
 }
 
 bool OSExchangeData::GetString(std::wstring* data) const {
@@ -395,8 +404,12 @@ bool OSExchangeData::GetFileContents(std::wstring* filename,
                                         file_contents);
 }
 
-bool OSExchangeData::GetCFHtml(std::wstring* cf_html) const {
-  return ClipboardUtil::GetCFHtml(source_object_, cf_html);
+bool OSExchangeData::GetHtml(std::wstring* html, GURL* base_url) const {
+  std::string url;
+  bool success = ClipboardUtil::GetHtml(source_object_, html, &url);
+  if (success)
+    *base_url = GURL(url);
+  return success;
 }
 
 bool OSExchangeData::HasString() const {
@@ -692,4 +705,3 @@ static STGMEDIUM* GetStorageForFileDescriptor(
   storage->pUnkForRelease = NULL;
   return storage;
 }
-

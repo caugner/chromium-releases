@@ -23,6 +23,10 @@ class GoogleUpdateSettings {
   // false if the setting could not be recorded.
   static bool SetCollectStatsConsent(bool consented);
 
+  // Sets the machine-wide EULA consented flag required on OEM installs.
+  // Returns false if the setting could not be recorded.
+  static bool SetEULAConsent(bool consented);
+
   // Returns in 'browser' the browser used to download chrome as recorded
   // Google Update. Returns false if the information is not available.
   static bool GetBrowser(std::wstring* browser);
@@ -36,9 +40,16 @@ class GoogleUpdateSettings {
   // assigned to a partner. Returns false if the information is not available.
   static bool GetBrand(std::wstring* brand);
 
+  // Returns in 'client' the RLZ referral available for some distribution
+  // partners. This value does not exist for most chrome or chromium installs.
+  static bool GetReferral(std::wstring* referral);
+
+  // Overwrites the current value of the referral with an empty string. Returns
+  // true if this operation succeeded.
+  static bool ClearReferral();
+
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);
 };
 
 #endif  // CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_SETTINGS_H_
-

@@ -33,6 +33,7 @@ class TestSuiteAll(unittest.TestSuite):
     from grit.node import message_unittest
     from grit import tclib_unittest
     import grit.format.rc_unittest
+    import grit.format.data_pack_unittest
     from grit.tool import rc2grd_unittest
     from grit.tool import transl2tc_unittest
     from grit.gather import txt_unittest
@@ -44,7 +45,7 @@ class TestSuiteAll(unittest.TestSuite):
     from grit import shortcuts_unittests
     from grit.gather import muppet_strings_unittest
     from grit.node.custom import filename_unittest
-    
+
     test_classes = [
       base_unittest.NodeUnittest,
       io_unittest.FileNodeUnittest,
@@ -58,6 +59,7 @@ class TestSuiteAll(unittest.TestSuite):
       message_unittest.MessageUnittest,
       tclib_unittest.TclibUnittest,
       grit.format.rc_unittest.FormatRcUnittest,
+      grit.format.data_pack_unittest.FormatDataPackUnittest,
       rc2grd_unittest.Rc2GrdUnittest,
       transl2tc_unittest.TranslationToTcUnittest,
       txt_unittest.TxtUnittest,

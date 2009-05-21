@@ -8,6 +8,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 
+using base::Time;
+using base::TimeDelta;
+
 class SafeBrowsingProtocolManagerTest : public testing::Test {
 };
 
@@ -73,7 +76,8 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestChunkStrings) {
   phish.adds = "";
   phish.subs = "16,32,64-96";
   EXPECT_EQ(pm.FormatList(phish, false), "goog-phish-shavar;s:16,32,64-96\n");
-  EXPECT_EQ(pm.FormatList(phish, true), "goog-phish-shavar;s:16,32,64-96:mac\n");
+  EXPECT_EQ(pm.FormatList(phish, true),
+            "goog-phish-shavar;s:16,32,64-96:mac\n");
 
   // No chunks of either type.
   phish.adds = "";

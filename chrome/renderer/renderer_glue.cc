@@ -4,22 +4,38 @@
 
 // This file provides the embedder's side of random webkit glue functions.
 
+#include "build/build_config.h"
+
+#include <vector>
+
+#if defined(OS_WIN)
 #include <windows.h>
 #include <wininet.h>
+#endif
 
-#include "chrome/renderer/net/render_dns_master.h"
+#include "base/clipboard.h"
+#include "base/scoped_clipboard_writer.h"
+#include "base/string_util.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/plugin/npobject_util.h"
-#include "chrome/renderer/render_view.h"
-#include "chrome/renderer/visitedlink_slave.h"
+#include "chrome/renderer/net/render_dns_master.h"
+#include "chrome/renderer/render_process.h"
+#include "chrome/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
-#include "net/base/mime_util.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 
 #include "SkBitmap.h"
 
+#if defined(OS_WIN)
 #include <strsafe.h>  // note: per msdn docs, this must *follow* other includes
+#endif
 
 template <typename T, size_t stack_capacity>
 class ResizableStackArray {
@@ -66,279 +82,177 @@ class ResizableStackArray {
   size_t cur_capacity_;
 };
 
-namespace webkit_glue {
+#if defined(OS_WIN)
+// This definition of WriteBitmapFromPixels uses shared memory to communicate
+// across processes.
+void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
+                                                      const gfx::Size& size) {
+  // Do not try to write a bitmap more than once
+  if (shared_buf_)
+    return;
 
-bool HistoryContains(const wchar_t* url, int url_length,
-                     const char* document_host, int document_host_length,
-                     bool is_dns_prefetch_enabled) {
-  if (url_length == 0)
-    return false;  // Empty URLs are not visited.
-
-  // Use big stack buffer to avoid allocation when possible.
-  url_parse::Parsed parsed;
-  url_canon::RawCanonOutput<2048> canon;
-
-  if (!url_util::Canonicalize(url, url_length, NULL, &canon, &parsed))
-    return false;  // Invalid URLs are not visited.
-
-  char* parsed_host = canon.data() + parsed.host.begin;
-
-  // If the hostnames match or is_dns_prefetch_enabled is true, do the prefetch.
-  if (parsed.host.is_nonempty()) {
-    if (is_dns_prefetch_enabled ||
-        (document_host_length > 0 && parsed.host.len == document_host_length &&
-         strncmp(parsed_host, document_host, parsed.host.len) == 0))
-      DnsPrefetchCString(parsed_host, parsed.host.len);
-  }
-
-  return RenderThread::current()->visited_link_slave()->
-      IsVisited(canon.data(), canon.length());
-}
-
-void DnsPrefetchUrl(const wchar_t* url, int url_length) {
-  if (url_length == 0)
-    return;  // Empty URLs have no hostnames.
-
-  // Use big stack buffer to avoid allocation when possible.
-  url_parse::Parsed parsed;
-  url_canon::RawCanonOutput<2048> canon;
-
-  if (!url_util::Canonicalize(url, url_length, NULL, &canon, &parsed))
-    return;  // Invalid URLs don't have hostnames.
-
-  // Call for prefetching without creating a std::string().
-  if (parsed.host.is_nonempty())
-    DnsPrefetchCString(canon.data() + parsed.host.begin, parsed.host.len);
-}
-
-void PrecacheUrl(const wchar_t* url, int url_length) {
-  // TBD: jar: Need implementation that loads the targetted URL into our cache.
-  // For now, at least prefetch DNS lookup
-  DnsPrefetchUrl(url, url_length);
-}
-
-void webkit_glue::AppendToLog(const char* file, int line, const char* msg) {
-  logging::LogMessage(file, line).stream() << msg;
-}
-
-bool webkit_glue::GetMimeTypeFromExtension(std::wstring &ext,
-                                           std::string *mime_type) {
-  if (IsPluginProcess())
-    return net::GetMimeTypeFromExtension(ext, mime_type);
-
-  // The sandbox restricts our access to the registry, so we need to proxy
-  // these calls over to the browser process.
-  DCHECK(mime_type->empty());
-  RenderThread::current()->Send(
-      new ViewHostMsg_GetMimeTypeFromExtension(ext, mime_type));
-  return !mime_type->empty();
-}
-
-bool webkit_glue::GetMimeTypeFromFile(const std::wstring &file_path,
-                                      std::string *mime_type) {
-  if (IsPluginProcess())
-    return net::GetMimeTypeFromFile(file_path, mime_type);
-
-  // The sandbox restricts our access to the registry, so we need to proxy
-  // these calls over to the browser process.
-  DCHECK(mime_type->empty());
-  RenderThread::current()->Send(
-      new ViewHostMsg_GetMimeTypeFromFile(file_path, mime_type));
-  return !mime_type->empty();
-}
-
-bool webkit_glue::GetPreferredExtensionForMimeType(const std::string& mime_type,
-                                                   std::wstring* ext) {
-  if (IsPluginProcess())
-    return net::GetPreferredExtensionForMimeType(mime_type, ext);
-
-  // The sandbox restricts our access to the registry, so we need to proxy
-  // these calls over to the browser process.
-  DCHECK(ext->empty());
-  RenderThread::current()->Send(
-      new ViewHostMsg_GetPreferredExtensionForMimeType(mime_type, ext));
-  return !ext->empty();
-}
-
-IMLangFontLink2* webkit_glue::GetLangFontLink() {
-  return RenderProcess::GetLangFontLink();
-}
-
-std::string webkit_glue::GetDataResource(int resource_id) {
-  return ResourceBundle::GetSharedInstance().GetDataResource(resource_id);
-}
-
-HCURSOR webkit_glue::LoadCursor(int cursor_id) {
-  return ResourceBundle::GetSharedInstance().LoadCursor(cursor_id);
-}
-
-// Clipboard glue
-
-void webkit_glue::ClipboardClear() {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardClear());
-}
-
-void webkit_glue::ClipboardWriteText(const std::wstring& text) {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardWriteText(text));
-}
-
-void webkit_glue::ClipboardWriteHTML(const std::wstring& html,
-                                     const GURL& url) {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardWriteHTML(html, url));
-}
-
-void webkit_glue::ClipboardWriteBookmark(const std::wstring& title,
-                                         const GURL& url) {
-  RenderThread::current()->Send(
-      new ViewHostMsg_ClipboardWriteBookmark(title, url));
-}
-
-// Here we need to do some work to marshal the bitmap through shared memory
-void webkit_glue::ClipboardWriteBitmap(const SkBitmap& bitmap) {
-  size_t buf_size = bitmap.getSize();
-  gfx::Size size(bitmap.width(), bitmap.height());
+  size_t buf_size = 4 * size.width() * size.height();
 
   // Allocate a shared memory buffer to hold the bitmap bits
-  SharedMemory* shared_buf =
-      RenderProcess::AllocSharedMemory(buf_size);
-  if (!shared_buf) {
-    NOTREACHED();
-    return;
-  }
-  if (!shared_buf->Map(buf_size)) {
+  shared_buf_ = new base::SharedMemory;
+  const bool created = shared_buf_ && shared_buf_->Create(
+      L"", false /* read write */, true /* open existing */, buf_size);
+  if (!shared_buf_ || !created || !shared_buf_->Map(buf_size)) {
     NOTREACHED();
     return;
   }
 
   // Copy the bits into shared memory
-  SkAutoLockPixels bitmap_lock(bitmap);
-  memcpy(shared_buf->memory(), bitmap.getPixels(), buf_size);
-  shared_buf->Unmap();
+  memcpy(shared_buf_->memory(), pixels, buf_size);
+  shared_buf_->Unmap();
 
-  // Send the handle over synchronous IPC
+  Clipboard::ObjectMapParam param1, param2;
+  base::SharedMemoryHandle smh = shared_buf_->handle();
+
+  const char* shared_handle = reinterpret_cast<const char*>(&smh);
+  for (size_t i = 0; i < sizeof base::SharedMemoryHandle; i++)
+    param1.push_back(shared_handle[i]);
+
+  const char* size_data = reinterpret_cast<const char*>(&size);
+  for (size_t i = 0; i < sizeof gfx::Size; i++)
+    param2.push_back(size_data[i]);
+
+  Clipboard::ObjectMapParams params;
+  params.push_back(param1);
+  params.push_back(param2);
+  objects_[Clipboard::CBF_SMBITMAP] = params;
+}
+#endif
+
+// Define a destructor that makes IPCs to flush the contents to the
+// system clipboard.
+ScopedClipboardWriterGlue::~ScopedClipboardWriterGlue() {
+  if (objects_.empty())
+    return;
+
+#if defined(OS_WIN)
+  if (shared_buf_) {
+    RenderThread::current()->Send(
+        new ViewHostMsg_ClipboardWriteObjectsSync(objects_));
+    delete shared_buf_;
+    return;
+  }
+#endif
+
   RenderThread::current()->Send(
-      new ViewHostMsg_ClipboardWriteBitmap(shared_buf->handle(), size));
-
-  // The browser should be done with the bitmap now.  It's our job to free
-  // the shared memory.
-  RenderProcess::FreeSharedMemory(shared_buf);
+      new ViewHostMsg_ClipboardWriteObjectsAsync(objects_));
 }
 
-void webkit_glue::ClipboardWriteWebSmartPaste() {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardWriteWebSmartPaste());
+namespace webkit_glue {
+
+// Global variable set during RenderProcess::GlobalInit if video was enabled
+// and our media libraries were successfully loaded.
+static bool g_media_player_available = false;
+
+void SetMediaPlayerAvailable(bool value) {
+  g_media_player_available = value;
 }
 
-bool webkit_glue::ClipboardIsFormatAvailable(unsigned int format) {
+bool IsMediaPlayerAvailable() {
+  return g_media_player_available;
+}
+
+void PrecacheUrl(const wchar_t* url, int url_length) {
+  // TBD: jar: Need implementation that loads the targetted URL into our cache.
+  // For now, at least prefetch DNS lookup
+  std::string url_string;
+  WideToUTF8(url, url_length, &url_string);
+  const std::string host = GURL(url_string).host();
+  if (!host.empty())
+    DnsPrefetchCString(host.data(), host.length());
+}
+
+void AppendToLog(const char* file, int line, const char* msg) {
+  logging::LogMessage(file, line).stream() << msg;
+}
+
+std::string GetDataResource(int resource_id) {
+  return ResourceBundle::GetSharedInstance().GetDataResource(resource_id);
+}
+
+#if defined(OS_WIN)
+HCURSOR LoadCursor(int cursor_id) {
+  return ResourceBundle::GetSharedInstance().LoadCursor(cursor_id);
+}
+#endif
+
+// Clipboard glue
+
+Clipboard* ClipboardGetClipboard(){
+  return NULL;
+}
+
+bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format) {
   bool result;
   RenderThread::current()->Send(
       new ViewHostMsg_ClipboardIsFormatAvailable(format, &result));
   return result;
 }
 
-void webkit_glue::ClipboardReadText(std::wstring* result) {
+void ClipboardReadText(string16* result) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadText(result));
 }
 
-void webkit_glue::ClipboardReadAsciiText(std::string* result) {
+void ClipboardReadAsciiText(std::string* result) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadAsciiText(result));
 }
 
-void webkit_glue::ClipboardReadHTML(std::wstring* markup, GURL* url) {
+void ClipboardReadHTML(string16* markup, GURL* url) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadHTML(markup, url));
 }
 
-GURL webkit_glue::GetInspectorURL() {
-  return GURL("chrome-resource://inspector/inspector.html");
+GURL GetInspectorURL() {
+  return GURL("chrome-ui://inspector/inspector.html");
 }
 
-std::string webkit_glue::GetUIResourceProtocol() {
-  return "chrome-resource";
+std::string GetUIResourceProtocol() {
+  return "chrome-ui";
 }
 
-bool webkit_glue::GetPlugins(bool refresh,
-                             std::vector<WebPluginInfo>* plugins) {
+bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
   return RenderThread::current()->Send(
       new ViewHostMsg_GetPlugins(refresh, plugins));
 }
 
-bool webkit_glue::EnsureFontLoaded(HFONT font) {
-  LOGFONT logfont;
-  GetObject(font, sizeof(LOGFONT), &logfont);
-  return RenderThread::current()->Send(new ViewHostMsg_LoadFont(logfont));
-}
-
-MONITORINFOEX webkit_glue::GetMonitorInfoForWindow(HWND window) {
-  MONITORINFOEX monitor_info;
+webkit_glue::ScreenInfo GetScreenInfo(gfx::NativeViewId window) {
+  webkit_glue::ScreenInfo results;
   RenderThread::current()->Send(
-      new ViewHostMsg_GetMonitorInfoForWindow(window, &monitor_info));
-  return monitor_info;
-}
-
-
-#ifndef USING_SIMPLE_RESOURCE_LOADER_BRIDGE
-
-// Each RenderView has a ResourceDispatcher.  In unit tests, this function may
-// not work properly since there may be a ResourceDispatcher w/o a RenderView.
-// The WebView's delegate may be null, which typically happens as a WebView is
-// being closed (but it is also possible that it could be null at other times
-// since WebView has a SetDelegate method).
-static ResourceDispatcher* GetResourceDispatcher(WebFrame* frame) {
-  WebViewDelegate* d = frame->GetView()->GetDelegate();
-  return d ? static_cast<RenderView*>(d)->resource_dispatcher() : NULL;
+      new ViewHostMsg_GetScreenInfo(window, &results));
+  return results;
 }
 
 // static factory function
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
-    WebFrame* webframe,
     const std::string& method,
     const GURL& url,
     const GURL& policy_url,
     const GURL& referrer,
+    const std::string& frame_origin,
+    const std::string& main_frame_origin,
     const std::string& headers,
     int load_flags,
     int origin_pid,
     ResourceType::Type resource_type,
-    bool mixed_content) {
-  // TODO(darin): we need to eliminate the webframe parameter because webkit
-  // does not always supply it (see ResourceHandle::loadResourceSynchronously).
-  // Instead we should add context to ResourceRequest, which will be easy to do
-  // once we merge to the latest WebKit (r23806 at least).
-  if (!webframe) {
-    NOTREACHED() << "no webframe";
-    return NULL;
-  }
-  ResourceDispatcher* dispatcher = GetResourceDispatcher(webframe);
-  if (!dispatcher) {
-    DLOG(WARNING) << "no resource dispatcher";
-    return NULL;
-  }
-  return dispatcher->CreateBridge(method, url, policy_url, referrer, headers,
-                                  load_flags, origin_pid, resource_type,
-                                  mixed_content, 0);
-}
-
-void SetCookie(const GURL& url, const GURL& policy_url,
-               const std::string& cookie) {
-  RenderThread::current()->Send(new ViewHostMsg_SetCookie(url, policy_url,
-                                                          cookie));
-}
-
-std::string GetCookies(const GURL& url, const GURL& policy_url) {
-  std::string cookies;
-  RenderThread::current()->Send(new ViewHostMsg_GetCookies(url, policy_url,
-                                                           &cookies));
-  return cookies;
+    int routing_id) {
+  ResourceDispatcher* dispatch = RenderThread::current()->resource_dispatcher();
+  return dispatch->CreateBridge(method, url, policy_url, referrer,
+                                frame_origin, main_frame_origin, headers,
+                                load_flags, origin_pid, resource_type,
+                                0, routing_id);
 }
 
 void NotifyCacheStats() {
   // Update the browser about our cache
   // NOTE: Since this can be called from the plugin process, we might not have
   // a RenderThread.  Do nothing in that case.
-  if (RenderThread::current())
+  if (!IsPluginProcess())
     RenderThread::current()->InformHostOfCacheStatsLater();
 }
 
-#endif  // !USING_SIMPLE_RESOURCE_LOADER_BRIDGE
 
 }  // namespace webkit_glue
-

@@ -11,9 +11,11 @@
 
 #include <string>
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "ResourceHandleClient.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 namespace WebCore {
 
@@ -52,4 +54,3 @@ class FeedClientProxy : public ResourceHandleClient {
 }  // namespace WebCore
 
 #endif  // WEBKIT_GLUE_FEED_PREVIEW_H__
-

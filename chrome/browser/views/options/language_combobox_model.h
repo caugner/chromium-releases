@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_VIEWS_OPTIONS_LANGUAGE_COMBOBOX_MODEL_H__
 
 #include "chrome/browser/profile.h"
-#include "chrome/views/combo_box.h"
+#include "chrome/views/controls/combo_box.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // LanguageComboboxModel
 //  The model that fills the dropdown of valid UI languages.
-class LanguageComboboxModel : public ChromeViews::ComboBox::Model {
+class LanguageComboboxModel : public views::ComboBox::Model {
  public:
   struct LocaleData {
     LocaleData() { }
@@ -29,14 +29,19 @@ class LanguageComboboxModel : public ChromeViews::ComboBox::Model {
   LanguageComboboxModel(Profile* profile,
                         const std::vector<std::wstring>& locale_codes);
 
+  // Temporary compatibility constructor.
+  // TODO(port): remove this once locale codes are all switched to ASCII.
+  LanguageComboboxModel(Profile* profile,
+                        const std::vector<std::string>& locale_codes);
+
   virtual ~LanguageComboboxModel() {}
 
   void InitNativeNames(const std::vector<std::wstring>& locale_codes);
 
-  // Overridden from ChromeViews::Combobox::Model:
-  virtual int GetItemCount(ChromeViews::ComboBox* source);
+  // Overridden from views::Combobox::Model:
+  virtual int GetItemCount(views::ComboBox* source);
 
-  virtual std::wstring GetItemAt(ChromeViews::ComboBox* source, int index);
+  virtual std::wstring GetItemAt(views::ComboBox* source, int index);
 
   // Return the locale for the given index.  E.g., may return pt-BR.
   std::wstring GetLocaleFromIndex(int index);
@@ -68,4 +73,3 @@ class LanguageComboboxModel : public ChromeViews::ComboBox::Model {
 };
 
 #endif  // #ifndef CHROME_BROWSER_VIEWS_OPTIONS_LANGUAGE_COMBOBOX_MODEL_H__
-

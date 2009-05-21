@@ -23,7 +23,7 @@ class MimeTypeTests : public TestShellTest {
     test_shell_->LoadURL(UTF8ToWide(url.spec()).c_str());
     test_shell_->WaitTestFinished();
   }
-  
+
   void CheckMimeType(const char* mimetype, const std::wstring& expected) {
     std::string path("contenttype?");
     GURL url = server_->TestServerPage(path + mimetype);
@@ -31,25 +31,30 @@ class MimeTypeTests : public TestShellTest {
     WebFrame* frame = test_shell_->webView()->GetMainFrame();
     EXPECT_EQ(expected, webkit_glue::DumpDocumentText(frame));
   }
-  
-  scoped_ptr<UnittestTestServer> server_;
+
+  scoped_refptr<UnittestTestServer> server_;
 };
 
 TEST_F(MimeTypeTests, MimeTypeTests) {
-  server_.reset(new UnittestTestServer);
+  server_ = UnittestTestServer::CreateServer();
+  ASSERT_TRUE(NULL != server_.get());
 
   std::wstring expected_src(L"<html>\n<body>\n"
       L"<p>HTML text</p>\n</body>\n</html>\n");
-  
+
   // These files should all be displayed as plain text.
   const char* plain_text[] = {
-    "text/css",
-    "text/foo",
-    "text/richext",
-    "text/rtf",
+    // It is unclear whether to display text/css or download it.
+    //   Firefox 3: Display
+    //   Internet Explorer 7: Download
+    //   Safari 3.2: Download
+    // We choose to match Safari.
+    // "text/css",
+    "text/javascript",
+    "text/plain",
     "application/x-javascript",
   };
-  for (int i = 0; i < arraysize(plain_text); ++i) {
+  for (size_t i = 0; i < arraysize(plain_text); ++i) {
     CheckMimeType(plain_text[i], expected_src);
   }
 
@@ -60,7 +65,7 @@ TEST_F(MimeTypeTests, MimeTypeTests) {
     "text/xsl",
     "application/xhtml+xml",
   };
-  for (int i = 0; i < arraysize(html_src); ++i) {
+  for (size_t i = 0; i < arraysize(html_src); ++i) {
     CheckMimeType(html_src[i], L"HTML text");
   }
 
@@ -72,7 +77,7 @@ TEST_F(MimeTypeTests, MimeTypeTests) {
     "image/jpeg",
     "image/bmp",
   };
-  for (int i = 0; i < arraysize(not_text); ++i) {
+  for (size_t i = 0; i < arraysize(not_text); ++i) {
     CheckMimeType(not_text[i], L"");
     test_shell_->webView()->StopLoading();
   }
@@ -80,8 +85,6 @@ TEST_F(MimeTypeTests, MimeTypeTests) {
   // TODO(tc): make sure other mime types properly go to download (e.g.,
   // image/foo).
 
-  server_.reset(NULL);
 }
 
 }  // namespace
-

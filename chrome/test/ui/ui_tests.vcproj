@@ -146,6 +146,14 @@
 			Name="Common"
 			>
 			<File
+				RelativePath=".\npapi_test_helper.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\npapi_test_helper.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\tools\build\win\precompiled_wtl.cc"
 				>
 				<FileConfiguration
@@ -163,10 +171,6 @@
 			</File>
 			<File
 				RelativePath=".\run_all_unittests.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\test_file_util.cc"
 				>
 			</File>
 			<File
@@ -221,6 +225,14 @@
 				RelativePath="..\..\browser\browser_uitest.cc"
 				>
 			</File>
+			<Filter
+				Name="TestImages"
+				>
+				<File
+					RelativePath="..\..\browser\images_uitest.cc"
+					>
+				</File>
+			</Filter>
 		</Filter>
 		<Filter
 			Name="TestChromeLogging"
@@ -235,14 +247,6 @@
 			>
 			<File
 				RelativePath="..\..\browser\download\download_uitest.cc"
-				>
-			</File>
-		</Filter>
-		<Filter
-			Name="TestImages"
-			>
-			<File
-				RelativePath="..\..\browser\images_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -302,7 +306,7 @@
 			Name="TestSessionRestore"
 			>
 			<File
-				RelativePath="..\..\browser\session_restore_uitest.cc"
+				RelativePath="..\..\browser\sessions\session_restore_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -311,6 +315,14 @@
 			>
 			<File
 				RelativePath="..\..\browser\tab_restore_uitest.cc"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="TestUnload"
+			>
+			<File
+				RelativePath="..\..\browser\unload_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -334,7 +346,7 @@
 			Name="TestViewSource"
 			>
 			<File
-				RelativePath="..\..\browser\view_source_uitest.cc"
+				RelativePath="..\..\browser\tab_contents\view_source_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -350,7 +362,7 @@
 			Name="TestResourceDispatcherHost"
 			>
 			<File
-				RelativePath="..\..\browser\resource_dispatcher_host_uitest.cc"
+				RelativePath="..\..\browser\renderer_host\resource_dispatcher_host_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -358,7 +370,7 @@
 			Name="TestFindInPage"
 			>
 			<File
-				RelativePath="..\..\browser\find_in_page_controller_uitest.cc"
+				RelativePath="..\..\browser\views\find_bar_win_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -410,7 +422,7 @@
 			Name="TestMetricsService"
 			>
 			<File
-				RelativePath="..\..\browser\metrics_service_uitest.cc"
+				RelativePath="..\..\browser\metrics\metrics_service_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -426,7 +438,7 @@
 			Name="TestSSL"
 			>
 			<File
-				RelativePath="..\..\browser\ssl_uitest.cc"
+				RelativePath="..\..\browser\ssl\ssl_uitest.cc"
 				>
 			</File>
 		</Filter>
@@ -519,6 +531,22 @@
 			>
 			<File
 				RelativePath=".\omnibox_uitest.cc"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="TestHistory"
+			>
+			<File
+				RelativePath=".\history_uitest.cc"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="TestDOMChecker"
+			>
+			<File
+				RelativePath=".\dom_checker_uitest.cc"
 				>
 			</File>
 		</Filter>

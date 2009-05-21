@@ -3,13 +3,17 @@
 // found in the LICENSE file.
 
 #include "chrome/renderer/debug_message_handler.h"
+
+#include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_view.h"
 
 ////////////////////////////////////////
 // methods called from the RenderThread
 
-DebugMessageHandler::DebugMessageHandler(RenderView* view) :
-    debugger_(NULL), view_(view), channel_(NULL) {
+DebugMessageHandler::DebugMessageHandler(RenderView* view)
+    : debugger_(NULL),
+      view_(view),
+      channel_(NULL) {
   view_loop_ = MessageLoop::current();
   view_routing_id_ = view_->routing_id();
 }
@@ -17,14 +21,20 @@ DebugMessageHandler::DebugMessageHandler(RenderView* view) :
 DebugMessageHandler::~DebugMessageHandler() {
 }
 
-void DebugMessageHandler::EvaluateScriptUrl(const std::wstring& url) {
+void DebugMessageHandler::EvaluateScript(const std::wstring& script) {
   DCHECK(MessageLoop::current() == view_loop_);
   // It's possible that this will get cleared out from under us.
   RenderView* view = view_;
   if (view) {
-    view->EvaluateScriptUrl(L"", url);
+    view->EvaluateScript(L"", script);
   }
 }
+
+void DebugMessageHandler::Attach() {
+  DCHECK(MessageLoop::current() == view_loop_);
+  debugger_->Attach();
+}
+
 
 ///////////////////////////////////////////////
 // all methods below called from the IO thread
@@ -34,19 +44,29 @@ void DebugMessageHandler::DebuggerOutput(const std::wstring& out) {
 }
 
 void DebugMessageHandler::OnBreak(bool force) {
+  // Set the debug break flag in the V8 enging.
   debugger_->Break(force);
+
+  // If a forced break has been requested make sure that it will occour by
+  // running some JavaScript in the renderer.
   if (force && view_loop_) {
     view_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &DebugMessageHandler::EvaluateScriptUrl,
+        this, &DebugMessageHandler::EvaluateScript,
         std::wstring(L"javascript:void(0)")));
   }
 }
 
 void DebugMessageHandler::OnAttach() {
   if (!debugger_) {
-    debugger_ = new Debugger(this);
+    debugger_ = new DebuggerBridge(this);
   }
-  debugger_->Attach();
+
+  // Run the actual debugger attach in the renderer as it uses V8 methods which
+  // most run in the V8 thread.
+  if (view_loop_) {
+    view_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &DebugMessageHandler::Attach));
+  }
 }
 
 void DebugMessageHandler::OnCommand(const std::wstring& cmd) {
@@ -111,4 +131,3 @@ bool DebugMessageHandler::OnMessageReceived(const IPC::Message& message) {
   IPC_END_MESSAGE_MAP()
   return handled;
 }
-

@@ -16,7 +16,8 @@ class URLRequestMockNetErrorJob : public URLRequestMockHTTPJob {
  public:
   URLRequestMockNetErrorJob(URLRequest* request,
                             const std::vector<int>& errors,
-                            net::X509Certificate* ssl_cert);
+                            net::X509Certificate* ssl_cert,
+                            const FilePath& file_path);
   virtual ~URLRequestMockNetErrorJob();
 
   virtual void Start();
@@ -68,4 +69,3 @@ class URLRequestMockNetErrorJob : public URLRequestMockHTTPJob {
 };
 
 #endif  // #define CHROME_BROWSER_AUTOMATION_URL_REQUEST_MOCK_NET_ERROR_H__
-

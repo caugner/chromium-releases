@@ -14,22 +14,50 @@
 #endif
 
 #include "base/basictypes.h"
-#include "googleurl/src/url_canon.h"
-#include "googleurl/src/url_parse.h"
 
+struct addrinfo;
+class FilePath;
 class GURL;
+
+namespace base {
+class Time;
+}
 
 namespace net {
 
 // Given the full path to a file name, creates a file: URL. The returned URL
 // may not be valid if the input is malformed.
+GURL FilePathToFileURL(const FilePath& path);
+// Deprecated temporary compatibility function.
 GURL FilePathToFileURL(const std::wstring& file_path);
 
 // Converts a file: URL back to a filename that can be passed to the OS. The
 // file URL must be well-formed (GURL::is_valid() must return true); we don't
 // handle degenerate cases here. Returns true on success, false if it isn't a
 // valid file URL. On failure, *file_path will be empty.
+bool FileURLToFilePath(const GURL& url, FilePath* file_path);
+// Deprecated temporary compatibility function.
 bool FileURLToFilePath(const GURL& url, std::wstring* file_path);
+
+// Split an input of the form <host>[":"<port>] into its consitituent parts.
+// Saves the result into |*host| and |*port|. If the input did not have
+// the optional port, sets |*port| to -1.
+// Returns true if the parsing was successful, false otherwise.
+// The returned host is NOT canonicalized, and may be invalid.
+bool GetHostAndPort(std::string::const_iterator host_and_port_begin,
+                    std::string::const_iterator host_and_port_end,
+                    std::string* host,
+                    int* port);
+bool GetHostAndPort(const std::string& host_and_port,
+                    std::string* host,
+                    int* port);
+
+// Returns the string representation of an address, like "192.168.0.1".
+// Returns empty string on failure.
+std::string NetAddressToString(const struct addrinfo* net_address);
+
+// Returns the hostname of the current system. Returns empty string on failure.
+std::string GetMyHostName();
 
 // Return the value of the HTTP response header with name 'name'.  'headers'
 // should be in the format that URLRequest::GetResponseHeaders() returns.
@@ -95,15 +123,12 @@ void IDNToUnicode(const char* host,
 std::string CanonicalizeHost(const std::string& host, bool* is_ip_address);
 std::string CanonicalizeHost(const std::wstring& host, bool* is_ip_address);
 
-#ifdef OS_WIN
-// TODO: Port GetDirectoryListingEntry for OSX and linux.
 // Call these functions to get the html for a directory listing.
 // They will pass non-7bit-ascii characters unescaped, allowing
 // the browser to interpret the encoding (utf8, etc).
 std::string GetDirectoryListingHeader(const std::string& title);
-std::string GetDirectoryListingEntry(const std::string& name, DWORD attrib,
-                                     int64 size, const FILETIME* modified);
-#endif
+std::string GetDirectoryListingEntry(const std::string& name, bool is_dir,
+                                     int64 size, const base::Time& modified);
 
 // If text starts with "www." it is removed, otherwise text is returned
 // unmodified.
@@ -131,7 +156,9 @@ bool IsPortAllowedByDefault(int port);
 // restricted.
 bool IsPortAllowedByFtp(int port);
 
+// Set socket to non-blocking mode
+int SetNonBlocking(int fd);
+
 }  // namespace net
 
 #endif  // NET_BASE_NET_UTIL_H__
-

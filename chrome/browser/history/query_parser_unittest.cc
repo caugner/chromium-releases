@@ -3,11 +3,9 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/history/query_parser.h"
-#include "base/logging.h"
+#include "base/basictypes.h"
 #include "chrome/common/scoped_vector.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace {
 
 class QueryParserTest : public testing::Test {
  public:
@@ -21,8 +19,6 @@ class QueryParserTest : public testing::Test {
  protected:
   QueryParser query_parser_;
 };
-
-};  // namespace
 
 // Test helper: Convert a user query string to a SQLite query string.
 std::wstring QueryParserTest::QueryToString(const std::wstring& query) {
@@ -50,10 +46,14 @@ TEST_F(QueryParserTest, SimpleQueries) {
 
 // Quoted substring parsing.
 TEST_F(QueryParserTest, Quoted) {
-  EXPECT_EQ(L"\"Quoted\"", QueryToString(L"\"Quoted\""));    // ASCII quotes
-  EXPECT_EQ(L"\"miss end\"", QueryToString(L"\"miss end"));  // Missing end quotes
-  EXPECT_EQ(L"miss* beg*", QueryToString(L"miss beg\""));    // Missing begin quotes
-  EXPECT_EQ(L"\"Many\" \"quotes\"", QueryToString(L"\"Many   \"\"quotes")); // Weird formatting
+  // ASCII quotes
+  EXPECT_EQ(L"\"Quoted\"", QueryToString(L"\"Quoted\""));
+  // Missing end quotes
+  EXPECT_EQ(L"\"miss end\"", QueryToString(L"\"miss end"));
+  // Missing begin quotes
+  EXPECT_EQ(L"miss* beg*", QueryToString(L"miss beg\""));
+  // Weird formatting
+  EXPECT_EQ(L"\"Many\" \"quotes\"", QueryToString(L"\"Many   \"\"quotes"));
 }
 
 // Apostrophes within words should be preserved, but otherwise stripped.
@@ -76,7 +76,7 @@ TEST_F(QueryParserTest, NumWords) {
     { L"foo \"bar baz\"  blah", 4 },
   };
 
-  for (int i = 0; i < arraysize(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     std::wstring query_string;
     EXPECT_EQ(data[i].expected_word_count,
               query_parser_.ParseQuery(data[i].input, &query_string));
@@ -88,24 +88,27 @@ TEST_F(QueryParserTest, ParseQueryNodesAndMatch) {
     const std::wstring query;
     const std::wstring text;
     const bool matches;
-    const int m1_start;
-    const int m1_end;
-    const int m2_start;
-    const int m2_end;
+    const size_t m1_start;
+    const size_t m1_end;
+    const size_t m2_start;
+    const size_t m2_end;
   } data[] = {
+    { L"foo foo",       L"foo",              true,  0, 3, 0, 0 },
+    { L"foo fooey",     L"fooey",            true,  0, 5, 0, 0 },
+    { L"foo fooey bar", L"bar fooey",        true,  0, 3, 4, 9 },
     { L"blah",          L"blah",             true,  0, 4, 0, 0 },
     { L"blah",          L"foo",              false, 0, 0, 0, 0 },
     { L"blah",          L"blahblah",         true,  0, 4, 0, 0 },
     { L"blah",          L"foo blah",         true,  4, 8, 0, 0 },
     { L"foo blah",      L"blah",             false, 0, 0, 0, 0 },
-    { L"foo blah",      L"blahx foobar",     true,  6, 9, 0, 4 },
+    { L"foo blah",      L"blahx foobar",     true,  0, 4, 6, 9 },
     { L"\"foo blah\"",  L"foo blah",         true,  0, 8, 0, 0 },
     { L"\"foo blah\"",  L"foox blahx",       false, 0, 0, 0, 0 },
     { L"\"foo blah\"",  L"foo blah",         true,  0, 8, 0, 0 },
     { L"\"foo blah\"",  L"\"foo blah\"",     true,  1, 9, 0, 0 },
     { L"foo blah",      L"\"foo bar blah\"", true,  1, 4, 9, 13 },
   };
-  for (int i = 0; i < arraysize(data); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     std::vector<std::wstring> results;
     QueryParser parser;
     ScopedVector<QueryNode> query_nodes;
@@ -126,5 +129,31 @@ TEST_F(QueryParserTest, ParseQueryNodesAndMatch) {
       EXPECT_EQ(data[i].m2_start, match_positions[offset].first);
       EXPECT_EQ(data[i].m2_end, match_positions[offset].second);
     }
+  }
+}
+
+TEST_F(QueryParserTest, ExtractQueryWords) {
+  struct TestData2 {
+    const std::wstring text;
+    const std::wstring w1;
+    const std::wstring w2;
+    const std::wstring w3;
+    const size_t word_count;
+  } data[] = {
+    { L"foo",           L"foo", L"",    L"",  1 },
+    { L"foo bar",       L"foo", L"bar", L"",  2 },
+    { L"\"foo bar\"",   L"foo", L"bar", L"",  2 },
+    { L"\"foo bar\" a", L"foo", L"bar", L"a", 3 },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+    std::vector<std::wstring> results;
+    QueryParser parser;
+    parser.ExtractQueryWords(data[i].text, &results);
+    ASSERT_EQ(data[i].word_count, results.size());
+    EXPECT_EQ(data[i].w1, results[0]);
+    if (results.size() == 2)
+      EXPECT_EQ(data[i].w2, results[1]);
+    if (results.size() == 3)
+      EXPECT_EQ(data[i].w3, results[2]);
   }
 }

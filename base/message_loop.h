@@ -14,6 +14,7 @@
 #include "base/message_pump.h"
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/timer.h"
 
@@ -97,10 +98,10 @@ class MessageLoop : public base::MessagePump::Delegate {
   //
   // NOTE: These methods may be called on any thread.  The Task will be invoked
   // on the thread that executes MessageLoop::Run().
-  
+
   void PostTask(
       const tracked_objects::Location& from_here, Task* task);
-  
+
   void PostDelayedTask(
       const tracked_objects::Location& from_here, Task* task, int delay_ms);
 
@@ -247,7 +248,7 @@ class MessageLoop : public base::MessagePump::Delegate {
 
   class AutoRunState : RunState {
    public:
-    AutoRunState(MessageLoop* loop);
+    explicit AutoRunState(MessageLoop* loop);
     ~AutoRunState();
    private:
     MessageLoop* loop_;
@@ -256,15 +257,15 @@ class MessageLoop : public base::MessagePump::Delegate {
 
   // This structure is copied around by value.
   struct PendingTask {
-    Task* task;              // The task to run.
-    Time  delayed_run_time;  // The time when the task should be run.
-    int   sequence_num;      // Used to facilitate sorting by run time.
-    bool  nestable;          // True if OK to dispatch from a nested loop.
+    Task* task;                   // The task to run.
+    base::Time delayed_run_time;  // The time when the task should be run.
+    int sequence_num;             // Used to facilitate sorting by run time.
+    bool nestable;                // True if OK to dispatch from a nested loop.
 
     PendingTask(Task* task, bool nestable)
         : task(task), sequence_num(0), nestable(nestable) {
     }
-    
+
     // Used to support sorting.
     bool operator<(const PendingTask& other) const;
   };
@@ -280,7 +281,6 @@ class MessageLoop : public base::MessagePump::Delegate {
   base::MessagePumpLibevent* pump_libevent() {
     return static_cast<base::MessagePumpLibevent*>(pump_.get());
   }
- protected:
 #endif
 
   // A function to encapsulate all the exception handling capability in the
@@ -335,7 +335,7 @@ class MessageLoop : public base::MessagePump::Delegate {
 
   // base::MessagePump::Delegate methods:
   virtual bool DoWork();
-  virtual bool DoDelayedWork(Time* next_delayed_work_time);
+  virtual bool DoDelayedWork(base::Time* next_delayed_work_time);
   virtual bool DoIdleWork();
 
   // Start recording histogram info about events and action IF it was enabled
@@ -355,7 +355,7 @@ class MessageLoop : public base::MessagePump::Delegate {
   // A list of tasks that need to be processed by this instance.  Note that
   // this queue is only accessed (push/pop) by our current thread.
   TaskQueue work_queue_;
-  
+
   // Contains delayed tasks, sorted by their 'delayed_run_time' property.
   DelayedTaskQueue delayed_work_queue_;
 
@@ -424,6 +424,12 @@ class MessageLoopForUI : public MessageLoop {
   void WillProcessMessage(const MSG& message);
   void DidProcessMessage(const MSG& message);
   void PumpOutPendingPaintMessages();
+
+ protected:
+  // TODO(rvargas): Make this platform independent.
+  base::MessagePumpForUI* pump_ui() {
+    return static_cast<base::MessagePumpForUI*>(pump_.get());
+  }
 #endif  // defined(OS_WIN)
 };
 
@@ -453,19 +459,37 @@ class MessageLoopForIO : public MessageLoop {
   }
 
 #if defined(OS_WIN)
-  typedef base::MessagePumpWin::Watcher Watcher;
+  typedef base::MessagePumpForIO::IOHandler IOHandler;
+  typedef base::MessagePumpForIO::IOContext IOContext;
 
   // Please see MessagePumpWin for definitions of these methods.
-  void WatchObject(HANDLE object, Watcher* watcher);
+  void RegisterIOHandler(HANDLE file_handle, IOHandler* handler);
+  bool WaitForIOCompletion(DWORD timeout, IOHandler* filter);
+
+ protected:
+  // TODO(rvargas): Make this platform independent.
+  base::MessagePumpForIO* pump_io() {
+    return static_cast<base::MessagePumpForIO*>(pump_.get());
+  }
 
 #elif defined(OS_POSIX)
   typedef base::MessagePumpLibevent::Watcher Watcher;
+  typedef base::MessagePumpLibevent::FileDescriptorWatcher
+      FileDescriptorWatcher;
 
-  // Please see MessagePumpLibevent for definitions of these methods.
-  void WatchSocket(int socket, short interest_mask, 
-                   struct event* e, Watcher* watcher);
-  void UnwatchSocket(struct event* e);
-#endif  // defined(OS_WIN)
+  enum Mode {
+    WATCH_READ = base::MessagePumpLibevent::WATCH_READ,
+    WATCH_WRITE = base::MessagePumpLibevent::WATCH_WRITE,
+    WATCH_READ_WRITE = base::MessagePumpLibevent::WATCH_READ_WRITE
+  };
+
+  // Please see MessagePumpLibevent for definition.
+  bool WatchFileDescriptor(int fd,
+                           bool persistent,
+                           Mode mode,
+                           FileDescriptorWatcher *controller,
+                           Watcher *delegate);
+#endif  // defined(OS_POSIX)
 };
 
 // Do not add any member variables to MessageLoopForIO!  This is important b/c

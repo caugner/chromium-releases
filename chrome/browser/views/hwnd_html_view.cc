@@ -4,11 +4,12 @@
 
 #include "chrome/browser/views/hwnd_html_view.h"
 
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/render_widget_host_hwnd.h"
-#include "chrome/browser/render_view_host_delegate.h"
-#include "chrome/browser/site_instance.h"
-#include "chrome/views/view_container.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_widget_host_view_win.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/tab_contents/site_instance.h"
+#include "chrome/views/widget/widget.h"
+#include "chrome/views/widget/widget_win.h"
 
 HWNDHtmlView::~HWNDHtmlView() {
   if (render_view_host_) {
@@ -18,6 +19,13 @@ HWNDHtmlView::~HWNDHtmlView() {
   }
 }
 
+void HWNDHtmlView::InitHidden() {
+  // TODO(mpcomplete): make it possible to create a RenderView without an HWND.
+  views::WidgetWin* win = new views::WidgetWin;
+  win->Init(NULL, gfx::Rect(), true);
+  win->SetContentsView(this);
+}
+
 void HWNDHtmlView::Init(HWND parent_hwnd) {
   DCHECK(!render_view_host_) << "Already initialized.";
   RenderViewHost* rvh = new RenderViewHost(
@@ -25,7 +33,7 @@ void HWNDHtmlView::Init(HWND parent_hwnd) {
     delegate_, MSG_ROUTING_NONE, NULL);
   render_view_host_ = rvh;
 
-  RenderWidgetHostHWND* view = new RenderWidgetHostHWND(rvh);
+  RenderWidgetHostViewWin* view = new RenderWidgetHostViewWin(rvh);
   rvh->set_view(view);
 
   // Create the HWND. Note:
@@ -35,11 +43,12 @@ void HWNDHtmlView::Init(HWND parent_hwnd) {
   // same z-order as constrained windows.
   HWND hwnd = view->Create(parent_hwnd);
   view->ShowWindow(SW_SHOW);
-  ChromeViews::HWNDView::Attach(hwnd);
+  views::HWNDView::Attach(hwnd);
 
   // Start up the renderer.
   if (allow_dom_ui_bindings_)
     rvh->AllowDOMUIBindings();
+  CreatingRenderer();
   rvh->CreateRenderView();
   rvh->NavigateToURL(content_url_);
   initialized_ = true;
@@ -47,6 +56,6 @@ void HWNDHtmlView::Init(HWND parent_hwnd) {
 
 void HWNDHtmlView::ViewHierarchyChanged(bool is_add, View* parent,
                                         View* child) {
-  if (is_add && GetViewContainer() && !initialized_)
-    Init(GetViewContainer()->GetHWND());
+  if (is_add && GetWidget() && !initialized_)
+    Init(GetWidget()->GetNativeView());
 }

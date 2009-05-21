@@ -10,11 +10,15 @@
 
 #include "base/condition_variable.h"
 #include "base/logging.h"
-#include "base/platform_test.h"
 #include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "base/spin_wait.h"
+#include "base/thread_collision_warner.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
+
+using base::TimeDelta;
+using base::TimeTicks;
 
 namespace {
 //------------------------------------------------------------------------------
@@ -73,9 +77,12 @@ class WorkQueue : public PlatformThread::Delegate {
   int task_count() const;
   bool allow_help_requests() const;  // Workers can signal more workers.
   bool shutdown() const;  // Check if shutdown has been requested.
-  int shutdown_task_count() const;
 
   void thread_shutting_down();
+
+
+  //----------------------------------------------------------------------------
+  // Worker threads can call them but not needed to acquire a lock.
   Lock* lock();
 
   ConditionVariable* work_is_available();
@@ -96,7 +103,13 @@ class WorkQueue : public PlatformThread::Delegate {
   void SetTaskCount(int count);
   void SetAllowHelp(bool allow);
 
+  // Caller must acquire lock before calling.
   void SetShutdown();
+
+  // Compares the |shutdown_task_count_| to the |thread_count| and returns true
+  // if they are equal.  This check will acquire the |lock_| so the caller
+  // should not hold the lock when calling this method.
+  bool ThreadSafeCheckShutdown(int thread_count);
 
  private:
   // Both worker threads and controller use the following to synchronize.
@@ -117,6 +130,8 @@ class WorkQueue : public PlatformThread::Delegate {
   TimeDelta worker_delay_;  // Time each task takes to complete.
   bool allow_help_requests_;  // Workers can signal more workers.
   bool shutdown_;  // Set when threads need to terminate.
+
+  DFAKE_MUTEX(locked_methods_);
 };
 
 //------------------------------------------------------------------------------
@@ -165,7 +180,15 @@ TEST_F(ConditionVariableTest, TimeoutTest) {
   lock.Release();
 }
 
-TEST_F(ConditionVariableTest, MultiThreadConsumerTest) {
+// This test is flaky due to excessive timing sensitivity.
+// http://code.google.com/p/chromium/issues/detail?id=3599
+// TODO(jar): A recent change to the WorkQueue fixed flakyness for the test
+// LargeFastTaskTest.  Specifically, the test was accessing the member variable
+// WorkQueue::shutdown_task_count_ without a lock held.  The MultiThreadConsumer
+// test now ran successfully for 500 times on RalphL's machine.  RalphL did not
+// want to blindly re-enable this test if you know of other issues with it, but
+// it appears that the flakyness is gone, but I'll leave that to you to verify.
+TEST_F(ConditionVariableTest, DISABLED_MultiThreadConsumerTest) {
   const int kThreadCount = 10;
   WorkQueue queue(kThreadCount);  // Start the threads.
 
@@ -325,7 +348,7 @@ TEST_F(ConditionVariableTest, MultiThreadConsumerTest) {
   queue.work_is_available()->Broadcast();  // Force check for shutdown.
 
   SPIN_FOR_TIMEDELTA_OR_UNTIL_TRUE(TimeDelta::FromMinutes(1),
-                                   queue.shutdown_task_count() == kThreadCount);
+                                   queue.ThreadSafeCheckShutdown(kThreadCount));
   PlatformThread::Sleep(10);  // Be sure they're all shutdown.
 }
 
@@ -425,7 +448,7 @@ TEST_F(ConditionVariableTest, LargeFastTaskTest) {
 
   // Wait for shutdowns to complete.
   SPIN_FOR_TIMEDELTA_OR_UNTIL_TRUE(TimeDelta::FromMinutes(1),
-                                   queue.shutdown_task_count() == kThreadCount);
+                                   queue.ThreadSafeCheckShutdown(kThreadCount));
   PlatformThread::Sleep(10);  // Be sure they're all shutdown.
 }
 
@@ -472,15 +495,18 @@ WorkQueue::~WorkQueue() {
 }
 
 int WorkQueue::GetThreadId() {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   DCHECK(!EveryIdWasAllocated());
   return thread_started_counter_++;  // Give out Unique IDs.
 }
 
 bool WorkQueue::EveryIdWasAllocated() const {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   return thread_count_ == thread_started_counter_;
 }
 
 TimeDelta WorkQueue::GetAnAssignment(int thread_id) {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   DCHECK_LT(0, task_count_);
   assignment_history_[thread_id]++;
   if (0 == --task_count_) {
@@ -490,26 +516,43 @@ TimeDelta WorkQueue::GetAnAssignment(int thread_id) {
 }
 
 void WorkQueue::WorkIsCompleted(int thread_id) {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   completion_history_[thread_id]++;
 }
 
 int WorkQueue::task_count() const {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   return task_count_;
 }
 
 bool WorkQueue::allow_help_requests() const {
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   return allow_help_requests_;
 }
 
 bool WorkQueue::shutdown() const {
+  lock_.AssertAcquired();
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   return shutdown_;
 }
 
-int WorkQueue::shutdown_task_count() const {
-  return shutdown_task_count_;
+// Because this method is called from the test's main thread we need to actually
+// take the lock.  Threads will call the thread_shutting_down() method with the
+// lock already acquired.
+bool WorkQueue::ThreadSafeCheckShutdown(int thread_count) {
+  bool all_shutdown;
+  AutoLock auto_lock(lock_);
+  {
+    // Declare in scope so DFAKE is guranteed to be destroyed before AutoLock.
+    DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
+    all_shutdown = (shutdown_task_count_ == thread_count);
+  }
+  return all_shutdown;
 }
 
 void WorkQueue::thread_shutting_down() {
+  lock_.AssertAcquired();
+  DFAKE_SCOPED_RECURSIVE_LOCK(locked_methods_);
   shutdown_task_count_++;
 }
 
@@ -586,6 +629,7 @@ void WorkQueue::SetAllowHelp(bool allow) {
 }
 
 void WorkQueue::SetShutdown() {
+  lock_.AssertAcquired();
   shutdown_ = true;
 }
 
@@ -656,4 +700,3 @@ void WorkQueue::ThreadMain() {
 }
 
 }  // namespace
-

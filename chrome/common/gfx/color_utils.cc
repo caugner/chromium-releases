@@ -12,9 +12,12 @@
 #include "chrome/common/gfx/color_utils.h"
 
 #include "base/basictypes.h"
-#include "base/gfx/skia_utils.h"
 #include "base/logging.h"
 #include "skia/include/SkBitmap.h"
+
+#if defined(OS_WIN)
+#include "skia/ext/skia_utils_win.h"
+#endif
 
 namespace color_utils {
 
@@ -32,7 +35,8 @@ static const double kK = 903.3;
 static double CIEConvertNonLinear(uint8 color_component) {
   double color_component_d = static_cast<double>(color_component) / 255.0;
   if (color_component_d > 0.04045) {
-    double base = (color_component_d + kCIEConversionAlpha) / (1 + kCIEConversionAlpha);
+    double base = (color_component_d + kCIEConversionAlpha) /
+                      (1 + kCIEConversionAlpha);
     return pow(base, kCIEConversionGamma);
   } else {
     return color_component_d / 12.92;
@@ -83,7 +87,9 @@ static uint8 sRGBColorComponentFromLinearComponent(double component) {
   if (component <= 0.0031308) {
     result = 12.92 * component;
   } else {
-    result = (1 + kCIEConversionAlpha) * pow(component, (static_cast<double>(1) / 2.4)) - kCIEConversionAlpha;
+    result = (1 + kCIEConversionAlpha) *
+                 pow(component, (static_cast<double>(1) / 2.4)) -
+                 kCIEConversionAlpha;
   }
   return std::min(static_cast<uint8>(255), static_cast<uint8>(result * 255));
 }
@@ -252,7 +258,7 @@ SkColor SetColorAlpha(SkColor c, SkAlpha alpha) {
 
 SkColor GetSysSkColor(int which) {
 #if defined(OS_WIN)
-  return gfx::COLORREFToSkColor(::GetSysColor(which));
+  return skia::COLORREFToSkColor(::GetSysColor(which));
 #else
   NOTIMPLEMENTED();
   return SK_ColorLTGRAY;
@@ -260,4 +266,3 @@ SkColor GetSysSkColor(int which) {
 }
 
 } // namespace color_utils
-

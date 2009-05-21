@@ -7,6 +7,8 @@
 #include "base/basictypes.h"
 #include "base/string_util.h"
 
+using base::TimeDelta;
+
 void URLRequestJobMetrics::AppendText(std::wstring* text) {
   if (!text)
     return;
@@ -21,8 +23,9 @@ void URLRequestJobMetrics::AppendText(std::wstring* text) {
 
   TimeDelta elapsed = end_time_ - start_time_;
   StringAppendF(text,
-      L"; total bytes read = %d; read calls = %d; time = %lld ms;",
-      total_bytes_read_, number_of_read_IO_, elapsed.InMilliseconds());
+      L"; total bytes read = %ld; read calls = %d; time = %lld ms;",
+      static_cast<long>(total_bytes_read_),
+      number_of_read_IO_, elapsed.InMilliseconds());
 
   if (success_) {
     text->append(L" success.");
@@ -30,4 +33,3 @@ void URLRequestJobMetrics::AppendText(std::wstring* text) {
     text->append(L" fail.");
   }
 }
-

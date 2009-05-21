@@ -5,29 +5,35 @@
 #ifndef CHROME_VIEWS_VIEW_H_
 #define CHROME_VIEWS_VIEW_H_
 
-#include <map>
-#include <vector>
+#include "build/build_config.h"
 
-// TODO(maruel):  Remove these once WTL::CRect and WTL::CPoint are no more used.
+#if defined(OS_WIN)
 #include <atlbase.h>
 #include <atlapp.h>
 #include <atlmisc.h>
+#endif  // defined(OS_WIN)
+
+#include <algorithm>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "chrome/views/accelerator.h"
+#include "chrome/views/background.h"
+#include "chrome/views/border.h"
 
 namespace gfx {
 class Insets;
 class Path;
 }
 
-class AccessibleWrapper;
 class ChromeCanvas;
 class OSExchangeData;
-class SkBitmap;
+class ViewAccessibilityWrapper;
 
-namespace ChromeViews {
+namespace views {
 
 class Background;
 class Border;
@@ -37,7 +43,7 @@ class LayoutManager;
 class RestoreFocusTask;
 class RootView;
 class ScrollView;
-class ViewContainer;
+class Widget;
 
 // ContextMenuController is responsible for showing the context menu for a
 // View. To use a ContextMenuController invoke SetContextMenuController on a
@@ -87,8 +93,8 @@ class DragController {
 //
 // View class
 //
-//   A View is a rectangle within the ChromeViews View hierarchy. It is the
-//   base class for all Views.
+//   A View is a rectangle within the views View hierarchy. It is the base
+//   class for all Views.
 //
 //   A View is a container of other Views (there is no such thing as a Leaf
 //   View - makes code simpler, reduces type conversion headaches, design
@@ -140,9 +146,11 @@ class View : public AcceleratorTarget {
   // This is the function subclasses should use whenever they need to obtain
   // the bounds of one of their child views (for example, when implementing
   // View::Layout()).
-  void GetBounds(CRect *out) const {
-    GetBounds(out, IGNORE_MIRRORING_TRANSFORMATION);
-  };
+  // TODO(beng): Convert |bounds_| to a gfx::Rect.
+  gfx::Rect bounds() const { return bounds_; }
+
+  // Get the size of the View.
+  gfx::Size size() const { return bounds_.size(); }
 
   // Return the bounds of the View, relative to the parent. If
   // |settings| is IGNORE_MIRRORING_TRANSFORMATION, the function returns the
@@ -155,31 +163,34 @@ class View : public AcceleratorTarget {
   //       transparent to the View subclasses and therefore you should use the
   //       version of GetBounds() which does not take a transformation settings
   //       parameter.
-  void GetBounds(CRect *out, PositionMirroringSettings settings) const;
+  gfx::Rect GetBounds(PositionMirroringSettings settings) const;
 
   // Set the bounds in the parent's coordinate system.
-  void SetBounds(const CRect& bounds);
-  void SetBounds(int x, int y, int width, int height);
+  void SetBounds(const gfx::Rect& bounds);
+  void SetBounds(int x, int y, int width, int height) {
+    SetBounds(gfx::Rect(x, y, std::max(0, width), std::max(0, height)));
+  }
   void SetX(int x) { SetBounds(x, y(), width(), height()); }
   void SetY(int y) { SetBounds(x(), y, width(), height()); }
 
   // Returns the left coordinate of the View, relative to the parent View,
-  // which is the value of bounds_.left.
+  // which is the value of bounds_.x().
   //
   // This is the function subclasses should use whenever they need to obtain
   // the left position of one of their child views (for example, when
   // implementing View::Layout()).
-  int x() const {
-    // This is equivalent to GetX(IGNORE_MIRRORING_TRANSFORMATION), but
-    // inlinable.
-    return bounds_.left;
-  };
+  // This is equivalent to GetX(IGNORE_MIRRORING_TRANSFORMATION), but
+  // inlinable.
+  int x() const { return bounds_.x(); }
+  int y() const { return bounds_.y(); }
+  int width() const { return bounds_.width(); }
+  int height() const { return bounds_.height(); }
 
   // Return the left coordinate of the View, relative to the parent. If
   // |settings| is IGNORE_MIRRORING_SETTINGS, the function returns the value of
-  // bounds_.left. If |settings| is APPLY_MIRRORING_SETTINGS AND the parent
+  // bounds_.x(). If |settings| is APPLY_MIRRORING_SETTINGS AND the parent
   // View is using a right-to-left UI layout, then the function returns the
-  // mirrored value of bounds_.left.
+  // mirrored value of bounds_.x().
   //
   // NOTE: in the vast majority of the cases, the mirroring implementation is
   //       transparent to the View subclasses and therefore you should use the
@@ -187,40 +198,27 @@ class View : public AcceleratorTarget {
   //       coordinate of a child View.
   int GetX(PositionMirroringSettings settings) const;
 
-  int y() const {
-    return bounds_.top;
-  };
-  int width() const {
-    return bounds_.Width();
-  };
-  int height() const {
-    return bounds_.Height();
-  };
-
   // Return this control local bounds. If include_border is true, local bounds
   // is the rectangle {0, 0, width(), height()}, otherwise, it does not
   // include the area where the border (if any) is painted.
-  void GetLocalBounds(CRect* out, bool include_border) const;
-
-  // Get the size of the View
-  void GetSize(CSize* out) const;
+  gfx::Rect GetLocalBounds(bool include_border) const;
 
   // Get the position of the View, relative to the parent.
   //
   // Note that if the parent uses right-to-left UI layout, then the mirrored
   // position of this View is returned. Use x()/y() if you want to ignore
   // mirroring.
-  void GetPosition(CPoint* out) const;
+  gfx::Point GetPosition() const;
 
   // Get the size the View would like to be, if enough space were available.
-  virtual void GetPreferredSize(CSize* out);
+  virtual gfx::Size GetPreferredSize();
 
   // Convenience method that sizes this view to its preferred size.
   void SizeToPreferredSize();
 
   // Gets the minimum size of the view. View's implementation invokes
   // GetPreferredSize.
-  virtual void GetMinimumSize(CSize* out);
+  virtual gfx::Size GetMinimumSize();
 
   // Return the height necessary to display this view with the provided width.
   // View's implementation returns the value from getPreferredSize.cy.
@@ -230,7 +228,8 @@ class View : public AcceleratorTarget {
 
   // This method is invoked when this object size or position changes.
   // The default implementation does nothing.
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
+  virtual void DidChangeBounds(const gfx::Rect& previous,
+                               const gfx::Rect& current);
 
   // Set whether the receiving view is visible. Painting is scheduled as needed
   virtual void SetVisible(bool flag);
@@ -318,9 +317,9 @@ class View : public AcceleratorTarget {
   //
   // Enabling canvas flipping is useful for leaf views that draw a bitmap that
   // needs to be flipped horizontally when the UI layout is right-to-left
-  // (ChromeViews::Button, for example). This method is helpful for such
-  // classes because their drawing logic stays the same and they can become
-  // agnostic to the UI directionality.
+  // (views::Button, for example). This method is helpful for such classes
+  // because their drawing logic stays the same and they can become agnostic to
+  // the UI directionality.
   void EnableCanvasFlippingForRTLUI(bool enable) {
     flip_canvas_on_paint_for_rtl_ui_ = enable;
   }
@@ -331,7 +330,7 @@ class View : public AcceleratorTarget {
   // UI mirroring is transparent to most View subclasses and therefore there is
   // no need to call this routine from anywhere within your subclass
   // implementation.
-  int View::MirroredX() const;
+  int MirroredX() const;
 
   // Given a rectangle specified in this View's coordinate system, the function
   // computes the 'left' value for the mirrored rectangle within this View. If
@@ -362,7 +361,7 @@ class View : public AcceleratorTarget {
   // Mark the specified rectangle as dirty (needing repaint). If |urgent| is
   // true, the view will be repainted when the current event processing is
   // done. Otherwise, painting will take place as soon as possible.
-  virtual void SchedulePaint(const CRect& r, bool urgent);
+  virtual void SchedulePaint(const gfx::Rect& r, bool urgent);
 
   // Mark the entire View's bounds as dirty. Painting will occur as soon as
   // possible.
@@ -428,10 +427,10 @@ class View : public AcceleratorTarget {
   int GetChildViewCount() const;
 
   // Get the child View at the specified point.
-  virtual View* GetViewForPoint(const CPoint& point);
+  virtual View* GetViewForPoint(const gfx::Point& point);
 
-  // Get the containing ViewContainer
-  virtual ViewContainer* GetViewContainer() const;
+  // Get the Widget that hosts this View, if any.
+  virtual Widget* GetWidget() const;
 
   // Get the containing RootView
   virtual RootView* GetRootView();
@@ -502,8 +501,8 @@ class View : public AcceleratorTarget {
   virtual void SetFocusable(bool focusable);
 
   // Convenience method to retrieve the FocusManager associated with the
-  // container window that contains this view.  This can return NULL if this
-  // view is not part of a view hierarchy with a ViewContainer.
+  // Widget that contains this view.  This can return NULL if this view is not
+  // part of a view hierarchy with a Widget.
   virtual FocusManager* GetFocusManager();
 
   // Sets a keyboard accelerator for that view. When the user presses the
@@ -511,6 +510,9 @@ class View : public AcceleratorTarget {
   // Note that you can set multiple accelerators for a view by invoking this
   // method several times.
   virtual void AddAccelerator(const Accelerator& accelerator);
+
+  // Removes the specified accelerator for this view.
+  virtual void RemoveAccelerator(const Accelerator& accelerator);
 
   // Removes all the keyboard accelerators for this view.
   virtual void ResetAccelerators();
@@ -557,6 +559,9 @@ class View : public AcceleratorTarget {
   // successful.
   virtual bool GetAccessibleName(std::wstring* name) { return false; }
 
+#if defined(OS_WIN)
+  // TODO(port): Make these functions using VARIANT portable.
+
   // Returns the MSAA role of the current view. The role is what assistive
   // technologies (ATs) use to determine what behavior to expect from a given
   // control. Sets the input VARIANT appropriately, and returns true if
@@ -566,6 +571,7 @@ class View : public AcceleratorTarget {
   // Returns the MSAA state of the current view. Sets the input VARIANT
   // appropriately, and returns true if a change was performed successfully.
   virtual bool GetAccessibleState(VARIANT* state) { return false; }
+#endif  // defined(OS_WIN)
 
   // Assigns a keyboard shortcut string description to the given control. Needed
   // as a View does not know which shortcut will be associated with it until it
@@ -580,12 +586,12 @@ class View : public AcceleratorTarget {
   // Returns an instance of a wrapper class implementing the (platform-specific)
   // accessibility interface for a given View. If one exists, it will be
   // re-used, otherwise a new instance will be created.
-  AccessibleWrapper* GetAccessibleWrapper();
+  ViewAccessibilityWrapper* GetViewAccessibilityWrapper();
 
   // Accessor used to determine if a child view (leaf) has accessibility focus.
   // Returns NULL if there are no children, or if none of the children has
   // accessibility focus.
-  virtual ChromeViews::View* GetAccFocusedChildView() { return NULL; }
+  virtual View* GetAccFocusedChildView() { return NULL; }
 
   // Floating views
   //
@@ -670,27 +676,22 @@ class View : public AcceleratorTarget {
   // If source and dst are not in the same View hierarchy, the result is
   // undefined.
   // Source can be NULL in which case it means the screen coordinate system
-  static void ConvertPointToView(View* src,
-                                 View* dst,
+  static void ConvertPointToView(const View* src,
+                                 const View* dst,
                                  gfx::Point* point);
-  // WARNING: DEPRECATED. Will be removed once everything is converted to
-  // gfx::Point. Don't add code that use this overload.
-  static void ConvertPointToView(View* src,
-                                 View* dst,
-                                 CPoint* point);
 
   // Convert a point from the coordinate system of a View to that of the
-  // ViewContainer. This is useful for example when sizing HWND children
-  // of the ViewContainer that don't know about the View hierarchy and need
-  // to be placed relative to the ViewContainer that is their parent.
-  static void ConvertPointToViewContainer(View* src, CPoint* point);
+  // Widget. This is useful for example when sizing HWND children of the
+  // Widget that don't know about the View hierarchy and need to be placed
+  // relative to the Widget that is their parent.
+  static void ConvertPointToWidget(const View* src, gfx::Point* point);
 
-  // Convert a point from a view ViewContainer to a View dest
-  static void ConvertPointFromViewContainer(View *dest, CPoint *p);
+  // Convert a point from a view Widget to a View dest
+  static void ConvertPointFromWidget(const View* dest, gfx::Point* p);
 
   // Convert a point from the coordinate system of a View to that of the
   // screen. This is useful for example when placing popup windows.
-  static void ConvertPointToScreen(View* src, CPoint* point);
+  static void ConvertPointToScreen(const View* src, gfx::Point* point);
 
   // Event Handlers
 
@@ -877,29 +878,39 @@ class View : public AcceleratorTarget {
     return context_menu_controller_;
   }
 
-  // Set the background. The background is owned by the view after this call.
-  virtual void SetBackground(Background* b);
+  // Provides default implementation for context menu handling. The default
+  // implementation calls the ShowContextMenu of the current
+  // ContextMenuController (if it is not NULL). Overridden in subclassed views
+  // to provide right-click menu display triggerd by the keyboard (i.e. for the
+  // Chrome toolbar Back and Forward buttons). No source needs to be specified,
+  // as it is always equal to the current View.
+  virtual void ShowContextMenu(int x,
+                               int y,
+                               bool is_mouse_gesture);
 
-  // Return the background currently in use or NULL.
-  virtual const Background* GetBackground() const;
+  // The background object is owned by this object and may be NULL.
+  void set_background(Background* b) { background_.reset(b); }
+  const Background* background() const { return background_.get(); }
 
-  // Set the border. The border is owned by the view after this call.
-  virtual void SetBorder(Border* b);
-
-  // Return the border currently in use or NULL.
-  virtual const Border* GetBorder() const;
+  // The border object is owned by this object and may be NULL.
+  void set_border(Border* b) { border_.reset(b); }
+  const Border* border() const { return border_.get(); }
 
   // Returns the insets of the current border. If there is no border an empty
   // insets is returned.
   gfx::Insets GetInsets() const;
 
+#if defined(OS_WIN)
+  // TODO(port): Make GetCursorForPoint portable.
+
   // Return the cursor that should be used for this view or NULL if
   // the default cursor should be used. The provided point is in the
   // receiver's coordinate system.
   virtual HCURSOR GetCursorForPoint(Event::EventType event_type, int x, int y);
+#endif  // defined(OS_WIN)
 
   // Convenience to test whether a point is within this view's bounds
-  virtual bool HitTest(const CPoint &l) const;
+  virtual bool HitTest(const gfx::Point& l) const;
 
   // Gets the tooltip for this View. If the View does not have a tooltip,
   // return false. If the View does have a tooltip, copy the tooltip into
@@ -912,7 +923,7 @@ class View : public AcceleratorTarget {
   // Returns the location (relative to this View) for the text on the tooltip
   // to display. If false is returned (the default), the tooltip is placed at
   // a default position.
-  virtual bool GetTooltipTextOrigin(int x, int y, CPoint* loc);
+  virtual bool GetTooltipTextOrigin(int x, int y, gfx::Point* loc);
 
   // Set whether this view is owned by its parent. A view that is owned by its
   // parent is automatically deleted when the parent is deleted. The default is
@@ -928,6 +939,10 @@ class View : public AcceleratorTarget {
   // find out during run time if a view can be safely casted to a specific view
   // subclass. The default implementation returns kViewClassName.
   virtual std::string GetClassName() const;
+
+  // Returns the first ancestor, starting at this, whose class name is |name|.
+  // Returns null if no ancestor has the class name |name|.
+  View* GetAncestorWithClassName(const std::string& name);
 
   // Returns the visible bounds of the receiver in the receivers coordinate
   // system.
@@ -976,10 +991,6 @@ class View : public AcceleratorTarget {
                                      bool is_horizontal, bool is_positive);
 
  protected:
-  // TODO(beng): these members should NOT be protected per style guide.
-  // This View's bounds in the parent coordinate system.
-  CRect bounds_;
-
   // The id of this View. Used to find this View.
   int id_;
 
@@ -988,10 +999,26 @@ class View : public AcceleratorTarget {
   // to find other radio buttons.
   int group_;
 
+  // Called when the UI theme has changed, overriding allows individual Views to
+  // do special cleanup and processing (such as dropping resource caches).
+  // Subclasses that override this method must call the base class
+  // implementation to ensure child views are processed.
+  // Can only be called by subclasses. To dispatch a theme changed notification,
+  // call this method on the RootView.
+  virtual void ThemeChanged();
+
 #ifndef NDEBUG
   // Returns true if the View is currently processing a paint.
   virtual bool IsProcessingPaint() const;
 #endif
+
+  // Returns the location, in screen coordinates, to show the context menu at
+  // when the context menu is shown from the keyboard. This implementation
+  // returns the middle of the visible region of this view.
+  //
+  // This method is invoked when the context menu is shown by way of the
+  // keyboard.
+  virtual gfx::Point GetKeyboardContextMenuLocation();
 
   // Called by HitTest to see if this View has a custom hit test mask. If the
   // return value is true, GetHitTestMask will be called to obtain the mask.
@@ -1028,7 +1055,8 @@ class View : public AcceleratorTarget {
   void TooltipTextChanged();
 
   // Actual implementation of GetViewForPoint.
-  virtual View* GetViewForPoint(const CPoint& point, bool can_create_floating);
+  virtual View* GetViewForPoint(const gfx::Point& point,
+                                bool can_create_floating);
 
   // Sets whether this view wants notification when its visible bounds relative
   // to the root view changes. If true, this view is notified any time the
@@ -1047,13 +1075,9 @@ class View : public AcceleratorTarget {
   // set and gives an opportunity to subclasses to perform any extra focus steps
   // (for example native component set the native focus on their native
   // component). The default behavior is to set the native focus on the root
-  // view container, which is what is appropriate for views that have no native
-  // window associated with them (so the root view gets the keyboard messages).
+  // Widget, which is what is appropriate for views that have no native window
+  // associated with them (so the root view gets the keyboard messages).
   virtual void Focus();
-
-  // Heavyweight views (views that hold a native control) should return the
-  // window for that control.
-  virtual HWND GetNativeControlHWND() { return NULL; }
 
   // Invoked when a key is pressed before the key event is processed by the
   // focus manager for accelerators.  This gives a chance to the view to
@@ -1121,6 +1145,12 @@ class View : public AcceleratorTarget {
     int start_y;
   };
 
+  // Returns how much the mouse needs to move in one direction to start a
+  // drag. These methods cache in a platform-appropriate way. These values are
+  // used by the public static method ExceededDragThreshold().
+  static int GetHorizontalDragThreshold();
+  static int GetVerticalDragThreshold();
+
   // RootView invokes these. These in turn invoke the appropriate OnMouseXXX
   // method. If a drag is detected, DoDrag is invoked.
   bool ProcessMousePressed(const MouseEvent& e, DragInfo* drop_info);
@@ -1130,7 +1160,7 @@ class View : public AcceleratorTarget {
   // Starts a drag and drop operation originating from this view. This invokes
   // WriteDragData to write the data and GetDragOperations to determine the
   // supported drag operations. When done, OnDragDone is invoked.
-  void DoDrag(const ChromeViews::MouseEvent& e, int press_x, int press_y);
+  void DoDrag(const MouseEvent& e, int press_x, int press_y);
 
   // Adds a child View at the specified position. |floating_view| should be true
   // if the |v| is a floating view.
@@ -1162,17 +1192,19 @@ class View : public AcceleratorTarget {
   // Takes care of registering/unregistering accelerators if
   // |register_accelerators| true and calls ViewHierarchyChanged().
   void ViewHierarchyChangedImpl(bool register_accelerators,
-                                bool is_add, View *parent, View *child);
+                                bool is_add,
+                                View* parent,
+                                View* child);
 
   // This is the actual implementation for ConvertPointToView()
   // Attempts a parent -> child conversion and then a
   // child -> parent conversion if try_other_direction is true
-  static void ConvertPointToView(View* src,
-                                 View *dst,
+  static void ConvertPointToView(const View* src,
+                                 const View* dst,
                                  gfx::Point* point,
                                  bool try_other_direction);
 
-  // Propagates UpdateTooltip() to the TooltipManager for the ViewContainer.
+  // Propagates UpdateTooltip() to the TooltipManager for the Widget.
   // This must be invoked any time the View hierarchy changes in such a way
   // the view under the mouse differs. For example, if the bounds of a View is
   // changed, this is invoked. Similarly, as Views are added/removed, this
@@ -1225,6 +1257,9 @@ class View : public AcceleratorTarget {
   // |start| view.
   static View* GetViewForPath(View* start, const std::vector<int>& path);
 
+  // This View's bounds in the parent coordinate system.
+  gfx::Rect bounds_;
+
   // This view's parent
   View *parent_;
 
@@ -1252,10 +1287,10 @@ class View : public AcceleratorTarget {
   bool is_visible_;
 
   // Background
-  Background* background_;
+  scoped_ptr<Background> background_;
 
   // Border.
-  Border* border_;
+  scoped_ptr<Border> border_;
 
   // Whether this view is owned by its parent.
   bool is_parent_owned_;
@@ -1286,8 +1321,10 @@ class View : public AcceleratorTarget {
   // The menu controller.
   ContextMenuController* context_menu_controller_;
 
+#if defined(OS_WIN)
   // The accessibility implementation for this View.
-  scoped_ptr<AccessibleWrapper> accessibility_;
+  scoped_ptr<ViewAccessibilityWrapper> accessibility_;
+#endif
 
   DragController* drag_controller_;
 
@@ -1304,7 +1341,6 @@ class View : public AcceleratorTarget {
   DISALLOW_COPY_AND_ASSIGN(View);
 };
 
-}  // namespace ChromeViews
+}  // namespace views
 
 #endif  // CHROME_VIEWS_VIEW_H_
-

@@ -4,12 +4,14 @@
 
 #include "chrome/views/accelerator.h"
 
+#include <windows.h>
+
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/common/l10n_util.h"
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
 
-namespace ChromeViews {
+namespace views {
 
 std::wstring Accelerator::GetShortcutText() const {
   int string_id = 0;
@@ -41,12 +43,27 @@ std::wstring Accelerator::GetShortcutText() const {
   case VK_DELETE:
     string_id = IDS_DELETE_KEY;
     break;
+  case VK_F1:
+    string_id = IDS_F1_KEY;
+    break;
+  case VK_F11:
+    string_id = IDS_F11_KEY;
+    break;
   }
 
   std::wstring shortcut;
   if (!string_id) {
-    // Our fallback is to try translate the key code to a regular char.
-    wchar_t key = LOWORD(::MapVirtualKeyW(key_code_, MAPVK_VK_TO_CHAR));
+    // Our fallback is to try translate the key code to a regular character
+    // unless it is one of digits (VK_0 to VK_9). Some keyboard
+    // layouts have characters other than digits assigned in
+    // an unshifted mode (e.g. French AZERY layout has 'a with grave
+    // accent' for '0'). For display in the menu (e.g. Ctrl-0 for the
+    // default zoom level), we leave VK_[0-9] alone without translation.
+    wchar_t key;
+    if (key_code_ >= '0' && key_code_ <= '9')
+      key = key_code_;
+    else
+      key = LOWORD(::MapVirtualKeyW(key_code_, MAPVK_VK_TO_CHAR));
     shortcut += key;
   } else {
     shortcut = l10n_util::GetString(string_id);
@@ -94,8 +111,8 @@ std::wstring Accelerator::GetShortcutText() const {
   // string.
   //
   // TODO(idana) bug# 1232732: this hack can be avoided if instead of using
-  // ChromeViews::Menu we use ChromeViews::MenuItemView because the latter is a
-  // View subclass and therefore it supports marking text as RTL or LTR using
+  // views::Menu we use views::MenuItemView because the latter is a View
+  // subclass and therefore it supports marking text as RTL or LTR using
   // standard Unicode directionality marks.
   if (adjust_shortcut_for_rtl) {
     int key_length = static_cast<int>(shortcut_rtl.length());
@@ -110,5 +127,4 @@ std::wstring Accelerator::GetShortcutText() const {
   return shortcut;
 }
 
-}  // namespace ChromeViews
-
+}  // namespace views

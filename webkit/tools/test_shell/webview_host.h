@@ -8,20 +8,19 @@
 #include "base/basictypes.h"
 #include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
-#include "base/scoped_ptr.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
 
 struct WebPreferences;
 class WebView;
 class WebViewDelegate;
 
-// This class is a simple ViewHandle-based host for a WebView
+// This class is a simple NativeView-based host for a WebView
 class WebViewHost : public WebWidgetHost {
  public:
-  // The new instance is deleted once the associated ViewHandle is destroyed.
+  // The new instance is deleted once the associated NativeView is destroyed.
   // The newly created window should be resized after it is created, using the
   // MoveWindow (or equivalent) function.
-  static WebViewHost* Create(gfx::WindowHandle parent_window,
+  static WebViewHost* Create(gfx::NativeView parent_view,
                              WebViewDelegate* delegate,
                              const WebPreferences& prefs);
 

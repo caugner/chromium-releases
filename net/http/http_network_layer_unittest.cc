@@ -2,46 +2,60 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/ref_counted.h"
+#include "net/base/host_resolver_unittest.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_transaction_unittest.h"
+#include "net/proxy/proxy_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
-namespace {
+class HttpNetworkLayerTest : public PlatformTest {
+ public:
+  HttpNetworkLayerTest()
+      : host_mapper_(new net::RuleBasedHostMapper()),
+        scoped_host_mapper_(host_mapper_.get()) {
+    // TODO(darin): kill this exception once we have a way to test out the
+    // HttpNetworkLayer class using loopback connections.
+    host_mapper_->AddRule("www.google.com", "www.google.com");
+  }
 
-class HttpNetworkLayerTest : public testing::Test {
+ private:
+  scoped_refptr<net::RuleBasedHostMapper> host_mapper_;
+  net::ScopedHostMapper scoped_host_mapper_;
 };
 
-}  // namespace
-
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
-  net::HttpNetworkLayer factory(NULL);
+  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
+  net::HttpNetworkLayer factory(proxy_service.get());
 
-  net::HttpTransaction* trans = factory.CreateTransaction();
-  trans->Destroy();
+  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
 }
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
-  net::HttpNetworkLayer factory(NULL);
+  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
+  net::HttpNetworkLayer factory(proxy_service.get());
 
-  net::HttpTransaction* trans = factory.CreateTransaction();
-  trans->Destroy();
+  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
+  trans.reset();
 
   factory.Suspend(true);
 
-  trans = factory.CreateTransaction();
+  trans.reset(factory.CreateTransaction());
   ASSERT_TRUE(trans == NULL);
 
   factory.Suspend(false);
 
-  trans = factory.CreateTransaction();
-  trans->Destroy();
+  trans.reset(factory.CreateTransaction());
 }
 
 TEST_F(HttpNetworkLayerTest, GoogleGET) {
-  net::HttpNetworkLayer factory(NULL);
+  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
+  net::HttpNetworkLayer factory(proxy_service.get());
+
   TestCompletionCallback callback;
 
-  net::HttpTransaction* trans = factory.CreateTransaction();
+  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
 
   net::HttpRequestInfo request_info;
   request_info.url = GURL("http://www.google.com/");
@@ -55,9 +69,6 @@ TEST_F(HttpNetworkLayerTest, GoogleGET) {
   EXPECT_EQ(net::OK, rv);
 
   std::string contents;
-  rv = ReadTransaction(trans, &contents);
+  rv = ReadTransaction(trans.get(), &contents);
   EXPECT_EQ(net::OK, rv);
-
-  trans->Destroy();
 }
-

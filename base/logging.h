@@ -10,7 +10,6 @@
 #include <sstream>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
 
 //
 // Optional message capabilities
@@ -77,18 +76,24 @@
 // We also override the standard 'assert' to use 'DLOG_ASSERT'.
 //
 // The supported severity levels for macros that allow you to specify one
-// are (in increasing order of severity) INFO, WARNING, ERROR, and FATAL.
-//
-// There is also the special severity of DFATAL, which logs FATAL in
-// debug mode, ERROR in normal mode.
+// are (in increasing order of severity) INFO, WARNING, ERROR, ERROR_REPORT,
+// and FATAL.
 //
 // Very important: logging a message at the FATAL severity level causes
 // the program to terminate (after the message is logged).
+//
+// Note the special severity of ERROR_REPORT only available/relevant in normal
+// mode, which displays error dialog without terminating the program. There is
+// no error dialog for severity ERROR or below in normal mode.
+//
+// There is also the special severity of DFATAL, which logs FATAL in
+// debug mode, ERROR_REPORT in normal mode.
 
 namespace logging {
 
 // Where to record logging output? A flat file and/or system debug log via
-// OutputDebugString. Defaults to LOG_ONLY_TO_FILE.
+// OutputDebugString. Defaults on Windows to LOG_ONLY_TO_FILE, and on
+// POSIX to LOG_ONLY_TO_SYSTEM_DEBUG_LOG (aka stderr).
 enum LoggingDestination { LOG_NONE,
                           LOG_ONLY_TO_FILE,
                           LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
@@ -150,22 +155,29 @@ void SetLogItems(bool enable_process_id, bool enable_thread_id,
                  bool enable_timestamp, bool enable_tickcount);
 
 // Sets the Log Assert Handler that will be used to notify of check failures.
-// The default handler shows a dialog box, however clients can use this
-// function to override with their own handling (e.g. a silent one for Unit
-// Tests)
+// The default handler shows a dialog box and then terminate the process,
+// however clients can use this function to override with their own handling
+// (e.g. a silent one for Unit Tests)
 typedef void (*LogAssertHandlerFunction)(const std::string& str);
 void SetLogAssertHandler(LogAssertHandlerFunction handler);
+// Sets the Log Report Handler that will be used to notify of check failures
+// in non-debug mode. The default handler shows a dialog box and continues
+// the execution, however clients can use this function to override with their
+// own handling.
+typedef void (*LogReportHandlerFunction)(const std::string& str);
+void SetLogReportHandler(LogReportHandlerFunction handler);
 
 typedef int LogSeverity;
 const LogSeverity LOG_INFO = 0;
 const LogSeverity LOG_WARNING = 1;
 const LogSeverity LOG_ERROR = 2;
-const LogSeverity LOG_FATAL = 3;
-const LogSeverity LOG_NUM_SEVERITIES = 4;
+const LogSeverity LOG_ERROR_REPORT = 3;
+const LogSeverity LOG_FATAL = 4;
+const LogSeverity LOG_NUM_SEVERITIES = 5;
 
-// LOG_DFATAL_LEVEL is LOG_FATAL in debug mode, ERROR in normal mode
+// LOG_DFATAL_LEVEL is LOG_FATAL in debug mode, ERROR_REPORT in normal mode
 #ifdef NDEBUG
-const LogSeverity LOG_DFATAL_LEVEL = LOG_ERROR;
+const LogSeverity LOG_DFATAL_LEVEL = LOG_ERROR_REPORT;
 #else
 const LogSeverity LOG_DFATAL_LEVEL = LOG_FATAL;
 #endif
@@ -179,6 +191,8 @@ const LogSeverity LOG_DFATAL_LEVEL = LOG_FATAL;
   logging::LogMessage(__FILE__, __LINE__, logging::LOG_WARNING)
 #define COMPACT_GOOGLE_LOG_ERROR \
   logging::LogMessage(__FILE__, __LINE__, logging::LOG_ERROR)
+#define COMPACT_GOOGLE_LOG_ERROR_REPORT \
+  logging::LogMessage(__FILE__, __LINE__, logging::LOG_ERROR_REPORT)
 #define COMPACT_GOOGLE_LOG_FATAL \
   logging::LogMessage(__FILE__, __LINE__, logging::LOG_FATAL)
 #define COMPACT_GOOGLE_LOG_DFATAL \
@@ -244,7 +258,9 @@ std::string* MakeCheckOpString(const t1& v1, const t2& v2, const char* names) {
 extern std::string* MakeCheckOpStringIntInt(int v1, int v2, const char* names);
 
 template<int, int>
-std::string* MakeCheckOpString(const int& v1, const int& v2, const char* names) {
+std::string* MakeCheckOpString(const int& v1,
+                               const int& v2,
+                               const char* names) {
   return MakeCheckOpStringIntInt(v1, v2, names);
 }
 
@@ -257,7 +273,66 @@ std::string* MakeCheckOpString(const int& v1, const int& v2, const char* names) 
 //     foo.CheckThatFoo();
 //   #endif
 
+#ifdef OFFICIAL_BUILD
+// We want to have optimized code for an official build so we remove DLOGS and
+// DCHECK from the executable.
+
+#define DLOG(severity) \
+  true ? (void) 0 : logging::LogMessageVoidify() & LOG(severity)
+
+#define DLOG_IF(severity, condition) \
+  true ? (void) 0 : logging::LogMessageVoidify() & LOG(severity)
+
+#define DLOG_ASSERT(condition) \
+  true ? (void) 0 : LOG_ASSERT(condition)
+
+enum { DEBUG_MODE = 0 };
+
+// This macro can be followed by a sequence of stream parameters in
+// non-debug mode. The DCHECK and friends macros use this so that
+// the expanded expression DCHECK(foo) << "asdf" is still syntactically
+// valid, even though the expression will get optimized away.
+// In order to avoid variable unused warnings for code that only uses a
+// variable in a CHECK, we make sure to use the macro arguments.
+#define NDEBUG_EAT_STREAM_PARAMETERS \
+  logging::LogMessage(__FILE__, __LINE__).stream()
+
+#define DCHECK(condition) \
+  while (false && (condition)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_EQ(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_NE(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_LE(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_LT(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_GE(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_GT(val1, val2) \
+  while (false && (val1) == (val2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_STREQ(str1, str2) \
+  while (false && (str1) == (str2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_STRCASEEQ(str1, str2) \
+  while (false && (str1) == (str2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_STRNE(str1, str2) \
+  while (false && (str1) == (str2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#define DCHECK_STRCASENE(str1, str2) \
+  while (false && (str1) == (str2)) NDEBUG_EAT_STREAM_PARAMETERS
+
+#else
 #ifndef NDEBUG
+// On a regular debug build, we want to have DCHECKS and DLOGS enabled.
 
 #define DLOG(severity) LOG(severity)
 #define DLOG_IF(severity, condition) LOG_IF(severity, condition)
@@ -311,7 +386,8 @@ DECLARE_DCHECK_STROP_IMPL(_stricmp, false)
 #define DCHECK_BOUND(B,A) DCHECK(B <= (sizeof(A)/sizeof(A[0])))
 
 #else  // NDEBUG
-
+// On a regular release build we want to be able to enable DCHECKS through the
+// command line.
 #define DLOG(severity) \
   true ? (void) 0 : logging::LogMessageVoidify() & LOG(severity)
 
@@ -334,7 +410,7 @@ enum { DEBUG_MODE = 0 };
 extern bool g_enable_dcheck;
 #define DCHECK(condition) \
     !logging::g_enable_dcheck ? void (0) : \
-        LOG_IF(FATAL, !(condition)) << "Check failed: " #condition ". "
+        LOG_IF(ERROR_REPORT, !(condition)) << "Check failed: " #condition ". "
 
 // Helper macro for binary operators.
 // Don't use this macro directly in your code, use DCHECK_EQ et al below.
@@ -342,7 +418,8 @@ extern bool g_enable_dcheck;
   if (logging::g_enable_dcheck) \
     if (logging::CheckOpString _result = \
         logging::Check##name##Impl((val1), (val2), #val1 " " #op " " #val2)) \
-      logging::LogMessage(__FILE__, __LINE__, _result).stream()
+      logging::LogMessage(__FILE__, __LINE__, logging::LOG_ERROR_REPORT, \
+                          _result).stream()
 
 #define DCHECK_STREQ(str1, str2) \
   while (false) NDEBUG_EAT_STREAM_PARAMETERS
@@ -406,6 +483,7 @@ DEFINE_DCHECK_OP_IMPL(GT, > )
 #define DCHECK_GE(val1, val2) DCHECK_OP(GE, >=, val1, val2)
 #define DCHECK_GT(val1, val2) DCHECK_OP(GT, > , val1, val2)
 
+#endif  // OFFICIAL_BUILD
 
 #define NOTREACHED() DCHECK(false)
 
@@ -445,6 +523,11 @@ class LogMessage {
   // A special constructor used for check failures.
   // Implied severity = LOG_FATAL
   LogMessage(const char* file, int line, const CheckOpString& result);
+
+  // A special constructor used for check failures, with the option to
+  // specify severity.
+  LogMessage(const char* file, int line, LogSeverity severity,
+             const CheckOpString& result);
 
   ~LogMessage();
 
@@ -513,6 +596,14 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 #define NOTIMPLEMENTED_POLICY 4
 #endif
 
+#if defined(COMPILER_GCC)
+// On Linux, with GCC, we can use __PRETTY_FUNCTION__ to get the demangled name
+// of the current function in the NOTIMPLEMENTED message.
+#define NOTIMPLEMENTED_MSG "Not implemented reached in " << __PRETTY_FUNCTION__
+#else
+#define NOTIMPLEMENTED_MSG "NOT IMPLEMENTED"
+#endif
+
 #if NOTIMPLEMENTED_POLICY == 0
 #define NOTIMPLEMENTED() ;
 #elif NOTIMPLEMENTED_POLICY == 1
@@ -523,13 +614,12 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 #elif NOTIMPLEMENTED_POLICY == 3
 #define NOTIMPLEMENTED() NOTREACHED()
 #elif NOTIMPLEMENTED_POLICY == 4
-#define NOTIMPLEMENTED() LOG(ERROR) << "NOT IMPLEMENTED!"
+#define NOTIMPLEMENTED() LOG(ERROR) << NOTIMPLEMENTED_MSG
 #elif NOTIMPLEMENTED_POLICY == 5
 #define NOTIMPLEMENTED() do {\
   static int count = 0;\
-  LOG_IF(ERROR, 0 == count++) << "NOT IMPLEMENTED!";\
+  LOG_IF(ERROR, 0 == count++) << NOTIMPLEMENTED_MSG;\
 } while(0)
 #endif
 
 #endif  // BASE_LOGGING_H_
-

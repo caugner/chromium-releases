@@ -7,9 +7,7 @@
 
 #include "build/build_config.h"
 
-#ifdef UNIT_TEST
 #include <iostream>
-#endif
 
 #if defined(OS_WIN)
 typedef struct tagPOINT POINT;
@@ -45,6 +43,11 @@ class Point {
   void set_x(int x) { x_ = x; }
   void set_y(int y) { y_ = y; }
 
+  void Offset(int delta_x, int delta_y) {
+    x_ += delta_x;
+    y_ += delta_y;
+  }
+
   bool operator==(const Point& rhs) const {
     return x_ == rhs.x_ && y_ == rhs.y_;
   }
@@ -66,13 +69,8 @@ class Point {
 
 }  // namespace gfx
 
-#ifdef UNIT_TEST
-
 inline std::ostream& operator<<(std::ostream& out, const gfx::Point& p) {
   return out << p.x() << "," << p.y();
 }
 
-#endif  // #ifdef UNIT_TEST
-
 #endif // BASE_GFX_POINT_H__
-

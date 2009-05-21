@@ -8,26 +8,28 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "net/base/auth.h"
+#include "base/scoped_ptr.h"
 #include "net/base/filter.h"
 #include "net/base/load_states.h"
-#include "net/url_request/url_request_status.h"
 
 namespace net {
+class AuthChallengeInfo;
 class HttpResponseInfo;
+class IOBuffer;
 class UploadData;
 }
 
 class GURL;
 class URLRequest;
+class URLRequestStatus;
 class URLRequestJobMetrics;
 
 // The URLRequestJob is using RefCounterThreadSafe because some sub classes
 // can be destroyed on multiple threads. This is the case of the
 // UrlRequestFileJob.
-class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
+class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
+                      public FilterContext {
  public:
   explicit URLRequestJob(URLRequest* request);
   virtual ~URLRequestJob();
@@ -78,18 +80,13 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   // bytes read, 0 when there is no more data, or -1 if there was an error.
   // This is just the backend for URLRequest::Read, see that function for more
   // info.
-  bool Read(char* buf, int buf_size, int *bytes_read);
+  bool Read(net::IOBuffer* buf, int buf_size, int *bytes_read);
 
   // Called to fetch the current load state for the job.
   virtual net::LoadState GetLoadState() const { return net::LOAD_STATE_IDLE; }
 
   // Called to get the upload progress in bytes.
   virtual uint64 GetUploadProgress() const { return 0; }
-
-  // Called to fetch the mime_type for this request.  Only makes sense for some
-  // types of requests. Returns true on success.  Calling this on a type that
-  // doesn't have a mime type will return false.
-  virtual bool GetMimeType(std::string* mime_type) { return false; }
 
   // Called to fetch the charset for this request.  Only makes sense for some
   // types of requests. Returns true on success.  Calling this on a type that
@@ -114,14 +111,20 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   // some types of requests. Returns true on success. Calling this on a request
   // that doesn't have or specify an encoding type will return false.
   // Returns a array of strings showing the sequential encodings used on the
-  // content.  For example, types[0] = "sdch" and types[1] = gzip, means the
-  // content was first encoded by sdch, and then encoded by gzip.  To decode,
-  // a series of filters must be applied in the reverse order (in the above
-  // example, ungzip first, and then sdch expand).
-  // TODO(jar): Cleaner API would return an array of enums.
-  virtual bool GetContentEncodings(std::vector<std::string>* encoding_types) {
+  // content.
+  // For example, encoding_types[0] = FILTER_TYPE_SDCH and encoding_types[1] =
+  // FILTER_TYPE_GZIP, means the content was first encoded by sdch, and then
+  // result was encoded by gzip.  To decode, a series of filters must be applied
+  // in the reverse order (in the above example, ungzip first, and then sdch
+  // expand).
+  virtual bool GetContentEncodings(
+      std::vector<Filter::FilterType>* encoding_types) {
     return false;
   }
+
+  // Find out if this is a response to a request that advertised an SDCH
+  // dictionary.  Only makes sense for some types of requests.
+  virtual bool IsSdchResponse() const { return false; }
 
   // Called to setup stream filter for this request. An example of filter is
   // content encoding/decoding.
@@ -158,14 +161,6 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   virtual void GetAuthChallengeInfo(
       scoped_refptr<net::AuthChallengeInfo>* auth_info);
 
-  // Returns cached auth data for the auth challenge.  Returns NULL if there
-  // is no auth cache or if the auth cache doesn't have the auth data for
-  // the auth challenge.
-  virtual void GetCachedAuthData(const net::AuthChallengeInfo& auth_info,
-                                 scoped_refptr<net::AuthData>* auth_data) {
-    *auth_data = NULL;
-  }
-
   // Resend the request with authentication credentials.
   virtual void SetAuth(const std::wstring& username,
                        const std::wstring& password);
@@ -194,6 +189,18 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
     expected_content_size_ = size;
   }
 
+  // Whether we have processed the response for that request yet.
+  bool has_response_started() const { return has_handled_response_; }
+
+  // FilterContext methods:
+  // These methods are not applicable to all connections.
+  virtual bool GetMimeType(std::string* mime_type) const { return false; }
+  virtual int64 GetByteReadCount() const;
+  virtual bool GetURL(GURL* gurl) const;
+  virtual base::Time GetRequestTime() const;
+  virtual bool IsCachedContent() const;
+  virtual int GetInputStreamBufferSize() const { return kFilterBufSize; }
+
  protected:
   // Notifies the job that headers have been received.
   void NotifyHeadersComplete();
@@ -202,13 +209,13 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   void NotifyReadComplete(int bytes_read);
 
   // Notifies the request that a start error has occurred.
-  void NotifyStartError(const URLRequestStatus &status);
+  void NotifyStartError(const URLRequestStatus& status);
 
   // NotifyDone marks when we are done with a request.  It is really
   // a glorified set_status, but also does internal state checking and
   // job tracking.  It should be called once per request, when the job is
   // finished doing all IO.
-  void NotifyDone(const URLRequestStatus &status);
+  void NotifyDone(const URLRequestStatus& status);
 
   // Some work performed by NotifyDone must be completed on a separate task
   // so as to avoid re-entering the delegate.  This method exists to perform
@@ -233,7 +240,7 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   // If async IO is pending, the status of the request will be
   // URLRequestStatus::IO_PENDING, and buf must remain available until the
   // operation is completed.  See comments on URLRequest::Read for more info.
-  virtual bool ReadRawData(char* buf, int buf_size, int *bytes_read);
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
 
   // Informs the filter that data has been read into its buffer
   void FilteredDataRead(int bytes_read);
@@ -252,7 +259,7 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   const URLRequestStatus GetStatus();
 
   // Set the status of the job.
-  void SetStatus(const URLRequestStatus &status);
+  void SetStatus(const URLRequestStatus& status);
 
   // Whether the job is doing performance profiling
   bool is_profiling_;
@@ -261,6 +268,9 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   scoped_ptr<URLRequestJobMetrics> metrics_;
 
  private:
+  // Size of filter input buffers used by this class.
+  static const int kFilterBufSize;
+
   // When data filtering is enabled, this function is used to read data
   // for the filter.  Returns true if raw data was read.  Returns false if
   // an error occurred (or we are waiting for IO to complete).
@@ -287,11 +297,16 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
 
   // The data stream filter which is enabled on demand.
   scoped_ptr<Filter> filter_;
+
+  // If the filter filled its output buffer, then there is a change that it
+  // still has internal data to emit, and this flag is set.
+  bool filter_needs_more_output_space_;
+
   // When we filter data, we receive data into the filter buffers.  After
   // processing the filtered data, we return the data in the caller's buffer.
   // While the async IO is in progress, we save the user buffer here, and
   // when the IO completes, we fill this in.
-  char *read_buffer_;
+  net::IOBuffer *read_buffer_;
   int read_buffer_len_;
 
   // Used by HandleResponseIfNecessary to track whether we've sent the
@@ -301,8 +316,12 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob> {
   // Expected content size
   int64 expected_content_size_;
 
+  // Total number of bytes read from network (or cache) and and typically handed
+  // to filter to process.  Used to histogram compression ratios, and error
+  // recovery scenarios in filters.
+  int64 filter_input_byte_count_;
+
   DISALLOW_COPY_AND_ASSIGN(URLRequestJob);
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_JOB_H_
-

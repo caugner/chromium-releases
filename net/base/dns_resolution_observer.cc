@@ -5,10 +5,9 @@
 // This file supports network stack independent notification of progress
 // towards resolving a hostname.
 
-#include <windows.h>
-#include <string>
-
 #include "net/base/dns_resolution_observer.h"
+
+#include <string>
 
 #include "base/logging.h"
 
@@ -20,10 +19,7 @@ void AddDnsResolutionObserver(DnsResolutionObserver* new_observer) {
   if (new_observer == dns_resolution_observer)
     return;  // Facilitate unit tests that init/teardown repeatedly.
   DCHECK(!dns_resolution_observer);
-  if (InterlockedCompareExchangePointer(
-          reinterpret_cast<PVOID*>(&dns_resolution_observer),
-          new_observer, NULL))
-    DCHECK(0) << "Second attempt to setup observer";
+  dns_resolution_observer = new_observer;
 }
 
 DnsResolutionObserver* RemoveDnsResolutionObserver() {
@@ -51,12 +47,14 @@ void DidStartDnsResolution(const std::string& name, void* context) {
     current_observer->OnStartResolution(name, context);
 }
 
-void DidFinishDnsResolutionWithStatus(bool was_resolved, void* context) {
+void DidFinishDnsResolutionWithStatus(bool was_resolved,
+                                      const GURL& referrer,
+                                      void* context) {
   DnsResolutionObserver* current_observer = dns_resolution_observer;
   if (current_observer) {
-    current_observer->OnFinishResolutionWithStatus(was_resolved, context);
+    current_observer->OnFinishResolutionWithStatus(was_resolved, referrer,
+                                                   context);
   }
 }
 
 }  // namspace net
-

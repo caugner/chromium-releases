@@ -5,9 +5,10 @@
 #include "chrome/browser/hang_monitor/hung_window_detector.h"
 
 #include <windows.h>
+#include <atlbase.h>
 
 #include "base/logging.h"
-#include "chrome/app/result_codes.h"
+#include "chrome/common/result_codes.h"
 
 // How long do we wait for the terminated thread or process to die (in ms)
 static const int kTerminateTimeout = 2000;
@@ -154,7 +155,6 @@ bool HungWindowDetector::CheckChildWindow(HWND child_window) {
         }
       }
     } else {
-      DCHECK(IsHungAppWindow(child_window) == false);
       RemoveProp(child_window, kHungChildWindowTimeout);
     }
   }
@@ -173,5 +173,3 @@ BOOL CALLBACK HungWindowDetector::ChildWndEnumProc(HWND child_window,
 
   return detector_instance->CheckChildWindow(child_window);
 }
-
-

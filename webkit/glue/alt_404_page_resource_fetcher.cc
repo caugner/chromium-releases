@@ -4,9 +4,11 @@
 
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "DocumentLoader.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 #undef LOG
 
 #include "webkit/glue/alt_404_page_resource_fetcher.h"
@@ -27,7 +29,7 @@ Alt404PageResourceFetcher::Alt404PageResourceFetcher(
     const GURL& url)
     : webframeloaderclient_(webframeloaderclient),
       doc_loader_(doc_loader) {
-  
+
   fetcher_.reset(new ResourceFetcherWithTimeout(url, frame,
                                                 kDownloadTimeoutSec, this));
 }
@@ -43,4 +45,3 @@ void Alt404PageResourceFetcher::OnURLFetchComplete(
   }
   doc_loader_ = NULL;
 }
-

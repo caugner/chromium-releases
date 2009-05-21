@@ -6,20 +6,22 @@
 
 #include <set>
 
-#include "base/gfx/platform_device_win.h"
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "chrome/browser/printing/page_number.h"
 #include "chrome/browser/printing/page_overlays.h"
 #include "chrome/browser/printing/printed_pages_source.h"
 #include "chrome/browser/printing/printed_page.h"
-#include "chrome/browser/printing/units.h"
 #include "chrome/common/gfx/chrome_font.h"
 #include "chrome/common/gfx/emf.h"
-#include "chrome/common/gfx/url_elider.h"
+#include "chrome/common/gfx/text_elider.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/win_util.h"
+#include "printing/units.h"
+#include "skia/ext/platform_device.h"
+
+using base::Time;
 
 namespace printing {
 
@@ -58,7 +60,7 @@ void PrintedDocument::SetPage(int page_number, gfx::Emf* emf, double shrink) {
     }
   }
   NotificationService::current()->Notify(
-      NOTIFY_PRINTED_DOCUMENT_UPDATED,
+      NotificationType::PRINTED_DOCUMENT_UPDATED,
       Source<PrintedDocument>(this),
       Details<PrintedPage>(page));
 }
@@ -89,7 +91,7 @@ bool PrintedDocument::GetPage(int page_number,
 
 void PrintedDocument::RenderPrintedPage(const PrintedPage& page,
                                         HDC context) const {
-#ifdef _DEBUG
+#ifndef NDEBUG
   {
     // Make sure the page is from our list.
     AutoLock lock(lock_);
@@ -101,7 +103,7 @@ void PrintedDocument::RenderPrintedPage(const PrintedPage& page,
   // the device context.
   int saved_state = SaveDC(context);
   DCHECK_NE(saved_state, 0);
-  gfx::PlatformDeviceWin::InitializeDC(context);
+  skia::PlatformDeviceWin::InitializeDC(context);
   {
     // Save the state (again) to apply the necessary world transformation.
     int saved_state = SaveDC(context);
@@ -243,7 +245,7 @@ void PrintedDocument::set_page_count(int max_page) {
     }
   }
   NotificationService::current()->Notify(
-      NOTIFY_PRINTED_DOCUMENT_UPDATED,
+      NotificationType::PRINTED_DOCUMENT_UPDATED,
       Source<PrintedDocument>(this),
       NotificationService::NoDetails());
 }
@@ -309,8 +311,13 @@ void PrintedDocument::PrintHeaderFooter(HDC context,
       break;
   }
 
-  if (string_size.width() > bounding.width())
-    output = gfx::ElideText(output, font, bounding.width());
+  if (string_size.width() > bounding.width()) {
+    if (line == PageOverlays::kUrl) {
+      output = gfx::ElideUrl(url(), font, bounding.width(), std::wstring());
+    } else {
+      output = gfx::ElideText(output, font, bounding.width());
+    }
+  }
 
   // Save the state (again) for the clipping region.
   int saved_state = SaveDC(context);
@@ -337,12 +344,7 @@ void PrintedDocument::PrintPage_ThreadJump(int page_number) {
       AutoLock lock(lock_);
       source = mutable_.source_;
     }
-    if (source) {
-      // Don't render with the lock held.
-      source->RenderOnePrintedPage(this, page_number);
-    } else {
-      // Printing has probably been canceled already.
-    }
+    NOTREACHED();
   }
 }
 
@@ -376,4 +378,3 @@ PrintedDocument::Immutable::Immutable(const PrintSettings& settings,
 }
 
 }  // namespace printing
-

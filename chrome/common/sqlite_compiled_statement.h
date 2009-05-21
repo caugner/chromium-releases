@@ -10,7 +10,7 @@
 
 #include "chrome/common/sqlite_utils.h"
 
-#include "third_party/sqlite/sqlite3.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 
 // Stores a list of precompiled sql statements for a database. Each statement
 // is given a unique name by the caller.
@@ -132,4 +132,3 @@ class SqliteCompiledStatement {
     SqliteCompiledStatement var_name(__FILE__, __LINE__, cache, sql)
 
 #endif  // CHROME_COMMON_SQLITE_COMPILED_STATEMENT_
-

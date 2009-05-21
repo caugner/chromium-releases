@@ -4,23 +4,23 @@
 
 #include "chrome/browser/views/first_run_view.h"
 
-#include "chrome/app/locales/locale_settings.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/first_run.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/views/first_run_customize_view.h"
 #include "chrome/browser/views/standard_layout.h"
-#include "chrome/browser/user_metrics.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/image_view.h"
-#include "chrome/views/label.h"
-#include "chrome/views/throbber.h"
-#include "chrome/views/separator.h"
-#include "chrome/views/window.h"
-
-#include "chromium_strings.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/button/checkbox.h"
+#include "chrome/views/controls/image_view.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/throbber.h"
+#include "chrome/views/controls/separator.h"
+#include "chrome/views/window/window.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
 
 namespace {
 
@@ -52,8 +52,10 @@ FirstRunView::~FirstRunView() {
 }
 
 void FirstRunView::SetupControls() {
-  using ChromeViews::Label;
-  using ChromeViews::Link;
+  using views::Label;
+  using views::Link;
+
+  default_browser_->SetIsSelected(true);
 
   welcome_label_ = new Label(l10n_util::GetString(IDS_FIRSTRUN_DLG_TEXT));
   welcome_label_->SetMultiLine(true);
@@ -91,11 +93,10 @@ void FirstRunView::SetupControls() {
   AddChildView(customize_link_);
 }
 
-void FirstRunView::GetPreferredSize(CSize *out) {
-  DCHECK(out);
-  *out = ChromeViews::Window::GetLocalizedContentsSize(
+gfx::Size FirstRunView::GetPreferredSize() {
+  return gfx::Size(views::Window::GetLocalizedContentsSize(
       IDS_FIRSTRUN_DIALOG_WIDTH_CHARS,
-      IDS_FIRSTRUN_DIALOG_HEIGHT_LINES).ToSIZE();
+      IDS_FIRSTRUN_DIALOG_HEIGHT_LINES));
 }
 
 void FirstRunView::Layout() {
@@ -104,21 +105,20 @@ void FirstRunView::Layout() {
   const int kVertSpacing = 8;
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
-  CSize pref_size;
-  welcome_label_->GetPreferredSize(&pref_size);
+  gfx::Size pref_size = welcome_label_->GetPreferredSize();
   // Wrap the label text before we overlap the product icon.
   int label_width = background_image()->width() -
       rb.GetBitmapNamed(IDR_WIZARD_ICON)->width() - kPanelHorizMargin;
   welcome_label_->SetBounds(kPanelHorizMargin, kPanelVertMargin,
-                            label_width, pref_size.cy);
+                            label_width, pref_size.height());
   AdjustDialogWidth(welcome_label_);
 
   int next_v_space = background_image()->y() +
                      background_image()->height() + kPanelVertMargin;
 
-  actions_label_->GetPreferredSize(&pref_size);
+  pref_size = actions_label_->GetPreferredSize();
   actions_label_->SetBounds(kPanelHorizMargin, next_v_space,
-                            pref_size.cx, pref_size.cy);
+                            pref_size.width(), pref_size.height());
   AdjustDialogWidth(actions_label_);
 
   next_v_space = actions_label_->y() +
@@ -142,27 +142,23 @@ void FirstRunView::Layout() {
                  actions_shorcuts_->height() +
                  kUnrelatedControlVerticalSpacing;
 
-  customize_link_->GetPreferredSize(&pref_size);
+  pref_size = customize_link_->GetPreferredSize();
   customize_link_->SetBounds(kPanelHorizMargin, next_v_space,
-                             pref_size.cx, pref_size.cy);
-}
-
-std::wstring FirstRunView::GetDialogButtonLabel(DialogButton button) const {
-  if (DIALOGBUTTON_OK == button)
-      return l10n_util::GetString(IDS_FIRSTRUN_DLG_OK);
-  // The other buttons get the default text.
-  return std::wstring();
+                             pref_size.width(), pref_size.height());
 }
 
 void FirstRunView::OpenCustomizeDialog() {
   // The customize dialog now owns the importer host object.
-  ChromeViews::Window::CreateChromeWindow(
-      window()->GetHWND(),
+  views::Window::CreateChromeWindow(
+      window()->GetNativeWindow(),
       gfx::Rect(),
-      new FirstRunCustomizeView(profile_, importer_host_, this))->Show();
+      new FirstRunCustomizeView(profile_,
+                                importer_host_,
+                                this,
+                                default_browser_->IsSelected()))->Show();
 }
 
-void FirstRunView::LinkActivated(ChromeViews::Link* source, int event_flags) {
+void FirstRunView::LinkActivated(views::Link* source, int event_flags) {
   OpenCustomizeDialog();
 }
 
@@ -170,7 +166,7 @@ std::wstring FirstRunView::GetWindowTitle() const {
   return l10n_util::GetString(IDS_FIRSTRUN_DLG_TITLE);
 }
 
-ChromeViews::View* FirstRunView::GetContentsView() {
+views::View* FirstRunView::GetContentsView() {
   return this;
 }
 
@@ -182,9 +178,11 @@ bool FirstRunView::Accept() {
   customize_link_->SetEnabled(false);
   CreateDesktopShortcut();
   CreateQuickLaunchShortcut();
+  if (default_browser_->IsSelected())
+    SetDefaultBrowser();
   // Index 0 is the default browser.
   FirstRun::ImportSettings(profile_, 0, GetDefaultImportItems(),
-                           window()->GetHWND());
+                           window()->GetNativeWindow());
   UserMetrics::RecordAction(L"FirstRunDef_Accept", profile_);
 
   return true;
@@ -205,4 +203,3 @@ void FirstRunView::CustomizeAccepted() {
 void FirstRunView::CustomizeCanceled() {
   UserMetrics::RecordAction(L"FirstRunCustom_Cancel", profile_);
 }
-

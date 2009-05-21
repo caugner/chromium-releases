@@ -8,9 +8,12 @@
 
 #include "base/registry.h"
 #include "base/scoped_ptr.h"
+#include "base/file_util.h"
+#include "chrome/common/json_value_serializer.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_chrome_distribution.h"
+#include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/work_item_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,13 +29,13 @@ class GoogleChromeDistributionTest : public testing::Test {
   }
 
   // Creates "ap" key with the value given as parameter. Also adds work
-  // items to work_item_list given so that they can be rollbed back later.
+  // items to work_item_list given so that they can be rolled back later.
   bool CreateApKey(WorkItemList* work_item_list, std::wstring value) {
     HKEY reg_root = HKEY_CURRENT_USER;
     std::wstring reg_key = GetApKeyPath();
     work_item_list->AddCreateRegKeyWorkItem(reg_root, reg_key);
     work_item_list->AddSetRegValueWorkItem(reg_root, reg_key,
-        google_update::kRegApFieldName, value.c_str(), true);
+        google_update::kRegApField, value.c_str(), true);
     if (!work_item_list->Do()) {
       work_item_list->Rollback();
       return false;
@@ -53,8 +56,8 @@ class GoogleChromeDistributionTest : public testing::Test {
     RegKey key;
     std::wstring ap_key_value;
     std::wstring reg_key = GetApKeyPath();
-    if (key.Open(HKEY_CURRENT_USER, reg_key.c_str(), KEY_ALL_ACCESS) && 
-        key.ReadValue(google_update::kRegApFieldName, &ap_key_value)) {
+    if (key.Open(HKEY_CURRENT_USER, reg_key.c_str(), KEY_ALL_ACCESS) &&
+        key.ReadValue(google_update::kRegApField, &ap_key_value)) {
       return ap_key_value;
     }
     return std::wstring();
@@ -115,7 +118,7 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   scoped_ptr<WorkItemList> work_item_list(WorkItem::CreateWorkItemList());
   // Test incremental install failure
   if (!CreateApKey(work_item_list.get(), L""))
-    GTEST_FATAL_FAILURE("Failed to create ap key.");
+    FAIL() << "Failed to create ap key.";
   dist->UpdateDiffInstallStatus(false, true, installer_util::INSTALL_FAILED);
   EXPECT_STREQ(ReadApKeyValue().c_str(), L"-full");
   work_item_list->Rollback();
@@ -123,7 +126,7 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   work_item_list.reset(WorkItem::CreateWorkItemList());
   // Test incremental install success
   if (!CreateApKey(work_item_list.get(), L""))
-    GTEST_FATAL_FAILURE("Failed to create ap key.");
+    FAIL() << "Failed to create ap key.";
   dist->UpdateDiffInstallStatus(false, true,
                                 installer_util::FIRST_INSTALL_SUCCESS);
   EXPECT_STREQ(ReadApKeyValue().c_str(), L"");
@@ -132,7 +135,7 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   work_item_list.reset(WorkItem::CreateWorkItemList());
   // Test full install failure
   if (!CreateApKey(work_item_list.get(), L"-full"))
-    GTEST_FATAL_FAILURE("Failed to create ap key.");
+    FAIL() << "Failed to create ap key.";
   dist->UpdateDiffInstallStatus(false, false, installer_util::INSTALL_FAILED);
   EXPECT_STREQ(ReadApKeyValue().c_str(), L"");
   work_item_list->Rollback();
@@ -140,7 +143,7 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   work_item_list.reset(WorkItem::CreateWorkItemList());
   // Test full install success
   if (!CreateApKey(work_item_list.get(), L"-full"))
-    GTEST_FATAL_FAILURE("Failed to create ap key.");
+    FAIL() << "Failed to create ap key.";
   dist->UpdateDiffInstallStatus(false, false,
                                 installer_util::FIRST_INSTALL_SUCCESS);
   EXPECT_STREQ(ReadApKeyValue().c_str(), L"");
@@ -153,11 +156,11 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   HKEY reg_root = HKEY_CURRENT_USER;
   bool ap_key_deleted = false;
   RegKey key;
-  if (!key.Open(HKEY_CURRENT_USER, reg_key.c_str(), KEY_ALL_ACCESS)){
+  if (!key.Open(HKEY_CURRENT_USER, reg_key.c_str(), KEY_ALL_ACCESS)) {
     work_item_list->AddCreateRegKeyWorkItem(reg_root, reg_key);
     if (!work_item_list->Do())
-      GTEST_FATAL_FAILURE("Failed to create ClientState key.");
-  } else if (key.DeleteValue(google_update::kRegApFieldName)) {
+      FAIL() << "Failed to create ClientState key.";
+  } else if (key.DeleteValue(google_update::kRegApField)) {
     ap_key_deleted = true;
   }
   // try differential installer
@@ -171,14 +174,106 @@ TEST_F(GoogleChromeDistributionTest, UpdateDiffInstallStatusTest) {
   // - If we created any reg key path for ap, roll it back
   // - Finally restore the original value of ap key.
   key.Open(HKEY_CURRENT_USER, reg_key.c_str(), KEY_ALL_ACCESS);
-  key.DeleteValue(google_update::kRegApFieldName);
+  key.DeleteValue(google_update::kRegApField);
   work_item_list->Rollback();
   if (ap_key_deleted) {
     work_item_list.reset(WorkItem::CreateWorkItemList());
     if (!CreateApKey(work_item_list.get(), ap_key_value))
-      GTEST_FATAL_FAILURE("Failed to restore ap key.");
+      FAIL() << "Failed to restore ap key.";
   }
-
 }
+
+TEST_F(GoogleChromeDistributionTest, TestExtractUninstallMetrics) {
+  // A make-believe JSON preferences file.
+  std::string pref_string(
+      "{ \n"
+      "  \"foo\": \"bar\",\n"
+      "  \"uninstall_metrics\": { \n"
+      "    \"last_launch_time_sec\": \"1235341118\","
+      "    \"last_observed_running_time_sec\": \"1235341183\","
+      "    \"launch_count\": \"11\","
+      "    \"page_load_count\": \"68\","
+      "    \"uptime_sec\": \"809\"\n"
+      "  },\n"
+      "  \"blah\": {\n"
+      "    \"this_sentence_is_true\": false\n"
+      "  },\n"
+      "  \"user_experience_metrics\": { \n"
+      "    \"client_id_timestamp\": \"1234567890\","
+      "    \"reporting_enabled\": true\n"
+      "  }\n"
+      "} \n");
+
+  // The URL string we expect to be generated from said make-believe file.
+  std::wstring expected_url_string(
+      L"&last_launch_time_sec=1235341118"
+      L"&last_observed_running_time_sec=1235341183"
+      L"&launch_count=11&page_load_count=68&uptime_sec=809&");
+  expected_url_string += installer_util::kUninstallInstallationDate;
+  expected_url_string += L"=1234567890";
+
+  JSONStringValueSerializer json_deserializer(pref_string);
+  std::string error_message;
+
+  scoped_ptr<Value> root(json_deserializer.Deserialize(&error_message));
+  ASSERT_TRUE(root.get());
+
+  std::wstring uninstall_metrics_string;
+  GoogleChromeDistribution* dist = static_cast<GoogleChromeDistribution*>(
+      BrowserDistribution::GetDistribution());
+  EXPECT_TRUE(
+      dist->ExtractUninstallMetrics(*static_cast<DictionaryValue*>(root.get()),
+                                    &uninstall_metrics_string));
+  EXPECT_EQ(expected_url_string, uninstall_metrics_string);
+}
+
 #endif
 
+TEST(MasterPreferences, ParseDistroParams) {
+  std::wstring prefs;
+  ASSERT_TRUE(file_util::CreateTemporaryFileName(&prefs));
+  const char text[] =
+    "{ \n"
+    "  \"distribution\": { \n"
+    "     \"skip_first_run_ui\": true,\n"
+    "     \"show_welcome_page\": true,\n"
+    "     \"import_search_engine\": true,\n"
+    "     \"import_history\": true,\n"
+    "     \"create_all_shortcuts\": true,\n"
+    "     \"do_not_launch_chrome\": true,\n"
+    "     \"make_chrome_default\": true,\n"
+    "     \"system_level\": true,\n"
+    "     \"verbose_logging\": true,\n"
+    "     \"require_eula\": true,\n"
+    "     \"alternate_shortcut_text\": true\n"
+    "},\n"
+    "  \"blah\": {\n"
+    "     \"import_history\": false\n"
+    "  }\n"
+    "} \n";
+
+  EXPECT_TRUE(file_util::WriteFile(prefs, text, sizeof(text)));
+  int result = installer_util::ParseDistributionPreferences(prefs);
+  EXPECT_FALSE(result & installer_util::MASTER_PROFILE_NOT_FOUND);
+  EXPECT_FALSE(result & installer_util::MASTER_PROFILE_ERROR);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_NO_FIRST_RUN_UI);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_SHOW_WELCOME);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_IMPORT_SEARCH_ENGINE);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_IMPORT_HISTORY);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_CREATE_ALL_SHORTCUTS);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_DO_NOT_LAUNCH_CHROME);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_MAKE_CHROME_DEFAULT);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_SYSTEM_LEVEL);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_VERBOSE_LOGGING);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_REQUIRE_EULA);
+  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_ALT_SHORTCUT_TXT);
+  EXPECT_TRUE(file_util::Delete(prefs, false));
+}
+
+TEST(BrowserDistribution, StringsTest) {
+  BrowserDistribution *dist = BrowserDistribution::GetDistribution();
+  ASSERT_TRUE(dist != NULL);
+  std::wstring name = dist->GetApplicationName();
+  std::wstring desc = dist->GetAppDescription();
+  // TODO(cpu) finish the test when the translated strings arrive.
+}

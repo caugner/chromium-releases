@@ -14,13 +14,9 @@
 #include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#define IPC_MESSAGE_MACROS_ENUMS
-#include "chrome/common/ipc_sync_message_unittest.h"
 
-// define the classes
-#define IPC_MESSAGE_MACROS_CLASSES
-#include "chrome/common/ipc_sync_message_unittest.h"
-
+#define MESSAGES_INTERNAL_FILE "chrome/common/ipc_sync_message_unittest.h"
+#include "chrome/common/ipc_message_macros.h"
 
 static IPC::Message* g_reply;
 
@@ -89,7 +85,8 @@ class TestMessageReceiver {
     *out2 = 32;
   }
 
-  void On_3_3(int in1, std::string in2, bool in3, std::string* out1, int* out2, bool* out3) {
+  void On_3_3(int in1, std::string in2, bool in3, std::string* out1, int* out2,
+              bool* out3) {
     DCHECK(in1 == 3 && in2 == "3_3" && in3);
     *out1 = "3_3";
     *out2 = 33;
@@ -250,4 +247,3 @@ TEST(IPCSyncMessageTest, Main) {
   Send(new Msg_R_3_3(0, 3, "3_3", true, &string1, &int1, &bool1));
   DCHECK(string1 == "3_3" && int1 == 33 && !bool1);
 }
-

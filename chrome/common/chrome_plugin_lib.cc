@@ -7,9 +7,13 @@
 #include "base/command_line.h"
 #include "base/hash_tables.h"
 #include "base/histogram.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/perftimer.h"
+#include "base/thread.h"
+#if defined(OS_WIN)
 #include "base/registry.h"
+#endif
 #include "base/string_util.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_switches.h"
@@ -17,12 +21,17 @@
 #include "chrome/common/chrome_paths.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
+using base::TimeDelta;
+
+// TODO(port): revisit when plugins happier
+#if defined(OS_WIN)
 const TCHAR ChromePluginLib::kRegistryChromePlugins[] =
     _T("Software\\Google\\Chrome\\Plugins");
 static const TCHAR kRegistryLoadOnStartup[] = _T("LoadOnStartup");
 static const TCHAR kRegistryPath[] = _T("Path");
+#endif
 
-typedef base::hash_map<std::wstring, scoped_refptr<ChromePluginLib> >
+typedef base::hash_map<FilePath, scoped_refptr<ChromePluginLib> >
     PluginMap;
 
 // A map of all the instantiated plugins.
@@ -30,41 +39,50 @@ static PluginMap* g_loaded_libs;
 
 // The thread plugins are loaded and used in, lazily initialized upon
 // the first creation call.
-static DWORD g_plugin_thread_id = 0;
+static PlatformThreadId g_plugin_thread_id = 0;
+static MessageLoop* g_plugin_thread_loop = NULL;
+
+#ifdef GEARS_STATIC_LIB
+// defined in gears/base/chrome/module_cr.cc
+CPError STDCALL Gears_CP_Initialize(CPID id, const CPBrowserFuncs *bfuncs,
+                                    CPPluginFuncs *pfuncs);
+#endif
 
 static bool IsSingleProcessMode() {
   // We don't support ChromePlugins in single-process mode.
-  CommandLine command_line;
-  return command_line.HasSwitch(switches::kSingleProcess);
+  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
 }
 
 // static
-ChromePluginLib* ChromePluginLib::Create(const std::wstring& filename,
+bool ChromePluginLib::IsInitialized() {
+  return (g_loaded_libs != NULL);
+}
+
+// static
+ChromePluginLib* ChromePluginLib::Create(const FilePath& filename,
                                          const CPBrowserFuncs* bfuncs) {
   // Keep a map of loaded plugins to ensure we only load each library once.
   if (!g_loaded_libs) {
     g_loaded_libs = new PluginMap();
-    g_plugin_thread_id = ::GetCurrentThreadId();
+    g_plugin_thread_id = PlatformThread::CurrentId();
+    g_plugin_thread_loop = MessageLoop::current();
   }
   DCHECK(IsPluginThread());
 
-  // Lower case to match how PluginList::LoadPlugin stores the path.
-  std::wstring filename_lc = StringToLowerASCII(filename);
-
-  PluginMap::const_iterator iter = g_loaded_libs->find(filename_lc);
+  PluginMap::const_iterator iter = g_loaded_libs->find(filename);
   if (iter != g_loaded_libs->end())
     return iter->second;
 
-  scoped_refptr<ChromePluginLib> plugin(new ChromePluginLib(filename_lc));
+  scoped_refptr<ChromePluginLib> plugin(new ChromePluginLib(filename));
   if (!plugin->CP_Initialize(bfuncs))
     return NULL;
 
-  (*g_loaded_libs)[filename_lc] = plugin;
+  (*g_loaded_libs)[filename] = plugin;
   return plugin;
 }
 
 // static
-ChromePluginLib* ChromePluginLib::Find(const std::wstring& filename) {
+ChromePluginLib* ChromePluginLib::Find(const FilePath& filename) {
   if (g_loaded_libs) {
     PluginMap::const_iterator iter = g_loaded_libs->find(filename);
     if (iter != g_loaded_libs->end())
@@ -74,7 +92,7 @@ ChromePluginLib* ChromePluginLib::Find(const std::wstring& filename) {
 }
 
 // static
-void ChromePluginLib::Destroy(const std::wstring& filename) {
+void ChromePluginLib::Destroy(const FilePath& filename) {
   DCHECK(g_loaded_libs);
   PluginMap::iterator iter = g_loaded_libs->find(filename);
   if (iter != g_loaded_libs->end()) {
@@ -85,7 +103,12 @@ void ChromePluginLib::Destroy(const std::wstring& filename) {
 
 // static
 bool ChromePluginLib::IsPluginThread() {
-  return ::GetCurrentThreadId() == g_plugin_thread_id;
+  return PlatformThread::CurrentId() == g_plugin_thread_id;
+}
+
+// static
+MessageLoop* ChromePluginLib::GetPluginThreadLoop() {
+  return g_plugin_thread_loop;
 }
 
 // static
@@ -94,16 +117,21 @@ void ChromePluginLib::RegisterPluginsWithNPAPI() {
   if (IsSingleProcessMode())
     return;
 
-  std::wstring path;
+  FilePath path;
   if (!PathService::Get(chrome::FILE_GEARS_PLUGIN, &path))
     return;
   // Note: we can only access the NPAPI list because the PluginService has done
   // the locking for us.  We should not touch it anywhere else.
+#if defined(OS_WIN)
   NPAPI::PluginList::AddExtraPluginPath(path);
+#else
+  // TODO(port): plugins not yet implemented
+  NOTIMPLEMENTED();
+#endif
 }
 
 static void LogPluginLoadTime(const TimeDelta &time) {
-  UMA_HISTOGRAM_TIMES(L"Gears.LoadTime", time);
+  UMA_HISTOGRAM_TIMES("Gears.LoadTime", time);
 }
 
 // static
@@ -117,7 +145,7 @@ void ChromePluginLib::LoadChromePlugins(const CPBrowserFuncs* bfuncs) {
   if (IsSingleProcessMode())
     return;
 
-  std::wstring path;
+  FilePath path;
   if (!PathService::Get(chrome::FILE_GEARS_PLUGIN, &path))
     return;
 
@@ -167,9 +195,11 @@ const CPPluginFuncs& ChromePluginLib::functions() const {
   return plugin_funcs_;
 }
 
-ChromePluginLib::ChromePluginLib(const std::wstring& filename)
+ChromePluginLib::ChromePluginLib(const FilePath& filename)
     : filename_(filename),
+#if defined(OS_WIN)
       module_(0),
+#endif
       initialized_(false),
       CP_VersionNegotiate_(NULL),
       CP_Initialize_(NULL) {
@@ -180,6 +210,8 @@ ChromePluginLib::~ChromePluginLib() {
 }
 
 bool ChromePluginLib::CP_Initialize(const CPBrowserFuncs* bfuncs) {
+  LOG(INFO) << "ChromePluginLib::CP_Initialize(" << filename_.value() <<
+               "): initialized=" << initialized_;
   if (initialized_)
     return true;
 
@@ -199,6 +231,9 @@ bool ChromePluginLib::CP_Initialize(const CPBrowserFuncs* bfuncs) {
   initialized_ = (rv == CPERR_SUCCESS) &&
       (CP_GET_MAJOR_VERSION(plugin_funcs_.version) == CP_MAJOR_VERSION) &&
       (CP_GET_MINOR_VERSION(plugin_funcs_.version) <= CP_MINOR_VERSION);
+  LOG(INFO) << "ChromePluginLib::CP_Initialize(" << filename_.value() <<
+               "): initialized=" << initialized_ <<
+               "): result=" << rv;
 
   return initialized_;
 }
@@ -218,8 +253,21 @@ int ChromePluginLib::CP_Test(void* param) {
 }
 
 bool ChromePluginLib::Load() {
+#if !defined(OS_WIN)
+  // TODO(port): plugins not yet implemented
+  NOTIMPLEMENTED();
+  return false;
+#else
   DCHECK(module_ == 0);
-  module_ = LoadLibrary(filename_.c_str());
+#ifdef GEARS_STATIC_LIB
+  FilePath path;
+  if (filename_.BaseName().value().find(FILE_PATH_LITERAL("gears")) == 0) {
+    CP_Initialize_ = &Gears_CP_Initialize;
+    return true;
+  }
+#endif
+
+  module_ = LoadLibrary(filename_.value().c_str());
   if (module_ == 0)
     return false;
 
@@ -242,19 +290,22 @@ bool ChromePluginLib::Load() {
       (GetProcAddress(module_, "CP_Test"));
 
   return true;
+#endif
 }
 
 void ChromePluginLib::Unload() {
   NotificationService::current()->Notify(
-      NOTIFY_CHROME_PLUGIN_UNLOADED,
+      NotificationType::CHROME_PLUGIN_UNLOADED,
       Source<ChromePluginLib>(this),
       NotificationService::NoDetails());
 
   if (initialized_)
     CP_Shutdown();
 
+#if defined(OS_WIN)
   if (module_) {
     FreeLibrary(module_);
     module_ = 0;
   }
+#endif
 }

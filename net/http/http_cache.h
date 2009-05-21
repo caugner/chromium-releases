@@ -15,10 +15,11 @@
 #define NET_HTTP_HTTP_CACHE_H_
 
 #include <list>
-#include <string>
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "net/http/http_transaction_factory.h"
 
@@ -29,9 +30,10 @@ class Entry;
 
 namespace net {
 
+class HttpNetworkSession;
 class HttpRequestInfo;
 class HttpResponseInfo;
-class ProxyInfo;
+class ProxyService;
 
 class HttpCache : public HttpTransactionFactory {
  public:
@@ -48,19 +50,37 @@ class HttpCache : public HttpTransactionFactory {
     PLAYBACK
   };
 
-  // Initialize the cache from the directory where its data is stored.  The
+  // The type of an HttpCache object, essentially describe what an HttpCache
+  // object is for.
+  enum Type {
+    // An HttpCache object for common objects, e.g. html pages, images, fonts,
+    // css files, js files and other common web resources.
+    COMMON = 0,
+    // A cache system for media file, e.g. video and audio files. These files
+    // are huge and has special requirement for access.
+    MEDIA
+  };
+
+  // Initialize the cache from the directory where its data is stored. The
   // disk cache is initialized lazily (by CreateTransaction) in this case. If
   // |cache_size| is zero, a default value will be calculated automatically.
-  // If the proxy information is null, then the system settings will be used.
-  HttpCache(const ProxyInfo* proxy_info,
+  HttpCache(ProxyService* proxy_service,
             const std::wstring& cache_dir,
+            int cache_size);
+
+  // Initialize the cache from the directory where its data is stored. The
+  // disk cache is initialized lazily (by CreateTransaction) in  this case. If
+  // |cache_size| is zero, a default value will be calculated automatically.
+  // Provide an existing HttpNetworkSession, the cache can construct a
+  // network layer with a shared HttpNetworkSession in order for multiple
+  // network layers to share information (e.g. authenication data).
+  HttpCache(HttpNetworkSession* session, const std::wstring& cache_dir,
             int cache_size);
 
   // Initialize using an in-memory cache. The cache is initialized lazily
   // (by CreateTransaction) in this case. If |cache_size| is zero, a default
-  // value will be calculated automatically. If the proxy information is null,
-  // then the system settings will be used.
-  HttpCache(const ProxyInfo* proxy_info, int cache_size);
+  // value will be calculated automatically.
+  HttpCache(ProxyService* proxy_service, int cache_size);
 
   // Initialize the cache from its component parts, which is useful for
   // testing.  The lifetime of the network_layer and disk_cache are managed by
@@ -75,7 +95,6 @@ class HttpCache : public HttpTransactionFactory {
   // HttpTransactionFactory implementation:
   virtual HttpTransaction* CreateTransaction();
   virtual HttpCache* GetCache();
-  virtual AuthCache* GetAuthCache();
   virtual void Suspend(bool suspend);
 
   // Helper function for reading response info from the disk cache.
@@ -93,6 +112,9 @@ class HttpCache : public HttpTransactionFactory {
   // Get/Set the cache's mode.
   void set_mode(Mode value) { mode_ = value; }
   Mode mode() { return mode_; }
+
+  void set_type(Type type) { type_ = type; }
+  Type type() { return type_; }
 
  private:
 
@@ -130,6 +152,7 @@ class HttpCache : public HttpTransactionFactory {
   ActiveEntry* CreateEntry(const std::string& cache_key);
   void DestroyEntry(ActiveEntry* entry);
   int AddTransactionToEntry(ActiveEntry* entry, Transaction* trans);
+  void DoneWithEntry(ActiveEntry* entry, Transaction* trans);
   void DoneWritingToEntry(ActiveEntry* entry, bool success);
   void DoneReadingFromEntry(ActiveEntry* entry, Transaction* trans);
   void ConvertWriterToReader(ActiveEntry* entry);
@@ -148,6 +171,7 @@ class HttpCache : public HttpTransactionFactory {
   std::wstring disk_cache_dir_;
 
   Mode mode_;
+  Type type_;
 
   scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;
@@ -166,10 +190,11 @@ class HttpCache : public HttpTransactionFactory {
   typedef base::hash_map<std::string, int> PlaybackCacheMap;
   scoped_ptr<PlaybackCacheMap> playback_cache_map_;
 
+  RevocableStore transactions_;
+
   DISALLOW_COPY_AND_ASSIGN(HttpCache);
 };
 
 }  // namespace net
 
 #endif  // NET_HTTP_HTTP_CACHE_H_
-

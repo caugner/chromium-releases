@@ -25,12 +25,13 @@
 #include <string>
 
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 
 
 //------------------------------------------------------------------------------
-// Create a public interface to help us load SDCH dictionaries.  
+// Create a public interface to help us load SDCH dictionaries.
 // The SdchManager class allows registration to support this interface.
 // A browser may register a fetcher that is used by the dictionary managers to
 // get data from a specified URL.  This allows us to use very high level browser
@@ -51,6 +52,100 @@ class SdchFetcher {
 
 class SdchManager {
  public:
+  // A list of errors that appeared and were either resolved, or used to turn
+  // off sdch encoding.
+  enum ProblemCodes {
+    MIN_PROBLEM_CODE,
+
+    // Content-encoding correction problems.
+    ADDED_CONTENT_ENCODING = 1,
+    FIXED_CONTENT_ENCODING = 2,
+    FIXED_CONTENT_ENCODINGS = 3,
+
+    // Content decoding errors.
+    DECODE_HEADER_ERROR = 4,
+    DECODE_BODY_ERROR = 5,
+
+    // More content-encoding correction problems.
+    OPTIONAL_GUNZIP_ENCODING_ADDED = 6,
+
+    // Content encoding correction when we're not even tagged as HTML!?!
+    BINARY_ADDED_CONTENT_ENCODING = 7,
+    BINARY_FIXED_CONTENT_ENCODING = 8,
+    BINARY_FIXED_CONTENT_ENCODINGS = 9,
+
+    // Dictionary selection for use problems.
+    DICTIONARY_FOUND_HAS_WRONG_DOMAIN = 10,
+    DICTIONARY_FOUND_HAS_WRONG_PORT_LIST = 11,
+    DICTIONARY_FOUND_HAS_WRONG_PATH = 12,
+    DICTIONARY_FOUND_HAS_WRONG_SCHEME = 13,
+    DICTIONARY_HASH_NOT_FOUND = 14,
+    DICTIONARY_HASH_MALFORMED = 15,
+
+    // Dictionary saving problems.
+    DICTIONARY_HAS_NO_HEADER = 20,
+    DICTIONARY_HEADER_LINE_MISSING_COLON = 21,
+    DICTIONARY_MISSING_DOMAIN_SPECIFIER = 22,
+    DICTIONARY_SPECIFIES_TOP_LEVEL_DOMAIN = 23,
+    DICTIONARY_DOMAIN_NOT_MATCHING_SOURCE_URL = 24,
+    DICTIONARY_PORT_NOT_MATCHING_SOURCE_URL = 25,
+    DICTIONARY_HAS_NO_TEXT = 26,
+
+    // Dictionary loading problems.
+    DICTIONARY_LOAD_ATTEMPT_FROM_DIFFERENT_HOST = 30,
+    DICTIONARY_SELECTED_FOR_SSL = 31,
+    DICTIONARY_ALREADY_LOADED = 32,
+    DICTIONARY_SELECTED_FROM_NON_HTTP = 33,
+    DICTIONARY_IS_TOO_LARGE= 34,
+    DICTIONARY_COUNT_EXCEEDED = 35,
+    DICTIONARY_ALREADY_SCHEDULED_TO_DOWNLOAD = 36,
+
+    // Failsafe hack.
+    ATTEMPT_TO_DECODE_NON_HTTP_DATA = 40,
+
+
+    // Content-Encoding problems detected, with no action taken.
+    MULTIENCODING_FOR_NON_SDCH_REQUEST = 50,
+    SDCH_CONTENT_ENCODE_FOR_NON_SDCH_REQUEST = 51,
+
+    // Dictionary manager issues.
+    DOMAIN_BLACKLIST_INCLUDES_TARGET = 61,
+
+    // Problematic decode recovery methods.
+    META_REFRESH_RECOVERY = 70,            // Dictionary not found.
+    // defunct =  71, // Almost the same as META_REFRESH_UNSUPPORTED.
+    // defunct = 72,  // Almost the same as CACHED_META_REFRESH_UNSUPPORTED.
+    // defunct = 73,  // PASSING_THROUGH_NON_SDCH plus DISCARD_TENTATIVE_SDCH.
+    META_REFRESH_UNSUPPORTED = 74,         // Unrecoverable error.
+    CACHED_META_REFRESH_UNSUPPORTED = 75,  // As above, but pulled from cache.
+    PASSING_THROUGH_NON_SDCH = 76,  // Non-html tagged as sdch but malformed.
+    INCOMPLETE_SDCH_CONTENT = 77,   // Last window was not completely decoded.
+
+
+    // Common decoded recovery methods.
+    META_REFRESH_CACHED_RECOVERY = 80,  // Probably startup tab loading.
+    DISCARD_TENTATIVE_SDCH = 81,        // Server decided not to use sdch.
+
+    // Non SDCH problems, only accounted for to make stat counting complete
+    // (i.e., be able to be sure all dictionary advertisements are accounted
+    // for).
+
+    UNFLUSHED_CONTENT = 90,   // Possible error in filter chaining.
+    MISSING_TIME_STATS = 91,  // Should never happen.
+    CACHE_DECODED = 92,       // No timing stats recorded.
+    OVER_10_MINUTES = 93,     // No timing stats will be recorded.
+    UNINITIALIZED = 94,       // Filter never even got initialized.
+    PRIOR_TO_DICTIONARY = 95, // We hadn't even parsed a dictionary selector.
+    DECODE_ERROR = 96,        // Something went wrong during decode.
+
+    MAX_PROBLEM_CODE  // Used to bound histogram.
+  };
+
+  // Use the following static limits to block DOS attacks until we implement
+  // a cached dictionary evicition strategy.
+  static const size_t kMaxDictionarySize;
+  static const size_t kMaxDictionaryCount;
+
   // There is one instance of |Dictionary| for each memory-cached SDCH
   // dictionary.
   class Dictionary : public base::RefCounted<Dictionary> {
@@ -67,13 +162,10 @@ class SdchManager {
     Dictionary(const std::string& dictionary_text, size_t offset,
                const std::string& client_hash, const GURL& url,
                const std::string& domain, const std::string& path,
-               const Time& expiration, const std::set<int> ports);
+               const base::Time& expiration, const std::set<int> ports);
 
     const GURL& url() const { return url_; }
     const std::string& client_hash() const { return client_hash_; }
-
-    // For a given URL, get the actual or default port.
-    static int GetPortIncludingDefault(const GURL& url);
 
     // Security method to check if we can advertise this dictionary for use
     // if the |target_url| returns SDCH compressed data.
@@ -95,10 +187,6 @@ class SdchManager {
     // Compare domains to see if the "match" for dictionary use.
     static bool DomainMatch(const GURL& url, const std::string& restriction);
 
-    // Each dictionary payload consists of several headers, followed by the text
-    // of the dictionary.  The following are the known headers.
-    std::string domain_attribute_;
-    std::set<int> ports_;
 
     // The actual text of the dictionary.
     std::string text_;
@@ -112,10 +200,12 @@ class SdchManager {
     const GURL url_;
 
     // Metadate "headers" in before dictionary text contained the following:
+    // Each dictionary payload consists of several headers, followed by the text
+    // of the dictionary.  The following are the known headers.
     const std::string domain_;
     const std::string path_;
-    const Time expiration_;  // Implied by max-age.
-    const std::set<int> ports;
+    const base::Time expiration_;  // Implied by max-age.
+    const std::set<int> ports_;
 
     DISALLOW_COPY_AND_ASSIGN(Dictionary);
   };
@@ -126,25 +216,61 @@ class SdchManager {
   // Provide access to the single instance of this class.
   static SdchManager* Global();
 
+  // Record stats on various errors.
+  static void SdchErrorRecovery(ProblemCodes problem);
+
   // Register a fetcher that this class can use to obtain dictionaries.
   void set_sdch_fetcher(SdchFetcher* fetcher) { fetcher_.reset(fetcher); }
 
   // If called with an empty string, advertise and support sdch on all domains.
   // If called with a specific string, advertise and support only the specified
-  // domain.
-  static void enable_sdch_support(const std::string& domain) {
-    // We presume that there is a SDCH manager instance.
-    global_->supported_domain_ = domain;
-    global_->sdch_enabled_ = true;
-  }
-  
-  const bool IsInSupportedDomain(const GURL& url) const;
+  // domain.  Function assumes the existence of a global SdchManager instance.
+  void EnableSdchSupport(const std::string& domain);
 
-  // Schedule the URL fetching to load a dictionary. This will generally return
-  // long before the dictionary is actually loaded and added.
+  static bool sdch_enabled() { return global_ && global_->sdch_enabled_; }
+
+  // Briefly prevent further advertising of SDCH on this domain (if SDCH is
+  // enabled). After enough calls to IsInSupportedDomain() the blacklisting
+  // will be removed.  Additional blacklists take exponentially more calls
+  // to IsInSupportedDomain() before the blacklisting is undone.
+  // Used when filter errors are found from a given domain, but it is plausible
+  // that the cause is temporary (such as application startup, where cached
+  // entries are used, but a dictionary is not yet loaded).
+  static void BlacklistDomain(const GURL& url);
+
+  // Used when SEVERE filter errors are found from a given domain, to prevent
+  // further use of SDCH on that domain.
+  static void BlacklistDomainForever(const GURL& url);
+
+  // Unit test only, this function resets enabling of sdch, and clears the
+  // blacklist.
+  static void ClearBlacklistings();
+
+  // Unit test only, this function resets the blacklisting count for a domain.
+  static void ClearDomainBlacklisting(std::string domain);
+
+  // Unit test only: indicate how many more times a domain will be blacklisted.
+  static int BlackListDomainCount(std::string domain);
+
+  // Unit test only: Indicate what current blacklist increment is for a domain.
+  static int BlacklistDomainExponential(std::string domain);
+
+  // Check to see if SDCH is enabled (globally), and the given URL is in a
+  // supported domain (i.e., not blacklisted, and either the specific supported
+  // domain, or all domains were assumed supported).  If it is blacklist, reduce
+  // by 1 the number of times it will be reported as blacklisted.
+  const bool IsInSupportedDomain(const GURL& url);
+
+  // Schedule the URL fetching to load a dictionary. This will always return
+  // before the dictionary is actually loaded and added.
   // After the implied task does completes, the dictionary will have been
   // cached in memory.
-  void FetchDictionary(const GURL& referring_url, const GURL& dictionary_url);
+  void FetchDictionary(const GURL& request_url, const GURL& dictionary_url);
+
+  // Security test function used before initiating a FetchDictionary.
+  // Return true if fetch is legal.
+  bool CanFetchDictionary(const GURL& referring_url,
+                          const GURL& dictionary_url) const;
 
   // Add an SDCH dictionary to our list of availible dictionaries. This addition
   // will fail (return false) if addition is illegal (data in the dictionary is
@@ -160,7 +286,8 @@ class SdchManager {
   // Caller is responsible for AddRef()ing the dictionary, and Release()ing it
   // when done.
   // Return null in |dictionary| if there is no matching legal dictionary.
-  void GetVcdiffDictionary(const std::string& server_hash, const GURL& referring_url,
+  void GetVcdiffDictionary(const std::string& server_hash,
+                           const GURL& referring_url,
                            Dictionary** dictionary);
 
   // Get list of available (pre-cached) dictionaries that we have already loaded
@@ -175,13 +302,15 @@ class SdchManager {
                            std::string* client_hash, std::string* server_hash);
 
  private:
+  typedef std::map<const std::string, int> DomainCounter;
+
   // A map of dictionaries info indexed by the hash that the server provides.
   typedef std::map<std::string, Dictionary*> DictionaryMap;
 
   // The one global instance of that holds all the data.
   static SdchManager* global_;
 
-  // A simple implementatino of a RFC 3548 "URL safe" base64 encoder.
+  // A simple implementation of a RFC 3548 "URL safe" base64 encoder.
   static void UrlSafeBase64Encode(const std::string& input,
                                   std::string* output);
   DictionaryMap dictionaries_;
@@ -195,6 +324,14 @@ class SdchManager {
   // Empty string means all domains.  Non-empty means support only the given
   // domain is supported.
   std::string supported_domain_;
+
+  // List domains where decode failures have required disabling sdch, along with
+  // count of how many additonal uses should be blacklisted.
+  DomainCounter blacklisted_domains_;
+
+  // Support exponential backoff in number of domain accesses before
+  // blacklisting expires.
+  DomainCounter exponential_blacklist_count;
 
   DISALLOW_COPY_AND_ASSIGN(SdchManager);
 };

@@ -8,19 +8,25 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/ref_counted.h"
-#include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_states.h"
-#include "net/base/ssl_info.h"
-#include "net/base/upload_data.h"
-#include "net/base/x509_certificate.h"
 #include "net/http/http_response_info.h"
-#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 
+namespace base {
+  class Time;
+}
+
+namespace net {
+
+class IOBuffer;
+class UploadData;
+class X509Certificate;
+
+}
+
+class URLRequestContext;
 class URLRequestJob;
 
 // This stores the values of the Set-Cookie headers received during the request.
@@ -45,8 +51,8 @@ class URLRequest {
   // information with a URLRequest. Use user_data() and set_user_data()
   class UserData {
    public:
-    UserData() {};
-    virtual ~UserData() {};
+    UserData() {}
+    virtual ~UserData() {}
   };
 
   // Callback function implemented by protocol handlers to create new jobs.
@@ -90,7 +96,7 @@ class URLRequest {
   class Delegate {
    public:
     virtual ~Delegate() {}
-    
+
     // Called upon a server-initiated redirect.  The delegate may call the
     // request's Cancel method to prevent the redirect from being followed.
     // Since there may be multiple chained redirects, there may also be more
@@ -200,29 +206,20 @@ class URLRequest {
   // The URL that should be consulted for the third-party cookie blocking
   // policy.
   const GURL& policy_url() const { return policy_url_; }
-  void set_policy_url(const GURL& policy_url) {
-    DCHECK(!is_pending_);
-    policy_url_ = policy_url;
-  }
+  void set_policy_url(const GURL& policy_url);
 
   // The request method, as an uppercase string.  "GET" is the default value.
   // The request method may only be changed before Start() is called and
   // should only be assigned an uppercase value.
   const std::string& method() const { return method_; }
-  void set_method(const std::string& method) {
-    DCHECK(!is_pending_);
-    method_ = method;
-  }
+  void set_method(const std::string& method);
 
   // The referrer URL for the request.  This header may actually be suppressed
   // from the underlying network request for security reasons (e.g., a HTTPS
   // URL will not be sent as the referrer for a HTTP request).  The referrer
   // may only be changed before Start() is called.
   const std::string& referrer() const { return referrer_; }
-  void set_referrer(const std::string& referrer) {
-    DCHECK(!is_pending_);
-    referrer_ = referrer;
-  }
+  void set_referrer(const std::string& referrer);
 
   // The delegate of the request.  This value may be changed at any time,
   // and it is permissible for it to be null.
@@ -247,10 +244,13 @@ class URLRequest {
   }
 
   // Set the upload data directly.
-  void set_upload(net::UploadData* upload) { upload_ = upload; }
+  void set_upload(net::UploadData* upload);
+
+  // Get the upload data directly.
+  net::UploadData* get_upload();
 
   // Returns true if the request has a non-empty message body to upload.
-  bool has_upload() const { return upload_ != NULL; }
+  bool has_upload() const;
 
   // Set an extra request header by ID or name.  These methods may only be
   // called before Start() is called.  It is an error to call it later.
@@ -264,6 +264,8 @@ class URLRequest {
   // method may only be called before Start() is called.  It is an error to
   // call it later.
   void SetExtraRequestHeaders(const std::string& headers);
+
+  const std::string& extra_request_headers() { return extra_request_headers_; }
 
   // Returns the current load state for the request.
   net::LoadState GetLoadState() const;
@@ -286,25 +288,33 @@ class URLRequest {
 
   // The time at which the returned response was requested.  For cached
   // responses, this may be a time well in the past.
-  const Time& request_time() const {
+  const base::Time& request_time() const {
     return response_info_.request_time;
   }
 
   // The time at which the returned response was generated.  For cached
   // responses, this may be a time well in the past.
-  const Time& response_time() const {
+  const base::Time& response_time() const {
     return response_info_.response_time;
   }
 
+  // Indicate if this response was fetched from disk cache.
+  bool was_cached() const { return response_info_.was_cached; }
+
   // Get all response headers, as a HttpResponseHeaders object.  See comments
   // in HttpResponseHeaders class as to the format of the data.
-  net::HttpResponseHeaders* response_headers() const {
-    return response_info_.headers.get();
-  }
+  net::HttpResponseHeaders* response_headers() const;
 
   // Get the SSL connection info.
   const net::SSLInfo& ssl_info() const {
     return response_info_.ssl_info;
+  }
+
+  // Returns the platform specific file handle for the standalone file that
+  // contains response data. base::kInvalidPlatformFileValue is returned if
+  // such file is not available.
+  base::PlatformFile response_data_file() {
+    return response_info_.response_data_file;
   }
 
   // Returns the cookie values included in the response, if the request is one
@@ -354,26 +364,29 @@ class URLRequest {
   // no effect once the response has completed.
   void Cancel();
 
-  // Similar to Cancel but sets the error to |os_error| (see net_error_list.h
-  // for values) instead of net::ERR_ABORTED.
-  // Used to attach a reason for canceling a request.
-  void CancelWithError(int os_error);
+  // Cancels the request and sets the error to |os_error| (see net_error_list.h
+  // for values).
+  void SimulateError(int os_error);
+
+  // Cancels the request and sets the error to |os_error| (see net_error_list.h
+  // for values) and attaches |ssl_info| as the SSLInfo for that request.  This
+  // is useful to attach a certificate and certificate error to a canceled
+  // request.
+  void SimulateSSLError(int os_error, const net::SSLInfo& ssl_info);
 
   // Read initiates an asynchronous read from the response, and must only
   // be called after the OnResponseStarted callback is received with a
   // successful status.
   // If data is available, Read will return true, and the data and length will
   // be returned immediately.  If data is not available, Read returns false,
-  // and an asynchronous Read is initiated.  The caller guarantees the
-  // buffer provided will be available until the Read is finished.  The
-  // Read is finished when the caller receives the OnReadComplete
-  // callback.  OnReadComplete will be always be called, even if there
-  // was a failure.
+  // and an asynchronous Read is initiated.  The Read is finished when
+  // the caller receives the OnReadComplete callback.  OnReadComplete will be
+  // always be called, even if there was a failure.
   //
-  // The buf parameter is a buffer to receive the data.  Once the read is
-  // initiated, the caller guarantees availability of this buffer until
-  // the OnReadComplete is received.  The buffer must be at least
-  // max_bytes in length.
+  // The buf parameter is a buffer to receive the data.  If the operation
+  // completes asynchronously, the implementation will reference the buffer
+  // until OnReadComplete is called.  The buffer must be at least max_bytes in
+  // length.
   //
   // The max_bytes parameter is the maximum number of bytes to read.
   //
@@ -383,7 +396,7 @@ class URLRequest {
   //
   // If a read error occurs, Read returns false and the request->status
   // will be set to an error.
-  bool Read(char* buf, int max_bytes, int *bytes_read);
+  bool Read(net::IOBuffer* buf, int max_bytes, int *bytes_read);
 
   // One of the following two methods should be called in response to an
   // OnAuthRequired() callback (and only then).
@@ -412,8 +425,8 @@ class URLRequest {
   void set_enable_profiling(bool profiling) { enable_profiling_ = profiling; }
 
   // Used to specify the context (cookie store, cache) for this request.
-  URLRequestContext* context() { return context_.get(); }
-  void set_context(URLRequestContext* context) { context_ = context; }
+  URLRequestContext* context();
+  void set_context(URLRequestContext* context);
 
   // Returns the expected content size if available
   int64 GetExpectedContentSize() const;
@@ -437,12 +450,20 @@ class URLRequest {
   // been orphaned.
   void OrphanJob();
 
+  // Cancels the request and set the error and ssl info for this request to the
+  // passed values.
+  void DoCancel(int os_error, const net::SSLInfo& ssl_info);
+
+  // Discard headers which have meaning in POST (Content-Length, Content-Type,
+  // Origin).
+  static std::string StripPostSpecificHeaders(const std::string& headers);
+
   scoped_refptr<URLRequestJob> job_;
   scoped_refptr<net::UploadData> upload_;
   GURL url_;
   GURL original_url_;
   GURL policy_url_;
-  std::string method_; // "GET", "POST", etc. Should be all uppercase.
+  std::string method_;  // "GET", "POST", etc. Should be all uppercase.
   std::string referrer_;
   std::string extra_request_headers_;
   int load_flags_;  // Flags indicating the request type for the load;
@@ -484,7 +505,7 @@ class URLRequest {
   // first transaction in a request involving redirects.
   uint64 final_upload_progress_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(URLRequest);
+  DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };
 
 //-----------------------------------------------------------------------------
@@ -497,10 +518,7 @@ class URLRequest {
 struct URLRequestMetrics {
   int object_count;
   URLRequestMetrics() : object_count(0) {}
-  ~URLRequestMetrics() {
-    DLOG_IF(WARNING, object_count != 0) <<
-      "Leaking " << object_count << " URLRequest object(s)";
-  }
+  ~URLRequestMetrics();
 };
 
 extern URLRequestMetrics url_request_metrics;
@@ -513,8 +531,6 @@ extern URLRequestMetrics url_request_metrics;
 #define URLREQUEST_COUNT_CTOR()
 #define URLREQUEST_COUNT_DTOR()
 
-#endif
-
+#endif  // #ifndef NDEBUG
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_H_
-

@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/webdata/web_database.h"
+
 #include <algorithm>
 #include <limits>
-
-#include "chrome/browser/webdata/web_database.h"
+#include <vector>
 
 #include "base/gfx/png_decoder.h"
 #include "base/gfx/png_encoder.h"
@@ -13,11 +14,24 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/ie7_password.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/browser/encryptor.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/common/l10n_util.h"
 #include "chrome/common/scoped_vector.h"
 #include "webkit/glue/password_form.h"
+
+#if defined(OS_POSIX)
+// TODO(port): get rid of this include. It's used just to provide declarations
+// and stub definitions for classes we encouter during the porting effort.
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
+// TODO(port): Get rid of this section and finish porting.
+#if defined(OS_WIN)
+// Encryptor is the *wrong* way of doing things; we need to turn it into a
+// bottleneck to use the platform methods (e.g. Keychain on the Mac). That's
+// going to take a massive change in its API...
+#include "chrome/browser/password_manager/encryptor.h"
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -61,6 +75,21 @@
 //                       remember'
 //                       passwords for this site.
 //
+// autofill
+//   name                The name of the input as specified in the html.
+//   value               The literal contents of the text field.
+//   value_lower         The contents of the text field made lower_case.
+//   pair_id             An ID number unique to the row in the table.
+//   count               How many times the user has entered the string |value|
+//                       in a field of name |name|.
+//
+// autofill_dates        This table associates a row to each separate time the
+//                       user submits a form containing a certain name/value
+//                       pair.  The |pair_id| should match the |pair_id| field
+//                       in the appropriate row of the autofill table.
+//   pair_id
+//   date_created
+//
 // web_app_icons
 //   url         URL of the web app.
 //   width       Width of the image.
@@ -73,8 +102,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+using base::Time;
+
 // Current version number.
-static const int kCurrentVersionNumber = 21;
+static const int kCurrentVersionNumber = 22;
+static const int kCompatibleVersionNumber = 21;
 
 // Keys used in the meta table.
 static const char* kDefaultSearchProviderKey = "Default Search Provider ID";
@@ -86,7 +118,7 @@ std::string JoinStrings(const std::string& separator,
     return std::string();
   std::vector<std::string>::const_iterator i(strings.begin());
   std::string result(*i);
-  while(++i != strings.end())
+  while (++i != strings.end())
     result += separator + *i;
   return result;
 }
@@ -148,16 +180,18 @@ bool WebDatabase::Init(const std::wstring& db_name) {
   transaction.Begin();
 
   // Version check.
-  if (!meta_table_.Init(std::string(), kCurrentVersionNumber, db_))
+  if (!meta_table_.Init(std::string(), kCurrentVersionNumber,
+                        kCompatibleVersionNumber, db_))
     return false;
   if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
-    LOG(WARNING) << "Web database is too new";
+    LOG(WARNING) << "Web database is too new.";
     return false;
   }
 
   // Initialize the tables.
   if (!InitKeywordsTable() || !InitLoginsTable() || !InitWebAppIconsTable() ||
-      !InitWebAppsTable()) {
+      !InitWebAppsTable() || !InitAutofillTable() ||
+      !InitAutofillDatesTable()) {
     LOG(WARNING) << "Unable to initialize the web database.";
     return false;
   }
@@ -180,11 +214,7 @@ bool WebDatabase::SetWebAppImage(const GURL& url,
   }
 
   std::vector<unsigned char> image_data;
-
-  SkAutoLockPixels pixel_lock(image);
-  PNGEncoder::Encode(reinterpret_cast<unsigned char*>(image.getPixels()),
-                     PNGEncoder::FORMAT_BGRA, image.width(),
-                     image.height(), image.width() * 4, false, &image_data);
+  PNGEncoder::EncodeBGRASkBitmap(image, false, &image_data);
 
   s.bind_string(0, history::HistoryDatabase::GURLToDatabaseURL(url));
   s.bind_int(1, image.width());
@@ -341,6 +371,58 @@ bool WebDatabase::InitLoginsTable() {
   return true;
 }
 
+bool WebDatabase::InitAutofillTable() {
+  if (!DoesSqliteTableExist(db_, "autofill")) {
+    if (sqlite3_exec(db_,
+                     "CREATE TABLE autofill ("
+                     "name VARCHAR, "
+                     "value VARCHAR, "
+                     "value_lower VARCHAR, "
+                     "pair_id INTEGER PRIMARY KEY, "
+                     "count INTEGER DEFAULT 1)",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+      NOTREACHED();
+      return false;
+    }
+    if (sqlite3_exec(db_,
+                     "CREATE INDEX autofill_name ON "
+                     "autofill (name)",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+       NOTREACHED();
+       return false;
+    }
+    if (sqlite3_exec(db_,
+                     "CREATE INDEX autofill_name_value_lower ON "
+                     "autofill (name, value_lower)",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+       NOTREACHED();
+       return false;
+    }
+  }
+  return true;
+}
+
+bool WebDatabase::InitAutofillDatesTable() {
+  if (!DoesSqliteTableExist(db_, "autofill_dates")) {
+    if (sqlite3_exec(db_,
+                     "CREATE TABLE autofill_dates ( "
+                     "pair_id INTEGER DEFAULT 0, "
+                     "date_created INTEGER DEFAULT 0)",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+      NOTREACHED();
+      return false;
+    }
+    if (sqlite3_exec(db_,
+                     "CREATE INDEX autofill_dates_pair_id ON "
+                     "autofill_dates (pair_id)",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+       NOTREACHED();
+       return false;
+    }
+  }
+  return true;
+}
+
 bool WebDatabase::InitWebAppIconsTable() {
   if (!DoesSqliteTableExist(db_, "web_app_icons")) {
     if (sqlite3_exec(db_, "CREATE TABLE web_app_icons ("
@@ -453,31 +535,31 @@ bool WebDatabase::GetKeywords(std::vector<TemplateURL*>* urls) {
     NOTREACHED() << "Statement prepare failed";
     return false;
   }
-  int64 result;
+  int result;
   while ((result = s.step()) == SQLITE_ROW) {
     TemplateURL* template_url = new TemplateURL();
     std::wstring tmp;
     template_url->set_id(s.column_int64(0));
 
-    s.column_string16(1, &tmp);
+    s.column_wstring(1, &tmp);
     DCHECK(!tmp.empty());
     template_url->set_short_name(tmp);
 
-    s.column_string16(2, &tmp);
+    s.column_wstring(2, &tmp);
     template_url->set_keyword(tmp);
 
-    s.column_string16(3, &tmp);
+    s.column_wstring(3, &tmp);
     if (!tmp.empty())
-      template_url->SetFavIconURL(GURL(tmp));
+      template_url->SetFavIconURL(GURL(WideToUTF8(tmp)));
 
-    s.column_string16(4, &tmp);
+    s.column_wstring(4, &tmp);
     template_url->SetURL(tmp, 0, 0);
 
     template_url->set_safe_for_autoreplace(s.column_int(5) == 1);
 
-    s.column_string16(6, &tmp);
+    s.column_wstring(6, &tmp);
     if (!tmp.empty())
-      template_url->set_originating_url(GURL(tmp));
+      template_url->set_originating_url(GURL(WideToUTF8(tmp)));
 
     template_url->set_date_created(Time::FromTimeT(s.column_int64(7)));
 
@@ -489,7 +571,7 @@ bool WebDatabase::GetKeywords(std::vector<TemplateURL*>* urls) {
 
     template_url->set_show_in_default_list(s.column_int(10) == 1);
 
-    s.column_string16(11, &tmp);
+    s.column_wstring(11, &tmp);
     template_url->SetSuggestionsURL(tmp, 0, 0);
 
     template_url->set_prepopulate_id(s.column_int(12));
@@ -540,40 +622,6 @@ int WebDatabase::GetBuitinKeywordVersion() {
   return version;
 }
 
-// Return a new GURL like url, but without any "#foo" bit on the end.
-static GURL GURLWithoutRef(const GURL& url) {
-  url_canon::Replacements<char> replacements;
-  replacements.ClearRef();
-  return url.ReplaceComponents(replacements);
-}
-
-// Convert a list of GUIDs from the in-memory form to the form we keep in
-// the database (tab-separated string).
-static std::string SerializeGUIDs(const std::vector<std::string>& guids) {
-  std::string result;
-  for (size_t i = 0; i < guids.size(); ++i) {
-    if (!result.empty())
-      result.push_back('\t');
-    const std::string& guid = guids[i];
-    for (size_t j = 0; j < guid.size(); ++j) {
-      char ch = guid[j];
-      // If we have any embedded tabs in the GUID (a pathological case),
-      // we normalize them to spaces.
-      if (ch == '\t')
-        ch = ' ';
-      result.push_back(ch);
-    }
-  }
-  return result;
-}
-
-// The partner of SerializeGUIDs.  Converts a serialized GUIDs string
-// back to a vector.
-static void DeserializeGUIDs(const std::string& str,
-                             std::vector<std::string>* guids) {
-  SplitString(str, '\t', guids);
-}
-
 bool WebDatabase::AddLogin(const PasswordForm& form) {
   SQLStatement s;
   std::string encrypted_password;
@@ -583,7 +631,8 @@ bool WebDatabase::AddLogin(const PasswordForm& form) {
                 " password_element, password_value, submit_element, "
                 " signon_realm, ssl_valid, preferred, date_created, "
                 " blacklisted_by_user, scheme) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") != SQLITE_OK) {
+                "VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") != SQLITE_OK) {
     NOTREACHED() << "Statement prepare failed";
     return false;
   }
@@ -593,7 +642,8 @@ bool WebDatabase::AddLogin(const PasswordForm& form) {
   s.bind_wstring(2, form.username_element);
   s.bind_wstring(3, form.username_value);
   s.bind_wstring(4, form.password_element);
-  Encryptor::EncryptWideString(form.password_value, &encrypted_password);
+  Encryptor::EncryptString16(WideToUTF16Hack(form.password_value),
+                             &encrypted_password);
   s.bind_blob(5, encrypted_password.data(),
               static_cast<int>(encrypted_password.length()));
   s.bind_wstring(6, form.submit_element);
@@ -603,27 +653,6 @@ bool WebDatabase::AddLogin(const PasswordForm& form) {
   s.bind_int64(10, form.date_created.ToTimeT());
   s.bind_int(11, form.blacklisted_by_user);
   s.bind_int(12, form.scheme);
-  if (s.step() != SQLITE_DONE) {
-    NOTREACHED();
-    return false;
-  }
-  return true;
-}
-
-bool WebDatabase::AddIE7Login(const IE7PasswordInfo& info) {
-  SQLStatement s;
-  if (s.prepare(db_,
-                "INSERT OR REPLACE INTO ie7_logins "
-                "(url_hash, password_value, date_created) "
-                "VALUES (?, ?, ?)") != SQLITE_OK) {
-    NOTREACHED() << "Statement prepare failed";
-    return false;
-  }
-
-  s.bind_wstring(0, info.url_hash);
-  s.bind_blob(1, &info.encrypted_data.front(),
-              static_cast<int>(info.encrypted_data.size()));
-  s.bind_int64(2, info.date_created.ToTimeT());
   if (s.step() != SQLITE_DONE) {
     NOTREACHED();
     return false;
@@ -649,7 +678,8 @@ bool WebDatabase::UpdateLogin(const PasswordForm& form) {
   }
 
   s.bind_string(0, form.action.spec());
-  Encryptor::EncryptWideString(form.password_value, &encrypted_password);
+  Encryptor::EncryptString16(WideToUTF16Hack(form.password_value),
+                             &encrypted_password);
   s.bind_blob(1, encrypted_password.data(),
               static_cast<int>(encrypted_password.length()));
   s.bind_int(2, form.ssl_valid);
@@ -695,24 +725,6 @@ bool WebDatabase::RemoveLogin(const PasswordForm& form) {
   return true;
 }
 
-bool WebDatabase::RemoveIE7Login(const IE7PasswordInfo& info) {
-  SQLStatement s;
-  // Remove a login by UNIQUE-constrained fields.
-  if (s.prepare(db_,
-                "DELETE FROM ie7_logins WHERE "
-                "url_hash = ?") != SQLITE_OK) {
-    NOTREACHED() << "Statement prepare failed";
-    return false;
-  }
-  s.bind_wstring(0, info.url_hash);
-
-  if (s.step() != SQLITE_DONE) {
-    NOTREACHED();
-    return false;
-  }
-  return true;
-}
-
 bool WebDatabase::RemoveLoginsCreatedBetween(const Time delete_begin,
                                              const Time delete_end) {
   SQLStatement s1;
@@ -748,16 +760,18 @@ static void InitPasswordFormFromStatement(PasswordForm* form,
                                           SQLStatement* s) {
   std::string encrypted_password;
   std::string tmp;
+  string16 decrypted_password;
   s->column_string(0, &tmp);
   form->origin = GURL(tmp);
   s->column_string(1, &tmp);
   form->action = GURL(tmp);
-  s->column_string16(2, &form->username_element);
-  s->column_string16(3, &form->username_value);
-  s->column_string16(4, &form->password_element);
+  s->column_wstring(2, &form->username_element);
+  s->column_wstring(3, &form->username_value);
+  s->column_wstring(4, &form->password_element);
   s->column_blob_as_string(5, &encrypted_password);
-  Encryptor::DecryptWideString(encrypted_password, &form->password_value);
-  s->column_string16(6, &form->submit_element);
+  Encryptor::DecryptString16(encrypted_password, &decrypted_password);
+  form->password_value = UTF16ToWideHack(decrypted_password);
+  s->column_wstring(6, &form->submit_element);
   s->column_string(7, &tmp);
   form->signon_realm = tmp;
   form->ssl_valid = (s->column_int(8) > 0);
@@ -787,7 +801,7 @@ bool WebDatabase::GetLogins(const PasswordForm& form,
 
   s.bind_string(0, form.signon_realm);
 
-  int64 result;
+  int result;
   while ((result = s.step()) == SQLITE_ROW) {
     PasswordForm* new_form = new PasswordForm();
     InitPasswordFormFromStatement(new_form, &s);
@@ -795,29 +809,6 @@ bool WebDatabase::GetLogins(const PasswordForm& form,
     forms->push_back(new_form);
   }
   return result == SQLITE_DONE;
-}
-
-bool WebDatabase::GetIE7Login(const IE7PasswordInfo& info,
-                              IE7PasswordInfo* result) {
-  DCHECK(result);
-  SQLStatement s;
-  if (s.prepare(db_,
-                "SELECT password_value, date_created FROM ie7_logins "
-                "WHERE url_hash == ? ") != SQLITE_OK) {
-    NOTREACHED() << "Statement prepare failed";
-    return false;
-  }
-
-  s.bind_wstring(0, info.url_hash);
-
-  int64 query_result = s.step();
-  if (query_result == SQLITE_ROW) {
-    s.column_blob_as_vector(0, &result->encrypted_data);
-    result->date_created = Time::FromTimeT(s.column_int64(1));
-    result->url_hash = info.url_hash;
-    s.step();
-  }
-  return query_result == SQLITE_DONE;
 }
 
 bool WebDatabase::GetAllLogins(std::vector<PasswordForm*>* forms,
@@ -838,7 +829,7 @@ bool WebDatabase::GetAllLogins(std::vector<PasswordForm*>* forms,
     return false;
   }
 
-  int64 result;
+  int result;
   while ((result = s.step()) == SQLITE_ROW) {
     PasswordForm* new_form = new PasswordForm();
     InitPasswordFormFromStatement(new_form, &s);
@@ -848,10 +839,338 @@ bool WebDatabase::GetAllLogins(std::vector<PasswordForm*>* forms,
   return result == SQLITE_DONE;
 }
 
+bool WebDatabase::AddAutofillFormElements(
+    const std::vector<AutofillForm::Element>& elements) {
+  bool result = true;
+  for (std::vector<AutofillForm::Element>::const_iterator
+       itr = elements.begin();
+       itr != elements.end();
+       itr++) {
+    result = result && AddAutofillFormElement(*itr);
+  }
+  return result;
+}
+
+bool WebDatabase::ClearAutofillEmptyValueElements() {
+  SQLStatement s;
+
+  if (s.prepare(db_, "SELECT pair_id FROM autofill "
+                     "WHERE TRIM(value)= \"\"") != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  std::set<int64> ids;
+  int result;
+  while ((result = s.step()) == SQLITE_ROW)
+    ids.insert(s.column_int64(0));
+
+  bool success = true;
+  for (std::set<int64>::const_iterator iter = ids.begin(); iter != ids.end();
+       ++iter) {
+    if (!RemoveFormElementForID(*iter))
+      success = false;
+  }
+
+  return success;
+}
+
+bool WebDatabase::GetIDAndCountOfFormElement(
+    const AutofillForm::Element& element, int64* pair_id, int* count) {
+  SQLStatement s;
+
+  if (s.prepare(db_, "SELECT pair_id, count FROM autofill "
+                     " WHERE name = ? AND value = ?") != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.bind_wstring(0, element.name);
+  s.bind_wstring(1, element.value);
+
+  int result;
+
+  *count = 0;
+
+  if ((result = s.step()) == SQLITE_ROW) {
+    *pair_id = s.column_int64(0);
+    *count = s.column_int(1);
+  }
+
+  return true;
+}
+
+bool WebDatabase::GetCountOfFormElement(int64 pair_id, int* count) {
+  SQLStatement s;
+
+  if (s.prepare(db_, "SELECT count FROM autofill "
+                     " WHERE pair_id = ?") != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.bind_int64(0, pair_id);
+
+  int result;
+  if ((result = s.step()) == SQLITE_ROW) {
+    *count = s.column_int(0);
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::InsertFormElement(const AutofillForm::Element& element,
+                                    int64* pair_id) {
+  SQLStatement s;
+
+  if (s.prepare(db_, "INSERT INTO autofill "
+                     "(name, value, value_lower) "
+                     "VALUES (?, ?, ?)")
+                     != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.bind_wstring(0, element.name);
+  s.bind_wstring(1, element.value);
+  s.bind_wstring(2, l10n_util::ToLower(element.value));
+
+  if (s.step() != SQLITE_DONE) {
+    NOTREACHED();
+    return false;
+  }
+
+  *pair_id = sqlite3_last_insert_rowid(db_);
+
+  return true;
+}
+
+bool WebDatabase::InsertPairIDAndDate(int64 pair_id,
+                                      const Time date_created) {
+  SQLStatement s;
+
+  if (s.prepare(db_,
+                "INSERT INTO autofill_dates "
+                "(pair_id, date_created) VALUES (?, ?)")
+                    != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.bind_int64(0, pair_id);
+  s.bind_int64(1, date_created.ToTimeT());
+
+  if (s.step() != SQLITE_DONE) {
+    NOTREACHED();
+    return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::SetCountOfFormElement(int64 pair_id, int count) {
+  SQLStatement s;
+
+  if (s.prepare(db_,
+                "UPDATE autofill SET count = ? "
+                "WHERE pair_id = ?")
+                    != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.bind_int(0, count);
+  s.bind_int64(1, pair_id);
+
+  if (s.step() != SQLITE_DONE) {
+    NOTREACHED();
+    return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::AddAutofillFormElement(const AutofillForm::Element& element) {
+  SQLStatement s;
+  int count = 0;
+  int64 pair_id;
+
+  if (!GetIDAndCountOfFormElement(element, &pair_id, &count))
+    return false;
+
+  if (count == 0 && !InsertFormElement(element, &pair_id))
+    return false;
+
+  return SetCountOfFormElement(pair_id, count + 1) &&
+      InsertPairIDAndDate(pair_id, Time::Now());
+}
+
+bool WebDatabase::GetFormValuesForElementName(const std::wstring& name,
+    const std::wstring& prefix,
+    std::vector<std::wstring>* values,
+    int limit) {
+  DCHECK(values);
+  SQLStatement s;
+
+  if (prefix.empty()) {
+    if (s.prepare(db_, "SELECT value FROM autofill "
+                       "WHERE name = ? "
+                       "ORDER BY count DESC "
+                       "LIMIT ?") != SQLITE_OK) {
+      NOTREACHED() << "Statement prepare failed";
+      return false;
+    }
+
+    s.bind_wstring(0, name);
+    s.bind_int(1, limit);
+  } else {
+    std::wstring prefix_lower = l10n_util::ToLower(prefix);
+    std::wstring next_prefix = prefix_lower;
+    next_prefix[next_prefix.length() - 1]++;
+
+    if (s.prepare(db_, "SELECT value FROM autofill "
+                       "WHERE name = ? AND "
+                       "value_lower >= ? AND "
+                       "value_lower < ? "
+                       "ORDER BY count DESC "
+                       "LIMIT ?") != SQLITE_OK) {
+      NOTREACHED() << "Statement prepare failed";
+      return false;
+    }
+
+    s.bind_wstring(0, name);
+    s.bind_wstring(1, prefix_lower);
+    s.bind_wstring(2, next_prefix);
+    s.bind_int(3, limit);
+  }
+
+  values->clear();
+  int result;
+  while ((result = s.step()) == SQLITE_ROW)
+    values->push_back(s.column_wstring(0));
+
+  return result == SQLITE_DONE;
+}
+
+bool WebDatabase::RemoveFormElementsAddedBetween(const Time delete_begin,
+                                                 const Time delete_end) {
+  SQLStatement s;
+  if (s.prepare(db_,
+                "SELECT DISTINCT pair_id FROM autofill_dates WHERE "
+                "date_created >= ? AND date_created < ?") != SQLITE_OK) {
+    NOTREACHED() << "Statement 1 prepare failed";
+    return false;
+  }
+  s.bind_int64(0, delete_begin.ToTimeT());
+  s.bind_int64(1,
+               delete_end.is_null() ?
+                   std::numeric_limits<int64>::max() :
+                   delete_end.ToTimeT());
+
+  std::vector<int64> pair_ids;
+  int result;
+  while ((result = s.step()) == SQLITE_ROW)
+    pair_ids.push_back(s.column_int64(0));
+
+  if (result != SQLITE_DONE) {
+    NOTREACHED();
+    return false;
+  }
+
+  for (std::vector<int64>::iterator itr = pair_ids.begin();
+       itr != pair_ids.end();
+       itr++) {
+    int how_many = 0;
+    if (!RemoveFormElementForTimeRange(*itr, delete_begin, delete_end,
+                                       &how_many)) {
+      return false;
+    }
+    if (!AddToCountOfFormElement(*itr, -how_many))
+      return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::RemoveFormElementForTimeRange(int64 pair_id,
+                                                const Time delete_begin,
+                                                const Time delete_end,
+                                                int* how_many) {
+  SQLStatement s;
+  if (s.prepare(db_,
+                "DELETE FROM autofill_dates WHERE pair_id = ? AND "
+                "date_created >= ? AND date_created < ?") != SQLITE_OK) {
+    NOTREACHED() << "Statement 1 prepare failed";
+    return false;
+  }
+  s.bind_int64(0, pair_id);
+  s.bind_int64(1, delete_begin.is_null() ? 0 : delete_begin.ToTimeT());
+  s.bind_int64(2, delete_end.is_null() ? std::numeric_limits<int64>::max() :
+                                         delete_end.ToTimeT());
+
+  bool result = (s.step() == SQLITE_DONE);
+  if (how_many)
+    *how_many = sqlite3_changes(db_);
+
+  return result;
+}
+
+bool WebDatabase::RemoveFormElement(const std::wstring& name,
+                                    const std::wstring& value) {
+  // Find the id for that pair.
+  SQLStatement s;
+  if (s.prepare(db_,
+                "SELECT pair_id FROM autofill WHERE  name = ? AND value= ?") !=
+                SQLITE_OK) {
+    NOTREACHED() << "Statement 1 prepare failed";
+    return false;
+  }
+  s.bind_wstring(0, name);
+  s.bind_wstring(1, value);
+
+  int result = s.step();
+  if (result != SQLITE_ROW)
+    return false;
+
+  return RemoveFormElementForID(s.column_int64(0));
+}
+
+bool WebDatabase::AddToCountOfFormElement(int64 pair_id, int delta) {
+  int count = 0;
+
+  if (!GetCountOfFormElement(pair_id, &count))
+    return false;
+
+  if (count + delta == 0) {
+    if (!RemoveFormElementForID(pair_id))
+      return false;
+  } else {
+    if (!SetCountOfFormElement(pair_id, count + delta))
+      return false;
+  }
+  return true;
+}
+
+bool WebDatabase::RemoveFormElementForID(int64 pair_id) {
+  SQLStatement s;
+  if (s.prepare(db_,
+                "DELETE FROM autofill WHERE pair_id = ?") != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+  s.bind_int64(0, pair_id);
+  if (s.step() != SQLITE_DONE)
+    return false;
+
+  return RemoveFormElementForTimeRange(pair_id, Time(), Time(), NULL);
+}
+
 void WebDatabase::MigrateOldVersionsAsNeeded() {
   // Migrate if necessary.
   int current_version = meta_table_.GetVersionNumber();
-  switch(current_version) {
+  switch (current_version) {
     // Versions 1 - 19 are unhandled.  Version numbers greater than
     // kCurrentVersionNumber should have already been weeded out by the caller.
     default:
@@ -868,11 +1187,22 @@ void WebDatabase::MigrateOldVersionsAsNeeded() {
                        "ALTER TABLE keywords ADD COLUMN autogenerate_keyword "
                        "INTEGER DEFAULT 0", NULL, NULL, NULL) != SQLITE_OK) {
         NOTREACHED();
+        LOG(WARNING) << "Unable to update web database to version 21.";
         return;
       }
-      ++current_version;
-      meta_table_.SetVersionNumber(current_version);
-      meta_table_.SetCompatibleVersionNumber(current_version);
+      meta_table_.SetVersionNumber(21);
+      meta_table_.SetCompatibleVersionNumber(
+          std::min(21, kCompatibleVersionNumber));
+      // FALL THROUGH
+
+    case 21:
+      if (!ClearAutofillEmptyValueElements()) {
+        NOTREACHED() << "Failed to clean-up autofill DB.";
+      }
+      meta_table_.SetVersionNumber(22);
+      // No change in the compatibility version number.
+
+      // FALL THROUGH
 
     // Add successive versions here.  Each should set the version number and
     // compatible version number as appropriate, then fall through to the next
@@ -883,4 +1213,3 @@ void WebDatabase::MigrateOldVersionsAsNeeded() {
       return;
   }
 }
-

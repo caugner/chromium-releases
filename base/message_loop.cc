@@ -13,9 +13,18 @@
 #include "base/string_util.h"
 #include "base/thread_local.h"
 
+#if defined(OS_MACOSX)
+#include "base/message_pump_mac.h"
+#endif
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #endif
+#if defined(OS_LINUX)
+#include "base/message_pump_glib.h"
+#endif
+
+using base::Time;
+using base::TimeDelta;
 
 // A lazily created thread local storage for quick access to a thread's message
 // loop, if one exists.  This should be safe and free of static constructors.
@@ -75,22 +84,29 @@ MessageLoop::MessageLoop(Type type)
   DCHECK(!current()) << "should only have one message loop per thread";
   lazy_tls_ptr.Pointer()->Set(this);
 
-  // TODO(darin): Choose the pump based on the requested type.
 #if defined(OS_WIN)
+  // TODO(rvargas): Get rid of the OS guards.
   if (type_ == TYPE_DEFAULT) {
     pump_ = new base::MessagePumpDefault();
+  } else if (type_ == TYPE_IO) {
+    pump_ = new base::MessagePumpForIO();
   } else {
-    pump_ = new base::MessagePumpWin();
+    DCHECK(type_ == TYPE_UI);
+    pump_ = new base::MessagePumpForUI();
   }
 #elif defined(OS_POSIX)
-  if (type_ == TYPE_IO) {
+  if (type_ == TYPE_UI) {
+#if defined(OS_MACOSX)
+    pump_ = base::MessagePumpMac::Create();
+#elif defined(OS_LINUX)
+    pump_ = new base::MessagePumpForUI();
+#endif  // OS_LINUX
+  } else if (type_ == TYPE_IO) {
     pump_ = new base::MessagePumpLibevent();
   } else {
     pump_ = new base::MessagePumpDefault();
   }
-#else
-  pump_ = new base::MessagePumpDefault();
-#endif
+#endif  // OS_POSIX
 }
 
 MessageLoop::~MessageLoop() {
@@ -177,7 +193,7 @@ void MessageLoop::RunInternal() {
     return;
   }
 #endif
-  
+
   pump_->Run(this);
 }
 
@@ -190,10 +206,10 @@ bool MessageLoop::ProcessNextDelayedNonNestableTask() {
 
   if (deferred_non_nestable_work_queue_.empty())
     return false;
-  
+
   Task* task = deferred_non_nestable_work_queue_.front().task;
   deferred_non_nestable_work_queue_.pop();
-  
+
   RunTask(task);
   return true;
 }
@@ -349,15 +365,23 @@ bool MessageLoop::DeletePendingTasks() {
       AddToDelayedWorkQueue(pending_task);
     } else {
       // TODO(darin): Delete all tasks once it is safe to do so.
-      //delete task;
+      // Until it is totally safe, just do it when running purify.
+#ifdef PURIFY
+      delete pending_task.task;
+#endif  // PURIFY
     }
   }
   did_work |= !deferred_non_nestable_work_queue_.empty();
   while (!deferred_non_nestable_work_queue_.empty()) {
     // TODO(darin): Delete all tasks once it is safe to do so.
-    //Task* task = deferred_non_nestable_work_queue_.front().task;
+    // Until it is totaly safe, just delete them to keep purify happy.
+#ifdef PURIFY
+    Task* task = deferred_non_nestable_work_queue_.front().task;
+#endif
     deferred_non_nestable_work_queue_.pop();
-    //delete task;
+#ifdef PURIFY
+    delete task;
+#endif
   }
   did_work |= !delayed_work_queue_.empty();
   while (!delayed_work_queue_.empty()) {
@@ -384,9 +408,9 @@ bool MessageLoop::DoWork() {
       PendingTask pending_task = work_queue_.front();
       work_queue_.pop();
       if (!pending_task.delayed_run_time.is_null()) {
-        bool was_empty = delayed_work_queue_.empty();
         AddToDelayedWorkQueue(pending_task);
-        if (was_empty)  // We only schedule the next delayed work item.
+        // If we changed the topmost task, then it is time to re-schedule.
+        if (delayed_work_queue_.top().task == pending_task.task)
           pump_->ScheduleDelayedWork(pending_task.delayed_run_time);
       } else {
         if (DeferOrRunPendingTask(pending_task))
@@ -404,7 +428,7 @@ bool MessageLoop::DoDelayedWork(Time* next_delayed_work_time) {
     *next_delayed_work_time = Time();
     return false;
   }
-  
+
   if (delayed_work_queue_.top().delayed_run_time > Time::Now()) {
     *next_delayed_work_time = delayed_work_queue_.top().delayed_run_time;
     return false;
@@ -412,7 +436,7 @@ bool MessageLoop::DoDelayedWork(Time* next_delayed_work_time) {
 
   PendingTask pending_task = delayed_work_queue_.top();
   delayed_work_queue_.pop();
-  
+
   if (!delayed_work_queue_.empty())
     *next_delayed_work_time = delayed_work_queue_.top().delayed_run_time;
 
@@ -488,11 +512,11 @@ void MessageLoop::StartHistogrammer() {
   if (enable_histogrammer_ && !message_histogram_.get()
       && StatisticsRecorder::WasStarted()) {
     DCHECK(!thread_name_.empty());
-    message_histogram_.reset(new LinearHistogram(
-        ASCIIToWide("MsgLoop:" + thread_name_).c_str(),
-                    kLeastNonZeroMessageId,
-                    kMaxMessageId,
-                    kNumberOfDistinctMessagesDisplayed));
+    message_histogram_.reset(
+        new LinearHistogram(("MsgLoop:" + thread_name_).c_str(),
+                            kLeastNonZeroMessageId,
+                            kMaxMessageId,
+                            kNumberOfDistinctMessagesDisplayed));
     message_histogram_->SetFlags(message_histogram_->kHexRangePrintingFlag);
     message_histogram_->SetRangeDescriptions(event_descriptions_);
   }
@@ -557,7 +581,7 @@ void MessageLoopForUI::DidProcessMessage(const MSG& message) {
   pump_win()->DidProcessMessage(message);
 }
 void MessageLoopForUI::PumpOutPendingPaintMessages() {
-  pump_win()->PumpOutPendingPaintMessages();
+  pump_ui()->PumpOutPendingPaintMessages();
 }
 
 #endif  // defined(OS_WIN)
@@ -567,18 +591,27 @@ void MessageLoopForUI::PumpOutPendingPaintMessages() {
 
 #if defined(OS_WIN)
 
-void MessageLoopForIO::WatchObject(HANDLE object, Watcher* watcher) {
-  pump_win()->WatchObject(object, watcher);
+void MessageLoopForIO::RegisterIOHandler(HANDLE file, IOHandler* handler) {
+  pump_io()->RegisterIOHandler(file, handler);
+}
+
+bool MessageLoopForIO::WaitForIOCompletion(DWORD timeout, IOHandler* filter) {
+  return pump_io()->WaitForIOCompletion(timeout, filter);
 }
 
 #elif defined(OS_POSIX)
 
-void MessageLoopForIO::WatchSocket(int socket, short interest_mask, 
-                                   struct event* e, Watcher* watcher) {
-  pump_libevent()->WatchSocket(socket, interest_mask, e, watcher);
+bool MessageLoopForIO::WatchFileDescriptor(int fd,
+                                           bool persistent,
+                                           Mode mode,
+                                           FileDescriptorWatcher *controller,
+                                           Watcher *delegate) {
+  return pump_libevent()->WatchFileDescriptor(
+      fd,
+      persistent,
+      static_cast<base::MessagePumpLibevent::Mode>(mode),
+      controller,
+      delegate);
 }
 
-void MessageLoopForIO::UnwatchSocket(struct event* e) {
-  pump_libevent()->UnwatchSocket(e);
-}
 #endif

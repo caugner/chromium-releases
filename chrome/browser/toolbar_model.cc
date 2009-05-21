@@ -5,17 +5,18 @@
 #include "chrome/browser/toolbar_model.h"
 
 #include "chrome/browser/cert_store.h"
-#include "chrome/browser/navigation_controller.h"
-#include "chrome/browser/navigation_entry.h"
-#include "chrome/browser/ssl_error_info.h"
-#include "chrome/browser/tab_contents.h"
-#include "chrome/common/gfx/url_elider.h"
+#include "chrome/browser/ssl/ssl_error_info.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/gfx/text_elider.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
+#include "grit/generated_resources.h"
 #include "net/base/net_util.h"
+#include "webkit/glue/feed.h"
 
-#include "generated_resources.h"
 
 ToolbarModel::ToolbarModel() : input_in_progress_(false) {
 }
@@ -42,7 +43,7 @@ std::wstring ToolbarModel::GetText() {
       url = entry->display_url();
     }
   }
-  return gfx::ElideUrl(url, ChromeFont(), 0, languages);
+  return gfx::GetCleanStringFromUrl(url, languages, NULL, NULL);
 }
 
 ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() {
@@ -107,6 +108,21 @@ ToolbarModel::Icon ToolbarModel::GetIcon() {
   }
 }
 
+scoped_refptr<FeedList> ToolbarModel::GetFeedList() {
+  if (input_in_progress_)
+    return NULL;
+
+  NavigationController* navigation_controller = GetNavigationController();
+  if (!navigation_controller)  // We might not have a controller on init.
+    return NULL;
+
+  NavigationEntry* entry = navigation_controller->GetActiveEntry();
+  if (!entry)
+    return NULL;
+
+  return entry->feedlist();
+}
+
 void ToolbarModel::GetIconHoverText(std::wstring* text, SkColor* text_color) {
   static const SkColor kOKHttpsInfoBubbleTextColor =
       SkColorSetRGB(0, 153, 51);  // Green.
@@ -122,7 +138,7 @@ void ToolbarModel::GetIconHoverText(std::wstring* text, SkColor* text_color) {
   NavigationEntry* entry = navigation_controller->GetActiveEntry();
   DCHECK(entry);
 
-  
+
   const NavigationEntry::SSLStatus& ssl = entry->ssl();
   switch (ssl.security_style()) {
     case SECURITY_STYLE_AUTHENTICATED: {
@@ -222,4 +238,3 @@ void ToolbarModel::CreateErrorText(NavigationEntry* entry, std::wstring* text) {
     }
   }
 }
-

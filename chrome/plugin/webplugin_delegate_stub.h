@@ -2,24 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H__
-#define CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H__
+#ifndef CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_
+#define CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_
 
 #include <queue>
 
 #include "base/gfx/rect.h"
 #include "base/ref_counted.h"
+#include "base/shared_memory.h"
 #include "base/task.h"
 #include "chrome/common/ipc_channel.h"
-#include "chrome/common/plugin_messages.h"
 #include "third_party/npapi/bindings/npapi.h"
 
 class GURL;
 class PluginChannel;
 class WebPluginProxy;
-class WebPluginDelegateImpl;
+class WebPluginDelegate;
 struct PluginMsg_Init_Params;
 struct PluginMsg_DidReceiveResponseParams;
+struct PluginMsg_PrintResponse_Params;
+struct PluginMsg_URLRequestReply_Params;
 class WebCursor;
 
 // Converts the IPC messages from WebPluginDelegateProxy into calls to the
@@ -57,11 +59,16 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
   void OnSetFocus();
   void OnHandleEvent(const NPEvent& event, bool* handled,
                      WebCursor* cursor);
+
+  void OnPaint(const gfx::Rect& damaged_rect);
+  void OnDidPaint();
+
   void OnPrint(PluginMsg_PrintResponse_Params* params);
+
   void OnUpdateGeometry(const gfx::Rect& window_rect,
-                        const gfx::Rect& clip_rect, bool visible,
-                        const SharedMemoryHandle& windowless_buffer,
-                        const SharedMemoryLock& lock);
+                        const gfx::Rect& clip_rect,
+                        const base::SharedMemoryHandle& windowless_buffer,
+                        const base::SharedMemoryHandle& background_buffer);
   void OnGetPluginScriptableObject(int* route_id, void** npobject_ptr);
   void OnSendJavaScriptStream(const std::string& url,
                               const std::wstring& result,
@@ -83,19 +90,18 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
                           HANDLE notify_data);
 
   void CreateSharedBuffer(size_t size,
-                          SharedMemory* shared_buf,
-                          SharedMemoryHandle* remote_handle);
+                          base::SharedMemory* shared_buf,
+                          base::SharedMemoryHandle* remote_handle);
 
   int instance_id_;
   std::string mime_type_;
 
   scoped_refptr<PluginChannel> channel_;
 
-  WebPluginDelegateImpl* delegate_;
+  WebPluginDelegate* delegate_;
   WebPluginProxy* webplugin_;
 
   DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegateStub);
 };
 
-#endif  // CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H__
-
+#endif  // CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_

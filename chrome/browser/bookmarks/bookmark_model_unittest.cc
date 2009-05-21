@@ -5,12 +5,17 @@
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/test/testing_profile.h"
-#include "chrome/views/tree_node_model.h"
+#include "chrome/views/controls/tree/tree_node_model.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::Time;
+using base::TimeDelta;
 
 class BookmarkModelTest : public testing::Test, public BookmarkModelObserver {
  public:
@@ -85,6 +90,11 @@ class BookmarkModelTest : public testing::Test, public BookmarkModelObserver {
     observer_details.Set(node, NULL, -1, -1);
   }
 
+  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                             BookmarkNode* node) {
+    reordered_count_++;
+  }
+
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          BookmarkNode* node) {
     // We never attempt to load favicons, so that this method never
@@ -92,17 +102,20 @@ class BookmarkModelTest : public testing::Test, public BookmarkModelObserver {
   }
 
   void ClearCounts() {
-    moved_count = added_count = removed_count = changed_count = 0;
+    reordered_count_ = moved_count = added_count = removed_count =
+        changed_count = 0;
   }
 
   void AssertObserverCount(int added_count,
                            int moved_count,
                            int removed_count,
-                           int changed_count) {
+                           int changed_count,
+                           int reordered_count) {
     ASSERT_EQ(added_count, this->added_count);
     ASSERT_EQ(moved_count, this->moved_count);
     ASSERT_EQ(removed_count, this->removed_count);
     ASSERT_EQ(changed_count, this->changed_count);
+    ASSERT_EQ(reordered_count, reordered_count_);
   }
 
   void AssertNodesEqual(BookmarkNode* expected, BookmarkNode* actual) {
@@ -140,6 +153,8 @@ class BookmarkModelTest : public testing::Test, public BookmarkModelObserver {
 
   int changed_count;
 
+  int reordered_count_;
+
   ObserverDetails observer_details;
 };
 
@@ -163,7 +178,7 @@ TEST_F(BookmarkModelTest, AddURL) {
   const GURL url("http://foo.com");
 
   BookmarkNode* new_node = model.AddURL(root, 0, title, url);
-  AssertObserverCount(1, 0, 0, 0);
+  AssertObserverCount(1, 0, 0, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
 
   ASSERT_EQ(1, root->GetChildCount());
@@ -181,7 +196,7 @@ TEST_F(BookmarkModelTest, AddGroup) {
   const std::wstring title(L"foo");
 
   BookmarkNode* new_node = model.AddGroup(root, 0, title);
-  AssertObserverCount(1, 0, 0, 0);
+  AssertObserverCount(1, 0, 0, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
 
   ASSERT_EQ(1, root->GetChildCount());
@@ -193,8 +208,8 @@ TEST_F(BookmarkModelTest, AddGroup) {
 
   // Add another group, just to make sure group_ids are incremented correctly.
   ClearCounts();
-  BookmarkNode* new_node2 = model.AddGroup(root, 0, title);
-  AssertObserverCount(1, 0, 0, 0);
+  model.AddGroup(root, 0, title);
+  AssertObserverCount(1, 0, 0, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
 }
 
@@ -202,12 +217,12 @@ TEST_F(BookmarkModelTest, RemoveURL) {
   BookmarkNode* root = model.GetBookmarkBarNode();
   const std::wstring title(L"foo");
   const GURL url("http://foo.com");
-  BookmarkNode* new_node = model.AddURL(root, 0, title, url);
+  model.AddURL(root, 0, title, url);
   ClearCounts();
 
   model.Remove(root, 0);
   ASSERT_EQ(0, root->GetChildCount());
-  AssertObserverCount(0, 0, 1, 0);
+  AssertObserverCount(0, 0, 1, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
 
   // Make sure there is no mapping for the URL.
@@ -223,14 +238,14 @@ TEST_F(BookmarkModelTest, RemoveGroup) {
   // Add a URL as a child.
   const std::wstring title(L"foo");
   const GURL url("http://foo.com");
-  BookmarkNode* new_node = model.AddURL(group, 0, title, url);
+  model.AddURL(group, 0, title, url);
 
   ClearCounts();
 
   // Now remove the group.
   model.Remove(root, 0);
   ASSERT_EQ(0, root->GetChildCount());
-  AssertObserverCount(0, 0, 1, 0);
+  AssertObserverCount(0, 0, 1, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
 
   // Make sure there is no mapping for the URL.
@@ -247,7 +262,7 @@ TEST_F(BookmarkModelTest, SetTitle) {
 
   title = L"foo2";
   model.SetTitle(node, title);
-  AssertObserverCount(0, 0, 0, 1);
+  AssertObserverCount(0, 0, 0, 1, 0);
   observer_details.AssertEquals(node, NULL, -1, -1);
   EXPECT_EQ(title, node->GetTitle());
 }
@@ -262,7 +277,7 @@ TEST_F(BookmarkModelTest, Move) {
 
   model.Move(node, group1, 0);
 
-  AssertObserverCount(0, 1, 0, 0);
+  AssertObserverCount(0, 1, 0, 0, 0);
   observer_details.AssertEquals(root, group1, 1, 0);
   EXPECT_TRUE(group1 == node->GetParent());
   EXPECT_EQ(1, root->GetChildCount());
@@ -273,7 +288,7 @@ TEST_F(BookmarkModelTest, Move) {
   // And remove the group.
   ClearCounts();
   model.Remove(root, 0);
-  AssertObserverCount(0, 0, 1, 0);
+  AssertObserverCount(0, 0, 1, 0, 0);
   observer_details.AssertEquals(root, NULL, 0, -1);
   EXPECT_TRUE(model.GetMostRecentlyAddedNodeForURL(url) == NULL);
   EXPECT_EQ(0, root->GetChildCount());
@@ -286,8 +301,7 @@ TEST_F(BookmarkModelTest, ParentForNewNodes) {
   const std::wstring title(L"foo");
   const GURL url("http://foo.com");
 
-  BookmarkNode* new_node = model.AddURL(model.other_node(), 0, title, url);
-
+  model.AddURL(model.other_node(), 0, title, url);
   ASSERT_EQ(model.other_node(), model.GetParentForNewNodes());
 }
 
@@ -300,15 +314,16 @@ TEST_F(BookmarkModelTest, MostRecentlyModifiedGroups) {
 
   // Make sure group is in the most recently modified.
   std::vector<BookmarkNode*> most_recent_groups =
-      model.GetMostRecentlyModifiedGroups(1);
-  ASSERT_EQ(1, most_recent_groups.size());
+      bookmark_utils::GetMostRecentlyModifiedGroups(&model, 1);
+  ASSERT_EQ(1U, most_recent_groups.size());
   ASSERT_EQ(group, most_recent_groups[0]);
 
   // Nuke the group and do another fetch, making sure group isn't in the
   // returned list.
   model.Remove(group->GetParent(), 0);
-  most_recent_groups = model.GetMostRecentlyModifiedGroups(1);
-  ASSERT_EQ(1, most_recent_groups.size());
+  most_recent_groups =
+      bookmark_utils::GetMostRecentlyModifiedGroups(&model, 1);
+  ASSERT_EQ(1U, most_recent_groups.size());
   ASSERT_TRUE(most_recent_groups[0] != group);
 }
 
@@ -332,16 +347,16 @@ TEST_F(BookmarkModelTest, MostRecentlyAddedEntries) {
 
   // Make sure order is honored.
   std::vector<BookmarkNode*> recently_added;
-  model.GetMostRecentlyAddedEntries(2, &recently_added);
-  ASSERT_EQ(2, recently_added.size());
+  bookmark_utils::GetMostRecentlyAddedEntries(&model, 2, &recently_added);
+  ASSERT_EQ(2U, recently_added.size());
   ASSERT_TRUE(n1 == recently_added[0]);
   ASSERT_TRUE(n2 == recently_added[1]);
 
   // swap 1 and 2, then check again.
   recently_added.clear();
   std::swap(n1->date_added_, n2->date_added_);
-  model.GetMostRecentlyAddedEntries(4, &recently_added);
-  ASSERT_EQ(4, recently_added.size());
+  bookmark_utils::GetMostRecentlyAddedEntries(&model, 4, &recently_added);
+  ASSERT_EQ(4U, recently_added.size());
   ASSERT_TRUE(n2 == recently_added[0]);
   ASSERT_TRUE(n1 == recently_added[1]);
   ASSERT_TRUE(n3 == recently_added[2]);
@@ -359,13 +374,13 @@ TEST_F(BookmarkModelTest, GetBookmarksMatchingText) {
   model.AddGroup(model.GetBookmarkBarNode(), 2, L"blah");
 
   // Make sure we don't get back the folder.
-  std::vector<BookmarkModel::TitleMatch> results;
-  model.GetBookmarksMatchingText(L"blah", 2, &results);
+  std::vector<bookmark_utils::TitleMatch> results;
+  bookmark_utils::GetBookmarksMatchingText(&model, L"blah", 2, &results);
   ASSERT_EQ(1U, results.size());
   EXPECT_EQ(n1, results[0].node);
   results.clear();
 
-  model.GetBookmarksMatchingText(L"x", 2, &results);
+  bookmark_utils::GetBookmarksMatchingText(&model, L"x", 2, &results);
   ASSERT_EQ(1U, results.size());
   EXPECT_EQ(n2, results[0].node);
 }
@@ -397,7 +412,7 @@ TEST_F(BookmarkModelTest, GetBookmarksWithDups) {
 
   std::vector<GURL> urls;
   model.GetBookmarks(&urls);
-  EXPECT_EQ(1, urls.size());
+  EXPECT_EQ(1U, urls.size());
   ASSERT_TRUE(urls[0] == url);
 }
 
@@ -408,13 +423,13 @@ namespace {
 class StarredListener : public NotificationObserver {
  public:
   StarredListener() : notification_count_(0), details_(false) {
-    registrar_.Add(this, NOTIFY_URLS_STARRED, Source<Profile>(NULL));
+    registrar_.Add(this, NotificationType::URLS_STARRED, Source<Profile>(NULL));
   }
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    if (type == NOTIFY_URLS_STARRED) {
+    if (type == NotificationType::URLS_STARRED) {
       notification_count_++;
       details_ = *(Details<history::URLsStarredDetails>(details).ptr());
     }
@@ -443,7 +458,7 @@ TEST_F(BookmarkModelTest, NotifyURLsStarred) {
   // Starred notification should be sent.
   EXPECT_EQ(1, listener.notification_count_);
   ASSERT_TRUE(listener.details_.starred);
-  ASSERT_EQ(1, listener.details_.changed_urls.size());
+  ASSERT_EQ(1U, listener.details_.changed_urls.size());
   EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
   listener.notification_count_ = 0;
   listener.details_.changed_urls.clear();
@@ -470,14 +485,14 @@ TEST_F(BookmarkModelTest, NotifyURLsStarred) {
   // Now we should get the notification.
   EXPECT_EQ(1, listener.notification_count_);
   ASSERT_FALSE(listener.details_.starred);
-  ASSERT_EQ(1, listener.details_.changed_urls.size());
+  ASSERT_EQ(1U, listener.details_.changed_urls.size());
   EXPECT_TRUE(url == *(listener.details_.changed_urls.begin()));
 }
 
 namespace {
 
 // See comment in PopulateNodeFromString.
-typedef ChromeViews::TreeNodeWithValue<history::StarredEntry::Type> TestNode;
+typedef views::TreeNodeWithValue<history::StarredEntry::Type> TestNode;
 
 // Does the work of PopulateNodeFromString. index gives the index of the current
 // element in description to process.
@@ -640,6 +655,8 @@ class BookmarkModelTestWithProfile : public testing::Test,
                                    int index) {}
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    BookmarkNode* node) {}
+  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                             BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          BookmarkNode* node) {}
 
@@ -664,7 +681,7 @@ TEST_F(BookmarkModelTestWithProfile, CreateAndRestore) {
     { L"a [ b ]", L"" },
     { L"a b c [ d e [ f ] ]", L"g h i [ j k [ l ] ]"},
   };
-  for (int i = 0; i < arraysize(data); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
     // Recreate the profile. We need to reset with NULL first so that the last
     // HistoryService releases the locks on the files it creates and we can
     // delete them.
@@ -764,15 +781,16 @@ class BookmarkModelTestWithProfile2 : public BookmarkModelTestWithProfile {
 // persisted correctly.
 TEST_F(BookmarkModelTestWithProfile2, MigrateFromDBToFileTest) {
   // Copy db file over that contains starred table.
-  std::wstring old_history_path;
+  FilePath old_history_path;
   PathService::Get(chrome::DIR_TEST_DATA, &old_history_path);
-  file_util::AppendToPath(&old_history_path, L"bookmarks");
-  file_util::AppendToPath(&old_history_path, L"History_with_starred");
-  std::wstring new_history_path = profile_->GetPath();
+  old_history_path = old_history_path.AppendASCII("bookmarks");
+  old_history_path = old_history_path.AppendASCII("History_with_starred");
+  FilePath new_history_path = profile_->GetPath();
   file_util::Delete(new_history_path, true);
   file_util::CreateDirectory(new_history_path);
-  file_util::AppendToPath(&new_history_path, chrome::kHistoryFilename);
-  file_util::CopyFile(old_history_path, new_history_path);
+  FilePath new_history_file = new_history_path.Append(
+      chrome::kHistoryFilename);
+  file_util::CopyFile(old_history_path, new_history_file);
 
   // Create the history service making sure it doesn't blow away the file we
   // just copied.
@@ -820,4 +838,33 @@ TEST_F(BookmarkModelTestWithProfile2, RemoveNotification) {
   // This won't actually delete the URL, rather it'll empty out the visits.
   // This triggers blocking on the BookmarkModel.
   profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->DeleteURL(url);
+}
+
+TEST_F(BookmarkModelTest, Sort) {
+  // Populate the bookmark bar node with nodes for 'B', 'a', 'd' and 'C'.
+  // 'C' and 'a' are folders.
+  TestNode bbn;
+  PopulateNodeFromString(L"B [ a ] d [ a ]", &bbn);
+  BookmarkNode* parent = model.GetBookmarkBarNode();
+  PopulateBookmarkNode(&bbn, &model, parent);
+
+  parent->GetChild(1)->SetTitle(L"a");
+  delete parent->GetChild(1)->Remove(0);
+  parent->GetChild(3)->SetTitle(L"C");
+  delete parent->GetChild(3)->Remove(0);
+
+  ClearCounts();
+
+  // Sort the children of the bookmark bar node.
+  model.SortChildren(parent);
+
+  // Make sure we were notified.
+  AssertObserverCount(0, 0, 0, 0, 1);
+
+  // Make sure the order matches (remember, 'a' and 'C' are folders and
+  // come first).
+  EXPECT_TRUE(parent->GetChild(0)->GetTitle() == L"a");
+  EXPECT_TRUE(parent->GetChild(1)->GetTitle() == L"C");
+  EXPECT_TRUE(parent->GetChild(2)->GetTitle() == L"B");
+  EXPECT_TRUE(parent->GetChild(3)->GetTitle() == L"d");
 }

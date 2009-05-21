@@ -9,12 +9,13 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/browser/debugger/debugger_shell.h"
+#include "chrome/common/notification_service.h"
 
-DebuggerNode::DebuggerNode() : valid_(true), observing_(false), data_(NULL) {
+DebuggerNode::DebuggerNode() : data_(NULL), valid_(true), observing_(false) {
 }
 
 void DebuggerNode::Observe(NotificationType type,
@@ -68,12 +69,14 @@ v8::Handle<v8::Value> DebuggerNode::NewInstance() {
   }
   v8::Local<v8::ObjectTemplate> instance = templ->InstanceTemplate();
   if (IsObject()) {
-    instance->SetNamedPropertyHandler(&DebuggerNode::NodeGetter, 0, 0, 0, 0, node);
+    instance->SetNamedPropertyHandler(&DebuggerNode::NodeGetter, 0, 0, 0, 0,
+                                      node);
     // TODO(erikkay): verify that the interceptor does not have to be
     // behind the object
   }
   if (IsCollection()) {
-    instance->SetIndexedPropertyHandler(&DebuggerNode::NodeIndex, 0, 0, 0, 0, node);
+    instance->SetIndexedPropertyHandler(&DebuggerNode::NodeIndex, 0, 0, 0, 0,
+                                        node);
   }
   v8::Local<v8::Object> ret = instance->NewInstance();
   v8::Persistent<v8::Object> p = v8::Persistent<v8::Object>::New(ret);
@@ -83,8 +86,8 @@ v8::Handle<v8::Value> DebuggerNode::NewInstance() {
 
 v8::Handle<v8::Value> DebuggerNode::NodeGetter(v8::Local<v8::String> prop,
                                             const v8::AccessorInfo& info) {
-  DebuggerNodeWrapper* w =
-    static_cast<DebuggerNodeWrapper*>(v8::External::Cast(*info.Data())->Value());
+  DebuggerNodeWrapper* w = static_cast<DebuggerNodeWrapper*>(v8::External::Cast(
+        *info.Data())->Value());
   DebuggerNode* n = w->node();
   if (n->IsValid() && n->IsObject()) {
     return n->PropGetter(prop, info);
@@ -95,8 +98,8 @@ v8::Handle<v8::Value> DebuggerNode::NodeGetter(v8::Local<v8::String> prop,
 
 v8::Handle<v8::Value> DebuggerNode::NodeIndex(uint32_t index,
                                            const v8::AccessorInfo& info) {
-  DebuggerNodeWrapper* w =
-    static_cast<DebuggerNodeWrapper*>(v8::External::Cast(*info.Data())->Value());
+  DebuggerNodeWrapper* w = static_cast<DebuggerNodeWrapper*>(v8::External::Cast(
+      *info.Data())->Value());
   DebuggerNode* n = w->node();
   if (n->IsValid() && n->IsCollection()) {
     return n->IndexGetter(index, info);
@@ -106,8 +109,8 @@ v8::Handle<v8::Value> DebuggerNode::NodeIndex(uint32_t index,
 }
 
 v8::Handle<v8::Value> DebuggerNode::NodeFunc(const v8::Arguments& args) {
-  DebuggerNodeWrapper* w =
-    static_cast<DebuggerNodeWrapper*>(v8::External::Cast(*args.Data())->Value());
+  DebuggerNodeWrapper* w = static_cast<DebuggerNodeWrapper*>(v8::External::Cast(
+      *args.Data())->Value());
   DebuggerNode* n = w->node();
   if (n->IsValid() && n->IsFunction()) {
     return n->Function(args);
@@ -130,17 +133,19 @@ ChromeNode::~ChromeNode() {
 v8::Handle<v8::Value> ChromeNode::PropGetter(v8::Handle<v8::String> prop,
                                              const v8::AccessorInfo& info) {
   if (prop->Equals(v8::String::New("pid"))) {
-    return v8::Number::New(GetCurrentProcessId());
+    return v8::Number::New(base::GetCurrentProcId());
   } else if (prop->Equals(v8::String::New("browser"))) {
     BrowserListNode *node = BrowserListNode::BrowserList();
     return node->NewInstance();
   } else if (prop->Equals(v8::String::New("setDebuggerReady"))) {
     FunctionNode<DebuggerShell>* f =
-      new FunctionNode<DebuggerShell>(DebuggerShell::SetDebuggerReady, debugger_);
+      new FunctionNode<DebuggerShell>(DebuggerShell::SetDebuggerReady,
+                                      debugger_);
     return f->NewInstance();
   } else if (prop->Equals(v8::String::New("setDebuggerBreak"))) {
     FunctionNode<DebuggerShell>* f =
-      new FunctionNode<DebuggerShell>(DebuggerShell::SetDebuggerBreak, debugger_);
+      new FunctionNode<DebuggerShell>(DebuggerShell::SetDebuggerBreak,
+                                      debugger_);
     return f->NewInstance();
   } else if (prop->Equals(v8::String::New("foo"))) {
     return v8::Undefined();
@@ -159,13 +164,15 @@ BrowserNode::BrowserNode(Browser *b) {
 
   NotificationService* service = NotificationService::current();
   DCHECK(service);
-  service->AddObserver(this, NOTIFY_BROWSER_CLOSED, Source<Browser>(b));
+  service->AddObserver(
+      this, NotificationType::BROWSER_CLOSED, Source<Browser>(b));
   observing_ = true;
 }
 
 void BrowserNode::StopObserving(NotificationService *service) {
   Browser *b = static_cast<Browser*>(data_);
-  service->RemoveObserver(this, NOTIFY_BROWSER_CLOSED, Source<Browser>(b));
+  service->RemoveObserver(
+      this, NotificationType::BROWSER_CLOSED, Source<Browser>(b));
 }
 
 BrowserNode* BrowserNode::BrowserAtIndex(int index) {
@@ -198,7 +205,7 @@ v8::Handle<v8::Value> BrowserNode::PropGetter(v8::Handle<v8::String> prop,
   if (b != NULL) {
     if (prop->Equals(v8::String::New("title"))) {
       const TabContents *t = b->GetSelectedTabContents();
-      std::wstring title = t->GetTitle();
+      std::wstring title = UTF16ToWideHack(t->GetTitle());
       std::string title2 = WideToUTF8(title);
       return v8::String::New(title2.c_str());
     } else if (prop->Equals(v8::String::New("tab"))) {
@@ -242,7 +249,8 @@ TabListNode::TabListNode(Browser* b) {
 
   NotificationService* service = NotificationService::current();
   DCHECK(service);
-  service->AddObserver(this, NOTIFY_BROWSER_CLOSED, Source<Browser>(b));
+  service->AddObserver(
+      this, NotificationType::BROWSER_CLOSED, Source<Browser>(b));
   observing_ = true;
 }
 
@@ -263,7 +271,8 @@ Browser* TabListNode::GetBrowser() {
 
 void TabListNode::StopObserving(NotificationService *service) {
   Browser *b = static_cast<Browser*>(data_);
-  service->RemoveObserver(this, NOTIFY_BROWSER_CLOSED, Source<Browser>(b));
+  service->RemoveObserver(
+      this, NotificationType::BROWSER_CLOSED, Source<Browser>(b));
 }
 
 v8::Handle<v8::Value> TabListNode::IndexGetter(uint32_t index,
@@ -286,7 +295,7 @@ TabNode::TabNode(TabContents *c) {
 
   NotificationService* service = NotificationService::current();
   DCHECK(service);
-  service->AddObserver(this, NOTIFY_TAB_CLOSING,
+  service->AddObserver(this, NotificationType::TAB_CLOSING,
                        Source<NavigationController>(c->controller()));
   observing_ = true;
 }
@@ -296,7 +305,7 @@ TabNode::~TabNode() {
 
 void TabNode::StopObserving(NotificationService *service) {
   NavigationController *c = static_cast<NavigationController*>(data_);
-  service->RemoveObserver(this, NOTIFY_TAB_CLOSING,
+  service->RemoveObserver(this, NotificationType::TAB_CLOSING,
                           Source<NavigationController>(c));
 }
 
@@ -326,7 +335,7 @@ v8::Handle<v8::Value> TabNode::Attach(const v8::Arguments& args,
   RenderViewHost* host = web->render_view_host();
   host->DebugAttach();
   RenderProcessHost* proc = host->process();
-  return v8::Int32::New(process_util::GetProcId(proc->process()));
+  return v8::Int32::New(proc->process().pid());
 }
 
 v8::Handle<v8::Value> TabNode::Detach(const v8::Arguments& args,
@@ -334,7 +343,7 @@ v8::Handle<v8::Value> TabNode::Detach(const v8::Arguments& args,
   RenderViewHost* host = web->render_view_host();
   host->DebugDetach();
   RenderProcessHost* proc = host->process();
-  return v8::Int32::New(process_util::GetProcId(proc->process()));
+  return v8::Int32::New(proc->process().pid());
 }
 
 v8::Handle<v8::Value> TabNode::Break(const v8::Arguments& args,
@@ -354,7 +363,7 @@ v8::Handle<v8::Value> TabNode::PropGetter(v8::Handle<v8::String> prop,
   if (t != NULL) {
     WebContents* web = t->AsWebContents();
     if (prop->Equals(v8::String::New("title"))) {
-      std::wstring title = t->GetTitle();
+      std::wstring title = UTF16ToWideHack(t->GetTitle());
       std::string title2 = WideToUTF8(title);
       return v8::String::New(title2.c_str());
     } else if (web) {
@@ -387,4 +396,3 @@ template<class T>
 v8::Handle<v8::Value> FunctionNode<T>::Function(const v8::Arguments &args) {
   return function_(args, data_);
 }
-

@@ -7,21 +7,21 @@
 
 #include "net/http/http_transaction.h"
 
-#include <windows.h>
-
+#include <algorithm>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/load_flags.h"
 #include "net/base/test_completion_callback.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
-
-#pragma warning(disable: 4355)
 
 //-----------------------------------------------------------------------------
 // mock transaction data
@@ -99,14 +99,13 @@ class MockHttpRequest : public net::HttpRequestInfo {
 class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
  public:
   explicit TestTransactionConsumer(net::HttpTransactionFactory* factory)
-      : trans_(factory->CreateTransaction()),
-        state_(IDLE),
+      : state_(IDLE),
+        trans_(factory->CreateTransaction()),
         error_(net::OK) {
     ++quit_counter_;
   }
 
   ~TestTransactionConsumer() {
-    trans_->Destroy();
   }
 
   void Start(const net::HttpRequestInfo* request) {
@@ -152,7 +151,7 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
     if (result <= 0) {
       DidFinish(result);
     } else {
-      content_.append(read_buf_, result);
+      content_.append(read_buf_->data(), result);
       Read();
     }
   }
@@ -166,7 +165,8 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
 
   void Read() {
     state_ = READING;
-    int result = trans_->Read(read_buf_, sizeof(read_buf_), this);
+    read_buf_ = new net::IOBuffer(1024);
+    int result = trans_->Read(read_buf_, 1024, this);
     if (result != net::ERR_IO_PENDING)
       DidRead(result);
   }
@@ -178,9 +178,9 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
     DONE
   } state_;
 
-  net::HttpTransaction* trans_;
+  scoped_ptr<net::HttpTransaction> trans_;
   std::string content_;
-  char read_buf_[1024];
+  scoped_refptr<net::IOBuffer> read_buf_;
   int error_;
 
   static int quit_counter_;
@@ -195,11 +195,8 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
 // HttpCache implementation.
 class MockNetworkTransaction : public net::HttpTransaction {
  public:
-  MockNetworkTransaction() : task_factory_(this), data_cursor_(0) {
-  }
-
-  virtual void Destroy() {
-    delete this;
+  MockNetworkTransaction() :
+      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)), data_cursor_(0) {
   }
 
   virtual int Start(const net::HttpRequestInfo* request,
@@ -218,8 +215,9 @@ class MockNetworkTransaction : public net::HttpTransaction {
         StringPrintf("%s\n%s\n", resp_status.c_str(), resp_headers.c_str());
     std::replace(header_data.begin(), header_data.end(), '\n', '\0');
 
-    response_.request_time = Time::Now();
-    response_.response_time = Time::Now();
+    response_.request_time = base::Time::Now();
+    response_.was_cached = false;
+    response_.response_time = base::Time::Now();
     response_.headers = new net::HttpResponseHeaders(header_data);
     response_.ssl_info.cert_status = t->cert_status;
     data_ = resp_data;
@@ -242,11 +240,12 @@ class MockNetworkTransaction : public net::HttpTransaction {
     return net::ERR_FAILED;
   }
 
-  virtual int Read(char* buf, int buf_len, net::CompletionCallback* callback) {
+  virtual int Read(net::IOBuffer* buf, int buf_len,
+                   net::CompletionCallback* callback) {
     int data_len = static_cast<int>(data_.size());
     int num = std::min(buf_len, data_len - data_cursor_);
     if (num) {
-      memcpy(buf, data_.data() + data_cursor_, num);
+      memcpy(buf->data(), data_.data() + data_cursor_, num);
       data_cursor_ += num;
     }
     if (test_mode_ & TEST_MODE_SYNC_NET_READ)
@@ -296,10 +295,6 @@ class MockNetworkLayer : public net::HttpTransactionFactory {
   }
 
   virtual net::HttpCache* GetCache() {
-    return NULL;
-  }
-
-  virtual net::AuthCache* GetAuthCache() {
     return NULL;
   }
 

@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/views/tab_icon_view.h"
+
 #include <windows.h>
 #include <shellapi.h>
 
-#include "chrome/browser/views/tab_icon_view.h"
-
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "chrome/app/theme/theme_resources.h"
+#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/favicon_size.h"
 #include "chrome/common/gfx/icon_util.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/browser/tab_contents.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "grit/theme_resources.h"
 
 static bool g_initialized = false;
 static SkBitmap* g_default_fav_icon = NULL;
@@ -50,8 +50,8 @@ void TabIconView::InitializeIfNeeded() {
   }
 }
 
-TabIconView::TabIconView(TabContentsProvider* provider)
-    : provider_(provider),
+TabIconView::TabIconView(TabIconViewModel* model)
+    : model_(model),
       is_light_(false),
       throbber_running_(false),
       throbber_frame_(0) {
@@ -62,10 +62,9 @@ TabIconView::~TabIconView() {
 }
 
 void TabIconView::Update() {
-  TabContents* contents = provider_->GetCurrentTabContents();
   if (throbber_running_) {
     // We think the tab is loading.
-    if (!contents || !contents->is_loading()) {
+    if (!model_->ShouldTabIconViewAnimate()) {
       // Woops, tab is invalid or not loading, reset our status and schedule
       // a paint.
       throbber_running_ = false;
@@ -75,7 +74,7 @@ void TabIconView::Update() {
       throbber_frame_ = (throbber_frame_ + 1) % g_throbber_frame_count;
       SchedulePaint();
     }
-  } else if (contents && contents->is_loading()) {
+  } else if (model_->ShouldTabIconViewAnimate()) {
     // We didn't think we were loading, but the tab is loading. Reset the
     // frame and status and schedule a paint.
     throbber_running_ = true;
@@ -86,48 +85,64 @@ void TabIconView::Update() {
 
 void TabIconView::PaintThrobber(ChromeCanvas* canvas) {
   int image_size = g_throbber_frames->height();
-  int image_offset = throbber_frame_ * image_size;
-  canvas->DrawBitmapInt(is_light_ ? *g_throbber_frames_light :
-                                    *g_throbber_frames,
-                        image_offset, 0, image_size, image_size,
-                        0, 0, image_size, image_size, false);
+  PaintIcon(canvas, is_light_ ? *g_throbber_frames_light : *g_throbber_frames,
+            throbber_frame_ * image_size, 0, image_size, image_size, false);
 }
 
 void TabIconView::PaintFavIcon(ChromeCanvas* canvas, const SkBitmap& bitmap) {
-  int bw = bitmap.width();
-  int bh = bitmap.height();
-  if (bw <= kFavIconSize && bh <= kFavIconSize) {
-    canvas->DrawBitmapInt(bitmap, (width() - kFavIconSize) / 2,
-                          (height() - kFavIconSize) / 2);
+  PaintIcon(canvas, bitmap, 0, 0, bitmap.width(), bitmap.height(), true);
+}
+
+void TabIconView::PaintIcon(ChromeCanvas* canvas,
+                            const SkBitmap& bitmap,
+                            int src_x,
+                            int src_y,
+                            int src_w,
+                            int src_h,
+                            bool filter) {
+  // For source images smaller than the favicon square, scale them as if they
+  // were padded to fit the favicon square, so we don't blow up tiny favicons
+  // into larger or nonproportional results.
+  float float_src_w = static_cast<float>(src_w);
+  float float_src_h = static_cast<float>(src_h);
+  float scalable_w, scalable_h;
+  if (src_w <= kFavIconSize && src_h <= kFavIconSize) {
+    scalable_w = scalable_h = kFavIconSize;
   } else {
-    canvas->DrawBitmapInt(bitmap, 0, 0, bw, bh, 0, 0, width(), height(),
-                          true);
+    scalable_w = float_src_w;
+    scalable_h = float_src_h;
   }
+
+  // Scale proportionately.
+  float scale = std::min(static_cast<float>(width()) / scalable_w,
+                         static_cast<float>(height()) / scalable_h);
+  int dest_w = static_cast<int>(float_src_w * scale);
+  int dest_h = static_cast<int>(float_src_h * scale);
+
+  // Center the scaled image.
+  canvas->DrawBitmapInt(bitmap, src_x, src_y, src_w, src_h,
+                        (width() - dest_w) / 2, (height() - dest_h) / 2, dest_w,
+                        dest_h, filter);
 }
 
 void TabIconView::Paint(ChromeCanvas* canvas) {
-  TabContents* contents = provider_->GetCurrentTabContents();
   bool rendered = false;
 
-  if (contents) {
-    if (throbber_running_) {
+  if (throbber_running_) {
+    rendered = true;
+    PaintThrobber(canvas);
+  } else {
+    SkBitmap favicon = model_->GetFavIconForTabIconView();
+    if (!favicon.isNull()) {
       rendered = true;
-      PaintThrobber(canvas);
-    } else {
-      SkBitmap favicon = provider_->GetFavIcon();
-      if (!favicon.isNull()) {
-        rendered = true;
-        PaintFavIcon(canvas, favicon);
-      }
+      PaintFavIcon(canvas, favicon);
     }
   }
 
-  if (!rendered) {
+  if (!rendered)
     PaintFavIcon(canvas, *g_default_fav_icon);
-  }
 }
 
-void TabIconView::GetPreferredSize(CSize* out) {
-  out->cx = out->cy = kFavIconSize;
+gfx::Size TabIconView::GetPreferredSize() {
+  return gfx::Size(kFavIconSize, kFavIconSize);
 }
-

@@ -10,19 +10,22 @@
 #define CHROME_RENDERER_DEBUG_MESSAGE_HANDLER_H_
 
 #include "chrome/common/ipc_channel_proxy.h"
-#include "webkit/glue/debugger.h"
+#include "webkit/glue/debugger_bridge.h"
 
 class RenderView;
 
 class DebugMessageHandler : public IPC::ChannelProxy::MessageFilter,
-                            public Debugger::Delegate {
+                            public DebuggerBridge::Delegate {
  public:
   DebugMessageHandler(RenderView* view);
   virtual ~DebugMessageHandler();
 
  private:
-  // evaluate javascript URL in the renderer
-  void EvaluateScriptUrl(const std::wstring& url);
+  // Evaluate javascript URL in the renderer
+  void EvaluateScript(const std::wstring& script);
+
+  // Attach in the renderer
+  void Attach();
 
   // Debugger::Delegate callback method to handle debugger output.
   void DebuggerOutput(const std::wstring& out);
@@ -46,7 +49,7 @@ class DebugMessageHandler : public IPC::ChannelProxy::MessageFilter,
   // the message be handled in the default way.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-  scoped_refptr<Debugger> debugger_;
+  scoped_refptr<DebuggerBridge> debugger_;
 
   // Don't ever dereference view_ directly from another thread as it's not
   // threadsafe, instead proxy locally via its MessageLoop.

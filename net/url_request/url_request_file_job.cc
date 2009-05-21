@@ -17,300 +17,200 @@
 // signal from the OS that the overlapped read has completed.  It does so by
 // leveraging the MessageLoop::WatchObject API.
 
-#include <process.h>
-#include <windows.h>
-
 #include "net/url_request/url_request_file_job.h"
 
-#include "base/file_util.h"
+#include "base/compiler_specific.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/worker_pool.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "net/base/wininet_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_dir_job.h"
 
-using net::WinInetUtil;
+#if defined(OS_WIN)
+class URLRequestFileJob::AsyncResolver :
+    public base::RefCountedThreadSafe<URLRequestFileJob::AsyncResolver> {
+ public:
+  explicit AsyncResolver(URLRequestFileJob* owner)
+      : owner_(owner), owner_loop_(MessageLoop::current()) {
+  }
 
-namespace {
-
-// Thread used to run ResolveFile. The parameter is a pointer to the
-// URLRequestFileJob object.
-DWORD WINAPI NetworkFileThread(LPVOID param) {
-  URLRequestFileJob* job = reinterpret_cast<URLRequestFileJob*>(param);
-  job->ResolveFile();
-  return 0;
-}
-
-}  // namespace
-
-// static
-URLRequestJob* URLRequestFileJob::Factory(URLRequest* request,
-                                          const std::string& scheme) {
-  std::wstring file_path;
-  if (net::FileURLToFilePath(request->url(), &file_path)) {
-    if (file_path[file_path.size() - 1] == file_util::kPathSeparator) {
-      // Only directories have trailing slashes.
-      return new URLRequestFileDirJob(request, file_path);
+  void Resolve(const FilePath& file_path) {
+    file_util::FileInfo file_info;
+    bool exists = file_util::GetFileInfo(file_path, &file_info);
+    AutoLock locked(lock_);
+    if (owner_loop_) {
+      owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+          this, &AsyncResolver::ReturnResults, exists, file_info));
     }
   }
+
+  void Cancel() {
+    owner_ = NULL;
+
+    AutoLock locked(lock_);
+    owner_loop_ = NULL;
+  }
+
+ private:
+  void ReturnResults(bool exists, const file_util::FileInfo& file_info) {
+    if (owner_)
+      owner_->DidResolve(exists, file_info);
+  }
+
+  URLRequestFileJob* owner_;
+
+  Lock lock_;
+  MessageLoop* owner_loop_;
+};
+#endif
+
+// static
+URLRequestJob* URLRequestFileJob::Factory(
+    URLRequest* request, const std::string& scheme) {
+  FilePath file_path;
+  if (net::FileURLToFilePath(request->url(), &file_path) &&
+      file_util::EnsureEndsWithSeparator(&file_path) &&
+      file_path.IsAbsolute())
+    return new URLRequestFileDirJob(request, file_path);
 
   // Use a regular file request job for all non-directories (including invalid
   // file names).
-  URLRequestFileJob* job = new URLRequestFileJob(request);
-  job->file_path_ = file_path;
-  return job;
+  return new URLRequestFileJob(request, file_path);
 }
 
-URLRequestFileJob::URLRequestFileJob(URLRequest* request)
+URLRequestFileJob::URLRequestFileJob(URLRequest* request,
+                                     const FilePath& file_path)
     : URLRequestJob(request),
-      handle_(INVALID_HANDLE_VALUE),
-      is_waiting_(false),
-      is_directory_(false),
-      is_not_found_(false),
-      network_file_thread_(NULL),
-      loop_(NULL) {
-  memset(&overlapped_, 0, sizeof(overlapped_));
+      file_path_(file_path),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          io_callback_(this, &URLRequestFileJob::DidRead)),
+      is_directory_(false) {
 }
 
 URLRequestFileJob::~URLRequestFileJob() {
-  CloseHandles();
-
-  // The thread might still be running. We need to kill it because it holds
-  // a reference to this object.
-  if (network_file_thread_) {
-    TerminateThread(network_file_thread_, 0);
-    CloseHandle(network_file_thread_);
-  }
-}
-
-// This function can be called on the main thread or on the network file thread.
-// When the request is done, we call StartAsync on the main thread.
-void URLRequestFileJob::ResolveFile() {
-  WIN32_FILE_ATTRIBUTE_DATA file_attributes = {0};
-  if (!GetFileAttributesEx(file_path_.c_str(),
-                           GetFileExInfoStandard,
-                           &file_attributes)) {
-    is_not_found_ = true;
-  } else {
-    if (file_attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      is_directory_ = true;
-    } else {
-      // Set the file size as expected size to be read.
-      ULARGE_INTEGER file_size;
-      file_size.HighPart = file_attributes.nFileSizeHigh;
-      file_size.LowPart = file_attributes.nFileSizeLow;
-
-      set_expected_content_size(file_size.QuadPart);
-    }
-  }
-
-
-  // We need to protect the loop_ pointer with a lock because if we are running
-  // on the network file thread, it is possible that the main thread is
-  // executing Kill() at this moment. Kill() sets the loop_ to NULL because it
-  // might be going away.
-  AutoLock lock(loop_lock_);
-  if (loop_) {
-    // Start reading asynchronously so that all error reporting and data
-    // callbacks happen as they would for network requests.
-    loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &URLRequestFileJob::StartAsync));
-  }
+#if defined(OS_WIN)
+  DCHECK(!async_resolver_);
+#endif
 }
 
 void URLRequestFileJob::Start() {
-  // This is the loop on which we should execute StartAsync. This is used in
-  // ResolveFile().
-  loop_ = MessageLoop::current();
-
-  if (!file_path_.compare(0, 2, L"\\\\")) {
-    // This is on a network share. It might be slow to check if it's a directory
-    // or a file. We need to do it in another thread.
-    network_file_thread_ = CreateThread(NULL, 0, &NetworkFileThread, this, 0,
-                                        NULL);
-  } else {
-    // We can call the function directly because it's going to be fast.
-    ResolveFile();
+#if defined(OS_WIN)
+  // Resolve UNC paths on a background thread.
+  if (!file_path_.value().compare(0, 2, L"\\\\")) {
+    DCHECK(!async_resolver_);
+    async_resolver_ = new AsyncResolver(this);
+    WorkerPool::PostTask(FROM_HERE, NewRunnableMethod(
+        async_resolver_.get(), &AsyncResolver::Resolve, file_path_), true);
+    return;
   }
+#endif
+  file_util::FileInfo file_info;
+  bool exists = file_util::GetFileInfo(file_path_, &file_info);
+
+  // Continue asynchronously.
+  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &URLRequestFileJob::DidResolve, exists, file_info));
 }
 
 void URLRequestFileJob::Kill() {
-  // If we are killed while waiting for an overlapped result...
-  if (is_waiting_) {
-    MessageLoopForIO::current()->WatchObject(overlapped_.hEvent, NULL);
-    is_waiting_ = false;
-    Release();
-  }
-  CloseHandles();
-  URLRequestJob::Kill();
+  stream_.Close();
 
-  // It is possible that the network file thread is running and will invoke
-  // StartAsync() on loop_. We set loop_ to NULL here because the message loop
-  // might be going away and we don't want the other thread to call StartAsync()
-  // on this loop anymore. We protect loop_ with a lock in case the other thread
-  // is currenly invoking the call.
-  AutoLock lock(loop_lock_);
-  loop_ = NULL;
+#if defined(OS_WIN)
+  if (async_resolver_) {
+    async_resolver_->Cancel();
+    async_resolver_ = NULL;
+  }
+#endif
+
+  URLRequestJob::Kill();
 }
 
-bool URLRequestFileJob::ReadRawData(char* dest, int dest_size,
+bool URLRequestFileJob::ReadRawData(net::IOBuffer* dest, int dest_size,
                                     int *bytes_read) {
   DCHECK_NE(dest_size, 0);
   DCHECK(bytes_read);
-  DCHECK(!is_waiting_);
 
-  *bytes_read = 0;
-
-  DWORD bytes;
-  if (ReadFile(handle_, dest, dest_size, &bytes, &overlapped_)) {
-    // data is immediately available
-    overlapped_.Offset += bytes;
-    *bytes_read = static_cast<int>(bytes);
-    DCHECK(!is_waiting_);
-    DCHECK(!is_done());
+  int rv = stream_.Read(dest->data(), dest_size, &io_callback_);
+  if (rv >= 0) {
+    // Data is immediately available.
+    *bytes_read = rv;
     return true;
   }
 
-  // otherwise, a read error occured.
-  DWORD err = GetLastError();
-  if (err == ERROR_IO_PENDING) {
-    // OK, wait for the object to become signaled
-    MessageLoopForIO::current()->WatchObject(overlapped_.hEvent, this);
-    is_waiting_ = true;
+  // Otherwise, a read error occured.  We may just need to wait...
+  if (rv == net::ERR_IO_PENDING) {
     SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
-    AddRef();
-    return false;
+  } else {
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, rv));
   }
-  if (err == ERROR_HANDLE_EOF) {
-    // OK, nothing more to read
-    return true;
-  }
-
-  NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                              WinInetUtil::OSErrorToNetError(err)));
   return false;
 }
 
-bool URLRequestFileJob::GetMimeType(std::string* mime_type) {
+bool URLRequestFileJob::GetMimeType(std::string* mime_type) const {
   DCHECK(request_);
   return net::GetMimeTypeFromFile(file_path_, mime_type);
 }
 
-void URLRequestFileJob::CloseHandles() {
-  DCHECK(!is_waiting_);
-  if (handle_ != INVALID_HANDLE_VALUE) {
-    CloseHandle(handle_);
-    handle_ = INVALID_HANDLE_VALUE;
-  }
-  if (overlapped_.hEvent) {
-    CloseHandle(overlapped_.hEvent);
-    overlapped_.hEvent = NULL;
-  }
-}
-
-void URLRequestFileJob::StartAsync() {
-  if (network_file_thread_) {
-    CloseHandle(network_file_thread_);
-    network_file_thread_ = NULL;
-  }
-
-  // The request got killed, we need to stop.
-  if (!loop_)
-    return;
+void URLRequestFileJob::DidResolve(
+    bool exists, const file_util::FileInfo& file_info) {
+#if defined(OS_WIN)
+  async_resolver_ = NULL;
+#endif
 
   // We may have been orphaned...
   if (!request_)
     return;
 
-  // This is not a file, this is a directory.
-  if (is_directory_) {
+  int rv = net::OK;
+  // We use URLRequestFileJob to handle valid and invalid files as well as
+  // invalid directories. For a directory to be invalid, it must either not
+  // exist, or be "\" on Windows. (Windows resolves "\" to "C:\", thus
+  // reporting it as existent.) On POSIX, we don't count any existent
+  // directory as invalid.
+  if (!exists || file_info.is_directory) {
+    rv = net::ERR_FILE_NOT_FOUND;
+  } else {
+    int flags = base::PLATFORM_FILE_OPEN |
+                base::PLATFORM_FILE_READ |
+                base::PLATFORM_FILE_ASYNC;
+    rv = stream_.Open(file_path_, flags);
+  }
+
+  if (rv == net::OK) {
+    set_expected_content_size(file_info.size);
     NotifyHeadersComplete();
-    return;
-  }
-
-  if (is_not_found_) {
-    // some kind of invalid file URI
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                                net::ERR_FILE_NOT_FOUND));
   } else {
-    handle_ = CreateFile(file_path_.c_str(),
-                         GENERIC_READ|SYNCHRONIZE,
-                         FILE_SHARE_READ | FILE_SHARE_WRITE,
-                         NULL,
-                         OPEN_EXISTING,
-                         FILE_FLAG_OVERLAPPED | FILE_FLAG_SEQUENTIAL_SCAN,
-                         NULL);
-    if (handle_ == INVALID_HANDLE_VALUE) {
-      NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                 WinInetUtil::OSErrorToNetError(GetLastError())));
-    } else {
-      // Get setup for overlapped reads (w/ a manual reset event)
-      overlapped_.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    }
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, rv));
   }
-
-  NotifyHeadersComplete();
 }
 
-void URLRequestFileJob::OnObjectSignaled(HANDLE object) {
-  DCHECK(overlapped_.hEvent == object);
-  DCHECK(is_waiting_);
-
-  // We'll resume watching this handle if need be when we do
-  // another IO.
-  MessageLoopForIO::current()->WatchObject(object, NULL);
-  is_waiting_ = false;
-
-  DWORD bytes_read = 0;
-  if (!GetOverlappedResult(handle_, &overlapped_, &bytes_read, FALSE)) {
-    DWORD err = GetLastError();
-    if (err == ERROR_HANDLE_EOF) {
-      // successfully read all data
-      NotifyDone(URLRequestStatus());
-    } else {
-      NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                                  WinInetUtil::OSErrorToNetError(err)));
-    }
-  } else if (bytes_read) {
-    overlapped_.Offset += bytes_read;
-    // clear the IO_PENDING status
-    SetStatus(URLRequestStatus());
-  } else {
-    // there was no more data so we're done
+void URLRequestFileJob::DidRead(int result) {
+  if (result > 0) {
+    SetStatus(URLRequestStatus());  // Clear the IO_PENDING status
+  } else if (result == 0) {
     NotifyDone(URLRequestStatus());
+  } else {
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, result));
   }
-  NotifyReadComplete(bytes_read);
-
-  Release();  // Balance with AddRef from FillBuf; may destroy |this|
+  NotifyReadComplete(result);
 }
 
-bool URLRequestFileJob::IsRedirectResponse(GURL* location,
-                                           int* http_status_code) {
-  if (is_directory_) {
-    // This happens when we discovered the file is a directory, so needs a slash
-    // at the end of the path.
-    std::string new_path = request_->url().path();
-    new_path.push_back('/');
-    GURL::Replacements replacements;
-    replacements.SetPathStr(new_path);
+bool URLRequestFileJob::IsRedirectResponse(
+    GURL* location, int* http_status_code) {
+#if defined(OS_WIN)
+  std::wstring extension =
+      file_util::GetFileExtensionFromPath(file_path_.value());
 
-    *location = request_->url().ReplaceComponents(replacements);
-    *http_status_code = 301;  // simulate a permanent redirect
-    return true;
-  }
-
-  size_t found;
-  found = file_path_.find_last_of('.');
-
-  // We just resolve .lnk file, ignor others.
-  if (found == std::string::npos ||
-      !LowerCaseEqualsASCII(file_path_.substr(found), ".lnk"))
+  // Follow a Windows shortcut.
+  // We just resolve .lnk file, ignore others.
+  if (!LowerCaseEqualsASCII(extension, "lnk"))
     return false;
 
-  std::wstring new_path = file_path_;
+  std::wstring new_path = file_path_.value();
   bool resolved;
   resolved = file_util::ResolveShortcut(&new_path);
 
@@ -321,5 +221,7 @@ bool URLRequestFileJob::IsRedirectResponse(GURL* location,
   *location = net::FilePathToFileURL(new_path);
   *http_status_code = 301;
   return true;
+#else
+  return false;
+#endif
 }
-

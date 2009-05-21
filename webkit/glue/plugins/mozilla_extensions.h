@@ -7,7 +7,7 @@
 
 #include <string>
 
-// Include npapi first to avoid definition clashes due to 
+// Include npapi first to avoid definition clashes due to
 // XP_WIN
 #include "third_party/npapi/bindings/npapi.h"
 
@@ -19,7 +19,7 @@
 #include "base/ref_counted.h"
 
 // NS_DECL_NSIPLUGINMANAGER doesn't include methods described as "C++" in the
-// nsIPluginManager.idl. 
+// nsIPluginManager.idl.
 #define NS_DECL_NSIPLUGINMANAGER_FIXED                                        \
   NS_DECL_NSIPLUGINMANAGER                                                    \
     NS_IMETHOD                                                                \
@@ -68,7 +68,7 @@ namespace NPAPI
 
 class PluginInstance;
 
-// Implementation of extended Mozilla interfaces needed to support 
+// Implementation of extended Mozilla interfaces needed to support
 // Sun's new Java plugin.
 class MozillaExtensionApi : public nsIServiceManager,
                             public nsIPluginManager2,
@@ -97,4 +97,3 @@ class MozillaExtensionApi : public nsIServiceManager,
 } // namespace NPAPI
 
 #endif  // WEBKIT_GLUE_PLUGINS_MOZILLA_EXTENSIONS_H_
-

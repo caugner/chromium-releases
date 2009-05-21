@@ -5,8 +5,9 @@
 #include "chrome/browser/browsing_instance.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/site_instance.h"
+#include "chrome/browser/tab_contents/site_instance.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 
 /*static*/
 BrowsingInstance::ProfileSiteInstanceMap
@@ -17,17 +18,18 @@ bool BrowsingInstance::ShouldUseProcessPerSite(const GURL& url) {
   // the case if the --process-per-site switch is specified, or in
   // process-per-site-instance for particular sites (e.g., the new tab page).
 
-  if (CommandLine().HasSwitch(switches::kProcessPerSite))
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kProcessPerSite))
     return true;
 
-  if (!CommandLine().HasSwitch(switches::kProcessPerTab)) {
+  if (!command_line.HasSwitch(switches::kProcessPerTab)) {
     // We are not in process-per-site or process-per-tab, so we must be in the
     // default (process-per-site-instance).  Only use the process-per-site
     // logic for particular sites that we want to consolidate.
     // Note that --single-process may have been specified, but that affects the
     // process creation logic in RenderProcessHost, so we do not need to worry
     // about it here.
-    if (url.SchemeIs("chrome-resource"))
+    if (url.SchemeIs(chrome::kChromeUIScheme))
       // Always consolidate instances of the new tab page (and instances of any
       // other internal resource urls).
       return true;
@@ -110,4 +112,3 @@ void BrowsingInstance::UnregisterSiteInstance(SiteInstance* site_instance) {
     map->erase(i);
   }
 }
-

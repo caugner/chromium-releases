@@ -12,7 +12,7 @@
 namespace net {
 
 bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
-    const std::wstring& ext, std::string* result) const {
+    const FilePath::StringType& ext, std::string* result) const {
   // check windows registry for file extension's mime type (registry key
   // names are not case-sensitive).
   std::wstring value, key = L"." + ext;
@@ -25,10 +25,16 @@ bool PlatformMimeUtil::GetPlatformMimeTypeFromExtension(
 }
 
 bool PlatformMimeUtil::GetPreferredExtensionForMimeType(
-    const std::string& mime_type, std::wstring* ext) const {
+    const std::string& mime_type, FilePath::StringType* ext) const {
   std::wstring key(L"MIME\\Database\\Content Type\\" + UTF8ToWide(mime_type));
-  return RegKey(HKEY_CLASSES_ROOT, key.c_str()).ReadValue(L"Extension", ext);
+  if (!RegKey(HKEY_CLASSES_ROOT, key.c_str()).ReadValue(L"Extension", ext))
+    return false;
+
+  // Strip off the leading dot, this should always be the case.
+  if (!ext->empty() && ext->at(0) == L'.')
+    ext->erase(ext->begin());
+
+  return true;
 }
 
 }  // namespace net
-

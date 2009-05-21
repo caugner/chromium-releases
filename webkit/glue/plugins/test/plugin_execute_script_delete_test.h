@@ -14,13 +14,15 @@ namespace NPAPIClient {
 class ExecuteScriptDeleteTest : public PluginTest {
  public:
   // Constructor.
-  ExecuteScriptDeleteTest(NPP id, NPNetscapeFuncs *host_functions);
+  ExecuteScriptDeleteTest(NPP id, NPNetscapeFuncs *host_functions,
+                          const std::string& test_name);
   // NPAPI HandleEvent handler
   virtual int16 HandleEvent(void* event);
+
+ private:
+  std::string test_name_;
 };
 
 } // namespace NPAPIClient
 
 #endif  // WEBKIT_GLUE_PLUGINS_TEST_PLUGIN_EXECUTE_SCRIPT_DELETE_TEST_H
-
-

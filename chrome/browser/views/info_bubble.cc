@@ -5,16 +5,17 @@
 #include "chrome/browser/views/info_bubble.h"
 
 #include "base/win_util.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/frame_util.h"
+#include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/path.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/common/win_util.h"
-#include "chrome/views/root_view.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/window/window.h"
+#include "grit/theme_resources.h"
 
-using ChromeViews::View;
+using views::View;
 
 // All sizes are in pixels.
 
@@ -67,19 +68,22 @@ static const int kMinimumAlpha = 72;
 // static
 InfoBubble* InfoBubble::Show(HWND parent_hwnd,
                              const gfx::Rect& position_relative_to,
-                             ChromeViews::View* content,
+                             views::View* content,
                              InfoBubbleDelegate* delegate) {
   InfoBubble* window = new InfoBubble();
   window->Init(parent_hwnd, position_relative_to, content);
-  BrowserWindow* frame = window->GetHostingWindow();
-  if (frame)
-    frame->InfoBubbleShowing();
-  window->ShowWindow(SW_SHOW);
+  // Set the delegate before we show, on the off chance the delegate is needed
+  // during showing.
   window->delegate_ = delegate;
+  window->ShowWindow(SW_SHOW);
   return window;
 }
 
-InfoBubble::InfoBubble() : content_view_(NULL) {
+InfoBubble::InfoBubble()
+    : delegate_(NULL),
+      parent_(NULL),
+      content_view_(NULL),
+      closed_(false) {
 }
 
 InfoBubble::~InfoBubble() {
@@ -87,7 +91,14 @@ InfoBubble::~InfoBubble() {
 
 void InfoBubble::Init(HWND parent_hwnd,
                       const gfx::Rect& position_relative_to,
-                      ChromeViews::View* content) {
+                      views::View* content) {
+  HWND owning_frame_hwnd = GetAncestor(parent_hwnd, GA_ROOTOWNER);
+  BrowserView* browser_view =
+      BrowserView::GetBrowserViewForHWND(owning_frame_hwnd);
+  DCHECK(browser_view);
+  parent_ = browser_view->frame();
+  parent_->DisableInactiveRendering();
+
   if (kInfoBubbleCornerTopLeft == NULL) {
     kInfoBubbleCornerTopLeft = ResourceBundle::GetSharedInstance()
         .GetBitmapNamed(IDR_INFO_BUBBLE_CORNER_TOP_LEFT);
@@ -100,6 +111,9 @@ void InfoBubble::Init(HWND parent_hwnd,
   }
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
   set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW);
+  // Because we're going to change the alpha value of the layered window we
+  // don't want to use the offscreen buffer provided by WidgetWin.
+  SetUseLayeredBuffer(false);
   content_view_ = CreateContentView(content);
   gfx::Rect bounds = content_view_->
       CalculateWindowBounds(parent_hwnd, position_relative_to);
@@ -107,17 +121,12 @@ void InfoBubble::Init(HWND parent_hwnd,
       (win_util::GetWinVersion() < win_util::WINVERSION_XP) ?
       0 : CS_DROPSHADOW);
 
-  HWNDViewContainer::Init(parent_hwnd, bounds, true);
+  WidgetWin::Init(parent_hwnd, bounds, true);
   SetContentsView(content_view_);
   // The preferred size may differ when parented. Ask for the bounds again
   // and if they differ reset the bounds.
   gfx::Rect parented_bounds = content_view_->
       CalculateWindowBounds(parent_hwnd, position_relative_to);
-
-  // Set our initial alpha to zero so we don't flicker at the user. This
-  // doesn't trigger UpdateLayeredWindow, which would explode our native
-  // controls.
-  SetLayeredAlpha(kMinimumAlpha);
 
   if (bounds != parented_bounds) {
     SetWindowPos(NULL, parented_bounds.x(), parented_bounds.y(),
@@ -128,25 +137,24 @@ void InfoBubble::Init(HWND parent_hwnd,
   }
 
   // Register the Escape accelerator for closing.
-  ChromeViews::FocusManager* focus_manager =
-      ChromeViews::FocusManager::GetFocusManager(GetHWND());
-  focus_manager->RegisterAccelerator(ChromeViews::Accelerator(VK_ESCAPE,
-                                                              false, false,
-                                                              false),
+  views::FocusManager* focus_manager =
+      views::FocusManager::GetFocusManager(GetNativeView());
+  focus_manager->RegisterAccelerator(views::Accelerator(VK_ESCAPE, false,
+                                                        false, false),
                                      this);
+
+  // Set initial alpha value of the layered window.
+  SetLayeredWindowAttributes(GetNativeView(),
+                             RGB(0xFF, 0xFF, 0xFF),
+                             kMinimumAlpha,
+                             LWA_ALPHA);
 
   fade_animation_.reset(new SlideAnimation(this));
   fade_animation_->Show();
 }
 
 void InfoBubble::Close() {
-  // We don't fade out because it looks terrible.
-  BrowserWindow* frame = GetHostingWindow();
-  if (delegate_)
-    delegate_->InfoBubbleClosing(this);
-  if (frame)
-    frame->InfoBubbleClosing();
-  HWNDViewContainer::Close();
+  Close(false);
 }
 
 void InfoBubble::AnimationProgressed(const Animation* animation) {
@@ -154,18 +162,18 @@ void InfoBubble::AnimationProgressed(const Animation* animation) {
       (fade_animation_->GetCurrentValue() * (255.0 - kMinimumAlpha) +
       kMinimumAlpha));
 
-  SetLayeredWindowAttributes(GetHWND(),
+  SetLayeredWindowAttributes(GetNativeView(),
                              RGB(0xFF, 0xFF, 0xFF),
                              alpha,
                              LWA_ALPHA);
-  content_view_->SchedulePaint();
+  // Don't need to invoke paint as SetLayeredWindowAttributes handles that for
+  // us.
 }
 
-bool InfoBubble::AcceleratorPressed(
-    const ChromeViews::Accelerator& accelerator) {
+bool InfoBubble::AcceleratorPressed(const views::Accelerator& accelerator) {
   DCHECK(accelerator.GetKeyCode() == VK_ESCAPE);
   if (!delegate_ || delegate_->CloseOnEscape()) {
-    Close();
+    Close(true);
     return true;
   }
   return false;
@@ -177,7 +185,7 @@ void InfoBubble::OnSize(UINT param, const CSize& size) {
 
 void InfoBubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   // The popup should close when it is deactivated.
-  if (action == WA_INACTIVE) {
+  if (action == WA_INACTIVE && !closed_) {
     Close();
   } else if (action == WA_ACTIVE) {
     DCHECK(GetRootView()->GetChildViewCount() > 0);
@@ -189,22 +197,20 @@ InfoBubble::ContentView* InfoBubble::CreateContentView(View* content) {
   return new ContentView(content, this);
 }
 
-BrowserWindow* InfoBubble::GetHostingWindow() {
-  HWND owning_frame_hwnd = GetAncestor(GetHWND(), GA_ROOTOWNER);
-  BrowserWindow* frame = FrameUtil::GetBrowserWindowForHWND(owning_frame_hwnd);
-  if (!frame) {
-    // We should always have a frame, but there was a bug else where that
-    // made it possible for the frame to be NULL, so we have the check. If
-    // you hit this, file a bug.
-    NOTREACHED();
-  }
-  return frame;
+void InfoBubble::Close(bool closed_by_escape) {
+  if (closed_)
+    return;
+
+  // We don't fade out because it looks terrible.
+  if (delegate_)
+    delegate_->InfoBubbleClosing(this, closed_by_escape);
+  closed_ = true;
+  WidgetWin::Close();
 }
 
 // ContentView ----------------------------------------------------------------
 
-InfoBubble::ContentView::ContentView(ChromeViews::View* content,
-                                     InfoBubble* host)
+InfoBubble::ContentView::ContentView(views::View* content, InfoBubble* host)
     : host_(host) {
   if (UILayoutIsRightToLeft()) {
     arrow_edge_ = TOP_RIGHT;
@@ -236,14 +242,15 @@ gfx::Rect InfoBubble::ContentView::CalculateWindowBounds(
   return CalculateWindowBounds(position_relative_to);
 }
 
-void InfoBubble::ContentView::GetPreferredSize(CSize* pref) {
+gfx::Size InfoBubble::ContentView::GetPreferredSize() {
   DCHECK(GetChildViewCount() == 1);
   View* content = GetChildViewAt(0);
-  content->GetPreferredSize(pref);
-  pref->cx += kBorderSize + kBorderSize + kInfoBubbleViewLeftMargin +
-              kInfoBubbleViewRightMargin;
-  pref->cy += kBorderSize + kBorderSize + kArrowSize +
-              kInfoBubbleViewTopMargin + kInfoBubbleViewBottomMargin;
+  gfx::Size pref = content->GetPreferredSize();
+  pref.Enlarge(kBorderSize + kBorderSize + kInfoBubbleViewLeftMargin +
+                   kInfoBubbleViewRightMargin,
+               kBorderSize + kBorderSize + kArrowSize +
+                   kInfoBubbleViewTopMargin + kInfoBubbleViewBottomMargin);
+  return pref;
 }
 
 void InfoBubble::ContentView::Layout() {
@@ -405,19 +412,17 @@ void InfoBubble::ContentView::Paint(ChromeCanvas* canvas) {
 
 gfx::Rect InfoBubble::ContentView::CalculateWindowBounds(
     const gfx::Rect& position_relative_to) {
-  CSize pref;
-  GetPreferredSize(&pref);
+  gfx::Size pref = GetPreferredSize();
   int x = position_relative_to.x() + position_relative_to.width() / 2;
   int y;
   if (IsLeft())
     x -= kArrowXOffset;
   else
-    x = x + kArrowXOffset - pref.cx;
+    x = x + kArrowXOffset - pref.width();
   if (IsTop()) {
     y = position_relative_to.bottom() + kArrowToContentPadding;
   } else {
-    y = position_relative_to.y() - kArrowToContentPadding - pref.cy;
+    y = position_relative_to.y() - kArrowToContentPadding - pref.height();
   }
-  return gfx::Rect(x, y, pref.cx, pref.cy);
+  return gfx::Rect(x, y, pref.width(), pref.height());
 }
-

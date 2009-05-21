@@ -20,6 +20,7 @@
 			OutputDirectory="$(SolutionDir)$(ConfigurationName)"
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="1"
+			InheritedPropertySheets=".\using_platform_sdk_6_1.vsprops"
 			UseOfATL="1"
 			CharacterSet="1"
 			>
@@ -97,6 +98,7 @@
 			OutputDirectory="$(SolutionDir)$(ConfigurationName)"
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="1"
+			InheritedPropertySheets=".\using_platform_sdk_6_1.vsprops"
 			UseOfATL="1"
 			CharacterSet="1"
 			WholeProgramOptimization="1"
@@ -215,11 +217,15 @@
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
 			<File
-				RelativePath=".\channel_changer.ico"
+				RelativePath=".\channel_changer.rc"
 				>
 			</File>
 			<File
-				RelativePath=".\channel_changer.rc"
+				RelativePath=".\chrome.bmp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\chrome\app\theme\google_chrome\chrome.ico"
 				>
 			</File>
 			<File

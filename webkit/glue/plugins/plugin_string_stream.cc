@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "config.h"
+
 #include "webkit/glue/plugins/plugin_string_stream.h"
 
 namespace NPAPI {
@@ -20,7 +22,7 @@ PluginStringStream::~PluginStringStream() {
 void PluginStringStream::SendToPlugin(const std::string &data,
                                       const std::string &mime_type) {
   int length = static_cast<int>(data.length());
-  if (Open(mime_type, std::string(), length, 0)) {
+  if (Open(mime_type, std::string(), length, 0, false)) {
     // TODO - check if it was not fully sent, and figure out a backup plan.
     int written = Write(data.c_str(), length, 0);
     NPReason reason = written == length ? NPRES_DONE : NPRES_NETWORK_ERR;
@@ -29,4 +31,3 @@ void PluginStringStream::SendToPlugin(const std::string &data,
 }
 
 }
-

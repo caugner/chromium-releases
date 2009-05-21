@@ -13,7 +13,10 @@
 
 #include <stdio.h>
 
+#include "base/file_util.h"
 #include "base/icu_util.h"
+#include "base/logging.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "chrome/third_party/hunspell/google/bdict_reader.h"
 #include "chrome/third_party/hunspell/google/bdict_writer.h"
@@ -61,7 +64,8 @@ bool VerifyWords(const convert_dict::DicReader::WordList& org_words,
 
 int PrintHelp() {
   printf("Usage: convert_dict <dicfile base name>\n\n");
-  printf("Example:\n  convert_dict en-US\nwill read en-US.dic / en-US.aff and\n");
+  printf("Example:\n");
+  printf("  convert_dict en-US\nwill read en-US.dic / en-US.aff and\n");
   printf("generate en-US.bdic\n\n");
   return 1;
 }
@@ -69,6 +73,7 @@ int PrintHelp() {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  base::EnableTerminationOnHeapCorruption();
   if (argc != 2)
     return PrintHelp();
 
@@ -111,15 +116,14 @@ int main(int argc, char* argv[]) {
 
   std::string out_name = file_base + ".bdic";
   printf("Writing %s ...\n", out_name.c_str());
-  FILE* out_file;
-  fopen_s(&out_file, out_name.c_str(), "wb");
+  FILE* out_file = file_util::OpenFile(out_name, "wb");
   if (!out_file) {
     printf("ERROR writing file\n");
     return 1;
   }
-  fwrite(&serialized[0], 1, serialized.size(), out_file);
-  fclose(out_file);
+  size_t written = fwrite(&serialized[0], 1, serialized.size(), out_file);
+  CHECK(written == serialized.size());
+  file_util::CloseFile(out_file);
 
   return 0;
 }
-

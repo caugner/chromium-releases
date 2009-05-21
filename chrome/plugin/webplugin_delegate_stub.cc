@@ -5,8 +5,6 @@
 #include "chrome/plugin/webplugin_delegate_stub.h"
 
 #include "base/command_line.h"
-#include "base/time.h"
-#include "base/gfx/platform_device_win.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gfx/emf.h"
 #include "chrome/common/plugin_messages.h"
@@ -17,8 +15,9 @@
 #include "chrome/plugin/webplugin_proxy.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
+#include "skia/ext/platform_device.h"
 #include "webkit/glue/webcursor.h"
+#include "webkit/glue/webplugin_delegate.h"
 
 class FinishDestructionTask : public Task {
  public:
@@ -52,7 +51,7 @@ WebPluginDelegateStub::~WebPluginDelegateStub() {
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
     // right away.
-    MessageLoop::current()->PostTask(FROM_HERE,
+    MessageLoop::current()->PostNonNestableTask(FROM_HERE,
         new FinishDestructionTask(delegate_, webplugin_));
   } else {
     // Safe to delete right away.
@@ -80,6 +79,8 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
                         OnDidFinishLoadWithReason)
     IPC_MESSAGE_HANDLER(PluginMsg_SetFocus, OnSetFocus)
     IPC_MESSAGE_HANDLER(PluginMsg_HandleEvent, OnHandleEvent)
+    IPC_MESSAGE_HANDLER(PluginMsg_Paint, OnPaint)
+    IPC_MESSAGE_HANDLER(PluginMsg_DidPaint, OnDidPaint)
     IPC_MESSAGE_HANDLER(PluginMsg_Print, OnPrint)
     IPC_MESSAGE_HANDLER(PluginMsg_GetPluginScriptableObject,
                         OnGetPluginScriptableObject)
@@ -93,7 +94,8 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
                         OnDidFinishManualLoading)
     IPC_MESSAGE_HANDLER(PluginMsg_DidManualLoadFail, OnDidManualLoadFail)
     IPC_MESSAGE_HANDLER(PluginMsg_InstallMissingPlugin, OnInstallMissingPlugin)
-    IPC_MESSAGE_HANDLER(PluginMsg_HandleURLRequestReply, OnHandleURLRequestReply)
+    IPC_MESSAGE_HANDLER(PluginMsg_HandleURLRequestReply,
+                        OnHandleURLRequestReply)
     IPC_MESSAGE_HANDLER(PluginMsg_URLRequestRouted, OnURLRequestRouted)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
@@ -121,9 +123,10 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
     argv[i] = const_cast<char*>(params.arg_values[i].c_str());
   }
 
-  CommandLine command_line;
-  std::wstring path = command_line.GetSwitchValue(switches::kPluginPath);
-  delegate_ = WebPluginDelegateImpl::Create(
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  FilePath path =
+      FilePath(command_line.GetSwitchValue(switches::kPluginPath));
+  delegate_ = WebPluginDelegate::Create(
       path, mime_type_, params.containing_window);
   if (delegate_) {
     webplugin_ = new WebPluginProxy(
@@ -155,6 +158,7 @@ void WebPluginDelegateStub::OnDidReceiveResponse(
                              params.headers,
                              params.expected_length,
                              params.last_modified,
+                             params.request_is_seekable,
                              cancel);
 }
 
@@ -199,6 +203,14 @@ void WebPluginDelegateStub::OnHandleEvent(const NPEvent& event,
   *handled = delegate_->HandleEvent(const_cast<NPEvent*>(&event), cursor);
 }
 
+void WebPluginDelegateStub::OnPaint(const gfx::Rect& damaged_rect) {
+  webplugin_->Paint(damaged_rect);
+}
+
+void WebPluginDelegateStub::OnDidPaint() {
+  webplugin_->DidPaint();
+}
+
 void WebPluginDelegateStub::OnPrint(PluginMsg_PrintResponse_Params* params) {
   gfx::Emf emf;
   if (!emf.CreateDc(NULL, NULL)) {
@@ -206,7 +218,7 @@ void WebPluginDelegateStub::OnPrint(PluginMsg_PrintResponse_Params* params) {
     return;
   }
   HDC hdc = emf.hdc();
-  gfx::PlatformDeviceWin::InitializeDC(hdc);
+  skia::PlatformDeviceWin::InitializeDC(hdc);
   delegate_->Print(hdc);
   if (!emf.CloseDc()) {
     NOTREACHED();
@@ -216,7 +228,7 @@ void WebPluginDelegateStub::OnPrint(PluginMsg_PrintResponse_Params* params) {
   size_t size = emf.GetDataSize();
   DCHECK(size);
   params->size = size;
-  SharedMemory shared_buf;
+  base::SharedMemory shared_buf;
   CreateSharedBuffer(size, &shared_buf, &params->shared_memory);
 
   // Retrieve a copy of the data.
@@ -227,11 +239,10 @@ void WebPluginDelegateStub::OnPrint(PluginMsg_PrintResponse_Params* params) {
 void WebPluginDelegateStub::OnUpdateGeometry(
     const gfx::Rect& window_rect,
     const gfx::Rect& clip_rect,
-    bool visible,
-    const SharedMemoryHandle& windowless_buffer,
-    const SharedMemoryLock& lock) {
+    const base::SharedMemoryHandle& windowless_buffer,
+    const base::SharedMemoryHandle& background_buffer) {
   webplugin_->UpdateGeometry(
-      window_rect, clip_rect, visible, windowless_buffer, lock);
+      window_rect, clip_rect, windowless_buffer, background_buffer);
 }
 
 void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
@@ -246,7 +257,8 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
   *npobject_ptr = object;
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
-  NPObjectStub* stub = new NPObjectStub(object, channel_.get(), *route_id);
+  NPObjectStub* stub = new NPObjectStub(
+      object, channel_.get(), *route_id, webplugin_->modal_dialog_event());
 
   // Release ref added by GetPluginScriptableObject (our stub holds its own).
   NPN_ReleaseObject(object);
@@ -289,8 +301,8 @@ void WebPluginDelegateStub::OnInstallMissingPlugin() {
 
 void WebPluginDelegateStub::CreateSharedBuffer(
     size_t size,
-    SharedMemory* shared_buf,
-    SharedMemoryHandle* remote_handle) {
+    base::SharedMemory* shared_buf,
+    base::SharedMemoryHandle* remote_handle) {
   if (!shared_buf->Create(std::wstring(), false, false, size)) {
     NOTREACHED();
     return;
@@ -307,6 +319,7 @@ void WebPluginDelegateStub::CreateSharedBuffer(
                                 remote_handle, 0, FALSE,
                                 DUPLICATE_SAME_ACCESS);
   DCHECK_NE(result, 0);
+
   // If the calling function's shared_buf is on the stack, its destructor will
   // close the shared memory buffer handle. This is fine since we already
   // duplicated the handle to the renderer process so it will stay "alive".
@@ -327,4 +340,3 @@ void WebPluginDelegateStub::OnURLRequestRouted(const std::string& url,
                                                HANDLE notify_data) {
   delegate_->URLRequestRouted(url, notify_needed, notify_data);
 }
-

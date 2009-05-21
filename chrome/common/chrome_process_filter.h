@@ -9,7 +9,7 @@
 
 // Filter all chrome browser processes that run with the same user data
 // directory.
-class BrowserProcessFilter : public process_util::ProcessFilter {
+class BrowserProcessFilter : public base::ProcessFilter {
  public:
   // Create the filter for the given user_data_dir.
   // If user_data_dir is an empty string, will use the PathService
@@ -28,4 +28,3 @@ class BrowserProcessFilter : public process_util::ProcessFilter {
 };
 
 #endif  // CHROME_COMMON_CHROME_PROCESS_FILTER_H__
-

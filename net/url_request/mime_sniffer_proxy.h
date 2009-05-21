@@ -19,7 +19,14 @@
 // 2) ms_->mime_type() -- returns the sniffed mime type of the data;
 //    valid after OnResponseStarted() is called.
 
+#ifndef NET_URL_REQUEST_MIME_SNIFFER_PROXY_H_
+#define NET_URL_REQUEST_MIME_SNIFFER_PROXY_H_
+
 #include "net/url_request/url_request.h"
+
+namespace net {
+class IOBuffer;
+}
 
 class MimeSnifferProxy : public URLRequest::Delegate {
  public:
@@ -48,7 +55,7 @@ class MimeSnifferProxy : public URLRequest::Delegate {
   }
 
   // Wrapper around URLRequest::Read.
-  bool Read(char* buf, int max_bytes, int *bytes_read);
+  bool Read(net::IOBuffer* buf, int max_bytes, int *bytes_read);
 
   // Return the sniffed mime type of the request.  Valid after
   // OnResponseStarted() has been called on the delegate.
@@ -69,8 +76,9 @@ class MimeSnifferProxy : public URLRequest::Delegate {
   bool error_;
 
   // A buffer for the first bit of the request.
-  char buf_[1024];
+  scoped_refptr<net::IOBuffer> buf_;
   // The number of bytes we've read into the buffer.
   int bytes_read_;
 };
 
+#endif  // NET_URL_REQUEST_MIME_SNIFFER_PROXY_H_

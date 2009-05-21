@@ -4,15 +4,17 @@
 
 #include "chrome/browser/fav_icon_helper.h"
 
-#include "base/gfx/image_operations.h"
+#include "build/build_config.h"
+
 #include "base/gfx/png_decoder.h"
 #include "base/gfx/png_encoder.h"
-#include "chrome/browser/navigation_entry.h"
-#include "chrome/browser/navigation_controller.h"
-#include "chrome/browser/tab_contents_delegate.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/gfx/favicon_size.h"
+#include "skia/ext/image_operations.h"
 
 FavIconHelper::FavIconHelper(WebContents* web_contents)
     : web_contents_(web_contents),
@@ -84,12 +86,7 @@ void FavIconHelper::SetFavIcon(
 
   if (GetHistoryService() && !profile()->IsOffTheRecord()) {
     std::vector<unsigned char> image_data;
-    SkAutoLockPixels icon_lock(sized_image);
-    PNGEncoder::Encode(
-        reinterpret_cast<unsigned char*>(sized_image.getPixels()),
-        PNGEncoder::FORMAT_BGRA, sized_image.width(),
-        sized_image.height(), sized_image.width()* 4, false,
-        &image_data);
+    PNGEncoder::EncodeBGRASkBitmap(sized_image, false, &image_data);
     GetHistoryService()->SetFavIcon(i->second.url, i->second.fav_icon_url,
                                     image_data);
   }
@@ -257,10 +254,9 @@ SkBitmap FavIconHelper::ConvertToFavIconSize(const SkBitmap& image) {
   int height = image.height();
   if (width > 0 && height > 0) {
     calc_favicon_target_size(&width, &height);
-    return gfx::ImageOperations::Resize(
-          image, gfx::ImageOperations::RESIZE_LANCZOS3,
-          gfx::Size(width, height));
+    return skia::ImageOperations::Resize(
+          image, skia::ImageOperations::RESIZE_LANCZOS3,
+          width, height);
   }
   return image;
 }
-

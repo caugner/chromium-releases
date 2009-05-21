@@ -161,9 +161,17 @@ size_t ComputeTrieStorage(DicNode* node) {
     // The additional affix list holds affixes when there is more than one. Each
     // entry is two bytes, plus an additional FFFF terminator.
     size_t supplimentary_size = 0;
-    if (node->affix_indices.size() > 1 ||
-        node->affix_indices[0] > BDict::LEAF_NODE_MAX_FIRST_AFFIX_ID)
+    if (node->affix_indices[0] > BDict::LEAF_NODE_MAX_FIRST_AFFIX_ID) {
+      // We cannot store the first affix ID of the affix list into a leaf node.
+      // In this case, we have to store all the affix IDs and a terminator
+      // into a supplimentary list.
+      supplimentary_size = node->affix_indices.size() * 2 + 2;
+    } else if (node->affix_indices.size() > 1) {
+      // We can store the first affix ID of the affix list into a leaf node.
+      // In this case, we need to store the remaining affix IDs and a
+      // terminator into a supplimentary list.
       supplimentary_size = node->affix_indices.size() * 2;
+    }
 
     if (node->leaf_addition.empty()) {
       node->storage = DicNode::LEAF;
@@ -183,7 +191,7 @@ size_t ComputeTrieStorage(DicNode* node) {
   static const int kListHeaderSize = 1;
 
   // Lists can only store up to 16 items.
-  static const int kListThreshold = 16;
+  static const size_t kListThreshold = 16;
   if (node->children.size() < kListThreshold && child_size <= 0xFF) {
     node->storage = DicNode::LIST8;
     return kListHeaderSize + node->children.size() * 2 + child_size;
@@ -257,7 +265,7 @@ void SerializeLeaf(const DicNode* node, std::string* output) {
       output->push_back(
           static_cast<char>((node->affix_indices[i] >> 8) & 0xFF));
     }
-    
+
     // Terminator for affix list. We use 0xFFFF.
     output->push_back(static_cast<unsigned char>(0xFF));
     output->push_back(static_cast<unsigned char>(0xFF));
@@ -434,7 +442,7 @@ void BDictWriter::SetWords(const WordList& words) {
 
 std::string BDictWriter::GetBDict() const {
   std::string ret;
-  
+
   // Save room for the header. This will be populated at the end.
   ret.resize(sizeof(hunspell::BDict::Header));
 
@@ -451,8 +459,8 @@ std::string BDictWriter::GetBDict() const {
   hunspell::BDict::Header* header =
       reinterpret_cast<hunspell::BDict::Header*>(&ret[0]);
   header->signature = hunspell::BDict::SIGNATURE;
-  header->major_version = 1;
-  header->minor_version = 0;
+  header->major_version = hunspell::BDict::MAJOR_VERSION;
+  header->minor_version = hunspell::BDict::MINOR_VERSION;
   header->aff_offset = static_cast<uint32>(aff_offset);
   header->dic_offset = static_cast<uint32>(dic_offset);
 

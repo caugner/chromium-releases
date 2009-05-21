@@ -4,7 +4,6 @@
 //
 // Test program to convert lists of integers into ranges, and vice versa.
 
-#include "base/logging.h"
 #include "chunk_range.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -174,4 +173,21 @@ TEST(SafeBrowsingChunkRangeTest, TestRangesToChunks) {
   EXPECT_EQ(chunks[2], 3);
   EXPECT_EQ(chunks[3], 4);
   EXPECT_EQ(chunks[4], 17);
+}
+
+
+TEST(SafeBrowsingChunkRangeTest, TestSearchChunkRanges) {
+  std::string range_str("1-10,15-17,21-410,555,991-1000");
+  std::vector<ChunkRange> ranges;
+  StringToRanges(range_str, &ranges);
+
+  EXPECT_TRUE(IsChunkInRange(7, ranges));
+  EXPECT_TRUE(IsChunkInRange(300, ranges));
+  EXPECT_TRUE(IsChunkInRange(555, ranges));
+  EXPECT_TRUE(IsChunkInRange(1, ranges));
+  EXPECT_TRUE(IsChunkInRange(1000, ranges));
+
+  EXPECT_FALSE(IsChunkInRange(11, ranges));
+  EXPECT_FALSE(IsChunkInRange(990, ranges));
+  EXPECT_FALSE(IsChunkInRange(2000, ranges));
 }

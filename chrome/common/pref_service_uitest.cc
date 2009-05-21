@@ -43,9 +43,8 @@ public:
     ASSERT_TRUE(::SetFileAttributesW(tmp_pref_file_.c_str(),
         FILE_ATTRIBUTE_NORMAL));
 
-    CommandLine::AppendSwitchWithValue(&launch_arguments_,
-                                       switches::kUserDataDir,
-                                       tmp_profile_);
+    launch_arguments_.AppendSwitchWithValue(switches::kUserDataDir,
+                                            tmp_profile_);
   }
 
   bool LaunchAppWithProfile() {
@@ -58,16 +57,7 @@ public:
   void TearDown() {
     UITest::TearDown();
 
-    const int kWaitForDeleteMs = 100;
-    int num_retries = 5;
-    while (num_retries > 0) {
-      file_util::Delete(tmp_profile_, true);
-      if (!file_util::PathExists(tmp_profile_))
-        break;
-      --num_retries;
-      Sleep(kWaitForDeleteMs);
-    }
-    EXPECT_FALSE(file_util::PathExists(tmp_profile_));
+    EXPECT_TRUE(DieFileDie(tmp_profile_, true));
   }
 
 public:
@@ -82,19 +72,17 @@ TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   ASSERT_TRUE(file_util::PathExists(tmp_pref_file_));
 
   JSONFileValueSerializer deserializer(tmp_pref_file_);
-  Value* root = NULL;
-  ASSERT_TRUE(deserializer.Deserialize(&root));
+  scoped_ptr<Value> root(deserializer.Deserialize(NULL));
 
-  ASSERT_TRUE(root);
+  ASSERT_TRUE(root.get());
   ASSERT_TRUE(root->IsType(Value::TYPE_DICTIONARY));
 
-  DictionaryValue* root_dict = static_cast<DictionaryValue*>(root);
+  DictionaryValue* root_dict = static_cast<DictionaryValue*>(root.get());
 
   // Retrieve the screen rect for the launched window
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   HWND hWnd;
   ASSERT_TRUE(window->GetHWND(&hWnd));
 
@@ -130,6 +118,4 @@ TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   ASSERT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + L".maximized",
       &is_maximized));
   ASSERT_EQ(is_maximized, is_window_maximized);
-  delete root;
 }
-

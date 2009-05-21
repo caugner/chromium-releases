@@ -4,8 +4,10 @@
 
 // A handful of resource-like constants related to the Chrome application.
 
-#ifndef CHROME_COMMON_CHROME_CONSTANTS_H__
-#define CHROME_COMMON_CHROME_CONSTANTS_H__
+#ifndef CHROME_COMMON_CHROME_CONSTANTS_H_
+#define CHROME_COMMON_CHROME_CONSTANTS_H_
+
+#include "base/file_path.h"
 
 namespace chrome {
 
@@ -17,31 +19,35 @@ extern const wchar_t kCrashReportLog[];
 extern const wchar_t kTestingInterfaceDLL[];
 extern const wchar_t kNotSignedInProfile[];
 extern const wchar_t kNotSignedInID[];
-extern const wchar_t kStatsFilename[];
+extern const char    kStatsFilename[];
 extern const wchar_t kBrowserResourcesDll[];
+extern const FilePath::CharType kExtensionFileExtension[];
 
 // filenames
-extern const wchar_t kArchivedHistoryFilename[];
-extern const wchar_t kCacheDirname[];
+extern const FilePath::CharType kArchivedHistoryFilename[];
+extern const FilePath::CharType kCacheDirname[];
+extern const FilePath::CharType kMediaCacheDirname[];
+extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
 extern const wchar_t kChromePluginDataDirname[];
-extern const wchar_t kCookieFilename[];
-extern const wchar_t kHistoryFilename[];
-extern const wchar_t kLocalStateFilename[];
-extern const wchar_t kPreferencesFilename[];
-extern const wchar_t kSafeBrowsingFilename[];
-extern const wchar_t kThumbnailsFilename[];
+extern const FilePath::CharType kCookieFilename[];
+extern const FilePath::CharType kHistoryFilename[];
+extern const FilePath::CharType kLocalStateFilename[];
+extern const FilePath::CharType kPreferencesFilename[];
+extern const FilePath::CharType kSafeBrowsingFilename[];
+extern const FilePath::CharType kThumbnailsFilename[];
 extern const wchar_t kUserDataDirname[];
-extern const wchar_t kWebDataFilename[];
-extern const wchar_t kBookmarksFileName[];
-extern const wchar_t kHistoryBookmarksFileName[];
-extern const wchar_t kCustomDictionaryFileName[];
+extern const FilePath::CharType kUserScriptsDirname[];
+extern const FilePath::CharType kWebDataFilename[];
+extern const FilePath::CharType kBookmarksFileName[];
+extern const FilePath::CharType kHistoryBookmarksFileName[];
+extern const FilePath::CharType kCustomDictionaryFileName[];
 
 extern const unsigned int kMaxRendererProcessCount;
 extern const int kStatsMaxThreads;
 extern const int kStatsMaxCounters;
 
 extern const bool kRecordModeEnabled;
-}
 
-#endif  // CHROME_COMMON_CHROME_CONSTANTS_H__
+}  // namespace chrome
 
+#endif  // CHROME_COMMON_CHROME_CONSTANTS_H_

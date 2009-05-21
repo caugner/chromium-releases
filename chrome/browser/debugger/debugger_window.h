@@ -6,16 +6,15 @@
 #define CHROME_BROWSER_DEBUGGER_DEBUGGER_WINDOW_H__
 
 #include "chrome/browser/debugger/debugger_io.h"
-#include "chrome/views/text_field.h"
-#include "chrome/views/window.h"
-#include "chrome/views/window_delegate.h"
+#include "chrome/views/window/window.h"
+#include "chrome/views/window/window_delegate.h"
 
 class DebuggerView;
+class ListValue;
 class TabContents;
 
 class DebuggerWindow : public DebuggerInputOutput,
-                    public ChromeViews::WindowDelegate,
-                    public ChromeViews::TextField::Controller {
+                       public views::WindowDelegate {
  public:
   DebuggerWindow();
   virtual ~DebuggerWindow();
@@ -33,24 +32,22 @@ class DebuggerWindow : public DebuggerInputOutput,
   virtual void Output(const std::string& out);
   virtual void OutputLine(const std::string& out);
   virtual void OutputPrompt(const std::string& prompt);
-  virtual void Start(DebuggerShell* debugger);
+  virtual void Start(DebuggerHost* debugger);
   virtual void SetDebuggerReady(bool ready);
   virtual void SetDebuggerBreak(bool brk);
 
-  // ChromeViews::WindowDelegate methods:
+  // Note that this method will take ownership of argv.
+  virtual void CallFunctionInPage(const std::wstring& name,
+                                  ListValue* argv);
+
+  // views::WindowDelegate methods:
   virtual std::wstring GetWindowTitle() const;
   virtual void WindowClosing();
   virtual bool CanResize() const;
-  virtual ChromeViews::View* GetContentsView();
-
-  // Overridden from ChromeViews::TextField::Controller:
-  virtual void ContentsChanged(ChromeViews::TextField* sender,
-                               const std::wstring& new_contents);
-  virtual void HandleKeystroke(ChromeViews::TextField* sender, UINT message,
-                               TCHAR key, UINT repeat_count, UINT flags);
+  virtual views::View* GetContentsView();
 
  private:
-  ChromeViews::Window* window_;
+  views::Window* window_;
   DebuggerView* view_;
 
   bool debugger_ready_;
@@ -60,4 +57,3 @@ class DebuggerWindow : public DebuggerInputOutput,
 };
 
 #endif // CHROME_BROWSER_DEBUGGER_DEBUGGER_WINDOW_H__
-

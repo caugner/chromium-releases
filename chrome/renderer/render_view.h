@@ -2,58 +2,102 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_RENDERER_RENDER_VIEW_H__
-#define CHROME_RENDERER_RENDER_VIEW_H__
+#ifndef CHROME_RENDERER_RENDER_VIEW_H_
+#define CHROME_RENDERER_RENDER_VIEW_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/scoped_handle.h"
 #include "base/gfx/point.h"
 #include "base/gfx/rect.h"
+#include "base/id_map.h"
+#include "base/shared_memory.h"
 #include "base/timer.h"
 #include "base/values.h"
-#include "chrome/common/resource_dispatcher.h"
+#include "build/build_config.h"
 #ifdef CHROME_PERSONALIZATION
 #include "chrome/personalization/personalization.h"
 #endif
 #include "chrome/renderer/automation/dom_automation_controller.h"
 #include "chrome/renderer/dom_ui_bindings.h"
 #include "chrome/renderer/external_host_bindings.h"
+#include "chrome/renderer/extensions/extension_bindings.h"
 #include "chrome/renderer/external_js_object.h"
-#include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_widget.h"
+#include "media/audio/audio_output.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/glue/console_message_level.h"
 #include "webkit/glue/dom_serializer_delegate.h"
+#include "webkit/glue/feed.h"
+#include "webkit/glue/form_data.h"
+#include "webkit/glue/password_form_dom_manager.h"
+#include "webkit/glue/webaccessibilitymanager.h"
 #include "webkit/glue/webview_delegate.h"
 #include "webkit/glue/webview.h"
 
+#if defined(OS_WIN)
 // RenderView is a diamond-shaped hierarchy, with WebWidgetDelegate at the root.
 // VS warns when we inherit the WebWidgetDelegate method implementations from
 // RenderWidget.  It's safe to ignore that warning.
 #pragma warning(disable: 4250)
+#endif
 
+class AudioRendererImpl;
+class DictionaryValue;
 class DebugMessageHandler;
+class DevToolsAgent;
+class DevToolsClient;
+class FilePath;
 class GURL;
-class SharedMemory;
+class RenderThread;
+class ResourceDispatcher;
 class SkBitmap;
-struct ThumbnailScore;
+class WebAccessibilityManager;
 class WebError;
 class WebFrame;
 class WebPluginDelegate;
 class WebPluginDelegateProxy;
-enum WebRequestCachePolicy;
+class WebDevToolsAgentDelegate;
+struct FindInPageRequest;
+struct ThumbnailScore;
+struct ViewMsg_Navigate_Params;
+struct ViewMsg_PrintPage_Params;
+struct ViewMsg_PrintPages_Params;
+struct ViewMsg_Print_Params;
+struct ViewMsg_UploadFile_Params;
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace webkit_glue {
-  struct FileUploadData;
+struct FileUploadData;
+//class WebAccessibility;
+//struct InParams;
+//struct OutParams;
 }
+
+// We need to prevent a page from trying to create infinite popups. It is not
+// as simple as keeping a count of the number of immediate children
+// popups. Having an html file that window.open()s itself would create
+// an unlimited chain of RenderViews who only have one RenderView child.
+//
+// Therefore, each new top level RenderView creates a new counter and shares it
+// with all its children and grandchildren popup RenderViews created with
+// CreateWebView() to have a sort of global limit for the page so no more than
+// kMaximumNumberOfPopups popups are created.
+//
+// This is a RefCounted holder of an int because I can't say
+// scoped_refptr<int>.
+typedef base::RefCountedData<int> SharedRenderViewCounter;
 
 //
 // RenderView is an object that manages a WebView object, and provides a
 // communication interface with an embedding application process
 //
-class RenderView : public RenderWidget, public WebViewDelegate,
+class RenderView : public RenderWidget,
+                   public WebViewDelegate,
                    public webkit_glue::DomSerializerDelegate {
  public:
   // Creates a new RenderView.  The parent_hwnd specifies a HWND to use as the
@@ -62,32 +106,31 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // the renderer and plugin processes know to pump window messages.  If this
   // is a constrained popup or as a new tab, opener_id is the routing ID of the
   // RenderView responsible for creating this RenderView (corresponding to the
-  // parent_hwnd).
-  static RenderView* Create(HWND parent_hwnd,
-                            HANDLE modal_dialog_event,
-                            int32 opener_id,
-                            const WebPreferences& webkit_prefs,
-                            int32 routing_id);
+  // parent_hwnd). |counter| is either a currently initialized counter, or NULL
+  // (in which case we treat this RenderView as a top level window).
+  static RenderView* Create(
+      RenderThreadBase* render_thread,
+      gfx::NativeViewId parent_hwnd,
+      base::WaitableEvent* modal_dialog_event,  // takes ownership
+      int32 opener_id,
+      const WebPreferences& webkit_prefs,
+      SharedRenderViewCounter* counter,
+      int32 routing_id);
 
   // Sets the "next page id" counter.
   static void SetNextPageID(int32 next_page_id);
-
-  // The resource dispatcher used to fetch resources for this view.
-  ResourceDispatcher* resource_dispatcher() {
-    return resource_dispatcher_;
-  }
 
   // May return NULL when the view is closing.
   WebView* webview() const {
     return static_cast<WebView*>(webwidget());
   }
 
-  HWND host_window() const {
+  gfx::NativeViewId host_window() const {
     return host_window_;
   }
 
-  HANDLE modal_dialog_event() {
-    return modal_dialog_event_.Get();
+  base::WaitableEvent* modal_dialog_event() {
+    return modal_dialog_event_.get();
   }
 
   // IPC::Channel::Listener
@@ -97,20 +140,29 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
                                    const std::string& json_arguments,
                                    std::string* json_retval);
-  virtual void RunJavaScriptAlert(WebView* webview,
+  virtual void RunJavaScriptAlert(WebFrame* webframe,
                                   const std::wstring& message);
-  virtual bool RunJavaScriptConfirm(WebView* webview,
+  virtual bool RunJavaScriptConfirm(WebFrame* webframe,
                                     const std::wstring& message);
-  virtual bool RunJavaScriptPrompt(WebView* webview,
+  virtual bool RunJavaScriptPrompt(WebFrame* webframe,
                                    const std::wstring& message,
                                    const std::wstring& default_value,
                                    std::wstring* result);
-  virtual bool RunBeforeUnloadConfirm(WebView* webview,
+  virtual bool RunBeforeUnloadConfirm(WebFrame* webframe,
                                       const std::wstring& message);
-  virtual void OnUnloadListenerChanged(WebView* webview, WebFrame* webframe);
+  virtual void EnableSuddenTermination();
+  virtual void DisableSuddenTermination();
+  virtual void QueryFormFieldAutofill(const std::wstring& field_name,
+                                      const std::wstring& text,
+                                      int64 node_id);
+  virtual void RemoveStoredAutofillEntry(const std::wstring& field_name,
+                                         const std::wstring& text);
   virtual void UpdateTargetURL(WebView* webview,
                                const GURL& url);
-  virtual void RunFileChooser(const std::wstring& default_filename,
+  virtual void RunFileChooser(bool multi_select,
+                              const std::wstring& title,
+                              const std::wstring& initial_filename,
+                              const std::wstring& filter,
                               WebFileChooserCallback* file_chooser);
   virtual void AddMessageToConsole(WebView* webview,
                                    const std::wstring& message,
@@ -167,8 +219,13 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   virtual void DidCompleteClientRedirect(WebView* webview,
                                          WebFrame* frame,
                                          const GURL& source);
+  virtual void WillSendRequest(WebView* webview,
+                               uint32 identifier,
+                               WebRequest* request);
 
   virtual void WindowObjectCleared(WebFrame* webframe);
+  virtual void DocumentElementAvailable(WebFrame* webframe);
+
   virtual WindowOpenDisposition DispositionForNavigationAction(
       WebView* webview,
       WebFrame* frame,
@@ -178,15 +235,18 @@ class RenderView : public RenderWidget, public WebViewDelegate,
       bool is_redirect);
 
   virtual WebView* CreateWebView(WebView* webview, bool user_gesture);
-  virtual WebWidget* CreatePopupWidget(WebView* webview);
+  virtual WebWidget* CreatePopupWidget(WebView* webview, bool activatable);
   virtual WebPluginDelegate* CreatePluginDelegate(
       WebView* webview,
       const GURL& url,
       const std::string& mime_type,
       const std::string& clsid,
       std::string* actual_mime_type);
+  virtual WebWorker* CreateWebWorker(WebWorkerClient* client);
+  virtual webkit_glue::WebMediaPlayerDelegate* CreateMediaPlayerDelegate();
   virtual void OnMissingPluginStatus(WebPluginDelegate* delegate, int status);
   virtual void OpenURL(WebView* webview, const GURL& url,
+                       const GURL& referrer,
                        WindowOpenDisposition disposition);
   virtual void DidDownloadImage(int id,
                                 const GURL& image_url,
@@ -196,7 +256,7 @@ class RenderView : public RenderWidget, public WebViewDelegate,
                                         ErrorPageType error_type);
 
   virtual void ShowContextMenu(WebView* webview,
-                               ContextNode::Type type,
+                               ContextNode node,
                                int x,
                                int y,
                                const GURL& link_url,
@@ -205,7 +265,8 @@ class RenderView : public RenderWidget, public WebViewDelegate,
                                const GURL& frame_url,
                                const std::wstring& selection_text,
                                const std::wstring& misspelled_word,
-                               int edit_flags);
+                               int edit_flags,
+                               const std::string& security_info);
   virtual void StartDragging(WebView* webview,
                              const WebDropData& drag_data);
 
@@ -213,7 +274,6 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   virtual void JSOutOfMemory();
 
   virtual WebHistoryItem* GetHistoryEntryAtOffset(int offset);
-  virtual void GoToEntryAtOffsetAsync(int offset);
   virtual int GetHistoryBackListCount();
   virtual int GetHistoryForwardListCount();
   virtual void OnNavStateChanged(WebView* webview);
@@ -222,8 +282,13 @@ class RenderView : public RenderWidget, public WebViewDelegate,
 
   virtual void DownloadUrl(const GURL& url, const GURL& referrer);
 
+  virtual WebDevToolsAgentDelegate* GetWebDevToolsAgentDelegate();
+
   virtual void OnPasswordFormsSeen(WebView* webview,
                                    const std::vector<PasswordForm>& forms);
+
+  virtual void OnAutofillFormSubmitted(WebView* webview,
+                                       const AutofillForm& form);
 
   virtual void ReportFindInPageMatchCount(int count, int request_id,
                                           bool final_update);
@@ -246,6 +311,7 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // WebWidgetDelegate
   // Most methods are handled by RenderWidget.
   virtual void Show(WebWidget* webwidget, WindowOpenDisposition disposition);
+  virtual void CloseWidgetSoon(WebWidget* webwidget);
   virtual void RunModal(WebWidget* webwidget);
 
   // Do not delete directly.  This class is reference counted.
@@ -255,7 +321,7 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   void PluginDestroyed(WebPluginDelegateProxy* proxy);
 
   // Called when a plugin is crashed.
-  void PluginCrashed(const std::wstring& plugin_path);
+  void PluginCrashed(const FilePath& plugin_path);
 
   // Called from JavaScript window.external.AddSearchProvider() to add a
   // keyword for a provider described in the given OpenSearch document.
@@ -268,28 +334,61 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // periodic timer so we don't send too many messages.
   void SyncNavigationState();
 
-  // Evaluates a javascript: URL
-  void EvaluateScriptUrl(const std::wstring& frame_xpath,
-                         const std::wstring& jscript);
+  // Evaluates a string of JavaScript in a particular frame.
+  void EvaluateScript(const std::wstring& frame_xpath,
+                      const std::wstring& jscript);
 
   // Called when the Javascript debugger is no longer attached.
   // This is called from within the renderer, not via an IPC message.
   void OnDebugDetach();
 
- private:
-  RenderView();
+  int delay_seconds_for_form_state_sync() const {
+    return delay_seconds_for_form_state_sync_;
+  }
+  void set_delay_seconds_for_form_state_sync(int delay_in_seconds) {
+    delay_seconds_for_form_state_sync_ = delay_in_seconds;
+  }
 
-  // When we are created from window.open from an already existing view, this
-  // constructor stores that view ID.
-  explicit RenderView(int32 opener_id);
+  // Returns a message loop of type IO that can be used to run I/O jobs. The
+  // renderer thread is of type TYPE_DEFAULT, so doesn't support everything
+  // needed by some consumers. The returned thread will be the main thread of
+  // the renderer, which processes all IPC, to any I/O should be non-blocking.
+  MessageLoop* GetMessageLoopForIO();
+
+  // Register the audio renderer and try to create an audio output stream in the
+  // browser process. Always return a stream id. Audio renderer will then
+  // receive state change notification messages.
+  int32 CreateAudioStream(AudioRendererImpl* renderer,
+                          AudioManager::Format format, int channels,
+                          int sample_rate, int bits_per_sample,
+                          size_t packet_size);
+  void StartAudioStream(int stream_id);
+  void CloseAudioStream(int stream_id);
+  void NotifyAudioPacketReady(int stream_id, size_t size);
+  void GetAudioVolume(int stream_id);
+  void SetAudioVolume(int stream_id, double left, double right);
+
+ protected:
+  // RenderWidget override.
+  virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Rect& resizer_rect);
+
+ private:
+  FRIEND_TEST(RenderViewTest, OnLoadAlternateHTMLText);
+  FRIEND_TEST(RenderViewTest, OnNavStateChanged);
+  FRIEND_TEST(RenderViewTest, OnImeStateChanged);
+  FRIEND_TEST(RenderViewTest, ImeComposition);
+
+  explicit RenderView(RenderThreadBase* render_thread);
 
   // Initializes this view with the given parent and ID. The |routing_id| can be
   // set to 'MSG_ROUTING_NONE' if the true ID is not yet known. In this case,
   // CompleteInit must be called later with the true ID.
-  void Init(HWND parent,
-            HANDLE modal_dialog_event,
+  void Init(gfx::NativeViewId parent,
+            base::WaitableEvent* modal_dialog_event,  // takes ownership
             int32 opener_id,
             const WebPreferences& webkit_prefs,
+            SharedRenderViewCounter* counter,
             int32 routing_id);
 
   void UpdateURL(WebFrame* frame);
@@ -323,7 +422,7 @@ class RenderView : public RenderWidget, public WebViewDelegate,
 
   // Creates a thumbnail of |frame|'s contents resized to (|w|, |h|)
   // and puts that in |thumbnail|. Thumbnail metadata goes in |score|.
-  void CaptureThumbnail(WebFrame* frame, int w, int h,
+  bool CaptureThumbnail(WebFrame* frame, int w, int h,
                         SkBitmap* thumbnail,
                         ThumbnailScore* score);
 
@@ -336,18 +435,23 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   bool RunJavaScriptMessage(int type,
                             const std::wstring& message,
                             const std::wstring& default_value,
+                            const GURL& frame_url,
                             std::wstring* result);
 
   // Adds search provider from the given OpenSearch description URL as a
   // keyword search.
   void AddGURLSearchProvider(const GURL& osd_url, bool autodetected);
 
+  // Update the feed list.
+  void UpdateFeedList(scoped_refptr<FeedList> feedlist);
+
+  // Tells the browser process to navigate to a back/forward entry at the given
+  // offset from current.
+  void GoToEntryAtOffset(int offset);
+
   // RenderView IPC message handlers
-  void OnCreatingNewAck(HWND parent);
   void SendThumbnail();
-  void OnPrintPage(const ViewMsg_PrintPage_Params& params);
-  void OnGetPrintedPagesCount(const ViewMsg_Print_Params& params);
-  void OnPrintPages(const ViewMsg_PrintPages_Params& params);
+  void OnPrintPages();
   void OnNavigate(const ViewMsg_Navigate_Params& params);
   void OnStop();
   void OnLoadAlternateHTMLText(const std::string& html_contents,
@@ -363,20 +467,22 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   void OnCopy();
   void OnPaste();
   void OnReplace(const std::wstring& text);
+  void OnToggleSpellCheck();
   void OnDelete();
   void OnSelectAll();
   void OnCopyImageAt(int x, int y);
   void OnInspectElement(int x, int y);
   void OnShowJavaScriptConsole();
+  void OnSetupDevToolsClient();
   void OnCancelDownload(int32 download_id);
   void OnFind(const FindInPageRequest& request);
-  void OnAlterTextSize(int size);
+  void OnZoom(int function);
   void OnSetPageEncoding(const std::wstring& encoding_name);
   void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
   void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
-      const std::vector<std::wstring>& links,
-      const std::vector<std::wstring>& local_paths,
-      const std::wstring& local_directory_name);
+      const std::vector<GURL>& links,
+      const std::vector<FilePath>& local_paths,
+      const FilePath& local_directory_name);
   void OnUploadFileRequest(const ViewMsg_UploadFile_Params& p);
   void OnFormFill(const FormData& form);
   void OnFillPasswordForm(const PasswordFormDomManager::FillData& form_data);
@@ -388,9 +494,7 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   void OnDragTargetDragLeave();
   void OnDragTargetDrop(const gfx::Point& client_pt,
                         const gfx::Point& screen_pt);
-  void OnAllowDomAutomationBindings(bool allow_binding);
-  void OnAllowBindings(bool enable_dom_ui_bindings,
-                       bool enable_external_host_bindings);
+  void OnAllowBindings(int enabled_bindings_flags);
   void OnSetDOMUIProperty(const std::string& name, const std::string& value);
   void OnSetInitialFocus(bool reverse);
   void OnUpdateWebPreferences(const WebPreferences& prefs);
@@ -413,10 +517,16 @@ class RenderView : public RenderWidget, public WebViewDelegate,
       int client_x, int client_y, int screen_x, int screen_y, bool ended);
   void OnDragSourceSystemDragEnded();
   void OnInstallMissingPlugin();
-  void OnFileChooserResponse(const std::wstring& file_name);
+  void OnFileChooserResponse(const std::vector<std::wstring>& file_names);
   void OnEnableViewSourceMode();
   void OnUpdateBackForwardListCount(int back_list_count,
                                     int forward_list_count);
+  void OnGetAccessibilityInfo(
+      const webkit_glue::WebAccessibility::InParams& in_params,
+      webkit_glue::WebAccessibility::OutParams* out_params);
+  void OnClearAccessibilityInfo(int acc_obj_id, bool clear_all);
+
+  void OnMoveOrResizeStarted();
 
   // Checks if the RenderView should close, runs the beforeunload handler and
   // sends ViewMsg_ShouldClose to the browser.
@@ -429,25 +539,48 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // Notification about ui theme changes.
   void OnThemeChanged();
 
+  // Notification that we have received autofill suggestion.
+  void OnReceivedAutofillSuggestions(
+      int64 node_id,
+      int request_id,
+      const std::vector<std::wstring>& suggestions,
+      int default_suggestions_index);
+
+  // Message that the popup notification has been shown or hidden.
+  void OnPopupNotificationVisiblityChanged(bool visible);
+
 #ifdef CHROME_PERSONALIZATION
   void OnPersonalizationEvent(std::string event_name, std::string event_args);
 #endif
 
   // Handles messages posted from automation.
-  void OnMessageFromExternalHost(const std::string& target,
-                                 const std::string& message);
+  void OnMessageFromExternalHost(const std::string& message,
+                                 const std::string& origin,
+                                 const std::string& target);
 
-  // Switches the frame's CSS media type to "print" and calculate the number of
-  // printed pages that are to be expected. |frame| will be used to calculate
-  // the number of expected pages for this frame only.
-  int SwitchFrameToPrintMediaType(const ViewMsg_Print_Params& params,
-                                  WebFrame* frame);
+  // Message that we should no longer be part of the current popup window
+  // grouping, and should form our own grouping.
+  void OnDisassociateFromPopupCount();
 
-  // Switches the frame's CSS media type to "display".
-  void SwitchFrameToDisplayMediaType(WebFrame* frame);
+  // Received when browser process wants more audio packet.
+  void OnRequestAudioPacket(int stream_id);
+
+  // Received when browser process has created an audio output stream for us.
+  void OnAudioStreamCreated(int stream_id, base::SharedMemoryHandle handle,
+                            int length);
+
+  // Received when internal state of browser process' audio output device has
+  // changed.
+  void OnAudioStreamStateChanged(int stream_id, AudioOutputStream::State state,
+                                 int info);
+
+  // Notification of volume property of an audio output stream.
+  void OnAudioStreamVolume(int stream_id, double left, double right);
 
   // Prints the page listed in |params|.
-  void PrintPage(const ViewMsg_PrintPage_Params& params, WebFrame* frame);
+  void PrintPage(const ViewMsg_PrintPage_Params& params,
+                 const gfx::Size& canvas_size,
+                 WebFrame* frame);
 
   // Prints all the pages listed in |params|.
   void PrintPages(const ViewMsg_PrintPages_Params& params, WebFrame* frame);
@@ -464,6 +597,10 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // information to the browser process.
   void BindDOMAutomationController(WebFrame* webframe);
 
+  // Creates DevToolsClient and sets up JavaScript bindings for developer tools
+  // UI that is going to be hosted by this RenderView.
+  void CreateDevToolsClient();
+
   void set_opened_by_user_gesture(bool value) {
     opened_by_user_gesture_ = value;
   }
@@ -479,18 +616,19 @@ class RenderView : public RenderWidget, public WebViewDelegate,
 
   virtual void TransitionToCommittedForNewPage();
 
+  virtual void DidAddHistoryItem();
+
   // A helper method used by WasOpenedByUserGesture.
   bool WasOpenedByUserGestureHelper() const;
 
-  // Handles resource loads for this view.
-  scoped_refptr<ResourceDispatcher> resource_dispatcher_;
+  // Bitwise-ORed set of extra bindings that have been enabled.  See
+  // BindingsPolicy for details.
+  int enabled_bindings_;
 
   // DOM Automation Controller CppBoundClass.
-  bool enable_dom_automation_;
   DomAutomationController dom_automation_controller_;
 
   // Chrome page<->browser messaging CppBoundClass.
-  bool enable_dom_ui_bindings_;
   DOMUIBindings dom_ui_bindings_;
 
 #ifdef CHROME_PERSONALIZATION
@@ -501,8 +639,10 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   ExternalJSObject external_js_object_;
 
   // External host exposed through automation controller.
-  bool enable_external_host_bindings_;
   ExternalHostBindings external_host_bindings_;
+
+  // Extension bindings exposed for script running in the extension process.
+  ExtensionBindings extension_bindings_;
 
   // The last gotten main frame's encoding.
   std::wstring last_encoding_name_;
@@ -589,16 +729,16 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // Handle to an event that's set when the page is showing a modal dialog (or
   // equivalent constrained window).  The renderer and any plugin processes
   // check this to know if they should pump messages/tasks then.
-  ScopedHandle modal_dialog_event_;
-
-  // Document width when in print CSS media type. 0 otherwise.
-  int printed_document_width_;
-
-  // Backup the view size before printing since it needs to be overriden. This
-  // value is set to restore the view size when printing is done.
-  gfx::Size printing_view_size_;
+  scoped_ptr<base::WaitableEvent> modal_dialog_event_;
 
   scoped_refptr<DebugMessageHandler> debug_message_handler_;
+
+  // Provides access to this renderer from the remote Inspector UI.
+  scoped_refptr<DevToolsAgent> devtools_agent_;
+
+  // DevToolsClient for renderer hosting developer tools UI. It's NULL for other
+  // render views.
+  scoped_ptr<DevToolsClient> devtools_client_;
 
   scoped_ptr<WebFileChooserCallback> file_chooser_;
 
@@ -611,7 +751,55 @@ class RenderView : public RenderWidget, public WebViewDelegate,
   // True if the page has any frame-level unload or beforeunload listeners.
   bool has_unload_listener_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RenderView);
+  // The total number of unrequested popups that exist and can be followed back
+  // to a common opener. This count is shared among all RenderViews created
+  // with CreateWebView(). All popups are treated as unrequested until
+  // specifically instructed otherwise by the Browser process.
+  scoped_refptr<SharedRenderViewCounter> shared_popup_counter_;
+
+  // Whether this is a top level window (instead of a popup). Top level windows
+  // shouldn't count against their own |shared_popup_counter_|.
+  bool decrement_shared_popup_at_destruction_;
+
+  // TODO(port): revisit once we have accessibility
+#if defined(OS_WIN)
+  // Handles accessibility requests into the renderer side, as well as
+  // maintains the cache and other features of the accessibility tree.
+  scoped_ptr<webkit_glue::WebAccessibilityManager> web_accessibility_manager_;
+#endif
+
+  // Resource message queue. Used to queue up resource IPCs if we need
+  // to wait for an ACK from the browser before proceeding.
+  std::queue<IPC::Message*> queued_resource_messages_;
+
+  // The id of the last request sent for form field autofill.  Used to ignore
+  // out of date responses.
+  int form_field_autofill_request_id_;
+
+  // A cached WebHistoryItem used for back/forward navigations initiated by
+  // WebCore (via the window.history.go API).  We only have one such navigation
+  // pending at a time.
+  scoped_refptr<WebHistoryItem> history_navigation_item_;
+
+  // We need to prevent windows from closing themselves with a window.close()
+  // call while a blocked popup notification is being displayed. We cannot
+  // synchronously querry the Browser process. We cannot wait for the Browser
+  // process to send a message to us saying that a blocked popup notification
+  // is being displayed. We instead assume that when we create a window off
+  // this RenderView, that it is going to be blocked until we get a message
+  // from the Browser process telling us otherwise.
+  bool popup_notification_visible_;
+
+  // Time in seconds of the delay between syncing page state such as form
+  // elements and scroll position. This timeout allows us to avoid spamming the
+  // browser process with every little thing that changes. This normally doesn't
+  // change but is overridden by tests.
+  int delay_seconds_for_form_state_sync_;
+
+  // A set of audio renderers registered to use IPC for audio output.
+  IDMap<AudioRendererImpl> audio_renderers_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderView);
 };
 
-#endif  // CHROME_RENDERER_RENDER_VIEW_H__
+#endif  // CHROME_RENDERER_RENDER_VIEW_H_

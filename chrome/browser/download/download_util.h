@@ -4,90 +4,25 @@
 //
 // Download utilities.
 
-#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H__
-#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H__
+#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
+#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
 
 #include <objidl.h>
 
+#include <set>
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/task.h"
-#include "chrome/browser/views/download_item_view.h"
+#include "chrome/views/controls/menu/menu.h"
 #include "chrome/views/event.h"
-#include "chrome/views/menu.h"
 #include "chrome/views/view.h"
 
+class BaseDownloadItemModel;
 class DownloadItem;
 class SkBitmap;
 
 namespace download_util {
-
-// DownloadContextMenu ---------------------------------------------------------
-
-// The base class of context menus that provides the various commands.
-// Subclasses are responsible for creating and running the menu.
-class BaseContextMenu : public Menu::Delegate {
- public:
-  explicit BaseContextMenu(DownloadItem* download);
-  virtual ~BaseContextMenu();
-
-  enum ContextMenuCommands {
-    SHOW_IN_FOLDER = 1,  // Open an Explorer window with the item highlighted
-    COPY_LINK,           // Copy the download's URL to the clipboard
-    COPY_PATH,           // Copy the download's full path to the clipboard
-    COPY_FILE,           // Copy the downloaded file to the clipboard
-    OPEN_WHEN_COMPLETE,  // Open the download when it's finished
-    ALWAYS_OPEN_TYPE,    // Default this file extension to always open
-    REMOVE_ITEM,         // Remove the download
-    CANCEL,              // Cancel the download
-    MENU_LAST
-  };
-
-  // Menu::Delegate interface
-  virtual bool IsItemChecked(int id) const;
-  virtual bool IsItemDefault(int id) const;
-  virtual std::wstring GetLabel(int id) const;
-  virtual bool SupportsCommand(int id) const;
-  virtual bool IsCommandEnabled(int id) const;
-  virtual void ExecuteCommand(int id);
-
- protected:
-  // Information source.
-  DownloadItem* download_;
-
- private:
-  DISALLOW_EVIL_CONSTRUCTORS(BaseContextMenu);
-};
-
-// Menu for the download shelf.
-class DownloadShelfContextMenu : public BaseContextMenu {
- public:
-  DownloadShelfContextMenu(DownloadItem* download,
-                           HWND window,
-                           DownloadItemView::BaseDownloadItemModel* model,
-                           const CPoint& point);
-  virtual ~DownloadShelfContextMenu();
-
-  virtual bool IsItemDefault(int id) const;
-  virtual void ExecuteCommand(int id);
-
- private:
-  // A model to control the cancel behavior.
-  DownloadItemView::BaseDownloadItemModel* model_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadShelfContextMenu);
-};
-
-// Menu for the download destination view.
-class DownloadDestinationContextMenu : public BaseContextMenu {
- public:
-  DownloadDestinationContextMenu(DownloadItem* download,
-                                 HWND window,
-                                 const CPoint& point);
-  virtual ~DownloadDestinationContextMenu();
-
- private:
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadDestinationContextMenu);
-};
 
 // DownloadProgressTask --------------------------------------------------------
 
@@ -103,7 +38,7 @@ class DownloadProgressTask : public Task {
   }
  private:
   DownloadView* view_;
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadProgressTask);
+  DISALLOW_COPY_AND_ASSIGN(DownloadProgressTask);
 };
 
 // Download opening ------------------------------------------------------------
@@ -136,14 +71,17 @@ const int kProgressRateMs = 150;
 const int kSmallIconSize = 16;
 const int kBigIconSize = 32;
 
-// Our progress halo around the icon
+// Our progress halo around the icon.
+int GetBigProgressIconSize();
+
 const int kSmallProgressIconSize = 39;
 const int kBigProgressIconSize = 52;
 
 // The offset required to center the icon in the progress bitmaps.
+int GetBigProgressIconOffset();
+
 const int kSmallProgressIconOffset =
     (kSmallProgressIconSize - kSmallIconSize) / 2;
-const int kBigProgressIconOffset = (kBigProgressIconSize - kBigIconSize) / 2;
 
 enum PaintDownloadProgressSize {
   SMALL = 0,
@@ -160,7 +98,7 @@ enum PaintDownloadProgressSize {
 // drawing in a right-to-left locale, we need to mirror the position of the
 // progress animation within the containing View.
 void PaintDownloadProgress(ChromeCanvas* canvas,
-                           ChromeViews::View* containing_view,
+                           views::View* containing_view,
                            int origin_x,
                            int origin_y,
                            int start_angle,
@@ -168,7 +106,7 @@ void PaintDownloadProgress(ChromeCanvas* canvas,
                            PaintDownloadProgressSize size);
 
 void PaintDownloadComplete(ChromeCanvas* canvas,
-                           ChromeViews::View* containing_view,
+                           views::View* containing_view,
                            int origin_x,
                            int origin_y,
                            double animation_progress,
@@ -183,10 +121,9 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon);
 // Executable file support -----------------------------------------------------
 
 // Copy all executable file extensions.
-void InitializeExeTypes(std::set<std::wstring>* exe_extensions);
+void InitializeExeTypes(std::set<std::string>* exe_extensions);
 
 }  // namespace download_util
 
 
-#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H__
-
+#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_

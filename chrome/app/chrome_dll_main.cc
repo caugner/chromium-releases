@@ -2,33 +2,62 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(port): the ifdefs in here are a first step towards trying to determine
+// the correct abstraction for all the OS functionality required at this
+// stage of process initialization. It should not be taken as a final
+// abstraction.
+
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include <algorithm>
 #include <atlbase.h>
 #include <atlapp.h>
 #include <malloc.h>
 #include <new.h>
+#endif
+
+#if defined(OS_LINUX)
+#include <gtk/gtk.h>
+#endif
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/debug_util.h"
 #include "base/icu_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
+#include "base/scoped_nsautorelease_pool.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
+#if defined(OS_WIN)
 #include "base/win_util.h"
-#include "chrome/browser/render_process_host.h"
+#endif
+#include "chrome/app/scoped_ole_initializer.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/main_function_params.h"
 #include "chrome/common/resource_bundle.h"
+#include "chrome/common/sandbox_init_wrapper.h"
+#if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
+#endif
+#if defined(OS_MACOSX)
+#include "third_party/WebKit/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
+#endif
 
-extern int BrowserMain(CommandLine &, int, sandbox::BrokerServices*);
-extern int RendererMain(CommandLine &, int, sandbox::TargetServices*);
-extern int PluginMain(CommandLine &, int, sandbox::TargetServices*);
+extern int BrowserMain(const MainFunctionParams&);
+extern int RendererMain(const MainFunctionParams&);
+extern int PluginMain(const MainFunctionParams&);
+extern int WorkerMain(const MainFunctionParams&);
 
+#if defined(OS_WIN)
 // TODO(erikkay): isn't this already defined somewhere?
 #define DLLEXPORT __declspec(dllexport)
 
@@ -36,11 +65,17 @@ extern int PluginMain(CommandLine &, int, sandbox::TargetServices*);
 extern "C" {
 DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
                                  sandbox::SandboxInterfaceInfo* sandbox_info,
-                                 TCHAR* command_line, int show_command);
+                                 TCHAR* command_line);
 }
+#elif defined(OS_POSIX)
+extern "C" {
+int ChromeMain(int argc, const char** argv);
+}
+#endif
 
 namespace {
 
+#if defined(OS_WIN)
 const wchar_t kProfilingDll[] = L"memory_watcher.dll";
 
 // Load the memory profiling DLL.  All it needs to be activated
@@ -86,26 +121,69 @@ void ChromeAssert(const std::string& str) {
 
 #pragma optimize("", on)
 
-}  // namespace
+// Early versions of Chrome incorrectly registered a chromehtml: URL handler.
+// Later versions fixed the registration but in some cases (e.g. Vista and non-
+// admin installs) the fix could not be applied.  This prevents Chrome to be
+// launched with the incorrect format.
+// CORRECT: <broser.exe> -- "chromehtml:<url>"
+// INVALID: <broser.exe> "chromehtml:<url>"
+bool IncorrectChromeHtmlArguments(const std::wstring& command_line) {
+  const wchar_t kChromeHtml[] = L"-- \"chromehtml:";
+  const wchar_t kOffset = 5;  // Where chromehtml: starts in above
+  std::wstring command_line_lower = command_line;
 
-DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
-                                 sandbox::SandboxInterfaceInfo* sandbox_info,
-                                 TCHAR* command_line, int show_command) {
-  // Register the invalid param handler and pure call handler to be able to
-  // notify breakpad when it happens.
+  // We are only searching for ASCII characters so this is OK.
+  StringToLowerASCII(&command_line_lower);
+
+  std::wstring::size_type pos = command_line_lower.find(
+      kChromeHtml + kOffset);
+
+  if (pos == std::wstring::npos)
+    return false;
+
+  // The browser is being launched with chromehtml: somewhere on the command
+  // line.  We will not launch unless it's preceded by the -- switch terminator.
+  if (pos >= kOffset) {
+    if (equal(kChromeHtml, kChromeHtml + arraysize(kChromeHtml) - 1,
+        command_line_lower.begin() + pos - kOffset)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+#endif  // OS_WIN
+
+#if defined(OS_LINUX)
+static void GtkFatalLogHandler(const gchar* log_domain,
+                               GLogLevelFlags log_level,
+                               const gchar* message,
+                               gpointer userdata) {
+  if (!log_domain)
+    log_domain = "<all>";
+  if (!message)
+    message = "<no message>";
+
+  NOTREACHED() << "GTK: (" << log_domain << "): " << message;
+}
+#endif
+
+// Register the invalid param handler and pure call handler to be able to
+// notify breakpad when it happens.
+void RegisterInvalidParamHandler() {
+#if defined(OS_WIN)
   _set_invalid_parameter_handler(InvalidParameter);
   _set_purecall_handler(PureCall);
   // Gather allocation failure.
   _set_new_handler(&OnNoMemory);
   // Make sure malloc() calls the new handler too.
   _set_new_mode(1);
+#endif
+}
 
-  // The exit manager is in charge of calling the dtors of singleton objects.
-  base::AtExitManager exit_manager;
-
-  // Initialize the command line.
-  CommandLine parsed_command_line;
-
+void SetupCRT(const CommandLine& parsed_command_line) {
+#if defined(OS_WIN)
 #ifdef _CRTDBG_MAP_ALLOC
   _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
   _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
@@ -128,6 +206,86 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
     HeapSetInformation(crt_heap, HeapCompatibilityInformation,
                        &enable_lfh, sizeof(enable_lfh));
   }
+#endif
+}
+
+// Enable the heap profiler if the appropriate command-line switch is
+// present, bailing out of the app we can't.
+void EnableHeapProfiler(const CommandLine& parsed_command_line) {
+#if defined(OS_WIN)
+  if (parsed_command_line.HasSwitch(switches::kMemoryProfiling))
+    if (!LoadMemoryProfiler())
+      exit(-1);
+#endif
+}
+
+void CommonSubprocessInit() {
+  // Initialize ResourceBundle which handles files loaded from external
+  // sources.  The language should have been passed in to us from the
+  // browser process as a command line flag.
+  ResourceBundle::InitSharedInstance(std::wstring());
+
+#if defined(OS_WIN)
+  // HACK: Let Windows know that we have started.  This is needed to suppress
+  // the IDC_APPSTARTING cursor from being displayed for a prolonged period
+  // while a subprocess is starting.
+  PostThreadMessage(GetCurrentThreadId(), WM_NULL, 0, 0);
+  MSG msg;
+  PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
+#endif
+}
+
+}  // namespace
+
+#if defined(OS_WIN)
+DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
+                                 sandbox::SandboxInterfaceInfo* sandbox_info,
+                                 TCHAR* command_line) {
+#elif defined(OS_POSIX)
+int ChromeMain(int argc, const char** argv) {
+#endif
+
+#if defined(OS_MACOSX)
+  DebugUtil::DisableOSCrashDumps();
+#endif
+  RegisterInvalidParamHandler();
+
+  // The exit manager is in charge of calling the dtors of singleton objects.
+  base::AtExitManager exit_manager;
+
+  // We need this pool for all the objects created before we get to the
+  // event loop, but we don't want to leave them hanging around until the
+  // app quits. Each "main" needs to flush this pool right before it goes into
+  // its main event loop to get rid of the cruft.
+  base::ScopedNSAutoreleasePool autorelease_pool;
+
+  // Initialize the command line.
+#if defined(OS_WIN)
+  CommandLine::Init(0, NULL);
+#else
+  CommandLine::Init(argc, argv);
+#endif
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+
+#if defined(OS_WIN)
+   // Must do this before any other usage of command line!
+  if (::IncorrectChromeHtmlArguments(parsed_command_line.command_line_string()))
+    return 1;
+#endif
+
+  int browser_pid;
+  std::wstring process_type =
+    parsed_command_line.GetSwitchValue(switches::kProcessType);
+  if (process_type.empty()) {
+    browser_pid = base::GetCurrentProcId();
+  } else {
+    std::wstring channel_name =
+      parsed_command_line.GetSwitchValue(switches::kProcessChannelID);
+
+    browser_pid = StringToInt(WideToASCII(channel_name));
+    DCHECK(browser_pid != 0);
+  }
+  SetupCRT(parsed_command_line);
 
   // Initialize the Chrome path provider.
   chrome::RegisterPathProvider();
@@ -137,7 +295,11 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
   // Chrome.  These lines can be commented out to effectively turn
   // counters 'off'.  The table is created and exists for the life
   // of the process.  It is not cleaned up.
-  StatsTable *stats_table = new StatsTable(chrome::kStatsFilename,
+  // TODO(port): we probably need to shut this down correctly to avoid
+  // leaking shared memory regions on posix platforms.
+  std::string statsfile =
+      StringPrintf("%s-%d", chrome::kStatsFilename, browser_pid);
+  StatsTable *stats_table = new StatsTable(statsfile,
       chrome::kStatsMaxThreads, chrome::kStatsMaxCounters);
   StatsTable::set_current(stats_table);
 
@@ -145,36 +307,24 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
       startup_timer(chrome::Counters::chrome_main());
 
   // Enable the heap profiler as early as possible!
-  if (parsed_command_line.HasSwitch(switches::kMemoryProfiling))
-    if (!LoadMemoryProfiler())
-      exit(-1);
+  EnableHeapProfiler(parsed_command_line);
 
   // Enable Message Loop related state asap.
   if (parsed_command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
 
-  sandbox::TargetServices* target_services = NULL;
-  sandbox::BrokerServices* broker_services = NULL;
-  if (sandbox_info) {
-    target_services = sandbox_info->target_services;
-    broker_services = sandbox_info->broker_services;
-  }
-
-  std::wstring process_type =
-    parsed_command_line.GetSwitchValue(switches::kProcessType);
-
   // Checks if the sandbox is enabled in this process and initializes it if this
   // is the case. The crash handler depends on this so it has to be done before
   // its initialization.
-  if (target_services && !parsed_command_line.HasSwitch(switches::kNoSandbox)) {
-    if ((process_type == switches::kRendererProcess) ||
-        (process_type == switches::kPluginProcess &&
-         parsed_command_line.HasSwitch(switches::kSafePlugins))) {
-      target_services->Init();
-    }
-  }
+  SandboxInitWrapper sandbox_wrapper;
+#if defined(OS_WIN)
+  sandbox_wrapper.SetServices(sandbox_info);
+#endif
+  sandbox_wrapper.InitializeSandbox(parsed_command_line, process_type);
 
+#if defined(OS_WIN)
   _Module.Init(NULL, instance);
+#endif
 
   // Notice a user data directory override if any
   const std::wstring user_data_dir =
@@ -183,9 +333,24 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
     PathService::Override(chrome::DIR_USER_DATA, user_data_dir);
 
   bool single_process =
+#if defined (GOOGLE_CHROME_BUILD)
+    // This is an unsupported and not fully tested mode, so don't enable it for
+    // official Chrome builds.
+    false;
+#else
     parsed_command_line.HasSwitch(switches::kSingleProcess);
+#endif
   if (single_process)
     RenderProcessHost::set_run_renderer_in_process(true);
+#if defined(OS_MACOSX)
+  // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
+  // shess tried to refactor things appropriately, but it sprawled out
+  // of control because different platforms needed different styles of
+  // initialization.  Try again once we understand the process
+  // architecture needed and where it should live.
+  if (single_process)
+    InitWebCoreSystemInterface();
+#endif
 
   bool icu_result = icu_util::Initialize();
   CHECK(icu_result);
@@ -200,46 +365,66 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
 #ifdef NDEBUG
   if (parsed_command_line.HasSwitch(switches::kSilentDumpOnDCHECK) &&
       parsed_command_line.HasSwitch(switches::kEnableDCHECK)) {
-    logging::SetLogAssertHandler(ChromeAssert);
+#if defined(OS_WIN)
+    logging::SetLogReportHandler(ChromeAssert);
+#endif
   }
 #endif  // NDEBUG
 
-  if (!process_type.empty()) {
-    // Initialize ResourceBundle which handles files loaded from external
-    // sources.  The language should have been passed in to us from the
-    // browser process as a command line flag.
-    ResourceBundle::InitSharedInstance(std::wstring());
-  }
+  if (!process_type.empty())
+    CommonSubprocessInit();
 
   startup_timer.Stop();  // End of Startup Time Measurement.
 
-  int rv;
+  MainFunctionParams main_params(parsed_command_line, sandbox_wrapper,
+                                 &autorelease_pool);
+
+  // TODO(port): turn on these main() functions as they've been de-winified.
+  int rv = -1;
   if (process_type == switches::kRendererProcess) {
-    rv = RendererMain(parsed_command_line, show_command, target_services);
+    rv = RendererMain(main_params);
   } else if (process_type == switches::kPluginProcess) {
-    rv = PluginMain(parsed_command_line, show_command, target_services);
+#if defined(OS_WIN)
+    rv = PluginMain(main_params);
+#endif
+  } else if (process_type == switches::kWorkerProcess) {
+#if defined(OS_WIN)
+    rv = WorkerMain(main_params);
+#endif
   } else if (process_type.empty()) {
-    int ole_result = OleInitialize(NULL);
-    DCHECK(ole_result == S_OK);
-    rv = BrowserMain(parsed_command_line, show_command, broker_services);
-    OleUninitialize();
+#if defined(OS_LINUX)
+    // gtk_init() can change |argc| and |argv|, but nobody else uses them.
+    gtk_init(&argc, const_cast<char***>(&argv));
+    // Register GTK assertions to go through our logging system.
+    g_log_set_handler(NULL,  // All logging domains.
+                      static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION |
+                                                  G_LOG_FLAG_FATAL |
+                                                  G_LOG_LEVEL_ERROR |
+                                                  G_LOG_LEVEL_CRITICAL |
+                                                  G_LOG_LEVEL_WARNING),
+                      GtkFatalLogHandler,
+                      NULL);
+#endif
+
+    ScopedOleInitializer ole_initializer;
+    rv = BrowserMain(main_params);
   } else {
     NOTREACHED() << "Unknown process type";
-    rv = -1;
   }
 
   if (!process_type.empty()) {
     ResourceBundle::CleanupSharedInstance();
   }
 
+#if defined(OS_WIN)
 #ifdef _CRTDBG_MAP_ALLOC
   _CrtDumpMemoryLeaks();
 #endif  // _CRTDBG_MAP_ALLOC
 
   _Module.Term();
+#endif
 
   logging::CleanupChromeLogging();
 
   return rv;
 }
-

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/scoped_handle.h"
+#include "base/scoped_handle_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "sandbox/src/sandbox.h"
 #include "sandbox/src/sandbox_factory.h"
@@ -26,7 +26,7 @@ SBOX_TESTS_COMMAND int UseOneDLL(int argc, wchar_t **argv) {
 
   if ((option == L'U') || (option == L'B')) {
     HMODULE module2 = ::GetModuleHandleW(argv[1]);
-    rv = FreeLibrary(module2) ? SBOX_TEST_SUCCEEDED : SBOX_TEST_FAILED;  
+    rv = FreeLibrary(module2) ? SBOX_TEST_SUCCEEDED : SBOX_TEST_FAILED;
   }
   return rv;
 }
@@ -87,4 +87,3 @@ TEST(UnloadDllTest, UnloadAviCapDllWithPatching) {
 }
 
 }  // namespace sandbox
-

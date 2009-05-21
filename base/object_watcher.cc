@@ -23,7 +23,7 @@ struct ObjectWatcher::Watch : public Task {
     // just get out of dodge.
     if (!watcher)
       return;
-    
+
     DCHECK(did_signal);
     watcher->StopWatching();
 
@@ -78,7 +78,7 @@ bool ObjectWatcher::StopWatching() {
 
   // Make sure ObjectWatcher is used in a single-threaded fashion.
   DCHECK(watch_->origin_loop == MessageLoop::current());
-  
+
   // If DoneWaiting is in progress, we wait for it to finish.  We know whether
   // DoneWaiting happened or not by inspecting the did_signal flag.
   if (!UnregisterWaitEx(watch_->wait_object, INVALID_HANDLE_VALUE)) {
@@ -107,6 +107,13 @@ bool ObjectWatcher::StopWatching() {
   return true;
 }
 
+HANDLE ObjectWatcher::GetWatchedObject() {
+  if (!watch_)
+    return NULL;
+
+  return watch_->object;
+}
+
 // static
 void CALLBACK ObjectWatcher::DoneWaiting(void* param, BOOLEAN timed_out) {
   DCHECK(!timed_out);
@@ -129,4 +136,3 @@ void ObjectWatcher::WillDestroyCurrentMessageLoop() {
 }
 
 }  // namespace base
-

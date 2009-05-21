@@ -2,20 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBFRAME_H__
-#define WEBKIT_GLUE_WEBFRAME_H__
+#ifndef WEBKIT_GLUE_WEBFRAME_H_
+#define WEBKIT_GLUE_WEBFRAME_H_
 
-#include <string>
-
-#include "base/basictypes.h"
-#include "base/ref_counted.h"
-#include "base/gfx/bitmap_platform_device.h"
-#include "base/gfx/size.h"
+#include "base/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
+#include "skia/ext/bitmap_platform_device.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/glue/console_message_level.h"
+#include "webkit/glue/feed.h"
 #include "webkit/glue/find_in_page_request.h"
+#include "webkit/glue/webscriptsource.h"
 
-class GURL;
-class PlatformContextSkia;
 class WebDataSource;
 class WebError;
 class WebRequest;
@@ -24,18 +22,15 @@ class WebTextInput;
 struct NPObject;
 
 namespace gfx {
-class Size;
 class Rect;
+class Size;
 }
-
-// TODO(darin): use GURL everywhere a URL string appears
 
 // Every frame in a web page is represented by one WebFrame, including the
 // outermost frame.
-class WebFrame : public base::RefCounted<WebFrame> {
+class WebFrame {
  public:
   WebFrame() {}
-  virtual ~WebFrame() {}
 
   // Binds a C++ class to a JavaScript property of the window object.  This
   // should generally be used via CppBoundClass::BindToJavascript() instead of
@@ -52,6 +47,8 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // casts the return value to WebCore::Frame.
   // TODO(fqian): Remove this method when V8 supports NP runtime.
   virtual void* GetFrameImplementation() = 0;
+
+  virtual NPObject* GetWindowNPObject() = 0;
 
   // Loads the given WebRequest.
   virtual void LoadRequest(WebRequest* request) = 0;
@@ -91,28 +88,45 @@ class WebFrame : public base::RefCounted<WebFrame> {
                                           bool replace,
                                           const GURL& fake_url) = 0;
 
+  // Executes JavaScript in the web frame.
+  virtual void ExecuteScript(const webkit_glue::WebScriptSource& source) = 0;
+
+  // Executes JavaScript in a new context associated with the web frame. The
+  // script gets its own global scope and its own prototypes for intrinsic
+  // JavaScript objects (String, Array, and so-on). It shares the wrappers for
+  // all DOM nodes and DOM constructors.
+  virtual void ExecuteScriptInNewContext(
+      const webkit_glue::WebScriptSource* sources, int num_sources) = 0;
+
+  // Inserts the given CSS styles at the beginning of the document.
+  virtual bool InsertCSSStyles(const std::string& css) = 0;
+
   // Returns a string representing the state of the previous page load for
-  // later use when loading as well as the uri and title of the page.  The
-  // previous page is the page that was loaded before DidCommitLoadForFrame was
-  // received.  Returns false if there is no state.
-  virtual bool GetPreviousState(GURL* url, std::wstring* title,
-                                std::string* history_state) const = 0;
+  // later use when loading. The previous page is the page that was loaded
+  // before DidCommitLoadForFrame was received.
+  //
+  // Returns false if there is no valid state to return (for example, there is
+  // no previous item). Returns true if the previous item's state was retrieved,
+  // even if that state may be empty.
+  virtual bool GetPreviousHistoryState(std::string* history_state) const = 0;
 
   // Returns a string representing the state of the current page load for later
-  // use when loading as well as the url and title of the page.  Returns false
-  // if there is no state.
-  virtual bool GetCurrentState(GURL* url, std::wstring* title,
-                               std::string* history_state) const = 0;
+  // use when loading as well as the url and title of the page.
+  //
+  // Returns false if there is no valid state to return (for example, there is
+  // no previous item). Returns true if the current item's state was retrieved,
+  // even if that state may be empty.
+  virtual bool GetCurrentHistoryState(std::string* history_state) const = 0;
 
   // Returns true if there is a current history item.  A newly created WebFrame
   // lacks a history item.  Otherwise, this will always be true.
-  virtual bool HasCurrentState() const = 0;
+  virtual bool HasCurrentHistoryState() const = 0;
 
-  // Returns the current URL of the frame, or the empty string if there is no
+  // Returns the current URL of the frame, or an empty GURL if there is no
   // URL to retrieve (for example, the frame may never have had any content).
   virtual GURL GetURL() const = 0;
 
-  // Returns the URL to the favorite icon for the frame. An empty string is
+  // Returns the URL to the favorite icon for the frame. An empty GURL is
   // returned if the frame has not finished loading, or the frame's URL
   // protocol is not http or https.
   virtual GURL GetFavIconURL() const = 0;
@@ -120,6 +134,10 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // Returns the URL to the OpenSearch description document for the frame. If
   // the page does not have a valid document, an empty GURL is returned.
   virtual GURL GetOSDDURL() const = 0;
+
+  // Return the list of feeds specified in the document for the frame. If
+  // the page does not have a valid document, an empty list is returned.
+  virtual scoped_refptr<class FeedList> GetFeedList() const = 0;
 
   // Returns the committed data source, which is the last data source that has
   // successfully started loading. Will return NULL if no provisional data
@@ -148,6 +166,9 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // frame with no parent.
   virtual WebFrame* GetParent() const = 0;
 
+  // Returns the top-most frame in the frame hierarchy containing this frame.
+  virtual WebFrame* GetTop() const = 0;
+
   // Returns the child frame with the given xpath.
   // The document of this frame is used as the context node.
   // The xpath may need a recursive traversal if non-trivial
@@ -165,6 +186,9 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // pointer is not AddRef'd and is only valid for the lifetime of the WebFrame
   // unless it is AddRef'd separately by the caller.
   virtual WebView* GetView() const = 0;
+
+  // Returns the serialization of the frame's security origin.
+  virtual std::string GetSecurityOrigin() const = 0;
 
   // Fills the contents of this frame into the given string. If the text is
   // longer than max_chars, it will be clipped to that length. Warning: this
@@ -190,21 +214,14 @@ class WebFrame : public base::RefCounted<WebFrame> {
                     bool wrap_within_frame,
                     gfx::Rect* selection_rect) = 0;
 
-  // Searches a frame for the next (or previous occurrence of a given string.
-  //
-  // This function works similarly to Find (documented above), except that it
-  // uses an index into the tick-mark vector to figure out what the next
-  // match is, alleviating the need to call findString on the content again.
-  //
-  // Returns true if the search string was found, false otherwise.
-  virtual bool FindNext(const FindInPageRequest& request,
-                        bool wrap_within_frame) = 0;
-
   // Notifies the frame that we are no longer interested in searching. This will
   // abort any asynchronous scoping effort already under way (see the function
   // ScopeStringMatches for details) and erase all tick-marks and highlighting
-  // from the previous search.
-  virtual void StopFinding() = 0;
+  // from the previous search. If |clear_selection| is true, it will also make
+  // sure the end state for the Find operation does not leave a selection.
+  // This can occur when the user clears the search string but does not close
+  // the find box.
+  virtual void StopFinding(bool clear_selection) = 0;
 
   // Counts how many times a particular string occurs within the frame. It
   // also retrieves the location of the string and updates a vector in the frame
@@ -258,6 +275,12 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // Replace the selection text by a given text.
   virtual void Replace(const std::wstring& text) = 0;
 
+  // Toggle spell check on and off.
+  virtual void ToggleSpellCheck() = 0;
+
+  // Return whether spell check is enabled or not in this frame.
+  virtual bool SpellCheckEnabled() = 0;
+
   //
   //  - (void)delete:(id)sender;
   // Delete as in similar to Cut, not as in teardown
@@ -272,16 +295,24 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // Clear any text selection in the frame.
   virtual void ClearSelection() = 0;
 
+  // Returns the selected text if there is any.  If |as_html| is true, returns
+  // the selection as HTML.  The return value is encoded in utf-8.
+  virtual std::string GetSelection(bool as_html) = 0;
+
   // Paints the contents of this web view in a bitmapped image. This image
   // will not have plugins drawn. Devices are cheap to copy because the data is
-  // internally refcounted, so we return by value.
+  // internally refcounted so we allocate and return a new copy
   //
   // Set scroll_to_zero to force all frames to be scrolled to 0,0 before
   // being painted into the image. This will not send DOM events because it
   // just draws the contents at a different place, but it does mean the
   // scrollbars in the resulting image will appear to be wrong (they'll be
   // painted as if the content was scrolled).
-  virtual gfx::BitmapPlatformDevice CaptureImage(bool scroll_to_zero) = 0;
+  //
+  // Returns false on failure. CaptureImage can fail if 'image' argument
+  // is not valid or due to failure to allocate a canvas.
+  virtual bool CaptureImage(scoped_ptr<skia::BitmapPlatformDevice>* image,
+                            bool scroll_to_zero) = 0;
 
   // This function sets a flag within WebKit to instruct it to render the page
   // as View-Source (showing the HTML source for the page).
@@ -301,7 +332,13 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // superset of those accepted by javascript:document.execCommand().
   // This method is exposed in order to implement
   // javascript:layoutTestController.execCommand()
-  virtual bool ExecuteCoreCommandByName(const std::string& name, const std::string& value) = 0;
+  virtual bool ExecuteCoreCommandByName(const std::string& name,
+                                        const std::string& value) = 0;
+
+  // Checks whether a webkit editor command is currently enabled. This
+  // method is exposed in order to implement
+  // javascript:layoutTestController.isCommandEnabled()
+  virtual bool IsCoreCommandEnabled(const std::string& name) = 0;
 
   // Adds a message to the frame's console.
   virtual void AddMessageToConsole(const std::wstring& msg,
@@ -317,42 +354,32 @@ class WebFrame : public base::RefCounted<WebFrame> {
   // The current scroll offset from the top of frame in pixels.
   virtual gfx::Size ScrollOffset() const = 0;
 
-  // Reformats the web page, i.e. the main frame and its subframes, for printing
-  // or for screen display, depending on |printing| argument. |page_width_min|
-  // and |page_width_max| are the minimum and maximum width, in pixels, that the
-  // layout can try to fit the whole content. |width| is the resulted choosen
-  // document width in pixel.
-  // Note: It fails if the main frame failed to load. It will succeed even if a
-  // child frame failed to load.
-  virtual bool SetPrintingMode(bool printing,
-                               float page_width_min,
-                               float page_width_max,
-                               int* width) = 0;
-
-  // Layouts the web page on paper. Calculates the rectangle of the web page
-  // each pages will "see". Then you can retrieve the exact view of a paper page
-  // with GetPageRect.
-  // Returns the number of printed pages computed.
-  virtual int ComputePageRects(const gfx::Size& page_size_px) = 0;
-
-  // Retrieves the paper page's view of the web page.
-  virtual void GetPageRect(int page, gfx::Rect* page_size) const = 0;
+  // Reformats the web frame for printing. |page_size_px| is the page size in
+  // pixels.
+  // |width| is the resulting document width in pixel.
+  // |page_count| is the number of printed pages.
+  // Returns false if it fails. It'll fail if the main frame failed to load but
+  // will succeed even if a child frame failed to load.
+  virtual bool BeginPrint(const gfx::Size& page_size_px,
+                          int* page_count) = 0;
 
   // Prints one page. |page| is 0-based.
-  virtual bool SpoolPage(int page,
-                         PlatformContextSkia* context) = 0;
+  // Returns the page shrinking factor calculated by webkit (usually between
+  // 1/1.25 and 1/2). Returns 0 if the page number is invalid or not in printing
+  // mode.
+  virtual float PrintPage(int page, skia::PlatformCanvas* canvas) = 0;
 
-  // Does this frame have an onunload or unbeforeunload event listener?
-  virtual bool HasUnloadListener() = 0;
+  // Reformats the web frame for screen display.
+  virtual void EndPrint() = 0;
 
-  // Is this frame reloading with allowing stale data? This will be true when
-  // the encoding of the page is changed and it needs to be re-interpreted,
-  // but no additional loads should occur.
-  virtual bool IsReloadAllowingStaleData() const = 0;
+  // Only for test_shell
+  virtual int PendingFrameUnloadEventCount() const = 0;
+
+ protected:
+  virtual ~WebFrame() {}
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebFrame);
+  DISALLOW_COPY_AND_ASSIGN(WebFrame);
 };
 
-#endif  // WEBKIT_GLUE_WEBFRAME_H__
-
+#endif  // WEBKIT_GLUE_WEBFRAME_H_

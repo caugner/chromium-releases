@@ -5,9 +5,10 @@
 #include "base/basictypes.h"
 #include "base/gfx/png_encoder.h"
 #include "base/logging.h"
+#include "skia/include/SkBitmap.h"
 
 extern "C" {
-#include "png.h"
+#include "third_party/libpng/png.h"
 }
 
 namespace {
@@ -176,7 +177,8 @@ bool PNGEncoder::Encode(const unsigned char* input, ColorFormat format,
   if (!converter) {
     // No conversion needed, give the data directly to libpng.
     for (int y = 0; y < h; y ++)
-      png_write_row(png_ptr, const_cast<unsigned char*>(&input[y * row_byte_width]));
+      png_write_row(png_ptr,
+                    const_cast<unsigned char*>(&input[y * row_byte_width]));
   } else {
     // Needs conversion using a separate buffer.
     unsigned char* row = new unsigned char[w * output_color_components];
@@ -191,3 +193,13 @@ bool PNGEncoder::Encode(const unsigned char* input, ColorFormat format,
   return true;
 }
 
+// static
+bool PNGEncoder::EncodeBGRASkBitmap(const SkBitmap& input,
+                                    bool discard_transparency,
+                                    std::vector<unsigned char>* output) {
+  SkAutoLockPixels input_lock(input);
+  DCHECK(input.empty() || input.bytesPerPixel() == 4);
+  return Encode(static_cast<unsigned char*>(input.getPixels()),
+                PNGEncoder::FORMAT_BGRA, input.width(), input.height(),
+                input.rowBytes(), discard_transparency, output);
+}

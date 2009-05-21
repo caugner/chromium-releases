@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_DISK_CACHE_CACHE_INTERNAL_INL_H__
-#define NET_DISK_CACHE_CACHE_INTERNAL_INL_H__
+#ifndef NET_DISK_CACHE_STORAGE_BLOCK_INL_H_
+#define NET_DISK_CACHE_STORAGE_BLOCK_INL_H_
 
 #include "net/disk_cache/storage_block.h"
 
+#include "base/logging.h"
 #include "net/disk_cache/trace.h"
 
 namespace disk_cache {
@@ -23,8 +24,7 @@ template<typename T> StorageBlock<T>::StorageBlock(MappedFile* file,
 template<typename T> StorageBlock<T>::~StorageBlock() {
   if (modified_)
     Store();
-  if (own_data_)
-    delete data_;
+  DeleteData();
 }
 
 template<typename T> void* StorageBlock<T>::buffer() const {
@@ -58,10 +58,7 @@ template<typename T> bool StorageBlock<T>::LazyInit(MappedFile* file,
 
 template<typename T> void StorageBlock<T>::SetData(T* other) {
   DCHECK(!modified_);
-  if (own_data_) {
-    delete data_;
-    own_data_ = false;
-  }
+  DeleteData();
   data_ = other;
 }
 
@@ -122,7 +119,18 @@ template<typename T> void StorageBlock<T>::AllocateData() {
   own_data_ = true;
 }
 
+template<typename T> void StorageBlock<T>::DeleteData() {
+  if (own_data_) {
+    if (!extended_) {
+      delete data_;
+    } else {
+      data_->~T();
+      delete[] reinterpret_cast<char*>(data_);
+    }
+    own_data_ = false;
+  }
+}
+
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_CACHE_INTERNAL_INL_H__
-
+#endif  // NET_DISK_CACHE_STORAGE_BLOCK_INL_H_

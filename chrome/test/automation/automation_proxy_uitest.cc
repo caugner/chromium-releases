@@ -18,14 +18,15 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "chrome/views/event.h"
+#include "chrome/views/window/dialog_delegate.h"
 #include "net/base/net_util.h"
 
 class AutomationProxyTest : public UITest {
  protected:
   AutomationProxyTest() {
-    CommandLine::AppendSwitchWithValue(&launch_arguments_,
-                                       switches::kLang,
-                                       L"en-us");
+    dom_automation_enabled_ = true;
+    launch_arguments_.AppendSwitchWithValue(switches::kLang,
+                                            L"en-us");
   }
 };
 
@@ -33,6 +34,21 @@ class AutomationProxyVisibleTest : public UITest {
  protected:
   AutomationProxyVisibleTest() {
     show_window_ = true;
+  }
+};
+
+template <class AutomationProxyClass>
+class CustomAutomationProxyTest : public AutomationProxyVisibleTest {
+ protected:
+  CustomAutomationProxyTest() {
+  }
+
+  // Override UITest's CreateAutomationProxy to provide our the unit test
+  // with our special implementation of AutomationProxy.
+  // This function is called from within UITest::LaunchBrowserAndServer.
+  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout) {
+    AutomationProxyClass* proxy = new AutomationProxyClass(execution_timeout);
+    return proxy;
   }
 };
 
@@ -66,8 +82,7 @@ TEST_F(AutomationProxyVisibleTest, WindowGetViewBounds) {
   {
     scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
     ASSERT_TRUE(browser.get());
-    scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+    scoped_ptr<WindowProxy> window(browser->GetWindow());
     ASSERT_TRUE(window.get());
 
     scoped_ptr<TabProxy> tab1(browser->GetTab(0));
@@ -119,7 +134,7 @@ TEST_F(AutomationProxyVisibleTest, WindowGetViewBounds) {
     end.x = start.x + 2 * bounds.width() / 3;
     end.y = start.y;
     ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                      ChromeViews::Event::EF_LEFT_BUTTON_DOWN));
+                                      views::Event::EF_LEFT_BUTTON_DOWN));
 
     // Check to see that the drag event successfully swapped the two tabs.
     tab1.reset(browser->GetTab(0));
@@ -369,7 +384,9 @@ class AutomationProxyTest2 : public AutomationProxyVisibleTest {
 
     document2_ = test_data_directory_;
     file_util::AppendToPath(&document2_, L"title2.html");
-    launch_arguments_ = document1_ + L" " + document2_;
+    launch_arguments_ = CommandLine(L"");
+    launch_arguments_.AppendLooseValue(document1_);
+    launch_arguments_.AppendLooseValue(document2_);
   }
 
   std::wstring document1_;
@@ -442,8 +459,7 @@ TEST_F(AutomationProxyTest, Cookies) {
 TEST_F(AutomationProxyTest, GetHWND) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get());
 
   HWND handle;
@@ -463,8 +479,8 @@ TEST_F(AutomationProxyTest, NavigateToURLAsync) {
   GURL newurl = net::FilePathToFileURL(filename);
 
   ASSERT_TRUE(tab->NavigateToURLAsync(newurl));
-  std::string value = WaitUntilCookieNonEmpty(tab.get(), newurl,
-                                              "foo", 250, 5*1000);
+  std::string value = WaitUntilCookieNonEmpty(tab.get(), newurl, "foo", 250,
+                                              action_max_timeout_ms());
   ASSERT_STREQ("baz", value.c_str());
 }
 
@@ -474,7 +490,7 @@ TEST_F(AutomationProxyTest, AcceleratorNewTab) {
   int old_tab_count = -1;
   ASSERT_TRUE(window->GetTabCount(&old_tab_count));
 
-  ASSERT_TRUE(window->ApplyAccelerator(IDC_NEWTAB));
+  ASSERT_TRUE(window->ApplyAccelerator(IDC_NEW_TAB));
   int new_tab_count;
   ASSERT_TRUE(window->WaitForTabCountToChange(old_tab_count, &new_tab_count,
                                               5000));
@@ -487,7 +503,7 @@ TEST_F(AutomationProxyTest, AcceleratorNewTab) {
   std::wstring title;
   int i;
   for (i = 0; i < 10; ++i) {
-    Sleep(kWaitForActionMaxMsec / 10);
+    Sleep(sleep_timeout_ms());
     ASSERT_TRUE(tab->GetTabTitle(&title));
     if (title == L"Destinations" || title == L"New Tab")
       break;
@@ -503,10 +519,10 @@ class AutomationProxyTest4 : public UITest {
   }
 };
 
-std::wstring SynthesizeJSURL(const std::wstring& value) {
+std::wstring CreateJSString(const std::wstring& value) {
   std::wstring jscript;
   SStringPrintf(&jscript,
-      L"javascript:void(window.domAutomationController.send(%ls));",
+      L"window.domAutomationController.send(%ls);",
       value.c_str());
   return jscript;
 }
@@ -519,7 +535,7 @@ TEST_F(AutomationProxyTest4, StringValueIsEchoedByDomAutomationController) {
   ASSERT_TRUE(tab.get());
 
   std::wstring expected(L"string");
-  std::wstring jscript = SynthesizeJSURL(L"\"" + expected + L"\"");
+  std::wstring jscript = CreateJSString(L"\"" + expected + L"\"");
   std::wstring actual;
   ASSERT_TRUE(tab->ExecuteAndExtractString(L"", jscript, &actual));
   ASSERT_STREQ(expected.c_str(), actual.c_str());
@@ -541,7 +557,7 @@ TEST_F(AutomationProxyTest4, BooleanValueIsEchoedByDomAutomationController) {
   ASSERT_TRUE(tab.get());
 
   bool expected = true;
-  std::wstring jscript = SynthesizeJSURL(BooleanToString(expected));
+  std::wstring jscript = CreateJSString(BooleanToString(expected));
   bool actual = false;
   ASSERT_TRUE(tab->ExecuteAndExtractBool(L"", jscript, &actual));
   ASSERT_EQ(expected, actual);
@@ -558,7 +574,7 @@ TEST_F(AutomationProxyTest4, NumberValueIsEchoedByDomAutomationController) {
   int actual = 0;
   std::wstring expected_string;
   SStringPrintf(&expected_string, L"%d", expected);
-  std::wstring jscript = SynthesizeJSURL(expected_string);
+  std::wstring jscript = CreateJSString(expected_string);
   ASSERT_TRUE(tab->ExecuteAndExtractInt(L"", jscript, &actual));
   ASSERT_EQ(expected, actual);
 }
@@ -574,18 +590,17 @@ class AutomationProxyTest3 : public UITest {
     file_util::AppendToPath(&document1_, L"frame_dom_access.html");
 
     dom_automation_enabled_ = true;
-    launch_arguments_ = document1_;
+    launch_arguments_ = CommandLine(L"");
+    launch_arguments_.AppendLooseValue(document1_);
   }
 
   std::wstring document1_;
 };
 
-std::wstring SynthesizeJSURLForDOMQuery(const std::wstring& id) {
-  std::wstring jscript;
-  SStringPrintf(&jscript,
-      L"javascript:void(window.domAutomationController)");
+std::wstring CreateJSStringForDOMQuery(const std::wstring& id) {
+  std::wstring jscript(L"window.domAutomationController");
   StringAppendF(&jscript, L".send(document.getElementById('%ls').nodeName);",
-      id.c_str());
+                id.c_str());
   return jscript;
 }
 
@@ -598,17 +613,17 @@ TEST_F(AutomationProxyTest3, FrameDocumentCanBeAccessed) {
 
   std::wstring actual;
   std::wstring xpath1 = L"";  // top level frame
-  std::wstring jscript1 = SynthesizeJSURLForDOMQuery(L"myinput");
+  std::wstring jscript1 = CreateJSStringForDOMQuery(L"myinput");
   ASSERT_TRUE(tab->ExecuteAndExtractString(xpath1, jscript1, &actual));
   ASSERT_EQ(L"INPUT", actual);
 
   std::wstring xpath2 = L"/html/body/iframe";
-  std::wstring jscript2 = SynthesizeJSURLForDOMQuery(L"myspan");
+  std::wstring jscript2 = CreateJSStringForDOMQuery(L"myspan");
   ASSERT_TRUE(tab->ExecuteAndExtractString(xpath2, jscript2, &actual));
   ASSERT_EQ(L"SPAN", actual);
 
   std::wstring xpath3 = L"/html/body/iframe\n/html/body/iframe";
-  std::wstring jscript3 = SynthesizeJSURLForDOMQuery(L"mydiv");
+  std::wstring jscript3 = CreateJSStringForDOMQuery(L"mydiv");
   ASSERT_TRUE(tab->ExecuteAndExtractString(xpath3, jscript3, &actual));
   ASSERT_EQ(L"DIV", actual);
 
@@ -626,7 +641,7 @@ TEST_F(AutomationProxyTest3, FrameDocumentCanBeAccessed) {
   std::wstring title;
   int i;
   for (i = 0; i < 10; ++i) {
-    Sleep(kWaitForActionMaxMsec / 10);
+    Sleep(sleep_timeout_ms());
     ASSERT_TRUE(tab->GetTabTitle(&title));
     if (title == L"Destinations")
       break;
@@ -708,7 +723,13 @@ TEST_F(AutomationProxyTest, CantEscapeByOnloadMoveto) {
   ASSERT_NE(20, rect.y());
 }
 
-bool ExternalTabHandler(HWND external_tab_window) {
+// Creates a top-level window, makes the |external_tab_window| a child
+// of that window and displays them.  After displaying the windows the function
+// enters a message loop that processes window messages as well as calling
+// MessageLoop::current()->RunAllPending() to process any incoming IPC messages.
+// The time_to_wait parameter is the maximum time the loop will run.
+// To end the loop earlier, post a quit message to the thread.
+bool ExternalTabHandler(HWND external_tab_window, int time_to_wait) {
   static const wchar_t class_name[] = L"External_Tab_UI_Test_Class";
   static const wchar_t window_title[] = L"External Tab Tester";
 
@@ -718,8 +739,9 @@ bool ExternalTabHandler(HWND external_tab_window) {
   wnd_class.lpfnWndProc = DefWindowProc;
   wnd_class.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
   wnd_class.lpszClassName = class_name;
-  ATOM result = RegisterClassEx(&wnd_class);
-  if (0 == result) {
+  ATOM atom = RegisterClassEx(&wnd_class);
+  if (0 == atom) {
+    NOTREACHED() << "RegisterClassEx";
     return false;
   }
 
@@ -741,23 +763,178 @@ bool ExternalTabHandler(HWND external_tab_window) {
   ShowWindow(external_tab_ui_parent, SW_SHOW);
 
   // Allow the renderers to connect.
-  Sleep(1000);
+
+  const int kTimerIdQuit = 100;
+  const int kTimerIdProcessPendingMessages = 101;
+
+  ::SetTimer(external_tab_ui_parent, kTimerIdQuit, time_to_wait, NULL);
+  // Process pending messages every 50 milliseconds
+  ::SetTimer(external_tab_ui_parent, kTimerIdProcessPendingMessages, 50, NULL);
+
+  MSG msg;
+  bool quit = false;
+  do {
+    BOOL ok = ::GetMessage(&msg, NULL, 0, 0);
+    if (!ok || ok == -1)
+      break;
+
+    if (msg.message == WM_TIMER && msg.hwnd == external_tab_ui_parent) {
+      switch (msg.wParam) {
+        case kTimerIdProcessPendingMessages:
+          MessageLoop::current()->RunAllPending();
+          break;
+
+        case kTimerIdQuit:
+          ::KillTimer(external_tab_ui_parent, msg.wParam);
+          quit = true;
+          break;
+
+        default:
+          NOTREACHED() << "invalid timer id";
+          break;
+      }
+    } else if (msg.message == WM_QUIT) {
+      quit = true;
+    } else {
+      ::TranslateMessage(&msg);
+      ::DispatchMessage(&msg);
+    }
+  // In case there's an interactive user that closes the window.
+  } while (!quit && ::IsWindow(external_tab_ui_parent));
+
   DestroyWindow(external_tab_ui_parent);
+
+  EXPECT_TRUE(UnregisterClassW(reinterpret_cast<const wchar_t*>(atom),
+                               wnd_class.hInstance));
+
   return true;
 }
 
-TEST_F(AutomationProxyVisibleTest, CreateExternalTab) {
+// A single-use AutomationProxy implementation that's good
+// for a single navigation and a single ForwardMessageToExternalHost
+// message.  Once the ForwardMessageToExternalHost message is received
+// the class posts a quit message to the thread on which the message
+// was received.
+class AutomationProxyForExternalTab : public AutomationProxy {
+ public:
+  AutomationProxyForExternalTab(int execution_timeout)
+      : AutomationProxy(execution_timeout),
+        messages_received_(0),
+        navigate_complete_(false) {
+  }
+
+  int messages_received() const {
+    return messages_received_;
+  }
+
+  const std::string& message() const {
+    return message_;
+  }
+
+  const std::string& origin() const {
+    return origin_;
+  }
+
+  const std::string& target() const {
+    return target_;
+  }
+
+  // Waits for the DidNavigate event to be processed on the current thread.
+  // Returns true if the event arrived, false if there was a timeout.
+  bool WaitForNavigationComplete(int max_time_to_wait_ms) {
+    base::TimeTicks start(base::TimeTicks::Now());
+    while (!navigate_complete_) {
+      Sleep(50);
+      MessageLoop::current()->RunAllPending();
+      base::TimeTicks end(base::TimeTicks::Now());
+      base::TimeDelta delta = end - start;
+      if (static_cast<int>(delta.InMilliseconds()) > max_time_to_wait_ms)
+        return false;
+    }
+    return true;
+  }
+
+ protected:
+  virtual void OnMessageReceived(const IPC::Message& msg) {
+    IPC_BEGIN_MESSAGE_MAP(AutomationProxyForExternalTab, msg)
+      IPC_MESSAGE_HANDLER(AutomationMsg_DidNavigate, OnDidNavigate)
+      IPC_MESSAGE_HANDLER(AutomationMsg_ForwardMessageToExternalHost,
+                          OnForwardMessageToExternalHost)
+    IPC_END_MESSAGE_MAP()
+  }
+
+  void OnDidNavigate(int navigation_type, int relative_offset,
+                     const GURL& url) {
+    navigate_complete_ = true;
+  }
+
+  void OnForwardMessageToExternalHost(const std::string& message,
+                                      const std::string& origin,
+                                      const std::string& target) {
+    messages_received_++;
+    message_ = message;
+    origin_ = origin;
+    target_ = target;
+    PostQuitMessage(0);
+  }
+
+ protected:
+  bool navigate_complete_;
+  int messages_received_;
+  std::string message_, origin_, target_;
+};
+
+typedef CustomAutomationProxyTest<AutomationProxyForExternalTab>
+    ExternalTabTestType;
+
+TEST_F(ExternalTabTestType, CreateExternalTab) {
   HWND external_tab_container = NULL;
-  scoped_ptr<TabProxy> tab(automation()->CreateExternalTab(
-      &external_tab_container));
+  scoped_ptr<TabProxy> tab(automation()->CreateExternalTab(NULL, gfx::Rect(),
+      WS_POPUP, &external_tab_container));
   EXPECT_TRUE(tab != NULL);
   EXPECT_NE(FALSE, ::IsWindow(external_tab_container));
   if (tab != NULL) {
     tab->NavigateInExternalTab(GURL(L"http://www.google.com"));
-    EXPECT_EQ(true, ExternalTabHandler(external_tab_container));
+    EXPECT_EQ(true, ExternalTabHandler(external_tab_container, 1000));
     // Since the tab goes away lazily, wait a bit
     Sleep(1000);
     EXPECT_FALSE(tab->is_valid());
+  }
+}
+
+TEST_F(ExternalTabTestType, ExternalTabPostMessage) {
+  AutomationProxyForExternalTab* proxy =
+      static_cast<AutomationProxyForExternalTab*>(automation());
+
+  HWND external_tab_container = NULL;
+  scoped_ptr<TabProxy> tab(proxy->CreateExternalTab(NULL, gfx::Rect(),
+      WS_POPUP, &external_tab_container));
+  EXPECT_TRUE(tab != NULL);
+  EXPECT_NE(FALSE, ::IsWindow(external_tab_container));
+  if (tab != NULL) {
+    std::string content =
+        "data:text/html,<html><head><script>"
+        "function onload() {"
+        "  window.externalHost.onmessage = onMessage;"
+        "}"
+        "function onMessage(evt) {"
+        "  window.externalHost.postMessage(evt.data, '*');"
+        "}"
+        "</script></head>"
+        "<body onload='onload()'>external tab test<br></div>"
+        "</body></html>";
+    tab->NavigateInExternalTab(GURL(content));
+    EXPECT_TRUE(proxy->WaitForNavigationComplete(10000));
+
+    tab->HandleMessageFromExternalHost(tab->handle(), "Hello from gtest",
+                                       "null", "*");
+
+    EXPECT_TRUE(ExternalTabHandler(external_tab_container, 10000));
+    EXPECT_NE(0, proxy->messages_received());
+
+    if (proxy->messages_received()) {
+      EXPECT_EQ("Hello from gtest", proxy->message());
+    }
   }
 }
 
@@ -765,7 +942,7 @@ TEST_F(AutomationProxyTest, AutocompleteGetSetText) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_ptr<AutocompleteEditProxy> edit(
-      automation()->GetAutocompleteEditForBrowser(browser.get()));
+      browser->GetAutocompleteEdit());
   ASSERT_TRUE(edit.get());
   EXPECT_TRUE(edit->is_valid());
   const std::wstring text_to_set = L"Lollerskates";
@@ -774,7 +951,7 @@ TEST_F(AutomationProxyTest, AutocompleteGetSetText) {
   EXPECT_TRUE(edit->GetText(&actual_text));
   EXPECT_EQ(text_to_set, actual_text);
   scoped_ptr<AutocompleteEditProxy> edit2(
-      automation()->GetAutocompleteEditForBrowser(browser.get()));
+      browser->GetAutocompleteEdit());
   EXPECT_TRUE(edit2->GetText(&actual_text));
   EXPECT_EQ(text_to_set, actual_text);
 }
@@ -783,15 +960,16 @@ TEST_F(AutomationProxyTest, AutocompleteParallelProxy) {
   scoped_ptr<BrowserProxy> browser1(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser1.get());
   scoped_ptr<AutocompleteEditProxy> edit1(
-      automation()->GetAutocompleteEditForBrowser(browser1.get()));
+      browser1->GetAutocompleteEdit());
   ASSERT_TRUE(edit1.get());
-  EXPECT_TRUE(browser1->ApplyAccelerator(IDC_NEWWINDOW));
+  EXPECT_TRUE(browser1->ApplyAccelerator(IDC_NEW_WINDOW));
   scoped_ptr<BrowserProxy> browser2(automation()->GetBrowserWindow(1));
   ASSERT_TRUE(browser2.get());
   scoped_ptr<AutocompleteEditProxy> edit2(
-      automation()->GetAutocompleteEditForBrowser(browser2.get()));
+      browser2->GetAutocompleteEdit());
   ASSERT_TRUE(edit2.get());
-  EXPECT_TRUE(browser2->GetTab(0)->WaitForTabToBeRestored(kWaitForActionMsec));
+  EXPECT_TRUE(browser2->GetTab(0)->WaitForTabToBeRestored(
+      action_max_timeout_ms()));
   const std::wstring text_to_set1 = L"Lollerskates";
   const std::wstring text_to_set2 = L"Roflcopter";
   std::wstring actual_text1, actual_text2;
@@ -807,7 +985,7 @@ TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_ptr<AutocompleteEditProxy> edit(
-      automation()->GetAutocompleteEditForBrowser(browser.get()));
+      browser->GetAutocompleteEdit());
   ASSERT_TRUE(edit.get());
   EXPECT_TRUE(browser->ApplyAccelerator(IDC_FOCUS_LOCATION));
   EXPECT_TRUE(edit->is_valid());
@@ -819,4 +997,124 @@ TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   std::vector<AutocompleteMatchData> matches;
   EXPECT_TRUE(edit->GetAutocompleteMatches(&matches));
   EXPECT_FALSE(matches.empty());
+}
+
+// Disabled because flacky see bug #5314.
+TEST_F(AutomationProxyTest, DISABLED_AppModalDialogTest) {
+  scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  scoped_ptr<TabProxy> tab(browser->GetTab(0));
+  tab.reset(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  bool modal_dialog_showing = false;
+  views::DialogDelegate::DialogButton button =
+      views::DialogDelegate::DIALOGBUTTON_NONE;
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_FALSE(modal_dialog_showing);
+  EXPECT_EQ(views::DialogDelegate::DIALOGBUTTON_NONE, button);
+
+  // Show a simple alert.
+  std::string content =
+      "data:text/html,<html><head><script>function onload() {"
+      "setTimeout(\"alert('hello');\", 1000); }</script></head>"
+      "<body onload='onload()'></body></html>";
+  tab->NavigateToURL(GURL(content));
+  EXPECT_TRUE(automation()->WaitForAppModalDialog(3000));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_TRUE(modal_dialog_showing);
+  EXPECT_EQ(views::DialogDelegate::DIALOGBUTTON_OK, button);
+
+  // Test that clicking missing button fails graciously and does not close the
+  // dialog.
+  EXPECT_FALSE(automation()->ClickAppModalDialogButton(
+      views::DialogDelegate::DIALOGBUTTON_CANCEL));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_TRUE(modal_dialog_showing);
+
+  // Now click OK, that should close the dialog.
+  EXPECT_TRUE(automation()->ClickAppModalDialogButton(
+      views::DialogDelegate::DIALOGBUTTON_OK));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_FALSE(modal_dialog_showing);
+
+  // Show a confirm dialog.
+  content =
+      "data:text/html,<html><head><script>var result = -1; function onload() {"
+      "setTimeout(\"result = confirm('hello') ? 0 : 1;\", 1000);} </script>"
+      "</head><body onload='onload()'></body></html>";
+  tab->NavigateToURL(GURL(content));
+  EXPECT_TRUE(automation()->WaitForAppModalDialog(3000));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_TRUE(modal_dialog_showing);
+  EXPECT_EQ(views::DialogDelegate::DIALOGBUTTON_OK |
+            views::DialogDelegate::DIALOGBUTTON_CANCEL, button);
+
+  // Click OK.
+  EXPECT_TRUE(automation()->ClickAppModalDialogButton(
+      views::DialogDelegate::DIALOGBUTTON_OK));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_FALSE(modal_dialog_showing);
+  int result = -1;
+  EXPECT_TRUE(tab->ExecuteAndExtractInt(
+      L"", L"window.domAutomationController.send(result);", &result));
+  EXPECT_EQ(0, result);
+
+  // Try again.
+  tab->NavigateToURL(GURL(content));
+  EXPECT_TRUE(automation()->WaitForAppModalDialog(3000));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_TRUE(modal_dialog_showing);
+  EXPECT_EQ(views::DialogDelegate::DIALOGBUTTON_OK |
+            views::DialogDelegate::DIALOGBUTTON_CANCEL, button);
+
+  // Click Cancel this time.
+  EXPECT_TRUE(automation()->ClickAppModalDialogButton(
+      views::DialogDelegate::DIALOGBUTTON_CANCEL));
+  EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
+                                                     &button));
+  EXPECT_FALSE(modal_dialog_showing);
+  EXPECT_TRUE(tab->ExecuteAndExtractInt(
+      L"", L"window.domAutomationController.send(result);", &result));
+  EXPECT_EQ(1, result);
+}
+
+class AutomationProxyTest5 : public UITest {
+ protected:
+  AutomationProxyTest5() {
+    show_window_ = true;
+    dom_automation_enabled_ = true;
+    // We need to disable popup blocking to ensure that the RenderView
+    // instance for the popup actually closes.
+    launch_arguments_.AppendSwitch(switches::kDisablePopupBlocking);
+  }
+};
+
+TEST_F(AutomationProxyTest5, TestLifetimeOfDomAutomationController) {
+  scoped_ptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window.get());
+
+  scoped_ptr<TabProxy> tab(window->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  std::wstring filename(test_data_directory_);
+  file_util::AppendToPath(&filename, L"dom_automation_test_with_popup.html");
+
+  tab->NavigateToURL(net::FilePathToFileURL(filename));
+
+  // Allow some time for the popup to show up and close.
+  Sleep(2000);
+
+  std::wstring expected(L"string");
+  std::wstring jscript = CreateJSString(L"\"" + expected + L"\"");
+  std::wstring actual;
+  ASSERT_TRUE(tab->ExecuteAndExtractString(L"", jscript, &actual));
+  ASSERT_STREQ(expected.c_str(), actual.c_str());
 }

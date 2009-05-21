@@ -8,50 +8,45 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/process_util.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "base/thread.h"
+#include "base/waitable_event.h"
 #include "chrome/common/ipc_channel_proxy.h"
 #include "chrome/common/ipc_message.h"
+#include "chrome/common/ipc_sync_channel.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 #include "chrome/test/automation/automation_messages.h"
 
+#if defined(OS_WIN)
+// TODO(port): Enable this or equivalent.
+#include "chrome/views/window/dialog_delegate.h"
+#endif
+
 class AutomationRequest;
 class BrowserProxy;
-class WindowProxy;
 class TabProxy;
-class AutocompleteEditProxy;
+class WindowProxy;
 
 // This is an interface that AutomationProxy-related objects can use to
 // access the message-sending abilities of the Proxy.
 class AutomationMessageSender : public IPC::Message::Sender {
  public:
-  // Sends a message synchronously (from the perspective of the caller's
-  // thread, at least); it doesn't return until a response has been received.
-  // This method takes ownership of the request object passed in.  The caller
-  // is responsible for deleting the response object when they're done with it.
-  // response_type should be set to the message type of the expected response.
-  // A response object will only be available if the method returns true.
-  // NOTE: This method will overwrite any routing_id on the request message,
-  //       since it uses this field to match the response up with the request.
-  virtual bool SendAndWaitForResponse(IPC::Message* request,
-                                      IPC::Message** response,
-                                      int response_type) = 0;
-
   // Sends a message synchronously; it doesn't return until a response has been
   // received or a timeout has expired.
+  //
+  // Use base::kNoTimeout for no timeout.
+  //
   // The function returns true if a response is received, and returns false if
   // there is a failure or timeout (in milliseconds). If return after timeout,
   // is_timeout is set to true.
-  // See the comments in SendAndWaitForResponse for other details on usage.
   // NOTE: When timeout occurs, the connection between proxy provider may be
   //       in transit state. Specifically, there might be pending IPC messages,
   //       and the proxy provider might be still working on the previous
   //       request.
-  virtual bool SendAndWaitForResponseWithTimeout(IPC::Message* request,
-                                                 IPC::Message** response,
-                                                 int response_type,
-                                                 uint32 timeout_ms,
-                                                 bool* is_timeout) = 0;
+  virtual bool SendWithTimeout(IPC::Message* message, int timeout,
+                               bool* is_timeout) = 0;
 };
 
 // This is the interface that external processes can use to interact with
@@ -59,7 +54,7 @@ class AutomationMessageSender : public IPC::Message::Sender {
 class AutomationProxy : public IPC::Channel::Listener,
                         public AutomationMessageSender {
  public:
-  AutomationProxy();
+  explicit AutomationProxy(int command_execution_timeout_ms);
   virtual ~AutomationProxy();
 
   // IPC callback
@@ -108,6 +103,26 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Returns true on success.
   bool WaitForWindowCountToBecome(int target_count, int wait_timeout);
 
+#if defined(OS_WIN)
+  // TODO(port): Enable when we have portable DialogDelegate.
+
+  // Returns whether an app modal dialog window is showing right now (i.e., a
+  // javascript alert), and what buttons it contains.
+  bool GetShowingAppModalDialog(bool* showing_app_modal_dialog,
+                                views::DialogDelegate::DialogButton* button);
+
+  // Simulates a click on a dialog button.
+  bool ClickAppModalDialogButton(views::DialogDelegate::DialogButton button);
+#endif  // defined(OS_WIN)
+
+  // Block the thread until a modal dialog is displayed. Returns true on
+  // success.
+  bool WaitForAppModalDialog(int wait_timeout);
+
+  // Block the thread until one of the tabs in any window (including windows
+  // opened after the call) displays given url. Returns true on success.
+  bool WaitForURLDisplayed(GURL url, int wait_timeout);
+
   // Returns the BrowserProxy for the browser window at the given index,
   // transferring ownership of the pointer to the caller.
   // On failure, returns NULL.
@@ -128,27 +143,6 @@ class AutomationProxy : public IPC::Channel::Listener,
   // On failure, returns NULL.
   WindowProxy* GetActiveWindow();
 
-  // Returns the browser this window corresponds to, or NULL if this window
-  // is not a browser.  The caller owns the returned BrowserProxy.
-  BrowserProxy* GetBrowserForWindow(WindowProxy* window);
-
-  // Same as GetBrowserForWindow except return NULL if response isn't received
-  // before the specified timeout.
-  BrowserProxy* GetBrowserForWindowWithTimeout(WindowProxy* window,
-                                               uint32 timeout_ms,
-                                               bool* is_timeout);
-
-  // Returns the WindowProxy for this browser's window. It can be used to
-  // retreive view bounds, simulate clicks and key press events.  The caller
-  // owns the returned WindowProxy.
-  // On failure, returns NULL.
-  WindowProxy* GetWindowForBrowser(BrowserProxy* browser);
-
-  // Returns an AutocompleteEdit for this browser's window. It can be used to
-  // manipulate the omnibox.  The caller owns the returned pointer.
-  // On failure, returns NULL.
-  AutocompleteEditProxy* GetAutocompleteEditForBrowser(BrowserProxy* browser);
-
   // Tells the browser to enable or disable network request filtering.  Returns
   // false if the message fails to send to the browser.
   bool SetFilteredInet(bool enabled);
@@ -161,40 +155,49 @@ class AutomationProxy : public IPC::Channel::Listener,
   // load_time is how long, in ms, the tab contents took to load.
   void SignalNewTabUITab(int load_time);
 
+  // Set whether or not running the save page as... command show prompt the
+  // user for a download path.  Returns true if the message is successfully
+  // sent.
+  bool SavePackageShouldPromptUser(bool should_prompt);
+
   // Returns the ID of the automation IPC channel, so that it can be
   // passed to the app as a launch parameter.
   const std::wstring& channel_id() const { return channel_id_; }
 
+#if defined(OS_POSIX)
+  base::file_handle_mapping_vector fds_to_map() const;
+#endif
+
   // AutomationMessageSender implementations.
   virtual bool Send(IPC::Message* message);
-  virtual bool SendAndWaitForResponse(IPC::Message* request,
-                                      IPC::Message** response,
-                                      int response_type);
-  virtual bool SendAndWaitForResponseWithTimeout(IPC::Message* request,
-                                                 IPC::Message** response,
-                                                 int response_type,
-                                                 uint32 timeout_ms,
-                                                 bool* is_timeout);
+  virtual bool SendWithTimeout(IPC::Message* message, int timeout,
+                               bool* is_timeout);
 
   // Returns the current AutomationRequest object.
   AutomationRequest* current_request() { return current_request_; }
   // Clears the current AutomationRequest object.
   void clear_current_request() { current_request_ = NULL; }
 
-  // Wrapper over AutomationHandleTracker::InvalidateHandle. Receives the message
-  // from AutomationProxy, unpacks the messages and routes that call to the
-  // tracker.
+  // Wrapper over AutomationHandleTracker::InvalidateHandle. Receives the
+  // message from AutomationProxy, unpacks the messages and routes that call to
+  // the tracker.
   void InvalidateHandle(const IPC::Message& message);
+
+#if defined(OS_WIN)
+  // TODO(port): Enable when we can replace HWND.
 
   // Creates a tab that can hosted in an external process. The function
   // returns a TabProxy representing the tab as well as a window handle
   // that can be reparented in another process.
-  TabProxy* CreateExternalTab(HWND* external_tab_container);
+  TabProxy* CreateExternalTab(HWND parent, const gfx::Rect& dimensions,
+                              unsigned int style, HWND* external_tab_container);
+#endif  // defined(OS_WIN)
+
+  int command_execution_timeout_ms() const {
+    return static_cast<int>(command_execution_timeout_.InMilliseconds());
+  }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(AutomationProxy);
-
-  void InitializeEvents();
   void InitializeChannelID();
   void InitializeThread();
   void InitializeChannel();
@@ -202,19 +205,23 @@ class AutomationProxy : public IPC::Channel::Listener,
 
   std::wstring channel_id_;
   scoped_ptr<base::Thread> thread_;
-  scoped_ptr<IPC::ChannelProxy> channel_;
+  scoped_ptr<IPC::SyncChannel> channel_;
   scoped_ptr<AutomationHandleTracker> tracker_;
 
-  HANDLE app_launched_;
-  HANDLE initial_loads_complete_;
-  HANDLE new_tab_ui_load_complete_;
+  base::WaitableEvent app_launched_;
+  base::WaitableEvent initial_loads_complete_;
+  base::WaitableEvent new_tab_ui_load_complete_;
   int new_tab_ui_load_time_;
+
+  // An event that notifies when we are shutting-down.
+  scoped_ptr<base::WaitableEvent> shutdown_event_;
 
   AutomationRequest* current_request_;
 
-  static const int kMaxCommandExecutionTime;  // Delay to let the browser
-                                              //  execute the command.;
+  // Delay to let the browser execute the command.
+  base::TimeDelta command_execution_timeout_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutomationProxy);
 };
 
 #endif  // CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
-

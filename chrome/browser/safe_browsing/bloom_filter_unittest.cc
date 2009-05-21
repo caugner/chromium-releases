@@ -5,49 +5,48 @@
 
 #include "chrome/browser/safe_browsing/bloom_filter.h"
 
+#include <limits.h>
+
 #include <set>
 
 #include "base/logging.h"
+#include "base/rand_util.h"
+#include "base/ref_counted.h"
 #include "base/string_util.h"
-#include "base/win_util.h"
-#include "chrome/common/rand_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 uint32 GenHash() {
-  return static_cast<uint32>(rand_util::RandIntSecure(0, kint32max));
+  return static_cast<uint32>(base::RandUint64());
 }
 
 }
 
 TEST(SafeBrowsing, BloomFilter) {
-  // rand_util isn't random enough on Win2K, see bug 1076619.
-  if (win_util::GetWinVersion() == win_util::WINVERSION_2000)
-    return;
-
   // Use a small number for unit test so it's not slow.
-  int count = 1000;//100000;
+  uint32 count = 1000;
 
   // Build up the bloom filter.
-  BloomFilter filter(count * 10);
+  scoped_refptr<BloomFilter> filter = new BloomFilter(count * 10);
 
   typedef std::set<int> Values;
   Values values;
-  for (int i = 0; i < count; ++i) {
+  for (uint32 i = 0; i < count; ++i) {
     uint32 value = GenHash();
     values.insert(value);
-    filter.Insert(value);
+    filter->Insert(value);
   }
 
   // Check serialization works.
-  char* data_copy = new char[filter.size()];
-  memcpy(data_copy, filter.data(), filter.size());
-  BloomFilter filter_copy(data_copy, filter.size());
+  char* data_copy = new char[filter->size()];
+  memcpy(data_copy, filter->data(), filter->size());
+  scoped_refptr<BloomFilter> filter_copy =
+      new BloomFilter(data_copy, filter->size());
 
   // Check no false negatives by ensuring that every time we inserted exists.
   for (Values::iterator i = values.begin(); i != values.end(); ++i) {
-    EXPECT_TRUE(filter_copy.Exists(*i));
+    EXPECT_TRUE(filter_copy->Exists(*i));
   }
 
   // Check false positive error rate by checking the same number of items that
@@ -60,7 +59,7 @@ TEST(SafeBrowsing, BloomFilter) {
     if (values.find(value) != values.end())
       continue;
 
-    if (filter_copy.Exists(value))
+    if (filter_copy->Exists(value))
       found_count++;
 
     checked ++;

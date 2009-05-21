@@ -7,16 +7,21 @@
 
 #include <vector>
 #include "base/basictypes.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/gfx/point.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "base/ref_counted.h"
+#include "base/shared_memory.h"
 #include "chrome/common/ipc_channel.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_process.h"
+#include "skia/ext/platform_canvas.h"
+
 #include "webkit/glue/webwidget_delegate.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webplugin.h"
+
+class RenderThreadBase;
+struct WebPluginGeometry;
 
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
@@ -26,8 +31,11 @@ class RenderWidget : public IPC::Channel::Listener,
                      public base::RefCounted<RenderWidget> {
  public:
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
-  // RenderView that this widget lives inside.
-  static RenderWidget* Create(int32 opener_id);
+  // RenderView that this widget lives inside. The render_thread is any
+  // RenderThreadBase implementation, mostly commonly RenderThread::current().
+  static RenderWidget* Create(int32 opener_id,
+                              RenderThreadBase* render_thread,
+                              bool activatable);
 
   // The routing ID assigned by the RenderProcess. Will be MSG_ROUTING_NONE if
   // not yet assigned a view ID, in which case, the process MUST NOT send
@@ -43,10 +51,10 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // Implementing RefCounting required for WebWidgetDelegate
   virtual void AddRef() {
-    RefCounted<RenderWidget>::AddRef();
+    base::RefCounted<RenderWidget>::AddRef();
   }
   virtual void Release() {
-    RefCounted<RenderWidget>::Release();
+    base::RefCounted<RenderWidget>::Release();
   }
 
   // IPC::Channel::Listener
@@ -56,7 +64,7 @@ class RenderWidget : public IPC::Channel::Listener,
   virtual bool Send(IPC::Message* msg);
 
   // WebWidgetDelegate
-  virtual HWND GetContainingWindow(WebWidget* webwidget);
+  virtual gfx::NativeViewId GetContainingView(WebWidget* webwidget);
   virtual void DidInvalidateRect(WebWidget* webwidget, const gfx::Rect& rect);
   virtual void DidScrollRect(WebWidget* webwidget, int dx, int dy,
                              const gfx::Rect& clip_rect);
@@ -68,33 +76,33 @@ class RenderWidget : public IPC::Channel::Listener,
   virtual void GetWindowRect(WebWidget* webwidget, gfx::Rect* rect);
   virtual void SetWindowRect(WebWidget* webwidget, const gfx::Rect& rect);
   virtual void GetRootWindowRect(WebWidget* webwidget, gfx::Rect* rect);
+  virtual void GetRootWindowResizerRect(WebWidget* webwidget, gfx::Rect* rect);
   virtual void DidMove(WebWidget* webwidget, const WebPluginGeometry& move);
   virtual void RunModal(WebWidget* webwidget) {}
-
-  // Do not delete directly.  This class is reference counted.
-  virtual ~RenderWidget();
+  virtual bool IsHidden() { return is_hidden_; }
 
   // Close the underlying WebWidget.
   void Close();
 
  protected:
-  RenderWidget();
+  // Friend RefCounted so that the dtor can be non-public. Using this class
+  // without ref-counting is an error.
+  friend class base::RefCounted<RenderWidget>;
+
+  RenderWidget(RenderThreadBase* render_thread, bool activatable);
+  virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
   // later.
   void Init(int32 opener_id);
 
   // Finishes creation of a pending view started with Init.
-  void CompleteInit(HWND parent);
+  void CompleteInit(gfx::NativeViewId parent);
 
-  // Paints the given rectangular region of the WebWidget into paint_buf (a
-  // shared memory segment returned by AllocPaintBuf). The caller must ensure
-  // that the given rect fits within the bounds of the WebWidget.
-  void PaintRect(const gfx::Rect& rect, SharedMemory* paint_buf);
-
-  // Get the size of the paint buffer for the given rectangle, rounding up to
-  // the allocation granularity of the system.
-  size_t GetPaintBufSize(const gfx::Rect& rect);
+  // Paints the given rectangular region of the WebWidget into canvas (a
+  // shared memory segment returned by AllocPaintBuf on Windows). The caller
+  // must ensure that the given rect fits within the bounds of the WebWidget.
+  void PaintRect(const gfx::Rect& rect, skia::PlatformCanvas* canvas);
 
   void DoDeferredPaint();
   void DoDeferredScroll();
@@ -105,8 +113,9 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // RenderWidget IPC message handlers
   void OnClose();
-  void OnCreatingNewAck(HWND parent);
-  void OnResize(const gfx::Size& new_size);
+  void OnCreatingNewAck(gfx::NativeViewId parent);
+  virtual void OnResize(const gfx::Size& new_size,
+                        const gfx::Rect& resizer_rect);
   void OnWasHidden();
   void OnWasRestored(bool needs_repainting);
   void OnPaintRectAck();
@@ -130,25 +139,11 @@ class RenderWidget : public IPC::Channel::Listener,
     return current_scroll_buf_ != NULL;
   }
 
-  bool next_paint_is_resize_ack() const {
-    return ViewHostMsg_PaintRect_Flags::is_resize_ack(next_paint_flags_);
-  }
-
-  bool next_paint_is_restore_ack() const {
-    return ViewHostMsg_PaintRect_Flags::is_restore_ack(next_paint_flags_);
-  }
-
-  void set_next_paint_is_resize_ack() {
-    next_paint_flags_ |= ViewHostMsg_PaintRect_Flags::IS_RESIZE_ACK;
-  }
-
-  void set_next_paint_is_restore_ack() {
-    next_paint_flags_ |= ViewHostMsg_PaintRect_Flags::IS_RESTORE_ACK;
-  }
-
-  void set_next_paint_is_repaint_ack() {
-    next_paint_flags_ |= ViewHostMsg_PaintRect_Flags::IS_REPAINT_ACK;
-  }
+  bool next_paint_is_resize_ack() const;
+  bool next_paint_is_restore_ack() const;
+  void set_next_paint_is_resize_ack();
+  void set_next_paint_is_restore_ack();
+  void set_next_paint_is_repaint_ack();
 
   // Called when a renderer process moves an input focus or updates the
   // position of its caret.
@@ -165,7 +160,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
   int32 routing_id_;
 
-  scoped_refptr<WebWidget> webwidget_;
+  // We are responsible for destroying this object via its Close method.
+  WebWidget* webwidget_;
 
   // Set to the ID of the view that initiated creating this view, if any. When
   // the view was initiated by the browser (the common case), this will be
@@ -176,11 +172,14 @@ class RenderWidget : public IPC::Channel::Listener,
   // view is.
   int32 opener_id_;
 
+  // The thread that does our IPC.
+  RenderThreadBase* render_thread_;
+
   // The position where this view should be initially shown.
   gfx::Rect initial_pos_;
 
   // The window we are embedded within.  TODO(darin): kill this.
-  HWND host_window_;
+  gfx::NativeViewId host_window_;
 
   // We store the current cursor object so we can avoid spamming SetCursor
   // messages.
@@ -188,10 +187,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // The size of the RenderWidget.
   gfx::Size size_;
 
-  // Shared memory handles that are currently in use to transfer an image to
-  // the browser.
-  SharedMemory* current_paint_buf_;
-  SharedMemory* current_scroll_buf_;
+  // Transport DIBs that are currently in use to transfer an image to the
+  // browser.
+  TransportDIB* current_paint_buf_;
+  TransportDIB* current_scroll_buf_;
 
   // The smallest bounding rectangle that needs to be re-painted.  This is non-
   // empty if a paint event is pending.
@@ -200,6 +199,9 @@ class RenderWidget : public IPC::Channel::Listener,
   // The clip rect for the pending scroll event.  This is non-empty if a
   // scroll event is pending.
   gfx::Rect scroll_rect_;
+
+  // The area that must be reserved for drawing the resize corner.
+  gfx::Rect resizer_rect_;
 
   // The scroll delta for a pending scroll event.
   gfx::Point scroll_delta_;
@@ -248,6 +250,10 @@ class RenderWidget : public IPC::Channel::Listener,
   int ime_control_y_;
   bool ime_control_new_state_;
   bool ime_control_updated_;
+  bool ime_control_busy_;
+
+  // Whether the window for this RenderWidget can be activated.
+  bool activatable_;
 
   // Holds all the needed plugin window moves for a scroll.
   std::vector<WebPluginGeometry> plugin_window_moves_;
@@ -255,4 +261,4 @@ class RenderWidget : public IPC::Channel::Listener,
   DISALLOW_EVIL_CONSTRUCTORS(RenderWidget);
 };
 
-#endif // CHROME_RENDERER_RENDER_WIDGET_H__
+#endif  // CHROME_RENDERER_RENDER_WIDGET_H__

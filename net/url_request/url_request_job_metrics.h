@@ -28,13 +28,13 @@ class URLRequestJobMetrics {
   scoped_ptr<GURL> url_;
 
   // Time when the job starts.
-  TimeTicks start_time_;
+  base::TimeTicks start_time_;
 
   // Time when the job is done.
-  TimeTicks end_time_;
+  base::TimeTicks end_time_;
 
   // Total number of bytes the job reads from underline IO.
-  int total_bytes_read_;
+  int64 total_bytes_read_;
 
   // Number of IO read operations the job issues.
   int number_of_read_IO_;
@@ -47,4 +47,3 @@ class URLRequestJobMetrics {
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_JOB_METRICS_H_
-

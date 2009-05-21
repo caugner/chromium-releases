@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_GFX_PNG_ENCODER_H__
-#define BASE_GFX_PNG_ENCODER_H__
+#ifndef BASE_GFX_PNG_ENCODER_H_
+#define BASE_GFX_PNG_ENCODER_H_
 
 #include <vector>
 
 #include "base/basictypes.h"
+
+class SkBitmap;
 
 // Interface for encoding PNG data. This is a wrapper around libpng,
 // which has an inconvenient interface for callers. This is currently designed
@@ -51,9 +53,16 @@ class PNGEncoder {
                      bool discard_transparency,
                      std::vector<unsigned char>* output);
 
+  // Call PNGEncoder::Encode on the supplied SkBitmap |input|, which is assumed
+  // to be BGRA, 32 bits per pixel. The params |discard_transparency| and
+  // |output| are passed directly to Encode; refer to Encode for more
+  // information. During the call, an SkAutoLockPixels lock is held on |input|.
+  static bool EncodeBGRASkBitmap(const SkBitmap& input,
+                                 bool discard_transparency,
+                                 std::vector<unsigned char>* output);
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(PNGEncoder);
+  DISALLOW_COPY_AND_ASSIGN(PNGEncoder);
 };
 
-#endif  // BASE_GFX_PNG_ENCODER_H__
-
+#endif  // BASE_GFX_PNG_ENCODER_H_

@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H__
-#define CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H_
+#define CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H_
 
+#include "chrome/browser/download/download_shelf.h"
 #include "chrome/common/slide_animation.h"
-#include "chrome/views/button.h"
-#include "chrome/views/link.h"
+#include "chrome/views/controls/button/button.h"
+#include "chrome/views/controls/link.h"
 
-namespace ChromeViews {
-  class ImageView;
+namespace views {
+class ImageButton;
+class ImageView;
 }
 
-class DownloadItem;
+class BaseDownloadItemModel;
 class TabContents;
 
 class DownloadAnimation;
@@ -24,68 +26,51 @@ class DownloadAnimation;
 // To add a view representing a download to DownloadShelfView, invoke
 // AddDownloadView. AddDownloadView takes ownership of the passed in View.
 // DownloadShelfView does not hold an infinite number of download views, rather
-// it'll automatically remove views once a certain point is reached. As such,
-// the remove method is private.
-class DownloadShelfView : public ChromeViews::View,
-                          public ChromeViews::BaseButton::ButtonListener,
-                          public ChromeViews::LinkController,
+// it'll automatically remove views once a certain point is reached.
+class DownloadShelfView : public DownloadShelf,
+                          public views::View,
+                          public views::ButtonListener,
+                          public views::LinkController,
                           public AnimationDelegate {
  public:
-  DownloadShelfView(TabContents* tab_contents);
+  explicit DownloadShelfView(TabContents* tab_contents);
 
-  // A new download has started, so add it to our shelf.
-  void AddDownload(DownloadItem* download);
-
-  virtual void GetPreferredSize(CSize *out);
-
+  // Implementation of View.
+  virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-
-  // Invokes the following methods to do painting:
-  //   PaintBackground, PaintBorder and PaintSeparators.
   virtual void Paint(ChromeCanvas* canvas);
 
-  void DidChangeBounds(const CRect& previous, const CRect& current);
-
-  // AnimationDelegate implementations
+  // Implementation of AnimationDelegate.
   virtual void AnimationProgressed(const Animation* animation);
   virtual void AnimationEnded(const Animation* animation);
 
+  // Implementation of LinkController.
   // Invoked when the user clicks the 'show all downloads' link button.
-  virtual void LinkActivated(ChromeViews::Link* source, int event_flags);
+  virtual void LinkActivated(views::Link* source, int event_flags);
 
+  // Implementation of ButtonListener.
   // Invoked when the user clicks the close button. Asks the browser to
   // hide the download shelf.
-  virtual void ButtonPressed(ChromeViews::BaseButton* button);
+  virtual void ButtonPressed(views::Button* button);
+
+  // Implementation of DownloadShelf.
+  virtual void AddDownload(BaseDownloadItemModel* download_model);
+  virtual bool IsShowing() const;
 
   // Removes a specified download view. The supplied view is deleted after
   // it's removed.
-  void RemoveDownloadView(ChromeViews::View* view);
-
-  // Adds a View representing a download to this DownloadShelfView.
-  // DownloadShelfView takes ownership of the View, and will delete it as
-  // necessary.
-  void AddDownloadView(ChromeViews::View* view);
-
-  // Invoked when the download shelf is migrated from one tab contents to a new
-  // one.
-  void ChangeTabContents(TabContents* old_contents, TabContents* new_contents);
+  void RemoveDownloadView(views::View* view);
 
  private:
   void Init();
 
+  // Adds a View representing a download to this DownloadShelfView.
+  // DownloadShelfView takes ownership of the View, and will delete it as
+  // necessary.
+  void AddDownloadView(views::View* view);
+
   // Paints the border.
   void PaintBorder(ChromeCanvas* canvas);
-
-  // Paints the separators. This invokes PaintSeparator to paint a particular
-  // separator.
-  void PaintSeparators(ChromeCanvas* canvas);
-
-  // Paints the separator between the two views.
-  void PaintSeparator(ChromeCanvas* canvas,
-                      ChromeViews::View* v1,
-                      ChromeViews::View* v2);
-
-  TabContents* tab_contents_;
 
   // The animation for adding new items to the shelf.
   scoped_ptr<SlideAnimation> new_item_animation_;
@@ -98,18 +83,17 @@ class DownloadShelfView : public ChromeViews::View,
   std::vector<View*> download_views_;
 
   // An image displayed on the right of the "Show all downloads..." link.
-  ChromeViews::ImageView* arrow_image_;
+  views::ImageView* arrow_image_;
 
   // Link for showing all downloads. This is contained as a child, and deleted
   // by View.
-  ChromeViews::Link* show_all_view_;
+  views::Link* show_all_view_;
 
   // Button for closing the downloads. This is contained as a child, and
   // deleted by View.
-  ChromeViews::Button* close_button_;
+  views::ImageButton* close_button_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadShelfView);
+  DISALLOW_COPY_AND_ASSIGN(DownloadShelfView);
 };
 
-#endif // CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H__
-
+#endif  // CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H_

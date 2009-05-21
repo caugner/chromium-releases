@@ -31,6 +31,7 @@
 // --timeout=millisecond: time out as specified in millisecond during each
 //                        page load.
 // --nopagedown: won't simulate page down key presses after page load.
+// --savedebuglog: save Chrome and v8 debug log for each page loaded.
 
 #include <fstream>
 #include <iostream>
@@ -39,9 +40,13 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/url_fixer_upper.h"
+#include "base/time.h"
+#include "base/time_format.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/test/automation/automation_messages.h"
@@ -70,11 +75,17 @@ const wchar_t kEndURLSwitch[] = L"endurl";
 const wchar_t kLogFileSwitch[] = L"logfile";
 const wchar_t kTimeoutSwitch[] = L"timeout";
 const wchar_t kNoPageDownSwitch[] = L"nopagedown";
+const wchar_t kSaveDebugLogSwitch[] = L"savedebuglog";
 
 std::wstring server_url = L"http://urllist.com";
 const wchar_t test_url_1[] = L"http://www.google.com";
 const wchar_t test_url_2[] = L"about:crash";
 const wchar_t test_url_3[] = L"http://www.youtube.com";
+
+// These are copied from v8 definitions as we cannot include them.
+const wchar_t kV8LogFileSwitch[] = L"logfile";
+const wchar_t kV8LogFileDefaultName[] = L"v8.log";
+
 bool append_page_id = false;
 int32 start_page;
 int32 end_page;
@@ -89,8 +100,11 @@ bool page_down = true;
 std::wstring end_url;
 std::wstring log_file_path;
 uint32 timeout_ms = INFINITE;
-
-int kWaitForActionMsec = 4000;
+bool save_debug_log = false;
+std::wstring chrome_log_path;
+std::wstring v8_log_path;
+std::wstring test_log_path;
+bool stand_alone = false;
 
 class PageLoadTest : public UITest {
  public:
@@ -121,11 +135,22 @@ class PageLoadTest : public UITest {
   void NavigateToURLLogResult(const GURL& url, std::ofstream& log_file,
                               NavigationMetrics* metrics_output) {
     NavigationMetrics metrics = {NAVIGATION_ERROR};
+    std::ofstream test_log;
+
+    // Create a test log.
+    test_log_path = L"test_log.log";
+    test_log.open(test_log_path.c_str());
 
     if (!continuous_load && !browser_existing) {
       LaunchBrowserAndServer();
       browser_existing = true;
     }
+
+    // Log timestamp for test start.
+    base::Time time_now = base::Time::Now();
+    double time_start = time_now.ToDoubleT();
+    test_log << "Test Start: ";
+    test_log << base::TimeFormatFriendlyDateAndTime(time_now) << std::endl;
 
     bool is_timeout = false;
     int result = AUTOMATION_MSG_NAVIGATION_ERROR;
@@ -144,17 +169,16 @@ class PageLoadTest : public UITest {
           // Page down twice.
           scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
           if (browser.get()) {
-            scoped_ptr<WindowProxy> window(
-                automation()->GetWindowForBrowser(browser.get()));
+            scoped_ptr<WindowProxy> window(browser->GetWindow());
             if (window.get()) {
               bool activation_timeout;
-              browser->BringToFrontWithTimeout(kWaitForActionMsec,
+              browser->BringToFrontWithTimeout(action_max_timeout_ms(),
                                                &activation_timeout);
               if (!activation_timeout) {
                 window->SimulateOSKeyPress(VK_NEXT, 0);
-                Sleep(kWaitForActionMsec);
+                Sleep(sleep_timeout_ms());
                 window->SimulateOSKeyPress(VK_NEXT, 0);
-                Sleep(kWaitForActionMsec);
+                Sleep(sleep_timeout_ms());
               }
             }
           }
@@ -167,10 +191,18 @@ class PageLoadTest : public UITest {
       browser_existing = false;
     }
 
+    // Log timestamp for end of test.
+    time_now = base::Time::Now();
+    double time_stop = time_now.ToDoubleT();
+    test_log << "Test End: ";
+    test_log << base::TimeFormatFriendlyDateAndTime(time_now) << std::endl;
+    test_log << "duration_seconds=" << (time_stop - time_start) << std::endl;
+
     // Get navigation result and metrics, and optionally write to the log file
     // provided.  The log format is:
     // <url> <navigation_result> <browser_crash_count> <renderer_crash_count>
-    // <plugin_crash_count> <crash_dump_count> crash_dump=<path>
+    // <plugin_crash_count> <crash_dump_count> [chrome_log=<path>
+    // v8_log=<path>] crash_dump=<path>
     if (is_timeout) {
       metrics.result = NAVIGATION_TIME_OUT;
       // After timeout, the test automation is in the transition state since
@@ -231,6 +263,12 @@ class PageLoadTest : public UITest {
                << " " << metrics.crash_dump_count;
     }
 
+    // Close test log.
+    test_log.close();
+
+    if (log_file.is_open() && save_debug_log && !continuous_load)
+      SaveDebugLogs(log_file);
+
     // Get crash dumps.
     LogOrDeleteNewCrashDumps(log_file, &metrics);
 
@@ -253,7 +291,10 @@ class PageLoadTest : public UITest {
       }
     } else {
       // Don't run if single process mode.
-      if (in_process_renderer())
+      // Also don't run if running as a standalone program which is for
+      // distributed testing, to avoid mistakenly hitting web sites with many
+      // instances.
+      if (in_process_renderer() || stand_alone)
         return;
       // For usage 1
       NavigationMetrics metrics;
@@ -280,7 +321,7 @@ class PageLoadTest : public UITest {
       // Page load crashed and test automation timed out.
       EXPECT_EQ(NAVIGATION_TIME_OUT, metrics.result);
       // Found a crash dump
-      EXPECT_EQ(1, metrics.crash_dump_count);
+      EXPECT_EQ(1, metrics.crash_dump_count) << kFailedNoCrashService;
       // Browser did not crash, and exited cleanly.
       EXPECT_EQ(true, metrics.browser_clean_exit);
       EXPECT_EQ(1, metrics.browser_launch_count);
@@ -377,6 +418,36 @@ class PageLoadTest : public UITest {
     }
   }
 
+  std::wstring ConstructSavedDebugLogPath(const std::wstring& debug_log_path,
+                                          int index) {
+    std::wstring saved_debug_log_path(debug_log_path);
+    std::wstring suffix(L"_");
+    suffix.append(IntToWString(index));
+    file_util::InsertBeforeExtension(&saved_debug_log_path, suffix);
+    return saved_debug_log_path;
+  }
+
+  void SaveDebugLog(const std::wstring& log_path, const std::wstring& log_id,
+                    std::ofstream& log_file, int index) {
+    if (!log_path.empty()) {
+      std::wstring saved_log_path =
+          ConstructSavedDebugLogPath(log_path, index);
+      if (file_util::Move(log_path, saved_log_path)) {
+        log_file << log_id << "=" << saved_log_path;
+      }
+    }
+  }
+
+  // Rename the chrome and v8 debug log files if existing, and save the file
+  // paths in the log_file provided.
+  void SaveDebugLogs(std::ofstream& log_file) {
+    static int url_count = 1;
+    SaveDebugLog(chrome_log_path, L"chrome_log", log_file, url_count);
+    SaveDebugLog(v8_log_path, L"v8_log", log_file, url_count);
+    SaveDebugLog(test_log_path, L"test_log", log_file, url_count);
+    url_count++;
+  }
+
   // If a log_file is provided, log the crash dump with the given path;
   // otherwise, delete the crash dump file.
   void LogOrDeleteCrashDump(std::ofstream& log_file,
@@ -434,8 +505,8 @@ class PageLoadTest : public UITest {
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
   PrefService* GetLocalState() {
-    std::wstring local_state_path = user_data_dir();
-    file_util::AppendToPath(&local_state_path, chrome::kLocalStateFilename);
+    FilePath local_state_path = FilePath::FromWStringHack(user_data_dir())
+        .Append(chrome::kLocalStateFilename);
 
     PrefService* local_state(new PrefService(local_state_path));
     return local_state;
@@ -513,6 +584,8 @@ TEST_F(PageLoadTest, Reliability) {
 }
 
 void SetPageRange(const CommandLine& parsed_command_line) {
+  // If calling into this function, we are running as a standalone program.
+  stand_alone = true;
   if (parsed_command_line.HasSwitch(kStartPageSwitch)) {
     ASSERT_TRUE(parsed_command_line.HasSwitch(kEndPageSwitch));
     start_page =
@@ -572,5 +645,25 @@ void SetPageRange(const CommandLine& parsed_command_line) {
 
   if (parsed_command_line.HasSwitch(kNoPageDownSwitch))
     page_down = false;
-}
 
+  if (parsed_command_line.HasSwitch(kSaveDebugLogSwitch)) {
+    save_debug_log = true;
+    chrome_log_path = logging::GetLogFileName();
+    // We won't get v8 log unless --no-sandbox is specified.
+    if (parsed_command_line.HasSwitch(switches::kNoSandbox)) {
+      PathService::Get(base::DIR_CURRENT, &v8_log_path);
+      file_util::AppendToPath(&v8_log_path, kV8LogFileDefaultName);
+      // The command line switch may override the default v8 log path.
+      if (parsed_command_line.HasSwitch(switches::kJavaScriptFlags)) {
+        CommandLine v8_command_line(
+            parsed_command_line.GetSwitchValue(switches::kJavaScriptFlags));
+        if (v8_command_line.HasSwitch(kV8LogFileSwitch)) {
+          v8_log_path = v8_command_line.GetSwitchValue(kV8LogFileSwitch);
+          if (!file_util::AbsolutePath(&v8_log_path)) {
+            v8_log_path.clear();
+          }
+        }
+      }
+    }
+  }
+}

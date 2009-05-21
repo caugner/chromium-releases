@@ -13,8 +13,6 @@
 #include <ctype.h>
 #endif
 
-#include <io.h>
-
 #include "hashmgr.hxx"
 #include "csutil.hxx"
 #include "atypes.hxx"
@@ -121,7 +119,6 @@ HashMgr::~HashMgr()
 
 #ifdef HUNSPELL_CHROME_CLIENT
   EmptyHentryCache();
-  STLDeleteValues(&custom_word_to_hentry_map_);
   for (std::vector<std::string*>::iterator it = pointer_to_strings_.begin(); 
        it != pointer_to_strings_.end(); ++it) {
     delete *it;
@@ -154,12 +151,12 @@ struct hentry * HashMgr::lookup(const char *word) const
   int affix_ids[hunspell::BDict::MAX_AFFIXES_PER_WORD];
   int affix_count = bdict_reader->FindWord(word, affix_ids);
   if (affix_count == 0) { // look for custom added word
-    std::map<StringPiece, struct hentry *>::const_iterator iter = 
-      custom_word_to_hentry_map_.find(word);
-    if (iter != custom_word_to_hentry_map_.end())
-      return iter->second;
-    else
-      return NULL;
+    std::map<StringPiece, int>::const_iterator iter = 
+      custom_word_to_affix_id_map_.find(word);
+    if (iter != custom_word_to_affix_id_map_.end()) {
+      affix_count = 1;
+      affix_ids[0] = iter->second;
+    }
   }
 
   static const int kMaxWordLen = 128;
@@ -245,20 +242,13 @@ int HashMgr::add_word(const char * word, int wl, unsigned short * aff, int al, c
        dp->next = hp;
     }
 #endif  // HUNSPELL_CHROME_CLIENT
-    std::map<StringPiece, struct hentry *>::iterator iter = 
-        custom_word_to_hentry_map_.find(word);
-    if(iter == custom_word_to_hentry_map_.end()) {  // word needs to be added
-      // Make a custom hentry.
-      struct hentry* he = new hentry;
-      he->word = (char *)word;
-      he->wlen = wl;
-      he->next = NULL;
-      he->next_homonym = NULL;
-
+    std::map<StringPiece, int>::iterator iter = 
+        custom_word_to_affix_id_map_.find(word);
+    if(iter == custom_word_to_affix_id_map_.end()) {  // word needs to be added
       std::string* new_string_word = new std::string(word);
       pointer_to_strings_.push_back(new_string_word);
       StringPiece sp(*(new_string_word));
-      custom_word_to_hentry_map_[sp] = he;
+      custom_word_to_affix_id_map_[sp] = 0; // no affixes for custom words
       return 1;
     }
 
@@ -295,11 +285,9 @@ int HashMgr::put_word_pattern(const char * word, int wl, const char * pattern)
 struct hentry * HashMgr::walk_hashtable(int &col, struct hentry * hp) const
 {
 #ifdef HUNSPELL_CHROME_CLIENT
-  // DANGER! This is kind of impossible to make work correctly, since Hunspell
-  // will keep arbitrary hentry pointers into our table. Therefore, the caller
-  // (SuggestMgr::ngsuggest) will need to be modified to not do this for us
-  // to be able to uncomment this function.
-/*
+  // This function creates a new hentry if NULL is passed as hp. It also takes
+  // the responsibility of deleting the pointer hp when walk is over.
+  
   // This function is only ever called by one place and not nested. We can
   // therefore keep static state between calls and use |col| as a "reset" flag
   // to avoid changing the API. It is set to -1 for the first call.
@@ -312,11 +300,26 @@ struct hentry * HashMgr::walk_hashtable(int &col, struct hentry * hp) const
 
   int affix_ids[hunspell::BDict::MAX_AFFIXES_PER_WORD];
   static const int kMaxWordLen = 128;
-  static char word_buf[kMaxWordLen];
-  int affix_count = word_iterator.Advance(word_buf, kMaxWordLen, affix_ids);
-  return AffixIDsToHentry(word_buf, affix_ids, affix_count);
-*/
-  return NULL;
+  static char word[kMaxWordLen];
+  int affix_count = word_iterator.Advance(word, kMaxWordLen, affix_ids);
+  if (affix_count == 0) {
+    delete hp;
+    return NULL;
+  }
+  short word_len = static_cast<short>(strlen(word));
+
+  // For now, just re-compute the |hp| and return it. No need to create linked
+  // lists for the extra affixes. If hp is NULL, create it here.
+  if (!hp)
+    hp = new hentry;
+  hp->word = word;
+  hp->wlen = word_len;
+  hp->alen = (short)const_cast<HashMgr*>(this)->get_aliasf(affix_ids[0],
+                                                           &hp->astr);
+  hp->next = NULL;
+  hp->next_homonym = NULL;
+  
+  return hp;
 #else
   //reset to start
   if ((col < 0) || (hp == NULL)) {
@@ -556,27 +559,32 @@ int HashMgr::load_config()
 {
   utf8 = 1;  // We always use UTF-8.
 
-  // Read in all the AF lines which tell us the rules for each affix group ID.
+  // Read in the regular commands from the affix file. We care about the FLAG
+  // line becuase the AF lines depend on this value, and the IGNORE line.
+  // The rest of the commands will be read by the affix manager.
   char line[MAXDELEN+1];
-  hunspell::LineIterator iterator = bdict_reader->GetAfLineIterator();
-  while (iterator.AdvanceAndCopy(line, MAXDELEN)) {
-    int rv = parse_aliasf(line, &iterator);
-    if (rv)
-      return rv;
-  }
-
-  // Read in the regular commands from the affix file. We only care about the
-  // IGNORE line here. The rest of the commands will be read by the affix
-  // manager.
-  iterator = bdict_reader->GetOtherLineIterator();
+  hunspell::LineIterator iterator = bdict_reader->GetOtherLineIterator();
   while (iterator.AdvanceAndCopy(line, MAXDELEN)) {
     // Parse in the ignored characters (for example, Arabic optional
     // diacritics characters.
     if (strncmp(line,"IGNORE",6) == 0) {
       parse_array(line, &ignorechars, &ignorechars_utf16,
                   &ignorechars_utf16_len, "IGNORE", utf8);
-      break;  // All done.
     }
+    // Retrieve the format of an AF line.
+    if ((strncmp(line,"FLAG",4) == 0) && isspace(line[4])) {
+      if (strstr(line, "long")) flag_mode = FLAG_LONG;
+      if (strstr(line, "num")) flag_mode = FLAG_NUM;
+      if (strstr(line, "UTF-8")) flag_mode = FLAG_UNI;
+    }
+  }
+
+  // Read in all the AF lines which tell us the rules for each affix group ID.
+  iterator = bdict_reader->GetAfLineIterator();
+  while (iterator.AdvanceAndCopy(line, MAXDELEN)) {
+    int rv = parse_aliasf(line, &iterator);
+    if (rv)
+      return rv;
   }
 
   return 0;
@@ -775,7 +783,8 @@ int  HashMgr::parse_aliasf(char * line, FILE * af)
 
 #ifdef HUNSPELL_CHROME_CLIENT
 hentry* HashMgr::AffixIDsToHentry(char* word,
-                                  int* affix_ids, int affix_count) const
+                                  int* affix_ids, 
+                                  int affix_count) const
 {
   if (affix_count == 0)
     return NULL;
@@ -814,6 +823,19 @@ hentry* HashMgr::AffixIDsToHentry(char* word,
 
   cache[std_word] = first_he;  // Save this word in the cache for later.
   return first_he;
+}
+
+#endif
+
+#ifdef HUNSPELL_CHROME_CLIENT
+hentry* HashMgr::GetHentryFromHEntryCache(char* word) {
+  HEntryCache& cache = const_cast<HashMgr*>(this)->hentry_cache;
+  std::string std_word(word);
+  HEntryCache::iterator found = cache.find(std_word);
+  if (found != cache.end())
+    return found->second;
+  else
+    return NULL;
 }
 
 #endif

@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_VIEWS_LAYOUT_MANAGER_H__
-#define CHROME_VIEWS_LAYOUT_MANAGER_H__
+#ifndef CHROME_VIEWS_LAYOUT_MANAGER_H_
+#define CHROME_VIEWS_LAYOUT_MANAGER_H_
 
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlmisc.h>
+#include "chrome/views/view.h"
 
-namespace ChromeViews {
+namespace gfx {
+class Size;
+}
+
+namespace views {
 
 class View;
 
@@ -40,7 +42,7 @@ class LayoutManager {
 
   // Return the preferred size which is the size required to give each
   // children their respective preferred size.
-  virtual void GetPreferredSize(View* host, CSize* out) = 0;
+  virtual gfx::Size GetPreferredSize(View* host) = 0;
 
   // Returns the preferred height for the specified width. The default
   // implementation returns the value from GetPreferredSize.
@@ -53,7 +55,6 @@ class LayoutManager {
   virtual void ViewRemoved(View* host, View* view) {}
 };
 
-}
+}  // namespace views
 
-#endif // CHROME_VIEWS_LAYOUT_MANAGER_H__
-
+#endif // CHROME_VIEWS_LAYOUT_MANAGER_H_

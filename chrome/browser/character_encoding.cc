@@ -13,14 +13,13 @@
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/l10n_util.h"
+#include "grit/generated_resources.h"
 #include "unicode/ucnv.h"
-
-#include "generated_resources.h"
 
 namespace {
 
 // The maximum length of short list of recently user selected encodings is 3.
-const int kUserSelectedEncodingsMaxLength = 3;
+const size_t kUserSelectedEncodingsMaxLength = 3;
 
 typedef struct {
   int resource_id;
@@ -34,15 +33,15 @@ static CanonicalEncodingData canonical_encoding_names[] = {
   { IDC_ENCODING_UTF16LE, L"UTF-16LE", IDS_ENCODING_UNICODE },
   { IDC_ENCODING_ISO88591, L"ISO-8859-1", IDS_ENCODING_WESTERN },
   { IDC_ENCODING_WINDOWS1252, L"windows-1252", IDS_ENCODING_WESTERN },
-  { IDC_ENCODING_GB2312, L"GB2312", IDS_ENCODING_SIMP_CHINESE },
+  { IDC_ENCODING_GBK, L"GBK", IDS_ENCODING_SIMP_CHINESE },
   { IDC_ENCODING_GB18030, L"gb18030", IDS_ENCODING_SIMP_CHINESE },
   { IDC_ENCODING_BIG5, L"Big5", IDS_ENCODING_TRAD_CHINESE },
   { IDC_ENCODING_BIG5HKSCS, L"Big5-HKSCS", IDS_ENCODING_TRAD_CHINESE },
-  { IDC_ENCODING_KOREAN, L"EUC-KR", IDS_ENCODING_KOREAN },
+  { IDC_ENCODING_KOREAN, L"windows-949", IDS_ENCODING_KOREAN },
   { IDC_ENCODING_SHIFTJIS, L"Shift_JIS", IDS_ENCODING_JAPANESE },
-  { IDC_ENCODING_ISO2022JP, L"ISO-2022-JP", IDS_ENCODING_JAPANESE },
   { IDC_ENCODING_EUCJP, L"EUC-JP", IDS_ENCODING_JAPANESE },
-  { IDC_ENCODING_THAI, L"TIS-620", IDS_ENCODING_THAI },
+  { IDC_ENCODING_ISO2022JP, L"ISO-2022-JP", IDS_ENCODING_JAPANESE },
+  { IDC_ENCODING_THAI, L"windows-874", IDS_ENCODING_THAI },
   { IDC_ENCODING_ISO885915, L"ISO-8859-15", IDS_ENCODING_WESTERN },
   { IDC_ENCODING_MACINTOSH, L"macintosh", IDS_ENCODING_WESTERN },
   { IDC_ENCODING_ISO88592, L"ISO-8859-2", IDS_ENCODING_CENTRAL_EUROPEAN },
@@ -53,12 +52,12 @@ static CanonicalEncodingData canonical_encoding_names[] = {
   { IDC_ENCODING_KOI8U, L"KOI8-U", IDS_ENCODING_CYRILLIC },
   { IDC_ENCODING_ISO88597, L"ISO-8859-7", IDS_ENCODING_GREEK },
   { IDC_ENCODING_WINDOWS1253, L"windows-1253", IDS_ENCODING_GREEK },
-  { IDC_ENCODING_ISO88599, L"ISO-8859-9", IDS_ENCODING_TURKISH },
   { IDC_ENCODING_WINDOWS1254, L"windows-1254", IDS_ENCODING_TURKISH },
-  { IDC_ENCODING_ISO88596, L"ISO-8859-6", IDS_ENCODING_ARABIC },
   { IDC_ENCODING_WINDOWS1256, L"windows-1256", IDS_ENCODING_ARABIC },
-  { IDC_ENCODING_ISO88598, L"ISO-8859-8", IDS_ENCODING_HEBREW },
+  { IDC_ENCODING_ISO88596, L"ISO-8859-6", IDS_ENCODING_ARABIC },
   { IDC_ENCODING_WINDOWS1255, L"windows-1255", IDS_ENCODING_HEBREW },
+  { IDC_ENCODING_ISO88598I, L"ISO-8859-8-I", IDS_ENCODING_HEBREW },
+  { IDC_ENCODING_ISO88598, L"ISO-8859-8", IDS_ENCODING_HEBREW },
   { IDC_ENCODING_WINDOWS1258, L"windows-1258", IDS_ENCODING_VIETNAMESE },
   { IDC_ENCODING_ISO88594, L"ISO-8859-4", IDS_ENCODING_BALTIC },
   { IDC_ENCODING_ISO885913, L"ISO-8859-13", IDS_ENCODING_BALTIC },
@@ -72,7 +71,8 @@ static CanonicalEncodingData canonical_encoding_names[] = {
 static const int canonical_encoding_names_length =
     arraysize(canonical_encoding_names);
 
-typedef std::map<int, std::pair<const wchar_t*, int> > IdToCanonicalEncodingNameMapType;
+typedef std::map<int, std::pair<const wchar_t*, int> >
+    IdToCanonicalEncodingNameMapType;
 typedef std::map<const std::wstring, int> CanonicalEncodingNameToIdMapType;
 
 class CanonicalEncodingMap {
@@ -86,20 +86,22 @@ class CanonicalEncodingMap {
     return &locale_dependent_encoding_ids_;
   }
 
-  std::vector<int>* const current_display_encoding_ids() {
-    return &current_display_encoding_ids_;
+  std::vector<CharacterEncoding::EncodingInfo>* const
+      current_display_encodings() {
+    return &current_display_encodings_;
   }
 
  private:
   scoped_ptr<IdToCanonicalEncodingNameMapType> id_to_encoding_name_map_;
   scoped_ptr<CanonicalEncodingNameToIdMapType> encoding_name_to_id_map_;
   std::vector<int> locale_dependent_encoding_ids_;
-  std::vector<int> current_display_encoding_ids_;
+  std::vector<CharacterEncoding::EncodingInfo> current_display_encodings_;
 
   DISALLOW_EVIL_CONSTRUCTORS(CanonicalEncodingMap);
 };
 
-const IdToCanonicalEncodingNameMapType* CanonicalEncodingMap::GetIdToCanonicalEncodingNameMapData() {
+const IdToCanonicalEncodingNameMapType*
+    CanonicalEncodingMap::GetIdToCanonicalEncodingNameMapData() {
   // Testing and building map is not thread safe, this function is supposed to
   // only run in UI thread. Myabe I should add a lock in here for making it as
   // thread safe.
@@ -115,7 +117,8 @@ const IdToCanonicalEncodingNameMapType* CanonicalEncodingMap::GetIdToCanonicalEn
   return id_to_encoding_name_map_.get();
 }
 
-const CanonicalEncodingNameToIdMapType* CanonicalEncodingMap::GetCanonicalEncodingNameToIdMapData() {
+const CanonicalEncodingNameToIdMapType*
+    CanonicalEncodingMap::GetCanonicalEncodingNameToIdMapData() {
   if (!encoding_name_to_id_map_.get()) {
     encoding_name_to_id_map_.reset(new CanonicalEncodingNameToIdMapType);
     for (int i = 0; i < canonical_encoding_names_length; ++i) {
@@ -130,62 +133,36 @@ const CanonicalEncodingNameToIdMapType* CanonicalEncodingMap::GetCanonicalEncodi
 // encoding names.
 static CanonicalEncodingMap canonical_encoding_name_map_singleton;
 
-// Static.
-// Get encoding command id according to input encoding name. If the name is
-// valid, return corresponding encoding command id. Otherwise return 0;
-static int GetCommandIdByCanonicalEncodingName(
-    const std::wstring& encoding_name) {
-  const CanonicalEncodingNameToIdMapType* map =
-      canonical_encoding_name_map_singleton.
-          GetCanonicalEncodingNameToIdMapData();
-  DCHECK(map);
-
-  CanonicalEncodingNameToIdMapType::const_iterator found_id =
-      map->find(encoding_name);
-  if (found_id != map->end())
-    return found_id->second;
-  return 0;
-}
-
 const int default_encoding_menus[] = {
   IDC_ENCODING_UTF16LE,
-  0,
   IDC_ENCODING_ISO88591,
   IDC_ENCODING_WINDOWS1252,
-  0,
-  IDC_ENCODING_GB2312,
+  IDC_ENCODING_GBK,
   IDC_ENCODING_GB18030,
   IDC_ENCODING_BIG5,
   IDC_ENCODING_BIG5HKSCS,
-  0,
   IDC_ENCODING_KOREAN,
-  0,
   IDC_ENCODING_SHIFTJIS,
-  IDC_ENCODING_ISO2022JP,
   IDC_ENCODING_EUCJP,
-  0,
+  IDC_ENCODING_ISO2022JP,
   IDC_ENCODING_THAI,
-  0,
   IDC_ENCODING_ISO885915,
   IDC_ENCODING_MACINTOSH,
   IDC_ENCODING_ISO88592,
   IDC_ENCODING_WINDOWS1250,
-  0,
   IDC_ENCODING_ISO88595,
   IDC_ENCODING_WINDOWS1251,
   IDC_ENCODING_KOI8R,
   IDC_ENCODING_KOI8U,
-  0,
   IDC_ENCODING_ISO88597,
   IDC_ENCODING_WINDOWS1253,
-  IDC_ENCODING_ISO88599,
   IDC_ENCODING_WINDOWS1254,
-  IDC_ENCODING_ISO88596,
   IDC_ENCODING_WINDOWS1256,
-  IDC_ENCODING_ISO88598,
+  IDC_ENCODING_ISO88596,
   IDC_ENCODING_WINDOWS1255,
+  IDC_ENCODING_ISO88598I,
+  IDC_ENCODING_ISO88598,
   IDC_ENCODING_WINDOWS1258,
-
   IDC_ENCODING_ISO88594,
   IDC_ENCODING_ISO885913,
   IDC_ENCODING_WINDOWS1257,
@@ -201,12 +178,13 @@ const int default_encoding_menus_length = arraysize(default_encoding_menus);
 // comma, get available encoding ids and save them to |available_list|.
 // The parameter |maximum_size| indicates maximum size of encoding items we
 // want to get from the |encoding_list|.
-static void ParseEncodingListSeparatedWithComma(
+void ParseEncodingListSeparatedWithComma(
     const std::wstring& encoding_list, std::vector<int>* const available_list,
     size_t maximum_size) {
   WStringTokenizer tokenizer(encoding_list, L",");
   while (tokenizer.GetNext()) {
-    int id = GetCommandIdByCanonicalEncodingName(tokenizer.token());
+    int id = CharacterEncoding::GetCommandIdByCanonicalEncodingName(
+        tokenizer.token());
     // Ignore invalid encoding.
     if (!id)
       continue;
@@ -220,7 +198,8 @@ std::wstring GetEncodingDisplayName(std::wstring encoding_name,
                                     int category_string_id) {
   std::wstring category_name = l10n_util::GetString(category_string_id);
   if (category_string_id != IDS_ENCODING_KOREAN &&
-      category_string_id != IDS_ENCODING_THAI) {
+      category_string_id != IDS_ENCODING_THAI &&
+      category_string_id != IDS_ENCODING_TURKISH) {
     return l10n_util::GetStringF(IDS_ENCODING_DISPLAY_TEMPLATE,
                                  category_name,
                                  encoding_name);
@@ -228,7 +207,47 @@ std::wstring GetEncodingDisplayName(std::wstring encoding_name,
   return category_name;
 }
 
+int GetEncodingCategoryStringIdByCommandId(int id) {
+  const IdToCanonicalEncodingNameMapType* map =
+      canonical_encoding_name_map_singleton.
+          GetIdToCanonicalEncodingNameMapData();
+  DCHECK(map);
+
+  IdToCanonicalEncodingNameMapType::const_iterator found_name = map->find(id);
+  if (found_name != map->end())
+    return found_name->second.second;
+  return 0;
+}
+
+std::wstring GetEncodingCategoryStringByCommandId(int id) {
+  int category_id = GetEncodingCategoryStringIdByCommandId(id);
+  if (category_id)
+    return l10n_util::GetString(category_id);
+  return std::wstring();
+}
+
 }  // namespace
+
+CharacterEncoding::EncodingInfo::EncodingInfo(int id)
+    : encoding_id(id) {
+  encoding_category_name = GetEncodingCategoryStringByCommandId(id),
+  encoding_display_name = GetCanonicalEncodingDisplayNameByCommandId(id);
+}
+
+// Static.
+int CharacterEncoding::GetCommandIdByCanonicalEncodingName(
+    const std::wstring& encoding_name) {
+  const CanonicalEncodingNameToIdMapType* map =
+      canonical_encoding_name_map_singleton.
+          GetCanonicalEncodingNameToIdMapData();
+  DCHECK(map);
+
+  CanonicalEncodingNameToIdMapType::const_iterator found_id =
+      map->find(encoding_name);
+  if (found_id != map->end())
+    return found_id->second;
+  return 0;
+}
 
 // Static.
 std::wstring CharacterEncoding::GetCanonicalEncodingNameByCommandId(int id) {
@@ -281,6 +300,13 @@ std::wstring CharacterEncoding::GetCanonicalEncodingDisplayNameByIndex(
 }
 
 // Static.
+int CharacterEncoding::GetEncodingCommandIdByIndex(int index) {
+  if (index < canonical_encoding_names_length)
+    return canonical_encoding_names[index].resource_id;
+  return 0;
+}
+
+// Static.
 std::wstring CharacterEncoding::GetCanonicalEncodingNameByAliasName(
     const std::wstring& alias_name) {
   // If the input alias_name is already canonical encoding name, just return it.
@@ -316,13 +342,15 @@ std::wstring CharacterEncoding::GetCanonicalEncodingNameByAliasName(
 // FireFox, we always put UTF-8 as toppest position, after then put user
 // recently selected encodings, then put local dependent encoding items.
 // At last, we put all rest encoding items.
-const std::vector<int>* CharacterEncoding::GetCurrentDisplayEncodings(
+const std::vector<CharacterEncoding::EncodingInfo>*
+    CharacterEncoding::GetCurrentDisplayEncodings(
+    const std::wstring& locale,
     const std::wstring& locale_encodings,
     const std::wstring& recently_select_encodings) {
   std::vector<int>* const locale_dependent_encoding_list =
       canonical_encoding_name_map_singleton.locale_dependent_encoding_ids();
-  std::vector<int>* const encoding_list =
-      canonical_encoding_name_map_singleton.current_display_encoding_ids();
+  std::vector<CharacterEncoding::EncodingInfo>* const encoding_list =
+      canonical_encoding_name_map_singleton.current_display_encodings();
 
   // Initialize locale dependent static encoding list.
   if (locale_dependent_encoding_list->empty() && !locale_encodings.empty())
@@ -339,7 +367,7 @@ const std::vector<int>* CharacterEncoding::GetCurrentDisplayEncodings(
     // Clear old encoding list since user recently selected encodings changed.
     encoding_list->clear();
     // Always add UTF-8 to first encoding position.
-    encoding_list->push_back(IDC_ENCODING_UTF8);
+    encoding_list->push_back(EncodingInfo(IDC_ENCODING_UTF8));
     std::set<int> inserted_encoding;
     inserted_encoding.insert(IDC_ENCODING_UTF8);
 
@@ -354,8 +382,7 @@ const std::vector<int>* CharacterEncoding::GetCurrentDisplayEncodings(
     recently_select_encoding_list.insert(recently_select_encoding_list.begin(),
         locale_dependent_encoding_list->begin(),
         locale_dependent_encoding_list->end());
-    std::vector<int>::const_iterator it;
-    for (it = recently_select_encoding_list.begin();
+    for (std::vector<int>::iterator it = recently_select_encoding_list.begin();
          it != recently_select_encoding_list.end(); ++it) {
         // Test whether we have met this encoding id.
         bool ok = inserted_encoding.insert(*it).second;
@@ -363,27 +390,40 @@ const std::vector<int>* CharacterEncoding::GetCurrentDisplayEncodings(
         // happened, but just in case some one manually edit preference file.
         if (!ok)
           continue;
-        encoding_list->push_back(*it);
+        encoding_list->push_back(EncodingInfo(*it));
     }
     // Append a separator;
-    encoding_list->push_back(0);
+    encoding_list->push_back(EncodingInfo(0));
 
-    // Add those encodings which are in default_encoding_menus and does not
-    // override with locale-dependent encodings list.
-    bool previous_is_separator = true;
+    // We need to keep "Unicode (UTF-16LE)" always at the top (among the rest
+    // of encodings) instead of being sorted along with other encodings. So if
+    // "Unicode (UTF-16LE)" is already in previous encodings, sort the rest
+    // of encodings. Otherwise Put "Unicode (UTF-16LE)" on the first of the
+    // rest of encodings, skip "Unicode (UTF-16LE)" and sort all left encodings.
+    int start_sorted_index = encoding_list->size();
+    if (inserted_encoding.find(IDC_ENCODING_UTF16LE) ==
+        inserted_encoding.end()) {
+      encoding_list->push_back(EncodingInfo(IDC_ENCODING_UTF16LE));
+      inserted_encoding.insert(IDC_ENCODING_UTF16LE);
+      start_sorted_index++;
+    }
+
+    // Add the rest of encodings that are neither in the static encoding list
+    // nor in the list of recently selected encodings.
+    // Build the encoding list sorted in the current locale sorting order.
     for (int i = 0; i < default_encoding_menus_length; ++i) {
       int id = default_encoding_menus[i];
-      if (id) {
-        // We have inserted this encoding, skip it.
-        if (inserted_encoding.find(id) != inserted_encoding.end())
-          continue;
-        encoding_list->push_back(id);
-        previous_is_separator = false;
-      } else if (!previous_is_separator) {
-        encoding_list->push_back(0);
-        previous_is_separator = true;
-      }
+      // We have inserted this encoding, skip it.
+      if (inserted_encoding.find(id) != inserted_encoding.end())
+        continue;
+      encoding_list->push_back(EncodingInfo(id));
     }
+    // Sort the encoding list.
+    l10n_util::SortVectorWithStringKey(locale,
+                                       encoding_list,
+                                       start_sorted_index,
+                                       encoding_list->size(),
+                                       true);
   }
   DCHECK(!encoding_list->empty());
   return encoding_list;
@@ -433,4 +473,3 @@ bool CharacterEncoding::UpdateRecentlySelectdEncoding(
   }
   return true;
 }
-

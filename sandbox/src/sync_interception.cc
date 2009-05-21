@@ -52,9 +52,7 @@ HANDLE WINAPI TargetCreateEventW(CreateEventWFunction orig_CreateEvent,
     if (SBOX_ALL_OK != code)
       break;
 
-    if (NULL == answer.handle)
-      break;
-
+    ::SetLastError(answer.win32_result);
     return answer.handle;
   } while (false);
 
@@ -98,9 +96,7 @@ HANDLE WINAPI TargetOpenEventW(OpenEventWFunction orig_OpenEvent,
     if (SBOX_ALL_OK != code)
       break;
 
-    if (NULL == answer.handle)
-      break;
-
+    ::SetLastError(answer.win32_result);
     return answer.handle;
   } while (false);
 
@@ -109,4 +105,3 @@ HANDLE WINAPI TargetOpenEventW(OpenEventWFunction orig_OpenEvent,
 }
 
 }  // namespace sandbox
-

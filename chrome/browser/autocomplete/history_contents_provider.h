@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H__
-#define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H__
+#ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
+#define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
 
 #include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
 
 // HistoryContentsProvider is an AutocompleteProvider that provides results from
@@ -21,14 +21,12 @@ class HistoryContentsProvider : public AutocompleteProvider {
   HistoryContentsProvider(ACProviderListener* listener, Profile* profile)
       : AutocompleteProvider(listener, profile, "HistoryContents"),
         have_results_(false) {
-    DCHECK(profile);
   }
 
   // As necessary asks the history service for the relevant results. When
   // done SetResults is invoked.
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes,
-                     bool synchronous_only);
+                     bool minimal_changes);
 
   virtual void Stop();
 
@@ -39,7 +37,7 @@ class HistoryContentsProvider : public AutocompleteProvider {
 
   // The maximum match count we'll report. If the db_match_count is greater
   // than this, it will be clamped to this result.
-  static const int kMaxMatchCount = 50;
+  static const size_t kMaxMatchCount = 50;
 
  private:
   void QueryComplete(HistoryService::Handle handle,
@@ -68,7 +66,7 @@ class HistoryContentsProvider : public AutocompleteProvider {
 
   // Converts a BookmarkModel::TitleMatch to a QueryResult and adds it to
   // results_.
-  void AddBookmarkTitleMatchToResults(const BookmarkModel::TitleMatch& match);
+  void AddBookmarkTitleMatchToResults(const bookmark_utils::TitleMatch& match);
 
   CancelableRequestConsumerT<int, 0> request_consumer_;
 
@@ -95,4 +93,4 @@ class HistoryContentsProvider : public AutocompleteProvider {
   DISALLOW_EVIL_CONSTRUCTORS(HistoryContentsProvider);
 };
 
-#endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H__
+#endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,13 +22,15 @@ class Thread : PlatformThread::Delegate {
   struct Options {
     // Specifies the type of message loop that will be allocated on the thread.
     MessageLoop::Type message_loop_type;
-    
+
     // Specifies the maximum stack size that the thread is allowed to use.
     // This does not necessarily correspond to the thread's initial stack size.
     // A value of 0 indicates that the default maximum should be used.
     size_t stack_size;
 
     Options() : message_loop_type(MessageLoop::TYPE_DEFAULT), stack_size(0) {}
+    Options(MessageLoop::Type type, size_t size)
+        : message_loop_type(type), stack_size(size) {}
   };
 
   // Constructor.
@@ -101,6 +103,13 @@ class Thread : PlatformThread::Delegate {
   // The native thread handle.
   PlatformThreadHandle thread_handle() { return thread_; }
 
+  // The thread ID.
+  PlatformThreadId thread_id() const { return thread_id_; }
+
+  // Returns true if the thread has been started, and not yet stopped.
+  // When a thread is running, the thread_id_ is non-zero.
+  bool IsRunning() const { return thread_id_ != 0; }
+
  protected:
   // Called just prior to starting the message loop
   virtual void Init() {}
@@ -130,8 +139,8 @@ class Thread : PlatformThread::Delegate {
   // by the created thread.
   MessageLoop* message_loop_;
 
-  // Our thread's ID.  Used for debugging purposes.
-  int thread_id_;
+  // Our thread's ID.
+  PlatformThreadId thread_id_;
 
   // The name of the thread.  Used for debugging purposes.
   std::string name_;
@@ -144,4 +153,3 @@ class Thread : PlatformThread::Delegate {
 }  // namespace base
 
 #endif  // BASE_THREAD_H_
-

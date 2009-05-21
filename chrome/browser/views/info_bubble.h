@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_VIEWS_INFO_BUBBLE_H_
 
 #include "chrome/common/slide_animation.h"
-#include "chrome/views/hwnd_view_container.h"
 #include "chrome/views/view.h"
+#include "chrome/views/widget/widget_win.h"
 
 // InfoBubble is used to display an arbitrary view above all other windows.
 // Think of InfoBubble as a tooltip that allows you to embed an arbitrary view
@@ -18,32 +18,37 @@
 // (or rather ContentView) insets the content view for you, so that the
 // content typically shouldn't have any additional margins around the view.
 
-class BrowserWindow;
 class InfoBubble;
+namespace views {
+class Window;
+}
 
 class InfoBubbleDelegate {
  public:
   // Called when the InfoBubble is closing and is about to be deleted.
-  virtual void InfoBubbleClosing(InfoBubble* info_bubble) = 0;
+  // |closed_by_escape| is true if the close is the result of the user pressing
+  // escape.
+  virtual void InfoBubbleClosing(InfoBubble* info_bubble,
+                                 bool closed_by_escape) = 0;
 
   // Whether the InfoBubble should be closed when the Esc key is pressed.
   virtual bool CloseOnEscape() = 0;
 };
 
-class InfoBubble : public ChromeViews::HWNDViewContainer,
+class InfoBubble : public views::WidgetWin,
                    public AnimationDelegate {
  public:
   // Shows the InfoBubble. The InfoBubble is parented to parent_hwnd, contains
   // the View content and positioned relative to the screen position
   // position_relative_to. Show takes ownership of content and deletes the
-  // create InfoBubble when another window is activated. You can explicitly
+  // created InfoBubble when another window is activated. You can explicitly
   // close the bubble by invoking Close.  A delegate may optionally be provided
   // to be notified when the InfoBubble is closed and to prevent the InfoBubble
   // from being closed when the Escape key is pressed (which is the default
    // behavior if there is no delegate).
   static InfoBubble* Show(HWND parent_hwnd,
                           const gfx::Rect& position_relative_to,
-                          ChromeViews::View* content,
+                          views::View* content,
                           InfoBubbleDelegate* delegate);
 
   InfoBubble();
@@ -52,7 +57,7 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
   // Creates the InfoBubble.
   void Init(HWND parent_hwnd,
             const gfx::Rect& position_relative_to,
-            ChromeViews::View* content);
+            views::View* content);
 
   // Sets the delegate for that InfoBubble.
   void SetDelegate(InfoBubbleDelegate* delegate) { delegate_ = delegate; }
@@ -67,7 +72,7 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
   virtual void Close();
 
   // AcceleratorTarget method:
-  virtual bool AcceleratorPressed(const ChromeViews::Accelerator& accelerator);
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
 
   // AnimationDelegate Implementation
   virtual void AnimationProgressed(const Animation* animation);
@@ -77,7 +82,7 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
   // InfoBubble::CreateContentView() creates one of these. ContentView houses
   // the supplied content as its only child view, renders the arrow/border of
   // the bubble and sizes the content.
-  class ContentView : public ChromeViews::View {
+  class ContentView : public views::View {
    public:
     // Possible edges the arrow is aligned along.
     enum ArrowEdge {
@@ -89,7 +94,7 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
 
     // Creates the ContentView. The supplied view is added as the only child of
     // the ContentView.
-    ContentView(ChromeViews::View* content, InfoBubble* host);
+    ContentView(views::View* content, InfoBubble* host);
 
     virtual ~ContentView() {}
 
@@ -107,14 +112,10 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
 
     // Returns the preferred size, which is the sum of the preferred size of
     // the content and the border/arrow.
-    virtual void GetPreferredSize(CSize* pref);
+    virtual gfx::Size GetPreferredSize();
 
     // Positions the content relative to the border.
     virtual void Layout();
-
-    virtual void DidChangeBounds(const CRect& previous, const CRect& current) {
-      Layout();
-    }
 
     // Return the mask for the content view.
     HRGN GetMask(const CSize& size);
@@ -147,14 +148,18 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
   };
 
   // Creates and return a new ContentView containing content.
-  virtual ContentView* CreateContentView(ChromeViews::View* content);
-
-  // Returns the BrowserWindow that owns this InfoBubble.
-  BrowserWindow* GetHostingWindow();
+  virtual ContentView* CreateContentView(views::View* content);
 
  private:
+  // Closes the window notifying the delegate. |closed_by_escape| is true if
+  // the close is the result of pressing escape.
+  void Close(bool closed_by_escape);
+
   // The delegate notified when the InfoBubble is closed.
   InfoBubbleDelegate* delegate_;
+
+  // The window that this InfoBubble is parented to.
+  views::Window* parent_;
 
   // The content view contained by the infobubble.
   ContentView* content_view_;
@@ -162,8 +167,10 @@ class InfoBubble : public ChromeViews::HWNDViewContainer,
   // The fade-in animation.
   scoped_ptr<SlideAnimation> fade_animation_;
 
+  // Have we been closed?
+  bool closed_;
+
   DISALLOW_COPY_AND_ASSIGN(InfoBubble);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_INFO_BUBBLE_H_
-

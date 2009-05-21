@@ -10,20 +10,28 @@
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/net/dns_host_info.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/dns_host_info.h"
+#include "chrome/browser/net/referrer.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/session_startup_pref.h"
-#include "chrome/common/notification_types.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/dns_resolution_observer.h"
+
+using base::TimeDelta;
 
 namespace chrome_browser_net {
 
 static void DiscardAllPrefetchState();
+static void DnsMotivatedPrefetch(const std::string& hostname,
+                                 DnsHostInfo::ResolutionMotivation motivation);
+static void DnsPrefetchMotivatedList(
+    const NameList& hostnames,
+    DnsHostInfo::ResolutionMotivation motivation);
 
 //------------------------------------------------------------------------------
 // This section contains all the globally accessable API entry points for the
@@ -51,6 +59,7 @@ void OnTheRecord(bool enable) {
 
 void RegisterPrefs(PrefService* local_state) {
   local_state->RegisterListPref(prefs::kDnsStartupPrefetchList);
+  local_state->RegisterListPref(prefs::kDnsHostReferralList);
 }
 
 void RegisterUserPrefs(PrefService* user_prefs) {
@@ -62,29 +71,34 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 static DnsMaster* dns_master;
 
 // This API is only used in the browser process.
+// It is called from an IPC message originating in the renderer.  It currently
+// includes both Page-Scan, and Link-Hover prefetching.
+// TODO(jar): Separate out link-hover prefetching, and page-scan results.
 void DnsPrefetchList(const NameList& hostnames) {
-  if (!dns_prefetch_enabled)
-    return;
-  DCHECK(NULL != dns_master);
-  if (NULL != dns_master)
-    dns_master->ResolveList(hostnames);
+  DnsPrefetchMotivatedList(hostnames, DnsHostInfo::PAGE_SCAN_MOTIVATED);
 }
 
-// This API is used by the autocomplete popup box (wher URLs are typed).
-void DnsPrefetchUrlString(const url_canon::UTF16String& url_string) {
+static void DnsPrefetchMotivatedList(
+    const NameList& hostnames,
+    DnsHostInfo::ResolutionMotivation motivation) {
+  if (!dns_prefetch_enabled || NULL == dns_master)
+    return;
+  dns_master->ResolveList(hostnames, motivation);
+}
+
+// This API is used by the autocomplete popup box (where URLs are typed).
+void DnsPrefetchUrl(const GURL& url) {
   if (!dns_prefetch_enabled  || NULL == dns_master)
     return;
-  GURL gurl(url_string);
-  if (gurl.is_valid()) {
-    DnsPrefetch(gurl.host());
-  }
+  if (url.is_valid())
+    DnsMotivatedPrefetch(url.host(), DnsHostInfo::OMNIBOX_MOTIVATED);
 }
 
-// This API currently used after translating a url_string.
-void DnsPrefetch(const std::string& hostname) {
+static void DnsMotivatedPrefetch(const std::string& hostname,
+                                 DnsHostInfo::ResolutionMotivation motivation) {
   if (!dns_prefetch_enabled || NULL == dns_master || !hostname.size())
     return;
-  dns_master->Resolve(hostname);
+  dns_master->Resolve(hostname, motivation);
 }
 
 //------------------------------------------------------------------------------
@@ -95,11 +109,20 @@ void DnsPrefetch(const std::string& hostname) {
 //------------------------------------------------------------------------------
 
 // This function determines if there was a saving by prefetching the hostname
-// for which the host_info is supplied.
-static bool AcruePrefetchBenefits(DnsHostInfo* host_info) {
+// for which the navigation_info is supplied.
+static bool AccruePrefetchBenefits(const GURL& referrer,
+                                   DnsHostInfo* navigation_info) {
   if (!dns_prefetch_enabled || NULL == dns_master)
     return false;
-  return dns_master->AcruePrefetchBenefits(host_info);
+  return dns_master->AccruePrefetchBenefits(referrer, navigation_info);
+}
+
+// When we navigate, we may know in advance some other domains that will need to
+// be resolved.  This function initiates those side effects.
+static void NavigatingTo(const std::string& host_name) {
+  if (!dns_prefetch_enabled || NULL == dns_master)
+    return;
+  dns_master->NavigatingTo(host_name);
 }
 
 // The observer class needs to connect starts and finishes of HTTP network
@@ -114,14 +137,17 @@ class PrefetchObserver : public net::DnsResolutionObserver {
   PrefetchObserver();
   ~PrefetchObserver();
 
-  virtual void OnStartResolution(const std::string& name, void* context);
-  virtual void OnFinishResolutionWithStatus(bool was_resolved, void* context);
+  virtual void OnStartResolution(const std::string& host_name,
+                                 void* context);
+  virtual void OnFinishResolutionWithStatus(bool was_resolved,
+                                            const GURL& referrer,
+                                            void* context);
 
   static void DnsGetFirstResolutionsHtml(std::string* output);
   static void SaveStartupListAsPref(PrefService* local_state);
 
  private:
-  static void StartupListAppend(const DnsHostInfo& host_info);
+  static void StartupListAppend(const DnsHostInfo& navigation_info);
 
   // We avoid using member variables to better comply with the style guide.
   // We had permission to instantiate only a very minimal class as a global
@@ -157,49 +183,56 @@ PrefetchObserver::~PrefetchObserver() {
   lock = NULL;
 }
 
-void PrefetchObserver::OnStartResolution(const std::string& name,
+void PrefetchObserver::OnStartResolution(const std::string& host_name,
                                          void* context) {
-  DCHECK_NE(0, name.length());
-  DnsHostInfo host_info;
-  host_info.SetHostname(name);
-  host_info.SetStartedState();
+  DCHECK_NE(0U, host_name.length());
+  DnsHostInfo navigation_info;
+  navigation_info.SetHostname(host_name);
+  navigation_info.SetStartedState();
+
+  NavigatingTo(host_name);
 
   AutoLock auto_lock(*lock);
-  (*resolutions)[context] = host_info;
+  (*resolutions)[context] = navigation_info;
 }
 
 void PrefetchObserver::OnFinishResolutionWithStatus(bool was_resolved,
+                                                    const GURL& referrer,
                                                     void* context) {
-  DnsHostInfo host_info;
+  DnsHostInfo navigation_info;
   size_t startup_count;
   {
     AutoLock auto_lock(*lock);
     ObservedResolutionMap::iterator it = resolutions->find(context);
     if (resolutions->end() == it) {
+      DCHECK(false);
       return;
     }
-    host_info = it->second;
+    navigation_info = it->second;
     resolutions->erase(it);
     startup_count = first_resolutions->size();
   }
-  host_info.SetFinishedState(was_resolved);  // Get timing info
-  AcruePrefetchBenefits(&host_info);  // Update prefetch benefit (if any).
+  navigation_info.SetFinishedState(was_resolved);  // Get timing info
+  AccruePrefetchBenefits(referrer, &navigation_info);
   if (kStartupResolutionCount <= startup_count || !was_resolved)
     return;
-  StartupListAppend(host_info);
+  // TODO(jar): Don't add host to our list if it is a non-linked lookup, and
+  // instead rely on Referrers to pull this in automatically with the enclosing
+  // page load (once we start to persist elements of our referrer tree).
+  StartupListAppend(navigation_info);
 }
 
 // static
-void PrefetchObserver::StartupListAppend(const DnsHostInfo& host_info) {
+void PrefetchObserver::StartupListAppend(const DnsHostInfo& navigation_info) {
   if (!on_the_record_switch || NULL == dns_master)
     return;
   AutoLock auto_lock(*lock);
   if (kStartupResolutionCount <= first_resolutions->size())
     return;  // Someone just added the last item.
-  std::string host_name = host_info.hostname();
+  std::string host_name = navigation_info.hostname();
   if (first_resolutions->find(host_name) != first_resolutions->end())
     return;  // We already have this hostname listed.
-  (*first_resolutions)[host_name] = host_info;
+  (*first_resolutions)[host_name] = navigation_info;
 }
 
 // static
@@ -216,7 +249,7 @@ void PrefetchObserver::SaveStartupListAsPref(PrefService* local_state) {
   for (Results::iterator it = first_resolutions->begin();
        it != first_resolutions->end();
        it++) {
-    const std::wstring hostname = ASCIIToWide(it->first);
+    const std::string hostname = it->first;
     startup_list->Append(Value::CreateStringValue(hostname));
   }
 }
@@ -257,16 +290,16 @@ class OffTheRecordObserver : public NotificationObserver {
   void Register() {
     NotificationService* service = NotificationService::current();
     // TODO(tc): These notification observers are never removed.
-    service->AddObserver(this, NOTIFY_BROWSER_CLOSED,
+    service->AddObserver(this, NotificationType::BROWSER_CLOSED,
                          NotificationService::AllSources());
-    service->AddObserver(this, NOTIFY_BROWSER_OPENED,
+    service->AddObserver(this, NotificationType::BROWSER_OPENED,
                          NotificationService::AllSources());
   }
 
   void Observe(NotificationType type, const NotificationSource& source,
                const NotificationDetails& details) {
-    switch (type) {
-      case NOTIFY_BROWSER_OPENED:
+    switch (type.value) {
+      case NotificationType::BROWSER_OPENED:
         if (!Source<Browser>(source)->profile()->IsOffTheRecord())
           break;
         {
@@ -276,7 +309,7 @@ class OffTheRecordObserver : public NotificationObserver {
         OnTheRecord(false);
         break;
 
-      case NOTIFY_BROWSER_CLOSED:
+      case NotificationType::BROWSER_CLOSED:
         if (!Source<Browser>(source)->profile()->IsOffTheRecord())
           break;  // Ignore ordinary windows.
         {
@@ -299,7 +332,7 @@ class OffTheRecordObserver : public NotificationObserver {
   Lock lock_;
   int count_off_the_record_windows_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(OffTheRecordObserver);
+  DISALLOW_COPY_AND_ASSIGN(OffTheRecordObserver);
 };
 
 // TODO(jar): Use static class object so that I don't have to get the
@@ -325,6 +358,7 @@ void DnsPrefetchGetHtmlInfo(std::string* output) {
     } else {
       dns_master->GetHtmlInfo(output);
       PrefetchObserver::DnsGetFirstResolutionsHtml(output);
+      dns_master->GetHtmlReferrerLists(output);
     }
   }
   output->append("</body></html>");
@@ -346,38 +380,32 @@ void InitDnsPrefetch(PrefService* user_prefs) {
   const TimeDelta kAllowableShutdownTime(TimeDelta::FromSeconds(10));
   DCHECK(NULL == dns_master);
   if (!dns_master) {
-    DnsMaster* new_master = new DnsMaster(kAllowableShutdownTime);
-    if (InterlockedCompareExchangePointer(
-        reinterpret_cast<PVOID*>(&dns_master), new_master, NULL)) {
-      delete new_master;
-    } else {
-      // We did the initialization, so we should prime the pump, and set up
-      // the DNS resolution system to run.
-      off_the_record_observer.Register();
+    dns_master = new DnsMaster();
+    // We did the initialization, so we should prime the pump, and set up
+    // the DNS resolution system to run.
+    off_the_record_observer.Register();
 
-      if (user_prefs) {
-        bool enabled = user_prefs->GetBoolean(prefs::kDnsPrefetchingEnabled);
-        EnableDnsPrefetch(enabled);
-      }
-
-      DLOG(INFO) << "DNS Prefetch service started";
-
-      // Start observing real HTTP stack resolutions.
-      net::AddDnsResolutionObserver(&dns_resolution_observer);
+    if (user_prefs) {
+      bool enabled = user_prefs->GetBoolean(prefs::kDnsPrefetchingEnabled);
+      EnableDnsPrefetch(enabled);
     }
+
+    DLOG(INFO) << "DNS Prefetch service started";
+
+    // Start observing real HTTP stack resolutions.
+    net::AddDnsResolutionObserver(&dns_resolution_observer);
   }
 }
 
-void ShutdownDnsPrefetch() {
+void EnsureDnsPrefetchShutdown() {
+  if (NULL != dns_master)
+    dns_master->Shutdown();
+}
+
+void FreeDnsPrefetchResources() {
   DCHECK(NULL != dns_master);
-  DnsMaster* master = dns_master;
+  delete dns_master;
   dns_master = NULL;
-  if (master->ShutdownSlaves()) {
-    delete master;
-  } else {
-    // Leak instance if shutdown problem.
-    DCHECK(0);
-  }
 }
 
 static void DiscardAllPrefetchState() {
@@ -396,9 +424,8 @@ void SaveHostNamesForNextStartup(PrefService* local_state) {
   PrefetchObserver::SaveStartupListAsPref(local_state);
 }
 
-// TODO(jar): correct typo in name  change ...Pretch... to ...Prefetch...
-void DnsPretchHostNamesAtStartup(PrefService* user_prefs,
-                                 PrefService* local_state) {
+void DnsPrefetchHostNamesAtStartup(PrefService* user_prefs,
+                                   PrefService* local_state) {
   NameList hostnames;
   // Prefetch DNS for hostnames we learned about during last session.
   // This may catch secondary hostnames, pulled in by the homepages.  It will
@@ -410,9 +437,9 @@ void DnsPretchHostNamesAtStartup(PrefService* user_prefs,
     for (ListValue::iterator it = startup_list->begin();
          it != startup_list->end();
          it++) {
-      std::wstring w_hostname;
-      (*it)->GetAsString(&w_hostname);
-      hostnames.push_back(WideToASCII(w_hostname));
+      std::string hostname;
+      (*it)->GetAsString(&hostname);
+      hostnames.push_back(hostname);
     }
   }
 
@@ -429,11 +456,37 @@ void DnsPretchHostNamesAtStartup(PrefService* user_prefs,
   }
 
   if (hostnames.size() > 0)
-    DnsPrefetchList(hostnames);
-  else
-    DnsPrefetch(std::string("www.google.com"));  // Start a thread.
+    DnsPrefetchMotivatedList(hostnames, DnsHostInfo::STARTUP_LIST_MOTIVATED);
+  else  // Start a thread.
+    DnsMotivatedPrefetch(std::string("www.google.com"),
+                         DnsHostInfo::STARTUP_LIST_MOTIVATED);
 }
 
+//------------------------------------------------------------------------------
+// Functions to persist and restore host references, that are used to direct DNS
+// prefetch of names (probably) used in subresources when the major resource is
+// navigated towards.
+
+void SaveSubresourceReferrers(PrefService* local_state) {
+  if (NULL == dns_master)
+    return;
+  ListValue* referral_list =
+      local_state->GetMutableList(prefs::kDnsHostReferralList);
+  dns_master->SerializeReferrers(referral_list);
+}
+
+void RestoreSubresourceReferrers(PrefService* local_state) {
+  if (NULL == dns_master)
+    return;
+  ListValue* referral_list =
+      local_state->GetMutableList(prefs::kDnsHostReferralList);
+  dns_master->DeserializeReferrers(*referral_list);
+}
+
+void TrimSubresourceReferrers() {
+  if (NULL == dns_master)
+    return;
+  dns_master->TrimReferrers();
+}
 
 }  // namespace chrome_browser_net
-

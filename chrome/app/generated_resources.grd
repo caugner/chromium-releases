@@ -6,11 +6,12 @@ each locale. -->
 <grit base_dir="." latest_public_release="0" current_release="1"
       source_lang_id="en" enc_check="möl">
   <outputs>
-    <output filename="generated_resources.h" type="rc_header">
+    <output filename="grit/generated_resources.h" type="rc_header">
       <emit emit_type='prepend'></emit>
     </output>
     <output filename="generated_resources_ar.rc" type="rc_all" lang="ar" />
     <output filename="generated_resources_bg.rc" type="rc_all" lang="bg" />
+    <output filename="generated_resources_bn.rc" type="rc_all" lang="bn" />
     <output filename="generated_resources_ca.rc" type="rc_all" lang="ca" />
     <output filename="generated_resources_cs.rc" type="rc_all" lang="cs" />
     <output filename="generated_resources_da.rc" type="rc_all" lang="da" />
@@ -24,6 +25,7 @@ each locale. -->
     <output filename="generated_resources_fi.rc" type="rc_all" lang="fi" />
     <output filename="generated_resources_fil.rc" type="rc_all" lang="fil" />
     <output filename="generated_resources_fr.rc" type="rc_all" lang="fr" />
+    <output filename="generated_resources_gu.rc" type="rc_all" lang="gu" />
     <output filename="generated_resources_he.rc" type="rc_all" lang="he" />
     <output filename="generated_resources_hi.rc" type="rc_all" lang="hi" />
     <output filename="generated_resources_hr.rc" type="rc_all" lang="hr" />
@@ -31,13 +33,17 @@ each locale. -->
     <output filename="generated_resources_id.rc" type="rc_all" lang="id" />
     <output filename="generated_resources_it.rc" type="rc_all" lang="it" />
     <output filename="generated_resources_ja.rc" type="rc_all" lang="ja" />
+    <output filename="generated_resources_kn.rc" type="rc_all" lang="kn" />
     <output filename="generated_resources_ko.rc" type="rc_all" lang="ko" />
     <output filename="generated_resources_lt.rc" type="rc_all" lang="lt" />
     <output filename="generated_resources_lv.rc" type="rc_all" lang="lv" />
+    <output filename="generated_resources_ml.rc" type="rc_all" lang="ml" />
+    <output filename="generated_resources_mr.rc" type="rc_all" lang="mr" />
     <output filename="generated_resources_nl.rc" type="rc_all" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
     <output filename="generated_resources_nb.rc" type="rc_all" lang="no" />
+    <output filename="generated_resources_or.rc" type="rc_all" lang="or" />
     <output filename="generated_resources_pl.rc" type="rc_all" lang="pl" />
     <output filename="generated_resources_pt-BR.rc" type="rc_all" lang="pt-BR" />
     <output filename="generated_resources_pt-PT.rc" type="rc_all" lang="pt-PT" />
@@ -47,16 +53,72 @@ each locale. -->
     <output filename="generated_resources_sl.rc" type="rc_all" lang="sl" />
     <output filename="generated_resources_sr.rc" type="rc_all" lang="sr" />
     <output filename="generated_resources_sv.rc" type="rc_all" lang="sv" />
+    <output filename="generated_resources_ta.rc" type="rc_all" lang="ta" />
+    <output filename="generated_resources_te.rc" type="rc_all" lang="te" />
     <output filename="generated_resources_th.rc" type="rc_all" lang="th" />
     <output filename="generated_resources_tr.rc" type="rc_all" lang="tr" />
     <output filename="generated_resources_uk.rc" type="rc_all" lang="uk" />
     <output filename="generated_resources_vi.rc" type="rc_all" lang="vi" />
     <output filename="generated_resources_zh-CN.rc" type="rc_all" lang="zh-CN" />
     <output filename="generated_resources_zh-TW.rc" type="rc_all" lang="zh-TW" />
+
+    <output filename="generated_resources_ar.pak" type="data_package" lang="ar" />
+    <output filename="generated_resources_bg.pak" type="data_package" lang="bg" />
+    <output filename="generated_resources_bn.pak" type="data_package" lang="bn" />
+    <output filename="generated_resources_ca.pak" type="data_package" lang="ca" />
+    <output filename="generated_resources_cs.pak" type="data_package" lang="cs" />
+    <output filename="generated_resources_da.pak" type="data_package" lang="da" />
+    <output filename="generated_resources_de.pak" type="data_package" lang="de" />
+    <output filename="generated_resources_el.pak" type="data_package" lang="el" />
+    <output filename="generated_resources_en-GB.pak" type="data_package" lang="en-GB" />
+    <output filename="generated_resources_en-US.pak" type="data_package" lang="en" />
+    <output filename="generated_resources_es.pak" type="data_package" lang="es" />
+    <output filename="generated_resources_es-419.pak" type="data_package" lang="es-419" />
+    <output filename="generated_resources_et.pak" type="data_package" lang="et" />
+    <output filename="generated_resources_fi.pak" type="data_package" lang="fi" />
+    <output filename="generated_resources_fil.pak" type="data_package" lang="fil" />
+    <output filename="generated_resources_fr.pak" type="data_package" lang="fr" />
+    <output filename="generated_resources_gu.pak" type="data_package" lang="gu" />
+    <output filename="generated_resources_he.pak" type="data_package" lang="he" />
+    <output filename="generated_resources_hi.pak" type="data_package" lang="hi" />
+    <output filename="generated_resources_hr.pak" type="data_package" lang="hr" />
+    <output filename="generated_resources_hu.pak" type="data_package" lang="hu" />
+    <output filename="generated_resources_id.pak" type="data_package" lang="id" />
+    <output filename="generated_resources_it.pak" type="data_package" lang="it" />
+    <output filename="generated_resources_ja.pak" type="data_package" lang="ja" />
+    <output filename="generated_resources_kn.pak" type="data_package" lang="kn" />
+    <output filename="generated_resources_ko.pak" type="data_package" lang="ko" />
+    <output filename="generated_resources_lt.pak" type="data_package" lang="lt" />
+    <output filename="generated_resources_lv.pak" type="data_package" lang="lv" />
+    <output filename="generated_resources_ml.pak" type="data_package" lang="ml" />
+    <output filename="generated_resources_mr.pak" type="data_package" lang="mr" />
+    <output filename="generated_resources_nl.pak" type="data_package" lang="nl" />
+    <!-- The translation console uses 'no' for Norwegian Bokmål. It should
+         be 'nb'. -->
+    <output filename="generated_resources_nb.pak" type="data_package" lang="no" />
+    <output filename="generated_resources_or.pak" type="data_package" lang="or" />
+    <output filename="generated_resources_pl.pak" type="data_package" lang="pl" />
+    <output filename="generated_resources_pt-BR.pak" type="data_package" lang="pt-BR" />
+    <output filename="generated_resources_pt-PT.pak" type="data_package" lang="pt-PT" />
+    <output filename="generated_resources_ro.pak" type="data_package" lang="ro" />
+    <output filename="generated_resources_ru.pak" type="data_package" lang="ru" />
+    <output filename="generated_resources_sk.pak" type="data_package" lang="sk" />
+    <output filename="generated_resources_sl.pak" type="data_package" lang="sl" />
+    <output filename="generated_resources_sr.pak" type="data_package" lang="sr" />
+    <output filename="generated_resources_sv.pak" type="data_package" lang="sv" />
+    <output filename="generated_resources_ta.pak" type="data_package" lang="ta" />
+    <output filename="generated_resources_te.pak" type="data_package" lang="te" />
+    <output filename="generated_resources_th.pak" type="data_package" lang="th" />
+    <output filename="generated_resources_tr.pak" type="data_package" lang="tr" />
+    <output filename="generated_resources_uk.pak" type="data_package" lang="uk" />
+    <output filename="generated_resources_vi.pak" type="data_package" lang="vi" />
+    <output filename="generated_resources_zh-CN.pak" type="data_package" lang="zh-CN" />
+    <output filename="generated_resources_zh-TW.pak" type="data_package" lang="zh-TW" />
   </outputs>
   <translations>
     <file path="resources/generated_resources_ar.xtb" lang="ar" />
     <file path="resources/generated_resources_bg.xtb" lang="bg" />
+    <file path="resources/generated_resources_bn.xtb" lang="bn" />
     <file path="resources/generated_resources_ca.xtb" lang="ca" />
     <file path="resources/generated_resources_cs.xtb" lang="cs" />
     <file path="resources/generated_resources_da.xtb" lang="da" />
@@ -69,6 +131,7 @@ each locale. -->
     <file path="resources/generated_resources_fi.xtb" lang="fi" />
     <file path="resources/generated_resources_fil.xtb" lang="fil" />
     <file path="resources/generated_resources_fr.xtb" lang="fr" />
+    <file path="resources/generated_resources_gu.xtb" lang="gu" />
     <file path="resources/generated_resources_he.xtb" lang="he" />
     <file path="resources/generated_resources_hi.xtb" lang="hi" />
     <file path="resources/generated_resources_hr.xtb" lang="hr" />
@@ -76,11 +139,15 @@ each locale. -->
     <file path="resources/generated_resources_id.xtb" lang="id" />
     <file path="resources/generated_resources_it.xtb" lang="it" />
     <file path="resources/generated_resources_ja.xtb" lang="ja" />
+    <file path="resources/generated_resources_kn.xtb" lang="kn" />
     <file path="resources/generated_resources_ko.xtb" lang="ko" />
     <file path="resources/generated_resources_lt.xtb" lang="lt" />
     <file path="resources/generated_resources_lv.xtb" lang="lv" />
+    <file path="resources/generated_resources_ml.xtb" lang="ml" />
+    <file path="resources/generated_resources_mr.xtb" lang="mr" />
     <file path="resources/generated_resources_nl.xtb" lang="nl" />
     <file path="resources/generated_resources_no.xtb" lang="no" />
+    <file path="resources/generated_resources_or.xtb" lang="or" />
     <file path="resources/generated_resources_pl.xtb" lang="pl" />
     <file path="resources/generated_resources_pt-BR.xtb" lang="pt-BR" />
     <file path="resources/generated_resources_pt-PT.xtb" lang="pt-PT" />
@@ -90,6 +157,8 @@ each locale. -->
     <file path="resources/generated_resources_sl.xtb" lang="sl" />
     <file path="resources/generated_resources_sr.xtb" lang="sr" />
     <file path="resources/generated_resources_sv.xtb" lang="sv" />
+    <file path="resources/generated_resources_ta.xtb" lang="ta" />
+    <file path="resources/generated_resources_te.xtb" lang="te" />
     <file path="resources/generated_resources_th.xtb" lang="th" />
     <file path="resources/generated_resources_tr.xtb" lang="tr" />
     <file path="resources/generated_resources_uk.xtb" lang="uk" />
@@ -98,20 +167,6 @@ each locale. -->
     <file path="resources/generated_resources_zh-TW.xtb" lang="zh-TW" />
   </translations>
   <release seq="1" allow_pseudo="false">
-    <includes>
-      <!-- TODO add a list of your included resources here, e.g. BMP and GIF
-      resources. -->
-    </includes>
-    <structures>
-      <!-- TODO add a list of all your structured resources here, e.g. HTML
-      templates, menus, dialogs etc.  Note that for menus, dialogs and version
-      information resources you reference an .rc file containing them.-->
-    </structures>
-    <identifiers>
-      <!-- TODO, e.g.:
-      <identifier name="TEST_IDENTIFIER" id="1000"/>
-      -->
-    </identifiers>
     <messages fallback_to_english="true">
       <!-- TODO add all of your "string table" messages here.  Remember to
       change nontranslateable parts of the messages into placeholders (using the
@@ -136,9 +191,6 @@ each locale. -->
         Did you mean to go to <ph name="SITE">$1<ex>http://intranetsite/</ex></ph>?
       </message>
 
-      <message name="IDS_AUTOCOMPLETE_NO_ACTION" desc="Description for the dummy match displayed when no action is possible.">
-        (No action possible)
-      </message>
       <message name="IDS_AUTOCOMPLETE_KEYWORD_DESCRIPTION" desc="Description for a keyword match.">
         (Keyword: <ph name="KEYWORD">$1</ph>)
       </message>
@@ -158,6 +210,9 @@ each locale. -->
       <message name="IDS_DOWNLOAD_TITLE" desc="Title for the downloads tab.">
         Downloads
       </message>
+      <message name="IDS_EXTENSIONS_TITLE" desc="Title for the extensions tab.">
+        Extensions
+      </message>
       <message name="IDS_SESSIONS_TITLE" desc="Title for the sessions tab.">
         Sessions
       </message>
@@ -173,23 +228,12 @@ each locale. -->
       <message name="IDS_VIEW_SOURCE_TITLE" desc="The ViewSource tab title.">
         Source of <ph name="PAGE_URL">%s</ph>
       </message>
-      <message name="IDS_HISTORY_SEARCH_BUTTON" desc="Title of the button in the history page that triggers a search">
-        Search history
-      </message>
-      <message name="IDS_HISTORY_NO_RESULTS" desc="Text shown when no history search results have been found">
-        No search results found.
-      </message>
+
+
       <message name="IDS_HISTORY_SEARCH_STRING" desc="Text showing what the user searched for">
-        Search Results for '<ph name="SEARCH_STRING">$1<ex>pie</ex></ph>'
-      </message>
-      <message name="IDS_HISTORY_NO_ITEMS" desc="Text shown when the user has no history">
-        All the pages you visit will appear here unless you open them in an incognito window. You can use the Search button on this page to search all the pages in your history.
-      </message>
-      <message name="IDS_HISTORY_LOADING" desc="Text shown when we're loading the user's history">
-        Loading...
-      </message>
-      <message name="IDS_HISTORY_DATE_WITH_RELATIVE_TIME" desc="In the history view, some dates are formatted as 'Today - Wednesday, Nov 7, 2007">
-        <ph name="RELATIVE_DATE">$1<ex>Today</ex></ph> - <ph name="FULL_DATE">$2<ex>Wednesday, Nov 7, 2007</ex></ph>
+        Search Results for '<ph name="SEARCH_STRING">
+          $1<ex>pie</ex>
+        </ph>'
       </message>
       <message name="IDS_HISTORY_DELETE_PRIOR_VISITS_LINK" desc="Title of the link that allows the user to delete visits prior to the specified point">
         Delete history for this day
@@ -199,6 +243,48 @@ each locale. -->
       </message>
       <message name="IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_TITLE" desc="Title of the warning dialog">
         Delete
+      </message>
+
+      <!-- History HTML UI -->
+      <message name="IDS_HISTORY_LOADING" desc="Text shown when we're loading the user's history">
+        Loading...
+      </message>
+      <message name="IDS_HISTORY_DATE_WITH_RELATIVE_TIME" desc="In the history view, some dates are formatted as 'Today - Wednesday, Nov 7, 2007">
+        <ph name="RELATIVE_DATE">
+          $1<ex>Today</ex>
+        </ph> - <ph name="FULL_DATE">
+          $2<ex>Wednesday, Nov 7, 2007</ex>
+        </ph>
+      </message>
+      <message name="IDS_HISTORY_NO_RESULTS" desc="Text shown when no history search results have been found">
+        No search results found.
+      </message>
+      <message name="IDS_HISTORY_NO_ITEMS" desc="Text shown when the user has no history">
+        All the pages you visit will appear here unless you open them in an incognito window. You can use the Search button on this page to search all the pages in your history.
+      </message>
+      <message name="IDS_HISTORY_SEARCH_BUTTON" desc="Title of the button in the history page that triggers a search">
+        Search history
+      </message>
+      <message name="IDS_HISTORY_NEWEST" desc="HTML text shown as page navigation tool to take the user to the top of their history">
+        Newest
+      </message>
+      <message name="IDS_HISTORY_NEWER" desc="HTML text shown as page navigation tool to take the user back to the more recent page">
+        Newer
+      </message>
+      <message name="IDS_HISTORY_OLDER" desc="HTML text shown as page navigation tool to take the user forward to their older history">
+        Older
+      </message>
+      <message name="IDS_HISTORY_SEARCHRESULTSFOR" desc="Format string for search results">
+        Search results for '<ph name="SEARCH_STRING">%s</ph>'
+      </message>
+      <message name="IDS_HISTORY_BROWSERESULTS" desc="Title of browsing results page">
+        History
+      </message>
+      <message name="IDS_HISTORY_CONTINUED" desc="Shown after the date if the data is continued from the previous page">
+        (Cont.)
+      </message>
+      <message name="IDS_HISTORY_DELETE" desc="Link shown after the date, allowing the user to delete that date">
+        delete
       </message>
 
       <!-- Generic terms -->
@@ -239,6 +325,9 @@ each locale. -->
       </message>
       <message name="IDS_CONTENT_CONTEXT_INSPECTELEMENT" desc="The name of the Inspect Element command in the content area context menu">
         I&amp;nspect element
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_RELOAD" desc="The name of the Reload command in the content area context menu">
+        Re&amp;load
       </message>
 
       <message name="IDS_CONTENT_CONTEXT_OPENFRAMENEWWINDOW" desc="The name of the Open Frame in New Window command in the content area context menu">
@@ -318,6 +407,18 @@ each locale. -->
       <message name="IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY" desc="The name of the Add to dictionary command in the content area context menu">
         &amp;Add to dictionary
       </message>
+      <message name="IDS_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS" desc="The name of the No Spelling Suggestions display in the content area context menu">
+        &amp;No spelling suggestions
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_SPELLCHECK_MENU" desc="The name of the Spellcheck Options submenu in the content area context menu">
+        &amp;Spell-checker options
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_LANGUAGE_SETTINGS" desc="The name of the Language Settings command in the content area context menu">
+        &amp;Language settings...
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_CHECK_SPELLING_OF_THIS_FIELD" desc="The name of the Check the spelling of this field command in the content area context menu">
+        &amp;Check the spelling of this field
+      </message>
       <message name="IDS_CONTENT_CONTEXT_SELECTALL" desc="The name of the Select All command in the content area context menu">
         Select &amp;all
       </message>
@@ -332,16 +433,22 @@ each locale. -->
       </message>
 
       <!-- Page menu -->
-      <message name="IDS_NEWTAB" desc="The text label of the New Tab menu item">
+      <message name="IDS_NEW_TAB" desc="The text label of the New Tab menu item">
         New &amp;tab
       </message>
       <message name="IDS_SHOW_AS_TAB" desc="The text label for the Show As tab menu item">
         &amp;Show as tab
       </message>
-      <message name="IDS_NEWWINDOW" desc="The text label of the New Window menu item" >
+      <message name="IDS_NEW_WINDOW" desc="The text label of the New Window menu item" >
         &amp;New window
       </message>
-      <message name="IDS_GOOFFTHERECORD" desc="The text label of the New incognito window menu item">
+      <message name="IDS_PROFILE_MENU" desc="The text label of the New profile Window menu item" >
+        New window in &amp;profile
+      </message>
+      <message name="IDS_SELECT_PROFILE" desc="The text label of the menu item to select a profile other than the ones displayed directly in the Profile submenu." >
+        Other...
+      </message>
+      <message name="IDS_NEW_INCOGNITO_WINDOW" desc="The text label of the New incognito window menu item">
         New &amp;incognito window
       </message>
       <message name="IDS_UNDO" desc="The text label of the Undo menu item" >
@@ -356,20 +463,20 @@ each locale. -->
       <message name="IDS_PASTE" desc="The text label of the Paste menu item" >
         &amp;Paste
       </message>
-      <message name="IDS_SELECTALL" desc="The text label of the Select All menu item" >
+      <message name="IDS_SELECT_ALL" desc="The text label of the Select All menu item" >
         Select &amp;all
       </message>
-      <message name="IDS_FIND_IN_PAGE" desc="The text label of the Find in Page menu item" >
+      <message name="IDS_FIND" desc="The text label of the Find in Page menu item" >
         &amp;Find in page
       </message>
-      <message name="IDS_SAVEPAGEAS" desc="The text label of the Save Page As menu item" >
+      <message name="IDS_SAVE_PAGE" desc="The text label of the Save Page As menu item" >
         Save page &amp;as...
       </message>
       <message name="IDS_PRINT" desc="The text label of the Print... menu item. Opens a dialog box to select print settings" >
         &amp;Print...
       </message>
-      <message name="IDS_ZOOM" desc="The text label of the Zoom submenu" >
-        Text &amp;zoom
+      <message name="IDS_ZOOM_MENU" desc="The text label of the Zoom submenu" >
+        &amp;Zoom
       </message>
       <message name="IDS_ZOOM_PLUS" desc="The text label of the Make Text Larger menu item" >
         &amp;Larger
@@ -380,7 +487,7 @@ each locale. -->
       <message name="IDS_ZOOM_MINUS" desc="The text label of the Make Text Smaller menu item" >
         &amp;Smaller
       </message>
-      <message name="IDS_ENCODING" desc="The text label of the Encoding submenu" >
+      <message name="IDS_ENCODING_MENU" desc="The text label of the Encoding submenu" >
         &amp;Encoding
       </message>
       <message name="IDS_ENCODING_AUTO_DETECT" desc="The text label of the Auto Dectect submenu" >
@@ -446,28 +553,26 @@ each locale. -->
       <message name="IDS_ENCODING_VIETNAMESE" desc="The text label of Vietnamese encoding" >
         Vietnamese
       </message>
-      <message name="IDS_DEVELOPER" desc="The text label of the Developer submenu">
+      <message name="IDS_DEVELOPER_MENU" desc="The text label of the Developer submenu">
         Developer
       </message>
-      <message name="IDS_VIEWPAGESOURCE" desc="The text label of the View Page Source menu item" >
+      <message name="IDS_VIEW_SOURCE" desc="The text label of the View Page Source menu item" >
         View s&amp;ource
-      </message>
-      <message name="IDS_VIEWPAGEINFO" desc="The text label of the View Page Info menu item" >
-        Page &amp;info
       </message>
       <message name="IDS_DEBUGGER" desc="The text label of the JavaScript debugger menu item">
         Debug JavaScript
       </message>
-      <message name="IDS_COMMANDS_REPORTBUG" desc="The text label of the Report Bug menu item">
+      <message name="IDS_REPORT_BUG" desc="The text label of the Report Bug menu item">
         &amp;Report bug or broken website...
       </message>
-      <message name="IDS_VIEWJSCONSOLE" desc="The text the menu to show the JS console">
+      <message name="IDS_JS_CONSOLE" desc="The text the menu to show the JS console">
         &amp;JavaScript console
       </message>
-      <message name="IDS_TASKMANAGER" desc="The text label of the Task Manager menu item" >
+      <message name="IDS_TASK_MANAGER" desc="The text label of the Task Manager menu item" >
         &amp;Task manager
       </message>
-      <message name="IDS_CLOSE" desc="The close menu">
+      <!-- This really belongs under Generic Terms above. -->
+      <message name="IDS_CLOSE" desc="A generic term for Close on buttons and menus.">
         Close
       </message>
 
@@ -495,8 +600,11 @@ each locale. -->
       <message name="IDS_SHOW_BOOKMARK_BAR" desc="The toggle to show the bookmark bar">
         &amp;Always show bookmarks bar
       </message>
-      <message name="IDS_CLEAR_BROWSING_DATA" desc="The text label for the menu item for clearing of browing data">
-        Clear browsing &amp;data...
+      <message name="IDS_FULLSCREEN" desc="Switches into fullscreen mode">
+        &amp;Full screen
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA" desc="The text label for the menu item for clearing of browsing data">
+        &amp;Clear browsing data...
       </message>
       <message name="IDS_SHOW_DOWNLOADS" desc="The show downloads menu in the app menu">
         &amp;Downloads
@@ -504,8 +612,8 @@ each locale. -->
       <message name="IDS_OPTIONS" desc="The text label of the Options menu item">
         &amp;Options
       </message>
-      <message name="IDS_HELP" desc="The text label of the Help menu item">
-        Help
+      <message name="IDS_HELP_PAGE" desc="The text label of the Help menu item">
+        H&amp;elp
       </message>
       <message name="IDS_ABOUT" desc="The text label of the About Chrome menu item">
         About &amp;<ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>
@@ -1145,6 +1253,19 @@ each locale. -->
         Cancel
       </message>
 
+      <message name="IDS_PROMPT_DANGEROUS_DOWNLOAD"
+               desc="Message shown to the user to validate the download of a dangerous file.">
+        This type of file can harm your computer. Are you sure you want to download <ph name="FILE_NAME">$1<ex>malware.exe</ex></ph>?
+      </message>
+      <message name="IDS_SAVE_DOWNLOAD"
+               desc="Text for the button used to validate the downloading of a dangerous download.">
+        Save
+      </message>
+      <message name="IDS_DISCARD_DOWNLOAD"
+               desc="Text for the button used to stop a dangerous download.">
+        Discard
+      </message>      
+
       <!-- Download Tab Items -->
       <message name="IDS_DOWNLOAD_LINK_PAUSE"
                desc="In the download view, 'Pause' link text">
@@ -1152,6 +1273,12 @@ each locale. -->
       </message>
       <message name="IDS_DOWNLOAD_SEARCH_BUTTON" desc="Title of the button in the download page that triggers a search">
         Search downloads
+      </message>
+      <message name="IDS_DOWNLOAD_NO_RESULTS" desc="Descriptive text when no results are found.">
+        No results
+      </message>
+      <message name="IDS_DOWNLOAD_SEARCHRESULTSFOR" desc="Format string for search results">
+        Search results for '<ph name="SEARCH_STRING">%s</ph>'
       </message>
       <message name="IDS_DOWNLOAD_LINK_RESUME"
                desc="In the download view, 'Resume' link text">
@@ -1212,14 +1339,8 @@ each locale. -->
         &amp;Remove
       </message>
 
-      <!-- Download Preferences -->
-      <message name="IDS_DOWNLOAD_DIRECTORY"
-               desc="Directory under the profile for storing downloads">
-        Downloads
-      </message>
-
       <!-- Gears shortcut strings -->
-      <message name="IDS_DEFAULT_INSTALL_SITE_LABEL" desc="Default installation menu label">
+      <message name="IDS_CREATE_SHORTCUTS" desc="Default installation menu label">
         Create application &amp;shortcuts...
       </message>
 
@@ -1380,7 +1501,10 @@ each locale. -->
         Authentication Required
       </message>
       <message name="IDS_LOGIN_DIALOG_DESCRIPTION" desc="String to be displayed in the login prompt dialog to explain what the user needs to do">
-        The server <ph name="DOMAIN">$1<ex>google.com</ex></ph> at <ph name="TITLE">$2<ex>site name</ex></ph> requires a username and password.
+        The server <ph name="DOMAIN">$1<ex>google.com</ex></ph> at <ph name="REALM">$2<ex>site name</ex></ph> requires a username and password.
+      </message>
+      <message name="IDS_LOGIN_DIALOG_DESCRIPTION_NO_REALM" desc="String to be displayed in the login prompt dialog to explain what the user needs to do">
+        The server <ph name="DOMAIN">$1<ex>google.com</ex></ph> requires a username and password.
       </message>
       <message name="IDS_LOGIN_DIALOG_USERNAME_FIELD" desc="The label of the username field in the login prompt dialog">
         User Name:
@@ -1408,6 +1532,12 @@ each locale. -->
       </message>
       <message name="IDS_FIND_IN_PAGE_CLOSE_TOOLTIP" desc="The tooltip for the close button">
         Close find bar
+      </message>
+
+      
+      <!-- Fullscreen mode -->
+      <message name="IDS_EXIT_FULLSCREEN_MODE" desc="Clickable message displayed on entering fullscreen mode to tell users how to return to normal mode">
+        Exit full screen (<ph name="ACCELERATOR">$1<ex>F11</ex></ph>)
       </message>
 
 
@@ -1457,6 +1587,9 @@ each locale. -->
       <message name="IDS_TASK_MANAGER_UNKNOWN_PLUGIN_NAME" desc="The prefix for a Task Manager plugin row">
         Unknown plug-in
       </message>
+      <message name="IDS_TASK_MANAGER_WORKER_PREFIX" desc="The prefix for a Task Manager HTML5 Web Worker process row">
+        Web Worker: <ph name="WORKER_NAME">$1<ex>http://www.domain.com</ex></ph>
+      </message>
 
       <!-- Session Crashed Info Bar-->
       <message name="IDS_SESSION_CRASHED_VIEW_RESTORE_BUTTON" desc="Title of the restore button in the session crashed view.">
@@ -1505,9 +1638,6 @@ each locale. -->
       </message>
       <message name="IDS_ABOUT_VERSION_UNOFFICIAL" desc="unofficial build on the about:version page">
         Developer Build
-      </message>
-      <message name="IDS_ABOUT_VERSION_LICENSE" desc="The line that shows the license text (what appears in front of the URL)">
-        Portions of this software were licensed from third parties as described at: <ph name="URL">$1<ex>http://www.google.com/LICENSE</ex></ph>
       </message>
 
       <!-- Javascript Dialog Box strings -->
@@ -1735,6 +1865,15 @@ each locale. -->
       <message name="IDS_PASSWORD_MANAGER_VIEW_USERNAME_COLUMN" desc="Password manager table view Username column title">
         Username
       </message>
+      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_TITLE" desc="Password manager exceptions view window title">
+        Exceptions
+      </message>
+      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_REMOVE_BUTTON" desc="Password manager exceptions view's remove button text">
+        Remove
+      </message>
+      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_REMOVE_ALL_BUTTON" desc="Password manager exceptions view's remove all button text">
+        Remove All
+      </message>
 
       <!-- Import Settings Dialog -->
       <message name="IDS_IMPORT_SETTINGS_TITLE" desc="Dialog title for import dialog">
@@ -1748,6 +1887,9 @@ each locale. -->
       </message>
       <message name="IDS_IMPORT_FROM_FIREFOX" desc="browser combo box: Mozilla Firefox">
         Mozilla Firefox
+      </message>
+      <message name="IDS_IMPORT_FROM_GOOGLE_TOOLBAR" desc="browser combo box: Google Toolbar">
+        Google Toolbar
       </message>
       <message name="IDS_IMPORT_ITEMS_LABEL" desc="Label before item select checkboxes">
         Select items to import:
@@ -1770,6 +1912,10 @@ each locale. -->
 
       <message name="IDS_IMPORT_COMMIT" desc="Text for OK button on dialog">
         Import
+      </message>
+
+      <message name="IDS_IMPORTER_GOOGLE_LOGIN_TEXT" desc="The message to be displayed on dialog">
+        In order to import Toolbar bookmarks into Chrome, you must be logged into your Google account.  Please log in and try to import again.
       </message>
 
       <!-- Import progress popup -->
@@ -1892,6 +2038,9 @@ each locale. -->
       <message name="IDS_DEL_PASSWORDS_CHKBOX" desc="Checkbox for deleting Passwords">
         Clear saved passwords
       </message>
+      <message name="IDS_DEL_FORM_DATA_CHKBOX" desc="Checkbox for deleting form data saved for autofill">
+        Clear saved form data
+      </message>
       <message name="IDS_CLEAR_BROWSING_DATA_COMMIT" desc="Text for OK button on dialog">
         Clear Browsing Data
       </message>
@@ -1928,7 +2077,10 @@ each locale. -->
         A new version of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is available
       </message>
       <message name="IDS_UPGRADE_SUCCESSFUL" desc="Status label: Successfully upgraded">
-        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has been updated <ph name="VERSION">$2<ex>(0.1.131)</ex></ph>
+        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has been updated to <ph name="VERSION">$2<ex>0.1.131</ex></ph>
+      </message>
+      <message name="IDS_UPGRADE_SUCCESSFUL_NOVERSION" desc="Status label: Successfully upgraded">
+        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has been updated
       </message>
       <message name="IDS_UPGRADE_ALREADY_UP_TO_DATE" desc="Status label: Already up to date">
         <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is up to date (<ph name="VERSION">$2<ex>0.1.131</ex></ph>)
@@ -2007,7 +2159,7 @@ each locale. -->
       <message name="IDS_BOOKMARKS_NO_ITEMS" desc="Text shown when the user has no bookmarks">
         For quick access, place your bookmarks here in the bookmarks bar.
       </message>
-      
+
       <!-- The location for special bookmark groups -->
       <message name="IDS_BOOKMARK_GROUP_FROM_IE" desc="The group name of bookmarks from Internet Explorer">
         Imported From IE
@@ -2015,8 +2167,14 @@ each locale. -->
       <message name="IDS_BOOKMARK_GROUP_FROM_FIREFOX" desc="The group name of bookmarks from Firefox">
         Imported From Firefox
       </message>
-       
-      <!-- bookmark editor messages-->
+      <message name="IDS_BOOKMARK_GROUP_FROM_GOOGLE_TOOLBAR" desc="The group name of bookmarks from Google Toolbar">
+        Imported From Google Toolbar
+      </message>
+      <message name="IDS_BOOKMARK_GROUP" desc="The group name of bookmarks imported from a file">
+        Imported
+      </message>
+
+  <!-- bookmark editor messages-->
       <message name="IDS_BOOMARK_EDITOR_NAME_LABEL" desc="Label shown before the title/name of the URL.">
         Name:
       </message>
@@ -2078,7 +2236,7 @@ each locale. -->
       <message name="IDS_APP_MENU_RELOAD" desc="The reload menu in application windows">
         Reload
       </message>
-      <message name="IDS_APP_MENU_DUPLICATE" desc="The duplicate / start new instance menu">
+      <message name="IDS_APP_MENU_DUPLICATE_APP_WINDOW" meaning="Duplicate application window" desc="The duplicate / start new instance menu">
         Duplicate
       </message>
       <message name="IDS_APP_MENU_COPY_URL" desc="The copy url menu in application windows">
@@ -2098,8 +2256,8 @@ each locale. -->
       <message name="IDS_BOOMARK_BAR_DEFAULT_FOLDER" desc="Title of the default bookmarks folder">
         Bookmarks
       </message>
-      <message name="IDS_BOOMARK_BAR_OPEN" desc="Menu description for loading bookmark in current page">
-        Open
+      <message name="IDS_BOOMARK_BAR_OPEN_INCOGNITO" desc="Menu description for openning bookmark in incognito window">
+        Open in incognito window
       </message>
       <message name="IDS_BOOMARK_BAR_OPEN_IN_NEW_TAB" desc="Menu description for loading bookmark in a new tab">
         Open in new tab
@@ -2119,6 +2277,9 @@ each locale. -->
       <message name="IDS_BOOMARK_BAR_OPEN_ALL_NEW_WINDOW" desc="Menu title for opening all urls in a bookmark folder in a new window">
         Open all bookmarks in new window
       </message>
+      <message name="IDS_BOOMARK_BAR_OPEN_ALL_INCOGNITO" desc="Menu description for openning all urls in a bookmark folder in an incognito window">
+        Open all bookmarks in incognito window
+      </message>
       <message name="IDS_BOOKMARK_BAR_REMOVE" desc="Menu title for removing/unstarring a bookmark">
         Delete
       </message>
@@ -2132,6 +2293,14 @@ each locale. -->
                desc="Title of the bookmark context menu item that brings up the bookmark editor">
         Edit...
       </message>
+      <message name="IDS_BOOKMARK_BAR_RENAME_FOLDER"
+               desc="Title of the bookmark context menu item that brings up a dialog to rename a folder">
+        Rename...
+      </message>
+      <message name="IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL"
+               desc="Message in the message box shown if user asks to open a lot of bookmarks in a folder">
+        Are you sure you want to open <ph name="TAB_COUNT">$1<ex>20</ex></ph> tabs?
+      </message>
 
       <!-- error page messages -->
       <message name="IDS_ERRORPAGES_SUGGESTION_HEADING" desc="Heading in the error page above the actual suggestions">
@@ -2144,14 +2313,14 @@ each locale. -->
         Below is the original error message
       </message>
 
-      <message name="IDS_ERRORPAGES_SUGGESTION_RELOAD" desc="Suggest reloading to the user">
+      <message name="IDS_ERRORPAGES_SUGGESTION_RELOAD" desc="When a page fails to load, we provide a suggestion that the user try reloading the page later">
         &lt;a jsvalues="href:reloadUrl"&gt;Reload&lt;/a&gt; this web page later.
       </message>
-      <message name="IDS_ERRORPAGES_SUGGESTION_CACHE" desc="String suggesting to try using the google cache.">
-        View a &lt;a jsvalues="href:cacheUrl"&gt;cached copy of the web page from Google&lt;/a&gt;
-      </message>
-      <message name="IDS_ERRORPAGES_SUGGESTION_HOMEPAGE" desc="String suggesting to try just the hostname of the site.">
+      <message name="IDS_ERRORPAGES_SUGGESTION_HOMEPAGE" desc="When a page fails to load, sometimes we provide a suggesting of trying just the hostname of the site.">
         Go to the homepage of the site:
+      </message>
+      <message name="IDS_ERRORPAGES_SUGGESTION_LEARNMORE" desc="When a web page fails to load, we provide a link to the help center to learn more about the failure.">
+        <ph name="BEGIN_LINK">&lt;a jsvalues="href:learnMoreUrl"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph> about this problem.
       </message>
 
       <message name="IDS_ERRORPAGES_TITLE_NOT_AVAILABLE" desc="Title of the error page when we can't connect to a site.">
@@ -2489,7 +2658,7 @@ each locale. -->
       </message>
 
       <!-- Sad Tab Strings -->
-      <message name="IDS_SAD_TAB_TITLE" desc="The title of the sad tab page.">
+      <message name="IDS_SAD_TAB_TITLE" desc="The title of the sad tab page that is shown when a tab crashes. This is intended to be a humorous exclamation of dismay.">
         Aw, Snap!
       </message>
       <message name="IDS_SAD_TAB_MESSAGE" desc="The message displayed on the sad tab page.">
@@ -2515,6 +2684,9 @@ each locale. -->
       </message>
       <message name="IDS_OPTIONS_CONTENT_TAB_LABEL" desc="The title of the Tweaks tab">
         Minor Tweaks
+      </message>
+      <message name="IDS_OPTIONS_USER_DATA_TAB_LABEL" desc="The title of the User Data tab">
+        User Data
       </message>
       <message name="IDS_OPTIONS_ADVANCED_TAB_LABEL" desc="The title of the Advanced tab">
         Under the Hood
@@ -2636,7 +2808,17 @@ each locale. -->
       <message name="IDS_OPTIONS_PASSWORDS_SHOWPASSWORDS" desc="The label of the 'Show passwords' button">
         Show saved passwords
       </message>
-      
+      <message name="IDS_OPTIONS_PASSWORDS_EXCEPTIONS" desc="The label of the 'Exceptions' button">
+        Exceptions
+      </message>
+
+      <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="The title of the form autofill group">
+        Form autofill:
+      </message>
+      <message name="IDS_AUTOFILL_SAVEFORMS" desc="The autofill checkbox label">
+        Save text from forms to make them easier to fill out
+      </message>
+
       <message name="IDS_OPTIONS_FONTSANDLANGUAGES_GROUP_NAME" desc="The label of the 'Fonts and Languages' group">
         Fonts and Languages:
       </message>
@@ -2695,6 +2877,27 @@ each locale. -->
       <message name="IDS_OPTIONS_INCLUDE_MIXED_CONTENT" desc="The combo-box option for setting that all mixed-content be included.">
         Allow all content to load
       </message>
+
+      <message name="IDS_OPTIONS_IMPORT_DATA_GROUP_NAME" desc="The title of the 'Import' group.">
+        Import:
+      </message>
+      <message name="IDS_OPTIONS_IMPORT_DATA_INFO" desc="Information text about import options.">
+        You can import your bookmarks and settings from other browsers and user accounts on this computer.
+      </message>
+      <message name="IDS_OPTIONS_IMPORT_DATA_BUTTON" desc="Label for the import data button.">
+        Import data...
+      </message>
+
+      <message name="IDS_OPTIONS_CLEAR_DATA_GROUP_NAME" desc="The title of the 'Clear data' group.">
+        Clear Data:
+      </message>
+      <message name="IDS_OPTIONS_CLEAR_DATA_INFO" desc="Information text about clear data options.">
+        Clear your browsing data from this computer. Be aware that this may adversely affect the contents of the New Tab Page.
+      </message>
+      <message name="IDS_OPTIONS_CLEAR_DATA_BUTTON" desc="Label for the Clear data button.">
+        Clear browsing data...
+      </message>
+
 
       <!-- Misc advanced option description strings. -->
       <message name="IDS_WEBKIT_JAVA_ENABLED_DESCRIPTION" desc="In the advanced options tab, the text next to the checkbox that enables Java.">
@@ -2777,9 +2980,17 @@ each locale. -->
                desc="Title of the new tab page, this is only shown while loading, then the title comes from the page">
         New Tab
       </message>
+      <message name="IDS_NEW_TAB_TITLE_WITH_PROFILE_NAME"
+               desc="Title of the new tab page with profile name, this is only shown while loading, then the title comes from the page">
+        New Tab [<ph name="PROFILE_NAME">$1</ph>]
+      </message>
       <message name="IDS_NEW_TAB_MOST_VISITED"
                desc="The 'Most Visited' heading on the new tab page">
         Most visited
+      </message>
+      <message name="IDS_NEW_TAB_MOST_VISITED_WITH_PROFILE_NAME"
+               desc="The 'Most Visited' heading on the new tab page">
+        Most visited [<ph name="PROFILE_NAME">$1</ph>]
       </message>
       <message name="IDS_NEW_TAB_SEARCHES"
                desc="The 'Searches' heading on the new tab page">
@@ -2805,9 +3016,9 @@ each locale. -->
                desc="The label for the field that searches the user's history on the new tab page">
         Search your history
       </message>
-      <message name="IDS_NEW_TAB_CLOSED_TABS"
-               desc="The 'Recently Closed Tabs' heading on the new tab page">
-        Recently closed tabs
+      <message name="IDS_NEW_TAB_RECENTLY_CLOSED"
+               desc="The 'Recently Closed' heading on the new tab page">
+        Recently closed
       </message>
       <message name="IDS_NEW_TAB_FOOTER_HELP"
                desc="The help footer on the new tab page">
@@ -2831,7 +3042,11 @@ each locale. -->
         <ph name="END_LIST">&lt;/ul&gt;</ph>
         <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph> about incognito browsing.
       </message>
-      
+      <message name="IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW"
+               desc="Title of recently closed windows in the recently closed section of the new tab page">
+        Window
+      </message>
+
       <!-- SafeBrowsing -->
       <message name="IDS_SAFE_BROWSING_MALWARE_TITLE" desc="SafeBrowsing Malware HTML title">
         Malware Detected!
@@ -2886,8 +3101,33 @@ each locale. -->
       <message name="IDS_SAFE_BROWSING_PHISHING_BACK_BUTTON" desc="SafeBrowsing Phishing, back button">
         Back to safety
       </message>
-      <message name="IDS_SAFE_BROWSING_PHISHING_REPORT_ERROR" desc="SafeBrowsing Phishing, back button">
+      <message name="IDS_SAFE_BROWSING_PHISHING_REPORT_ERROR" desc="SafeBrowsing Phishing, report error link">
         Report an error
+      </message>
+
+      <message name="IDS_SAFE_BROWSING_MULTI_THREAT_TITLE" desc="SafeBrowsing Multi threat HTML title">
+        Malware and phishing Detected!
+      </message>
+      <message name="IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION1" desc="SafeBrowsing multiple threat HTML description, first line">
+        The website at &lt;strong&gt;<ph name="HOST_NAME">$1<ex>www.malware.com</ex></ph>&lt;/strong&gt; contains elements from sites which appear to host malware – software that can hurt your computer or otherwise operate without your consent.  Just visiting a site that hosts malware can infect your computer. The website also hosts contents from sites that have been reported as a “phishing” sites.  Phishing sites trick users into disclosing personal or financial information, often by pretending to represent trusted institutions, such as banks.
+      </message>
+      <message name="IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION2" desc="SafeBrowsing multiple threat HTML description, second line">
+        Below is a list of all the unsafe elements for the page. Click on the Diagnostic link for more information on the malware thread for a specific resource. If you know that a resource has been erroneously reported as phishing, click the 'Report error' link.
+      </message>
+      <message name="IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION1" desc="SafeBrowsing Malware HTML description, first line for case of several malicious subresource">
+        The website at &lt;strong&gt;<ph name="HOST_NAME">$1<ex>www.goodsite.com</ex></ph>&lt;/strong&gt; contains elements from sites which appear to host malware – software that can hurt your computer or otherwise operate without your consent.  Just visiting a site that contains malware can infect your computer.
+      </message>
+      <message name="IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION2" desc="SafeBrowsing Malware HTML description, second line for case of several malicious subresource">
+        Below is a list of all the unsafe elements for the page. Click on the Diagnostic link for more information on the thread for a specific element.
+      </message>
+      <message name="IDS_SAFE_BROWSING_MULTI_PHISHING_DESCRIPTION1" desc="SafeBrowsing Phishing HTML description, first line for case of several malicious subresource">
+        The website at &lt;strong&gt;<ph name="HOST_NAME">$1<ex>www.malware.com</ex></ph>&lt;/strong&gt; contains elements from sites which have been reported as “phishing” sites.  Phishing sites trick users into disclosing personal or financial information, often by pretending to represent trusted institutions, such as banks.
+      </message>
+      <message name="IDS_SAFE_BROWSING_PHISHING_LABEL" desc="SafeBrowsing multiple threats, phishing label in the table showing the reported threats.">
+        Phishing
+      </message>
+      <message name="IDS_SAFE_BROWSING_MALWARE_LABEL" desc="SafeBrowsing multiple threats, malware label in the table showing the reported threats.">
+        Malware
       </message>
 
       <message name="IDS_PLUGININSTALLER_MISSINGPLUGIN_PROMPT" desc="Info Bar message to prompt installing missing plugin">
@@ -2895,6 +3135,9 @@ each locale. -->
       </message>
       <message name="IDS_PLUGININSTALLER_INSTALLPLUGIN_BUTTON" desc="Info Bar button to install missing plugin">
         Install plug-in...
+      </message>
+      <message name="IDS_PLUGININSTALLER_PROBLEMSINSTALLING" desc="Infobar text for link to help center">
+        Problems installing?
       </message>
       <message name="IDS_PLUGIN_CRASHED_PROMPT" desc="Info Bar message to notify about a crashed plugin">
         The following plug-in has crashed : <ph name="PLUGIN_NAME">$1<ex>Shockwave</ex></ph>
@@ -2996,6 +3239,12 @@ each locale. -->
       <message name="IDS_ENTER_KEY" desc="Enter key">
         Enter
       </message>
+      <message name="IDS_F1_KEY" desc="F1 key">
+        F1
+      </message>
+      <message name="IDS_F11_KEY" desc="F11 key">
+        F11
+      </message>
 
       <!-- Strings used in local directory listings -->
       <message name="IDS_DIRECTORY_LISTING_HEADER" desc="When viewing a local directory, this is the title of the page.">
@@ -3063,7 +3312,10 @@ each locale. -->
       <message name="IDS_OPTIONS_CHROME_DICTIONARY_LANGUAGE" desc="The documentation string of the 'Spell check dictionary language' preference">
         Spell-checker language:
       </message>
-
+      <message name="IDS_OPTIONS_ENABLE_SPELLCHECK" desc="The documentation string of the 'Enable spellcheck' option">
+        Check spelling:
+      </message>
+      
       <message name="IDS_OPTIONS_RESET" desc="The label of the 'Reset all settings to defaults' button">
         Reset to defaults
       </message>
@@ -3081,10 +3333,32 @@ each locale. -->
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_CHOOSE_DIRECTORY_BUTTON" desc="Text on button that opens another dialog to choose a new directory for user data.">
         Choose Another Directory...
       </message>
-      
+
+      <!-- User data directory profiles dialog -->
+      <message name="IDS_SELECT_PROFILE_DIALOG_TITLE" desc="Title of the dialog that lets the user select a profile to open a new window.">
+        Select a Profile
+      </message>
+      <message name="IDS_SELECT_PROFILE_DIALOG_LABEL_TEXT" desc="The label for the combo box that shows all the available profiles.">
+        Select a profile to open a new window
+      </message>
+      <message name="IDS_SELECT_PROFILE_DIALOG_NEW_PROFILE_ENTRY" desc="Text for an extra entry in the profiles combo box. The user can select this entry to create a new profile.">
+        &lt;New Profile&gt;...
+      </message>
+
+      <!-- User data directory new profile dialog -->
+      <message name="IDS_NEW_PROFILE_DIALOG_TITLE" desc="Title of dialog that lets the user enter a new profile name to open new window.">
+        Enter a Profile Name
+      </message>
+      <message name="IDS_NEW_PROFILE_DIALOG_LABEL_TEXT" desc="The label for the text box that lets the user enter a new profile name.">
+        Enter a new profile name
+      </message>
+      <message name="IDS_NEW_PROFILE_DIALOG_CREATE_SHORTCUT_TEXT" desc="The label for the text box that lets the user enter a new profile name.">
+        Create a desktop shortcut for this profile
+      </message>
+
       <!-- Advanced Section Titles -->
-      <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_GENERAL">
-        General
+      <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY">
+        Privacy
       </message>
       <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT">
         Web Content
@@ -3117,6 +3391,91 @@ each locale. -->
       <message name="IDS_BLOCKED_POPUP" desc="Text on a blocked popup's window titlebar.">
         Blocked Pop-up
       </message>
+      <message name="IDS_POPUPS_BLOCKED_COUNT" desc="Message on the blocked popup window">
+        Pop-ups Blocked: <ph name="COUNT">$1<ex>2</ex></ph>
+      </message>
+      <message name="IDS_POPUP_TITLE_FORMAT" desc="Order of URL - Title on the popup">
+        <ph name="URL">$1</ph> - <ph name="WINDOW_TITLE">$2</ph>
+      </message>
+
+      <!-- Multiple download warning-->
+      <message name="IDS_MULTI_DOWNLOAD_WARNING" desc="Warning invoked if multiple downloads are attempted without user interaction.">
+        This site is attempting to download multiple files. Do you want to allow this?
+      </message>
+      <message name="IDS_MULTI_DOWNLOAD_WARNING_ALLOW" desc="Text on the allow button in the IDS_MULTI_DOWNLOAD_WARNING dialog">
+        Allow
+      </message>
+      <message name="IDS_MULTI_DOWNLOAD_WARNING_DENY" desc="Text on the deny button in the IDS_MULTI_DOWNLOAD_WARNING dialog">
+        Deny
+      </message>
+
+      <!-- Bookmark table -->
+      <message name="IDS_BOOKMARK_TABLE_TITLE" desc="Title of the column in bookmark table showing the title of the bookmark.">
+        Title
+      </message>
+      <message name="IDS_BOOKMARK_TABLE_URL" desc="Title of the column in bookmark table showing the url of the bookmark.">
+        URL
+      </message>
+      <message name="IDS_BOOKMARK_TABLE_PATH" desc="Title of the column in bookmark table showing the path in the bookmark bar of the node.">
+        Folder
+      </message>
+      <message name="IDS_BOOKMARK_TABLE_OTHER_BOOKMARKS_PATH" desc="Path used for bookmarks in the other bookmarks folder">
+        Other bookmarks
+      </message>
+      <message name="IDS_BOOKMARK_TABLE_BOOKMARK_BAR_PATH" desc="Path used for bookmarks on the bookmark bar">
+        Bookmark bar
+      </message>
+      <message name="IDS_BOOKMARK_TABLE_PATH_SEPARATOR" desc="Separator between path elements in the bookmarks table">
+        /
+      </message>
+
+      <!-- Bookmark tree -->
+      <message name="IDS_BOOKMARK_TREE_RECENTLY_BOOKMARKED_NODE_TITLE" desc="Title of the bookmark node in the bookmark manager showing the 'recently bookmarked' bookmarks">
+        Recently Added
+      </message>
+      <message name="IDS_BOOKMARK_TREE_SEARCH_NODE_TITLE" desc="Title of node under which search results are shown.">
+        Search
+      </message>
+
+      <!-- Bookmark manager -->
+      <message name="IDS_BOOKMARK_MANAGER_TITLE" desc="Title of the bookmark manager window.">
+        Bookmark Manager
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER" desc="The label of the menu item that shows the bookmark manager">
+        &amp;Bookmark manager
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_SHOW_IN_FOLDER" desc="The label of the menu item in the bookmark manager context menu that changes the selection in the tree to match the folder of the selected item in the table.">
+        Show in folder
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_SORT" desc="The label of the menu item in the bookmark manager organize menu that alphabetizes the bookmarks/folders by title.">
+        Reorder by title
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_ORGANIZE_MENU" desc="Title of the organize menu in the bookmark manager.">
+        Organize
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_TOOLS_MENU" desc="Title of the tools menu in the bookmark manager.">
+        Tools
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_IMPORT_MENU" desc="Title of the import menu item in the bookmark manager.">
+        Import bookmarks...
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_EXPORT_MENU" desc="Title of the export menu item in the bookmark manager.">
+        Export bookmarks...
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_NO_SEARCH_TEXT" desc="Text shown in the bookmark table if the user clicks on the search folder without typing in any text in the search text field.">
+        Enter a query in the text field above to search your bookmarks.
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_NO_RESULTS" desc="Text shown in the bookmark table when the search didn't find anything.">
+        No bookmarks match the query '<ph name="SEARCH_TEXT">$1</ph>'.
+      </message>
+      <message name="IDS_BOOKMARK_MANAGER_SEARCH_TITLE" desc="Text shown before the search text field.">
+        Search:
+      </message>
+
+      <message name="IDS_DEFAULT_FILENAME" desc="Default name for saved files when we have no idea what they could be.">
+        unknown
+      </message>
+
     </messages>
   </release>
 </grit>

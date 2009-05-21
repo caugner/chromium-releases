@@ -1,10 +1,10 @@
 // Copyright (c) 2008, Google Inc.
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
-// 
+//
 //     * Redistributions of source code must retain the above copyright
 // notice, this list of conditions and the following disclaimer.
 //     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
 //     * Neither the name of Google Inc. nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
-// 
+//
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 // "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 // LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -38,13 +38,16 @@
 #include "V8CanvasRenderingContext2D.h"
 #include "V8CanvasGradient.h"
 #include "V8CanvasPattern.h"
+#include "V8CanvasPixelArray.h"
 #include "V8CDATASection.h"
 #include "V8CharacterData.h"
+#include "V8ClientRect.h"
+#include "V8ClientRectList.h"
 #include "V8Clipboard.h"
 #include "V8Comment.h"
 #include "V8Console.h"
 #include "V8Counter.h"
-#include "V8CSSSTyleDeclaration.h"
+#include "V8CSSStyleDeclaration.h"
 #include "V8CSSRule.h"
 #include "V8CSSStyleRule.h"
 #include "V8CSSCharsetRule.h"
@@ -57,12 +60,17 @@
 #include "V8CSSValue.h"
 #include "V8CSSValueList.h"
 #include "V8CSSStyleSheet.h"
+#include "V8CSSVariablesDeclaration.h"
+#include "V8CSSVariablesRule.h"
+#include "V8Database.h"
 #include "V8Document.h"
 #include "V8DocumentFragment.h"
 #include "V8DocumentType.h"
 #include "V8Element.h"
 #include "V8Entity.h"
 #include "V8EntityReference.h"
+#include "V8File.h"
+#include "V8FileList.h"
 #include "V8History.h"
 #include "V8HTMLCanvasElement.h"
 #include "V8UndetectableHTMLCollection.h"
@@ -97,7 +105,6 @@
 #include "V8HTMLIFrameElement.h"
 #include "V8HTMLImageElement.h"
 #include "V8HTMLInputElement.h"
-#include "V8HTMLSelectionInputElement.h"
 #include "V8HTMLIsIndexElement.h"
 #include "V8HTMLLabelElement.h"
 #include "V8HTMLLegendElement.h"
@@ -127,9 +134,12 @@
 #include "V8HTMLTextAreaElement.h"
 #include "V8HTMLTitleElement.h"
 #include "V8HTMLUListElement.h"
+#include "V8ImageData.h"
 #include "V8InspectorController.h"
 #include "V8MediaList.h"
+#include "V8MessageChannel.h"
 #include "V8MessageEvent.h"
+#include "V8MessagePort.h"
 #include "V8NamedNodeMap.h"
 #include "V8Node.h"
 #include "V8NodeList.h"
@@ -142,12 +152,19 @@
 #include "V8TextEvent.h"
 #include "V8DOMCoreException.h"
 #include "V8DOMParser.h"
+#include "V8DOMStringList.h"
 #include "V8DOMWindow.h"
 #include "V8Event.h"
 #include "V8EventException.h"
-#include "V8EventTargetNode.h"
 #include "V8KeyboardEvent.h"
 #include "V8MouseEvent.h"
+#include "V8WebKitAnimationEvent.h"
+#include "V8WebKitCSSKeyframeRule.h"
+#include "V8WebKitCSSKeyframesRule.h"
+#include "V8WebKitCSSMatrix.h"
+#include "V8WebKitCSSTransformValue.h"
+#include "V8WebKitPoint.h"
+#include "V8WebKitTransitionEvent.h"
 #include "V8WheelEvent.h"
 #include "V8UIEvent.h"
 #include "V8MutationEvent.h"
@@ -163,7 +180,12 @@
 #include "V8Range.h"
 #include "V8RangeException.h"
 #include "V8Rect.h"
+#include "V8SQLError.h"
+#include "V8SQLResultSet.h"
+#include "V8SQLResultSetRowList.h"
+#include "V8SQLTransaction.h"
 #include "V8NodeIterator.h"
+#include "V8TextMetrics.h"
 #include "V8TreeWalker.h"
 #include "V8StyleSheetList.h"
 #include "V8DOMImplementation.h"
@@ -173,6 +195,8 @@
 #include "V8XPathNSResolver.h"
 #include "V8XMLHttpRequest.h"
 #include "V8XMLHttpRequestException.h"
+#include "V8XMLHttpRequestProgressEvent.h"
+#include "V8XMLHttpRequestUpload.h"
 #include "V8XMLSerializer.h"
 #include "V8XPathEvaluator.h"
 #include "V8XSLTProcessor.h"
@@ -232,6 +256,7 @@
 
 #if ENABLE(SVG)
 #include "V8SVGAElement.h"
+#include "V8SVGAltGlyphElement.h"
 #include "V8SVGCircleElement.h"
 #include "V8SVGClipPathElement.h"
 #include "V8SVGCursorElement.h"
@@ -241,6 +266,7 @@
 #include "V8SVGEllipseElement.h"
 #include "V8SVGException.h"
 #include "V8SVGGElement.h"
+#include "V8SVGGlyphElement.h"
 #include "V8SVGGradientElement.h"
 #include "V8SVGImageElement.h"
 #include "V8SVGLinearGradientElement.h"
@@ -324,6 +350,22 @@
 #include "V8SVGUnitTypes.h"
 #include "V8SVGURIReference.h"
 #include "V8SVGZoomEvent.h"
+#endif
+
+#if ENABLE(VIDEO)
+#include "V8HTMLAudioElement.h"
+#include "V8HTMLMediaElement.h"
+#include "V8HTMLSourceElement.h"
+#include "V8HTMLVideoElement.h"
+#include "V8MediaError.h"
+#include "V8TimeRanges.h"
+#endif
+
+#if ENABLE(WORKERS)
+#include "V8Worker.h"
+#include "V8WorkerContext.h"
+#include "V8WorkerLocation.h"
+#include "V8WorkerNavigator.h"
 #endif
 
 namespace WebCore {

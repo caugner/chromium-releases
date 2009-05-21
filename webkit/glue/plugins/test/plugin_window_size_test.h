@@ -9,7 +9,7 @@
 
 namespace NPAPIClient {
 
-// This class tests whether the plugin window has a non zero rect 
+// This class tests whether the plugin window has a non zero rect
 // on the second SetWindow call.
 class PluginWindowSizeTest : public PluginTest {
  public:
@@ -22,5 +22,3 @@ class PluginWindowSizeTest : public PluginTest {
 } // namespace NPAPIClient
 
 #endif  // WEBKIT_GLUE_PLUGINS_TEST_PLUGIN_WINDOW_SIZE_TEST_H
-
-

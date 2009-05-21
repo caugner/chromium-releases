@@ -30,6 +30,7 @@ void AppendEscapedCharForHTML(char c, std::string* output);
 
 // Escape chars that might cause this text to be interpretted as HTML tags.
 std::string EscapeForHTML(const std::string& text);
+std::wstring EscapeForHTML(const std::wstring& text);
 
 // Unescaping ------------------------------------------------------------------
 
@@ -117,4 +118,3 @@ bool EscapeQueryParamValue(const std::wstring& text, const char* codepage,
 std::wstring EscapeQueryParamValueUTF8(const std::wstring& text);
 
 #endif  // #ifndef NET_BASE_ESCAPE_H__
-

@@ -11,14 +11,14 @@
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/views/dialog_delegate.h"
+#include "chrome/views/window/dialog_delegate.h"
 
 class MessageBoxView;
-namespace ChromeViews {
+namespace views {
 class Window;
 }
 
-class UserDataDirDialog : public ChromeViews::DialogDelegate,
+class UserDataDirDialog : public views::DialogDelegate,
                           public MessageLoopForUI::Dispatcher,
                           public SelectFileDialog::Listener {
  public:
@@ -31,18 +31,18 @@ class UserDataDirDialog : public ChromeViews::DialogDelegate,
 
   std::wstring user_data_dir() { return user_data_dir_; }
 
-  // ChromeViews::DialogDelegate Methods:
+  // views::DialogDelegate Methods:
   virtual int GetDialogButtons() const;
   virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
-  virtual void WindowClosing();
+  virtual void DeleteDelegate();
   virtual bool Accept();
   virtual bool Cancel();
 
-  // ChromeViews::WindowDelegate Methods:
+  // views::WindowDelegate Methods:
   virtual bool IsAlwaysOnTop() const { return false; }
   virtual bool IsModal() const { return false; }
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
   // MessageLoop::Dispatcher Method:
   virtual bool Dispatch(const MSG& msg);
@@ -68,4 +68,3 @@ class UserDataDirDialog : public ChromeViews::DialogDelegate,
 };
 
 #endif // CHROME_BROWSER_USER_DATA_DIR_DIALOG_H__
-

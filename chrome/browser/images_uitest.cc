@@ -4,13 +4,16 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/platform_thread.h"
 #include "chrome/test/ui/ui_test.h"
 
 class ImagesTest : public UITest {
  protected:
   ImagesTest() : UITest() {
-    launch_arguments_ = test_data_directory_;
-    file_util::AppendToPath(&launch_arguments_, L"animated-gifs.html");
+    std::wstring path = test_data_directory_;
+    file_util::AppendToPath(&path, L"animated-gifs.html");
+    launch_arguments_ = CommandLine(L"");
+    launch_arguments_.AppendLooseValue(path);
   }
 };
 
@@ -19,7 +22,7 @@ TEST_F(ImagesTest, AnimatedGIFs) {
 
   // Let the GIFs fully animate.
   for (int i = 0; i < 10; ++i) {
-    Sleep(kWaitForActionMaxMsec / 10);
+    PlatformThread::Sleep(sleep_timeout_ms());
     if (page_title == GetActiveTabTitle())
       break;
   }
@@ -29,4 +32,3 @@ TEST_F(ImagesTest, AnimatedGIFs) {
 
   // Tau will check if this crashed.
 }
-

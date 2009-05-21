@@ -6,35 +6,56 @@
 
 #include "chrome/installer/setup/uninstall.h"
 
-#include <atlbase.h>
-#include <windows.h>
-#include <msi.h>
-
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/registry.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "base/win_util.h"
-#include "base/wmi_util.h"
-#include "chrome/app/result_codes.h"
+#include "chrome/common/result_codes.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/installer/setup/setup.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/logging_installer.h"
-#include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/version.h"
 
-#include "installer_util_strings.h"
+// Build-time generated include file.
+#include "registered_dlls.h"
 
 namespace {
+
+// This functions checks for any Chrome instances that are
+// running and first asks them to close politely by sending a Windows message.
+// If there is an error while sending message or if there are still Chrome
+// procesess active after the message has been sent, this function will try
+// to kill them.
+void CloseAllChromeProcesses() {
+  for (int j = 0; j < 4; ++j) {
+    std::wstring wnd_class(L"Chrome_WidgetWin_");
+    wnd_class.append(IntToWString(j));
+    HWND window = FindWindowEx(NULL, NULL, wnd_class.c_str(), NULL);
+    while (window) {
+      HWND tmpWnd = window;
+      window = FindWindowEx(NULL, window, wnd_class.c_str(), NULL);
+      if (!SendMessageTimeout(tmpWnd, WM_CLOSE, 0, 0, SMTO_BLOCK, 3000, NULL) &&
+          (GetLastError() == ERROR_TIMEOUT)) {
+        base::CleanupProcesses(installer_util::kChromeExe, 0,
+                               ResultCodes::HUNG, NULL);
+        return;
+      }
+    }
+  }
+
+  // If asking politely didn't work, wait for 15 seconds and then kill all
+  // chrome.exe. This check is just in case Chrome is ignoring WM_CLOSE
+  // messages.
+  base::CleanupProcesses(installer_util::kChromeExe, 15000,
+                         ResultCodes::HUNG, NULL);
+}
 
 // This method deletes Chrome shortcut folder from Windows Start menu. It
 // checks system_uninstall to see if the shortcut is in all users start menu
@@ -43,8 +64,14 @@ void DeleteChromeShortcut(bool system_uninstall) {
   std::wstring shortcut_path;
   if (system_uninstall) {
     PathService::Get(base::DIR_COMMON_START_MENU, &shortcut_path);
+    ShellUtil::RemoveChromeDesktopShortcut(ShellUtil::CURRENT_USER |
+                                           ShellUtil::SYSTEM_LEVEL);
+    ShellUtil::RemoveChromeQuickLaunchShortcut(ShellUtil::CURRENT_USER |
+                                               ShellUtil::SYSTEM_LEVEL);
   } else {
     PathService::Get(base::DIR_START_MENU, &shortcut_path);
+    ShellUtil::RemoveChromeDesktopShortcut(ShellUtil::CURRENT_USER);
+    ShellUtil::RemoveChromeQuickLaunchShortcut(ShellUtil::CURRENT_USER);
   }
   if (shortcut_path.empty()) {
     LOG(ERROR) << "Failed to get location for shortcut.";
@@ -55,6 +82,66 @@ void DeleteChromeShortcut(bool system_uninstall) {
     if (!file_util::Delete(shortcut_path, true))
       LOG(ERROR) << "Failed to delete folder: " << shortcut_path;
   }
+}
+
+// Deletes all installed files of Chromium and Folders. Before deleting it
+// needs to move setup.exe in a temp folder because the current process
+// is using that file. It returns false when it can not get the path to
+// installation folder, in all other cases it returns true even in case
+// of error (only logs the error).
+bool DeleteFilesAndFolders(const std::wstring& exe_path, bool system_uninstall,
+    const installer::Version& installed_version,
+    std::wstring* local_state_path) {
+  std::wstring install_path(installer::GetChromeInstallPath(system_uninstall));
+  if (install_path.empty()) {
+    LOG(ERROR) << "Could not get installation destination path.";
+    return false;  // Nothing else we can do for uninstall, so we return.
+  } else {
+    LOG(INFO) << "install destination path: " << install_path;
+  }
+
+  // Move setup.exe to the temp path.
+  std::wstring setup_exe(installer::GetInstallerPathUnderChrome(
+      install_path, installed_version.GetString()));
+  file_util::AppendToPath(&setup_exe, file_util::GetFilenameFromPath(exe_path));
+
+  std::wstring temp_file;
+  file_util::CreateTemporaryFileName(&temp_file);
+  file_util::Move(setup_exe, temp_file);
+
+  // Move the browser's persisted local state
+  FilePath user_local_state;
+  if (chrome::GetDefaultUserDataDirectory(&user_local_state)) {
+    std::wstring user_local_file(
+        user_local_state.Append(chrome::kLocalStateFilename).value());
+
+    file_util::CreateTemporaryFileName(local_state_path);
+    file_util::CopyFile(user_local_file, *local_state_path);
+  }
+
+  LOG(INFO) << "Deleting install path " << install_path;
+  if (!file_util::Delete(install_path, true)) {
+    LOG(ERROR) << "Failed to delete folder (1st try): " << install_path;
+    // Try closing any running chrome processes and deleting files once again.
+    CloseAllChromeProcesses();
+    if (!file_util::Delete(install_path, true))
+      LOG(ERROR) << "Failed to delete folder (2nd try): " << install_path;
+  }
+
+  // Now check and delete if the parent directories are empty
+  // For example Google\Chrome or Chromium
+  std::wstring parent_dir = file_util::GetDirectoryFromPath(install_path);
+  if (!parent_dir.empty() && file_util::IsDirectoryEmpty(parent_dir)) {
+    if (!file_util::Delete(parent_dir, true))
+      LOG(ERROR) << "Failed to delete folder: " << parent_dir;
+    parent_dir = file_util::GetDirectoryFromPath(parent_dir);
+    if (!parent_dir.empty() &&
+        file_util::IsDirectoryEmpty(parent_dir)) {
+      if (!file_util::Delete(parent_dir, true))
+        LOG(ERROR) << "Failed to delete folder: " << parent_dir;
+    }
+  }
+  return true;
 }
 
 // This method tries to delete a registry key and logs an error message
@@ -120,37 +207,29 @@ installer_util::InstallStatus IsChromeActiveOrUserCancelled(
 
 installer_util::InstallStatus installer_setup::UninstallChrome(
     const std::wstring& exe_path, bool system_uninstall,
-    const installer::Version& installed_version, bool remove_all) {
-  installer_util::InstallStatus status =
-      IsChromeActiveOrUserCancelled(system_uninstall);
-  if (status != installer_util::UNINSTALL_CONFIRMED)
-    return status;
-
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  dist->DoPreUninstallOperations();
-#if defined(GOOGLE_CHROME_BUILD)
-  // TODO(rahulk): This should be done by DoPreUninstallOperations call above
-  wchar_t product[39];  // GUID + '\0'
-  MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);  // Don't show any UI to user.
-  for (int i = 0; MsiEnumRelatedProducts(google_update::kGearsUpgradeCode, 0, i,
-                                         product) != ERROR_NO_MORE_ITEMS; ++i) {
-    LOG(INFO) << "Uninstalling Gears - " << product;
-    unsigned int ret = MsiConfigureProduct(product, INSTALLLEVEL_MAXIMUM,
-                                           INSTALLSTATE_ABSENT);
-    if (ret != ERROR_SUCCESS)
-      LOG(ERROR) << "Failed to uninstall Gears " << product << ": " << ret;
+    const installer::Version& installed_version,
+    bool remove_all, bool force_uninstall) {
+  if (!force_uninstall) {
+    installer_util::InstallStatus status =
+        IsChromeActiveOrUserCancelled(system_uninstall);
+    if (status != installer_util::UNINSTALL_CONFIRMED)
+      return status;
+  } else {
+    // Since --force-uninstall command line option is used, we are going to
+    // do silent uninstall. Try to close all running Chrome instances.
+    CloseAllChromeProcesses();
   }
-#endif
 
   // Chrome is not in use so lets uninstall Chrome by deleting various files
   // and registry entries. Here we will just make best effort and keep going
   // in case of errors.
-  // First delete shortcut from Start->Programs.
+  // First delete shortcuts from Start->Programs, Desktop & Quick Launch.
   DeleteChromeShortcut(system_uninstall);
 
   // Delete the registry keys (Uninstall key and Version key).
   HKEY reg_root = system_uninstall ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
   RegKey key(reg_root, L"", KEY_ALL_ACCESS);
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   DeleteRegistryKey(key, dist->GetUninstallRegPath());
   DeleteRegistryKey(key, dist->GetVersionKey());
 
@@ -167,50 +246,74 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
 
   DeleteRegistryValue(reg_root, ShellUtil::kRegRegisteredApplications,
                       dist->GetApplicationName());
+
+  // Cleanup Software\Classes\Applications\chrome.exe and OpenWithList
+  RegKey hklm_key(HKEY_LOCAL_MACHINE, L"", KEY_ALL_ACCESS);
+  std::wstring app_key(ShellUtil::kRegClasses);
+  file_util::AppendToPath(&app_key, L"Applications");
+  file_util::AppendToPath(&app_key, installer_util::kChromeExe);
+  DeleteRegistryKey(key, app_key);
+  if (remove_all)
+    DeleteRegistryKey(hklm_key, app_key);
+  for (int i = 0; ShellUtil::kFileAssociations[i] != NULL; i++) {
+    std::wstring open_with_key(ShellUtil::kRegClasses);
+    file_util::AppendToPath(&open_with_key, ShellUtil::kFileAssociations[i]);
+    file_util::AppendToPath(&open_with_key, L"OpenWithList");
+    file_util::AppendToPath(&open_with_key, installer_util::kChromeExe);
+    DeleteRegistryKey(key, open_with_key);
+    if (remove_all)
+      DeleteRegistryKey(hklm_key, open_with_key);
+  }
   key.Close();
 
   // Delete shared registry keys as well (these require admin rights) if
   // remove_all option is specified.
   if (remove_all) {
-    RegKey hklm_key(HKEY_LOCAL_MACHINE, L"", KEY_ALL_ACCESS);
     DeleteRegistryKey(hklm_key, set_access_key);
     DeleteRegistryKey(hklm_key, html_prog_id);
     DeleteRegistryValue(HKEY_LOCAL_MACHINE,
                         ShellUtil::kRegRegisteredApplications,
                         dist->GetApplicationName());
 
+    // Delete the App Paths key that lets explorer find Chrome.
+    std::wstring app_path_key(ShellUtil::kAppPathsRegistryKey);
+    file_util::AppendToPath(&app_path_key, installer_util::kChromeExe);
+    DeleteRegistryKey(hklm_key, app_path_key);
+
     // Delete media player registry key that exists only in HKLM.
     std::wstring reg_path(installer::kMediaPlayerRegPath);
     file_util::AppendToPath(&reg_path, installer_util::kChromeExe);
     DeleteRegistryKey(hklm_key, reg_path);
     hklm_key.Close();
+
+    // Unregister any dll servers that we may have registered.
+    std::wstring dll_path(installer::GetChromeInstallPath(system_uninstall));
+    file_util::AppendToPath(&dll_path, installed_version.GetString());
+
+    scoped_ptr<WorkItemList> dll_list(WorkItem::CreateWorkItemList());
+    if (InstallUtil::BuildDLLRegistrationList(dll_path, kDllsToRegister,
+                                              kNumDllsToRegister, false,
+                                              dll_list.get())) {
+      dll_list->Do();
+    }
   }
 
   // Finally delete all the files from Chrome folder after moving setup.exe
-  // to a temp location.
-  std::wstring install_path(installer::GetChromeInstallPath(system_uninstall));
-  if (install_path.empty()) {
-    LOG(ERROR) << "Could not get installation destination path.";
-    // Nothing else we could do for uninstall, so we return.
+  // and the user's Local State to a temp location.
+  std::wstring local_state_path;
+  if (!DeleteFilesAndFolders(exe_path, system_uninstall, installed_version,
+                             &local_state_path))
     return installer_util::UNINSTALL_FAILED;
-  } else {
-    LOG(INFO) << "install destination path: " << install_path;
+
+  if (!force_uninstall) {
+    LOG(INFO) << "Uninstallation complete. Launching Uninstall survey.";
+    dist->DoPostUninstallOperations(installed_version, local_state_path);
   }
 
-  std::wstring setup_exe(installer::GetInstallerPathUnderChrome(
-      install_path, installed_version.GetString()));
-  file_util::AppendToPath(&setup_exe, file_util::GetFilenameFromPath(exe_path));
+  // Try and delete the preserved local state once the post-install
+  // operations are complete.
+  if (!local_state_path.empty())
+    file_util::Delete(local_state_path, false);
 
-  std::wstring temp_file;
-  file_util::CreateTemporaryFileName(&temp_file);
-  file_util::Move(setup_exe, temp_file);
-
-  LOG(INFO) << "Deleting install path " << install_path;
-  if (!file_util::Delete(install_path, true))
-    LOG(ERROR) << "Failed to delete folder: " << install_path;
-
-  LOG(INFO) << "Uninstallation complete. Launching Uninstall survey.";
-  dist->DoPostUninstallOperations(installed_version);
   return installer_util::UNINSTALL_SUCCESSFUL;
 }
-

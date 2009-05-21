@@ -6,7 +6,7 @@
 
 #include <set>
 
-#include "net/url_request/url_request_inet_job.h"
+#include "base/logging.h"
 
 URLRequestFilter* URLRequestFilter::shared_instance_ = NULL;
 
@@ -129,4 +129,3 @@ URLRequestJob* URLRequestFilter::FindRequestHandler(URLRequest* request,
   }
   return job;
 }
-

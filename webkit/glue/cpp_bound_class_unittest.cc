@@ -17,9 +17,21 @@
 
 namespace {
 
+class CppBindingExampleSubObject : public CppBindingExample {
+ public:
+  CppBindingExampleSubObject() {
+    sub_value_.Set("sub!");
+    BindProperty("sub_value", &sub_value_);
+  }
+ private:
+  CppVariant sub_value_;
+};
+
+
 class CppBindingExampleWithOptionalFallback : public CppBindingExample {
  public:
   CppBindingExampleWithOptionalFallback() {
+    BindProperty("sub_object", sub_object_.GetAsCppVariant());
   }
 
   void set_fallback_method_enabled(bool state) {
@@ -30,9 +42,11 @@ class CppBindingExampleWithOptionalFallback : public CppBindingExample {
 
   // The fallback method does nothing, but because of it the JavaScript keeps
   // running when a nonexistent method is called on an object.
-  void fallbackMethod(const CppArgumentList& args,
-                      CppVariant* result) {
+  void fallbackMethod(const CppArgumentList& args, CppVariant* result) {
   }
+
+ private:
+  CppBindingExampleSubObject sub_object_;
 };
 
 class ExampleTestShell : public TestShell {
@@ -49,8 +63,8 @@ class ExampleTestShell : public TestShell {
     // We use the layoutTestController binding for notifyDone.
     TestShell::BindJSObjectsToWindow(frame);
   }
-  
-  // This is a public interface to TestShell's protected method, so it 
+
+  // This is a public interface to TestShell's protected method, so it
   // can be called by our CreateEmptyWindow.
   bool PublicInitialize(const std::wstring& startingURL) {
     return Initialize(startingURL);
@@ -97,7 +111,7 @@ class CppBoundClassTest : public TestShellTest {
      ExecuteJavaScript(javascript);
      EXPECT_EQ(L"SUCCESS", webkit_glue::DumpDocumentText(webframe_));
    }
-   
+
    // Executes the specified JavaScript and checks that the resulting document
    // text is empty.
    void CheckJavaScriptFailure(const std::string& javascript) {
@@ -118,8 +132,8 @@ class CppBoundClassTest : public TestShellTest {
             "if (leftval == rightval) {" +
             "  document.writeln('SUCCESS');" +
             "} else {" +
-            "  document.writeln(\"" + 
-                 left + " [\" + leftval + \"] != " + 
+            "  document.writeln(\"" +
+                 left + " [\" + leftval + \"] != " +
                  right + " [\" + rightval + \"]\");" +
             "}";
    }
@@ -140,8 +154,6 @@ protected:
   }
 };
 
-} // namespace
-
 // Ensures that the example object has been bound to JS.
 TEST_F(CppBoundClassTest, ObjectExists) {
   std::string js = BuildJSCondition("typeof window.example", "'object'");
@@ -157,6 +169,15 @@ TEST_F(CppBoundClassTest, PropertiesAreInitialized) {
   CheckJavaScriptSuccess(js);
 
   js = BuildJSCondition("example.my_other_value", "'Reinitialized!'");
+  CheckJavaScriptSuccess(js);
+}
+
+TEST_F(CppBoundClassTest, SubOject) {
+  std::string js = BuildJSCondition("typeof window.example.sub_object",
+                                    "'object'");
+  CheckJavaScriptSuccess(js);
+
+  js = BuildJSCondition("example.sub_object.sub_value", "'sub!'");
   CheckJavaScriptSuccess(js);
 }
 
@@ -194,7 +215,7 @@ TEST_F(CppBoundClassTest, InvokeMethods) {
     "example.echoValue()", "null",     // Too few arguments
 
     "example.echoType(false)", "true",
-    "example.echoType(19)", "3.14159",
+    "example.echoType(19)", "7",
     "example.echoType(9.876)", "3.14159",
     "example.echoType('test string')", "'Success!'",
     "example.echoType()", "null",      // Too few arguments
@@ -225,9 +246,9 @@ TEST_F(CppBoundClassTest, InvokeMethods) {
   CheckJavaScriptSuccess(js);
 }
 
-// Tests that invoking a nonexistent method with no fallback method stops the 
+// Tests that invoking a nonexistent method with no fallback method stops the
 // script's execution
-TEST_F(CppBoundClassTest, 
+TEST_F(CppBoundClassTest,
        InvokeNonexistentMethodNoFallback) {
   std::string js = "example.nonExistentMethod();document.writeln('SUCCESS');";
   CheckJavaScriptFailure(js);
@@ -235,9 +256,10 @@ TEST_F(CppBoundClassTest,
 
 // Ensures existent methods can be invoked successfully when the fallback method
 // is used
-TEST_F(CppBoundClassWithFallbackMethodTest, 
+TEST_F(CppBoundClassWithFallbackMethodTest,
        InvokeExistentMethodsWithFallback) {
   std::string js = BuildJSCondition("example.echoValue(34)", "34");
   CheckJavaScriptSuccess(js);
 }
 
+}  // namespace

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/debugger/debugger_shell.h"
 
+#include "build/build_config.h"
+
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -13,11 +15,17 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/debugger_io.h"
 #include "chrome/browser/debugger/debugger_node.h"
-#include "chrome/browser/debugger/resources/debugger_resources.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/resource_bundle.h"
+
+#include "grit/debugger_resources.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/tab_contents/tab_contents.h"
+#elif defined(OS_POSIX)
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
 
 DebuggerShell::DebuggerShell(DebuggerInputOutput* io) : io_(io),
                                                         debugger_ready_(true) {
@@ -27,6 +35,7 @@ DebuggerShell::~DebuggerShell() {
   io_->Stop();
   io_ = NULL;
 
+  v8::Locker locked;
   v8::HandleScope scope;
   SubshellFunction("exit", 0, NULL);
   v8::V8::RemoveMessageListeners(&DelegateMessageListener);
@@ -38,6 +47,7 @@ DebuggerShell::~DebuggerShell() {
 void DebuggerShell::Start() {
   io_->Start(this);
 
+  v8::Locker locked;
   v8::HandleScope scope;
 
   v8_this_ = v8::Persistent<v8::External>::New(v8::External::New(this));
@@ -75,7 +85,8 @@ void DebuggerShell::Start() {
   CompileAndRun(debugger_shell_js, "chrome.dll/debugger_shell.js");
 }
 
-void DebuggerShell::HandleWeakReference(v8::Persistent<v8::Object> obj, void* data) {
+void DebuggerShell::HandleWeakReference(v8::Persistent<v8::Value> obj,
+                                        void* data) {
   DebuggerNodeWrapper* node = static_cast<DebuggerNodeWrapper*>(data);
   node->Release();
 }
@@ -103,7 +114,8 @@ DebuggerInputOutput* DebuggerShell::GetIo() {
   return io_.get();
 }
 
-v8::Handle<v8::Value> DebuggerShell::DelegateSubshell(const v8::Arguments& args) {
+v8::Handle<v8::Value> DebuggerShell::DelegateSubshell(
+    const v8::Arguments& args) {
   DebuggerShell* debugger =
     static_cast<DebuggerShell*>(v8::External::Cast(*args.Data())->Value());
   return debugger->Subshell(args);
@@ -126,7 +138,8 @@ v8::Handle<v8::Value> DebuggerShell::Subshell(const v8::Arguments& args) {
       v8_context_->Global()->Set(v8::String::New("shell_"), shell_);
     }
   } else if (args[0]->IsObject()) {
-    shell_ = v8::Persistent<v8::Object>::New(v8::Local<v8::Object>::Cast(args[0]));
+    shell_ =
+        v8::Persistent<v8::Object>::New(v8::Local<v8::Object>::Cast(args[0]));
     v8_context_->Global()->Set(v8::String::New("shell_"), shell_);
   }
   return v8::Undefined();
@@ -207,6 +220,7 @@ void DebuggerShell::MessageListener(v8::Handle<v8::Message> message) {
 }
 
 void DebuggerShell::Debug(TabContents* tab) {
+  v8::Locker locked;
   v8::HandleScope outer;
   v8::Context::Scope scope(v8_context_);
 
@@ -220,10 +234,12 @@ void DebuggerShell::Debug(TabContents* tab) {
 }
 
 void DebuggerShell::DebugMessage(const std::wstring& msg) {
+  v8::Locker locked;
   v8::HandleScope scope;
 
   if (msg.length()) {
-    if ((msg[0] == L'{' || msg[0] == L'[' || msg[0] == L'(') && (!shell_.IsEmpty())) {
+    if ((msg[0] == L'{' || msg[0] == L'[' || msg[0] == L'(') &&
+        (!shell_.IsEmpty())) {
       // v8's wide String constructor requires uint16 rather than wchar
       const uint16* data = reinterpret_cast<const uint16* >(msg.c_str());
       v8::Handle<v8::Value> argv[] = {v8::String::New(data)};
@@ -239,16 +255,19 @@ void DebuggerShell::DebugMessage(const std::wstring& msg) {
 }
 
 void DebuggerShell::OnDebugAttach() {
+  v8::Locker locked;
   v8::HandleScope scope;
   SubshellFunction("on_attach", 0, NULL);
 }
 
 void DebuggerShell::OnDebugDisconnect() {
+  v8::Locker locked;
   v8::HandleScope scope;
   SubshellFunction("on_disconnect", 0, NULL);
 }
 
-void DebuggerShell::ObjectToString(v8::Handle<v8::Value> result, std::wstring* str) {
+void DebuggerShell::ObjectToString(v8::Handle<v8::Value> result,
+                                   std::wstring* str) {
   v8::HandleScope scope;
   if (!result.IsEmpty() && !result->IsUndefined()) {
     v8::Local<v8::String> str_obj = result->ToString();
@@ -263,7 +282,8 @@ void DebuggerShell::ObjectToString(v8::Handle<v8::Value> result, std::wstring* s
   }
 }
 
-void DebuggerShell::ObjectToString(v8::Handle<v8::Value> result, std::string* str) {
+void DebuggerShell::ObjectToString(v8::Handle<v8::Value> result,
+                                   std::string* str) {
   v8::HandleScope scope;
   if (!result.IsEmpty() && !result->IsUndefined()) {
     v8::Local<v8::String> str_obj = result->ToString();
@@ -315,6 +335,7 @@ void DebuggerShell::PrintPrompt() {
   if (!shell_.IsEmpty()) {
     if (!debugger_ready_)
       return;
+    v8::Locker locked;
     v8::HandleScope outer;
     v8::Handle<v8::Value> result = CompileAndRun("shell_.prompt()");
     if (!result.IsEmpty() && !result->IsUndefined()) {
@@ -326,6 +347,7 @@ void DebuggerShell::PrintPrompt() {
 }
 
 void DebuggerShell::ProcessCommand(const std::wstring& data) {
+  v8::Locker locked;
   v8::HandleScope outer;
   v8::Context::Scope scope(v8_context_);
   if (!shell_.IsEmpty() && data.substr(0, 7) != L"source(") {
@@ -367,6 +389,7 @@ void DebuggerShell::LoadUserConfig() {
 }
 
 void DebuggerShell::DidConnect() {
+  v8::Locker locked;
   v8::HandleScope outer;
   v8::Context::Scope scope(v8_context_);
 
@@ -376,6 +399,7 @@ void DebuggerShell::DidConnect() {
 }
 
 void DebuggerShell::DidDisconnect() {
+  v8::Locker locked;
   v8::HandleScope outer;
   SubshellFunction("exit", 0, NULL);
 }
@@ -390,6 +414,7 @@ v8::Handle<v8::Value> DebuggerShell::CompileAndRun(
 v8::Handle<v8::Value> DebuggerShell::CompileAndRun(
     const std::wstring& wstr,
     const std::string& filename) {
+  v8::Locker locked;
   v8::Context::Scope scope(v8_context_);
   v8::Handle<v8::String> scriptname;
   if (filename.length() > 0) {
@@ -409,6 +434,3 @@ v8::Handle<v8::Value> DebuggerShell::CompileAndRun(
   }
   return v8::Undefined();
 }
-
-
-

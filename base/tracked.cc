@@ -7,6 +7,8 @@
 #include "base/string_util.h"
 #include "base/tracked_objects.h"
 
+using base::Time;
+
 namespace tracked_objects {
 
 //------------------------------------------------------------------------------
@@ -90,5 +92,3 @@ bool Tracked::MissingBirthplace() const {
 #endif  // NDEBUG
 
 }  // namespace tracked_objects
-
-

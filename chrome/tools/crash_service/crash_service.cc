@@ -27,7 +27,7 @@ namespace {
 
 const wchar_t kTestPipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 
-const wchar_t kCrashReportURL[] = L"https://www.google.com/cr/report";
+const wchar_t kCrashReportURL[] = L"https://clients2.google.com/cr/report";
 const wchar_t kCheckPointFile[] = L"crash_checkpoint.txt";
 
 typedef std::map<std::wstring, std::wstring> CrashMap;
@@ -195,7 +195,8 @@ bool CrashService::Initialize(const std::wstring& command_line) {
     return false;
   }
 
-  CommandLine cmd_line(command_line);
+  CommandLine cmd_line(L"");
+  cmd_line.ParseFromString(command_line);
 
   // We can override the send reports quota with a command line switch.
   if (cmd_line.HasSwitch(kMaxReports))
@@ -427,4 +428,3 @@ int CrashService::ProcessingLoop() {
 
   return static_cast<int>(msg.wParam);
 }
-

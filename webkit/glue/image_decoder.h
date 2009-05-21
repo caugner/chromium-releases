@@ -4,7 +4,6 @@
 
 #include "base/basictypes.h"
 #include "base/gfx/size.h"
-#include "base/scoped_ptr.h"
 
 class SkBitmap;
 
@@ -26,7 +25,7 @@ class ImageDecoder {
 
   // Call this function to decode the image. If successful, the decoded image
   // will be returned. Otherwise, an empty bitmap will be returned.
-  SkBitmap Decode(const unsigned char* data, size_t size);
+  SkBitmap Decode(const unsigned char* data, size_t size) const;
 
  private:
   // Size will be empty to get the largest possible size.
@@ -36,4 +35,3 @@ class ImageDecoder {
 };
 
 }  // namespace webkit_glue
-

@@ -3,27 +3,20 @@
 // found in the LICENSE file.
 
 #include "config.h"
+#include "webkit/glue/event_conversion.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
+#include "KeyboardCodes.h"
 #include "StringImpl.h"  // This is so that the KJS build works
-#pragma warning(push, 0)
-// HACK: make it possible to initialize these classes...
-// TODO(darin): send this change to webkit.org
-#define private protected
 #include "PlatformKeyboardEvent.h"
 #include "PlatformMouseEvent.h"
 #include "PlatformWheelEvent.h"
-#undef private
 #include "Widget.h"
-#pragma warning(pop)
 
 #undef LOG
 #include "base/gfx/point.h"
 #include "base/logging.h"
-#include "webkit/glue/event_conversion.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "webkit/glue/glue_util.h"
 #include "webkit/glue/webinputevent.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -35,17 +28,10 @@ int MakePlatformMouseEvent::last_click_count_ = 0;
 uint32 MakePlatformMouseEvent::last_click_time_ = 0;
 
 MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
-                                               const WebMouseEvent& e)
-#if defined(OS_WIN)
-    : PlatformMouseEvent(NULL, 0, 0, 0, false /* TODO(darin): do we care? */) {
-#elif defined(OS_MACOSX)
-    : PlatformMouseEvent(e.mac_event.get()) {
-#endif
-#if defined(OS_WIN) || defined(OS_LINUX)
+                                               const WebMouseEvent& e) {
   // TODO(mpcomplete): widget is always toplevel, unless it's a popup.  We
   // may be able to get rid of this once we abstract popups into a WebKit API.
   m_position = widget->convertFromContainingWindow(IntPoint(e.x, e.y));
-#endif
   m_globalPosition = IntPoint(e.global_x, e.global_y);
   m_button = static_cast<MouseButton>(e.button);
   m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
@@ -80,12 +66,22 @@ MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
         last_click_position = IntPoint();
         last_click_time_ = 0;
       }
-#if defined(OS_WIN)
-      setClickCount(last_click_count_);
-#endif
+      m_clickCount = last_click_count_;
       m_eventType = MouseEventMoved;
       break;
 
+  // TODO(port): make these platform agnostic when we restructure this code.
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+    case WebInputEvent::MOUSE_DOUBLE_CLICK:
+      ++m_clickCount;
+      // fall through
+    case WebInputEvent::MOUSE_DOWN:
+      ++m_clickCount;
+      last_click_time_ = current_time;
+      last_click_button = m_button;
+      m_eventType = MouseEventPressed;
+      break;
+#else
     case WebInputEvent::MOUSE_DOWN:
     case WebInputEvent::MOUSE_DOUBLE_CLICK:
       if (!cancel_previous_click && (m_button == last_click_button)) {
@@ -96,16 +92,13 @@ MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
       }
       last_click_time_ = current_time;
       last_click_button = m_button;
-#if defined(OS_WIN)
-      setClickCount(last_click_count_);
-#endif
+      m_clickCount = last_click_count_;
       m_eventType = MouseEventPressed;
       break;
+#endif
 
     case WebInputEvent::MOUSE_UP:
-#if defined(OS_WIN)
-      setClickCount(last_click_count_);
-#endif
+      m_clickCount = last_click_count_;
       m_eventType = MouseEventReleased;
       break;
 
@@ -113,64 +106,65 @@ MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
       NOTREACHED() << "unexpected mouse event type";
   }
 
-  if (webkit_glue::IsLayoutTestMode()) {
-#if defined(OS_WIN)
-    setClickCount(e.layout_test_click_count);
-#endif
+  if (WebKit::layoutTestMode()) {
+    m_clickCount = e.layout_test_click_count;
   }
 }
 
 // MakePlatformWheelEvent -----------------------------------------------------
 
 MakePlatformWheelEvent::MakePlatformWheelEvent(Widget* widget,
-                                               const WebMouseWheelEvent& e)
-#if defined(OS_WIN)
-    : PlatformWheelEvent(NULL, 0, 0, false) {  // TODO(jackson): Check if it's a horizontal event
-#elif defined(OS_MACOSX)
-    : PlatformWheelEvent(e.mac_event.get()) {
-#endif
-#if defined(OS_WIN) || defined(OS_LINUX)
+                                               const WebMouseWheelEvent& e) {
   m_position = widget->convertFromContainingWindow(IntPoint(e.x, e.y));
-#endif
   m_globalPosition = IntPoint(e.global_x, e.global_y);
-  m_deltaX = static_cast<float>(e.delta_x);
-  m_deltaY = static_cast<float>(e.delta_y);
+  m_deltaX = e.delta_x;
+  m_deltaY = e.delta_y;
+  m_wheelTicksX = e.wheel_ticks_x;
+  m_wheelTicksY = e.wheel_ticks_y;
+  m_isAccepted = false;
+  m_granularity = e.scroll_by_page ?
+      ScrollByPageWheelEvent : ScrollByPixelWheelEvent;
   m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
   m_ctrlKey = (e.modifiers & WebInputEvent::CTRL_KEY) != 0;
   m_altKey = (e.modifiers & WebInputEvent::ALT_KEY) != 0;
   m_metaKey = (e.modifiers & WebInputEvent::META_KEY) != 0;
 }
 
-static inline const PlatformKeyboardEvent::Type platformKeyTypeForWebInputEventType(WebInputEvent::Type type) {
+// MakePlatformKeyboardEvent --------------------------------------------------
+
+static inline const PlatformKeyboardEvent::Type ToPlatformKeyboardEventType(
+    WebInputEvent::Type type) {
   switch (type) {
     case WebInputEvent::KEY_UP:
       return PlatformKeyboardEvent::KeyUp;
     case WebInputEvent::KEY_DOWN:
       return PlatformKeyboardEvent::KeyDown;
+    case WebInputEvent::RAW_KEY_DOWN:
+      return PlatformKeyboardEvent::RawKeyDown;
     case WebInputEvent::CHAR:
       return PlatformKeyboardEvent::Char;
+    default:
+      ASSERT_NOT_REACHED();
   }
-  ASSERT_NOT_REACHED();
   return PlatformKeyboardEvent::KeyDown;
-} 
+}
 
-// MakePlatformKeyboardEvent --------------------------------------------------
-
-MakePlatformKeyboardEvent::MakePlatformKeyboardEvent(const WebKeyboardEvent& e)
-#if defined(OS_WIN)
-    : PlatformKeyboardEvent(NULL, e.key_code, e.key_data,
-                            platformKeyTypeForWebInputEventType(e.type), 
-                            e.system_key) {
-#elif defined(OS_MACOSX)
-    : PlatformKeyboardEvent(e.mac_event.get()) {
-#endif
+MakePlatformKeyboardEvent::MakePlatformKeyboardEvent(
+    const WebKeyboardEvent& e) {
+  m_type = ToPlatformKeyboardEventType(e.type);
+  m_text = WebCore::String(e.text);
+  m_unmodifiedText = WebCore::String(e.unmodified_text);
+  m_keyIdentifier = WebCore::String(e.key_identifier);
   m_autoRepeat = (e.modifiers & WebInputEvent::IS_AUTO_REPEAT) != 0;
+  m_windowsVirtualKeyCode = e.windows_key_code;
+  m_nativeVirtualKeyCode = e.native_key_code;
   m_isKeypad = (e.modifiers & WebInputEvent::IS_KEYPAD) != 0;
   m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
   m_ctrlKey = (e.modifiers & WebInputEvent::CTRL_KEY) != 0;
   m_altKey = (e.modifiers & WebInputEvent::ALT_KEY) != 0;
   m_metaKey = (e.modifiers & WebInputEvent::META_KEY) != 0;
-} 
+  m_isSystemKey = e.system_key;
+}
 
 void MakePlatformKeyboardEvent::SetKeyType(Type type) {
   // According to the behavior of Webkit in Windows platform,
@@ -191,13 +185,11 @@ void MakePlatformKeyboardEvent::SetKeyType(Type type) {
 
 // Please refer to bug http://b/issue?id=961192, which talks about Webkit
 // keyboard event handling changes. It also mentions the list of keys
-// which don't have associated character events. 
+// which don't have associated character events.
 bool MakePlatformKeyboardEvent::IsCharacterKey() const {
   switch (windowsVirtualKeyCode()) {
-#if defined(OS_WIN)
-    case VK_BACK:
-    case VK_ESCAPE:
-#endif
+    case VKEY_BACK:
+    case VKEY_ESCAPE:
       return false;
 
     default:
@@ -205,4 +197,3 @@ bool MakePlatformKeyboardEvent::IsCharacterKey() const {
   }
   return true;
 }
-

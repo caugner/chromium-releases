@@ -10,220 +10,40 @@
 
 #include "base/base_drag_source.h"
 #include "base/file_util.h"
-#include "base/gfx/image_operations.h"
-#include "chrome/app/theme/theme_resources.h"
+#include "base/scoped_clipboard_writer.h"
+#include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/common/clipboard_service.h"
 #include "chrome/browser/drag_utils.h"
+#include "chrome/common/clipboard_service.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/os_exchange_data.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/views/view.h"
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
+#include "skia/ext/image_operations.h"
 #include "SkPath.h"
 #include "SkShader.h"
 
 namespace download_util {
 
-// BaseContextMenu -------------------------------------------------------------
-
-BaseContextMenu::BaseContextMenu(DownloadItem* download) : download_(download) {
-}
-
-BaseContextMenu::~BaseContextMenu() {
-}
-
 // How many times to cycle the complete animation. This should be an odd number
 // so that the animation ends faded out.
 static const int kCompleteAnimationCycles = 5;
 
-bool BaseContextMenu::IsItemChecked(int id) const {
-  switch (id) {
-    case OPEN_WHEN_COMPLETE:
-      return download_->open_when_complete();
-    case ALWAYS_OPEN_TYPE: {
-      const std::wstring extension =
-          file_util::GetFileExtensionFromPath(download_->full_path());
-      return download_->manager()->ShouldOpenFileExtension(extension);
-    }
-  }
-  return false;
-}
-
-bool BaseContextMenu::IsItemDefault(int id) const {
-  return false;
-}
-
-std::wstring BaseContextMenu::GetLabel(int id) const {
-  switch (id) {
-    case SHOW_IN_FOLDER:
-      return l10n_util::GetString(IDS_DOWNLOAD_LINK_SHOW);
-    case COPY_LINK:
-      return l10n_util::GetString(IDS_CONTENT_CONTEXT_COPYLINKLOCATION);
-    case COPY_PATH:
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_COPY_PATH);
-    case COPY_FILE:
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_COPY_FILE);
-    case OPEN_WHEN_COMPLETE:
-      if (download_->state() == DownloadItem::IN_PROGRESS)
-        return l10n_util::GetString(IDS_DOWNLOAD_MENU_OPEN_WHEN_COMPLETE);
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_OPEN);
-    case ALWAYS_OPEN_TYPE:
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
-    case REMOVE_ITEM:
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_REMOVE_ITEM);
-    case CANCEL:
-      return l10n_util::GetString(IDS_DOWNLOAD_MENU_CANCEL);
-    default:
-      NOTREACHED();
-  }
-  return std::wstring();
-}
-
-bool BaseContextMenu::SupportsCommand(int id) const {
-  return id > 0 && id < MENU_LAST;
-}
-
-bool BaseContextMenu::IsCommandEnabled(int id) const {
-  switch (id) {
-    case SHOW_IN_FOLDER:
-    case COPY_PATH:
-    case COPY_FILE:
-    case OPEN_WHEN_COMPLETE:
-      return download_->state() != DownloadItem::CANCELLED;
-    case ALWAYS_OPEN_TYPE:
-      return CanOpenDownload(download_);
-    case CANCEL:
-      return download_->state() == DownloadItem::IN_PROGRESS;
-    default:
-      return id > 0 && id < MENU_LAST;
-  }
-}
-
-void BaseContextMenu::ExecuteCommand(int id) {
-  ClipboardService* clipboard = g_browser_process->clipboard_service();
-  DCHECK(clipboard);
-  switch (id) {
-    case SHOW_IN_FOLDER:
-      download_->manager()->ShowDownloadInShell(download_);
-      break;
-    case COPY_LINK:
-      clipboard->Clear();
-      clipboard->WriteText(download_->url());
-      break;
-    case COPY_PATH:
-      clipboard->Clear();
-      clipboard->WriteText(download_->full_path());
-      break;
-    case COPY_FILE:
-      // TODO(paulg): Move to OSExchangeData when implementing drag and drop?
-      clipboard->Clear();
-      clipboard->WriteFile(download_->full_path());
-      break;
-    case OPEN_WHEN_COMPLETE:
-      OpenDownload(download_);
-      break;
-    case ALWAYS_OPEN_TYPE: {
-      const std::wstring extension =
-          file_util::GetFileExtensionFromPath(download_->full_path());
-      download_->manager()->OpenFilesOfExtension(
-          extension, !IsItemChecked(ALWAYS_OPEN_TYPE));
-      break;
-    }
-    case REMOVE_ITEM:
-      download_->Remove();
-      break;
-    case CANCEL:
-      download_->Cancel(true);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-// DownloadShelfContextMenu ----------------------------------------------------
-
-DownloadShelfContextMenu::DownloadShelfContextMenu(
-    DownloadItem* download,
-    HWND window,
-    DownloadItemView::BaseDownloadItemModel* model,
-    const CPoint& point)
-    : BaseContextMenu(download),
-      model_(model) {
-  DCHECK(model_);
-
-  // The menu's anchor point is determined based on the UI layout.
-  Menu::AnchorPoint anchor_point;
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    anchor_point = Menu::TOPRIGHT;
-  else
-    anchor_point = Menu::TOPLEFT;
-
-  Menu context_menu(this, anchor_point, window);
-  if (download->state() == DownloadItem::COMPLETE)
-    context_menu.AppendMenuItem(OPEN_WHEN_COMPLETE, L"", Menu::NORMAL);
-  else
-    context_menu.AppendMenuItem(OPEN_WHEN_COMPLETE, L"", Menu::CHECKBOX);
-  context_menu.AppendMenuItem(ALWAYS_OPEN_TYPE, L"", Menu::CHECKBOX);
-  context_menu.AppendSeparator();
-  context_menu.AppendMenuItem(SHOW_IN_FOLDER, L"", Menu::NORMAL);
-  context_menu.AppendSeparator();
-  context_menu.AppendMenuItem(CANCEL, L"", Menu::NORMAL);
-  context_menu.RunMenuAt(point.x, point.y);
-}
-
-DownloadShelfContextMenu::~DownloadShelfContextMenu() {
-}
-
-bool DownloadShelfContextMenu::IsItemDefault(int id) const {
-  return id == OPEN_WHEN_COMPLETE;
-}
-
-void DownloadShelfContextMenu::ExecuteCommand(int id) {
-  if (id == CANCEL)
-    model_->CancelTask();
-  else
-    BaseContextMenu::ExecuteCommand(id);
-}
-
-// DownloadDestinationContextMenu ----------------------------------------------
-
-DownloadDestinationContextMenu::DownloadDestinationContextMenu(
-    DownloadItem* download,
-    HWND window,
-    const CPoint& point)
-    : BaseContextMenu(download) {
-  // The menu's anchor point is determined based on the UI layout.
-  Menu::AnchorPoint anchor_point;
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    anchor_point = Menu::TOPRIGHT;
-  else
-    anchor_point = Menu::TOPLEFT;
-
-  Menu context_menu(this, anchor_point, window);
-  context_menu.AppendMenuItem(SHOW_IN_FOLDER, L"", Menu::NORMAL);
-  context_menu.AppendSeparator();
-  context_menu.AppendMenuItem(COPY_LINK, L"", Menu::NORMAL);
-  context_menu.AppendMenuItem(COPY_PATH, L"", Menu::NORMAL);
-  context_menu.AppendMenuItem(COPY_FILE, L"", Menu::NORMAL);
-  context_menu.AppendSeparator();
-  context_menu.AppendMenuItem(OPEN_WHEN_COMPLETE, L"", Menu::CHECKBOX);
-  context_menu.AppendMenuItem(ALWAYS_OPEN_TYPE, L"", Menu::CHECKBOX);
-  context_menu.AppendSeparator();
-  context_menu.AppendMenuItem(REMOVE_ITEM, L"", Menu::NORMAL);
-  context_menu.RunMenuAt(point.x, point.y);
-}
-
-DownloadDestinationContextMenu::~DownloadDestinationContextMenu() {
-}
-
 // Download opening ------------------------------------------------------------
 
 bool CanOpenDownload(DownloadItem* download) {
-  const std::wstring extension =
-      file_util::GetFileExtensionFromPath(download->full_path());
+  FilePath file_to_use = download->full_path();
+  if (!download->original_name().value().empty())
+    file_to_use = download->original_name();
+
+  const FilePath::StringType extension =
+      file_util::GetFileExtensionFromPath(file_to_use);
   return !download->manager()->IsExecutable(extension);
 }
 
@@ -245,7 +65,7 @@ SkBitmap* g_foreground_32 = NULL;
 SkBitmap* g_background_32 = NULL;
 
 void PaintDownloadProgress(ChromeCanvas* canvas,
-                           ChromeViews::View* containing_view,
+                           views::View* containing_view,
                            int origin_x,
                            int origin_y,
                            int start_angle,
@@ -344,7 +164,7 @@ void PaintDownloadProgress(ChromeCanvas* canvas,
 }
 
 void PaintDownloadComplete(ChromeCanvas* canvas,
-                           ChromeViews::View* containing_view,
+                           views::View* containing_view,
                            int origin_x,
                            int origin_y,
                            double animation_progress,
@@ -385,6 +205,27 @@ void PaintDownloadComplete(ChromeCanvas* canvas,
   canvas->restore();
 }
 
+// Load a language dependent height so that the dangerous download confirmation
+// message doesn't overlap with the download link label.
+int GetBigProgressIconSize() {
+  static int big_progress_icon_size = 0;
+  if (big_progress_icon_size == 0) {
+    std::wstring locale_size_str =
+        l10n_util::GetString(IDS_DOWNLOAD_BIG_PROGRESS_SIZE);
+    bool rc = StringToInt(locale_size_str, &big_progress_icon_size);
+    if (!rc || big_progress_icon_size < kBigProgressIconSize) {
+      NOTREACHED();
+      big_progress_icon_size = kBigProgressIconSize;
+    }
+  }
+
+  return big_progress_icon_size;
+}
+
+int GetBigProgressIconOffset() {
+  return (GetBigProgressIconSize() - kBigIconSize) / 2;
+}
+
 // Download dragging
 void DragDownload(const DownloadItem* download, SkBitmap* icon) {
   DCHECK(download);
@@ -392,8 +233,9 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon) {
   // Set up our OLE machinery
   scoped_refptr<OSExchangeData> data(new OSExchangeData);
   if (icon)
-    drag_utils::CreateDragImageForFile(download->file_name(), icon, data);
-  data->SetFilename(download->full_path());
+    drag_utils::CreateDragImageForFile(download->file_name().ToWStringHack(),
+                                       icon, data);
+  data->SetFilename(download->full_path().ToWStringHack());
   scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
 
   // Run the drag and drop loop
@@ -402,6 +244,4 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon) {
              &effects);
 }
 
-
 }  // namespace download_util
-

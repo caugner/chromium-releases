@@ -4,16 +4,22 @@
 
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
+#include "DOMWindow.h"
 #include "FloatRect.h"
 #include "InspectorController.h"
 #include "Page.h"
 #include "Settings.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 #undef LOG
+#include "base/logging.h"
+#include "base/gfx/rect.h"
 #include "webkit/glue/inspector_client_impl.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/weburlrequest.h"
 #include "webkit/glue/webview_impl.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -25,7 +31,7 @@ static const float kDefaultInspectorYPos = 50;
 static const float kDefaultInspectorHeight = 640;
 static const float kDefaultInspectorWidth = 480;
 
-WebInspectorClient::WebInspectorClient(WebView* webView)
+WebInspectorClient::WebInspectorClient(WebViewImpl* webView)
   : inspected_web_view_(webView)
   , inspector_web_view_(0) {
   ASSERT(inspected_web_view_);
@@ -42,7 +48,7 @@ Page* WebInspectorClient::createPage() {
   WebCore::Page* page;
 
   if (inspector_web_view_ != NULL) {
-    page = static_cast<WebViewImpl*>(inspector_web_view_)->page();
+    page = inspector_web_view_->page();
     ASSERT(page != NULL);
     if (page != NULL)
       return page;
@@ -51,17 +57,16 @@ Page* WebInspectorClient::createPage() {
   WebViewDelegate* delegate = inspected_web_view_->GetDelegate();
   if (!delegate)
     return NULL;
-  inspector_web_view_ = delegate->CreateWebView(inspected_web_view_, true);
+  inspector_web_view_ = static_cast<WebViewImpl*>(
+      delegate->CreateWebView(inspected_web_view_, true));
   if (!inspector_web_view_)
     return NULL;
 
   GURL inspector_url(webkit_glue::GetInspectorURL());
   scoped_ptr<WebRequest> request(WebRequest::Create(inspector_url));
-  WebViewImpl* inspector_web_view_impl =
-    static_cast<WebViewImpl*>(inspector_web_view_);
-  inspector_web_view_impl->main_frame()->LoadRequest(request.get());
+  inspector_web_view_->main_frame()->LoadRequest(request.get());
 
-  page = inspector_web_view_impl->page();
+  page = inspector_web_view_->page();
 
   page->chrome()->setToolbarsVisible(false);
   page->chrome()->setStatusbarVisible(false);
@@ -89,31 +94,27 @@ Page* WebInspectorClient::createPage() {
 }
 
 void WebInspectorClient::showWindow() {
-  WebViewImpl* impl = static_cast<WebViewImpl*>(inspected_web_view_.get());
-  InspectorController* inspector = impl->page()->inspectorController();
+  InspectorController* inspector = inspected_web_view_->page()->inspectorController();
   inspector->setWindowVisible(true);
 
   // Notify the webview delegate of how many resources we're inspecting.
-  WebViewDelegate* d = impl->delegate();
+  WebViewDelegate* d = inspected_web_view_->delegate();
   DCHECK(d);
   d->WebInspectorOpened(inspector->resources().size());
 }
 
 void WebInspectorClient::closeWindow() {
   inspector_web_view_ = NULL;
-  WebViewImpl* impl = static_cast<WebViewImpl*>(inspected_web_view_.get());
-  WebFrameImpl* frame = static_cast<WebFrameImpl*>(impl->GetMainFrame());
 
-  if (frame && frame->inspected_node())
-    hideHighlight();
+  hideHighlight();
 
-  if (impl->page())
-    impl->page()->inspectorController()->setWindowVisible(false);
+  if (inspected_web_view_->page())
+    inspected_web_view_->page()->inspectorController()->setWindowVisible(false);
 }
 
 bool WebInspectorClient::windowVisible() {
   if (inspector_web_view_ != NULL) {
-    Page* page = static_cast<WebViewImpl*>(inspector_web_view_)->page();
+    Page* page = inspector_web_view_->page();
     ASSERT(page != NULL);
     if (page != NULL)
       return true;
@@ -129,6 +130,11 @@ void WebInspectorClient::detachWindow() {
   // TODO(jackson): Implement this
 }
 
+void WebInspectorClient::setAttachedWindowHeight(unsigned int height) {
+  // TODO(dglazkov): Implement this
+  NOTIMPLEMENTED();
+}
+
 static void invalidateNodeBoundingRect(WebViewImpl* web_view) {
   // TODO(ojan): http://b/1143996 Is it important to just invalidate the rect
   // of the node region given that this is not on a critical codepath?
@@ -139,22 +145,15 @@ static void invalidateNodeBoundingRect(WebViewImpl* web_view) {
 }
 
 void WebInspectorClient::highlight(Node* node) {
-  WebViewImpl* web_view = static_cast<WebViewImpl*>(inspected_web_view_.get());
-  WebFrameImpl* frame = static_cast<WebFrameImpl*>(web_view->GetMainFrame());
-
-  if (frame->inspected_node())
-    hideHighlight();
-
-  invalidateNodeBoundingRect(web_view);
-  frame->selectNodeFromInspector(node);
+  // InspectorController does the actually tracking of the highlighted node
+  // and the drawing of the highlight. Here we just make sure to invalidate
+  // the rects of the old and new nodes.
+  hideHighlight();
 }
 
 void WebInspectorClient::hideHighlight() {
-  WebViewImpl* web_view = static_cast<WebViewImpl*>(inspected_web_view_.get());
-  WebFrameImpl* frame = static_cast<WebFrameImpl*>(web_view->GetMainFrame());
-
-  invalidateNodeBoundingRect(web_view);
-  frame->selectNodeFromInspector(NULL);
+  // TODO: Should be able to invalidate a smaller rect.
+  invalidateNodeBoundingRect(inspected_web_view_);
 }
 
 void WebInspectorClient::inspectedURLChanged(const String& newURL) {
@@ -162,7 +161,25 @@ void WebInspectorClient::inspectedURLChanged(const String& newURL) {
 }
 
 String WebInspectorClient::localizedStringsURL() {
-  notImplemented();
+  NOTIMPLEMENTED();
   return String();
 }
 
+String WebInspectorClient::hiddenPanels() {
+  // Enumerate tabs that are currently disabled.
+  return "scripts,profiles,databases";
+}
+
+void WebInspectorClient::populateSetting(
+    const String& key, InspectorController::Setting&) {
+  NOTIMPLEMENTED();
+}
+
+void WebInspectorClient::storeSetting(
+    const String& key, const InspectorController::Setting&) {
+  NOTIMPLEMENTED();
+}
+
+void WebInspectorClient::removeSetting(const String& key) {
+  NOTIMPLEMENTED();
+}

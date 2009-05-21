@@ -5,16 +5,18 @@
 #ifndef CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__
 #define CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__
 
-#include <string>
+#include "build/build_config.h"
 
+#if defined(OS_WIN)
 #include <windows.h>
+#endif
+
+#include <string>
 
 #include "base/thread.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 
-class GURL;
 class BrowserProxy;
-class TabProxy;
 class WindowProxy;
 
 namespace gfx {
@@ -33,6 +35,9 @@ class WindowProxy : public AutomationResourceProxy {
     : AutomationResourceProxy(tracker, sender, handle) {}
   virtual ~WindowProxy() {}
 
+#if defined(OS_WIN)
+  // TODO(port): Use portable replacements for windowsisms.
+
   // Gets the outermost HWND that corresponds to the given window.
   // Returns true if the call was successful.
   bool GetHWND(HWND* handle) const;
@@ -43,6 +48,7 @@ class WindowProxy : public AutomationResourceProxy {
   // the mouse and pressing the button.  So if there is a window on top of this
   // window, the top window is clicked.
   bool SimulateOSClick(const POINT& click, int flags);
+#endif  // defined(OS_WIN)
 
   // Simulates a key press at the OS level. |key| is the key pressed  and
   // |flags| specifies which modifiers keys are also pressed (as defined in
@@ -77,9 +83,16 @@ class WindowProxy : public AutomationResourceProxy {
   // was retrieved.
   bool GetFocusedViewID(int* view_id);
 
+  // Returns the browser this window corresponds to, or NULL if this window
+  // is not a browser.  The caller owns the returned BrowserProxy.
+  BrowserProxy* GetBrowser();
+
+  // Same as GetWindow except return NULL if response isn't received
+  // before the specified timeout.
+  BrowserProxy* GetBrowserWithTimeout(uint32 timeout_ms, bool* is_timeout);
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WindowProxy);
+  DISALLOW_COPY_AND_ASSIGN(WindowProxy);
 };
 
-#endif // CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__
-
+#endif  // CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__

@@ -18,10 +18,14 @@
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/shared_event.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/browser_process.h"
+
+#if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
+#else
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
 
 class CommandLine;
 class NotificationService;
@@ -29,7 +33,7 @@ class NotificationService;
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
  public:
-  BrowserProcessImpl(CommandLine& command_line);
+  BrowserProcessImpl(const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
   virtual void EndSession();
@@ -98,6 +102,13 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return debugger_wrapper_.get();
   }
 
+  virtual DevToolsManager* devtools_manager() {
+    DCHECK(CalledOnValidThread());
+    if (!created_devtools_manager_)
+      CreateDevToolsManager();
+    return devtools_manager_.get();
+  }
+
   virtual ClipboardService* clipboard_service() {
     DCHECK(CalledOnValidThread());
     return clipboard_service_.get();
@@ -145,7 +156,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return 0 == module_ref_count_;
   }
 
-  virtual ChromeViews::AcceleratorHandler* accelerator_handler() {
+  virtual views::AcceleratorHandler* accelerator_handler() {
     DCHECK(CalledOnValidThread());
     if (!accelerator_handler_.get())
       CreateAcceleratorHandler();
@@ -168,22 +179,9 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return memory_model_;
   }
 
-  virtual SuspendController* suspend_controller() {
-    DCHECK(CalledOnValidThread());
-    return suspend_controller_.get();
+  virtual base::WaitableEvent* shutdown_event() {
+    return shutdown_event_.get();
   }
-
-  // TODO(beng): remove once XPFrame/VistaFrame are gone.
-  virtual bool IsUsingNewFrames() {
-    DCHECK(CalledOnValidThread());
-    if (!checked_for_new_frames_) {
-      using_new_frames_ = CommandLine().HasSwitch(L"magic_browzR");
-      checked_for_new_frames_ = true;
-    }
-    return using_new_frames_;
-  }
-
-  virtual HANDLE shutdown_event() { return shutdown_event_; }
 
  private:
   void CreateResourceDispatcherHost();
@@ -200,6 +198,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void CreateViewedPageTracker();
   void CreateIconManager();
   void CreateDebuggerWrapper(int port);
+  void CreateDevToolsManager();
   void CreateAcceleratorHandler();
   void CreateGoogleURLTracker();
 
@@ -235,11 +234,14 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   bool created_debugger_wrapper_;
   scoped_refptr<DebuggerWrapper> debugger_wrapper_;
 
+  bool created_devtools_manager_;
+  scoped_ptr<DevToolsManager> devtools_manager_;
+
   scoped_ptr<ClipboardService> clipboard_service_;
 
   scoped_ptr<AutomationProviderList> automation_provider_list_;
 
-  scoped_ptr<ChromeViews::AcceleratorHandler> accelerator_handler_;
+  scoped_ptr<views::AcceleratorHandler> accelerator_handler_;
 
   scoped_ptr<GoogleURLTracker> google_url_tracker_;
 
@@ -254,16 +256,13 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   MemoryModel memory_model_;
 
-  scoped_refptr<SuspendController> suspend_controller_;
-
   bool checked_for_new_frames_;
   bool using_new_frames_;
 
   // An event that notifies when we are shutting-down.
-  HANDLE shutdown_event_;
+  scoped_ptr<base::WaitableEvent> shutdown_event_;
 
   DISALLOW_EVIL_CONSTRUCTORS(BrowserProcessImpl);
 };
 
 #endif  // CHROME_BROWSER_BROWSER_PROCESS_IMPL_H__
-

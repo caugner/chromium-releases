@@ -23,35 +23,40 @@
 // of ChromeClient and FrameLoaderClient not delegated in the WebKit
 // implementation; and some WebView additions.
 
-#ifndef WEBKIT_GLUE_WEBVIEW_DELEGATE_H__
-#define WEBKIT_GLUE_WEBVIEW_DELEGATE_H__
+#ifndef WEBKIT_GLUE_WEBVIEW_DELEGATE_H_
+#define WEBKIT_GLUE_WEBVIEW_DELEGATE_H_
 
-#include <string>
 #include <vector>
 
-#include "base/basictypes.h"
-#include "googleurl/src/gurl.h"
-#include "webkit/glue/context_node_types.h"
+#include "webkit/glue/context_menu.h"
 #include "webkit/glue/webwidget_delegate.h"
-#include "webkit/glue/window_open_disposition.h"
 
 namespace gfx {
-  class Point;
-  class Rect;
+class Point;
+class Rect;
+}
+
+namespace webkit_glue {
+class WebMediaPlayerDelegate;
 }
 
 struct PasswordForm;
 struct WebDropData;
 struct WebPreferences;
+class AutofillForm;
 class SkBitmap;
+class WebDevToolsAgentDelegate;
 class WebError;
 class WebFrame;
 class WebHistoryItem;
+class WebMediaPlayerDelegate;
 class WebPluginDelegate;
 class WebRequest;
 class WebResponse;
 class WebView;
 class WebWidget;
+class WebWorker;
+class WebWorkerClient;
 
 enum WebNavigationType {
   WebNavigationTypeLinkClicked,
@@ -83,10 +88,10 @@ class WebFileChooserCallback {
  public:
   WebFileChooserCallback() {}
   virtual ~WebFileChooserCallback() {}
-  virtual void OnFileChoose(const std::wstring& file_name) { }
+  virtual void OnFileChoose(const std::vector<std::wstring>& file_names) { }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebFileChooserCallback);
+  DISALLOW_COPY_AND_ASSIGN(WebFileChooserCallback);
 };
 
 
@@ -107,7 +112,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
 
   // This method is called to create a new WebWidget to act as a popup
   // (like a drop-down menu).
-  virtual WebWidget* CreatePopupWidget(WebView* webview) {
+  virtual WebWidget* CreatePopupWidget(WebView* webview, bool activatable) {
     return NULL;
   }
 
@@ -125,6 +130,16 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
     return NULL;
   }
 
+  // This method is called when the renderer creates a worker object.
+  virtual WebWorker* CreateWebWorker(WebWorkerClient* client) {
+    return NULL;
+  }
+
+  // Called when a WebMediaPlayerDelegate is needed.
+  virtual webkit_glue::WebMediaPlayerDelegate* CreateMediaPlayerDelegate() {
+    return NULL;
+  }
+
   // This method is called when default plugin has been correctly created and
   // initialized, and found that the missing plugin is available to install or
   // user has started installation.
@@ -133,6 +148,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
 
   // This method is called to open a URL in the specified manner.
   virtual void OpenURL(WebView* webview, const GURL& url,
+                       const GURL& referrer,
                        WindowOpenDisposition disposition) {
   }
 
@@ -183,6 +199,12 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // TODO(pamg): If we do implement WebScriptObject, we may wish to switch to
   // using the original version of this function.
   virtual void WindowObjectCleared(WebFrame* webframe) {
+  }
+
+  // Notifies that the documentElement for the document in a webframe has been
+  // created. This is called before anything else is parsed or executed for the
+  // document.
+  virtual void DocumentElementAvailable(WebFrame* webframe) {
   }
 
   // PolicyDelegate ----------------------------------------------------------
@@ -242,6 +264,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   //  @discussion This method is called after the provisional data source has
   //  failed to load.  The frame will continue to display the contents of the
   //  committed data source if there is one.
+  //  This notification is only received for errors like network errors.
   virtual void DidFailProvisionalLoadWithError(WebView* webview,
                                                const WebError& error,
                                                WebFrame* frame) {
@@ -445,8 +468,29 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
                                    const std::vector<PasswordForm>& forms) {
   }
 
-  //
-  virtual void OnUnloadListenerChanged(WebView* webview, WebFrame* webframe) {
+  // Notification of the submission of a form so that its contents can be
+  // recorded for future autofilling.
+  virtual void OnAutofillFormSubmitted(WebView* webview,
+                                       const AutofillForm& form) {
+  }
+
+  virtual void EnableSuddenTermination() {
+  }
+
+  virtual void DisableSuddenTermination() {
+  }
+
+  // Queries the browser for suggestions to be shown for the form text field
+  // named |field_name|.  |text| is the text entered by the user so far and
+  // |node_id| is the id of the node of the input field.
+  virtual void QueryFormFieldAutofill(const std::wstring& field_name,
+                                      const std::wstring& text,
+                                      int64 node_id) {
+  }
+
+  // Instructs the browser to remove the autofill entry specified from it DB.
+  virtual void RemoveStoredAutofillEntry(const std::wstring& name,
+                                         const std::wstring& value) {
   }
 
   // UIDelegate --------------------------------------------------------------
@@ -460,9 +504,10 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   }
 
   // Displays a JavaScript alert panel associated with the given view. Clients
-  // should visually indicate that this panel comes from JavaScript. The panel
+  // should visually indicate that this panel comes from JavaScript and some
+  // information about the originating frame (at least the domain). The panel
   // should have a single OK button.
-  virtual void RunJavaScriptAlert(WebView* webview,
+  virtual void RunJavaScriptAlert(WebFrame* webframe,
                                   const std::wstring& message) {
   }
 
@@ -470,7 +515,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Clients should visually indicate that this panel comes
   // from JavaScript. The panel should have two buttons, e.g. "OK" and
   // "Cancel". Returns true if the user hit OK, or false if the user hit Cancel.
-  virtual bool RunJavaScriptConfirm(WebView* webview,
+  virtual bool RunJavaScriptConfirm(WebFrame* webframe,
                                     const std::wstring& message) {
     return false;
   }
@@ -482,19 +527,23 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // panel when it is shown. If the user hit OK, returns true and fills result
   // with the text in the box.  The value of result is undefined if the user
   // hit Cancel.
-  virtual bool RunJavaScriptPrompt(WebView* webview,
+  virtual bool RunJavaScriptPrompt(WebFrame* webframe,
                                    const std::wstring& message,
                                    const std::wstring& default_value,
                                    std::wstring* result) {
     return false;
   }
 
+  // Sets the status bar text.
+  virtual void SetStatusbarText(WebView* webview,
+                                const std::wstring& message) { }
+
   // Displays a "before unload" confirm panel associated with the given view.
   // The panel should have two buttons, e.g. "OK" and "Cancel", where OK means
   // that the navigation should continue, and Cancel means that the navigation
   // should be cancelled, leaving the user on the current page.  Returns true
   // if the user hit OK, or false if the user hit Cancel.
-  virtual bool RunBeforeUnloadConfirm(WebView* webview,
+  virtual bool RunBeforeUnloadConfirm(WebFrame* webframe,
                                       const std::wstring& message) {
     return true;  // OK, continue to navigate away
   }
@@ -509,7 +558,10 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // populated with the given initial_filename string.  The WebViewDelegate
   // will own the WebFileChooserCallback object and is responsible for
   // freeing it.
-  virtual void RunFileChooser(const std::wstring& initial_filename,
+  virtual void RunFileChooser(bool multi_select,
+                              const std::wstring& title,
+                              const std::wstring& initial_filename,
+                              const std::wstring& filter,
                               WebFileChooserCallback* file_chooser) {
     delete file_chooser;
   }
@@ -517,7 +569,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // @abstract Shows a context menu with commands relevant to a specific
   //           element on the current page.
   // @param webview The WebView sending the delegate method.
-  // @param type The type of node(s) the context menu is being invoked on
+  // @param node The node(s) the context menu is being invoked on
   // @param x The x position of the mouse pointer (relative to the webview)
   // @param y The y position of the mouse pointer (relative to the webview)
   // @param link_url The absolute URL of the link that contains the node the
@@ -534,7 +586,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // @param frame_encoding Which indicates the encoding of current focused
   // sub frame.
   virtual void ShowContextMenu(WebView* webview,
-                               ContextNode::Type type,
+                               ContextNode node,
                                int x,
                                int y,
                                const GURL& link_url,
@@ -543,7 +595,8 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
                                const GURL& frame_url,
                                const std::wstring& selection_text,
                                const std::wstring& misspelled_word,
-                               int edit_flags) {
+                               int edit_flags,
+                               const std::string& security_info) {
   }
 
   // Starts a drag session with the supplied contextual information.
@@ -611,10 +664,23 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   }
 
   virtual bool SmartInsertDeleteEnabled() {
-    return false;
+    return true;
   }
+
+  virtual void SetSmartInsertDeleteEnabled(bool enabled);
+
+  virtual bool IsSelectTrailingWhitespaceEnabled() {
+#if defined(OS_WIN)
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  virtual void SetSelectTrailingWhitespaceEnabled(bool enabled);
+
   virtual void DidBeginEditing() { }
-  virtual void DidChangeSelection() { }
+  virtual void DidChangeSelection(bool is_empty_selection) { }
   virtual void DidChangeContents() { }
   virtual void DidEndEditing() { }
 
@@ -639,16 +705,15 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
 
   enum ErrorPageType {
     DNS_ERROR,
-    HTTP_404
+    HTTP_404,
+    CONNECTION_ERROR,
   };
   // If providing an alternate error page (like link doctor), returns the URL
   // to fetch instead.  If an invalid url is returned, just fall back on local
   // error pages. |error_name| tells the delegate what type of error page we
   // want (e.g., 404 vs dns errors).
   virtual GURL GetAlternateErrorPageURL(const GURL& failedURL,
-                                        ErrorPageType error_type) {
-    return GURL();
-  }
+                                        ErrorPageType error_type);
 
   // History Related ---------------------------------------------------------
 
@@ -656,10 +721,6 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // current entry.  Returns NULL on failure.
   virtual WebHistoryItem* GetHistoryEntryAtOffset(int offset) {
     return NULL;
-  }
-
-  // Asynchronously navigates to the history entry at the given offset.
-  virtual void GoToEntryAtOffsetAsync(int offset) {
   }
 
   // Returns how many entries are in the back and forward lists, respectively.
@@ -685,6 +746,12 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Downloading -------------------------------------------------------------
 
   virtual void DownloadUrl(const GURL& url, const GURL& referrer) { }
+
+  // DevTools ----------------------------------------------------------------
+
+  virtual WebDevToolsAgentDelegate* GetWebDevToolsAgentDelegate() {
+    return NULL;
+  }
 
   // Editor Client -----------------------------------------------------------
 
@@ -714,12 +781,14 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // will occur.
   virtual void TransitionToCommittedForNewPage() { }
 
+  // Called when an item was added to the history
+  virtual void DidAddHistoryItem() { }
+
   WebViewDelegate() { }
   virtual ~WebViewDelegate() { }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebViewDelegate);
+  DISALLOW_COPY_AND_ASSIGN(WebViewDelegate);
 };
 
-#endif  // WEBKIT_GLUE_WEBVIEW_DELEGATE_H__
-
+#endif  // WEBKIT_GLUE_WEBVIEW_DELEGATE_H_

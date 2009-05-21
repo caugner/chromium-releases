@@ -40,6 +40,7 @@ static const char* kCounterNames[] = {
   "Open hit",
   "Create miss",
   "Create hit",
+  "Resurrect hit",
   "Create error",
   "Trim entry",
   "Doom entry",
@@ -53,6 +54,8 @@ static const char* kCounterNames[] = {
   "Open rankings",
   "Get rankings",
   "Fatal error",
+  "Last report",
+  "Last report timer"
 };
 COMPILE_ASSERT(arraysize(kCounterNames) == disk_cache::Stats::MAX_COUNTER,
                update_the_names);
@@ -74,7 +77,7 @@ bool LoadStats(BackendImpl* backend, Addr address, OnDiskStats* stats) {
   if (stats->signature != kDiskSignature)
     return false;
 
-  // We don't want to discard the whole cache everytime we have one extra
+  // We don't want to discard the whole cache every time we have one extra
   // counter; just reset them to zero.
   if (stats->size != sizeof(*stats))
     memset(stats, 0, sizeof(*stats));
@@ -120,6 +123,12 @@ bool Stats::Init(BackendImpl* backend, uint32* storage_addr) {
 
   storage_addr_ = address.value();
   backend_ = backend;
+  if (!size_histogram_.get()) {
+    // Stats may be reused when the cache is re-created, but we want only one
+    // histogram at any given time.
+    size_histogram_.reset(new StatsHistogram("DiskCache.SizeStats"));
+    size_histogram_->Init(this);
+  }
 
   memcpy(data_sizes_, stats.data_sizes, sizeof(data_sizes_));
   memcpy(counters_, stats.counters, sizeof(counters_));
@@ -128,17 +137,7 @@ bool Stats::Init(BackendImpl* backend, uint32* storage_addr) {
 }
 
 Stats::~Stats() {
-  if (!backend_)
-    return;
-
-  OnDiskStats stats;
-  stats.signature = kDiskSignature;
-  stats.size = sizeof(stats);
-  memcpy(stats.data_sizes, data_sizes_, sizeof(data_sizes_));
-  memcpy(stats.counters, counters_, sizeof(counters_));
-
-  Addr address(storage_addr_);
-  StoreStats(backend_, address, &stats);
+  Store();
 }
 
 // The array will be filled this way:
@@ -182,6 +181,37 @@ int Stats::GetStatsBucket(int32 size) {
     result = kDataSizesLength - 1;
 
   return result;
+}
+
+int Stats::GetBucketRange(size_t i) const {
+  if (i < 2)
+    return static_cast<int>(1024 * i);
+
+  if (i < 12)
+    return static_cast<int>(2048 * (i - 1));
+
+  if (i < 17)
+    return static_cast<int>(4096 * (i - 11)) + 20 * 1024;
+
+  int n = 64 * 1024;
+  if (i > static_cast<size_t>(kDataSizesLength)) {
+    NOTREACHED();
+    i = kDataSizesLength;
+  }
+
+  i -= 17;
+  n <<= i;
+  return n;
+}
+
+void Stats::Snapshot(StatsHistogram::StatsSamples* samples) const {
+  samples->GetCounts()->resize(kDataSizesLength);
+  for (int i = 0; i < kDataSizesLength; i++) {
+    int count = data_sizes_[i];
+    if (count < 0)
+      count = 0;
+    samples->GetCounts()->at(i) = count;
+  }
 }
 
 void Stats::ModifyStorageStats(int32 old_size, int32 new_size) {
@@ -229,5 +259,52 @@ void Stats::GetItems(StatsItems* items) {
   }
 }
 
-}  // namespace disk_cache
+int Stats::GetHitRatio() const {
+  return GetRatio(OPEN_HIT, OPEN_MISS);
+}
 
+int Stats::GetResurrectRatio() const {
+  return GetRatio(RESURRECT_HIT, CREATE_HIT);
+}
+
+int Stats::GetRatio(Counters hit, Counters miss) const {
+  int64 ratio = GetCounter(hit) * 100;
+  if (!ratio)
+    return 0;
+
+  ratio /= (GetCounter(hit) + GetCounter(miss));
+  return static_cast<int>(ratio);
+}
+
+void Stats::ResetRatios() {
+  SetCounter(OPEN_HIT, 0);
+  SetCounter(OPEN_MISS, 0);
+  SetCounter(RESURRECT_HIT, 0);
+  SetCounter(CREATE_HIT, 0);
+}
+
+int Stats::GetLargeEntriesSize() {
+  int total = 0;
+  // data_sizes_[20] stores values between 512 KB and 1 MB (see comment before
+  // GetStatsBucket()).
+  for (int bucket = 20; bucket < kDataSizesLength; bucket++)
+    total += data_sizes_[bucket] * GetBucketRange(bucket);
+
+  return total;
+}
+
+void Stats::Store() {
+  if (!backend_)
+    return;
+
+  OnDiskStats stats;
+  stats.signature = kDiskSignature;
+  stats.size = sizeof(stats);
+  memcpy(stats.data_sizes, data_sizes_, sizeof(data_sizes_));
+  memcpy(stats.counters, counters_, sizeof(counters_));
+
+  Addr address(storage_addr_);
+  StoreStats(backend_, address, &stats);
+}
+
+}  // namespace disk_cache

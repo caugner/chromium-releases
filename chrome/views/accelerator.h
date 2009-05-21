@@ -15,7 +15,7 @@
 
 #include "chrome/views/event.h"
 
-namespace ChromeViews {
+namespace views {
 
 class Accelerator {
  public:
@@ -38,7 +38,7 @@ class Accelerator {
 
   ~Accelerator() { };
 
-  Accelerator& Accelerator::operator=(const Accelerator& accelerator) {
+  Accelerator& operator=(const Accelerator& accelerator) {
     if (this != &accelerator) {
       key_code_ = accelerator.key_code_;
       modifiers_ = accelerator.modifiers_;
@@ -95,4 +95,3 @@ class AcceleratorTarget {
 }
 
 #endif  // CHROME_VIEWS_ACCELERATOR_H_
-

@@ -4,7 +4,10 @@
 
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
+#include "AnimationController.h"
 #include "FrameLoader.h"
 #include "FrameTree.h"
 #include "Document.h"
@@ -19,18 +22,15 @@
 #include "HTMLInputElement.h"
 #include "HTMLLinkElement.h"
 #include "HTMLMetaElement.h"
+#include "HTMLOptionElement.h"
 #include "HTMLNames.h"
 #include "KURL.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 #undef LOG
 
-// Brings in more WebKit headers and #undefs LOG again, so this needs to come
-// first.
-#include "webkit/glue/autocomplete_input_listener.h"
-
-#include "webkit/glue/dom_operations.h"
-
 #include "base/string_util.h"
+#include "webkit/glue/dom_operations.h"
+#include "webkit/glue/dom_operations_private.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/password_autocomplete_listener.h"
@@ -87,8 +87,7 @@ void GetSavableResourceLinkForElement(WebCore::Element* element,
   if (!value)
     return;
   // Get absolute URL.
-  GURL u(webkit_glue::KURLToGURL(current_doc->completeURL((*value).
-                                 deprecatedString())));
+  GURL u(webkit_glue::KURLToGURL(current_doc->completeURL((*value).string())));
   // ignore invalid URL
   if (!u.is_valid())
     return;
@@ -104,8 +103,7 @@ void GetSavableResourceLinkForElement(WebCore::Element* element,
   // Insert referrer for above new resource link.
   if (current_doc->frame()) {
     GURL u(webkit_glue::KURLToGURL(
-        current_doc->frame()->loader()->outgoingReferrer().
-        deprecatedString()));
+        WebCore::KURL(current_doc->frame()->loader()->outgoingReferrer())));
     result->referrers_list->push_back(u);
   } else {
     // Insert blank referrer.
@@ -150,6 +148,16 @@ void GetAllSavableResourceLinksForFrame(WebFrameImpl* current_frame,
                                      unique_check,
                                      result);
   }
+}
+
+template <class HTMLNodeType>
+HTMLNodeType* CastHTMLElement(WebCore::Node* node,
+                              const WebCore::QualifiedName& name) {
+  if (node->isHTMLElement() &&
+      static_cast<typename WebCore::HTMLElement*>(node)->hasTagName(name)) {
+    return static_cast<HTMLNodeType*>(node);
+  }
+  return NULL;
 }
 
 }  // namespace
@@ -234,7 +242,7 @@ static bool FillFormToUploadFileImpl(WebCore::HTMLFormElement* fe,
 
   // If we found both the file and the submit button, let's submit.
   if (file_found && submit_found) {
-    fe->submit();
+    fe->submit(0, false, false);
   }
 
   fe->deref();
@@ -275,8 +283,8 @@ bool FillFormToUploadFile(WebView* view, const FileUploadData& data) {
 // Internal implementation of FillForm API.
 static bool FillFormImpl(FormElements* fe, const FormData& data, bool submit) {
   if (!fe->form_element->autoComplete())
-    return false;  
- 
+    return false;
+
   FormValueMap data_map;
   for (unsigned int i = 0; i < data.elements.size(); i++) {
     data_map[data.elements[i]] = data.values[i];
@@ -290,6 +298,8 @@ static bool FillFormImpl(FormElements* fe, const FormData& data, bool submit) {
       submit_found = true;
       continue;
     }
+    if (!it->second->value().isEmpty())  // Don't overwrite pre-filled values.
+      continue;
     it->second->setValue(StdWStringToString(data_map[it->first]));
     it->second->setAutofilled(true);
     it->second->onChange();
@@ -316,12 +326,11 @@ static bool FindFormInputElements(WebCore::HTMLFormElement* fe,
                                   const FormData& data,
                                   FormElements* result) {
   Vector<RefPtr<WebCore::Node> > temp_elements;
-  bool found_elements = true;
   // Loop through the list of elements we need to find on the form in
-  // order to autofill it. If we don't find any one of them, abort 
+  // order to autofill it. If we don't find any one of them, abort
   // processing this form; it can't be the right one.
   for (size_t j = 0; j < data.elements.size(); j++, temp_elements.clear()) {
-    fe->getNamedElements(StdWStringToString(data.elements[j]), 
+    fe->getNamedElements(StdWStringToString(data.elements[j]),
                                             temp_elements);
     if (temp_elements.isEmpty()) {
       // We didn't find a required element. This is not the right form.
@@ -361,19 +370,19 @@ static void FindFormElements(WebView* view,
   // Loop through each frame.
   for (WebCore::Frame* f = frame; f; f = f->tree()->traverseNext()) {
     WebCore::Document* doc = f->document();
-    if (!doc->isHTMLDocument()) 
+    if (!doc->isHTMLDocument())
       continue;
 
-    GURL full_origin(StringToStdWString(doc->documentURI()));
+    GURL full_origin(StringToStdString(doc->documentURI()));
     if (data.origin != full_origin.ReplaceComponents(rep))
       continue;
 
     WebCore::FrameLoader* loader = f->loader();
     if (loader == NULL)
       continue;
- 
+
     PassRefPtr<WebCore::HTMLCollection> forms = doc->forms();
-    for (size_t i = 0; i < forms->length(); ++i) { 
+    for (size_t i = 0; i < forms->length(); ++i) {
       WebCore::HTMLFormElement* fe =
           static_cast<WebCore::HTMLFormElement*>(forms->item(i));
 
@@ -400,7 +409,7 @@ bool FillForm(WebView* view, const FormData& data) {
   bool success = false;
   if (!forms.empty())
     success = FillFormImpl(forms[0], data, false);
-  
+
   // TODO(timsteele): Move STLDeleteElements to base/ and have FormElementsList
   // use that.
   FormElementsList::iterator iter;
@@ -413,7 +422,7 @@ void FillPasswordForm(WebView* view,
                       const PasswordFormDomManager::FillData& data) {
   FormElementsList forms;
   // We own the FormElements* in forms.
-  FindFormElements(view, data.basic_data, &forms);  
+  FindFormElements(view, data.basic_data, &forms);
   FormElementsList::iterator iter;
   for (iter = forms.begin(); iter != forms.end(); ++iter) {
     // TODO(timsteele): Move STLDeleteElements to base/ and have
@@ -436,12 +445,32 @@ void FillPasswordForm(WebView* view,
     WebCore::HTMLInputElement* password_element =
         form_elements->input_elements[data.basic_data.elements[1]].get();
 
-    AttachForInlineAutocomplete(username_element,
-                                new PasswordAutocompleteListener(
-                                    new HTMLInputDelegate(username_element),
-                                    new HTMLInputDelegate(password_element),
-                                    data));
+    WebFrameLoaderClient* frame_loader_client =
+        static_cast<WebFrameLoaderClient*>(username_element->document()->
+                                           frame()->loader()->client());
+    WebFrameImpl* webframe_impl = frame_loader_client->webframe();
+    webframe_impl->RegisterPasswordListener(
+        username_element,
+        new PasswordAutocompleteListener(
+            new HTMLInputDelegate(username_element),
+            new HTMLInputDelegate(password_element),
+            data));
   }
+}
+
+WebCore::HTMLLinkElement* CastToHTMLLinkElement(WebCore::Node* node) {
+  return CastHTMLElement<WebCore::HTMLLinkElement>(node,
+      WebCore::HTMLNames::linkTag);
+}
+
+WebCore::HTMLMetaElement* CastToHTMLMetaElement(WebCore::Node* node) {
+  return CastHTMLElement<WebCore::HTMLMetaElement>(node,
+      WebCore::HTMLNames::metaTag);
+}
+
+WebCore::HTMLOptionElement* CastToHTMLOptionElement(WebCore::Node* node) {
+  return CastHTMLElement<WebCore::HTMLOptionElement>(node,
+      WebCore::HTMLNames::optionTag);
 }
 
 WebFrameImpl* GetWebFrameImplFromElement(WebCore::Element* element,
@@ -505,7 +534,7 @@ const WebCore::AtomicString* GetSubResourceLinkFromElement(
   // If value has content and not start with "javascript:" then return it,
   // otherwise return NULL.
   if (value && !value->isEmpty() &&
-      !value->domString().startsWith("javascript:", false))
+      !value->startsWith("javascript:", false))
     return value;
 
   return NULL;
@@ -656,7 +685,10 @@ static int ParseSingleIconSize(const std::wstring& text) {
     if (!(text[i] >= L'0' && text[i] <= L'9'))
       return 0;
   }
-  return _wtoi(text.c_str());
+  int output;
+  if (!StringToInt(WideToUTF16Hack(text), &output))
+    return 0;
+  return output;
 }
 
 // Parses an icon size. An icon size must match the following regex:
@@ -701,7 +733,7 @@ static void AddInstallIcon(WebCore::HTMLLinkElement* link,
   if (href.isEmpty() || href.isNull())
     return;
 
-  GURL url(webkit_glue::StringToStdWString(href));
+  GURL url(webkit_glue::StringToStdString(href));
   if (!url.is_valid())
     return;
 
@@ -754,7 +786,7 @@ void GetApplicationInfo(WebView* view, WebApplicationInfo* app_info) {
           app_info->description =
               webkit_glue::StringToStdWString(meta->content());
         } else if (meta->name() == String("application-url")) {
-          std::wstring url = webkit_glue::StringToStdWString(meta->content());
+          std::string url = webkit_glue::StringToStdString(meta->content());
           GURL main_url = main_frame->GetURL();
           app_info->app_url = main_url.is_valid() ?
               main_url.Resolve(url) : GURL(url);
@@ -766,5 +798,80 @@ void GetApplicationInfo(WebView* view, WebApplicationInfo* app_info) {
   }
 }
 
-} // webkit_glue
+bool PauseAnimationAtTimeOnElementWithId(WebView* view,
+                                         const std::string& animation_name,
+                                         double time,
+                                         const std::string& element_id) {
+  WebFrame* web_frame = view->GetMainFrame();
+  if (!web_frame)
+    return false;
 
+  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
+  WebCore::AnimationController* controller = frame->animation();
+  if (!controller)
+    return false;
+
+  WebCore::Element* element =
+      frame->document()->getElementById(StdStringToString(element_id));
+  if (!element)
+    return false;
+
+  return controller->pauseAnimationAtTime(element->renderer(),
+                                          StdStringToString(animation_name),
+                                          time);
+}
+
+bool PauseTransitionAtTimeOnElementWithId(WebView* view,
+                                          const std::string& property_name,
+                                          double time,
+                                          const std::string& element_id) {
+  WebFrame* web_frame = view->GetMainFrame();
+  if (!web_frame)
+    return false;
+
+  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
+  WebCore::AnimationController* controller = frame->animation();
+  if (!controller)
+    return false;
+
+  WebCore::Element* element =
+      frame->document()->getElementById(StdStringToString(element_id));
+  if (!element)
+    return false;
+
+  return controller->pauseTransitionAtTime(element->renderer(),
+                                           StdStringToString(property_name),
+                                           time);
+}
+
+bool ElementDoesAutoCompleteForElementWithId(WebView* view,
+                                             const std::string& element_id) {
+  WebFrame* web_frame = view->GetMainFrame();
+  if (!web_frame)
+    return false;
+
+  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
+  WebCore::Element* element =
+      frame->document()->getElementById(StdStringToString(element_id));
+  if (!element || !element->hasLocalName(WebCore::HTMLNames::inputTag))
+    return false;
+
+  WebCore::HTMLInputElement* input_element =
+      static_cast<WebCore::HTMLInputElement*>(element);
+  return input_element->autoComplete();
+}
+
+int NumberOfActiveAnimations(WebView* view) {
+  WebFrame* web_frame = view->GetMainFrame();
+  if (!web_frame)
+    return -1;
+
+  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
+  WebCore::AnimationController* controller = frame->animation();
+  if (!controller)
+    return -1;
+
+  return controller->numberOfActiveAnimations();
+}
+
+} // webkit_glue

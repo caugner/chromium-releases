@@ -24,10 +24,10 @@
 // requires that Type be a complete type so we can determine the size.
 //
 // Example usage:
-//   static LazyInstance<MyClass> my_instance(base::LINKER_INITALIZED);
+//   static LazyInstance<MyClass> my_instance(base::LINKER_INITIALIZED);
 //   void SomeMethod() {
 //     my_instance.Get().SomeMethod();  // MyClass::SomeMethod()
-// 
+//
 //     MyClass* ptr = my_instance.Pointer();
 //     ptr->DoDoDo();  // MyClass::DoDoDo
 //   }

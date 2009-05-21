@@ -6,39 +6,49 @@
 
 #include <set>
 
+#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/gfx/png_encoder.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/perftimer.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
-#include "net/base/cookie_monster.h"
-#include "net/url_request/url_request_error_job.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
-#include "chrome/browser/dom_ui/html_dialog_contents.h"
-#include "chrome/browser/net/dns_master.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/gears_integration.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/gears_api.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/net/url_request_intercept_job.h"
-#include "chrome/common/plugin_messages.h"
-
-#include "base/gfx/png_encoder.h"
-#include "base/logging.h"
-#include "base/string_util.h"
-#include "googleurl/src/gurl.h"
+#include "chrome/common/render_messages.h"
 #include "net/base/base64.h"
+#include "net/base/cookie_monster.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_error_job.h"
 #include "skia/include/SkBitmap.h"
+
+// TODO(port): Port these files.
+#if defined(OS_WIN)
+#include "chrome/browser/dom_ui/html_dialog_contents.h"
+#include "chrome/common/plugin_messages.h"
+#else
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
+using base::TimeDelta;
 
 // This class manages the interception of network requests.  It queries the
 // plugin on every request, and creates an intercept job if the plugin can
@@ -121,11 +131,11 @@ class PluginRequestInterceptor
   }
 
   void LogInterceptHitTime(const TimeDelta& time) {
-    UMA_HISTOGRAM_TIMES(L"Gears.InterceptHit", time);
+    UMA_HISTOGRAM_TIMES("Gears.InterceptHit", time);
   }
 
   void LogInterceptMissTime(const TimeDelta& time) {
-    UMA_HISTOGRAM_TIMES(L"Gears.InterceptMiss", time);
+    UMA_HISTOGRAM_TIMES("Gears.InterceptMiss", time);
   }
 
   typedef std::set<std::string> HandledProtocolList;
@@ -143,7 +153,7 @@ class PluginRequestHandler : public PluginHelper, public URLRequest::Delegate {
   }
 
   PluginRequestHandler(ChromePluginLib* plugin, ScopableCPRequest* cprequest)
-      : PluginHelper(plugin), cprequest_(cprequest) {
+      : PluginHelper(plugin), cprequest_(cprequest), user_buffer_(NULL) {
     cprequest_->data = this;  // see FromCPRequest().
 
     URLRequestContext* context = CPBrowsingContextManager::Instance()->
@@ -161,6 +171,25 @@ class PluginRequestHandler : public PluginHelper, public URLRequest::Delegate {
 
   URLRequest* request() { return request_.get(); }
 
+  // Wraper of URLRequest::Read()
+  bool Read(char* dest, int dest_size, int *bytes_read) {
+    CHECK(!my_buffer_.get());
+    // We'll use our own buffer until the read actually completes.
+    user_buffer_ = dest;
+    my_buffer_ = new net::IOBuffer(dest_size);
+
+    if (request_->Read(my_buffer_, dest_size, bytes_read)) {
+      memcpy(dest, my_buffer_->data(), *bytes_read);
+      my_buffer_ = NULL;
+      return true;
+    }
+
+    if (!request_->status().is_io_pending())
+      my_buffer_ = NULL;
+
+    return false;
+  }
+
   // URLRequest::Delegate
   virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url) {
     plugin_->functions().response_funcs->received_redirect(
@@ -176,16 +205,24 @@ class PluginRequestHandler : public PluginHelper, public URLRequest::Delegate {
   }
 
   virtual void OnReadCompleted(URLRequest* request, int bytes_read) {
-    // TODO(mpcomplete): better error codes
-    if (bytes_read < 0)
+    CHECK(my_buffer_.get());
+    CHECK(user_buffer_);
+    if (bytes_read > 0) {
+      memcpy(user_buffer_, my_buffer_->data(), bytes_read);
+    } else if (bytes_read < 0) {
+      // TODO(mpcomplete): better error codes
       bytes_read = CPERR_FAILURE;
+    }
+    my_buffer_ = NULL;
     plugin_->functions().response_funcs->read_completed(
-      cprequest_.get(), bytes_read);
+        cprequest_.get(), bytes_read);
   }
 
  private:
   scoped_ptr<ScopableCPRequest> cprequest_;
   scoped_ptr<URLRequest> request_;
+  scoped_refptr<net::IOBuffer> my_buffer_;
+  char* user_buffer_;
 };
 
 // This class manages plugins that want to handle UI commands.  Right now, we
@@ -253,12 +290,12 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
                              void* plugin_context,
                              ChromePluginLib* plugin,
                              MessageLoop* main_message_loop,
-                             HWND parent_hwnd)
-      : plugin_(plugin),
-        plugin_context_(plugin_context),
-        main_message_loop_(main_message_loop),
+                             gfx::NativeWindow parent_wnd)
+      : main_message_loop_(main_message_loop),
         io_message_loop_(MessageLoop::current()),
-        parent_hwnd_(parent_hwnd) {
+        plugin_(plugin),
+        plugin_context_(plugin_context),
+        parent_wnd_(parent_wnd) {
     DCHECK(ChromePluginLib::IsPluginThread());
     params_.url = url;
     params_.height = height;
@@ -274,14 +311,13 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
 
   // The following public methods are called from the UI thread.
 
-  // ChromeViews::WindowDelegate implementation:
-  virtual bool IsModal() const { return false; }
-
   // HtmlDialogContentsDelegate implementation:
+  virtual bool IsDialogModal() const { return false; }
+  virtual std::wstring GetDialogTitle() const { return L"Google Gears"; }
   virtual GURL GetDialogContentURL() const { return params_.url; }
-  virtual void GetDialogSize(CSize* size) const {
-    size->cx = params_.width;
-    size->cy = params_.height;
+  virtual void GetDialogSize(gfx::Size* size) const {
+    size->set_width(params_.width);
+    size->set_height(params_.height);
   }
   virtual std::string GetDialogArgs() const { return params_.json_input; }
   virtual void OnDialogClosed(const std::string& json_retval) {
@@ -294,7 +330,7 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
   void Show() {
     DCHECK(MessageLoop::current() == main_message_loop_);
     Browser* browser = BrowserList::GetLastActive();
-    browser->ShowHtmlDialog(this, parent_hwnd_);
+    browser->ShowHtmlDialog(this, parent_wnd_);
   }
 
   // Gives the JSON result string back to the plugin.
@@ -323,16 +359,18 @@ class ModelessHtmlDialogDelegate : public HtmlDialogContentsDelegate {
 
   // The window this dialog box should be parented to, or NULL for the last
   // active browser window.
-  HWND parent_hwnd_;
+  gfx::NativeWindow parent_wnd_;
 
   DISALLOW_EVIL_CONSTRUCTORS(ModelessHtmlDialogDelegate);
 };
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
+template<>
 void RunnableMethodTraits<ModelessHtmlDialogDelegate>::RetainCallee(
     ModelessHtmlDialogDelegate* remover) {
 }
+template<>
 void RunnableMethodTraits<ModelessHtmlDialogDelegate>::ReleaseCallee(
     ModelessHtmlDialogDelegate* remover) {
 }
@@ -377,6 +415,7 @@ CPError STDCALL CPB_ShowHtmlDialog(
   ChromePluginLib* plugin = ChromePluginLib::FromCPID(id);
   CHECK(plugin);
 
+#if defined(OS_WIN)
   HWND parent_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(context));
   PluginService* service = PluginService::GetInstance();
   if (!service)
@@ -386,6 +425,11 @@ CPError STDCALL CPB_ShowHtmlDialog(
       new ModelessHtmlDialogDelegate(GURL(url), width, height, json_arguments,
                                      plugin_context, plugin, main_message_loop,
                                      parent_hwnd);
+#else
+  // TODO(port): port ModelessHtmlDialogDelegate
+  NOTIMPLEMENTED();
+#endif
+
   return CPERR_SUCCESS;
 }
 
@@ -419,7 +463,7 @@ int STDCALL CPB_GetBrowsingContextInfo(
     PluginService* service = PluginService::GetInstance();
     if (!service)
       return CPERR_FAILURE;
-    std::wstring wretval = service->GetChromePluginDataDir();
+    std::wstring wretval = service->GetChromePluginDataDir().ToWStringHack();
     file_util::AppendToPath(&wretval, chrome::kChromePluginDataDirname);
     *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, WideToUTF8(wretval));
     return CPERR_SUCCESS;
@@ -457,7 +501,7 @@ static void NotifyGearsShortcutsChanged() {
   // when gears provides the correct browser context, and when we
   // can relate that to an actual profile.
   NotificationService::current()->Notify(
-      NOTIFY_WEB_APP_INSTALL_CHANGED,
+      NotificationType::WEB_APP_INSTALL_CHANGED,
       Source<Profile>(NULL),
       NotificationService::NoDetails());
 }
@@ -541,6 +585,7 @@ CPError STDCALL CPB_CreateRequest(CPID id, CPBrowsingContext context,
 
   ScopableCPRequest* cprequest = new ScopableCPRequest(url, method, context);
   PluginRequestHandler* handler = new PluginRequestHandler(plugin, cprequest);
+  CHECK(handler);
 
   *request = cprequest;
   return CPERR_SUCCESS;
@@ -611,7 +656,7 @@ int STDCALL CPR_Read(CPRequest* request, void* buf, uint32 buf_size) {
   CHECK(handler);
 
   int bytes_read;
-  if (handler->request()->Read(static_cast<char*>(buf), buf_size, &bytes_read))
+  if (handler->Read(static_cast<char*>(buf), buf_size, &bytes_read))
     return bytes_read;  // 0 == CPERR_SUCESS
 
   if (handler->request()->status().is_io_pending())
@@ -637,39 +682,29 @@ CPProcessType STDCALL CPB_GetProcessType(CPID id) {
 }
 
 CPError STDCALL CPB_SendMessage(CPID id, const void *data, uint32 data_len) {
-  CommandLine cmd;
-  if (cmd.HasSwitch(switches::kGearsInRenderer)) {
-    ChromePluginLib* plugin = ChromePluginLib::FromCPID(id);
-    CHECK(plugin);
+  CHECK(ChromePluginLib::IsPluginThread());
+  ChromePluginLib* plugin = ChromePluginLib::FromCPID(id);
+  CHECK(plugin);
 
-    const unsigned char* data_ptr = static_cast<const unsigned char*>(data);
-    std::vector<uint8> v(data_ptr, data_ptr + data_len);
-    for (RenderProcessHost::iterator it = RenderProcessHost::begin();
-      it != RenderProcessHost::end(); ++it) {
-        it->second->Send(new ViewMsg_PluginMessage(plugin->filename(), v));
-    }
-
-    return CPERR_SUCCESS;
-  } else {
-    CHECK(ChromePluginLib::IsPluginThread());
-    ChromePluginLib* plugin = ChromePluginLib::FromCPID(id);
-    CHECK(plugin);
-
-    PluginService* service = PluginService::GetInstance();
-    if (!service)
+  PluginService* service = PluginService::GetInstance();
+  if (!service)
     return CPERR_FAILURE;
-    PluginProcessHost *host =
-    service->FindOrStartPluginProcess(plugin->filename(), std::string());
-    if (!host)
+  PluginProcessHost *host =
+  service->FindOrStartPluginProcess(plugin->filename(), std::string());
+  if (!host)
     return CPERR_FAILURE;
 
-    const unsigned char* data_ptr = static_cast<const unsigned char*>(data);
-    std::vector<uint8> v(data_ptr, data_ptr + data_len);
-    if (!host->Send(new PluginProcessMsg_PluginMessage(v)))
-      return CPERR_FAILURE;
+  const unsigned char* data_ptr = static_cast<const unsigned char*>(data);
+  std::vector<uint8> v(data_ptr, data_ptr + data_len);
+#if defined(OS_WIN)
+  if (!host->Send(new PluginProcessMsg_PluginMessage(v)))
+    return CPERR_FAILURE;
+#else
+  // TODO(port): Implement PluginProcessMsg.
+  NOTIMPLEMENTED();
+#endif
 
-    return CPERR_SUCCESS;
-  }
+  return CPERR_SUCCESS;
 }
 
 CPError STDCALL CPB_SendSyncMessage(CPID id, const void *data, uint32 data_len,
@@ -689,6 +724,18 @@ CPError STDCALL CPB_PluginThreadAsyncCall(CPID id,
   message_loop->PostTask(FROM_HERE, NewRunnableFunction(func, user_data));
 
   return CPERR_SUCCESS;
+}
+
+CPError STDCALL CPB_OpenFileDialog(CPID id,
+                                   CPBrowsingContext context,
+                                   bool multiple_files,
+                                   const char *title,
+                                   const char *filter,
+                                   void *user_data) {
+  NOTREACHED() <<
+    "Open file dialog should only be called from the renderer process.";
+
+  return CPERR_FAILURE;
 }
 
 }
@@ -724,6 +771,7 @@ CPBrowserFuncs* GetCPBrowserFuncsForBrowser() {
     browser_funcs.response_funcs = &response_funcs;
     browser_funcs.send_sync_message = CPB_SendSyncMessage;
     browser_funcs.plugin_thread_async_call = CPB_PluginThreadAsyncCall;
+    browser_funcs.open_file_dialog = CPB_OpenFileDialog;
 
     request_funcs.size = sizeof(request_funcs);
     request_funcs.start_request = CPR_StartRequest;
@@ -755,4 +803,3 @@ void CPHandleCommand(int command, CPCommandInterface* data,
       NewRunnableFunction(PluginCommandHandler::HandleCommand,
                           command, data, context_as_int32));
 }
-

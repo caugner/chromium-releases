@@ -57,7 +57,7 @@ std::string HttpUtil::PathForRequest(const GURL& url) {
   DCHECK(url.is_valid() && (url.SchemeIs("http") || url.SchemeIs("https")));
   if (url.has_query())
     return url.path() + "?" + url.query();
-  return url.path(); 
+  return url.path();
 }
 
 // static
@@ -228,7 +228,11 @@ bool HttpUtil::IsNonCoalescingHeader(string::const_iterator name_begin,
     "last-modified",
     "location",  // See bug 1050541 for details
     "retry-after",
-    "set-cookie"
+    "set-cookie",
+    // The format of auth-challenges mixes both space separated tokens and
+    // comma separated properties, so coalescing on comma won't work.
+    "www-authenticate",
+    "proxy-authenticate"
   };
   for (size_t i = 0; i < arraysize(kNonCoalescingHeaders); ++i) {
     if (LowerCaseEqualsASCII(name_begin, name_end, kNonCoalescingHeaders[i]))
@@ -250,6 +254,73 @@ void HttpUtil::TrimLWS(string::const_iterator* begin,
   // trailing whitespace
   while (*begin < *end && IsLWS((*end)[-1]))
     --(*end);
+}
+
+// static
+bool HttpUtil::IsQuote(char c) {
+  // Single quote mark isn't actually part of quoted-text production,
+  // but apparently some servers rely on this.
+  return c == '"' || c == '\'';
+}
+
+// static
+std::string HttpUtil::Unquote(std::string::const_iterator begin,
+                              std::string::const_iterator end) {
+  // Empty string
+  if (begin == end)
+    return std::string();
+
+  // Nothing to unquote.
+  if (!IsQuote(*begin))
+    return std::string(begin, end);
+
+  // No terminal quote mark.
+  if (end - begin < 2 || *begin != *(end - 1))
+    return std::string(begin, end);
+
+  // Strip quotemarks
+  ++begin;
+  --end;
+
+  // Unescape quoted-pair (defined in RFC 2616 section 2.2)
+  std::string unescaped;
+  bool prev_escape = false;
+  for (; begin != end; ++begin) {
+    char c = *begin;
+    if (c == '\\' && !prev_escape) {
+      prev_escape = true;
+      continue;
+    }
+    prev_escape = false;
+    unescaped.push_back(c);
+  }
+  return unescaped;
+}
+
+// static
+std::string HttpUtil::Unquote(const std::string& str) {
+  return Unquote(str.begin(), str.end());
+}
+
+// static
+std::string HttpUtil::Quote(const std::string& str) {
+  std::string escaped;
+  escaped.reserve(2 + str.size());
+
+  std::string::const_iterator begin = str.begin();
+  std::string::const_iterator end = str.end();
+
+  // Esape any backslashes or quotemarks within the string, and
+  // then surround with quotes.
+  escaped.push_back('"');
+  for (; begin != end; ++begin) {
+    char c = *begin;
+    if (c == '"' || c == '\\')
+      escaped.push_back('\\');
+    escaped.push_back(c);
+  }
+  escaped.push_back('"');
+  return escaped;
 }
 
 // Find the "http" substring in a status line. This allows for
@@ -359,7 +430,7 @@ std::string HttpUtil::AssembleRawHeaders(const char* input_begin,
   while (lines.GetNext()) {
     const char* line_begin = lines.token_begin();
     const char* line_end = lines.token_end();
-     
+
     if (prev_line_continuable && IsLWS(*line_begin)) {
       // Join continuation; reduce the leading LWS to a single SP.
       raw_headers.push_back(' ');
@@ -378,6 +449,50 @@ std::string HttpUtil::AssembleRawHeaders(const char* input_begin,
 
   raw_headers.append("\0\0", 2);
   return raw_headers;
+}
+
+// TODO(jungshik): 1. If the list is 'fr-CA,fr-FR,en,de', we have to add
+// 'fr' after 'fr-CA' with the same q-value as 'fr-CA' because
+// web servers, in general, do not fall back to 'fr' and may end up picking
+// 'en' which has a lower preference than 'fr-CA' and 'fr-FR'.
+// 2. This function assumes that the input is a comma separated list
+// without any whitespace. As long as it comes from the preference and
+// a user does not manually edit the preference file, it's the case. Still,
+// we may have to make it more robust.
+std::string HttpUtil::GenerateAcceptLanguageHeader(
+    const std::string& raw_language_list) {
+  // We use integers for qvalue and qvalue decrement that are 10 times
+  // larger than actual values to avoid a problem with comparing
+  // two floating point numbers.
+  const unsigned int kQvalueDecrement10 = 2;
+  unsigned int qvalue10 = 10;
+  StringTokenizer t(raw_language_list, ",");
+  std::string lang_list_with_q;
+  while (t.GetNext()) {
+    std::string language = t.token();
+    if (qvalue10 == 10) {
+      // q=1.0 is implicit.
+      lang_list_with_q = language;
+    } else {
+      DCHECK(qvalue10 >= 0 && qvalue10 < 10);
+      StringAppendF(&lang_list_with_q, ",%s;q=0.%d", language.c_str(),
+                    qvalue10);
+    }
+    // It does not make sense to have 'q=0'.
+    if (qvalue10 > kQvalueDecrement10)
+      qvalue10 -= kQvalueDecrement10;
+  }
+  return lang_list_with_q;
+}
+
+std::string HttpUtil::GenerateAcceptCharsetHeader(const std::string& charset) {
+  std::string charset_with_q = charset;
+  if (LowerCaseEqualsASCII(charset, "utf-8")) {
+    charset_with_q += ",*;q=0.5";
+  } else {
+    charset_with_q += ",utf-8;q=0.7,*;q=0.3";
+  }
+  return charset_with_q;
 }
 
 // BNF from section 4.2 of RFC 2616:
@@ -448,4 +563,3 @@ bool HttpUtil::ValuesIterator::GetNext() {
 }
 
 }  // namespace net
-

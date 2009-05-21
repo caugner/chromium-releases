@@ -2,82 +2,250 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <math.h>
-
 #include "chrome/browser/views/tabs/dragged_tab_controller.h"
 
+#include <math.h>
+#include <set>
+
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/frame_util.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/tabs/dragged_tab_view.h"
 #include "chrome/browser/views/tabs/hwnd_photobooth.h"
 #include "chrome/browser/views/tabs/tab.h"
 #include "chrome/browser/views/tabs/tab_strip.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/common/animation.h"
+#include "chrome/common/gfx/chrome_canvas.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/resource_bundle.h"
 #include "chrome/views/event.h"
-#include "chrome/views/root_view.h"
+#include "chrome/views/widget/root_view.h"
+#include "grit/theme_resources.h"
 #include "skia/include/SkBitmap.h"
 
 static const int kHorizontalMoveThreshold = 16; // pixels
 
 namespace {
 
-///////////////////////////////////////////////////////////////////////////////
-// WindowFinder
-//  A WindowForPoint facility that can ignore 2 provided window HWNDs.
-//
-class WindowFinder {
+// Delay, in ms, during dragging before we bring a window to front.
+const int kBringToFrontDelay = 750;
+
+// Radius of the rect drawn by DockView.
+const int kRoundedRectRadius = 4;
+
+// Spacing between tab icons when DockView is showing a docking location that
+// contains more than one tab.
+const int kTabSpacing = 4;
+
+// DockView is the view responsible for giving a visual indicator of where a
+// dock is going to occur.
+
+class DockView : public views::View {
  public:
-  static HWND WindowForPoint(const gfx::Point& screen_point, HWND ignore1) {
-    WindowFinder instance(screen_point, ignore1);
-    return instance.GetResult();
-  }
- private:
-  WindowFinder(const gfx::Point& screen_point, HWND ignore1)
-      : screen_point_(screen_point.ToPOINT()),
-    ignore1_(ignore1),
-    result_(NULL) {
+  explicit DockView(DockInfo::Type type) : type_(type) {}
+
+  virtual gfx::Size GetPreferredSize() {
+    return gfx::Size(DockInfo::popup_width(), DockInfo::popup_height());
   }
 
-  static BOOL CALLBACK WindowEnumProc(HWND hwnd, LPARAM lParam) {
-    WindowFinder* wf = reinterpret_cast<WindowFinder*>(lParam);
-    if (hwnd == wf->ignore1_)
-      return true;
+  virtual void PaintBackground(ChromeCanvas* canvas) {
+    SkRect outer_rect = { SkIntToScalar(0), SkIntToScalar(0),
+                          SkIntToScalar(width()),
+                          SkIntToScalar(height()) };
 
-    if (::IsWindowVisible(hwnd)) {
-      CRect r;
-      ::GetWindowRect(hwnd, &r);
-      if (r.PtInRect(wf->screen_point_)) {
-        // We always deal with the root HWND.
-        wf->result_ = GetAncestor(hwnd, GA_ROOT);
-        return FALSE;
+    // Fill the background rect.
+    SkPaint paint;
+    paint.setColor(SkColorSetRGB(108, 108, 108));
+    paint.setStyle(SkPaint::kFill_Style);
+    canvas->drawRoundRect(outer_rect, SkIntToScalar(kRoundedRectRadius),
+                          SkIntToScalar(kRoundedRectRadius), paint);
+
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+
+    SkBitmap* high_icon = rb.GetBitmapNamed(IDR_DOCK_HIGH);
+    SkBitmap* wide_icon = rb.GetBitmapNamed(IDR_DOCK_WIDE);
+
+    switch (type_) {
+      case DockInfo::LEFT_OF_WINDOW:
+      case DockInfo::LEFT_HALF:
+        canvas->DrawBitmapInt(*high_icon,
+            width() / 2 - high_icon->width() - kTabSpacing / 2,
+            (height() - high_icon->height()) / 2);
+        if (type_ == DockInfo::LEFT_OF_WINDOW) {
+          DrawBitmapWithAlpha(canvas, *high_icon, width() / 2 + kTabSpacing / 2,
+                              (height() - high_icon->height()) / 2);
+        }
+        break;
+
+
+      case DockInfo::RIGHT_OF_WINDOW:
+      case DockInfo::RIGHT_HALF:
+        canvas->DrawBitmapInt(*high_icon, width() / 2 + kTabSpacing / 2,
+                              (height() - high_icon->height()) / 2);
+        if (type_ == DockInfo::RIGHT_OF_WINDOW) {
+         DrawBitmapWithAlpha(canvas, *high_icon,
+              width() / 2 - high_icon->width() - kTabSpacing / 2,
+              (height() - high_icon->height()) / 2);
+        }
+        break;
+
+      case DockInfo::TOP_OF_WINDOW:
+        canvas->DrawBitmapInt(*wide_icon, (width() - wide_icon->width()) / 2,
+                              height() / 2 - high_icon->height());
+        break;
+
+      case DockInfo::MAXIMIZE: {
+        SkBitmap* max_icon = rb.GetBitmapNamed(IDR_DOCK_MAX);
+        canvas->DrawBitmapInt(*max_icon, (width() - max_icon->width()) / 2,
+                              (height() - max_icon->height()) / 2);
+        break;
       }
+
+      case DockInfo::BOTTOM_HALF:
+      case DockInfo::BOTTOM_OF_WINDOW:
+        canvas->DrawBitmapInt(*wide_icon, (width() - wide_icon->width()) / 2,
+                              height() / 2 + kTabSpacing / 2);
+        if (type_ == DockInfo::BOTTOM_OF_WINDOW) {
+          DrawBitmapWithAlpha(canvas, *wide_icon,
+              (width() - wide_icon->width()) / 2,
+              height() / 2 - kTabSpacing / 2 - wide_icon->height());
+        }
+        break;
     }
-    return TRUE;
   }
 
-  HWND GetResult() {
-    EnumThreadWindows(GetCurrentThreadId(), WindowEnumProc,
-                      reinterpret_cast<LPARAM>(this));
-    return result_;
+ private:
+  void DrawBitmapWithAlpha(ChromeCanvas* canvas, const SkBitmap& image,
+                           int x, int y) {
+    SkPaint paint;
+    paint.setAlpha(128);
+    canvas->DrawBitmapInt(image, x, y, paint);
   }
 
-  POINT screen_point_;
-  HWND ignore1_;
-  HWND result_;
+  DockInfo::Type type_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(WindowFinder);
+  DISALLOW_COPY_AND_ASSIGN(DockView);
 };
 
 gfx::Point ConvertScreenPointToTabStripPoint(TabStrip* tabstrip,
                                              const gfx::Point& screen_point) {
-  CPoint tabstrip_topleft(0, 0);
-  ChromeViews::View::ConvertPointToScreen(tabstrip, &tabstrip_topleft);
-  return gfx::Point(screen_point.x() - tabstrip_topleft.x,
-                    screen_point.y() - tabstrip_topleft.y);
+  gfx::Point tabstrip_topleft;
+  views::View::ConvertPointToScreen(tabstrip, &tabstrip_topleft);
+  return gfx::Point(screen_point.x() - tabstrip_topleft.x(),
+                    screen_point.y() - tabstrip_topleft.y());
 }
 
-}
+}  // namespace
+
+///////////////////////////////////////////////////////////////////////////////
+// DockDisplayer
+
+// DockDisplayer is responsible for giving the user a visual indication of a
+// possible dock position (as represented by DockInfo). DockDisplayer shows
+// a window with a DockView in it. Two animations are used that correspond to
+// the state of DockInfo::in_enable_area.
+class DraggedTabController::DockDisplayer : public AnimationDelegate {
+ public:
+  DockDisplayer(DraggedTabController* controller,
+                const DockInfo& info)
+      : controller_(controller),
+        popup_(NULL),
+        popup_hwnd_(NULL),
+#pragma warning(suppress: 4355)  // Okay to pass "this" here.
+        animation_(this),
+        hidden_(false),
+        in_enable_area_(info.in_enable_area()) {
+    popup_ = new views::WidgetWin;
+    popup_->set_window_style(WS_POPUP);
+    popup_->set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW |
+                                WS_EX_TOPMOST);
+    popup_->SetLayeredAlpha(0x00);
+    popup_->Init(NULL, info.GetPopupRect(), false);
+    popup_->SetContentsView(new DockView(info.type()));
+    if (info.in_enable_area())
+      animation_.Reset(1);
+    else
+      animation_.Show();
+    popup_->SetWindowPos(HWND_TOP, 0, 0, 0, 0,
+        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOMOVE | SWP_SHOWWINDOW);
+    popup_hwnd_ = popup_->GetNativeView();
+  }
+
+  ~DockDisplayer() {
+    if (controller_)
+      controller_->DockDisplayerDestroyed(this);
+  }
+
+  // Updates the state based on |in_enable_area|.
+  void UpdateInEnabledArea(bool in_enable_area) {
+    if (in_enable_area != in_enable_area_) {
+      in_enable_area_ = in_enable_area;
+      UpdateLayeredAlpha();
+    }
+  }
+
+  // Resets the reference to the hosting DraggedTabController. This is invoked
+  // when the DraggedTabController is destoryed.
+  void clear_controller() { controller_ = NULL; }
+
+  // HWND of the window we create.
+  HWND popup_hwnd() { return popup_hwnd_; }
+
+  // Starts the hide animation. When the window is closed the
+  // DraggedTabController is notified by way of the DockDisplayerDestroyed
+  // method
+  void Hide() {
+    if (hidden_)
+      return;
+
+    if (!popup_) {
+      delete this;
+      return;
+    }
+    hidden_ = true;
+    animation_.Hide();
+  }
+
+  virtual void AnimationProgressed(const Animation* animation) {
+    UpdateLayeredAlpha();
+  }
+
+  virtual void AnimationEnded(const Animation* animation) {
+    if (!hidden_)
+      return;
+    popup_->Close();
+    delete this;
+  }
+
+  virtual void UpdateLayeredAlpha() {
+    double scale = in_enable_area_ ? 1 : .5;
+    popup_->SetLayeredAlpha(
+        static_cast<BYTE>(animation_.GetCurrentValue() * scale * 255.0));
+    popup_->GetRootView()->SchedulePaint();
+  }
+
+ private:
+  // DraggedTabController that created us.
+  DraggedTabController* controller_;
+
+  // Window we're showing.
+  views::WidgetWin* popup_;
+
+  // HWND of |popup_|. We cache this to avoid the possibility of invoking a
+  // method on popup_ after we close it.
+  HWND popup_hwnd_;
+
+  // Animation for when first made visible.
+  SlideAnimation animation_;
+
+  // Have we been hidden?
+  bool hidden_;
+
+  // Value of DockInfo::in_enable_area.
+  bool in_enable_area_;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // DraggedTabController, public:
@@ -103,6 +271,11 @@ DraggedTabController::~DraggedTabController() {
   in_destructor_ = true;
   CleanUpSourceTab();
   MessageLoopForUI::current()->RemoveObserver(this);
+  // Need to delete the view here manually _before_ we reset the dragged
+  // contents to NULL, otherwise if the view is animating to its destination
+  // bounds, it won't be able to clean up properly since its cleanup routine
+  // uses GetIndexForDraggedContents, which will be invalid.
+  view_.reset(NULL);
   ChangeDraggedContents(NULL); // This removes our observer.
 }
 
@@ -112,6 +285,8 @@ void DraggedTabController::CaptureDragInfo(const gfx::Point& mouse_offset) {
 }
 
 void DraggedTabController::Drag() {
+  bring_to_front_timer_.Stop();
+
   // Before we get to dragging anywhere, ensure that we consider ourselves
   // attached to the source tabstrip.
   if (source_tab_->IsVisible() && CanStartDrag())
@@ -123,8 +298,8 @@ void DraggedTabController::Drag() {
   }
 }
 
-void DraggedTabController::EndDrag(bool canceled) {
-  EndDragImpl(canceled ? CANCELED : NORMAL);
+bool DraggedTabController::EndDrag(bool canceled) {
+  return EndDragImpl(canceled ? CANCELED : NORMAL);
 }
 
 Tab* DraggedTabController::GetDragSourceTabForContents(
@@ -143,13 +318,15 @@ bool DraggedTabController::IsDragSourceTab(Tab* tab) const {
 
 void DraggedTabController::OpenURLFromTab(TabContents* source,
                                           const GURL& url,
+                                          const GURL& referrer,
                                           WindowOpenDisposition disposition,
                                           PageTransition::Type transition) {
   if (original_delegate_) {
     if (disposition == CURRENT_TAB)
       disposition = NEW_WINDOW;
 
-    original_delegate_->OpenURLFromTab(source, url, disposition, transition);
+    original_delegate_->OpenURLFromTab(source, url, referrer,
+                                       disposition, transition);
   }
 }
 
@@ -165,16 +342,23 @@ void DraggedTabController::NavigationStateChanged(const TabContents* source,
 void DraggedTabController::ReplaceContents(TabContents* source,
                                            TabContents* new_contents) {
   DCHECK(dragged_contents_ == source);
-  source->set_delegate(NULL);
-  new_contents->set_delegate(this);
 
   // If we're attached to a TabStrip, we need to tell the TabStrip that this
   // TabContents was replaced.
-  if (attached_tabstrip_ && attached_tabstrip_->model() && dragged_contents_) {
-    int index =
-        attached_tabstrip_->model()->GetIndexOfTabContents(dragged_contents_);
-    if (index != TabStripModel::kNoTab)
-      attached_tabstrip_->model()->ReplaceTabContentsAt(index, new_contents);
+  if (attached_tabstrip_ && dragged_contents_) {
+    if (original_delegate_) {
+      original_delegate_->ReplaceContents(source, new_contents);
+      // ReplaceContents on the original delegate is going to reset the delegate
+      // for us. We need to unset original_delegate_ here so that
+      // ChangeDraggedContents doesn't attempt to restore the delegate to the
+      // wrong value.
+      original_delegate_ = NULL;
+    } else if (attached_tabstrip_->model()) {
+      int index =
+          attached_tabstrip_->model()->GetIndexOfTabContents(dragged_contents_);
+      if (index != TabStripModel::kNoTab)
+        attached_tabstrip_->model()->ReplaceTabContentsAt(index, new_contents);
+    }
   }
 
   // Update our internal state.
@@ -247,7 +431,7 @@ void DraggedTabController::UpdateTargetURL(TabContents* source,
 void DraggedTabController::Observe(NotificationType type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  DCHECK(type == NOTIFY_TAB_CONTENTS_DESTROYED);
+  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
   DCHECK(Source<TabContents>(source).ptr() == dragged_contents_);
   EndDragImpl(TAB_DESTROYED);
 }
@@ -271,31 +455,75 @@ void DraggedTabController::DidProcessMessage(const MSG& msg) {
 // DraggedTabController, private:
 
 void DraggedTabController::InitWindowCreatePoint() {
-  CPoint mouse_offset_cpoint(mouse_offset_.x(), mouse_offset_.y());
+  window_create_point_.SetPoint(mouse_offset_.x(), mouse_offset_.y());
   Tab* first_tab = attached_tabstrip_->GetTabAt(0);
-  ChromeViews::View::ConvertPointToViewContainer(first_tab,
-                                                 &mouse_offset_cpoint);
-  window_create_point_.SetPoint(mouse_offset_cpoint.x, mouse_offset_cpoint.y);
+  views::View::ConvertPointToWidget(first_tab, &window_create_point_);
 }
 
 gfx::Point DraggedTabController::GetWindowCreatePoint() const {
   POINT pt;
   GetCursorPos(&pt);
+  if (dock_info_.type() != DockInfo::NONE) {
+    // If we're going to dock, we need to return the exact coordinate,
+    // otherwise we may attempt to maximize on the wrong monitor.
+    return gfx::Point(pt);
+  }
   return gfx::Point(pt.x - window_create_point_.x(),
                     pt.y - window_create_point_.y());
 }
 
+void DraggedTabController::UpdateDockInfo(const gfx::Point& screen_point) {
+  // Update the DockInfo for the current mouse coordinates.
+  DockInfo dock_info = GetDockInfoAtPoint(screen_point);
+  if (!dock_info.equals(dock_info_)) {
+    // DockInfo for current position differs.
+    if (dock_info_.type() != DockInfo::NONE &&
+        !dock_controllers_.empty()) {
+      // Hide old visual indicator.
+      dock_controllers_.back()->Hide();
+    }
+    dock_info_ = dock_info;
+    if (dock_info_.type() != DockInfo::NONE) {
+      // Show new docking position.
+      DockDisplayer* controller = new DockDisplayer(this, dock_info_);
+      if (controller->popup_hwnd()) {
+        dock_controllers_.push_back(controller);
+        dock_windows_.insert(controller->popup_hwnd());
+      } else {
+        delete controller;
+      }
+    }
+  } else if (dock_info_.type() != DockInfo::NONE &&
+             !dock_controllers_.empty()) {
+    // Current dock position is the same as last, update the controller's
+    // in_enable_area state as it may have changed.
+    dock_controllers_.back()->UpdateInEnabledArea(dock_info_.in_enable_area());
+  }
+}
+
 void DraggedTabController::ChangeDraggedContents(TabContents* new_contents) {
   if (dragged_contents_) {
-    NotificationService::current()->RemoveObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(dragged_contents_));
+    NotificationService::current()->RemoveObserver(
+        this,
+        NotificationType::TAB_CONTENTS_DESTROYED,
+        Source<TabContents>(dragged_contents_));
+    if (original_delegate_)
+      dragged_contents_->set_delegate(original_delegate_);
   }
+  original_delegate_ = NULL;
   dragged_contents_ = new_contents;
   if (dragged_contents_) {
-    NotificationService::current()->AddObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(dragged_contents_));
+    NotificationService::current()->AddObserver(
+        this,
+        NotificationType::TAB_CONTENTS_DESTROYED,
+        Source<TabContents>(dragged_contents_));
+
+    // We need to be the delegate so we receive messages about stuff,
+    // otherwise our dragged_contents() may be replaced and subsequently
+    // collected/destroyed while the drag is in process, leading to
+    // nasty crashes.
+    original_delegate_ = dragged_contents_->delegate();
+    dragged_contents_->set_delegate(this);
   }
 }
 
@@ -343,16 +571,21 @@ void DraggedTabController::ContinueDragging() {
   // dragging within it.
   TabStrip* target_tabstrip = GetTabStripForPoint(screen_point);
   if (target_tabstrip != attached_tabstrip_) {
-    if (target_tabstrip) {
-      // We may receive this event before we're fully detached from the source,
-      // we check for that and force a detach now.
-      if (attached_tabstrip_)
-        Detach();
-      Attach(target_tabstrip, screen_point);
-    } else {
+    // Make sure we're fully detached from whatever TabStrip we're attached to
+    // (if any).
+    if (attached_tabstrip_)
       Detach();
-    }
+    if (target_tabstrip)
+      Attach(target_tabstrip, screen_point);
   }
+  if (!target_tabstrip) {
+    bring_to_front_timer_.Start(
+        base::TimeDelta::FromMilliseconds(kBringToFrontDelay), this,
+        &DraggedTabController::BringWindowUnderMouseToFront);
+  }
+
+  UpdateDockInfo(screen_point);
+
   MoveTab(screen_point);
 }
 
@@ -388,21 +621,44 @@ void DraggedTabController::MoveTab(const gfx::Point& screen_point) {
   view_->MoveTo(dragged_view_point);
 }
 
+DockInfo DraggedTabController::GetDockInfoAtPoint(
+    const gfx::Point& screen_point) {
+  if (attached_tabstrip_) {
+    // If the mouse is over a tab strip, don't offer a dock position.
+    return DockInfo();
+  }
+
+  if (dock_info_.IsValidForPoint(screen_point)) {
+    // It's possible any given screen coordinate has multiple docking
+    // positions. Check the current info first to avoid having the docking
+    // position bounce around.
+    return dock_info_;
+  }
+
+  HWND dragged_hwnd = view_->GetWidget()->GetNativeView();
+  dock_windows_.insert(dragged_hwnd);
+  DockInfo info = DockInfo::GetDockInfoAtPoint(screen_point, dock_windows_);
+  dock_windows_.erase(dragged_hwnd);
+  return info;
+}
+
 TabStrip* DraggedTabController::GetTabStripForPoint(
-    const gfx::Point& screen_point) const {
-  HWND dragged_hwnd = view_->GetViewContainer()->GetHWND();
-  HWND other_hwnd = WindowFinder::WindowForPoint(screen_point, dragged_hwnd);
-  if (!other_hwnd)
+    const gfx::Point& screen_point) {
+  HWND dragged_hwnd = view_->GetWidget()->GetNativeView();
+  dock_windows_.insert(dragged_hwnd);
+  HWND local_window =
+      DockInfo::GetLocalProcessWindowAtPoint(screen_point, dock_windows_);
+  dock_windows_.erase(dragged_hwnd);
+  if (!local_window)
+    return NULL;
+  BrowserView* browser = BrowserView::GetBrowserViewForHWND(local_window);
+  if (!browser)
     return NULL;
 
-  BrowserWindow* other_frame = FrameUtil::GetBrowserWindowForHWND(other_hwnd);
-  if (other_frame) {
-    TabStrip* other_tabstrip = other_frame->GetTabStrip();
-    if (!other_tabstrip->IsCompatibleWith(source_tabstrip_))
-      return NULL;
-    return GetTabStripIfItContains(other_tabstrip, screen_point);
-  }
-  return NULL;
+  TabStrip* other_tabstrip = browser->tabstrip();
+  if (!other_tabstrip->IsCompatibleWith(source_tabstrip_))
+    return NULL;
+  return GetTabStripIfItContains(other_tabstrip, screen_point);
 }
 
 TabStrip* DraggedTabController::GetTabStripIfItContains(
@@ -463,7 +719,7 @@ void DraggedTabController::Attach(TabStrip* attached_tabstrip,
     original_delegate_ = NULL;
 
     // Return the TabContents' to normalcy.
-    dragged_contents_->DidCaptureContents();
+    dragged_contents_->set_capturing_contents(false);
 
     // We need to ask the TabStrip we're attached to to ensure that the ideal
     // bounds for all its tabs are correctly generated, because the calculation
@@ -491,20 +747,23 @@ void DraggedTabController::Attach(TabStrip* attached_tabstrip,
   tab->SetVisible(false);
 
   // Move the corresponding window to the front.
-  attached_tabstrip_->GetViewContainer()->MoveToFront(true);
+  attached_tabstrip_->GetWidget()->MoveToFront(true);
 }
 
 void DraggedTabController::Detach() {
   // Prevent the TabContents' HWND from being hidden by any of the model
   // operations performed during the drag.
-  dragged_contents_->WillCaptureContents();
+  dragged_contents_->set_capturing_contents(true);
 
   // Update the Model.
   TabStripModel* attached_model = attached_tabstrip_->model();
   int index = attached_model->GetIndexOfTabContents(dragged_contents_);
   if (index >= 0 && index < attached_model->count()) {
+    // Sometimes, DetachTabContentsAt has consequences that result in
+    // attached_tabstrip_ being set to NULL, so we need to save it first.
+    TabStrip* attached_tabstrip = attached_tabstrip_;
     attached_model->DetachTabContentsAt(index);
-    attached_tabstrip_->SchedulePaint();
+    attached_tabstrip->SchedulePaint();
   }
 
   // If we've removed the last Tab from the TabStrip, hide the frame now.
@@ -514,16 +773,15 @@ void DraggedTabController::Detach() {
   // Set up the photo booth to start capturing the contents of the dragged
   // TabContents.
   if (!photobooth_.get())
-    photobooth_.reset(new HWNDPhotobooth(dragged_contents_->GetContainerHWND()));
+    photobooth_.reset(new HWNDPhotobooth(dragged_contents_->GetNativeView()));
 
-  // Update the View.
-  view_->Detach(photobooth_.get());
+  // Update the View. This NULL check is necessary apparently in some
+  // conditions during automation where the view_ is destroyed inside a
+  // function call preceding this point but after it is created.
+  if (view_.get())
+    view_->Detach(photobooth_.get());
 
-  // We need to be the delegate so we receive messages about stuff,
-  // otherwise our dragged_contents() may be replaced and subsequently
-  // collected/destroyed while the drag is in process, leading to
-  // nasty crashes.
-  original_delegate_ = dragged_contents_->delegate();
+  // Detaching resets the delegate, but we still want to be the delegate.
   dragged_contents_->set_delegate(this);
 
   attached_tabstrip_ = NULL;
@@ -620,12 +878,30 @@ Tab* DraggedTabController::GetTabMatchingDraggedContents(
   return index == TabStripModel::kNoTab ? NULL : tabstrip->GetTabAt(index);
 }
 
-void DraggedTabController::EndDragImpl(EndDragType type) {
+bool DraggedTabController::EndDragImpl(EndDragType type) {
+  // WARNING: this may be invoked multiple times. In particular, if deletion
+  // occurs after a delay (as it does when the tab is released in the original
+  // tab strip) and the navigation controller/tab contents is deleted before
+  // the animation finishes, this is invoked twice. The second time through
+  // type == TAB_DESTROYED.
+
+  bring_to_front_timer_.Stop();
+
+  // Hide the current dock controllers.
+  for (size_t i = 0; i < dock_controllers_.size(); ++i) {
+    // Be sure and clear the controller first, that way if Hide ends up
+    // deleting the controller it won't call us back.
+    dock_controllers_[i]->clear_controller();
+    dock_controllers_[i]->Hide();
+  }
+  dock_controllers_.clear();
+  dock_windows_.clear();
+
   bool destroy_now = true;
   if (type != TAB_DESTROYED) {
     // We only finish up the drag if we were actually dragging. If we never
-    // constructed a view, the user just clicked and released and didn't move the
-    // mouse enough to trigger a drag.
+    // constructed a view, the user just clicked and released and didn't move
+    // the mouse enough to trigger a drag.
     if (view_.get()) {
       RestoreFocus();
       if (type == CANCELED) {
@@ -634,6 +910,8 @@ void DraggedTabController::EndDragImpl(EndDragType type) {
         destroy_now = CompleteDrag();
       }
     }
+    if (dragged_contents_ && dragged_contents_->delegate() == this)
+      dragged_contents_->set_delegate(original_delegate_);
   } else {
     // If we get here it means the NavigationController is going down. Don't
     // attempt to do any cleanup other than resetting the delegate (if we're
@@ -641,11 +919,19 @@ void DraggedTabController::EndDragImpl(EndDragType type) {
     if (dragged_contents_ && dragged_contents_->delegate() == this)
       dragged_contents_->set_delegate(NULL);
     dragged_contents_ = NULL;
-    attached_tabstrip_ = NULL;
   }
+
+  // The delegate of the dragged contents should have been reset. Unset the
+  // original delegate so that we don't attempt to reset the delegate when
+  // deleted.
+  DCHECK(!dragged_contents_ || dragged_contents_->delegate() != this);
+  original_delegate_ = NULL;
+
   // If we're not destroyed now, we'll be destroyed asynchronously later.
   if (destroy_now)
     source_tabstrip_->DestroyDragController();
+
+  return destroy_now;
 }
 
 void DraggedTabController::RevertDrag() {
@@ -683,7 +969,7 @@ void DraggedTabController::RevertDrag() {
   // it has been hidden.
   if (restore_frame) {
     if (!restore_bounds_.IsEmpty()) {
-      HWND frame_hwnd = source_tabstrip_->GetViewContainer()->GetHWND();
+      HWND frame_hwnd = source_tabstrip_->GetWidget()->GetNativeView();
       MoveWindow(frame_hwnd, restore_bounds_.x(), restore_bounds_.y(),
                  restore_bounds_.width(), restore_bounds_.height(), TRUE);
     }
@@ -702,10 +988,61 @@ bool DraggedTabController::CompleteDrag() {
         NewCallback(this, &DraggedTabController::OnAnimateToBoundsComplete));
     destroy_immediately = false;
   } else {
+    if (dock_info_.type() != DockInfo::NONE) {
+      switch (dock_info_.type()) {
+        case DockInfo::LEFT_OF_WINDOW:
+          UserMetrics::RecordAction(L"DockingWindow_Left",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::RIGHT_OF_WINDOW:
+          UserMetrics::RecordAction(L"DockingWindow_Right",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::BOTTOM_OF_WINDOW:
+          UserMetrics::RecordAction(L"DockingWindow_Bottom",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::TOP_OF_WINDOW:
+          UserMetrics::RecordAction(L"DockingWindow_Top",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::MAXIMIZE:
+          UserMetrics::RecordAction(L"DockingWindow_Maximize",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::LEFT_HALF:
+          UserMetrics::RecordAction(L"DockingWindow_LeftHalf",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::RIGHT_HALF:
+          UserMetrics::RecordAction(L"DockingWindow_RightHalf",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        case DockInfo::BOTTOM_HALF:
+          UserMetrics::RecordAction(L"DockingWindow_BottomHalf",
+                                    source_tabstrip_->model()->profile());
+          break;
+
+        default:
+          NOTREACHED();
+          break;
+      }
+    }
     // Compel the model to construct a new window for the detached TabContents.
-    source_tabstrip_->model()->TearOffTabContents(
-        dragged_contents_,
-        GetWindowCreatePoint());
+    CRect browser_rect;
+    GetWindowRect(source_tabstrip_->GetWidget()->GetNativeView(), &browser_rect);
+    gfx::Rect window_bounds(
+        GetWindowCreatePoint(),
+        gfx::Size(browser_rect.Width(), browser_rect.Height()));
+    source_tabstrip_->model()->delegate()->CreateNewStripWithContents(
+        dragged_contents_, window_bounds, dock_info_);
     CleanUpHiddenFrame();
   }
 
@@ -715,7 +1052,7 @@ bool DraggedTabController::CompleteDrag() {
 void DraggedTabController::EnsureDraggedView() {
   if (!view_.get()) {
     RECT wr;
-    GetWindowRect(dragged_contents_->GetContainerHWND(), &wr);
+    GetWindowRect(dragged_contents_->GetNativeView(), &wr);
 
     view_.reset(new DraggedTabView(dragged_contents_, mouse_offset_,
         gfx::Size(wr.right - wr.left, wr.bottom - wr.top)));
@@ -728,14 +1065,12 @@ gfx::Point DraggedTabController::GetCursorScreenPoint() const {
   return gfx::Point(pt);
 }
 
-gfx::Rect DraggedTabController::GetViewScreenBounds(
-    ChromeViews::View* view) const {
-  CPoint view_topleft(0, 0);
-  ChromeViews::View::ConvertPointToScreen(view, &view_topleft);
-  CRect view_screen_bounds;
-  view->GetLocalBounds(&view_screen_bounds, true);
-  view_screen_bounds.OffsetRect(view_topleft);
-  return gfx::Rect(view_screen_bounds);
+gfx::Rect DraggedTabController::GetViewScreenBounds(views::View* view) const {
+  gfx::Point view_topleft;
+  views::View::ConvertPointToScreen(view, &view_topleft);
+  gfx::Rect view_screen_bounds = view->GetLocalBounds(true);
+  view_screen_bounds.Offset(view_topleft.x(), view_topleft.y());
+  return view_screen_bounds;
 }
 
 int DraggedTabController::NormalizeIndexToAttachedTabStrip(int index) const {
@@ -751,7 +1086,7 @@ int DraggedTabController::NormalizeIndexToAttachedTabStrip(int index) const {
 void DraggedTabController::HideFrame() {
   // We don't actually hide the window, rather we just move it way off-screen.
   // If we actually hide it, we stop receiving drag events.
-  HWND frame_hwnd = source_tabstrip_->GetViewContainer()->GetHWND();
+  HWND frame_hwnd = source_tabstrip_->GetWidget()->GetNativeView();
   RECT wr;
   GetWindowRect(frame_hwnd, &wr);
   MoveWindow(frame_hwnd, 0xFFFF, 0xFFFF, wr.right - wr.left,
@@ -784,8 +1119,12 @@ void DraggedTabController::OnAnimateToBoundsComplete() {
   // detach even though we aren't attached to a TabStrip. Guard against that.
   if (attached_tabstrip_) {
     Tab* tab = GetTabMatchingDraggedContents(attached_tabstrip_);
-    if (tab)
+    if (tab) {
       tab->SetVisible(true);
+      // Paint the tab now, otherwise there may be slight flicker between the
+      // time the dragged tab window is destroyed and we paint.
+      tab->PaintNow();
+    }
   }
   CleanUpHiddenFrame();
 
@@ -793,3 +1132,42 @@ void DraggedTabController::OnAnimateToBoundsComplete() {
     source_tabstrip_->DestroyDragController();
 }
 
+void DraggedTabController::DockDisplayerDestroyed(
+    DockDisplayer* controller) {
+  std::set<HWND>::iterator dock_i =
+      dock_windows_.find(controller->popup_hwnd());
+  if (dock_i != dock_windows_.end())
+    dock_windows_.erase(dock_i);
+  else
+    NOTREACHED();
+
+  std::vector<DockDisplayer*>::iterator i =
+      std::find(dock_controllers_.begin(), dock_controllers_.end(),
+                controller);
+  if (i != dock_controllers_.end())
+    dock_controllers_.erase(i);
+  else
+    NOTREACHED();
+}
+
+void DraggedTabController::BringWindowUnderMouseToFront() {
+  // If we're going to dock to another window, bring it to the front.
+  HWND hwnd = dock_info_.hwnd();
+  if (!hwnd) {
+    HWND dragged_hwnd = view_->GetWidget()->GetNativeView();
+    dock_windows_.insert(dragged_hwnd);
+    hwnd = DockInfo::GetLocalProcessWindowAtPoint(GetCursorScreenPoint(),
+                                                  dock_windows_);
+    dock_windows_.erase(dragged_hwnd);
+  }
+  if (hwnd) {
+    // Move the window to the front.
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+
+    // The previous call made the window appear on top of the dragged window,
+    // move the dragged window to the front.
+    SetWindowPos(view_->GetWidget()->GetNativeView(), HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+  }
+}

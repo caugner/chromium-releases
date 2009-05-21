@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-
 #include "chrome/browser/webdata/web_data_service.h"
 
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/ie7_password.h"
-#include "chrome/browser/template_url.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_constants.h"
 #include "webkit/glue/password_form.h"
+#include "webkit/glue/autofill_form.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -20,10 +18,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-WebDataService::WebDataService() : should_commit_(false),
-                                   next_request_handle_(1),
-                                   thread_(NULL),
-                                   db_(NULL) {
+using base::Time;
+
+WebDataService::WebDataService() : thread_(NULL),
+                                   db_(NULL),
+                                   should_commit_(false),
+                                   next_request_handle_(1) {
 }
 
 WebDataService::~WebDataService() {
@@ -32,13 +32,13 @@ WebDataService::~WebDataService() {
   }
 }
 
-bool WebDataService::Init(const std::wstring& profile_path) {
-  std::wstring path = profile_path;
-  file_util::AppendToPath(&path, chrome::kWebDataFilename);
+bool WebDataService::Init(const FilePath& profile_path) {
+  FilePath path = profile_path;
+  path = path.Append(chrome::kWebDataFilename);
   return InitWithPath(path);
 }
 
-bool WebDataService::InitWithPath(const std::wstring& path) {
+bool WebDataService::InitWithPath(const FilePath& path) {
   thread_ = new base::Thread("Chrome_WebDataThread");
 
   if (!thread_->Start()) {
@@ -110,6 +110,47 @@ void WebDataService::CancelRequest(Handle h) {
     return;
   }
   i->second->Cancel();
+}
+
+void WebDataService::AddAutofillFormElements(
+    const std::vector<AutofillForm::Element>& element) {
+  GenericRequest<std::vector<AutofillForm::Element> >* request =
+      new GenericRequest<std::vector<AutofillForm::Element> >(
+          this, GetNextRequestHandle(), NULL, element);
+  RegisterRequest(request);
+  ScheduleTask(NewRunnableMethod(this,
+                                 &WebDataService::AddAutofillFormElementsImpl,
+                                 request));
+}
+
+WebDataService::Handle WebDataService::GetFormValuesForElementName(
+    const std::wstring& name, const std::wstring& prefix, int limit,
+    WebDataServiceConsumer* consumer) {
+  WebDataRequest* request =
+      new WebDataRequest(this, GetNextRequestHandle(), consumer);
+  RegisterRequest(request);
+  ScheduleTask(
+      NewRunnableMethod(this,
+                        &WebDataService::GetFormValuesForElementNameImpl,
+                        request,
+                        name,
+                        prefix,
+                        limit));
+  return request->GetHandle();
+}
+
+void WebDataService::RemoveFormValueForElementName(
+    const std::wstring& name, const std::wstring& value) {
+  GenericRequest2<std::wstring, std::wstring>* request =
+      new GenericRequest2<std::wstring, std::wstring>(this,
+                                                      GetNextRequestHandle(),
+                                                      NULL,
+                                                      name, value);
+  RegisterRequest(request);
+  ScheduleTask(
+      NewRunnableMethod(this,
+                        &WebDataService::RemoveFormValueForElementNameImpl,
+                        request));
 }
 
 void WebDataService::RequestCompleted(Handle h) {
@@ -259,15 +300,6 @@ void WebDataService::AddLogin(const PasswordForm& form) {
                                  request));
 }
 
-void WebDataService::AddIE7Login(const IE7PasswordInfo& info) {
-  GenericRequest<IE7PasswordInfo>* request =
-      new GenericRequest<IE7PasswordInfo>(this, GetNextRequestHandle(), NULL,
-                                          info);
-  RegisterRequest(request);
-  ScheduleTask(NewRunnableMethod(this, &WebDataService::AddIE7LoginImpl,
-                                 request));
-}
-
 void WebDataService::UpdateLogin(const PasswordForm& form) {
   GenericRequest<PasswordForm>* request =
       new GenericRequest<PasswordForm>(this, GetNextRequestHandle(),
@@ -283,15 +315,6 @@ void WebDataService::RemoveLogin(const PasswordForm& form) {
                                       form);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this, &WebDataService::RemoveLoginImpl,
-                                 request));
-}
-
-void WebDataService::RemoveIE7Login(const IE7PasswordInfo& info) {
-  GenericRequest<IE7PasswordInfo>* request =
-      new GenericRequest<IE7PasswordInfo>(this, GetNextRequestHandle(), NULL,
-                                          info);
-  RegisterRequest(request);
-  ScheduleTask(NewRunnableMethod(this, &WebDataService::RemoveIE7LoginImpl,
                                  request));
 }
 
@@ -312,6 +335,19 @@ void WebDataService::RemoveLoginsCreatedAfter(const Time delete_begin) {
   RemoveLoginsCreatedBetween(delete_begin, Time());
 }
 
+void WebDataService::RemoveFormElementsAddedBetween(const Time& delete_begin,
+                                                    const Time& delete_end) {
+  GenericRequest2<Time, Time>* request =
+    new GenericRequest2<Time, Time>(this,
+                                    GetNextRequestHandle(),
+                                    NULL,
+                                    delete_begin,
+                                    delete_end);
+  RegisterRequest(request);
+  ScheduleTask(NewRunnableMethod(this,
+      &WebDataService::RemoveFormElementsAddedBetweenImpl, request));
+}
+
 WebDataService::Handle WebDataService::GetLogins(
                                        const PasswordForm& form,
                                        WebDataServiceConsumer* consumer) {
@@ -320,18 +356,6 @@ WebDataService::Handle WebDataService::GetLogins(
                                        consumer, form);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this, &WebDataService::GetLoginsImpl,
-                                 request));
-  return request->GetHandle();
-}
-
-WebDataService::Handle WebDataService::GetIE7Login(
-    const IE7PasswordInfo& info,
-    WebDataServiceConsumer* consumer) {
-  GenericRequest<IE7PasswordInfo>* request =
-      new GenericRequest<IE7PasswordInfo>(this, GetNextRequestHandle(),
-                                          consumer, info);
-  RegisterRequest(request);
-  ScheduleTask(NewRunnableMethod(this, &WebDataService::GetIE7LoginImpl,
                                  request));
   return request->GetHandle();
 }
@@ -374,14 +398,14 @@ void WebDataService::Commit() {
   }
 }
 
-void WebDataService::InitializeDatabase(const std::wstring& path) {
+void WebDataService::InitializeDatabase(const FilePath& path) {
   DCHECK(!db_);
   // In the rare case where the db fails to initialize a dialog may get shown
   // the blocks the caller, yet allows other messages through. For this reason
   // we only set db_ to the created database if creation is successful. That
   // way other methods won't do anything as db_ is still NULL.
   WebDatabase* db = new WebDatabase();
-  if (!db->Init(path)) {
+  if (!db->Init(path.ToWStringHack())) {
     NOTREACHED() << "Cannot initialize the web database";
     delete db;
     return;
@@ -474,14 +498,6 @@ void WebDataService::AddLoginImpl(GenericRequest<PasswordForm>* request) {
   request->RequestComplete();
 }
 
-void WebDataService::AddIE7LoginImpl(GenericRequest<IE7PasswordInfo>* request) {
-  if (db_ && !request->IsCancelled()) {
-    if (db_->AddIE7Login(request->GetArgument()))
-      ScheduleCommit();
-  }
-  request->RequestComplete();
-}
-
 void WebDataService::UpdateLoginImpl(GenericRequest<PasswordForm>* request) {
   if (db_ && !request->IsCancelled()) {
     if (db_->UpdateLogin(request->GetArgument()))
@@ -493,15 +509,6 @@ void WebDataService::UpdateLoginImpl(GenericRequest<PasswordForm>* request) {
 void WebDataService::RemoveLoginImpl(GenericRequest<PasswordForm>* request) {
   if (db_ && !request->IsCancelled()) {
     if (db_->RemoveLogin(request->GetArgument()))
-      ScheduleCommit();
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::RemoveIE7LoginImpl(
-    GenericRequest<IE7PasswordInfo>* request) {
-  if (db_ && !request->IsCancelled()) {
-    if (db_->RemoveIE7Login(request->GetArgument()))
       ScheduleCommit();
   }
   request->RequestComplete();
@@ -527,17 +534,6 @@ void WebDataService::GetLoginsImpl(GenericRequest<PasswordForm>* request) {
   request->RequestComplete();
 }
 
-void WebDataService::GetIE7LoginImpl(
-    GenericRequest<IE7PasswordInfo>* request) {
-  if (db_ && !request->IsCancelled()) {
-    IE7PasswordInfo result;
-    db_->GetIE7Login(request->GetArgument(), &result);
-    request->SetResult(
-        new WDResult<IE7PasswordInfo>(PASSWORD_IE7_RESULT, result));
-  }
-  request->RequestComplete();
-}
-
 void WebDataService::GetAllAutofillableLoginsImpl(WebDataRequest* request) {
   if (db_ && !request->IsCancelled()) {
     std::vector<PasswordForm*> forms;
@@ -554,6 +550,53 @@ void WebDataService::GetAllLoginsImpl(WebDataRequest* request) {
     db_->GetAllLogins(&forms, true);
     request->SetResult(
         new WDResult<std::vector<PasswordForm*> >(PASSWORD_RESULT, forms));
+  }
+  request->RequestComplete();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// Autofill support.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+void WebDataService::AddAutofillFormElementsImpl(
+    GenericRequest<std::vector<AutofillForm::Element> >* request) {
+  if (db_ && !request->IsCancelled()) {
+    if (db_->AddAutofillFormElements(request->GetArgument()))
+      ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::GetFormValuesForElementNameImpl(WebDataRequest* request,
+    const std::wstring& name, const std::wstring& prefix, int limit) {
+  if (db_ && !request->IsCancelled()) {
+    std::vector<std::wstring> values;
+    db_->GetFormValuesForElementName(name, prefix, &values, limit);
+    request->SetResult(
+        new WDResult<std::vector<std::wstring> >(AUTOFILL_VALUE_RESULT,
+            values));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveFormElementsAddedBetweenImpl(
+    GenericRequest2<Time, Time>* request) {
+  if (db_ && !request->IsCancelled()) {
+    if (db_->RemoveFormElementsAddedBetween(request->GetArgument1(),
+                                            request->GetArgument2()))
+      ScheduleCommit();
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveFormValueForElementNameImpl(
+    GenericRequest2<std::wstring, std::wstring>* request) {
+  if (db_ && !request->IsCancelled()) {
+    if (db_->RemoveFormElement(request->GetArgument1(),
+                               request->GetArgument2()))
+      ScheduleCommit();
   }
   request->RequestComplete();
 }
@@ -660,4 +703,3 @@ int WebDataService::GetNextRequestHandle() {
   AutoLock l(pending_lock_);
   return ++next_request_handle_;
 }
-

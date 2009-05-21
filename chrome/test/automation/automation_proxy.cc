@@ -6,51 +6,42 @@
 
 #include "chrome/test/automation/automation_proxy.h"
 
+#include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/platform_thread.h"
+#include "base/process_util.h"
 #include "base/ref_counted.h"
-#include "chrome/common/ipc_message_macros.h"
-#include "chrome/test/automation/autocomplete_edit_proxy.h"
+#include "base/waitable_event.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 
+#if defined(OS_WIN)
+// TODO(port): Enable when dialog_delegate is ported.
+#include "chrome/views/window/dialog_delegate.h"
+#endif
+
+using base::TimeDelta;
+using base::TimeTicks;
+
 // This class exists to group together the data and functionality used for
 // synchronous automation requests.
 class AutomationRequest :
     public base::RefCountedThreadSafe<AutomationRequest> {
 public:
-  AutomationRequest() {
+  AutomationRequest() : received_response_(true, false) {
     static int32 routing_id = 0;
     routing_id_ = ++routing_id;
-    received_response_ = ::CreateEvent(NULL, TRUE, FALSE, NULL);
-    DCHECK(received_response_);
-  }
-  ~AutomationRequest() {
-    DCHECK(received_response_);
-    ::CloseHandle(received_response_);
-  }
-
-  // This is called on the foreground thread to block while waiting for a
-  // response from the app.
-  // The function returns true if response is received, and returns false
-  // if there is a failure or timeout.
-  bool WaitForResponse(uint32 timeout_ms, bool* is_timeout) {
-    uint32 result = ::WaitForSingleObject(received_response_, timeout_ms);
-    if (is_timeout)
-      *is_timeout = (result == WAIT_TIMEOUT);
-
-    return result != WAIT_FAILED && result != WAIT_TIMEOUT;
   }
 
   // This is called on the background thread once the response has been
   // received and the foreground thread can resume execution.
-  bool SignalResponseReady(const IPC::Message& response) {
+  void SignalResponseReady(const IPC::Message& response) {
     response_.reset(new IPC::Message(response));
 
-    DCHECK(received_response_);
-    return !!::SetEvent(received_response_);
+    received_response_.Signal();
   }
 
   // This can be used to take ownership of the response object that
@@ -73,7 +64,7 @@ private:
 
   int32 routing_id_;
   scoped_ptr<IPC::Message> response_;
-  HANDLE received_response_;
+  base::WaitableEvent received_response_;
 };
 
 namespace {
@@ -137,34 +128,30 @@ class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
 }  // anonymous namespace
 
 
-const int AutomationProxy::kMaxCommandExecutionTime = 30000;
-
-AutomationProxy::AutomationProxy() : current_request_(NULL) {
-  InitializeEvents();
+AutomationProxy::AutomationProxy(int command_execution_timeout_ms)
+    : app_launched_(true, false),
+      initial_loads_complete_(true, false),
+      new_tab_ui_load_complete_(true, false),
+      shutdown_event_(new base::WaitableEvent(true, false)),
+      current_request_(NULL),
+      command_execution_timeout_(
+          TimeDelta::FromMilliseconds(command_execution_timeout_ms)) {
   InitializeChannelID();
+  InitializeHandleTracker();
   InitializeThread();
   InitializeChannel();
-  InitializeHandleTracker();
 }
 
 AutomationProxy::~AutomationProxy() {
-}
-
-void AutomationProxy::InitializeEvents() {
-  app_launched_ =
-      CreateEvent(NULL,   // Handle cannot be inherited by child processes.
-                  TRUE,   // No automatic reset after a waiting thread released.
-                  FALSE,  // Initially not signalled.
-                  NULL);  // No name.
-  DCHECK(app_launched_);
-
-  // See the above call to CreateEvent to understand these parameters.
-  initial_loads_complete_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  DCHECK(initial_loads_complete_);
-
-  // See the above call to CreateEvent to understand these parameters.
-  new_tab_ui_load_complete_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  DCHECK(new_tab_ui_load_complete_);
+  DCHECK(shutdown_event_.get() != NULL);
+  shutdown_event_->Signal();
+  // Destruction order is important. Thread has to outlive the channel and
+  // tracker has to outlive the thread since we access the tracker inside
+  // AutomationMessageFilter::OnMessageReceived.
+  channel_.reset();
+  thread_.reset();
+  DCHECK(NULL == current_request_);
+  tracker_.reset();
 }
 
 void AutomationProxy::InitializeChannelID() {
@@ -176,7 +163,7 @@ void AutomationProxy::InitializeChannelID() {
   static int channel_counter = 0;
 
   std::wostringstream buf;
-  buf << L"ChromeTestingInterface:" << GetCurrentProcessId() <<
+  buf << L"ChromeTestingInterface:" << base::GetCurrentProcId() <<
          L"." << ++channel_counter;
   channel_id_ = buf.str();
 }
@@ -192,12 +179,20 @@ void AutomationProxy::InitializeThread() {
 }
 
 void AutomationProxy::InitializeChannel() {
-  channel_.reset(new IPC::ChannelProxy(
+  DCHECK(shutdown_event_.get() != NULL);
+
+  // TODO(iyengar)
+  // The shutdown event could be global on the same lines as the automation
+  // provider, where we use the shutdown event provided by the chrome browser
+  // process.
+  channel_.reset(new IPC::SyncChannel(
     channel_id_,
     IPC::Channel::MODE_SERVER,
     this,  // we are the listener
     new AutomationMessageFilter(this),
-    thread_->message_loop()));
+    thread_->message_loop(),
+    true,
+    shutdown_event_.get()));
 }
 
 void AutomationProxy::InitializeHandleTracker() {
@@ -205,36 +200,37 @@ void AutomationProxy::InitializeHandleTracker() {
 }
 
 bool AutomationProxy::WaitForAppLaunch() {
-  return ::WaitForSingleObject(app_launched_,
-                               kMaxCommandExecutionTime) == WAIT_OBJECT_0;
+  return app_launched_.TimedWait(command_execution_timeout_);
 }
 
 void AutomationProxy::SignalAppLaunch() {
-  ::SetEvent(app_launched_);
+  app_launched_.Signal();
 }
 
 bool AutomationProxy::WaitForInitialLoads() {
-  return ::WaitForSingleObject(initial_loads_complete_,
-                               kMaxCommandExecutionTime) == WAIT_OBJECT_0;
+  return initial_loads_complete_.TimedWait(command_execution_timeout_);
 }
 
 bool AutomationProxy::WaitForInitialNewTabUILoad(int* load_time) {
-  if (::WaitForSingleObject(new_tab_ui_load_complete_,
-                            kMaxCommandExecutionTime) == WAIT_OBJECT_0) {
+  if (new_tab_ui_load_complete_.TimedWait(command_execution_timeout_)) {
     *load_time = new_tab_ui_load_time_;
-    ::ResetEvent(new_tab_ui_load_complete_);
+    new_tab_ui_load_complete_.Reset();
     return true;
   }
   return false;
 }
 
 void AutomationProxy::SignalInitialLoads() {
-  ::SetEvent(initial_loads_complete_);
+  initial_loads_complete_.Signal();
 }
 
 void AutomationProxy::SignalNewTabUITab(int load_time) {
   new_tab_ui_load_time_ = load_time;
-  ::SetEvent(new_tab_ui_load_complete_);
+  new_tab_ui_load_complete_.Signal();
+}
+
+bool AutomationProxy::SavePackageShouldPromptUser(bool should_prompt) {
+  return Send(new AutomationMsg_SavePackageShouldPromptUser(0, should_prompt));
 }
 
 bool AutomationProxy::GetBrowserWindowCount(int* num_windows) {
@@ -243,26 +239,15 @@ bool AutomationProxy::GetBrowserWindowCount(int* num_windows) {
     return false;
   }
 
-  IPC::Message* response = NULL;
-  bool is_timeout = true;
-  bool succeeded = SendAndWaitForResponseWithTimeout(
-      new AutomationMsg_BrowserWindowCountRequest(0), &response,
-      AutomationMsg_BrowserWindowCountResponse::ID,
-      kMaxCommandExecutionTime, &is_timeout);
-  if (!succeeded)
-    return false;
+  bool succeeded = SendWithTimeout(
+      new AutomationMsg_BrowserWindowCount(0, num_windows),
+      command_execution_timeout_ms(), NULL);
 
-  if (is_timeout) {
+  if (!succeeded) {
     DLOG(ERROR) << "GetWindowCount did not complete in a timely fashion";
     return false;
   }
 
-  void* iter = NULL;
-  if (!response->ReadInt(&iter, num_windows)) {
-    succeeded = false;
-  }
-
-  delete response;
   return succeeded;
 }
 
@@ -274,7 +259,7 @@ bool AutomationProxy::WaitForWindowCountToChange(int count, int* new_count,
     bool succeeded = GetBrowserWindowCount(new_count);
     if (!succeeded) return false;
     if (count != *new_count) return true;
-    Sleep(automation::kSleepTime);
+    PlatformThread::Sleep(automation::kSleepTime);
   }
   // Window count never changed.
   return false;
@@ -293,9 +278,104 @@ bool AutomationProxy::WaitForWindowCountToBecome(int count,
     } else if (count == new_count) {
       return true;
     }
-    Sleep(automation::kSleepTime);
+    PlatformThread::Sleep(automation::kSleepTime);
   }
   // Window count never reached the value we sought.
+  return false;
+}
+
+#if defined(OS_WIN)
+// TODO(port): Port when DialogDelegate is ported.
+bool AutomationProxy::GetShowingAppModalDialog(
+    bool* showing_app_modal_dialog,
+    views::DialogDelegate::DialogButton* button) {
+  if (!showing_app_modal_dialog || !button) {
+    NOTREACHED();
+    return false;
+  }
+
+  int button_int = 0;
+
+  if (!SendWithTimeout(
+          new AutomationMsg_ShowingAppModalDialog(
+              0, showing_app_modal_dialog, &button_int),
+          command_execution_timeout_ms(), NULL)) {
+    DLOG(ERROR) << "ShowingAppModalDialog did not complete in a timely fashion";
+    return false;
+  }
+
+  *button = static_cast<views::DialogDelegate::DialogButton>(button_int);
+  return true;
+}
+
+bool AutomationProxy::ClickAppModalDialogButton(
+    views::DialogDelegate::DialogButton button) {
+  bool succeeded = false;
+
+  if (!SendWithTimeout(
+          new AutomationMsg_ClickAppModalDialogButton(
+              0, button, &succeeded),
+          command_execution_timeout_ms(), NULL)) {
+    return false;
+  }
+
+  return succeeded;
+}
+
+bool AutomationProxy::WaitForAppModalDialog(int wait_timeout) {
+  const TimeTicks start = TimeTicks::Now();
+  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
+  while (TimeTicks::Now() - start < timeout) {
+    bool dialog_shown = false;
+    views::DialogDelegate::DialogButton button =
+        views::DialogDelegate::DIALOGBUTTON_NONE;
+    bool succeeded = GetShowingAppModalDialog(&dialog_shown, &button);
+    if (!succeeded) {
+      // Try again next round, but log it.
+      DLOG(ERROR) << "GetShowingAppModalDialog returned false";
+    } else if (dialog_shown) {
+      return true;
+    }
+    Sleep(automation::kSleepTime);
+  }
+  // Dialog never shown.
+  return false;
+}
+#endif  // defined(OS_WIN)
+
+bool AutomationProxy::WaitForURLDisplayed(GURL url, int wait_timeout) {
+  const TimeTicks start = TimeTicks::Now();
+  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
+  while (TimeTicks::Now() - start < timeout) {
+    int window_count;
+    if (!GetBrowserWindowCount(&window_count))
+      return false;
+
+    for (int i = 0; i < window_count; i++) {
+      BrowserProxy* window = GetBrowserWindow(i);
+      if (!window)
+        break;
+
+      int tab_count;
+      if (!window->GetTabCount(&tab_count))
+        continue;
+
+      for (int j = 0; j < tab_count; j++) {
+        TabProxy* tab = window->GetTab(j);
+        if (!tab)
+          break;
+
+        GURL tab_url;
+        if (!tab->GetCurrentURL(&tab_url))
+          continue;
+
+        if (tab_url == url)
+          return true;
+      }
+    }
+    PlatformThread::Sleep(automation::kSleepTime);
+  }
+
   return false;
 }
 
@@ -318,205 +398,77 @@ void AutomationProxy::OnChannelError() {
 }
 
 WindowProxy* AutomationProxy::GetActiveWindow() {
-  IPC::Message* response = NULL;
-  bool is_timeout = true;
-  bool succeeded = SendAndWaitForResponseWithTimeout(
-      new AutomationMsg_ActiveWindowRequest(0), &response,
-      AutomationMsg_ActiveWindowResponse::ID,
-      kMaxCommandExecutionTime, &is_timeout);
-  if (!succeeded)
-    return NULL;
+  int handle = 0;
 
-  scoped_ptr<IPC::Message> response_deleter(response);  // Delete on exit.
-  if (is_timeout) {
-    DLOG(ERROR) << "GetActiveWindow did not complete in a timely fashion";
+  if (!SendWithTimeout(new AutomationMsg_ActiveWindow(0, &handle),
+                       command_execution_timeout_ms(), NULL)) {
     return NULL;
   }
 
-  void* iter = NULL;
-  int handle;
-  if (response->ReadInt(&iter, &handle) && (handle != 0))
-    return new WindowProxy(this, tracker_.get(), handle);
-
-  return NULL;
+  return new WindowProxy(this, tracker_.get(), handle);
 }
 
 
 BrowserProxy* AutomationProxy::GetBrowserWindow(int window_index) {
-  IPC::Message* response;
-  bool is_timeout = true;
-  bool succeeded = SendAndWaitForResponseWithTimeout(
-    new AutomationMsg_BrowserWindowRequest(0, window_index), &response,
-    AutomationMsg_BrowserWindowResponse::ID,
-    kMaxCommandExecutionTime, &is_timeout);
-  if (!succeeded)
-    return NULL;
+  int handle = 0;
 
-  scoped_ptr<IPC::Message> response_deleter(response);  // Delete on exit.
-  if (is_timeout) {
+  if (!SendWithTimeout(new AutomationMsg_BrowserWindow(0, window_index,
+                                                       &handle),
+                       command_execution_timeout_ms(), NULL)) {
     DLOG(ERROR) << "GetBrowserWindow did not complete in a timely fashion";
     return NULL;
   }
 
-  void* iter = NULL;
-  int handle;
-  if (!response->ReadInt(&iter, &handle) || (handle == 0)) {
-    DLOG(ERROR) << "Bad response from the window getter.";
+  if (handle == 0) {
     return NULL;
   }
+
   return new BrowserProxy(this, tracker_.get(), handle);
 }
 
 BrowserProxy* AutomationProxy::GetLastActiveBrowserWindow() {
-  IPC::Message* response;
-  bool is_timeout = true;
-  bool succeeded = SendAndWaitForResponseWithTimeout(
-    new AutomationMsg_LastActiveBrowserWindowRequest(0),
-    &response, AutomationMsg_LastActiveBrowserWindowResponse::ID,
-    kMaxCommandExecutionTime, &is_timeout);
-  if (!succeeded)
-    return NULL;
+  int handle = 0;
 
-  scoped_ptr<IPC::Message> response_deleter(response);  // Delete on exit.
-  if (is_timeout) {
-    DLOG(ERROR) << "GetLastActiveBrowserWindow did not complete in a timely fashion";
+  if (!SendWithTimeout(new AutomationMsg_LastActiveBrowserWindow(
+      0, &handle), command_execution_timeout_ms(), NULL)) {
+    DLOG(ERROR) <<
+        "GetLastActiveBrowserWindow did not complete in a timely fashion";
     return NULL;
   }
 
-  void* iter = NULL;
-  int handle;
-  if (!response->ReadInt(&iter, &handle) || (handle == 0)) {
-    DLOG(ERROR) << "Bad response from the window getter.";
-    return NULL;
-  }
   return new BrowserProxy(this, tracker_.get(), handle);
 }
 
-BrowserProxy* AutomationProxy::GetBrowserForWindow(WindowProxy* window) {
-  return GetBrowserForWindowWithTimeout(window, INFINITE, NULL);
+#if defined(OS_POSIX)
+base::file_handle_mapping_vector AutomationProxy::fds_to_map() const {
+  base::file_handle_mapping_vector map;
+  int src_fd = -1, dest_fd = -1;
+  channel_->GetClientFileDescriptorMapping(&src_fd, &dest_fd);
+  if (src_fd > -1)
+    map.push_back(std::make_pair(src_fd, dest_fd));
+  return map;
 }
-
-BrowserProxy* AutomationProxy::GetBrowserForWindowWithTimeout(
-    WindowProxy* window, uint32 timeout_ms, bool* is_timeout) {
-  DCHECK(window);
-  if (!window->is_valid() || !window->handle())
-    return false;
-
-  IPC::Message* response = NULL;
-  bool succeeded = SendAndWaitForResponseWithTimeout(
-    new AutomationMsg_BrowserForWindowRequest(0, window->handle()), &response,
-    AutomationMsg_BrowserForWindowResponse::ID, timeout_ms, is_timeout);
-  if (!succeeded)
-    return NULL;
-
-  scoped_ptr<IPC::Message> response_deleter(response);  // Delete on exit.
-  int browser_handle = 0;
-  void* iter = NULL;
-  bool handle_ok;
-  succeeded = response->ReadBool(&iter, &handle_ok);
-  if (succeeded)
-    succeeded = response->ReadInt(&iter, &browser_handle);
-
-  if (succeeded) {
-    return new BrowserProxy(this, tracker_.get(), browser_handle);
-  } else {
-    return NULL;
-  }
-}
-
-WindowProxy* AutomationProxy::GetWindowForBrowser(BrowserProxy* browser) {
-  if (!browser->is_valid() || !browser->handle())
-    return false;
-
-  IPC::Message* response = NULL;
-  bool succeeded = SendAndWaitForResponse(
-    new AutomationMsg_WindowForBrowserRequest(0, browser->handle()), &response,
-    AutomationMsg_WindowForBrowserResponse::ID);
-  if (!succeeded)
-    return NULL;
-
-  scoped_ptr<IPC::Message> response_deleter(response);  // Delete on exit.
-  int window_handle;
-  void* iter = NULL;
-  bool handle_ok;
-  succeeded = response->ReadBool(&iter, &handle_ok);
-  if (succeeded)
-    succeeded = response->ReadInt(&iter, &window_handle);
-
-  if (succeeded) {
-    return new WindowProxy(this, tracker_.get(), window_handle);
-  } else {
-    return NULL;
-  }
-}
-
-AutocompleteEditProxy* AutomationProxy::GetAutocompleteEditForBrowser(
-    BrowserProxy* browser) {
-  if (!browser->is_valid() || !browser->handle())
-    return NULL;
-
-  IPC::Message* response = NULL;
-  if (!SendAndWaitForResponse(
-      new AutomationMsg_AutocompleteEditForBrowserRequest(0, browser->handle()),
-      &response, AutomationMsg_AutocompleteEditForBrowserResponse::ID))
-    return NULL;
-  scoped_ptr<IPC::Message> response_deleter(response);
-
-  int autocomplete_edit_handle;
-  void* iter = NULL;
-  bool handle_ok;
-  if (!response->ReadBool(&iter, &handle_ok) ||
-      !response->ReadInt(&iter, &autocomplete_edit_handle))
-    return NULL;
-
-  return new AutocompleteEditProxy(this, tracker_.get(),
-                                   autocomplete_edit_handle);
-}
+#endif  // defined(OS_POSIX)
 
 bool AutomationProxy::Send(IPC::Message* message) {
-  if (channel_.get())
-    return channel_->Send(message);
+  return SendWithTimeout(message, base::kNoTimeout, NULL);
+}
+
+bool AutomationProxy::SendWithTimeout(IPC::Message* message, int timeout,
+                                      bool* is_timeout) {
+  if (is_timeout)
+    *is_timeout = false;
+
+  if (channel_.get()) {
+    bool result = channel_->SendWithTimeout(message, timeout);
+    if (!result && is_timeout)
+      *is_timeout = true;
+    return result;
+  }
 
   DLOG(WARNING) << "Channel has been closed; dropping message!";
   delete message;
   return false;
-}
-
-bool AutomationProxy::SendAndWaitForResponse(IPC::Message* request,
-                                             IPC::Message** response,
-                                             int response_type) {
-  return SendAndWaitForResponseWithTimeout(request, response, response_type,
-                                           INFINITE, NULL);
-}
-
-bool AutomationProxy::SendAndWaitForResponseWithTimeout(
-    IPC::Message* request,
-    IPC::Message** response,
-    int response_type,
-    uint32 timeout_ms,
-    bool* is_timeout) {
-
-  DCHECK(request);
-  DCHECK(response);
-  DCHECK(!current_request_) <<
-    "Only one synchronous request should exist at any given time.";
-
-  scoped_refptr<AutomationRequest> req = new AutomationRequest;
-  current_request_ = req;
-
-  // Rewrite the message's routing ID so that we'll recognize the response
-  // to it when it comes back.
-  request->set_routing_id(req->routing_id());
-  bool result = Send(request) && req->WaitForResponse(timeout_ms, is_timeout);
-  if (!result || req->response().type() != response_type) {
-    // If Send() or WaitForResponse() failed, current_request_ may not have
-    // gotten cleared by the background thread, so we'll clear it here.
-    current_request_ = NULL;
-    return false;
-  }
-  req->GrabResponse(response);
-
-  return true;
 }
 
 void AutomationProxy::InvalidateHandle(const IPC::Message& message) {
@@ -532,28 +484,25 @@ bool AutomationProxy::OpenNewBrowserWindow(int show_command) {
   return Send(new AutomationMsg_OpenNewBrowserWindow(0, show_command));
 }
 
-TabProxy* AutomationProxy::CreateExternalTab(HWND* external_tab_container) {
+#if defined(OS_WIN)
+// TODO(port): Replace HWNDs.
+TabProxy* AutomationProxy::CreateExternalTab(HWND parent,
+                                             const gfx::Rect& dimensions,
+                                             unsigned int style,
+                                             HWND* external_tab_container) {
   IPC::Message* response = NULL;
-  bool succeeded = SendAndWaitForResponse(
-    new AutomationMsg_CreateExternalTab(0), &response,
-    AutomationMsg_CreateExternalTabResponse::ID);
+  int handle = 0;
+
+  bool succeeded =
+      Send(new AutomationMsg_CreateExternalTab(0, parent, dimensions, style,
+                                               external_tab_container,
+                                               &handle));
   if (!succeeded) {
     return NULL;
   }
-  void* iter = NULL;
-  int handle = 0;
-  TabProxy* tab_proxy = NULL;
-  if (IPC::ReadParam(response, &iter, external_tab_container) &&
-      IsWindow(*external_tab_container)) {
-    if (response->ReadInt(&iter, &handle) &&
-        (handle >= 0)) {
-      succeeded = true;
-      tab_proxy = new TabProxy(this, tracker_.get(), handle);
-    }
-  } else {
-    succeeded = false;
-  }
-  delete response;
-  return tab_proxy;
-}
 
+  DCHECK(IsWindow(*external_tab_container));
+
+  return new TabProxy(this, tracker_.get(), handle);
+}
+#endif  // defined(OS_WIN)

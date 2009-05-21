@@ -11,6 +11,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using namespace std;
+using base::Time;
 using net::HttpResponseHeaders;
 using net::HttpVersion;
 
@@ -102,7 +103,7 @@ TEST(HttpResponseHeadersTest, NormalizeHeadersLeadingWhitespace) {
     "HTTP/1.1 202 Accepted\n"
     "Set-Cookie: a, b\n",
 
-    202, 
+    202,
     HttpVersion(1,1),
     HttpVersion(1,1)
   };
@@ -289,24 +290,29 @@ TEST(HttpResponseHeadersTest, GetNormalizedHeader) {
 
 TEST(HttpResponseHeadersTest, Persist) {
   const struct {
+    net::HttpResponseHeaders::PersistOptions options;
     const char* raw_headers;
     const char* expected_headers;
   } tests[] = {
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_ALL,
+      "HTTP/1.1 200 OK\n"
       "Cache-control:private\n"
       "cache-Control:no-store\n",
 
       "HTTP/1.1 200 OK\n"
       "Cache-control: private, no-store\n"
     },
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_HOP_BY_HOP,
+      "HTTP/1.1 200 OK\n"
       "connection: keep-alive\n"
       "server: blah\n",
 
       "HTTP/1.1 200 OK\n"
       "server: blah\n"
     },
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE |
+      net::HttpResponseHeaders::PERSIST_SANS_HOP_BY_HOP,
+      "HTTP/1.1 200 OK\n"
       "fOo: 1\n"
       "Foo: 2\n"
       "Transfer-Encoding: chunked\n"
@@ -316,7 +322,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "HTTP/1.1 200 OK\n"
       "cache-control: private, no-cache=\"foo\"\n"
     },
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private,no-cache=\"foo, bar\"\n"
       "bar",
@@ -325,7 +332,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private,no-cache=\"foo, bar\"\n"
     },
     // ignore bogus no-cache value
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private,no-cache=foo\n",
 
@@ -334,7 +342,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private,no-cache=foo\n"
     },
     // ignore bogus no-cache value
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private, no-cache=\n",
 
@@ -343,7 +352,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private, no-cache=\n"
     },
     // ignore empty no-cache value
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private, no-cache=\"\"\n",
 
@@ -352,7 +362,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private, no-cache=\"\"\n"
     },
     // ignore wrong quotes no-cache value
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private, no-cache=\'foo\'\n",
 
@@ -361,7 +372,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private, no-cache=\'foo\'\n"
     },
     // ignore unterminated quotes no-cache value
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private, no-cache=\"foo\n",
 
@@ -370,7 +382,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private, no-cache=\"foo\n"
     },
     // accept sloppy LWS
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_SANS_NON_CACHEABLE,
+      "HTTP/1.1 200 OK\n"
       "Foo: 2\n"
       "Cache-Control: private, no-cache=\" foo\t, bar\"\n",
 
@@ -378,7 +391,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Cache-Control: private, no-cache=\" foo\t, bar\"\n"
     },
     // header name appears twice, separated by another header
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_ALL,
+      "HTTP/1.1 200 OK\n"
       "Foo: 1\n"
       "Bar: 2\n"
       "Foo: 3\n",
@@ -388,7 +402,8 @@ TEST(HttpResponseHeadersTest, Persist) {
       "Bar: 2\n"
     },
     // header name appears twice, separated by another header (type 2)
-    { "HTTP/1.1 200 OK\n"
+    { net::HttpResponseHeaders::PERSIST_ALL,
+      "HTTP/1.1 200 OK\n"
       "Foo: 1, 3\n"
       "Bar: 2\n"
       "Foo: 4\n",
@@ -396,6 +411,17 @@ TEST(HttpResponseHeadersTest, Persist) {
       "HTTP/1.1 200 OK\n"
       "Foo: 1, 3, 4\n"
       "Bar: 2\n"
+    },
+    // Test filtering of cookie headers.
+    { net::HttpResponseHeaders::PERSIST_SANS_COOKIES,
+      "HTTP/1.1 200 OK\n"
+      "Set-Cookie: foo=bar; httponly\n"
+      "Set-Cookie: bar=foo\n"
+      "Bar: 1\n"
+      "Set-Cookie2: bar2=foo2\n",
+
+      "HTTP/1.1 200 OK\n"
+      "Bar: 1\n"
     },
   };
 
@@ -406,7 +432,7 @@ TEST(HttpResponseHeadersTest, Persist) {
         new HttpResponseHeaders(headers);
 
     Pickle pickle;
-    parsed1->Persist(&pickle, true);
+    parsed1->Persist(&pickle, tests[i].options);
 
     void* iter = NULL;
     scoped_refptr<HttpResponseHeaders> parsed2 =
@@ -436,6 +462,26 @@ TEST(HttpResponseHeadersTest, EnumerateHeader_Coalesced) {
   EXPECT_EQ("no-cache=\"set-cookie,server\"", value);
   EXPECT_TRUE(parsed->EnumerateHeader(&iter, "cache-control", &value));
   EXPECT_EQ("no-store", value);
+  EXPECT_FALSE(parsed->EnumerateHeader(&iter, "cache-control", &value));
+}
+
+TEST(HttpResponseHeadersTest, EnumerateHeader_Challenge) {
+  // Even though WWW-Authenticate has commas, it should not be treated as
+  // coalesced values.
+  std::string headers =
+    "HTTP/1.1 401 OK\n"
+    "WWW-Authenticate:Digest realm=foobar, nonce=x, domain=y\n"
+    "WWW-Authenticate:Basic realm=quatar\n";
+  HeadersToRaw(&headers);
+  scoped_refptr<HttpResponseHeaders> parsed = new HttpResponseHeaders(headers);
+
+  void* iter = NULL;
+  std::string value;
+  EXPECT_TRUE(parsed->EnumerateHeader(&iter, "WWW-Authenticate", &value));
+  EXPECT_EQ("Digest realm=foobar, nonce=x, domain=y", value);
+  EXPECT_TRUE(parsed->EnumerateHeader(&iter, "WWW-Authenticate", &value));
+  EXPECT_EQ("Basic realm=quatar", value);
+  EXPECT_FALSE(parsed->EnumerateHeader(&iter, "WWW-Authenticate", &value));
 }
 
 TEST(HttpResponseHeadersTest, EnumerateHeader_DateValued) {
@@ -590,7 +636,8 @@ TEST(HttpResponseHeadersTest, GetMimeType) {
   for (size_t i = 0; i < arraysize(tests); ++i) {
     string headers(tests[i].raw_headers);
     HeadersToRaw(&headers);
-    scoped_refptr<HttpResponseHeaders> parsed = new HttpResponseHeaders(headers);
+    scoped_refptr<HttpResponseHeaders> parsed =
+        new HttpResponseHeaders(headers);
 
     std::string value;
     EXPECT_EQ(tests[i].has_mimetype, parsed->GetMimeType(&value));
@@ -716,7 +763,8 @@ TEST(HttpResponseHeadersTest, RequiresValidation) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
     string headers(tests[i].headers);
     HeadersToRaw(&headers);
-    scoped_refptr<HttpResponseHeaders> parsed = new HttpResponseHeaders(headers);
+    scoped_refptr<HttpResponseHeaders> parsed =
+        new HttpResponseHeaders(headers);
 
     bool requires_validation =
         parsed->RequiresValidation(request_time, response_time, current_time);
@@ -996,6 +1044,17 @@ TEST(HttpResponseHeadersTest, IsKeepAlive) {
     const char* headers;
     bool expected_keep_alive;
   } tests[] = {
+    // The status line fabricated by HttpNetworkTransaction for a 0.9 response.
+    // Treated as 0.9.
+    { "HTTP/0.9 200 OK",
+      false
+    },
+    // This could come from a broken server.  Treated as 1.0 because it has a
+    // header.
+    { "HTTP/0.9 200 OK\n"
+      "connection: keep-alive\n",
+      true
+    },
     { "HTTP/1.1 200 OK\n",
       true
     },
@@ -1026,9 +1085,21 @@ TEST(HttpResponseHeadersTest, IsKeepAlive) {
       "connection: keep-alive\n",
       true
     },
+    { "HTTP/1.0 200 OK\n"
+      "proxy-connection: close\n",
+      false
+    },
+    { "HTTP/1.0 200 OK\n"
+      "proxy-connection: keep-alive\n",
+      true
+    },
     { "HTTP/1.1 200 OK\n"
       "proxy-connection: close\n",
       false
+    },
+    { "HTTP/1.1 200 OK\n"
+      "proxy-connection: keep-alive\n",
+      true
     },
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {

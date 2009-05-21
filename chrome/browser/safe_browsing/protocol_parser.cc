@@ -90,6 +90,13 @@ bool SafeBrowsingProtocolParser::ParseGetHash(
     full_hash.add_chunk_id = atoi(cmd_parts[1].c_str());
     int full_hash_len = atoi(cmd_parts[2].c_str());
 
+    // Ignore hash results from lists we don't recognize.
+    if (safe_browsing_util::GetListId(full_hash.list_name) < 0) {
+      data += full_hash_len;
+      length -= full_hash_len;
+      continue;
+    }
+
     while (full_hash_len > 0) {
       DCHECK(static_cast<size_t>(full_hash_len) >= sizeof(SBFullHash));
       memcpy(&full_hash.hash, data, sizeof(SBFullHash));
@@ -146,7 +153,7 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
     if (cmd_parts.empty())
       return false;
     const std::string& command = cmd_parts[0];
-    if (cmd_parts.size() != 2 && !(cmd_parts.size() == 3 && command[0] == 'u'))
+    if (cmd_parts.size() != 2 && command[0] != 'u')
       return false;
 
     const int consumed = static_cast<int>(cmd_line.size()) + 1;
@@ -197,13 +204,13 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
         break;
 
       case 'u': {
-        // The line providing a URL redirect to a chunk.
-        std::string redirect_url = cmd_parts[1];
-        if (cmd_parts.size() == 3) {
-          redirect_url += ':' + cmd_parts[2];
-        }
-
+        // The redirect command is of the form: u:<url>,<mac> where <url> can
+        // contain multiple colons, commas or any valid URL characters. We scan
+        // backwards in the string looking for the first ',' we encounter and
+        // assume that everything before that is the URL and everything after
+        // is the MAC (if the MAC was requested).
         std::string mac;
+        std::string redirect_url(cmd_line, 2);  // Skip the initial "u:".
         if (!key.empty()) {
           std::string::size_type mac_pos = redirect_url.rfind(',');
           if (mac_pos == std::string::npos)
@@ -211,8 +218,10 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
           mac = redirect_url.substr(mac_pos + 1);
           redirect_url = redirect_url.substr(0, mac_pos);
         }
+
         ChunkUrl chunk_url;
         chunk_url.url = redirect_url;
+        chunk_url.list_name = list_name;
         if (!key.empty())
           chunk_url.mac = mac;
         chunk_urls->push_back(chunk_url);
@@ -226,8 +235,8 @@ bool SafeBrowsingProtocolParser::ParseUpdate(
         break;
 
       default:
-        // A command we don't understand.
-        return false;
+        // According to the spec, we ignore commands we don't understand.
+        break;
     }
   }
 
@@ -286,10 +295,14 @@ bool SafeBrowsingProtocolParser::ParseChunk(const char* data,
     chunks->back().chunk_number = chunk_number;
 
     if (cmd_parts[0] == "a") {
-      if (!ParseAddChunk(chunk_data, chunk_len, hash_len, &chunks->back().hosts))
+      chunks->back().is_add = true;
+      if (!ParseAddChunk(chunk_data, chunk_len, hash_len,
+                         &chunks->back().hosts))
         return false;  // Parse error.
     } else if (cmd_parts[0] == "s") {
-      if (!ParseSubChunk(chunk_data, chunk_len, hash_len, &chunks->back().hosts))
+      chunks->back().is_add = false;
+      if (!ParseSubChunk(chunk_data, chunk_len, hash_len,
+                         &chunks->back().hosts))
         return false;  // Parse error.
     } else {
       NOTREACHED();
@@ -343,7 +356,8 @@ bool SafeBrowsingProtocolParser::ParseAddChunk(
       hosts->push_back(chunk_host);
     }
 
-    if (!ReadPrefixes(&chunk_data, &remaining, entry, prefix_count, index_start))
+    if (!ReadPrefixes(&chunk_data, &remaining, entry, prefix_count,
+                      index_start))
       return false;
   }
 

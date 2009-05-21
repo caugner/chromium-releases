@@ -6,7 +6,7 @@ files.
 """
 
 #
-# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008 The SCons Foundation
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 The SCons Foundation
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -28,7 +28,7 @@ files.
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-__revision__ = "src/engine/SCons/Script/SConscript.py 3424 2008/09/15 11:22:20 scons"
+__revision__ = "src/engine/SCons/Script/SConscript.py 3897 2009/01/13 06:45:54 scons"
 
 import SCons
 import SCons.Action
@@ -279,7 +279,20 @@ def _SConscript(fs, *files, **kw):
                 fs.chdir(frame.prev_dir, change_os_dir=0)
                 rdir = frame.prev_dir.rdir()
                 rdir._create()  # Make sure there's a directory there.
-                os.chdir(rdir.get_abspath())
+                try:
+                    os.chdir(rdir.get_abspath())
+                except OSError, e:
+                    # We still couldn't chdir there, so raise the error,
+                    # but only if actions are being executed.
+                    #
+                    # If the -n option was used, the directory would *not*
+                    # have been created and we should just carry on and
+                    # let things muddle through.  This isn't guaranteed
+                    # to work if the SConscript files are reading things
+                    # from disk (for example), but it should work well
+                    # enough for most configurations.
+                    if SCons.Action.execute_actions:
+                        raise e
 
             results.append(frame.retval)
 

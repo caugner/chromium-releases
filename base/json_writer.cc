@@ -58,7 +58,7 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
         double value;
         bool result = node->GetAsReal(&value);
         DCHECK(result);
-        std::string real = StringPrintf("%g", value);
+        std::string real = DoubleToString(value);
         // Ensure that the number has a .0 if there's no decimal or 'e'.  This
         // makes sure that when we read the JSON back, it's interpreted as a
         // real rather than an int.
@@ -156,7 +156,8 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
 }
 
 void JSONWriter::AppendQuotedString(const std::wstring& str) {
-  string_escape::JavascriptDoubleQuote(str, true, json_string_);
+  string_escape::JavascriptDoubleQuote(WideToUTF16Hack(str), true,
+                                       json_string_);
 }
 
 void JSONWriter::IndentLine(int depth) {
@@ -164,4 +165,3 @@ void JSONWriter::IndentLine(int depth) {
   // reallocating.
   json_string_->append(std::string(depth * 3, ' '));
 }
-

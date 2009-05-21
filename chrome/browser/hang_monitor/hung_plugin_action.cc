@@ -10,9 +10,8 @@
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/win_util.h"
+#include "grit/generated_resources.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
-
-#include "generated_resources.h"
 
 HungPluginAction::HungPluginAction() : current_hung_plugin_window_(NULL) {
 }
@@ -31,10 +30,6 @@ bool HungPluginAction::OnHungWindowDetected(HWND hung_window,
   }
 
   bool continue_hang_detection = true;
-
-  if (WebPluginDelegateImpl::IsDummyActivationWindow(hung_window)) {
-    return continue_hang_detection;
-  }
 
   DWORD hung_window_process_id = 0;
   DWORD top_level_window_process_id = 0;
@@ -158,4 +153,3 @@ void CALLBACK HungPluginAction::HungWindowResponseCallback(HWND target_window,
     instance->OnWindowResponsive(target_window);
   }
 }
-

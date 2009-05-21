@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 /*
-  LayoutTestController class: 
+  LayoutTestController class:
   Bound to a JavaScript window.layoutTestController object using the
   CppBoundClass::BindToJavascript(), this allows layout tests that are run in
   the test_shell (or, in principle, any web page loaded into a client app built
@@ -11,11 +11,12 @@
   sort of output they produce.
 */
 
-#ifndef WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H__
-#define WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H__
+#ifndef WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H_
+#define WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H_
 
 #include <queue>
 
+#include "base/timer.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 class TestShell;
@@ -35,7 +36,7 @@ class LayoutTestController : public CppBoundClass {
   // descriptive test for each editing command.  It takes no arguments, and
   // ignores any that may be present.
   void dumpEditingCallbacks(const CppArgumentList& args, CppVariant* result);
-  
+
   // This function sets a flag that tells the test_shell to print a line of
   // descriptive test for each frame load callback.  It takes no arguments, and
   // ignores any that may be present.
@@ -53,6 +54,11 @@ class LayoutTestController : public CppBoundClass {
   // dump all frames as plain text if the dumpAsText flag is set.
   // It takes no arguments, and ignores any that may be present.
   void dumpChildFramesAsText(const CppArgumentList& args, CppVariant* result);
+
+  // This function sets a flag that tells the test_shell to dump all calls
+  // to window.status().
+  // It takes no arguments, and ignores any that may be present.
+  void dumpWindowStatusChanges(const CppArgumentList& args, CppVariant* result);
 
   // When called with a boolean argument, this sets a flag that controls
   // whether content-editable elements accept editing focus when an editing
@@ -98,11 +104,11 @@ class LayoutTestController : public CppBoundClass {
   // never be used by Chrome, but some layout tests depend on its presence.
   void setUseDashboardCompatibilityMode(const CppArgumentList& args, CppVariant* result);
 
-  // Causes navigation actions just printout the intended navigation instead 
+  // Causes navigation actions just printout the intended navigation instead
   // of taking you to the page. This is used for cases like mailto, where you
   // don't actually want to open the mail program.
   void setCustomPolicyDelegate(const CppArgumentList& args, CppVariant* result);
-  
+
   // Converts a URL starting with file:///tmp/ to the local mapping.
   void pathToLocalResource(const CppArgumentList& args, CppVariant* result);
 
@@ -110,8 +116,36 @@ class LayoutTestController : public CppBoundClass {
   // with a fake file object.
   void addFileToPasteboardOnDrag(const CppArgumentList& args, CppVariant* result);
 
-  // Executes an internal command (superset of document.execCommand() commands)
-  void execCommand(const CppArgumentList& args, CppVariant* result);;
+  // Executes an internal command (superset of document.execCommand() commands).
+  void execCommand(const CppArgumentList& args, CppVariant* result);
+
+  // Checks if an internal command is currently available.
+  void isCommandEnabled(const CppArgumentList& args, CppVariant* result);
+
+  // Set the WebPreference that controls webkit's popup blocking.
+  void setPopupBlockingEnabled(const CppArgumentList& args, CppVariant* result);
+
+  // If true, causes provisional frame loads to be stopped for the remainder of
+  // the test.
+  void setStopProvisionalFrameLoads(const CppArgumentList& args,
+                                    CppVariant* result);
+
+  // Enable or disable smart insert/delete.  This is enabled by default.
+  void setSmartInsertDeleteEnabled(const CppArgumentList& args,
+                                   CppVariant* result);
+
+  // Enable or disable trailing whitespace selection on double click.
+  void setSelectTrailingWhitespaceEnabled(const CppArgumentList& args,
+                                          CppVariant* result);
+
+  void pauseAnimationAtTimeOnElementWithId(const CppArgumentList& args,
+                                           CppVariant* result);
+  void pauseTransitionAtTimeOnElementWithId(const CppArgumentList& args,
+                                            CppVariant* result);
+  void elementDoesAutoCompleteForElementWithId(const CppArgumentList& args,
+                                               CppVariant* result);
+  void numberOfActiveAnimations(const CppArgumentList& args,
+                                CppVariant* result);
 
   // The following are only stubs.  TODO(pamg): Implement any of these that
   // are needed to pass the layout tests.
@@ -133,7 +167,7 @@ class LayoutTestController : public CppBoundClass {
   void setPrivateBrowsingEnabled(const CppArgumentList& args, CppVariant* result);
 
   // The fallback method is called when a nonexistent method is called on
-  // the layout test controller object. 
+  // the layout test controller object.
   // It is usefull to catch typos in the JavaScript code (a few layout tests
   // do have typos in them) and it allows the script to continue running in
   // that case (as the Mac does).
@@ -152,6 +186,9 @@ class LayoutTestController : public CppBoundClass {
   bool ShouldDumpResourceLoadCallbacks() {
     return dump_resource_load_callbacks_;
   }
+  bool ShouldDumpStatusCallbacks() {
+    return dump_window_status_changes_;
+  }
   bool ShouldDumpBackForwardList() { return dump_back_forward_list_; }
   bool ShouldDumpTitleChanges() { return dump_title_changes_; }
   bool ShouldDumpChildFrameScrollPositions() {
@@ -163,14 +200,7 @@ class LayoutTestController : public CppBoundClass {
   bool AcceptsEditing() { return accepts_editing_; }
   bool CanOpenWindows() { return can_open_windows_; }
   bool ShouldAddFileToPasteboard() { return should_add_file_to_pasteboard_; }
-
-  // If we have queued events, fire them and then dump the test output. 
-  // Otherwise, just dump the test output.
-  // Used by the layout tests for tests that span more than a single load.
-  // This is called by the test webview delegate when a page finishes
-  // loading (successful or not).  Once all the work has been processed, we
-  // dump the test output.
-  void ProcessWork() { work_queue_.ProcessWork(); }
+  bool StopProvisionalFrameLoads() { return stop_provisional_frame_loads_; }
 
   // Called by the webview delegate when the toplevel frame load is done.
   void LocationChangeDone();
@@ -183,7 +213,7 @@ class LayoutTestController : public CppBoundClass {
   // A single item in the work queue.
   class WorkItem {
    public:
-    virtual ~WorkItem() {};
+    virtual ~WorkItem() {}
     virtual void Run(TestShell* shell) = 0;
   };
 
@@ -198,7 +228,7 @@ class LayoutTestController : public CppBoundClass {
   class WorkQueue {
    public:
     virtual ~WorkQueue();
-    void ProcessWork();
+    void ProcessWorkSoon();
 
     // Reset the state of the class between tests.
     void Reset();
@@ -209,6 +239,9 @@ class LayoutTestController : public CppBoundClass {
     bool empty() { return queue_.empty(); }
 
    private:
+    void ProcessWork();
+
+    base::OneShotTimer<WorkQueue> timer_;
     std::queue<WorkItem*> queue_;
     bool frozen_;
   };
@@ -216,7 +249,7 @@ class LayoutTestController : public CppBoundClass {
   // Non-owning pointer.  The LayoutTestController is owned by the host.
   static TestShell* shell_;
 
-  // If true, the test_shell will produce a plain text dump rather than a 
+  // If true, the test_shell will produce a plain text dump rather than a
   // text representation of the renderer.
   static bool dump_as_text_;
 
@@ -244,6 +277,9 @@ class LayoutTestController : public CppBoundClass {
   // dump all frames as plain text.
   static bool dump_child_frames_as_text_;
 
+  // If true, the test_shell will dump all changes to window.status.
+  static bool dump_window_status_changes_;
+
   // If true, output a message when the page title is changed.
   static bool dump_title_changes_;
 
@@ -265,6 +301,10 @@ class LayoutTestController : public CppBoundClass {
   // If true and a drag starts, adds a file to the drag&drop clipboard.
   static bool should_add_file_to_pasteboard_;
 
+  // If true, stops provisional frame loads during the
+  // DidStartProvisionalLoadForFrame callback.
+  static bool stop_provisional_frame_loads_;
+
   // If true, don't dump output until notifyDone is called.
   static bool wait_until_done_;
 
@@ -276,7 +316,9 @@ class LayoutTestController : public CppBoundClass {
   static WorkQueue work_queue_;
 
   static CppVariant globalFlag_;
+
+  // Bound variable counting the number of top URLs visited.
+  static CppVariant webHistoryItemCount_;
 };
 
-#endif  // WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H__
-
+#endif  // WEBKIT_TOOLS_TEST_SHELL_LAYOUT_TEST_CONTROLLER_H_

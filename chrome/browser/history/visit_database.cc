@@ -11,6 +11,9 @@
 
 #include "chrome/browser/history/url_database.h"
 #include "chrome/common/page_transition_types.h"
+#include "chrome/common/url_constants.h"
+
+using base::Time;
 
 // Rows, in order, of the visit table.
 #define HISTORY_VISIT_ROW_FIELDS \
@@ -33,7 +36,8 @@ bool VisitDatabase::InitVisitTable() {
         "from_visit INTEGER,"
         "transition INTEGER DEFAULT 0 NOT NULL,"
         "segment_id INTEGER,"
-        "is_indexed BOOLEAN)",  // True when we have indexed data for this visit.
+        // True when we have indexed data for this visit.
+        "is_indexed BOOLEAN)",
         NULL, NULL, NULL) != SQLITE_OK)
       return false;
   } else if (!DoesSqliteColumnExist(GetDB(), "visits",
@@ -99,9 +103,9 @@ void VisitDatabase::FillVisitVector(SQLStatement& statement,
 
 VisitID VisitDatabase::AddVisit(VisitRow* visit) {
   SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
-      "INSERT INTO visits("
-        "url,visit_time,from_visit,transition,segment_id,is_indexed)"
-      "VALUES(?,?,?,?,?,?)");
+      "INSERT INTO visits "
+      "(url, visit_time, from_visit, transition, segment_id, is_indexed) "
+      "VALUES (?,?,?,?,?,?)");
   if (!statement.is_valid())
     return 0;
 
@@ -324,7 +328,7 @@ bool VisitDatabase::GetRedirectFromVisit(VisitID from_visit,
 bool VisitDatabase::GetVisitCountToHost(const GURL& url,
                                         int* count,
                                         Time* first_visit) {
-  if (!url.SchemeIs("http") && !url.SchemeIs("https"))
+  if (!url.SchemeIs(chrome::kHttpScheme) && !url.SchemeIs(chrome::kHttpsScheme))
     return false;
 
   // We need to search for URLs with a matching host/port. One way to query for
@@ -364,5 +368,16 @@ bool VisitDatabase::GetVisitCountToHost(const GURL& url,
   return true;
 }
 
-}  // namespace history
+bool VisitDatabase::GetStartDate(Time* first_visit) {
+  SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
+      "SELECT MIN(visit_time) FROM visits WHERE visit_time != 0");
+  if (!statement.is_valid() || statement->step() != SQLITE_ROW || 
+      statement->column_int64(0) == 0) {
+    *first_visit = Time::Now();
+    return false;
+  }
+  *first_visit = Time::FromInternalValue(statement->column_int64(0));
+  return true;
+}
 
+}  // namespace history

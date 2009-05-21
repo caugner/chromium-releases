@@ -8,16 +8,10 @@
 #include <strsafe.h>
 
 #include "chrome/app/client_util.h"
+#include "chrome/installer/util/google_update_constants.h"
+#include "chrome/installer/util/install_util.h"
 
 namespace {
-const wchar_t kRegistryClients[] = L"Software\\Google\\Update\\Clients\\";
-const wchar_t kRegistryClientState[] =
-    L"Software\\Google\\Update\\ClientState\\";
-const wchar_t kRequestParamDidRun[] = L"dr";
-const wchar_t kRegistryUpdate[] = L"Software\\Google\\Update\\";
-const wchar_t kRegistryValueCrashReportPath[] = L"CrashReportPath";
-const wchar_t kEnvProductVersionKey[] = L"CHROME_VERSION";
-
 // Allocates the out param on success.
 bool GoogleUpdateEnvQueryStr(const wchar_t* key_name, wchar_t** out) {
   DWORD count = ::GetEnvironmentVariableW(key_name, NULL, 0);
@@ -54,14 +48,13 @@ const wchar_t* GoogleUpdateClient::GetVersion() const {
 bool GoogleUpdateClient::Launch(HINSTANCE instance,
                                 sandbox::SandboxInterfaceInfo* sandbox,
                                 wchar_t* command_line,
-                                int show_command,
                                 const char* entry_name,
                                 int* ret) {
   if (client_util::FileExists(dll_path_)) {
     ::SetCurrentDirectory(dll_path_);
     // Setting the version on the environment block is a 'best effort' deal.
     // It enables Google Update running on a child to load the same DLL version.
-    ::SetEnvironmentVariableW(kEnvProductVersionKey, version_);
+    ::SetEnvironmentVariableW(google_update::kEnvProductVersionKey, version_);
   }
 
   // The dll can be in the exe's directory or in the current directory.
@@ -85,18 +78,19 @@ bool GoogleUpdateClient::Launch(HINSTANCE instance,
       ::GetProcAddress(dll_handle, entry_name));
   if (NULL != entry) {
     // record did_run "dr" in client state
-    HKEY reg_root = (user_mode_) ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
-    std::wstring key_path = kRegistryClientState + guid_;
+    std::wstring key_path(google_update::kRegPathClientState);
+    key_path.append(L"\\" + guid_);
     HKEY reg_key;
-    if (::RegOpenKeyEx(reg_root, key_path.c_str(), 0,
-                       KEY_WRITE, &reg_key) == ERROR_SUCCESS) {
+    if (::RegCreateKeyEx(HKEY_CURRENT_USER, key_path.c_str(), 0, NULL,
+                         REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL,
+                         &reg_key, NULL) == ERROR_SUCCESS) {
       const wchar_t kVal[] = L"1";
-      ::RegSetValueEx(reg_key, kRequestParamDidRun, 0, REG_SZ,
+      ::RegSetValueEx(reg_key, google_update::kRegDidRunField, 0, REG_SZ,
                       reinterpret_cast<const BYTE *>(kVal), sizeof(kVal));
       ::RegCloseKey(reg_key);
     }
 
-    int rc = (entry)(instance, sandbox, command_line, show_command);
+    int rc = (entry)(instance, sandbox, command_line);
     if (ret) {
       *ret = rc;
     }
@@ -113,17 +107,16 @@ bool GoogleUpdateClient::Launch(HINSTANCE instance,
 bool GoogleUpdateClient::Init(const wchar_t* client_guid,
                               const wchar_t* client_dll) {
   client_util::GetExecutablePath(dll_path_);
-  user_mode_ = client_util::IsUserModeInstall(dll_path_);
-
   guid_.assign(client_guid);
   dll_.assign(client_dll);
   bool ret = false;
   if (!guid_.empty()) {
-    if (GoogleUpdateEnvQueryStr(kEnvProductVersionKey, &version_)) {
+    if (GoogleUpdateEnvQueryStr(google_update::kEnvProductVersionKey,
+                                &version_)) {
       ret = true;
     } else {
-      std::wstring key(kRegistryClients);
-      key.append(guid_);
+      std::wstring key(google_update::kRegPathClients);
+      key.append(L"\\" + guid_);
       if (client_util::GetChromiumVersion(dll_path_, key.c_str(), &version_))
         ret = true;
     }
@@ -135,4 +128,3 @@ bool GoogleUpdateClient::Init(const wchar_t* client_guid,
   return ret;
 }
 }  // namespace google_update
-

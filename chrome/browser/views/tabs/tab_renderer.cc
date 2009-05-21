@@ -6,16 +6,21 @@
 
 #include "chrome/browser/views/tabs/tab_renderer.h"
 
-#include "base/gfx/image_operations.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/tab_contents.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/chrome_font.h"
+#include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/common/win_util.h"
-#include "generated_resources.h"
+#include "chrome/views/widget/widget.h"
+#include "chrome/views/window/non_client_view.h"
+#include "chrome/views/window/window.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
+#include "skia/ext/image_operations.h"
 
 static const int kLeftPadding = 16;
 static const int kTopPadding = 6;
@@ -48,22 +53,6 @@ static SkBitmap* close_button_h = NULL;
 static SkBitmap* close_button_p = NULL;
 static int close_button_height = 0;
 static int close_button_width = 0;
-static SkBitmap* tab_active_l = NULL;
-static SkBitmap* tab_active_c = NULL;
-static SkBitmap* tab_active_r = NULL;
-static int tab_active_l_width = 0;
-static int tab_active_r_width = 0;
-static SkBitmap* tab_inactive_l = NULL;
-static SkBitmap* tab_inactive_c = NULL;
-static SkBitmap* tab_inactive_r = NULL;
-static SkBitmap* tab_inactive_otr_l = NULL;
-static SkBitmap* tab_inactive_otr_c = NULL;
-static SkBitmap* tab_inactive_otr_r = NULL;
-static SkBitmap* tab_hover_l = NULL;
-static SkBitmap* tab_hover_c = NULL;
-static SkBitmap* tab_hover_r = NULL;
-static int tab_inactive_l_width = 0;
-static int tab_inactive_r_width = 0;
 static SkBitmap* waiting_animation_frames = NULL;
 static SkBitmap* loading_animation_frames = NULL;
 static SkBitmap* crashed_fav_icon = NULL;
@@ -73,6 +62,11 @@ static int waiting_to_loading_frame_count_ratio = 0;
 static SkBitmap* download_icon = NULL;
 static int download_icon_width = 0;
 static int download_icon_height = 0;
+
+TabRenderer::TabImage TabRenderer::tab_active = {0};
+TabRenderer::TabImage TabRenderer::tab_inactive = {0};
+TabRenderer::TabImage TabRenderer::tab_inactive_otr = {0};
+TabRenderer::TabImage TabRenderer::tab_hover = {0};
 
 namespace {
 
@@ -89,38 +83,7 @@ void InitResources() {
     close_button_width = close_button_n->width();
     close_button_height = close_button_n->height();
 
-    tab_active_l = rb.GetBitmapNamed(IDR_TAB_ACTIVE_LEFT);
-    tab_active_c = rb.GetBitmapNamed(IDR_TAB_ACTIVE_CENTER);
-    tab_active_r = rb.GetBitmapNamed(IDR_TAB_ACTIVE_RIGHT);
-    tab_active_l_width = tab_active_l->width();
-    tab_active_r_width = tab_active_r->width();
-
-    if (win_util::ShouldUseVistaFrame()) {
-      tab_inactive_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_V);
-      tab_inactive_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_V);
-      tab_inactive_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_V);
-
-      // Our Vista frame doesn't change background color to show OTR,
-      // so we continue to use the existing background tabs.
-      tab_inactive_otr_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_V);
-      tab_inactive_otr_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_V);
-      tab_inactive_otr_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_V);
-    } else {
-      tab_inactive_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT);
-      tab_inactive_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER);
-      tab_inactive_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT);
-
-      tab_inactive_otr_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_OTR);
-      tab_inactive_otr_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_OTR);
-      tab_inactive_otr_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_OTR);
-    }
-
-    tab_hover_l = rb.GetBitmapNamed(IDR_TAB_HOVER_LEFT);
-    tab_hover_c = rb.GetBitmapNamed(IDR_TAB_HOVER_CENTER);
-    tab_hover_r = rb.GetBitmapNamed(IDR_TAB_HOVER_RIGHT);
-
-    tab_inactive_l_width = tab_inactive_l->width();
-    tab_inactive_r_width = tab_inactive_r->width();
+    TabRenderer::LoadTabImages(win_util::ShouldUseVistaFrame());
 
     // The loading animation image is a strip of states. Each state must be
     // square, so the height must divide the width evenly.
@@ -140,6 +103,12 @@ void InitResources() {
 
     waiting_to_loading_frame_count_ratio =
         waiting_animation_frame_count / loading_animation_frame_count;
+    // TODO(beng): eventually remove this when we have a proper themeing system.
+    //             themes not supporting IDR_THROBBER_WAITING are causing this
+    //             value to be 0 which causes DIV0 crashes. The value of 5
+    //             matches the current bitmaps in our source.
+    if (waiting_to_loading_frame_count_ratio == 0)
+      waiting_to_loading_frame_count_ratio = 5;
 
     crashed_fav_icon = rb.GetBitmapNamed(IDR_SAD_FAVICON);
 
@@ -163,25 +132,30 @@ int GetContentHeight() {
 //
 //  This is a Button subclass that causes middle clicks to be forwarded to the
 //  parent View by explicitly not handling them in OnMousePressed.
-class TabCloseButton : public ChromeViews::Button {
+class TabCloseButton : public views::ImageButton {
  public:
-  TabCloseButton() : Button() {}
+  explicit TabCloseButton(views::ButtonListener* listener)
+      : views::ImageButton(listener) {
+  }
   virtual ~TabCloseButton() {}
 
-  virtual bool OnMousePressed(const ChromeViews::MouseEvent& event) {
-    return !event.IsOnlyMiddleMouseButton();
+  virtual bool OnMousePressed(const views::MouseEvent& event) {
+    bool handled = ImageButton::OnMousePressed(event);
+    // Explicitly mark midle-mouse clicks as non-handled to ensure the tab
+    // sees them.
+    return event.IsOnlyMiddleMouseButton() ? false : handled;
   }
 
   // We need to let the parent know about mouse state so that it
   // can highlight itself appropriately. Note that Exit events
   // fire before Enter events, so this works.
-  virtual void OnMouseEntered(const ChromeViews::MouseEvent& event) {
-    BaseButton::OnMouseEntered(event);
+  virtual void OnMouseEntered(const views::MouseEvent& event) {
+    CustomButton::OnMouseEntered(event);
     GetParent()->OnMouseEntered(event);
   }
 
-  virtual void OnMouseExited(const ChromeViews::MouseEvent& event) {
-    BaseButton::OnMouseExited(event);
+  virtual void OnMouseExited(const views::MouseEvent& event) {
+    CustomButton::OnMouseExited(event);
     GetParent()->OnMouseExited(event);
   }
 
@@ -245,10 +219,10 @@ TabRenderer::TabRenderer()
   InitResources();
 
   // Add the Close Button.
-  close_button_ = new TabCloseButton;
-  close_button_->SetImage(ChromeViews::Button::BS_NORMAL, close_button_n);
-  close_button_->SetImage(ChromeViews::Button::BS_HOT, close_button_h);
-  close_button_->SetImage(ChromeViews::Button::BS_PUSHED, close_button_p);
+  close_button_ = new TabCloseButton(this);
+  close_button_->SetImage(views::CustomButton::BS_NORMAL, close_button_n);
+  close_button_->SetImage(views::CustomButton::BS_HOT, close_button_h);
+  close_button_->SetImage(views::CustomButton::BS_PUSHED, close_button_p);
   AddChildView(close_button_);
 
   hover_animation_.reset(new SlideAnimation(this));
@@ -265,12 +239,12 @@ TabRenderer::~TabRenderer() {
 void TabRenderer::UpdateData(TabContents* contents) {
   DCHECK(contents);
   data_.favicon = contents->GetFavIcon();
-  data_.title = contents->GetTitle();
+  data_.title = UTF16ToWideHack(contents->GetTitle());
   data_.loading = contents->is_loading();
   data_.off_the_record = contents->profile()->IsOffTheRecord();
   data_.show_icon = contents->ShouldDisplayFavIcon();
   data_.show_download_icon = contents->IsDownloadShelfVisible();
-  data_.crashed = contents->IsCrashed();
+  data_.crashed = contents->is_crashed();
 }
 
 void TabRenderer::UpdateFromModel() {
@@ -329,27 +303,27 @@ void TabRenderer::StopPulse() {
 }
 
 // static
-gfx::Size TabRenderer::GetMinimumSize() {
+gfx::Size TabRenderer::GetMinimumUnselectedSize() {
   InitResources();
 
   gfx::Size minimum_size;
   minimum_size.set_width(kLeftPadding + kRightPadding);
   // Since we use bitmap images, the real minimum height of the image is
   // defined most accurately by the height of the end cap images.
-  minimum_size.set_height(tab_active_l->height());
+  minimum_size.set_height(tab_active.image_l->height());
   return minimum_size;
 }
 
 // static
 gfx::Size TabRenderer::GetMinimumSelectedSize() {
-  gfx::Size minimum_size = GetMinimumSize();
+  gfx::Size minimum_size = GetMinimumUnselectedSize();
   minimum_size.set_width(kLeftPadding + kFaviconSize + kRightPadding);
   return minimum_size;
 }
 
 // static
 gfx::Size TabRenderer::GetStandardSize() {
-  gfx::Size standard_size = GetMinimumSize();
+  gfx::Size standard_size = GetMinimumUnselectedSize();
   standard_size.set_width(
       standard_size.width() + kFavIconTitleSpacing + kStandardTitleWidth);
   return standard_size;
@@ -363,12 +337,12 @@ std::wstring TabRenderer::GetTitle() const {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// TabRenderer, ChromeViews::View overrides:
+// TabRenderer, views::View overrides:
 
 void TabRenderer::Paint(ChromeCanvas* canvas) {
   // Don't paint if we're narrower than we can render correctly. (This should
   // only happen during animations).
-  if (width() < GetMinimumSize().width())
+  if (width() < GetMinimumUnselectedSize().width())
     return;
 
   // See if the model changes whether the icons should be painted.
@@ -400,6 +374,8 @@ void TabRenderer::Paint(ChromeCanvas* canvas) {
                               true);
       } else {
         if (!data_.favicon.isNull()) {
+          // TODO(pkasting): Use code in tab_icon_view.cc:PaintIcon() (or switch
+          // to using that class to render the favicon).
           canvas->DrawBitmapInt(data_.favicon, 0, 0,
                                 data_.favicon.width(),
                                 data_.favicon.height(),
@@ -438,15 +414,10 @@ void TabRenderer::Paint(ChromeCanvas* canvas) {
 }
 
 void TabRenderer::Layout() {
-  CRect lb;
-  GetLocalBounds(&lb, false);
-  if (lb.IsRectEmpty())
+  gfx::Rect lb = GetLocalBounds(false);
+  if (lb.IsEmpty())
     return;
-
-  lb.left += kLeftPadding;
-  lb.top += kTopPadding;
-  lb.bottom -= kBottomPadding;
-  lb.right -= kRightPadding;
+  lb.Inset(kLeftPadding, kTopPadding, kRightPadding, kBottomPadding);
 
   // First of all, figure out who is tallest.
   int content_height = GetContentHeight();
@@ -455,17 +426,17 @@ void TabRenderer::Layout() {
   showing_icon_ = ShouldShowIcon();
   if (showing_icon_) {
     int favicon_top = kTopPadding + (content_height - kFaviconSize) / 2;
-    favicon_bounds_.SetRect(lb.left, favicon_top, kFaviconSize, kFaviconSize);
+    favicon_bounds_.SetRect(lb.x(), favicon_top, kFaviconSize, kFaviconSize);
   } else {
-    favicon_bounds_.SetRect(lb.left, lb.top, 0, 0);
+    favicon_bounds_.SetRect(lb.x(), lb.y(), 0, 0);
   }
 
   // Size the download icon.
   showing_download_icon_ = data_.show_download_icon;
   if (showing_download_icon_) {
-      int icon_top = kTopPadding + (content_height - download_icon_height) / 2;
-      download_icon_bounds_.SetRect(lb.Width() - download_icon_width, icon_top,
-                                    download_icon_width, download_icon_height);
+    int icon_top = kTopPadding + (content_height - download_icon_height) / 2;
+    download_icon_bounds_.SetRect(lb.width() - download_icon_width, icon_top,
+                                  download_icon_width, download_icon_height);
   }
 
   // Size the Close button.
@@ -475,7 +446,7 @@ void TabRenderer::Layout() {
         kTopPadding + kCloseButtonVertFuzz +
         (content_height - close_button_height) / 2;
     // If the ratio of the close button size to tab width exceeds the maximum.
-    close_button_->SetBounds(lb.Width() + kCloseButtonHorzFuzz,
+    close_button_->SetBounds(lb.width() + kCloseButtonHorzFuzz,
                              close_button_top, close_button_width,
                              close_button_height);
     close_button_->SetVisible(true);
@@ -491,7 +462,7 @@ void TabRenderer::Layout() {
   // If the user has big fonts, the title will appear rendered too far down on
   // the y-axis if we use the regular top padding, so we need to adjust it so
   // that the text appears centered.
-  gfx::Size minimum_size = GetMinimumSize();
+  gfx::Size minimum_size = GetMinimumUnselectedSize();
   int text_height = title_top + title_font_height + kBottomPadding;
   if (text_height > minimum_size.height())
     title_top -= (text_height - minimum_size.height()) / 2;
@@ -501,7 +472,7 @@ void TabRenderer::Layout() {
     title_width = std::max(close_button_->x() -
                            kTitleCloseButtonSpacing - title_left, 0);
   } else {
-    title_width = std::max(lb.Width() - title_left, 0);
+    title_width = std::max(lb.width() - title_left, 0);
   }
   if (data_.show_download_icon)
     title_width = std::max(title_width - download_icon_width, 0);
@@ -511,8 +482,8 @@ void TabRenderer::Layout() {
   // are not represented as child Views (which is the preferred method).
   // Instead, these UI elements are drawn directly on the canvas from within
   // Tab::Paint(). The Tab's child Views (for example, the Tab's close button
-  // which is a ChromeViews::Button instance) are automatically mirrored by the
-  // mirroring infrastructure in ChromeViews. The elements Tab draws directly
+  // which is a views::Button instance) are automatically mirrored by the
+  // mirroring infrastructure in views. The elements Tab draws directly
   // on the canvas need to be manually mirrored if the View's layout is
   // right-to-left.
   favicon_bounds_.set_x(MirroredLeftPointForRect(favicon_bounds_));
@@ -520,20 +491,20 @@ void TabRenderer::Layout() {
   download_icon_bounds_.set_x(MirroredLeftPointForRect(download_icon_bounds_));
 }
 
-void TabRenderer::DidChangeBounds(const CRect& previous,
-                                  const CRect& current) {
-  Layout();
-}
-
-
-void TabRenderer::OnMouseEntered(const ChromeViews::MouseEvent& e) {
+void TabRenderer::OnMouseEntered(const views::MouseEvent& e) {
   hover_animation_->SetTweenType(SlideAnimation::EASE_OUT);
   hover_animation_->Show();
 }
 
-void TabRenderer::OnMouseExited(const ChromeViews::MouseEvent& e) {
+void TabRenderer::OnMouseExited(const views::MouseEvent& e) {
   hover_animation_->SetTweenType(SlideAnimation::EASE_IN);
   hover_animation_->Hide();
+}
+
+void TabRenderer::ThemeChanged() {
+  if (GetWidget() && GetWidget()->AsWindow())
+    LoadTabImages(GetWidget()->AsWindow()->GetNonClientView()->UseNativeFrame());
+  View::ThemeChanged();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -567,7 +538,7 @@ void TabRenderer::PaintTabBackground(ChromeCanvas* canvas) {
       animation = pulse_animation_.get();
     if (animation->GetCurrentValue() > 0) {
       PaintHoverTabBackground(canvas, animation->GetCurrentValue() *
-          (win_util::ShouldUseVistaFrame() ?
+          (GetWidget()->AsWindow()->GetNonClientView()->UseNativeFrame() ?
           kHoverOpacityVista : kHoverOpacity));
     } else {
       PaintInactiveTabBackground(canvas);
@@ -577,39 +548,42 @@ void TabRenderer::PaintTabBackground(ChromeCanvas* canvas) {
 
 void TabRenderer::PaintInactiveTabBackground(ChromeCanvas* canvas) {
   bool is_otr = data_.off_the_record;
-  canvas->DrawBitmapInt(is_otr ? *tab_inactive_otr_l : *tab_inactive_l, 0, 0);
-  canvas->TileImageInt(is_otr ? *tab_inactive_otr_c : *tab_inactive_c,
-                       tab_inactive_l_width, 0,
-                       width() - tab_inactive_l_width - tab_inactive_r_width,
-                       height());
-  canvas->DrawBitmapInt(is_otr ? *tab_inactive_otr_r : *tab_inactive_r,
-                        width() - tab_inactive_r_width, 0);
+  canvas->DrawBitmapInt(is_otr ? *tab_inactive_otr.image_l :
+                        *tab_inactive.image_l, 0, 0);
+  canvas->TileImageInt(is_otr ? *tab_inactive_otr.image_c :
+                       *tab_inactive.image_c, tab_inactive.l_width, 0,
+                       width() - tab_inactive.l_width -
+                       tab_inactive.r_width, height());
+  canvas->DrawBitmapInt(is_otr ? *tab_inactive_otr.image_r :
+                        *tab_inactive.image_r,
+                        width() - tab_inactive.r_width, 0);
 }
 
 void TabRenderer::PaintActiveTabBackground(ChromeCanvas* canvas) {
-  canvas->DrawBitmapInt(*tab_active_l, 0, 0);
-  canvas->TileImageInt(*tab_active_c, tab_active_l_width, 0,
-    width() - tab_active_l_width - tab_active_r_width, height());
-  canvas->DrawBitmapInt(*tab_active_r, width() - tab_active_r_width, 0);
+  canvas->DrawBitmapInt(*tab_active.image_l, 0, 0);
+  canvas->TileImageInt(*tab_active.image_c, tab_active.l_width, 0,
+    width() - tab_active.l_width - tab_active.r_width, height());
+  canvas->DrawBitmapInt(*tab_active.image_r, width() - tab_active.r_width, 0);
 }
 
 void TabRenderer::PaintHoverTabBackground(ChromeCanvas* canvas,
                                           double opacity) {
   bool is_otr = data_.off_the_record;
-  SkBitmap left = gfx::ImageOperations::CreateBlendedBitmap(
-                  (is_otr ? *tab_inactive_otr_l : *tab_inactive_l),
-                  *tab_hover_l, opacity);
-  SkBitmap center = gfx::ImageOperations::CreateBlendedBitmap(
-                   (is_otr ? *tab_inactive_otr_c : *tab_inactive_c),
-                    *tab_hover_c, opacity);
-  SkBitmap right = gfx::ImageOperations::CreateBlendedBitmap(
-                   (is_otr ? *tab_inactive_otr_r : *tab_inactive_r),
-                   *tab_hover_r, opacity);
+  SkBitmap left = skia::ImageOperations::CreateBlendedBitmap(
+                  (is_otr ? *tab_inactive_otr.image_l :
+                  *tab_inactive.image_l), *tab_hover.image_l, opacity);
+  SkBitmap center = skia::ImageOperations::CreateBlendedBitmap(
+                   (is_otr ? *tab_inactive_otr.image_c :
+                   *tab_inactive.image_c), *tab_hover.image_c, opacity);
+  SkBitmap right = skia::ImageOperations::CreateBlendedBitmap(
+                   (is_otr ? *tab_inactive_otr.image_r :
+                   *tab_inactive.image_r),
+                   *tab_hover.image_r, opacity);
 
   canvas->DrawBitmapInt(left, 0, 0);
-  canvas->TileImageInt(center, tab_active_l_width, 0,
-      width() - tab_active_l_width - tab_active_r_width, height());
-  canvas->DrawBitmapInt(right, width() - tab_active_r_width, 0);
+  canvas->TileImageInt(center, tab_active.l_width, 0,
+      width() - tab_active.l_width - tab_active.r_width, height());
+  canvas->DrawBitmapInt(right, width() - tab_active.r_width, 0);
 }
 
 void TabRenderer::PaintLoadingAnimation(ChromeCanvas* canvas) {
@@ -634,9 +608,8 @@ void TabRenderer::PaintLoadingAnimation(ChromeCanvas* canvas) {
 }
 
 int TabRenderer::IconCapacity() const {
-  if (height() < GetMinimumSize().height()) {
+  if (height() < GetMinimumUnselectedSize().height())
     return 0;
-  }
   return (width() - kLeftPadding - kRightPadding) / kFaviconSize;
 }
 
@@ -689,3 +662,42 @@ void TabRenderer::ResetCrashedFavIcon() {
   should_display_crashed_favicon_ = false;
 }
 
+// static
+void TabRenderer::LoadTabImages(bool use_vista_images) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+
+  tab_active.image_l = rb.GetBitmapNamed(IDR_TAB_ACTIVE_LEFT);
+  tab_active.image_c = rb.GetBitmapNamed(IDR_TAB_ACTIVE_CENTER);
+  tab_active.image_r = rb.GetBitmapNamed(IDR_TAB_ACTIVE_RIGHT);
+  tab_active.l_width = tab_active.image_l->width();
+  tab_active.r_width = tab_active.image_r->width();
+
+  tab_hover.image_l = rb.GetBitmapNamed(IDR_TAB_HOVER_LEFT);
+  tab_hover.image_c = rb.GetBitmapNamed(IDR_TAB_HOVER_CENTER);
+  tab_hover.image_r = rb.GetBitmapNamed(IDR_TAB_HOVER_RIGHT);
+
+  if (use_vista_images) {
+    tab_inactive.image_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_V);
+    tab_inactive.image_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_V);
+    tab_inactive.image_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_V);
+
+    // Our Vista frame doesn't change background color to show OTR,
+    // so we continue to use the existing background tabs.
+    tab_inactive_otr.image_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_V);
+    tab_inactive_otr.image_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_V);
+    tab_inactive_otr.image_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_V);
+  } else {
+    tab_inactive.image_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT);
+    tab_inactive.image_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER);
+    tab_inactive.image_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT);
+
+    tab_inactive_otr.image_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT_OTR);
+    tab_inactive_otr.image_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER_OTR);
+    tab_inactive_otr.image_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT_OTR);
+  }
+
+  tab_inactive.l_width = tab_inactive.image_l->width();
+  tab_inactive.r_width = tab_inactive.image_r->width();
+  // tab_[hover,inactive_otr] width are not used and are initialized to 0
+  // during static initialization.
+}

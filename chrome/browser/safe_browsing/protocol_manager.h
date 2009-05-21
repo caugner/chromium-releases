@@ -11,30 +11,42 @@
 // The SafeBrowsingProtocolParser class to do the actual parsing.
 
 #include <deque>
-#include <string>
-#include <vector>
+#include <set>
 
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/url_fetcher.h"
+#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/safe_browsing/chunk_range.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "net/url_request/url_request.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class MessageLoop;
 class Task;
 class Timer;
+class URLRequestStatus;
 
+#if defined(COMPILER_GCC)
+// Allows us to use URLFetchers in a hash_map with gcc (MSVC is okay without
+// specifying this).
+namespace __gnu_cxx {
+template<>
+struct hash<const URLFetcher*> {
+  size_t operator()(const URLFetcher* fetcher) const {
+    return reinterpret_cast<size_t>(fetcher);
+  }
+};
+}
+#endif
 
 class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   // Testing friends:
   FRIEND_TEST(SafeBrowsingProtocolManagerTest, TestBackOffTimes);
   FRIEND_TEST(SafeBrowsingProtocolManagerTest, TestChunkStrings);
-  FRIEND_TEST(SafeBrowsingProtocolManagerTest, DISABLED_TestGetHashBackOffTimes);
+  FRIEND_TEST(SafeBrowsingProtocolManagerTest,
+              DISABLED_TestGetHashBackOffTimes);
 
  public:
   SafeBrowsingProtocolManager(SafeBrowsingService* sb_service,
@@ -74,7 +86,12 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   void OnChunkInserted();
 
   // The last time we received an update.
-  Time last_update() const { return last_update_; }
+  base::Time last_update() const { return last_update_; }
+
+  // Report a malware resource to the SafeBrowsing service.
+  void ReportMalware(const GURL& malware_url,
+                     const GURL& page_url,
+                     const GURL& referrer_url);
 
  private:
   // Internal API for fetching information from the SafeBrowsing servers. The
@@ -130,6 +147,9 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
 
   // Update internal state for each GetHash response error.
   void HandleGetHashError();
+
+  // Helper function for update completion.
+  void UpdateFinished(bool success);
 
  private:
   // Main SafeBrowsing interface object.
@@ -196,12 +216,24 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   std::string wrapped_key_;
 
   // The last time we successfully received an update.
-  Time last_update_;
+  base::Time last_update_;
 
   // While in GetHash backoff, we can't make another GetHash until this time.
-  Time next_gethash_time_;
+  base::Time next_gethash_time_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SafeBrowsingProtocolManager);
+  // Current product version sent in each request.
+  std::string version_;
+
+  // Used for measuring chunk request latency.
+  base::Time chunk_request_start_;
+
+  // Track the size of each update (in bytes).
+  int update_size_;
+
+  // Track outstanding malware report fetchers for clean up.
+  std::set<const URLFetcher*> malware_reports_;
+
+  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingProtocolManager);
 };
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_PROTOCOL_MANAGER_H_

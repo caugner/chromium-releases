@@ -10,17 +10,17 @@ running of Rational Purify and Quantify in a consistent manner.
 """
 
 # Purify and Quantify have a front-end (e.g. quantifyw.exe) which talks to a
-# back-end engine (e.g. quantifye.exe).  The back-end seems to handle 
-# instrumentation, while the front-end controls program execution and 
+# back-end engine (e.g. quantifye.exe).  The back-end seems to handle
+# instrumentation, while the front-end controls program execution and
 # measurement.  The front-end will dynamically launch the back-end if
-# instrumentation is needed (sometimes in the middle of a run if a dll is 
+# instrumentation is needed (sometimes in the middle of a run if a dll is
 # loaded dynamically).
 # In an ideal world, this script would simply execute the front-end and check
 # the output.  However, purify is not the most reliable or well-documented app
 # on the planet, and my attempts to get it to run this way led to the back-end
 # engine hanging during instrumentation.  The workaround to this was to run two
-# passes, first running the engine to do instrumentation rather than letting 
-# the front-end do it for you, then running the front-end to actually do the 
+# passes, first running the engine to do instrumentation rather than letting
+# the front-end do it for you, then running the front-end to actually do the
 # run.  Each time through we're deleting all of the instrumented files in the
 # cache to ensure that we're testing that instrumentation works from scratch.
 # (although this can be changed with an option)
@@ -48,11 +48,19 @@ QUANTIFYW_PATH = os.path.join(PPLUS_PATH, "quantifyw.exe")
 
 class TimeoutError(Exception): pass
 
+
+def _print_line(line, flush=True):
+  # Printing to a text file (including stdout) on Windows always winds up
+  # using \r\n automatically.  On buildbot, this winds up being read by a master
+  # running on Linux, so we manually convert crlf to '\n'
+  print line.rstrip() + '\n',
+  if flush:
+    sys.stdout.flush()
+
 def RunSubprocess(proc, timeout=0, detach=False):
-  """ Runs a subprocess, polling every .2 seconds until it finishes or until
-  timeout is reached.  Then kills the process with taskkill.  A timeout <= 0
-  means no timeout.
-  
+  """ Runs a subprocess, until it finishes or |timeout| is exceeded and the
+  process is killed with taskkill.  A |timeout| <= 0  means no timeout.
+
   Args:
     proc: list of process components (exe + args)
     timeout: how long to wait before killing, <= 0 means wait forever
@@ -66,26 +74,70 @@ def RunSubprocess(proc, timeout=0, detach=False):
     DETACHED_PROCESS = 0x8
     p = subprocess.Popen(proc, creationflags=DETACHED_PROCESS)
   else:
-    p = subprocess.Popen(proc)
-  if timeout <= 0:
-    while p.poll() is None:
-      time.sleep(0.2)
-  else:
+    # For non-detached processes, manually read and print out stdout and stderr.
+    # By default, the subprocess is supposed to inherit these from its parent,
+    # however when run under buildbot, it seems unable to read data from a
+    # grandchild process, so we have to read the child and print the data as if
+    # it came from us for buildbot to read it.  We're not sure why this is
+    # necessary.
+    # TODO(erikkay): should we buffer stderr and stdout separately?
+    p = subprocess.Popen(proc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+  logging.info("started subprocess")
+
+  # How long to wait (in seconds) before printing progress log messages.
+  progress_delay = 300
+  progress_delay_time = time.time() + progress_delay
+  did_timeout = False
+  if timeout > 0:
     wait_until = time.time() + timeout
-    while p.poll() is None and time.time() < wait_until:
-      time.sleep(0.2)
-  result = p.poll()
-  if result is None:
+  while p.poll() is None and not did_timeout:
+    if not detach:
+      line = p.stdout.readline()
+      while line:
+        _print_line(line)
+        line = p.stdout.readline()
+    else:
+      # When we detach, blocking on reading stdout doesn't work, so we sleep
+      # a short time and poll.
+      time.sleep(0.5)
+      if time.time() >= progress_delay_time:
+        # Force output on a periodic basis to avoid getting killed off by the
+        # buildbot.
+        # TODO(erikkay): I'd prefer a less obtrusive 'print ".",' with a flush
+        # but because of how we're doing subprocesses, this doesn't appear to
+        # work reliably.
+        logging.info("%s still running..." % os.path.basename(proc[0]))
+        progress_delay_time = time.time() + progress_delay
+    if timeout > 0:
+      did_timeout = time.time() > wait_until
+
+  if did_timeout:
+    logging.info("process timed out")
+  else:
+    logging.info("process ended, did not time out")
+
+  if did_timeout:
     subprocess.call(["taskkill", "/T", "/F", "/PID", str(p.pid)])
-    logging.error("KILLED %d" % (p.pid))
-    # give the process a chance to actually die before continuing
-    # so that cleanup can happen safely
+    logging.error("KILLED %d" % p.pid)
+    # Give the process a chance to actually die before continuing
+    # so that cleanup can happen safely.
     time.sleep(1.0)
-    logging.error("TIMEOUT waiting for %s" % (proc[0]))
+    logging.error("TIMEOUT waiting for %s" % proc[0])
     raise TimeoutError(proc[0])
+  elif not detach:
+    for line in p.stdout.readlines():
+      _print_line(line, False)
+    if sys.platform != 'darwin':   # stdout flush fails on Mac
+      logging.info("flushing stdout")
+      p.stdout.flush()
+
+  logging.info("collecting result code")
+  result = p.poll()
   if result:
     logging.error("%s exited with non-zero result code %d" % (proc[0], result))
   return result
+
 
 def FixPath(path):
   """We pass computed paths to Rational as arguments, so these paths must be
@@ -98,33 +150,24 @@ def FixPath(path):
   p = subprocess.Popen(["cygpath", "-a", "-m", path], stdout=subprocess.PIPE)
   return p.communicate()[0].rstrip()
 
+
 class Rational(object):
   ''' Common superclass for Purify and Quantify automation objects.  Handles
   common argument parsing as well as the general program flow of Instrument,
   Execute, Analyze.
   '''
-  
+
   def __init__(self):
     google.logging_utils.config_root()
     self._out_file = None
 
   def Run(self):
-    '''Call this to run through the whole process: 
+    '''Call this to run through the whole process:
     Setup, Instrument, Execute, Analyze'''
     start = datetime.datetime.now()
     retcode = -1
     if self.Setup():
-      if self.Instrument():
-        if self.Execute():
-          retcode = self.Analyze()
-          if not retcode:
-            logging.info("instrumentation and execution completed successfully.")
-          else:
-            logging.error("Analyze failed")
-        else:
-          logging.error("Execute failed")
-      else:
-        logging.error("Instrument failed")
+      retcode = self._Run()
       self.Cleanup()
     else:
       logging.error("Setup failed")
@@ -137,6 +180,24 @@ class Rational(object):
     logging.info("elapsed time: %02d:%02d:%02d" % (hours, minutes, seconds))
     return retcode
 
+  def _Run(self):
+    retcode = -1
+    if not self.Instrument():
+      logging.error("Instrumentation failed.")
+      return retcode
+    if self._instrument_only:
+      logging.info("Instrumentation completed successfully.")
+      return 0
+    if not self.Execute():
+      logging.error("Execute failed.")
+      return
+    retcode = self.Analyze()
+    if retcode:
+      logging.error("Analyze failed.")
+      return retcode
+    logging.info("Instrumentation and execution completed successfully.")
+    return 0
+
   def CreateOptionParser(self):
     '''Creates OptionParser with shared arguments.  Overridden by subclassers
     to add custom arguments.'''
@@ -147,7 +208,7 @@ class Rational(object):
     parser.add_option("-o", "--out_file", dest="out_file", metavar="OUTFILE",
                       default="",
                       help="output data is written to OUTFILE")
-    parser.add_option("-s", "--save_cache", 
+    parser.add_option("-s", "--save_cache",
                       dest="save_cache", action="store_true", default=False,
                       help="don't delete instrumentation cache")
     parser.add_option("-c", "--cache_dir", dest="cache_dir", metavar="CACHEDIR",
@@ -161,16 +222,19 @@ class Rational(object):
                       help="timeout in seconds for the run (default 10000)")
     parser.add_option("-v", "--verbose", action="store_true", default=False,
                       help="verbose output - enable debug log messages")
+    parser.add_option("", "--instrument_only", action="store_true",
+                      default=False,
+                      help="Only instrument the target without running")
     self._parser = parser
 
   def Setup(self):
     if self.ParseArgv():
       logging.info("instrumentation cache in %s" % self._cache_dir)
       logging.info("output saving to %s" % self._out_file)
-      # Ensure that Rational's common dir and cache dir are in the front of the 
+      # Ensure that Rational's common dir and cache dir are in the front of the
       # path.  The common dir is required for purify to run in any case, and
       # the cache_dir is required when using the /Replace=yes option.
-      os.environ["PATH"] = (COMMON_PATH + ";" + self._cache_dir + ";" + 
+      os.environ["PATH"] = (COMMON_PATH + ";" + self._cache_dir + ";" +
           os.environ["PATH"])
       # clear the cache to make sure we're starting clean
       self.__ClearInstrumentationCache()
@@ -185,6 +249,9 @@ class Rational(object):
       if "/Replace=yes" in proc:
         if os.path.exists(self._exe + ".Original"):
           return True
+      elif self._instrument_only:
+        # TODO(paulg): Catch instrumentation errors and clean up properly.
+        return True
       elif os.path.isdir(self._cache_dir):
         for cfile in os.listdir(self._cache_dir):
           # TODO(erikkay): look for the actual munged purify filename
@@ -195,7 +262,7 @@ class Rational(object):
     return False
 
   def Execute(self, proc):
-    ''' Execute the app to be tested after successful instrumentation.  
+    ''' Execute the app to be tested after successful instrumentation.
     Full execution command-line provided by subclassers via proc.'''
     logging.info("starting execution...")
     # note that self._args begins with the exe to be run
@@ -216,7 +283,7 @@ class Rational(object):
     '''Parses arguments according to CreateOptionParser
     Subclassers must override if they have extra arguments.'''
     self.CreateOptionParser()
-    (self._options, self._args) = self._parser.parse_args()
+    self._options, self._args = self._parser.parse_args()
     if self._options.verbose:
       google.logging_utils.config_root(logging.DEBUG)
     self._save_cache = self._options.save_cache
@@ -245,6 +312,7 @@ class Rational(object):
       return False
     self._exe = self._args[0]
     self._exe_dir = FixPath(os.path.abspath(os.path.dirname(self._exe)))
+    self._instrument_only = self._options.instrument_only
     return True
 
   def Cleanup(self):
@@ -262,8 +330,5 @@ class Rational(object):
             try:
               os.remove(file)
             except:
-              logging.warning("unable to delete file %s: %s" % (file, 
+              logging.warning("unable to delete file %s: %s" % (file,
                               sys.exc_info()[0]))
-
-
-

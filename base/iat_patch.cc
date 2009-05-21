@@ -169,7 +169,8 @@ DWORD ModifyCode(void* old_code, void* new_code, int length) {
 }
 
 IATPatchFunction::IATPatchFunction()
-    : original_function_(NULL),
+    : module_handle_(NULL),
+      original_function_(NULL),
       iat_thunk_(NULL),
       intercept_function_(NULL) {
 }
@@ -181,13 +182,20 @@ IATPatchFunction::~IATPatchFunction() {
   }
 }
 
-DWORD IATPatchFunction::Patch(HMODULE module_handle,
+DWORD IATPatchFunction::Patch(const wchar_t* module,
                               const char* imported_from_module,
                               const char* function_name,
                               void* new_function) {
   DCHECK_EQ(static_cast<void*>(NULL), original_function_);
   DCHECK_EQ(static_cast<IMAGE_THUNK_DATA*>(NULL), iat_thunk_);
   DCHECK_EQ(static_cast<void*>(NULL), intercept_function_);
+
+  HMODULE module_handle = LoadLibraryW(module);
+
+  if (module_handle == NULL) {
+    NOTREACHED();
+    return GetLastError();
+  }
 
   DWORD error = InterceptImportedFunction(module_handle,
                                           imported_from_module,
@@ -198,7 +206,10 @@ DWORD IATPatchFunction::Patch(HMODULE module_handle,
 
   if (NO_ERROR == error) {
     DCHECK_NE(original_function_, intercept_function_);
+    module_handle_ = module_handle;
     intercept_function_ = new_function;
+  } else {
+    FreeLibrary(module_handle);
   }
 
   return error;
@@ -208,15 +219,22 @@ DWORD IATPatchFunction::Unpatch() {
   DWORD error = RestoreImportedFunction(intercept_function_,
                                         original_function_,
                                         iat_thunk_);
+  DCHECK(NO_ERROR == error);
 
-  if (NO_ERROR == error) {
-    intercept_function_ = NULL;
-    original_function_ = NULL;
-    iat_thunk_ = NULL;
-  }
+  // Hands off the intercept if we fail to unpatch.
+  // If IATPatchFunction::Unpatch fails during RestoreImportedFunction
+  // it means that we cannot safely unpatch the import address table
+  // patch. In this case its better to be hands off the intercept as
+  // trying to unpatch again in the destructor of IATPatchFunction is
+  // not going to be any safer
+  if (module_handle_)
+    FreeLibrary(module_handle_);
+  module_handle_ = NULL;
+  intercept_function_ = NULL;
+  original_function_ = NULL;
+  iat_thunk_ = NULL;
 
   return error;
 }
 
 }  // namespace iat_patch
-

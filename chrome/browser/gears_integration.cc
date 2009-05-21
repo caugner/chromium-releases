@@ -7,7 +7,6 @@
 #include "base/gfx/png_encoder.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/common/chrome_plugin_util.h"
@@ -94,9 +93,9 @@ inline void EnsureStringValidPathComponent(StringT &s) {
     s.resize(kUserPathComponentMaxChars);
 }
 
-void GearsSettingsPressed(HWND parent_hwnd) {
+void GearsSettingsPressed(gfx::NativeWindow parent_wnd) {
   CPBrowsingContext context = static_cast<CPBrowsingContext>(
-      reinterpret_cast<uintptr_t>(parent_hwnd));
+      reinterpret_cast<uintptr_t>(parent_wnd));
   CPHandleCommand(GEARSPLUGINCOMMAND_SHOW_SETTINGS, NULL, context);
 }
 
@@ -117,13 +116,7 @@ static GURL ConvertSkBitmapToDataURL(const SkBitmap& icon) {
 
   // Get the FavIcon data.
   std::vector<unsigned char> icon_data;
-  {
-    SkAutoLockPixels icon_lock(icon);
-    PNGEncoder::Encode(static_cast<unsigned char*>(icon.getPixels()),
-                       PNGEncoder::FORMAT_BGRA, icon.width(),
-                       icon.height(), icon.width()* 4, false,
-                       &icon_data);
-  }
+  PNGEncoder::EncodeBGRASkBitmap(icon, false, &icon_data);
 
   // Base64-encode it (to make it a data URL).
   std::string icon_data_str(reinterpret_cast<char*>(&icon_data[0]),
@@ -140,7 +133,7 @@ static GURL ConvertSkBitmapToDataURL(const SkBitmap& icon) {
 class CreateShortcutCommand : public CPCommandInterface {
  public:
   CreateShortcutCommand(
-      const std::string& name, const std::string& orig_name, 
+      const std::string& name, const std::string& orig_name,
       const std::string& url, const std::string& description,
       const std::vector<webkit_glue::WebApplicationInfo::IconInfo> &icons,
       const SkBitmap& fallback_icon,
@@ -148,8 +141,8 @@ class CreateShortcutCommand : public CPCommandInterface {
       : name_(name), url_(url), description_(description),
         orig_name_(orig_name), callback_(callback),
         calling_loop_(MessageLoop::current()) {
-    // shortcut_data_ has the same lifetime as our strings, so we just point it
-    // at their internal data.
+    // shortcut_data_ has the same lifetime as our strings, so we just
+    // point it at their internal data.
     memset(&shortcut_data_, 0, sizeof(shortcut_data_));
     shortcut_data_.name = name_.c_str();
     shortcut_data_.url = url_.c_str();
@@ -209,8 +202,7 @@ class CreateShortcutCommand : public CPCommandInterface {
     // so our name will potentially differ.  This is relevant because we store
     // some prefs keyed off the webapp name.
     shortcut_data_.name = shortcut_data_.orig_name;
-    callback_->Run(*reinterpret_cast<GearsShortcutData*>(&shortcut_data_),
-                   retval == CPERR_SUCCESS);
+    callback_->Run(shortcut_data_, retval == CPERR_SUCCESS);
     delete this;
   }
 
@@ -233,9 +225,11 @@ class CreateShortcutCommand : public CPCommandInterface {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
+template<>
 void RunnableMethodTraits<CreateShortcutCommand>::RetainCallee(
     CreateShortcutCommand* remover) {
 }
+template<>
 void RunnableMethodTraits<CreateShortcutCommand>::ReleaseCallee(
     CreateShortcutCommand* remover) {
 }
@@ -305,9 +299,11 @@ class QueryShortcutsCommand : public CPCommandInterface {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
+template<>
 void RunnableMethodTraits<QueryShortcutsCommand>::RetainCallee(
     QueryShortcutsCommand* remover) {
 }
+template<>
 void RunnableMethodTraits<QueryShortcutsCommand>::ReleaseCallee(
     QueryShortcutsCommand* remover) {
 }
@@ -317,4 +313,3 @@ void GearsQueryShortcuts(GearsQueryShortcutsCallback* callback) {
       new QueryShortcutsCommand(callback),
       NULL);
 }
-

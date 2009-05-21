@@ -15,9 +15,9 @@
 #ifndef CHROME_COMMON_PREF_SERVICE_H_
 #define CHROME_COMMON_PREF_SERVICE_H_
 
-#include <string>
+#include <set>
 
-#include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/non_thread_safe.h"
 #include "base/observer_list.h"
@@ -56,8 +56,8 @@ class PrefService : public NonThreadSafe {
     // browser.window_placement).
     const std::wstring name() const { return name_; }
 
-    // Returns the value of the Preference.  If there is no user specified value,
-    // it returns the default value.
+    // Returns the value of the Preference.  If there is no user specified
+    // value, it returns the default value.
     const Value* GetValue() const;
 
     // Returns true if the current value matches the default value.
@@ -76,8 +76,9 @@ class PrefService : public NonThreadSafe {
     DISALLOW_COPY_AND_ASSIGN(Preference);
   };
 
-  // |pref_filename| is the path to the prefs file we will try to load or save to.
-  explicit PrefService(const std::wstring& pref_filename);
+  // |pref_filename| is the path to the prefs file we will try to load or save
+  // to.
+  explicit PrefService(const FilePath& pref_filename);
   ~PrefService();
 
   // Reloads the data from file. This should only be called when the importer
@@ -109,6 +110,8 @@ class PrefService : public NonThreadSafe {
                         double default_value);
   void RegisterStringPref(const wchar_t* path,
                           const std::wstring& default_value);
+  void RegisterFilePathPref(const wchar_t* path,
+                            const FilePath& default_value);
   void RegisterListPref(const wchar_t* path);
   void RegisterDictionaryPref(const wchar_t* path);
 
@@ -126,12 +129,13 @@ class PrefService : public NonThreadSafe {
   bool IsPrefRegistered(const wchar_t* path);
 
   // If the path is valid and the value at the end of the path matches the type
-  // specified, it will return the specified value.  Otherwise, the default value
-  // (set when the pref was registered) will be returned.
+  // specified, it will return the specified value.  Otherwise, the default
+  // value (set when the pref was registered) will be returned.
   bool GetBoolean(const wchar_t* path) const;
   int GetInteger(const wchar_t* path) const;
   double GetReal(const wchar_t* path) const;
   std::wstring GetString(const wchar_t* path) const;
+  FilePath GetFilePath(const wchar_t* path) const;
 
   // Returns the branch if it exists.  If it's not a branch or the branch does
   // not exist, returns NULL.  This does
@@ -151,6 +155,14 @@ class PrefService : public NonThreadSafe {
   void SetInteger(const wchar_t* path, int value);
   void SetReal(const wchar_t* path, double value);
   void SetString(const wchar_t* path, const std::wstring& value);
+  void SetFilePath(const wchar_t* path, const FilePath& value);
+
+  // Int64 helper methods that actually store the given value as a string.
+  // Note that if obtaining the named value via GetDictionary or GetList, the
+  // Value type will be TYPE_STRING.
+  void SetInt64(const wchar_t* path, int64 value);
+  int64 GetInt64(const wchar_t* path) const;
+  void RegisterInt64Pref(const wchar_t* path, int64 default_value);
 
   // Used to set the value of dictionary or list values in the pref tree.  This
   // will create a dictionary or list if one does not exist in the pref tree.
@@ -197,7 +209,7 @@ class PrefService : public NonThreadSafe {
   PrefService();
 
   // Reads the data from the given file, returning true on success.
-  bool LoadPersistentPrefs(const std::wstring& file_path);
+  bool LoadPersistentPrefs(const FilePath& file_path);
 
   // Add a preference to the PreferenceMap.  If the pref already exists, return
   // false.  This method takes ownership of |pref|.
@@ -219,7 +231,7 @@ class PrefService : public NonThreadSafe {
   scoped_ptr<DictionaryValue> transient_;
 
   // The filename that we're loading/saving the prefs to.
-  std::wstring pref_filename_;
+  FilePath pref_filename_;
 
   // Task used by ScheduleSavePersistentPrefs to avoid lots of little saves.
   ScopedRunnableMethodFactory<PrefService> save_preferences_factory_;

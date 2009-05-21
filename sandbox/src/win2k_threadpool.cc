@@ -4,7 +4,6 @@
 
 #include "sandbox/src/win2k_threadpool.h"
 
-#include "base/logging.h"
 #include "sandbox/src/win_utils.h"
 
 namespace sandbox {
@@ -56,19 +55,10 @@ size_t Win2kThreadPool::OutstandingWaits() {
 }
 
 Win2kThreadPool::~Win2kThreadPool() {
-  // time to close all the pool wait handles. This frees the thread pool so
-  // it can throttle down the number of 'ready' threads.
-  AutoLock lock(&lock_);
-  PoolObjects::iterator it;
-  for (it = pool_objects_.begin(); it != pool_objects_.end(); ++it) {
-    if (0 != it->cookie) {
-      if (FALSE == ::UnregisterWait(it->wait)) {
-        NOTREACHED();
-      }
-      it->cookie = 0;
-    }
-  }
+  // Here we used to unregister all the pool wait handles. Now, following the
+  // rest of the code we avoid lengthy or blocking calls given that the process
+  // is being torn down.
+  ::DeleteCriticalSection(&lock_);
 }
 
 }  // namespace sandbox
-

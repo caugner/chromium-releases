@@ -4,9 +4,12 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
+#include "base/string16.h"
+#include "base/string_util.h"
+#include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/resource_bundle.h"
+#include "chrome/common/l10n_util.h"
 #include "chrome/plugin/npobject_util.h"
 #include "googleurl/src/url_util.h"
 #include "webkit/glue/webkit_glue.h"
@@ -27,17 +30,19 @@ bool IsPluginRunningInRendererProcess() {
 
 std::wstring GetWebKitLocale() {
   // The browser process should have passed the locale to the renderer via the
-  // --lang command line flag.
-  CommandLine parsed_command_line;
+  // --lang command line flag.  In single process mode, this will return the
+  // wrong value.  TODO(tc): Fix this for single process mode.
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::wstring& lang =
       parsed_command_line.GetSwitchValue(switches::kLang);
-  DCHECK(!lang.empty());
+  DCHECK(!lang.empty() ||
+      (!parsed_command_line.HasSwitch(switches::kRendererProcess) &&
+       !parsed_command_line.HasSwitch(switches::kPluginProcess)));
   return lang;
 }
 
-std::wstring GetLocalizedString(int message_id) {
-  return ResourceBundle::GetSharedInstance().GetLocalizedString(message_id);
+string16 GetLocalizedString(int message_id) {
+  return WideToUTF16(l10n_util::GetString(message_id));
 }
 
 }  // namespace webkit_glue
-

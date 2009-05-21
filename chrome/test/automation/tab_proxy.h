@@ -5,21 +5,27 @@
 #ifndef CHROME_TEST_AUTOMATION_TAB_PROXY_H_
 #define CHROME_TEST_AUTOMATION_TAB_PROXY_H_
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
 #include <wtypes.h>
+#endif
+
 #include <string>
 #include <vector>
 
 #include "chrome/browser/download/save_package.h"
-#include "chrome/browser/security_style.h"
-#include "chrome/browser/navigation_entry.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/security_style.h"
+#include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 
 class ConstrainedWindowProxy;
 class GURL;
 class Value;
 
-typedef enum FindInPageDirection { BACK = 0, FWD = 1 };
-typedef enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
+enum FindInPageDirection { BACK = 0, FWD = 1 };
+enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
 
 class TabProxy : public AutomationResourceProxy {
  public:
@@ -44,10 +50,9 @@ class TabProxy : public AutomationResourceProxy {
   // failure.
   ConstrainedWindowProxy* GetConstrainedWindow(int window_index) const;
 
-  // Execute a javascript in a frame's context whose xpath
-  // is provided as the first parameter and extract
-  // the values from the resulting json string.
-  // Example:
+  // Executes a javascript in a frame's context whose xpath is provided as the
+  // first parameter and extract the values from the resulting json string.
+  // Examples:
   // jscript = "window.domAutomationController.send('string');"
   // will result in value = "string"
   // jscript = "window.domAutomationController.send(24);"
@@ -68,21 +73,19 @@ class TabProxy : public AutomationResourceProxy {
   // Navigates to a url. This method accepts the same kinds of URL input that
   // can be passed to Chrome on the command line. This is a synchronous call and
   // hence blocks until the navigation completes.
-  // Returns a status from AutomationMsg_NavigationResponseValues.
-  int NavigateToURL(const GURL& url);
+  AutomationMsg_NavigationResponseValues NavigateToURL(const GURL& url);
 
   // Navigates to a url. This is same as NavigateToURL with a timeout option.
   // The function returns until the navigation completes or timeout (in
   // milliseconds) occurs. If return after timeout, is_timeout is set to true.
-  int NavigateToURLWithTimeout(const GURL& url, uint32 timeout_ms,
-                               bool* is_timeout);
+  AutomationMsg_NavigationResponseValues NavigateToURLWithTimeout(
+      const GURL& url, uint32 timeout_ms, bool* is_timeout);
 
   // Navigates to a url in an externally hosted tab.
   // This method accepts the same kinds of URL input that
   // can be passed to Chrome on the command line. This is a synchronous call and
   // hence blocks until the navigation completes.
-  // Returns a status from AutomationMsg_NavigationResponseValues.
-  int NavigateInExternalTab(const GURL& url);
+  AutomationMsg_NavigationResponseValues NavigateInExternalTab(const GURL& url);
 
   // Navigates to a url. This is an asynchronous version of NavigateToURL.
   // The function returns immediately after sending the LoadURL notification
@@ -100,16 +103,15 @@ class TabProxy : public AutomationResourceProxy {
 
   // Equivalent to hitting the Back button. This is a synchronous call and
   // hence blocks until the navigation completes.
-  int GoBack();
+  AutomationMsg_NavigationResponseValues GoBack();
 
   // Equivalent to hitting the Forward button. This is a synchronous call and
   // hence blocks until the navigation completes.
-  // Returns a status from AutomationMsg_NavigationResponseValues.
-  int GoForward();
+  AutomationMsg_NavigationResponseValues GoForward();
 
   // Equivalent to hitting the Reload button. This is a synchronous call and
   // hence blocks until the navigation completes.
-  int Reload();
+  AutomationMsg_NavigationResponseValues Reload();
 
   // Closes the tab. This is synchronous, but does NOT block until the tab has
   // closed, rather it blocks until the browser has initiated the close. Use
@@ -130,10 +132,13 @@ class TabProxy : public AutomationResourceProxy {
   // the last tab.
   bool Close(bool wait_until_closed);
 
+#if defined(OS_WIN)
+  // TODO(port): Use portable replacement for HWND.
+
   // Gets the HWND that corresponds to the content area of this tab.
   // Returns true if the call was successful.
-  // Returns a status from AutomationMsg_NavigationResponseValues.
   bool GetHWND(HWND* hwnd) const;
+#endif  // defined(OS_WIN)
 
   // Gets the process ID that corresponds to the content area of this tab.
   // Returns true if the call was successful.  If the specified tab has no
@@ -163,25 +168,15 @@ class TabProxy : public AutomationResourceProxy {
   // unchanged.
   bool IsShelfVisible(bool* is_visible);
 
-  // Opens the FindInPage box. Note: If you just want to search within a tab
-  // you don't need to call this function, just use FindInPage(...) directly.
-  bool OpenFindInPage();
-
-  // Returns whether the Find window is fully visible If animating, |is_visible|
-  // will be false. Returns false on failure.
-  bool IsFindWindowFullyVisible(bool* is_visible);
-
-  // Get the x, y coordinates for the Find window. If animating, |x| and |y|
-  // will be -1, -1. Returns false on failure.
-  bool GetFindWindowLocation(int* x, int* y);
-
   // Starts a search within the current tab. The parameter |search_string|
   // specifies what string to search for, |forward| specifies whether to search
   // in forward direction, and |match_case| specifies case sensitivity
   // (true=case sensitive). |find_next| specifies whether this is a new search
-  // or a continuation of the old one. A return value of -1 indicates failure.
+  // or a continuation of the old one. |ordinal| is an optional parameter that
+  // returns the ordinal of the active match (also known as "the 7" part of
+  // "7 of 9"). A return value of -1 indicates failure.
   int FindInPage(const std::wstring& search_string, FindInPageDirection forward,
-                 FindInPageCase match_case, bool find_next);
+                 FindInPageCase match_case, bool find_next, int* ordinal);
 
   bool GetCookies(const GURL& url, std::string* cookies);
   bool GetCookieByName(const GURL& url,
@@ -205,11 +200,14 @@ class TabProxy : public AutomationResourceProxy {
 
   // Shows an interstitial page.  Blocks until the interstitial page
   // has been loaded. Return false if a failure happens.3
-  bool ShowInterstitialPage(const std::string& html_text);
+  bool ShowInterstitialPage(const std::string& html_text, int timeout_ms);
 
   // Hides the currently shown interstitial page. Blocks until the interstitial
   // page has been hidden. Return false if a failure happens.
   bool HideInterstitialPage();
+
+#if defined(OS_WIN)
+  // TODO(port): Use something portable.
 
   // This sets the keyboard accelerators to be used by an externally
   // hosted tab. This call is not valid on a regular tab hosted within
@@ -220,6 +218,10 @@ class TabProxy : public AutomationResourceProxy {
   // accelerator keys that it did not process. This gives the tab a chance
   // to handle the keys
   bool ProcessUnhandledAccelerator(const MSG& msg);
+#endif  // defined(OS_WIN)
+
+  // Ask the tab to set focus to either the first or last element on the page.
+  bool SetInitialFocus(bool reverse);
 
   // Waits for the tab to finish being restored. Returns true on success.
   // timeout_ms gives the max amount of time to wait for restore to complete.
@@ -251,12 +253,46 @@ class TabProxy : public AutomationResourceProxy {
 
   // Posts a message to the external tab.
   void HandleMessageFromExternalHost(AutomationHandle handle,
-                                     const std::string& target,
-                                     const std::string& message);
+                                     const std::string& message,
+                                     const std::string& origin,
+                                     const std::string& target);
+
+  // Retrieves the number of SSL related info-bars currently showing in |count|.
+  bool GetSSLInfoBarCount(int* count);
+
+  // Causes a click on the link of the info-bar at |info_bar_index|.  If
+  // |wait_for_navigation| is true, this call does not return until a navigation
+  // has occured.
+  bool ClickSSLInfoBarLink(int info_bar_index, bool wait_for_navigation);
+
+  // Retrieves the time at which the last navigation occured.  This is intended
+  // to be used with WaitForNavigation (see below).
+  bool GetLastNavigationTime(int64* last_navigation_time);
+
+  // Waits for a new navigation if none as occurred since |last_navigation_time|
+  // The purpose of this function is for operations that causes asynchronous
+  // navigation to happen.
+  // It is supposed to be used as follow:
+  // int64 last_nav_time;
+  // tab_proxy->GetLastNavigationTime(&last_nav_time);
+  // tab_proxy->SomeOperationThatTriggersAnAsynchronousNavigation();
+  // tab_proxy->WaitForNavigation(last_nav_time);
+  bool WaitForNavigation(int64 last_navigation_time);
+
+  // Gets the current used encoding of the page in the tab.
+  bool GetPageCurrentEncoding(std::wstring* encoding);
+
+  // Uses the specified encoding to override encoding of the page in the tab.
+  bool OverrideEncoding(const std::wstring& encoding);
+
+#if defined(OS_WIN)
+  // Resizes the tab window.
+  void Reposition(HWND window, HWND window_insert_after, int left, int top,
+                  int width, int height, int flags);
+#endif  // defined(OS_WIN)
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabProxy);
 };
 
 #endif  // CHROME_TEST_AUTOMATION_TAB_PROXY_H_
-

@@ -27,6 +27,9 @@ class DownloadDatabase {
   // Update the state of one download. Returns true if successful.
   bool UpdateDownload(int64 received_bytes, int32 state, DownloadID db_handle);
 
+  // Update the path of one download. Returns true if successful.
+  bool UpdateDownloadPath(const std::wstring& path, DownloadID db_handle);
+
   // Create a new database entry for one download and return its primary db id.
   int64 CreateDownload(const DownloadCreateInfo& info);
 
@@ -37,7 +40,7 @@ class DownloadDatabase {
   // (inclusive) and before |remove_end|. You may use null Time values
   // to do an unbounded delete in either direction. This function ignores
   // all downloads that are in progress or are waiting to be cancelled.
-  void RemoveDownloadsBetween(Time remove_begin, Time remove_end);
+  void RemoveDownloadsBetween(base::Time remove_begin, base::Time remove_end);
 
   // Search for downloads matching the search text.
   void SearchDownloads(std::vector<int64>* results,
@@ -64,4 +67,3 @@ class DownloadDatabase {
 }  // namespace history
 
 #endif  // CHROME_BROWSER_HISTORY_DOWNLOAD_DATABASE_H__
-

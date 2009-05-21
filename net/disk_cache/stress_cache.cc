@@ -10,56 +10,48 @@
 // The child application has two threads: one to exercise the cache in an
 // infinite loop, and another one to asynchronously kill the process.
 
-#include <windows.h>
 #include <string>
+#include <vector>
 
 #include "base/at_exit.h"
+#include "base/command_line.h"
+#include "base/debug_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "net/base/io_buffer.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 
+using base::Time;
+
 const int kError = -1;
-const int kExpectedCrash = 1000000;
+const int kExpectedCrash = 100;
 
 // Starts a new process.
 int RunSlave(int iteration) {
   std::wstring exe;
   PathService::Get(base::FILE_EXE, &exe);
 
-  std::wstring command = StringPrintf(L"%ls %d", exe.c_str(), iteration);
+  CommandLine cmdline(exe);
+  cmdline.AppendLooseValue(ASCIIToWide(IntToString(iteration)));
 
-  STARTUPINFO startup_info = {0};
-  startup_info.cb = sizeof(startup_info);
-  PROCESS_INFORMATION process_info;
-
-  // I really don't care about this call modifying the string.
-  if (!::CreateProcess(exe.c_str(), const_cast<wchar_t*>(command.c_str()), NULL,
-                       NULL, FALSE, 0, NULL, NULL, &startup_info,
-                       &process_info)) {
+  base::ProcessHandle handle;
+  if (!base::LaunchApp(cmdline, false, false, &handle)) {
     printf("Unable to run test\n");
     return kError;
   }
 
-  DWORD reason = ::WaitForSingleObject(process_info.hProcess, INFINITE);
-
-  int code;
-  bool ok = ::GetExitCodeProcess(process_info.hProcess,
-                                 reinterpret_cast<PDWORD>(&code)) ? true :
-                                                                    false;
-
-  ::CloseHandle(process_info.hProcess);
-  ::CloseHandle(process_info.hThread);
-
-  if (!ok) {
+  int exit_code;
+  if (!base::WaitForExitCode(handle, &exit_code)) {
     printf("Unable to get return code\n");
     return kError;
   }
-
-  return code;
+  return exit_code;
 }
 
 // Main loop for the master process.
@@ -105,9 +97,9 @@ void StressTheCache(int iteration) {
     keys[i] = GenerateKey(true);
   }
 
-  const int kDataLen = 4000;
-  char data[kDataLen];
-  memset(data, 'k', kDataLen);
+  const int kSize = 4000;
+  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kSize);
+  memset(buffer->data(), 'k', kSize);
 
   for (int i = 0;; i++) {
     int slot = rand() % kNumEntries;
@@ -119,9 +111,8 @@ void StressTheCache(int iteration) {
     if (!cache->OpenEntry(keys[key], &entries[slot]))
       CHECK(cache->CreateEntry(keys[key], &entries[slot]));
 
-    sprintf_s(data, "%d %d", iteration, i);
-    CHECK(kDataLen == entries[slot]->WriteData(0, 0, data, kDataLen, NULL,
-                                               false));
+    base::snprintf(buffer->data(), kSize, "%d %d", iteration, i);
+    CHECK(kSize == entries[slot]->WriteData(0, 0, buffer, kSize, NULL, false));
 
     if (rand() % 100 > 80) {
       key = rand() % kNumKeys;
@@ -151,7 +142,14 @@ class CrashTask : public Task {
 
     if (rand() % 100 > 1) {
       printf("sweet death...\n");
-      TerminateProcess(GetCurrentProcess(), kExpectedCrash);
+#if defined(OS_WIN)
+      // Windows does more work on _exit() that we would like, so we use Kill.
+      base::KillProcessById(base::GetCurrentProcId(), kExpectedCrash, false);
+#elif defined(OS_POSIX)
+      // On POSIX, _exit() will terminate the process with minimal cleanup,
+      // and it is cleaner than killing.
+      _exit(kExpectedCrash);
+#endif
     }
   }
 
@@ -174,14 +172,14 @@ bool StartCrashThread() {
 
 void CrashHandler(const std::string& str) {
   g_crashing = true;
-  __debugbreak();
+  DebugUtil::BreakDebugger();
 }
 
 // -----------------------------------------------------------------------
 
 int main(int argc, const char* argv[]) {
   // Setup an AtExitManager so Singleton objects will be destructed.
-  base::AtExitManager at_exit_manager; 
+  base::AtExitManager at_exit_manager;
 
   if (argc < 2)
     return MasterCode();
@@ -189,8 +187,8 @@ int main(int argc, const char* argv[]) {
   logging::SetLogAssertHandler(CrashHandler);
 
   // Some time for the memory manager to flush stuff.
-  Sleep(3000);
-  MessageLoop message_loop;
+  PlatformThread::Sleep(3000);
+  MessageLoop message_loop(MessageLoop::TYPE_IO);
 
   char* end;
   long int iteration = strtol(argv[1], &end, 0);
@@ -203,4 +201,3 @@ int main(int argc, const char* argv[]) {
   StressTheCache(iteration);
   return 0;
 }
-

@@ -15,29 +15,32 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "base/time.h"
 #include "chrome/browser/cancelable_request.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/ref_counted_util.h"
 
 class BookmarkService;
+class ChromeThread;
 struct DownloadCreateInfo;
+class FilePath;
 class GURL;
 class HistoryURLProvider;
 struct HistoryURLProviderParams;
 class InMemoryURLDatabase;
 class MainPagesRequest;
-enum NotificationType;
 class PageUsageData;
 class PageUsageRequest;
 class Profile;
 class SkBitmap;
 struct ThumbnailScore;
+
+namespace base {
+  class Time;
+}
 
 namespace history {
 
@@ -100,7 +103,7 @@ class HistoryService : public CancelableRequestProvider,
   // not call any other functions. The given directory will be used for storing
   // the history files. The BookmarkService is used when deleting URLs to
   // test if a URL is bookmarked; it may be NULL during testing.
-  bool Init(const std::wstring& history_dir, BookmarkService* bookmark_service);
+  bool Init(const FilePath& history_dir, BookmarkService* bookmark_service);
 
   // Did the backend finish loading the databases?
   bool backend_loaded() const { return backend_loaded_; }
@@ -163,7 +166,7 @@ class HistoryService : public CancelableRequestProvider,
   // For adding pages to history with a specific time. This is for testing
   // purposes. Call the previous one to use the current time.
   void AddPage(const GURL& url,
-               Time time,
+               base::Time time,
                const void* id_scope,
                int32 page_id,
                const GURL& referrer,
@@ -280,7 +283,7 @@ class HistoryService : public CancelableRequestProvider,
   typedef Callback4<Handle,
                     bool,        // Were we able to determine the # of visits?
                     int,         // Number of visits.
-                    Time>::Type  // Time of first visit. Only first bool is
+                    base::Time>::Type // Time of first visit. Only first bool is
                                  // true and int is > 0.
       GetVisitCountToHostCallback;
 
@@ -387,7 +390,7 @@ class HistoryService : public CancelableRequestProvider,
   // if they are no longer referenced. |callback| runs when the expiration is
   // complete. You may use null Time values to do an unbounded delete in
   // either direction.
-  void ExpireHistoryBetween(Time begin_time, Time end_time,
+  void ExpireHistoryBetween(base::Time begin_time, base::Time end_time,
                             CancelableRequestConsumerBase* consumer,
                             ExpireHistoryCallback* callback);
 
@@ -421,6 +424,10 @@ class HistoryService : public CancelableRequestProvider,
   // the database with no need for a callback.
   void UpdateDownload(int64 received_bytes, int32 state, int64 db_handle);
 
+  // Called to update the history service about the path of a download.
+  // This is a 'fire and forget' query.
+  void UpdateDownloadPath(const std::wstring& path, int64 db_handle);
+
   // Permanently remove a download from the history system. This is a 'fire and
   // forget' operation.
   void RemoveDownload(int64 db_handle);
@@ -430,7 +437,7 @@ class HistoryService : public CancelableRequestProvider,
   // progress or in the process of being cancelled. This is a 'fire and forget'
   // operation. You can pass is_null times to get unbounded time in either or
   // both directions.
-  void RemoveDownloadsBetween(Time remove_begin, Time remove_end);
+  void RemoveDownloadsBetween(base::Time remove_begin, base::Time remove_end);
 
   // Implemented by the caller of 'SearchDownloads' below, and is called when
   // the history system has retrieved the search results.
@@ -460,7 +467,7 @@ class HistoryService : public CancelableRequestProvider,
   // to the segment ID. The URL and all the other information is set to the page
   // representing the segment.
   Handle QuerySegmentUsageSince(CancelableRequestConsumerBase* consumer,
-                                const Time from_time,
+                                const base::Time from_time,
                                 SegmentQueryCallback* callback);
 
   // Set the presentation index for the segment identified by |segment_id|.
@@ -529,7 +536,7 @@ class HistoryService : public CancelableRequestProvider,
                           const std::wstring& title,
                           int visit_count,
                           int typed_count,
-                          Time last_visit,
+                          base::Time last_visit,
                           bool hidden);
 
   // The same as AddPageWithDetails() but takes a vector.

@@ -8,6 +8,9 @@
 #include "base/string_util.h"
 #include "chrome/browser/history/text_database.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
+
+using base::Time;
 
 namespace history {
 
@@ -18,14 +21,16 @@ namespace {
 const char kURL1[] = "http://www.google.com/";
 const int kTime1 = 1000;
 const char kTitle1[] = "Google";
-const char kBody1[] = "COUNTTAG Web Images Maps News Shopping Gmail more My Account | "
+const char kBody1[] =
+    "COUNTTAG Web Images Maps News Shopping Gmail more My Account | "
     "Sign out Advanced Search Preferences Language Tools Advertising Programs "
     "- Business Solutions - About Google, 2008 Google";
 
 const char kURL2[] = "http://images.google.com/";
 const int kTime2 = 2000;
 const char kTitle2[] = "Google Image Search";
-const char kBody2[] = "COUNTTAG Web Images Maps News Shopping Gmail more My Account | "
+const char kBody2[] =
+    "COUNTTAG Web Images Maps News Shopping Gmail more My Account | "
     "Sign out Advanced Image Search Preferences The most comprehensive image "
     "search on the web. Want to help improve Google Image Search? Try Google "
     "Image Labeler. Advertising Programs - Business Solutions - About Google "
@@ -34,7 +39,8 @@ const char kBody2[] = "COUNTTAG Web Images Maps News Shopping Gmail more My Acco
 const char kURL3[] = "http://slashdot.org/";
 const int kTime3 = 3000;
 const char kTitle3[] = "Slashdot: News for nerds, stuff that matters";
-const char kBody3[] = "COUNTTAG Slashdot Log In Create Account Subscribe Firehose Why "
+const char kBody3[] =
+    "COUNTTAG Slashdot Log In Create Account Subscribe Firehose Why "
     "Log In? Why Subscribe? Nickname Password Public Terminal Sections "
     "Main Apple AskSlashdot Backslash Books Developers Games Hardware "
     "Interviews IT Linux Mobile Politics Science YRO";
@@ -76,13 +82,14 @@ bool ResultsHaveURL(const std::vector<TextDatabase::Match>& results,
 
 }  // namespace
 
-class TextDatabaseTest : public testing::Test {
+class TextDatabaseTest : public PlatformTest {
  public:
   TextDatabaseTest() : db_(NULL) {
   }
 
  protected:
   void SetUp() {
+    PlatformTest::SetUp();
     PathService::Get(base::DIR_TEMP, &temp_path_);
   }
 
@@ -90,6 +97,7 @@ class TextDatabaseTest : public testing::Test {
     for (size_t i = 0; i < opened_files_.size(); i++)
       file_util::Delete(opened_files_[i], false);
     file_util::Delete(file_name_, false);
+    PlatformTest::TearDown();
   }
 
   // Create databases with this function, which will ensure that the files are
@@ -116,13 +124,13 @@ class TextDatabaseTest : public testing::Test {
   }
 
   // Directory containing the databases.
-  std::wstring temp_path_;
+  FilePath temp_path_;
 
   // Name of the main database file.
-  std::wstring file_name_;
+  FilePath file_name_;
   sqlite3* db_;
 
-  std::vector<std::wstring> opened_files_;
+  std::vector<FilePath> opened_files_;
 };
 
 TEST_F(TextDatabaseTest, AttachDetach) {
@@ -202,7 +210,7 @@ TEST_F(TextDatabaseTest, Query) {
   EXPECT_TRUE(unique_urls.empty()) << "Didn't ask for unique URLs";
 
   // All 3 sites should be returned in order.
-  ASSERT_EQ(3, results.size());
+  ASSERT_EQ(3U, results.size());
   EXPECT_EQ(GURL(kURL1), results[2].url);
   EXPECT_EQ(GURL(kURL2), results[1].url);
   EXPECT_EQ(GURL(kURL3), results[0].url);
@@ -217,9 +225,9 @@ TEST_F(TextDatabaseTest, Query) {
   EXPECT_EQ(UTF8ToWide(std::string(kTitle3)), results[0].title);
 
   // Should have no matches in the title.
-  EXPECT_EQ(0, results[0].title_match_positions.size());
-  EXPECT_EQ(0, results[1].title_match_positions.size());
-  EXPECT_EQ(0, results[2].title_match_positions.size());
+  EXPECT_EQ(0U, results[0].title_match_positions.size());
+  EXPECT_EQ(0U, results[1].title_match_positions.size());
+  EXPECT_EQ(0U, results[2].title_match_positions.size());
 
   // We don't want to be dependent on the exact snippet algorithm, but we know
   // since we searched for "COUNTTAG" which occurs at the beginning of each
@@ -253,7 +261,7 @@ TEST_F(TextDatabaseTest, TimeRange) {
   EXPECT_TRUE(unique_urls.empty()) << "Didn't ask for unique URLs";
 
   // The first and second should have been returned.
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
   EXPECT_FALSE(ResultsHaveURL(results, kURL3));
@@ -273,7 +281,7 @@ TEST_F(TextDatabaseTest, TimeRange) {
             first_time_searched.ToInternalValue());
 
   // Should have two results, the second and third.
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_FALSE(ResultsHaveURL(results, kURL1));
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
   EXPECT_TRUE(ResultsHaveURL(results, kURL3));
@@ -311,7 +319,7 @@ TEST_F(TextDatabaseTest, MaxCount) {
   EXPECT_TRUE(unique_urls.empty()) << "Didn't ask for unique URLs";
 
   // There should be one result, the most recent one.
-  EXPECT_EQ(1, results.size());
+  EXPECT_EQ(1U, results.size());
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
 
   // The max time considered should be the date of the returned item.

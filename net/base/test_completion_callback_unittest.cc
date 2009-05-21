@@ -8,12 +8,15 @@
 #include "net/base/completion_callback.h"
 #include "net/base/test_completion_callback.h"
 #include "base/worker_pool.h"
+#include "testing/platform_test.h"
+
+typedef PlatformTest TestCompletionCallbackTest;
 
 using net::CompletionCallback;
 
 const int kMagicResult = 8888;
 
-// ExampleEmployer is a toy version of HostResolver 
+// ExampleEmployer is a toy version of HostResolver
 // TODO: restore damage done in extracting example from real code
 // (e.g. bring back real destructor, bring back comments)
 class ExampleEmployer {
@@ -34,7 +37,7 @@ class ExampleEmployer {
 };
 
 // Helper class; this is how ExampleEmployer puts work on a different thread
-class ExampleEmployer::ExampleWorker 
+class ExampleEmployer::ExampleWorker
     : public base::RefCountedThreadSafe<ExampleWorker> {
  public:
   ExampleWorker(ExampleEmployer* employer, CompletionCallback* callback)
@@ -67,7 +70,7 @@ void ExampleEmployer::ExampleWorker::DoWork() {
       reply = NULL;
     }
   }
-  
+
   // Does nothing if it got posted.
   delete reply;
 }
@@ -105,7 +108,7 @@ bool ExampleEmployer::DoSomething(CompletionCallback* callback) {
   return true;
 }
 
-TEST(TestCompletionCallbackTest, Simple) {
+TEST_F(TestCompletionCallbackTest, Simple) {
   ExampleEmployer boss;
   TestCompletionCallback callback;
   bool queued = boss.DoSomething(&callback);

@@ -7,6 +7,8 @@
 #include "base/logging.h"
 #include "base/win_util.h"
 
+namespace base {
+
 SharedMemory::SharedMemory()
     : mapped_file_(NULL),
       memory_(NULL),
@@ -43,6 +45,16 @@ SharedMemory::~SharedMemory() {
     CloseHandle(lock_);
 }
 
+// static
+bool SharedMemory::IsHandleValid(const SharedMemoryHandle& handle) {
+  return handle != NULL;
+}
+
+// static
+SharedMemoryHandle SharedMemory::NULLHandle() {
+  return NULL;
+}
+
 bool SharedMemory::Create(const std::wstring &name, bool read_only,
                           bool open_existing, size_t size) {
   DCHECK(mapped_file_ == NULL);
@@ -61,6 +73,11 @@ bool SharedMemory::Create(const std::wstring &name, bool read_only,
     return false;
   }
   max_size_ = size;
+  return true;
+}
+
+bool SharedMemory::Delete(const std::wstring& name) {
+  // intentionally empty -- there is nothing for us to do on Windows.
   return true;
 }
 
@@ -161,3 +178,8 @@ void SharedMemory::Unlock() {
   ReleaseMutex(lock_);
 }
 
+SharedMemoryHandle SharedMemory::handle() const {
+  return mapped_file_;
+}
+
+}  // namespace base

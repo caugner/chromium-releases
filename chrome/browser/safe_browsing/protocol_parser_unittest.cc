@@ -4,8 +4,6 @@
 //
 // Program to test the SafeBrowsing protocol parsing v2.1.
 
-#include "base/hash_tables.h"
-#include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -491,6 +489,47 @@ TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithMac) {
   EXPECT_EQ(memcmp(hash_result, &full_hashes[0].hash, sizeof(SBFullHash)), 0);
 }
 
+TEST(SafeBrowsingProtocolParsingTest, TestGetHashWithUnknownList) {
+  std::string hash_response = "goog-phish-shavar:1:32\n"
+                              "12345678901234567890123456789012"
+                              "googpub-phish-shavar:19:32\n"
+                              "09876543210987654321098765432109";
+  bool re_key = false;
+  std::string key = "";
+  std::vector<SBFullHashResult> full_hashes;
+  SafeBrowsingProtocolParser parser;
+  EXPECT_TRUE(parser.ParseGetHash(hash_response.data(),
+                                  hash_response.size(),
+                                  key,
+                                  &re_key,
+                                  &full_hashes));
+
+  EXPECT_EQ(full_hashes.size(), static_cast<size_t>(1));
+  EXPECT_EQ(memcmp("12345678901234567890123456789012",
+                   &full_hashes[0].hash, sizeof(SBFullHash)), 0);
+  EXPECT_EQ(full_hashes[0].list_name, "goog-phish-shavar");
+  EXPECT_EQ(full_hashes[0].add_chunk_id, 1);
+
+  hash_response += "goog-malware-shavar:7:32\n"
+                   "abcdefghijklmnopqrstuvwxyz123457";
+  full_hashes.clear();
+  EXPECT_TRUE(parser.ParseGetHash(hash_response.data(),
+                                  hash_response.size(),
+                                  key,
+                                  &re_key,
+                                  &full_hashes));
+
+  EXPECT_EQ(full_hashes.size(), static_cast<size_t>(2));
+  EXPECT_EQ(memcmp("12345678901234567890123456789012",
+                   &full_hashes[0].hash, sizeof(SBFullHash)), 0);
+  EXPECT_EQ(full_hashes[0].list_name, "goog-phish-shavar");
+  EXPECT_EQ(full_hashes[0].add_chunk_id, 1);
+  EXPECT_EQ(memcmp("abcdefghijklmnopqrstuvwxyz123457",
+                   &full_hashes[1].hash, sizeof(SBFullHash)), 0);
+  EXPECT_EQ(full_hashes[1].list_name, "goog-malware-shavar");
+  EXPECT_EQ(full_hashes[1].add_chunk_id, 7);
+}
+
 TEST(SafeBrowsingProtocolParsingTest, TestFormatHash) {
   SafeBrowsingProtocolParser parser;
   std::vector<SBPrefix> prefixes;
@@ -551,6 +590,106 @@ TEST(SafeBrowsingProtocolParsingTest, TestReset) {
   EXPECT_TRUE(reset);
 }
 
+// The SafeBrowsing service will occasionally send zero length chunks so that
+// client requests will have longer contiguous chunk number ranges, and thus
+// reduce the request size.
+TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeAddChunk) {
+  std::string add_chunk("a:1:4:0\n");
+  SafeBrowsingProtocolParser parser;
+  bool re_key = false;
+  std::deque<SBChunk> chunks;
+
+  bool result = parser.ParseChunk(add_chunk.data(),
+                                  static_cast<int>(add_chunk.length()),
+                                  "", "", &re_key, &chunks);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(chunks.size(), static_cast<size_t>(1));
+  EXPECT_EQ(chunks[0].chunk_number, 1);
+  EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(0));
+
+  safe_browsing_util::FreeChunks(&chunks);
+
+  // Now test a zero size chunk in between normal chunks.
+  chunks.clear();
+  std::string add_chunks("a:1:4:18\n1234\001abcd5678\001wxyz"
+                         "a:2:4:0\n"
+                         "a:3:4:9\ncafe\001beef");
+  result = parser.ParseChunk(add_chunks.data(),
+                             static_cast<int>(add_chunks.length()),
+                             "", "", &re_key, &chunks);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(chunks.size(), static_cast<size_t>(3));
+
+  // See that each chunk has the right content.
+  EXPECT_EQ(chunks[0].chunk_number, 1);
+  EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(2));
+  EXPECT_EQ(chunks[0].hosts[0].host, 0x34333231);
+  EXPECT_EQ(chunks[0].hosts[0].entry->PrefixAt(0), 0x64636261);
+  EXPECT_EQ(chunks[0].hosts[1].host, 0x38373635);
+  EXPECT_EQ(chunks[0].hosts[1].entry->PrefixAt(0), 0x7a797877);
+
+  EXPECT_EQ(chunks[1].chunk_number, 2);
+  EXPECT_EQ(chunks[1].hosts.size(), static_cast<size_t>(0));
+
+  EXPECT_EQ(chunks[2].chunk_number, 3);
+  EXPECT_EQ(chunks[2].hosts.size(), static_cast<size_t>(1));
+  EXPECT_EQ(chunks[2].hosts[0].host, 0x65666163);
+  EXPECT_EQ(chunks[2].hosts[0].entry->PrefixAt(0), 0x66656562);
+
+  safe_browsing_util::FreeChunks(&chunks);
+}
+
+// Test parsing a zero sized sub chunk.
+TEST(SafeBrowsingProtocolParsingTest, TestZeroSizeSubChunk) {
+  std::string sub_chunk("s:9:4:0\n");
+  SafeBrowsingProtocolParser parser;
+  bool re_key = false;
+  std::deque<SBChunk> chunks;
+
+  bool result = parser.ParseChunk(sub_chunk.data(),
+                                  static_cast<int>(sub_chunk.length()),
+                                  "", "", &re_key, &chunks);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(chunks.size(), static_cast<size_t>(1));
+  EXPECT_EQ(chunks[0].chunk_number, 9);
+  EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(0));
+
+  safe_browsing_util::FreeChunks(&chunks);
+  chunks.clear();
+
+  // Test parsing a zero sized sub chunk mixed in with content carrying chunks.
+  std::string sub_chunks("s:1:4:9\nabcdxwxyz"
+                         "s:2:4:0\n"
+                         "s:3:4:26\nefgh\0011234pqrscafe\0015678lmno");
+  sub_chunks[12] = '\0';
+
+  result = parser.ParseChunk(sub_chunks.data(),
+                             static_cast<int>(sub_chunks.length()),
+                             "", "", &re_key, &chunks);
+  EXPECT_TRUE(result);
+
+  EXPECT_EQ(chunks[0].chunk_number, 1);
+  EXPECT_EQ(chunks[0].hosts.size(), static_cast<size_t>(1));
+  EXPECT_EQ(chunks[0].hosts[0].host, 0x64636261);
+  EXPECT_EQ(chunks[0].hosts[0].entry->prefix_count(), 0);
+
+  EXPECT_EQ(chunks[1].chunk_number, 2);
+  EXPECT_EQ(chunks[1].hosts.size(), static_cast<size_t>(0));
+
+  EXPECT_EQ(chunks[2].chunk_number, 3);
+  EXPECT_EQ(chunks[2].hosts.size(), static_cast<size_t>(2));
+  EXPECT_EQ(chunks[2].hosts[0].host, 0x68676665);
+  EXPECT_EQ(chunks[2].hosts[0].entry->prefix_count(), 1);
+  EXPECT_EQ(chunks[2].hosts[0].entry->PrefixAt(0), 0x73727170);
+  EXPECT_EQ(chunks[2].hosts[0].entry->ChunkIdAtPrefix(0), 0x31323334);
+  EXPECT_EQ(chunks[2].hosts[1].host, 0x65666163);
+  EXPECT_EQ(chunks[2].hosts[1].entry->prefix_count(), 1);
+  EXPECT_EQ(chunks[2].hosts[1].entry->PrefixAt(0), 0x6f6e6d6c);
+  EXPECT_EQ(chunks[2].hosts[1].entry->ChunkIdAtPrefix(0), 0x35363738);
+
+  safe_browsing_util::FreeChunks(&chunks);
+}
+
 TEST(SafeBrowsingProtocolParsingTest, TestVerifyUpdateMac) {
   SafeBrowsingProtocolParser parser;
 
@@ -558,19 +697,35 @@ TEST(SafeBrowsingProtocolParsingTest, TestVerifyUpdateMac) {
       "m:XIU0LiQhAPJq6dynXwHbygjS5tw=\n"
       "n:1895\n"
       "i:goog-phish-shavar\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6501-6505:6501-6505,pcY6iVeT9-CBQ3fdAF0rpnKjR1Y=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6506-6510:6506-6510,SDBrYC3rX3KEPe72LOypnP6QYac=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6511-6520:6511-6520,9UQo-e7OkcsXT2wFWTAhOuWOsUs=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6521-6560:6521-6560,qVNw6JIpR1q6PIXST7J4LJ9n3Zg=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6561-6720:6561-6720,7OiJvCbiwvpzPITW-hQohY5NHuc=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6721-6880:6721-6880,oBS3svhoi9deIa0sWZ_gnD0ujj8=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6881-7040:6881-7040,a0r8Xit4VvH39xgyQHZTPczKBIE=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_7041-7200:7041-7163,q538LChutGknBw55s6kcE2wTcvU=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8001-8160:8001-8024,8026-8045,8048-8049,8051-8134,8136-8152,8155-8160,j6XXAEWnjYk9tVVLBSdQvIEq2Wg=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8161-8320:8161-8215,8217-8222,8224-8320,YaNfiqdQOt-uLCLWVLj46AZpAjQ=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8321-8480:8321-8391,8393-8399,8402,8404-8419,8421-8425,8427,8431-8433,8435-8439,8441-8443,8445-8446,8448-8480,ALj31GQMwGiIeU3bM2ZYKITfU-U=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8481-8640:8481-8500,8502-8508,8510-8511,8513-8517,8519-8525,8527-8531,8533,8536-8539,8541-8576,8578-8638,8640,TlQYRmS_kZ5PBAUIUyNQDq0Jprs=\n"
-      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8641-8800:8641-8689,8691-8731,8733-8786,x1Qf7hdNrO8b6yym03ZzNydDS1o=\n";
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6501-6505:6501-6505,"
+        "pcY6iVeT9-CBQ3fdAF0rpnKjR1Y=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6506-6510:6506-6510,"
+        "SDBrYC3rX3KEPe72LOypnP6QYac=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6511-6520:6511-6520,"
+        "9UQo-e7OkcsXT2wFWTAhOuWOsUs=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6521-6560:6521-6560,"
+        "qVNw6JIpR1q6PIXST7J4LJ9n3Zg=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6561-6720:6561-6720,"
+        "7OiJvCbiwvpzPITW-hQohY5NHuc=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6721-6880:6721-6880,"
+        "oBS3svhoi9deIa0sWZ_gnD0ujj8=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_6881-7040:6881-7040,"
+        "a0r8Xit4VvH39xgyQHZTPczKBIE=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_s_7041-7200:7041-7163,"
+        "q538LChutGknBw55s6kcE2wTcvU=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8001-8160:8001-8024,"
+        "8026-8045,8048-8049,8051-8134,8136-8152,8155-8160,"
+        "j6XXAEWnjYk9tVVLBSdQvIEq2Wg=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8161-8320:8161-8215,"
+        "8217-8222,8224-8320,YaNfiqdQOt-uLCLWVLj46AZpAjQ=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8321-8480:8321-8391,"
+        "8393-8399,8402,8404-8419,8421-8425,8427,8431-8433,8435-8439,8441-8443,"
+        "8445-8446,8448-8480,ALj31GQMwGiIeU3bM2ZYKITfU-U=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8481-8640:8481-8500,"
+        "8502-8508,8510-8511,8513-8517,8519-8525,8527-8531,8533,8536-8539,"
+        "8541-8576,8578-8638,8640,TlQYRmS_kZ5PBAUIUyNQDq0Jprs=\n"
+      "u:s.ytimg.com/safebrowsing/rd/goog-phish-shavar_a_8641-8800:8641-8689,"
+        "8691-8731,8733-8786,x1Qf7hdNrO8b6yym03ZzNydDS1o=\n";
 
   bool re_key = false;
   bool reset = false;

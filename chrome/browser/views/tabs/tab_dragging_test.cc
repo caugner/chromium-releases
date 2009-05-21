@@ -4,7 +4,6 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/common/chrome_paths.h"
@@ -31,8 +30,7 @@ protected:
 TEST_F(TabDraggingTest, Tab1Tab2) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get());
 
   // Get initial tab count.
@@ -51,7 +49,7 @@ TEST_F(TabDraggingTest, Tab1Tab2) {
   ASSERT_TRUE(browser->AppendTab(tab2_url));
   scoped_ptr<TabProxy> tab2(browser->GetTab(1));
   ASSERT_TRUE(tab2.get());
-  
+
   // Add Tab_3.
   GURL tab3_url("about:plugins");
   ASSERT_TRUE(browser->AppendTab(tab3_url));
@@ -101,8 +99,8 @@ TEST_F(TabDraggingTest, Tab1Tab2) {
   // |    Tab_1     |     Tab_2    |    Tab_3     |
   //  ---- ---- ---- ---- ---- ---- ---- ---- ----
   //         x---- ---->
-  //              ____________  
-  //             /     X      \ 
+  //              ____________
+  //             /     X      \
   //            |    Tab_1     |
   //             ---- ---- ----
 
@@ -113,7 +111,7 @@ TEST_F(TabDraggingTest, Tab1Tab2) {
   end.x = start.x + 2*bounds1.width()/3;
   end.y = start.y;
   ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                    ChromeViews::Event::EF_LEFT_BUTTON_DOWN,
+                                    views::Event::EF_LEFT_BUTTON_DOWN,
                                     false));
 
   // Now check for expected results.
@@ -131,12 +129,11 @@ TEST_F(TabDraggingTest, Tab1Tab2) {
   EXPECT_EQ(tab2_url.spec(), tab1_new_url.spec());
 }
 
-// Drag Tab_1 into the position of Tab_3. 
+// Drag Tab_1 into the position of Tab_3.
 TEST_F(TabDraggingTest, Tab1Tab3) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get());
 
   // Get initial tab count.
@@ -155,7 +152,7 @@ TEST_F(TabDraggingTest, Tab1Tab3) {
   ASSERT_TRUE(browser->AppendTab(tab2_url));
   scoped_ptr<TabProxy> tab2(browser->GetTab(1));
   ASSERT_TRUE(tab2.get());
-  
+
   // Add Tab_3.
   GURL tab3_url("about:plugins");
   ASSERT_TRUE(browser->AppendTab(tab3_url));
@@ -205,19 +202,19 @@ TEST_F(TabDraggingTest, Tab1Tab3) {
   // |    Tab_1     |     Tab_2    |    Tab_3     |
   //  ---- ---- ---- ---- ---- ---- ---- ---- ----
   //         x---- ---- ---- ---- ---- ---->
-  //                                  ____________  
-  //                                 /     X      \ 
+  //                                  ____________
+  //                                 /     X      \
   //                                |    Tab_1     |
   //                                 ---- ---- ----
 
   POINT start;
-  POINT end;  
+  POINT end;
   start.x = bounds1.x() + bounds1.width()/2;
   start.y = bounds1.y() + bounds1.height()/2;
   end.x = start.x + bounds1.width()/2 + bounds2.width() + bounds3.width()/2;
   end.y = start.y;
   ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                    ChromeViews::Event::EF_LEFT_BUTTON_DOWN,
+                                    views::Event::EF_LEFT_BUTTON_DOWN,
                                     false));
 
   // Now check for expected results.
@@ -246,8 +243,7 @@ TEST_F(TabDraggingTest, Tab1Tab3) {
 TEST_F(TabDraggingTest, Tab1Tab3Escape) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get());
 
   // Get initial tab count.
@@ -266,7 +262,7 @@ TEST_F(TabDraggingTest, Tab1Tab3Escape) {
   ASSERT_TRUE(browser->AppendTab(tab2_url));
   scoped_ptr<TabProxy> tab2(browser->GetTab(1));
   ASSERT_TRUE(tab2.get());
-  
+
   // Add Tab_3.
   GURL tab3_url("about:plugins");
   ASSERT_TRUE(browser->AppendTab(tab3_url));
@@ -316,22 +312,22 @@ TEST_F(TabDraggingTest, Tab1Tab3Escape) {
   // |    Tab_1     |     Tab_2    |    Tab_3     |
   //  ---- ---- ---- ---- ---- ---- ---- ---- ----
   //         x---- ---- ---- ---- ---- ----> + ESCAPE
-  //                                  ____________  
-  //                                 /     X      \ 
+  //                                  ____________
+  //                                 /     X      \
   //                                |    Tab_1     |
   //                                 ---- ---- ----
 
   POINT start;
-  POINT end;  
+  POINT end;
   start.x = bounds1.x() + bounds1.width()/2;
   start.y = bounds1.y() + bounds1.height()/2;
   end.x = start.x + bounds1.width()/2 + bounds2.width() + bounds3.width()/2;
   end.y = start.y;
 
-  // Simulate drag with 'true' as the last parameter. This will interrupt 
+  // Simulate drag with 'true' as the last parameter. This will interrupt
   // in-flight with Escape.
   ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                    ChromeViews::Event::EF_LEFT_BUTTON_DOWN,
+                                    views::Event::EF_LEFT_BUTTON_DOWN,
                                     true));
 
   // Now check for expected results.
@@ -349,7 +345,7 @@ TEST_F(TabDraggingTest, Tab1Tab3Escape) {
   ASSERT_TRUE(tab3.get());
   GURL tab3_new_url;
   ASSERT_TRUE(tab3->GetCurrentURL(&tab3_new_url));
-  
+
   // The tabs should be in their original positions.
   EXPECT_EQ(tab1_new_url.spec(), tab1_url.spec());
   EXPECT_EQ(tab2_new_url.spec(), tab2_url.spec());
@@ -360,8 +356,7 @@ TEST_F(TabDraggingTest, Tab1Tab3Escape) {
 TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(
-      automation()->GetWindowForBrowser(browser.get()));
+  scoped_ptr<WindowProxy> window(browser->GetWindow());
   ASSERT_TRUE(window.get());
 
   // Get initial tab count.
@@ -380,7 +375,7 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   ASSERT_TRUE(browser->AppendTab(tab2_url));
   scoped_ptr<TabProxy> tab2(browser->GetTab(1));
   ASSERT_TRUE(tab2.get());
-  
+
   // Add Tab_3.
   GURL tab3_url("about:plugins");
   ASSERT_TRUE(browser->AppendTab(tab3_url));
@@ -439,17 +434,17 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   //  /            \ /            \ /            \
   // |    Tab_1     |     Tab_2    |    Tab_3     |
   //  ---- ---- ---- ---- ---- ---- ---- ---- ----
-  //                       x 
-  //                       |  
+  //                       x
+  //                       |
   //                       |  (Drag this below, out of tab strip)
-  //                       V      
-  //                  ____________  
-  //                 /     X      \ 
+  //                       V
+  //                  ____________
+  //                 /     X      \
   //                |    Tab_2     |   (New Window)
   //                ---- ---- ---- ---- ---- ---- ----
 
   POINT start;
-  POINT end;  
+  POINT end;
   start.x = bounds2.x() + bounds2.width()/2;
   start.y = bounds2.y() + bounds2.height()/2;
   end.x = start.x;
@@ -457,7 +452,7 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
 
   // Simulate tab drag.
   ASSERT_TRUE(browser->SimulateDrag(start, end,
-                                    ChromeViews::Event::EF_LEFT_BUTTON_DOWN,
+                                    views::Event::EF_LEFT_BUTTON_DOWN,
                                     false));
 
   // Now, first make sure that the old window has only two tabs remaining.
@@ -475,8 +470,8 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   ASSERT_TRUE(tab2.get());
   GURL tab2_new_url;
   ASSERT_TRUE(tab2->GetCurrentURL(&tab2_new_url));
-  
-  // Now check for proper shifting of tabs; i.e., Tab_3 in window 1 should 
+
+  // Now check for proper shifting of tabs; i.e., Tab_3 in window 1 should
   // shift left to the position of Tab_2; Tab_1 should stay where it was.
   EXPECT_EQ(tab1_new_url.spec(), tab1_url.spec());
   EXPECT_EQ(tab2_new_url.spec(), tab3_url.spec());
@@ -484,8 +479,7 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   // Now check to make sure a new window has opened.
   scoped_ptr<BrowserProxy> browser2(automation()->GetBrowserWindow(1));
   ASSERT_TRUE(browser2.get());
-  scoped_ptr<WindowProxy> window2(
-      automation()->GetWindowForBrowser(browser2.get()));
+  scoped_ptr<WindowProxy> window2(browser2->GetWindow());
   ASSERT_TRUE(window2.get());
 
   // Make sure that the new window has only one tab.
@@ -504,4 +498,3 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   EXPECT_NE(tab1_2_url.spec(), tab1_url.spec());
   EXPECT_NE(tab1_2_url.spec(), tab3_url.spec());
 }
-

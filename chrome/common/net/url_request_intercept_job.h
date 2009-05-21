@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H__
-#define CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H__
+#ifndef CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H_
+#define CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H_
 
-#include "base/basictypes.h"
-#include "net/url_request/url_request.h"
+#include <string>
+
+#include "base/scoped_ptr.h"
 #include "net/url_request/url_request_job.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/common/chrome_plugin_api.h"
 #include "chrome/common/chrome_plugin_util.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 
 class ChromePluginLib;
+class URLRequest;
 
 // A request job that handles network requests intercepted by a Chrome plugin.
 class URLRequestInterceptJob
@@ -34,8 +36,8 @@ class URLRequestInterceptJob
   // URLRequestJob
   virtual void Start();
   virtual void Kill();
-  virtual bool ReadRawData(char* buf, int buf_size, int* bytes_read);
-  virtual bool GetMimeType(std::string* mime_type);
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
+  virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetCharset(std::string* charset);
   virtual void GetResponseInfo(net::HttpResponseInfo* info);
   virtual int GetResponseCode();
@@ -53,12 +55,10 @@ class URLRequestInterceptJob
   scoped_ptr<ScopableCPRequest> cprequest_;
   ChromePluginLib* plugin_;
   bool got_headers_;
-  char* read_buffer_;
+  net::IOBuffer* read_buffer_;
   int read_buffer_size_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(URLRequestInterceptJob);
+  DISALLOW_COPY_AND_ASSIGN(URLRequestInterceptJob);
 };
 
-
-#endif  // CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H__
-
+#endif  // CHROME_COMMON_NET_URL_REQUEST_INTERCEPT_JOB_H_

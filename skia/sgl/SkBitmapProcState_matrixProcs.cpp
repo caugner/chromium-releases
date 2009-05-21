@@ -37,9 +37,8 @@ void decal_filter_scale(uint32_t dst[], SkFixed fx, SkFixed dx, int count);
 #define TILEY_PROCF(fy, max)    (((fy) & 0xFFFF) * ((max) + 1) >> 16)
 #define TILEX_LOW_BITS(fx, max) ((((fx) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
 #define TILEY_LOW_BITS(fy, max) ((((fy) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
-#define REAL_MOD(val, modulus)  (((val)%(modulus)) + (modulus)*( (val)<0 ))
-#define TILEX_TRANS(x, max)     (REAL_MOD((x), ((max) + 1)))
-#define TILEY_TRANS(y, max)     (REAL_MOD((y), ((max) + 1)))
+#define TILEX_TRANS(x, max)     ((x) % ((max) + 1))
+#define TILEY_TRANS(y, max)     ((y) % ((max) + 1))
 #include "SkBitmapProcState_matrix.h"
 
 #define MAKENAME(suffix)        GeneralXY ## suffix
@@ -58,6 +57,8 @@ void decal_filter_scale(uint32_t dst[], SkFixed fx, SkFixed dx, int count);
 #define TILEX_TRANS(x, max)     tileProcX(x, max)
 #define TILEY_TRANS(y, max)     tileProcY(y, max)
 #include "SkBitmapProcState_matrix.h"
+
+
 
 static inline SkFixed fixed_clamp(SkFixed x, int max)
 {
@@ -100,11 +101,11 @@ static SkBitmapProcState::FixedTileProc choose_tile_proc(unsigned m)
     SkASSERT(SkShader::kMirror_TileMode == m);
     return fixed_mirror;
 }
- 
+
 static inline int int_clamp(int x, int max)
 {
     SkASSERT(max >= 0);
-    
+
     return SkClampMax(x, max);
 }
 
@@ -122,7 +123,7 @@ static inline int int_mirror(int x, int max)
     int dx = x % (max + 1);
     if (dx < 0)
         dx = -dx - 1;
-    
+
     return (x / (max + 1) % 2) ? max - dx : dx;
 }
 

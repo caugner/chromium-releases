@@ -66,9 +66,10 @@
 #define BASE_CONDITION_VARIABLE_H_
 
 #include "base/lock.h"
-#include "base/logging.h"
-#include "base/scoped_ptr.h"
-#include "base/time.h"
+
+namespace base {
+  class TimeDelta;
+}
 
 class ConditionVariable {
  public:
@@ -80,7 +81,7 @@ class ConditionVariable {
   // Wait() releases the caller's critical section atomically as it starts to
   // sleep, and the reacquires it when it is signaled.
   void Wait();
-  void TimedWait(const TimeDelta& max_time);
+  void TimedWait(const base::TimeDelta& max_time);
 
   // Broadcast() revives all waiting threads.
   void Broadcast();
@@ -171,4 +172,3 @@ class ConditionVariable {
 };
 
 #endif  // BASE_CONDITION_VARIABLE_H_
-

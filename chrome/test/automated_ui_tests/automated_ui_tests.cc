@@ -6,14 +6,18 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
+#include "base/sys_info.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/common/libxml_utils.h"
-#include "chrome/common/rand_util.h"
 #include "chrome/common/win_util.h"
 #include "chrome/test/automated_ui_tests/automated_ui_tests.h"
 #include "chrome/test/automation/browser_proxy.h"
@@ -47,6 +51,9 @@ const int kDebuggingTimeoutMsec = 5000;
 // How many commands to run when testing a dialog box.
 const int kTestDialogActionsToRun = 7;
 
+void SilentRuntimeReportHandler(const std::string& str) {
+}
+
 }  // namespace
 
 // This subset of commands is used to test dialog boxes, which aren't likely
@@ -79,7 +86,7 @@ AutomatedUITest::AutomatedUITest()
       post_action_delay_(0) {
   show_window_ = true;
   GetSystemTimeAsFileTime(&test_start_time_);
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kDebugModeSwitch))
     debug_logging_enabled_ = true;
   if (parsed_command_line.HasSwitch(kWaitSwitch)) {
@@ -90,12 +97,14 @@ AutomatedUITest::AutomatedUITest()
       post_action_delay_ = static_cast<int>(StringToInt64(str));
     }
   }
+  if (base::SysInfo::HasEnvVar(env_vars::kHeadless))
+    logging::SetLogReportHandler(SilentRuntimeReportHandler);
 }
 
 AutomatedUITest::~AutomatedUITest() {}
 
 void AutomatedUITest::RunReproduction() {
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   xml_writer_.StartWriting();
   xml_writer_.StartElement("Report");
   std::string action_string =
@@ -328,7 +337,7 @@ bool AutomatedUITest::DoAction(const std::string & action) {
   } else if (LowerCaseEqualsASCII(action, "selectprevtab")) {
     did_complete_action = SelectPreviousTab();
   } else if (LowerCaseEqualsASCII(action, "showbookmarks")) {
-    did_complete_action = ShowBookmarksBar();
+    did_complete_action = ShowBookmarkBar();
   } else if (LowerCaseEqualsASCII(action, "setup")) {
     LaunchBrowserAndServer();
     did_complete_action = true;
@@ -398,7 +407,7 @@ bool AutomatedUITest::OpenAndActivateNewBrowserWindow() {
     return false;
   }
   bool is_timeout;
-  if (!browser->ActivateTabWithTimeout(0, kWaitForActionMaxMsec,
+  if (!browser->ActivateTabWithTimeout(0, action_max_timeout_ms(),
                                        &is_timeout)) {
     AddWarningAttribute("failed_to_activate_tab");
     return false;
@@ -412,21 +421,22 @@ bool AutomatedUITest::BackButton() {
 
 bool AutomatedUITest::ChangeEncoding() {
   // Get the encoding list that is used to populate the UI (encoding menu)
-  const std::vector<int>* encoding_ids =
+  std::wstring cur_locale = g_browser_process->GetApplicationLocale();
+  const std::vector<CharacterEncoding::EncodingInfo>* encodings =
       CharacterEncoding::GetCurrentDisplayEncodings(
-          L"ISO-8859-1,windows-1252", L"");
-  DCHECK(encoding_ids);
-  DCHECK(!encoding_ids->empty());
-  unsigned len = static_cast<unsigned>(encoding_ids->size());
+          cur_locale, L"ISO-8859-1,windows-1252", L"");
+  DCHECK(encodings);
+  DCHECK(!encodings->empty());
+  unsigned len = static_cast<unsigned>(encodings->size());
 
   // The vector will contain mostly IDC values for encoding commands plus a few
   // menu separators (0 values). If we hit a separator we just retry.
-  int index = rand_util::RandInt(0, len);
-  while ((*encoding_ids)[index] == 0) {
-    index = rand_util::RandInt(0, len);
+  int index = base::RandInt(0, len);
+  while ((*encodings)[index].encoding_id == 0) {
+    index = base::RandInt(0, len);
   }
 
-  return RunCommand((*encoding_ids)[index]);
+  return RunCommand((*encodings)[index].encoding_id);
 }
 
 bool AutomatedUITest::CloseActiveTab() {
@@ -439,25 +449,28 @@ bool AutomatedUITest::CloseActiveTab() {
   int browser_windows_count;
   int tab_count;
   bool is_timeout;
-  browser->GetTabCountWithTimeout(&tab_count, kWaitForActionMaxMsec,
+  browser->GetTabCountWithTimeout(&tab_count,
+                                  action_max_timeout_ms(),
                                   &is_timeout);
   automation()->GetBrowserWindowCount(&browser_windows_count);
   // Avoid quitting the application by not closing the last window.
   if (tab_count > 1) {
     int new_tab_count;
-    return_value = browser->RunCommand(IDC_CLOSETAB);
+    return_value = browser->RunCommand(IDC_CLOSE_TAB);
     // Wait for the tab to close before we continue.
-    if (!browser->WaitForTabCountToChange(
-        tab_count, &new_tab_count, kWaitForActionMaxMsec)) {
+    if (!browser->WaitForTabCountToChange(tab_count,
+                                          &new_tab_count,
+                                          action_max_timeout_ms())) {
       AddWarningAttribute("tab_count_failed_to_change");
       return false;
     }
   } else if (tab_count == 1 && browser_windows_count > 1) {
     int new_window_count;
-    return_value = browser->RunCommand(IDC_CLOSETAB);
+    return_value = browser->RunCommand(IDC_CLOSE_TAB);
     // Wait for the window to close before we continue.
-    if (!automation()->WaitForWindowCountToChange(
-        browser_windows_count, &new_window_count, kWaitForActionMaxMsec)) {
+    if (!automation()->WaitForWindowCountToChange(browser_windows_count,
+                                                  &new_window_count,
+                                                  action_max_timeout_ms())) {
       AddWarningAttribute("window_count_failed_to_change");
       return false;
     }
@@ -469,7 +482,7 @@ bool AutomatedUITest::CloseActiveTab() {
 }
 
 bool AutomatedUITest::DuplicateTab() {
-  return RunCommand(IDC_DUPLICATE);
+  return RunCommand(IDC_DUPLICATE_TAB);
 }
 
 bool AutomatedUITest::FindInPage() {
@@ -481,7 +494,7 @@ bool AutomatedUITest::ForwardButton() {
 }
 
 bool AutomatedUITest::GoOffTheRecord() {
-  return RunCommand(IDC_GOOFFTHERECORD);
+  return RunCommand(IDC_NEW_INCOGNITO_WINDOW);
 }
 
 bool AutomatedUITest::Home() {
@@ -489,7 +502,7 @@ bool AutomatedUITest::Home() {
 }
 
 bool AutomatedUITest::JavaScriptConsole() {
-  return RunCommand(IDC_SHOW_JS_CONSOLE);
+  return RunCommand(IDC_JS_CONSOLE);
 }
 
 bool AutomatedUITest::JavaScriptDebugger() {
@@ -504,7 +517,7 @@ bool AutomatedUITest::Navigate() {
   }
   bool did_timeout;
   scoped_ptr<TabProxy> tab(
-      browser->GetActiveTabWithTimeout(kWaitForActionMaxMsec, &did_timeout));
+      browser->GetActiveTabWithTimeout(action_max_timeout_ms(), &did_timeout));
   // TODO(devint): This might be masking a bug. I can't think of many
   // valid cases where we would get a browser window, but not be able
   // to return an active tab. Yet this has happened and has triggered crashes.
@@ -519,7 +532,9 @@ bool AutomatedUITest::Navigate() {
   }
   GURL test_url(url);
   did_timeout = false;
-  tab->NavigateToURLWithTimeout(test_url, kMaxTestExecutionTime, &did_timeout);
+  tab->NavigateToURLWithTimeout(test_url,
+                                command_execution_timeout_ms(),
+                                &did_timeout);
 
   if (did_timeout) {
     AddWarningAttribute("timeout");
@@ -537,13 +552,15 @@ bool AutomatedUITest::NewTab() {
   int old_tab_count;
   int new_tab_count;
   bool is_timeout;
-  browser->GetTabCountWithTimeout(&old_tab_count, kWaitForActionMaxMsec,
-      &is_timeout);
+  browser->GetTabCountWithTimeout(&old_tab_count,
+                                  action_max_timeout_ms(),
+                                  &is_timeout);
   // Apply accelerator and wait for a new tab to open, if either
   // fails, return false. Apply Accelerator takes care of logging its failure.
-  bool return_value = RunCommand(IDC_NEWTAB);
-  if (!browser->WaitForTabCountToChange(
-      old_tab_count, &new_tab_count, kWaitForActionMaxMsec)) {
+  bool return_value = RunCommand(IDC_NEW_TAB);
+  if (!browser->WaitForTabCountToChange(old_tab_count,
+                                        &new_tab_count,
+                                        action_max_timeout_ms())) {
     AddWarningAttribute("tab_count_failed_to_change");
     return false;
   }
@@ -567,7 +584,7 @@ bool AutomatedUITest::OpenImportSettingsDialog() {
 }
 
 bool AutomatedUITest::OpenTaskManagerDialog() {
-  return RunCommand(IDC_TASKMANAGER);
+  return RunCommand(IDC_TASK_MANAGER);
 }
 
 bool AutomatedUITest::OpenViewPasswordsDialog() {
@@ -623,11 +640,11 @@ bool AutomatedUITest::SelectNextTab() {
 }
 
 bool AutomatedUITest::SelectPreviousTab() {
-  return RunCommand(IDC_SELECT_PREV_TAB);
+  return RunCommand(IDC_SELECT_PREVIOUS_TAB);
 }
 
-bool AutomatedUITest::ShowBookmarksBar() {
-  return RunCommand(IDC_SHOW_BOOKMARKS_BAR);
+bool AutomatedUITest::ShowBookmarkBar() {
+  return RunCommand(IDC_SHOW_BOOKMARK_BAR);
 }
 
 bool AutomatedUITest::ShowDownloads() {
@@ -643,7 +660,7 @@ bool AutomatedUITest::StarPage() {
 }
 
 bool AutomatedUITest::ViewSource() {
-  return RunCommand(IDC_VIEWSOURCE);
+  return RunCommand(IDC_VIEW_SOURCE);
 }
 
 bool AutomatedUITest::ZoomMinus() {
@@ -690,7 +707,7 @@ bool AutomatedUITest::TestViewPasswords() {
 }
 
 bool AutomatedUITest::ExerciseDialog() {
-  int index = rand_util::RandInt(0, arraysize(kDialogs) - 1);
+  int index = base::RandInt(0, arraysize(kDialogs) - 1);
   return DoAction(kDialogs[index]) && FuzzyTestDialog(kTestDialogActionsToRun);
 }
 
@@ -703,9 +720,9 @@ bool AutomatedUITest::FuzzyTestDialog(int num_actions) {
     // and Enter would close the dialog without performing more actions. We
     // rely on the fact that those two actions are first in the array and set
     // the lower bound to 2 if i == 0 to skip those two actions.
-    int action_index = rand_util::RandInt(i == 0 ? 2 : 0,
-                                          arraysize(kTestDialogPossibleActions)
-                                          - 1);
+    int action_index = base::RandInt(i == 0 ? 2 : 0,
+                                     arraysize(kTestDialogPossibleActions)
+                                         - 1);
     return_value = return_value &&
                    DoAction(kTestDialogPossibleActions[action_index]);
     if (DidCrash(false))
@@ -746,7 +763,8 @@ bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
     return false;
   }
   int tab_count;
-  browser->GetTabCountWithTimeout(&tab_count, kWaitForActionMaxMsec,
+  browser->GetTabCountWithTimeout(&tab_count,
+                                  action_max_timeout_ms(),
                                   &is_timeout);
   // As far as we're concerned, if we can't get a view for a tab, it doesn't
   // exist, so cap tab_count at the number of tab view ids there are.
@@ -754,7 +772,7 @@ bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
 
   int tab_index;
   if (!browser->GetActiveTabIndexWithTimeout(&tab_index,
-                                             kWaitForActionMaxMsec,
+                                             action_max_timeout_ms(),
                                              &is_timeout)) {
     AddWarningAttribute("no_active_tab");
     return false;
@@ -763,7 +781,7 @@ bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
   gfx::Rect dragged_tab_bounds;
   if (!window->GetViewBoundsWithTimeout(VIEW_ID_TAB_0 + tab_index,
                                         &dragged_tab_bounds, false,
-                                        kWaitForActionMaxMsec,
+                                        action_max_timeout_ms(),
                                         &is_timeout)) {
     AddWarningAttribute("no_tab_view_found");
     return false;
@@ -793,8 +811,8 @@ bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
 
   if (!browser->SimulateDragWithTimeout(dragged_tab_point,
                                         destination_point,
-                                        ChromeViews::Event::EF_LEFT_BUTTON_DOWN,
-                                        kWaitForActionMaxMsec,
+                                        views::Event::EF_LEFT_BUTTON_DOWN,
+                                        action_max_timeout_ms(),
                                         &is_timeout, false)) {
     AddWarningAttribute("failed_to_simulate_drag");
     return false;
@@ -817,13 +835,14 @@ bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
 
 WindowProxy* AutomatedUITest::GetAndActivateWindowForBrowser(
     BrowserProxy* browser) {
-  WindowProxy* window = automation()->GetWindowForBrowser(browser);
-
   bool did_timeout;
-  if (!browser->BringToFrontWithTimeout(kWaitForActionMaxMsec, &did_timeout)) {
+  if (!browser->BringToFrontWithTimeout(action_max_timeout_ms(),
+                                        &did_timeout)) {
     AddWarningAttribute("failed_to_bring_window_to_front");
     return NULL;
   }
+
+  WindowProxy* window = browser->GetWindow();
   return window;
 }
 
@@ -855,7 +874,7 @@ bool AutomatedUITest::SimulateKeyPressInActiveWindow(wchar_t key, int flags) {
 
 bool AutomatedUITest::InitXMLReader() {
   std::wstring input_path;
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kInputFilePathSwitch))
     input_path = parsed_command_line.GetSwitchValue(kInputFilePathSwitch);
   else
@@ -869,7 +888,7 @@ bool AutomatedUITest::InitXMLReader() {
 bool AutomatedUITest::WriteReportToFile() {
   std::ofstream error_file;
   std::wstring path;
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kOutputFilePathSwitch))
     path = parsed_command_line.GetSwitchValue(kOutputFilePathSwitch);
   else
@@ -889,7 +908,7 @@ bool AutomatedUITest::WriteReportToFile() {
 void AutomatedUITest::AppendToOutputFile(const std::string &append_string) {
   std::ofstream error_file;
   std::wstring path;
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kOutputFilePathSwitch))
     path = parsed_command_line.GetSwitchValue(kOutputFilePathSwitch);
   else
@@ -993,10 +1012,9 @@ bool AutomatedUITest::DidCrash(bool update_total_crashes) {
 }
 
 TEST_F(AutomatedUITest, TheOneAndOnlyTest) {
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kReproSwitch))
     RunReproduction();
   else
     RunAutomatedUITest();
 }
-

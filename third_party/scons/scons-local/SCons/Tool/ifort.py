@@ -1,7 +1,7 @@
 """SCons.Tool.ifort
 
 Tool-specific initialization for newer versions of the Intel Fortran Compiler
-for Linux. 
+for Linux/Windows (and possibly Mac OS X).
 
 There normally shouldn't be any need to import this module directly.
 It will usually be imported through the generic SCons.Tool.Tool()
@@ -10,7 +10,7 @@ selection method.
 """
 
 #
-# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008 The SCons Foundation
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 The SCons Foundation
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -32,7 +32,7 @@ selection method.
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-__revision__ = "src/engine/SCons/Tool/ifort.py 3424 2008/09/15 11:22:20 scons"
+__revision__ = "src/engine/SCons/Tool/ifort.py 3897 2009/01/13 06:45:54 scons"
 
 import string
 
@@ -47,7 +47,7 @@ def generate(env):
     fscan = FortranScan("FORTRANPATH")
     SCons.Tool.SourceFileScanner.add_scanner('.i', fscan)
     SCons.Tool.SourceFileScanner.add_scanner('.i90', fscan)
-     
+
     if not env.has_key('FORTRANFILESUFFIXES'):
         env['FORTRANFILESUFFIXES'] = ['.i']
     else:
@@ -75,6 +75,9 @@ def generate(env):
             for var in ['%sCOM' % dialect, '%sPPCOM' % dialect,
                         'SH%sCOM' % dialect, 'SH%sPPCOM' % dialect]:
                 env[var] = string.replace(env[var], '-o $TARGET', '-object:$TARGET')
+        env['FORTRANMODDIRPREFIX'] = "/module:"
+    else:
+        env['FORTRANMODDIRPREFIX'] = "-module "
 
 def exists(env):
     return env.Detect('ifort')

@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_BROWSING_DATA_REMOVER_H__
-#define CHROME_BROWSER_BROWSING_DATA_REMOVER_H__
+#ifndef CHROME_BROWSER_BROWSING_DATA_REMOVER_H_
+#define CHROME_BROWSER_BROWSING_DATA_REMOVER_H_
 
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "chrome/browser/cancelable_request.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 
 class MessageLoop;
 class Profile;
@@ -25,7 +25,8 @@ class BrowsingDataRemover : public NotificationObserver {
   static const int REMOVE_DOWNLOADS = 1 << 1;
   static const int REMOVE_COOKIES = 1 << 2;
   static const int REMOVE_PASSWORDS = 1 << 3;
-  static const int REMOVE_CACHE = 1 << 4;
+  static const int REMOVE_FORM_DATA = 1 << 4;
+  static const int REMOVE_CACHE = 1 << 5;
 
   // Observer is notified when the removal is done. Done means keywords have
   // been deleted, cache cleared and all other tasks scheduled.
@@ -36,7 +37,8 @@ class BrowsingDataRemover : public NotificationObserver {
 
   // Creates a BrowsingDataRemover to remove browser data from the specified
   // profile in the specified time range. Use Remove to initiate the removal.
-  BrowsingDataRemover(Profile* profile, Time delete_begin, Time delete_end);
+  BrowsingDataRemover(Profile* profile, base::Time delete_begin,
+                      base::Time delete_end);
   ~BrowsingDataRemover();
 
   // Removes the specified items related to browsing.
@@ -47,6 +49,8 @@ class BrowsingDataRemover : public NotificationObserver {
 
   // Called when history deletion is done.
   void OnHistoryDeletionDone();
+
+  static bool is_removing() { return removing_; }
 
  private:
   // NotificationObserver method. Callback when TemplateURLModel has finished
@@ -64,8 +68,8 @@ class BrowsingDataRemover : public NotificationObserver {
   void ClearedCache();
 
   // Invoked on the IO thread to delete from the cache.
-  void ClearCacheOnIOThread(Time delete_begin,
-                            Time delete_end,
+  void ClearCacheOnIOThread(base::Time delete_begin,
+                            base::Time delete_end,
                             MessageLoop* ui_loop);
 
   // Returns true if we're all done.
@@ -78,13 +82,13 @@ class BrowsingDataRemover : public NotificationObserver {
   Profile* profile_;
 
   // Start time to delete from.
-  const Time delete_begin_;
+  const base::Time delete_begin_;
 
   // End time to delete to.
-  const Time delete_end_;
+  const base::Time delete_end_;
 
   // True if Remove has been invoked.
-  bool removing_;
+  static bool removing_;
 
   // True if we're waiting for the TemplateURLModel to finish loading.
   bool waiting_for_keywords_;
@@ -100,8 +104,7 @@ class BrowsingDataRemover : public NotificationObserver {
   // Used if we need to clear history.
   CancelableRequestConsumer request_consumer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(BrowsingDataRemover);
+  DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemover);
 };
 
-#endif  // CHROME_BROWSER_BROWSING_DATA_REMOVER_H__
-
+#endif  // CHROME_BROWSER_BROWSING_DATA_REMOVER_H_

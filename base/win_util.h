@@ -10,6 +10,8 @@
 
 #include <string>
 
+#include "base/tracked.h"
+
 namespace win_util {
 
 // NOTE: Keep these in order so callers can do things like
@@ -21,6 +23,8 @@ enum WinVersion {
   WINVERSION_XP = 2,
   WINVERSION_SERVER_2003 = 3,
   WINVERSION_VISTA = 4,
+  WINVERSION_2008 = 5,
+  WINVERSION_WIN7 = 6,
 };
 
 void GetNonClientMetrics(NONCLIENTMETRICS* metrics);
@@ -49,6 +53,9 @@ bool GetLogonSessionOnlyDACL(SECURITY_DESCRIPTOR** security_descriptor);
 
 // Useful for subclassing a HWND.  Returns the previous window procedure.
 WNDPROC SetWindowProc(HWND hwnd, WNDPROC wndproc);
+
+// Returns true if the existing window procedure is the same as |subclass_proc|.
+bool IsSubclassed(HWND window, WNDPROC subclass_proc);
 
 // Subclasses a window, replacing its existing window procedure with the
 // specified one. Returns true if the current window procedure was replaced,
@@ -99,7 +106,17 @@ std::wstring FormatMessage(unsigned messageid);
 // Uses the last Win32 error to generate a human readable message string.
 std::wstring FormatLastWin32Error();
 
+// These 2 methods are used to track HWND creation/destruction to investigate
+// a mysterious crasher http://crbugs.com/4714 (crasher in on NCDestroy) that
+// might be caused by a multiple delete of an HWND.
+void NotifyHWNDCreation(const tracked_objects::Location& from_here, HWND hwnd);
+void NotifyHWNDDestruction(const tracked_objects::Location& from_here,
+                           HWND hwnd);
+
+#define TRACK_HWND_CREATION(hwnd) win_util::NotifyHWNDCreation(FROM_HERE, hwnd)
+#define TRACK_HWND_DESTRUCTION(hwnd) \
+    win_util::NotifyHWNDDestruction(FROM_HERE, hwnd)
+
 }  // namespace win_util
 
 #endif  // BASE_WIN_UTIL_H__
-

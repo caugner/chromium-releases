@@ -18,9 +18,8 @@ protected:
   virtual void Initialize() {
     UITestSuite::Initialize();
 
-    SetPageRange(CommandLine());
+    SetPageRange(*CommandLine::ForCurrentProcess());
   }
 };
 
 #endif // CHROME_TEST_RELIABILITY_RELIABILITY_TEST_SUITE_H_
-

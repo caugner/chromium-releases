@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_PERFTTIMER_H_
-#define BASE_PERFTTIMER_H_
+#ifndef BASE_PERFTIMER_H_
+#define BASE_PERFTIMER_H_
 
 #include <string>
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/time.h"
 
 // ----------------------------------------------------------------------
@@ -14,7 +15,7 @@
 // called at the beginning and end (respectively) of running all the
 // performance tests. The init function returns true on success.
 // ----------------------------------------------------------------------
-bool InitPerfLog(const char* log_file);
+bool InitPerfLog(const FilePath& log_path);
 void FinalizePerfLog();
 
 // ----------------------------------------------------------------------
@@ -31,16 +32,16 @@ void LogPerfResult(const char* test_name, double value, const char* units);
 class PerfTimer {
  public:
   PerfTimer() {
-    begin_ = TimeTicks::Now();
+    begin_ = base::TimeTicks::Now();
   }
 
   // Returns the time elapsed since object construction
-  TimeDelta Elapsed() const {
-    return TimeTicks::Now() - begin_;
+  base::TimeDelta Elapsed() const {
+    return base::TimeTicks::Now() - begin_;
   }
 
  private:
-  TimeTicks begin_;
+  base::TimeTicks begin_;
 };
 
 // ----------------------------------------------------------------------
@@ -77,4 +78,4 @@ class PerfTimeLogger {
   PerfTimer timer_;
 };
 
-#endif  // BASE_PERFTTIMER_H_
+#endif  // BASE_PERFTIMER_H_

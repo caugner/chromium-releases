@@ -10,10 +10,9 @@
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
-#include "net/proxy/proxy_service.h"
-#include "net/proxy/proxy_resolver_winhttp.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/webplugin.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 
 #define QI_SUPPORTS_IID(iid, iface)                                           \
@@ -35,55 +34,12 @@ void MozillaExtensionApi::DetachFromInstance() {
 
 bool MozillaExtensionApi::FindProxyForUrl(const char* url,
                                           std::string* proxy) {
-  bool result = false;
-
   if ((!url) || (!proxy)) {
     NOTREACHED();
-    return result;
+    return false;
   }
 
-  net::ProxyResolverWinHttp proxy_resolver;
-  net::ProxyService proxy_service(&proxy_resolver);
-  net::ProxyInfo proxy_info;
-
-  if (proxy_service.ResolveProxy(GURL(std::string(url)),
-                                 &proxy_info,
-                                 NULL,
-                                 NULL) == net::OK) {
-    if (!proxy_info.is_direct()) {
-      std::string winhttp_proxy = proxy_info.proxy_server();
-
-      // Winhttp returns proxy in the the following format:
-      // - HTTP proxy: "111.111.111.111:11"
-      // -.SOCKS proxy: "socks=111.111.111.111:11"
-      // - Mixed proxy: "http=111.111.111.111:11; socks=222.222.222.222:22"
-      // 
-      // We need to translate this into the following format:
-      // i)   "DIRECT"  -- no proxy
-      // ii)  "PROXY xxx.xxx.xxx.xxx"   -- use proxy
-      // iii) "SOCKS xxx.xxx.xxx.xxx"  -- use SOCKS
-      // iv)  Mixed. e.g. "PROXY 111.111.111.111;PROXY 112.112.112.112",
-      //                  "PROXY 111.111.111.111;SOCKS 112.112.112.112"....
-      StringToLowerASCII(winhttp_proxy);
-      if (std::string::npos == winhttp_proxy.find('=')) {
-        // Proxy is in the form: "111.111.111.111:11"
-        winhttp_proxy.insert(0, "http ");
-      } else {
-        // Proxy is in the following form. 
-        // -.SOCKS proxy: "socks=111.111.111.111:11"
-        // - Mixed proxy: "http=111.111.111.111:11; socks=222.222.222.222:22"
-        // in this case just replace the '=' with a space
-        std::replace_if(winhttp_proxy.begin(),
-                        winhttp_proxy.end(),
-                        std::bind2nd(std::equal_to<char>(), '='), ' ');
-      }
-
-      *proxy = winhttp_proxy;
-      result = true;
-    }
-  }
-
-  return result;
+  return webkit_glue::FindProxyForUrl(GURL(std::string(url)), proxy);
 }
 
 // nsISupports implementation
@@ -262,7 +218,7 @@ NS_IMETHODIMP MozillaExtensionApi::FindProxyForURL(
   std::string proxy = "DIRECT";
   FindProxyForUrl(aURL, &proxy);
 
-  // Allocate this using the NPAPI allocator. The plugin will call 
+  // Allocate this using the NPAPI allocator. The plugin will call
   // NPN_Free to free this.
   char* result = static_cast<char*>(NPN_MemAlloc(proxy.length() + 1));
   strncpy(result, proxy.c_str(), proxy.length() + 1);
@@ -354,7 +310,7 @@ NS_IMETHODIMP MozillaExtensionApi::SetCookie(
   if (!webplugin)
     return NS_ERROR_FAILURE;
 
-  std::string cookie(static_cast<const char*>(cookie_buffer), 
+  std::string cookie(static_cast<const char*>(cookie_buffer),
                      buffer_size);
   GURL cookies_url((std::string(url)));
   webplugin->SetCookie(cookies_url,
@@ -365,4 +321,3 @@ NS_IMETHODIMP MozillaExtensionApi::SetCookie(
 
 
 } // namespace NPAPI
-

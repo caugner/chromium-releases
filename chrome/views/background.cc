@@ -4,14 +4,14 @@
 
 #include "chrome/views/background.h"
 
-#include "base/gfx/skia_utils.h"
 #include "base/logging.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/views/painter.h"
 #include "chrome/views/view.h"
+#include "skia/ext/skia_utils_win.h"
 #include "skia/include/SkPaint.h"
 
-namespace ChromeViews {
+namespace views {
 
 // SolidBackground is a trivial Background implementation that fills the
 // background in a solid color.
@@ -34,7 +34,7 @@ class SolidBackground : public Background {
   DISALLOW_EVIL_CONSTRUCTORS(SolidBackground);
 };
 
-class BackgroundPainter : public ChromeViews::Background {
+class BackgroundPainter : public Background {
  public:
   BackgroundPainter(bool owns_painter, Painter* painter)
       : owns_painter_(owns_painter), painter_(painter) {
@@ -59,16 +59,24 @@ class BackgroundPainter : public ChromeViews::Background {
   DISALLOW_EVIL_CONSTRUCTORS(BackgroundPainter);
 };
 
-Background::Background() : native_control_brush_(NULL) {
+Background::Background()
+#if defined(OS_WIN)
+    : native_control_brush_(NULL)
+#endif
+{
 }
 
 Background::~Background() {
+#if defined(OS_WIN)
   DeleteObject(native_control_brush_);
+#endif
 }
 
 void Background::SetNativeControlColor(SkColor color) {
+#if defined(OS_WIN)
   DeleteObject(native_control_brush_);
-  native_control_brush_ = CreateSolidBrush(gfx::SkColorToCOLORREF(color));
+  native_control_brush_ = CreateSolidBrush(skia::SkColorToCOLORREF(color));
+#endif
 }
 
 //static
@@ -102,5 +110,4 @@ Background* Background::CreateBackgroundPainter(bool owns_painter,
   return new BackgroundPainter(owns_painter, painter);
 }
 
-}
-
+}  // namespace views

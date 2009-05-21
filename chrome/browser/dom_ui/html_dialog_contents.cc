@@ -4,7 +4,8 @@
 
 #include "chrome/browser/dom_ui/html_dialog_contents.h"
 
-#include "chrome/browser/render_view_host.h"
+#include "base/values.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 
 const char kGearsScheme[] = "gears";
 
@@ -13,7 +14,7 @@ HtmlDialogContents::HtmlDialogContents(Profile* profile,
                                        RenderViewHostFactory* rvf)
     : DOMUIHost(profile, instance, rvf),
       delegate_(NULL) {
-  type_ = TAB_CONTENTS_HTML_DIALOG;
+  set_type(TAB_CONTENTS_HTML_DIALOG);
 }
 
 HtmlDialogContents::~HtmlDialogContents() {
@@ -60,18 +61,17 @@ std::string GetJsonResponse(const Value* content) {
     return "";
   }
 
-  std::wstring result;
+  std::string result;
   Value* value = NULL;
   if (!args->Get(0, &value) || !value->GetAsString(&result)) {
     NOTREACHED();
     return "";
   }
 
-  return WideToASCII(result);
+  return result;
 }
 
 void HtmlDialogContents::OnDialogClosed(const Value* content) {
   if (delegate_)
     delegate_->OnDialogClosed(GetJsonResponse(content));
 }
-

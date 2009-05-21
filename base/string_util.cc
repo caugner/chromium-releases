@@ -4,6 +4,8 @@
 
 #include "base/string_util.h"
 
+#include "build/build_config.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -21,8 +23,19 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/singleton.h"
+#include "base/third_party/dmg_fp/dmg_fp.h"
 
 namespace {
+
+// Force the singleton used by Empty[W]String[16] to be a unique type. This
+// prevents other code that might accidentally use Singleton<string> from
+// getting our internal one.
+struct EmptyStrings {
+  EmptyStrings() {}
+  const std::string s;
+  const std::wstring ws;
+  const string16 s16;
+};
 
 // Hack to convert any char-like type to its unsigned counterpart.
 // For example, it will convert char, signed char and unsigned char to unsigned
@@ -124,14 +137,25 @@ class StringToLongTraits {
   }
 };
 
-class WStringToLongTraits {
+class String16ToLongTraits {
  public:
-  typedef std::wstring string_type;
+  typedef string16 string_type;
   typedef long value_type;
   static const int kBase = 10;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
+#if defined(WCHAR_T_IS_UTF16)
     return wcstol(str, endptr, kBase);
+#elif defined(WCHAR_T_IS_UTF32)
+    std::string ascii_string = UTF16ToASCII(string16(str));
+    char* ascii_end = NULL;
+    value_type ret = strtol(ascii_string.c_str(), &ascii_end, kBase);
+    if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
+      *endptr =
+          const_cast<string_type::value_type*>(str) + ascii_string.length();
+    }
+    return ret;
+#endif
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !iswspace(str[0]);
@@ -156,9 +180,9 @@ class StringToInt64Traits {
   }
 };
 
-class WStringToInt64Traits {
+class String16ToInt64Traits {
  public:
-  typedef std::wstring string_type;
+  typedef string16 string_type;
   typedef int64 value_type;
   static const int kBase = 10;
   static inline value_type convert_func(const string_type::value_type* str,
@@ -166,7 +190,14 @@ class WStringToInt64Traits {
 #ifdef OS_WIN
     return _wcstoi64(str, endptr, kBase);
 #else  // assume OS_POSIX
-    return wcstoll(str, endptr, kBase);
+    std::string ascii_string = UTF16ToASCII(string16(str));
+    char* ascii_end = NULL;
+    value_type ret = strtoll(ascii_string.c_str(), &ascii_end, kBase);
+    if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
+      *endptr =
+          const_cast<string_type::value_type*>(str) + ascii_string.length();
+    }
+    return ret;
 #endif
   }
   static inline bool valid_func(const string_type& str) {
@@ -191,14 +222,25 @@ class HexStringToLongTraits {
   }
 };
 
-class HexWStringToLongTraits {
+class HexString16ToLongTraits {
  public:
-  typedef std::wstring string_type;
+  typedef string16 string_type;
   typedef long value_type;
   static const int kBase = 16;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
+#if defined(WCHAR_T_IS_UTF16)
     return wcstoul(str, endptr, kBase);
+#elif defined(WCHAR_T_IS_UTF32)
+    std::string ascii_string = UTF16ToASCII(string16(str));
+    char* ascii_end = NULL;
+    value_type ret = strtoul(ascii_string.c_str(), &ascii_end, kBase);
+    if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
+      *endptr =
+          const_cast<string_type::value_type*>(str) + ascii_string.length();
+    }
+    return ret;
+#endif
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !iswspace(str[0]);
@@ -211,20 +253,33 @@ class StringToDoubleTraits {
   typedef double value_type;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
-    return strtod(str, endptr);
+    return dmg_fp::strtod(str, endptr);
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !isspace(str[0]);
   }
 };
 
-class WStringToDoubleTraits {
+class String16ToDoubleTraits {
  public:
-  typedef std::wstring string_type;
+  typedef string16 string_type;
   typedef double value_type;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
-    return wcstod(str, endptr);
+    // Because dmg_fp::strtod does not like char16, we convert it to ASCII.
+    // In theory, this should be safe, but it's possible that 16-bit chars
+    // might get ignored by accident causing something to be parsed when it
+    // shouldn't.
+    std::string ascii_string = UTF16ToASCII(string16(str));
+    char* ascii_end = NULL;
+    value_type ret = dmg_fp::strtod(ascii_string.c_str(), &ascii_end);
+    if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
+      // Put endptr at end of input string, so it's not recognized as an error.
+      *endptr =
+          const_cast<string_type::value_type*>(str) + ascii_string.length();
+    }
+
+    return ret;
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !iswspace(str[0]);
@@ -273,15 +328,20 @@ bool IsWprintfFormatPortable(const wchar_t* format) {
   return true;
 }
 
+
 }  // namespace base
 
 
 const std::string& EmptyString() {
-  return *Singleton<std::string>::get();
+  return Singleton<EmptyStrings>::get()->s;
 }
 
 const std::wstring& EmptyWString() {
-  return *Singleton<std::wstring>::get();
+  return Singleton<EmptyStrings>::get()->ws;
+}
+
+const string16& EmptyString16() {
+  return Singleton<EmptyStrings>::get()->s16;
 }
 
 const wchar_t kWhitespaceWide[] = {
@@ -321,8 +381,6 @@ const char kWhitespaceASCII[] = {
   0x0C,
   0x0D,
   0x20,    // Space
-  '\x85',  // <control-0085>
-  '\xa0',  // No-Break Space
   0
 };
 const char* const kCodepageUTF8 = "UTF-8";
@@ -377,10 +435,18 @@ TrimPositions TrimWhitespace(const std::wstring& input,
   return TrimStringT(input, kWhitespaceWide, positions, output);
 }
 
+TrimPositions TrimWhitespaceASCII(const std::string& input,
+                                  TrimPositions positions,
+                                  std::string* output) {
+  return TrimStringT(input, kWhitespaceASCII, positions, output);
+}
+
+// This function is only for backward-compatibility.
+// To be removed when all callers are updated.
 TrimPositions TrimWhitespace(const std::string& input,
                              TrimPositions positions,
                              std::string* output) {
-  return TrimStringT(input, kWhitespaceASCII, positions, output);
+  return TrimWhitespaceASCII(input, positions, output);
 }
 
 std::wstring CollapseWhitespace(const std::wstring& text,
@@ -434,6 +500,16 @@ std::wstring ASCIIToWide(const std::string& ascii) {
   return std::wstring(ascii.begin(), ascii.end());
 }
 
+std::string UTF16ToASCII(const string16& utf16) {
+  DCHECK(IsStringASCII(utf16));
+  return std::string(utf16.begin(), utf16.end());
+}
+
+string16 ASCIIToUTF16(const std::string& ascii) {
+  DCHECK(IsStringASCII(ascii));
+  return string16(ascii.begin(), ascii.end());
+}
+
 // Latin1 is just the low range of Unicode, so we can copy directly to convert.
 bool WideToLatin1(const std::wstring& wide, std::string* latin1) {
   std::string output;
@@ -456,20 +532,28 @@ bool IsString8Bit(const std::wstring& str) {
   return true;
 }
 
-bool IsStringASCII(const std::wstring& str) {
+template<class STR>
+static bool DoIsStringASCII(const STR& str) {
   for (size_t i = 0; i < str.length(); i++) {
-    if (str[i] > 0x7F)
+    typename ToUnsigned<typename STR::value_type>::Unsigned c = str[i];
+    if (c > 0x7F)
       return false;
   }
   return true;
 }
 
+bool IsStringASCII(const std::wstring& str) {
+  return DoIsStringASCII(str);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool IsStringASCII(const string16& str) {
+  return DoIsStringASCII(str);
+}
+#endif
+
 bool IsStringASCII(const std::string& str) {
-  for (size_t i = 0; i < str.length(); i++) {
-    if (static_cast<unsigned char>(str[i]) > 0x7F)
-      return false;
-  }
-  return true;
+  return DoIsStringASCII(str);
 }
 
 // Helper functions that determine whether the given character begins a
@@ -517,7 +601,7 @@ static inline bool IsInUTF8Sequence(int c) {
 // originally been UTF-8, but has been converted to wide characters because
 // that's what we (and Windows) use internally.
 template<typename CHAR>
-static bool IsStringUTF8T(const CHAR* str) {
+static bool IsStringUTF8T(const CHAR* str, int length) {
   bool overlong = false;
   bool surrogate = false;
   bool nonchar = false;
@@ -532,7 +616,7 @@ static bool IsStringUTF8T(const CHAR* str) {
   // are left in the sequence
   int positions_left = 0;
 
-  for (int i = 0; str[i] != 0; i++) {
+  for (int i = 0; i < length; i++) {
     // This whole function assume an unsigned value so force its conversion to
     // an unsigned value.
     typename ToUnsigned<CHAR>::Unsigned c = str[i];
@@ -556,6 +640,7 @@ static bool IsStringUTF8T(const CHAR* str) {
         slower = 0xA0;
       } else if (c == 0xEF) {
         // EF BF [BE-BF] : non-character
+        // TODO(jungshik): EF B7 [90-AF] should be checked as well.
         nonchar = true;
       }
     } else if (c <= 0xF4) {
@@ -599,12 +684,12 @@ static bool IsStringUTF8T(const CHAR* str) {
   return true;
 }
 
-bool IsStringUTF8(const char* str) {
-  return IsStringUTF8T(str);
+bool IsStringUTF8(const std::string& str) {
+  return IsStringUTF8T(str.data(), str.length());
 }
 
-bool IsStringWideUTF8(const wchar_t* str) {
-  return IsStringUTF8T(str);
+bool IsStringWideUTF8(const std::wstring& str) {
+  return IsStringUTF8T(str.data(), str.length());
 }
 
 template<typename Iter>
@@ -656,6 +741,19 @@ bool StartsWithASCII(const std::string& str,
     return str.compare(0, search.length(), search) == 0;
   else
     return base::strncasecmp(str.c_str(), search.c_str(), search.length()) == 0;
+}
+
+bool StartsWith(const std::wstring& str,
+                const std::wstring& search,
+                bool case_sensitive) {
+  if (case_sensitive)
+    return str.compare(0, search.length(), search) == 0;
+  else {
+    if (search.size() > str.size())
+      return false;
+    return std::equal(search.begin(), search.end(), str.begin(),
+                      CaseInsensitiveCompare<wchar_t>());
+  }
 }
 
 DataUnits GetByteDisplayUnits(int64 bytes) {
@@ -749,7 +847,8 @@ template<class StringType>
 void DoReplaceSubstringsAfterOffset(StringType* str,
                                     typename StringType::size_type start_offset,
                                     const StringType& find_this,
-                                    const StringType& replace_with) {
+                                    const StringType& replace_with,
+                                    bool replace_all) {
   if ((start_offset == StringType::npos) || (start_offset >= str->length()))
     return;
 
@@ -758,21 +857,42 @@ void DoReplaceSubstringsAfterOffset(StringType* str,
       offs != StringType::npos; offs = str->find(find_this, offs)) {
     str->replace(offs, find_this.length(), replace_with);
     offs += replace_with.length();
+
+    if (!replace_all)
+      break;
   }
 }
 
-void ReplaceSubstringsAfterOffset(std::wstring* str,
-                                  std::wstring::size_type start_offset,
-                                  const std::wstring& find_this,
-                                  const std::wstring& replace_with) {
-  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with);
+void ReplaceFirstSubstringAfterOffset(string16* str,
+                                      string16::size_type start_offset,
+                                      const string16& find_this,
+                                      const string16& replace_with) {
+  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with,
+                                 false);  // replace first instance
+}
+
+void ReplaceFirstSubstringAfterOffset(std::string* str,
+                                      std::string::size_type start_offset,
+                                      const std::string& find_this,
+                                      const std::string& replace_with) {
+  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with,
+                                 false);  // replace first instance
+}
+
+void ReplaceSubstringsAfterOffset(string16* str,
+                                  string16::size_type start_offset,
+                                  const string16& find_this,
+                                  const string16& replace_with) {
+  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with,
+                                 true);  // replace all instances
 }
 
 void ReplaceSubstringsAfterOffset(std::string* str,
                                   std::string::size_type start_offset,
                                   const std::string& find_this,
                                   const std::string& replace_with) {
-  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with);
+  DoReplaceSubstringsAfterOffset(str, start_offset, find_this, replace_with,
+                                 true);  // replace all instances
 }
 
 // Overloaded wrappers around vsnprintf and vswprintf. The buf_size parameter
@@ -968,13 +1088,24 @@ std::wstring Uint64ToWString(uint64 value) {
       IntToString(value);
 }
 
-inline void StringAppendV(std::string* dst, const char* format, va_list ap) {
+std::string DoubleToString(double value) {
+  // According to g_fmt.cc, it is sufficient to declare a buffer of size 32.
+  char buffer[32];
+  dmg_fp::g_fmt(buffer, value);
+  return std::string(buffer);
+}
+
+std::wstring DoubleToWString(double value) {
+  return ASCIIToWide(DoubleToString(value));
+}
+
+void StringAppendV(std::string* dst, const char* format, va_list ap) {
   StringAppendVT<char>(dst, format, ap);
 }
 
-inline void StringAppendV(std::wstring* dst,
-                          const wchar_t* format,
-                          va_list ap) {
+void StringAppendV(std::wstring* dst,
+                   const wchar_t* format,
+                   va_list ap) {
   StringAppendVT<wchar_t>(dst, format, ap);
 }
 
@@ -1075,6 +1206,31 @@ void SplitStringDontTrim(const std::string& str,
                          char s,
                          std::vector<std::string>* r) {
   SplitStringT(str, s, false, r);
+}
+
+template<typename STR>
+static STR JoinStringT(const std::vector<STR>& parts,
+                       typename STR::value_type sep) {
+  if (parts.size() == 0) return STR();
+
+  STR result(parts[0]);
+  typename std::vector<STR>::const_iterator iter = parts.begin();
+  ++iter;
+
+  for (; iter != parts.end(); ++iter) {
+    result += sep;
+    result += *iter;
+  }
+
+  return result;
+}
+
+std::string JoinString(const std::vector<std::string>& parts, char sep) {
+  return JoinStringT(parts, sep);
+}
+
+std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t sep) {
+  return JoinStringT(parts, sep);
 }
 
 void SplitStringAlongWhitespace(const std::wstring& str,
@@ -1320,18 +1476,18 @@ bool StringToInt(const std::string& input, int* output) {
                                             reinterpret_cast<long*>(output));
 }
 
-bool StringToInt(const std::wstring& input, int* output) {
+bool StringToInt(const string16& input, int* output) {
   COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_wcstol_to_int);
-  return StringToNumber<WStringToLongTraits>(input,
-                                             reinterpret_cast<long*>(output));
+  return StringToNumber<String16ToLongTraits>(input,
+                                              reinterpret_cast<long*>(output));
 }
 
 bool StringToInt64(const std::string& input, int64* output) {
   return StringToNumber<StringToInt64Traits>(input, output);
 }
 
-bool StringToInt64(const std::wstring& input, int64* output) {
-  return StringToNumber<WStringToInt64Traits>(input, output);
+bool StringToInt64(const string16& input, int64* output) {
+  return StringToNumber<String16ToInt64Traits>(input, output);
 }
 
 bool HexStringToInt(const std::string& input, int* output) {
@@ -1340,18 +1496,52 @@ bool HexStringToInt(const std::string& input, int* output) {
                                                reinterpret_cast<long*>(output));
 }
 
-bool HexStringToInt(const std::wstring& input, int* output) {
+bool HexStringToInt(const string16& input, int* output) {
   COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_wcstol_to_int);
-  return StringToNumber<HexWStringToLongTraits>(
+  return StringToNumber<HexString16ToLongTraits>(
       input, reinterpret_cast<long*>(output));
 }
 
-bool StringToDouble(const std::string& input, double* output) {
-  return StringToNumber<StringToDoubleTraits>(input, output);
+namespace {
+
+template<class CHAR>
+bool HexDigitToIntT(const CHAR digit, uint8* val) {
+  if (digit >= '0' && digit <= '9')
+    *val = digit - '0';
+  else if (digit >= 'a' && digit <= 'f')
+    *val = 10 + digit - 'a';
+  else if (digit >= 'A' && digit <= 'F')
+    *val = 10 + digit - 'A';
+  else
+    return false;
+  return true;
 }
 
-bool StringToDouble(const std::wstring& input, double* output) {
-  return StringToNumber<WStringToDoubleTraits>(input, output);
+template<typename STR>
+bool HexStringToBytesT(const STR& input, std::vector<uint8>* output) {
+  DCHECK(output->size() == 0);
+  int count = input.size();
+  if (count == 0 || (count % 2) != 0)
+    return false;
+  for (int i = 0; i < count / 2; ++i) {
+    uint8 msb = 0;  // most significant 4 bits
+    uint8 lsb = 0;  // least significant 4 bits
+    if (!HexDigitToIntT(input[i * 2], &msb) ||
+        !HexDigitToIntT(input[i * 2 + 1], &lsb))
+      return false;
+    output->push_back((msb << 4) | lsb);
+  }
+  return true;
+}
+
+}  // namespace
+
+bool HexStringToBytes(const std::string& input, std::vector<uint8>* output) {
+  return HexStringToBytesT(input, output);
+}
+
+bool HexStringToBytes(const string16& input, std::vector<uint8>* output) {
+  return HexStringToBytesT(input, output);
 }
 
 int StringToInt(const std::string& value) {
@@ -1360,7 +1550,7 @@ int StringToInt(const std::string& value) {
   return result;
 }
 
-int StringToInt(const std::wstring& value) {
+int StringToInt(const string16& value) {
   int result;
   StringToInt(value, &result);
   return result;
@@ -1372,7 +1562,7 @@ int64 StringToInt64(const std::string& value) {
   return result;
 }
 
-int64 StringToInt64(const std::wstring& value) {
+int64 StringToInt64(const string16& value) {
   int64 result;
   StringToInt64(value, &result);
   return result;
@@ -1384,10 +1574,18 @@ int HexStringToInt(const std::string& value) {
   return result;
 }
 
-int HexStringToInt(const std::wstring& value) {
+int HexStringToInt(const string16& value) {
   int result;
   HexStringToInt(value, &result);
   return result;
+}
+
+bool StringToDouble(const std::string& input, double* output) {
+  return StringToNumber<StringToDoubleTraits>(input, output);
+}
+
+bool StringToDouble(const string16& input, double* output) {
+  return StringToNumber<String16ToDoubleTraits>(input, output);
 }
 
 double StringToDouble(const std::string& value) {
@@ -1396,7 +1594,7 @@ double StringToDouble(const std::string& value) {
   return result;
 }
 
-double StringToDouble(const std::wstring& value) {
+double StringToDouble(const string16& value) {
   double result;
   StringToDouble(value, &result);
   return result;
@@ -1433,3 +1631,53 @@ size_t base::wcslcpy(wchar_t* dst, const wchar_t* src, size_t dst_size) {
   return lcpyT<wchar_t>(dst, src, dst_size);
 }
 
+bool ElideString(const std::wstring& input, int max_len, std::wstring* output) {
+  DCHECK(max_len >= 0);
+  if (static_cast<int>(input.length()) <= max_len) {
+    output->assign(input);
+    return false;
+  }
+
+  switch (max_len) {
+    case 0:
+      output->clear();
+      break;
+    case 1:
+      output->assign(input.substr(0, 1));
+      break;
+    case 2:
+      output->assign(input.substr(0, 2));
+      break;
+    case 3:
+      output->assign(input.substr(0, 1) + L"." +
+                     input.substr(input.length() - 1));
+      break;
+    case 4:
+      output->assign(input.substr(0, 1) + L".." +
+                     input.substr(input.length() - 1));
+      break;
+    default: {
+      int rstr_len = (max_len - 3) / 2;
+      int lstr_len = rstr_len + ((max_len - 3) % 2);
+      output->assign(input.substr(0, lstr_len) + L"..." +
+                     input.substr(input.length() - rstr_len));
+      break;
+    }
+  }
+
+  return true;
+}
+
+std::string HexEncode(const void* bytes, size_t size) {
+  static const char kHexChars[] = "0123456789ABCDEF";
+
+  // Each input byte creates two output hex characters.
+  std::string ret(size * 2, '\0');
+
+  for (size_t i = 0; i < size; ++i) {
+    char b = reinterpret_cast<const char*>(bytes)[i];
+    ret[(i * 2)] = kHexChars[(b >> 4) & 0xf];
+    ret[(i * 2) + 1] = kHexChars[b & 0xf];
+  }
+  return ret;
+}

@@ -8,14 +8,13 @@
 #include <Windows.h>
 #include <map>
 
-#include "base/logging.h"
-#include "chrome/browser/template_url_model.h"
-#include "chrome/views/dialog_delegate.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/table_view.h"
+#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/table/table_view.h"
 #include "chrome/views/view.h"
+#include "chrome/views/window/dialog_delegate.h"
 
-namespace ChromeViews {
+namespace views {
 class CheckBox;
 class Label;
 }
@@ -40,7 +39,7 @@ class TemplateURLTableModel;
 // the favicon. The entries in the model are sorted such that non-generated
 // appear first (grouped together) and are followed by generated keywords.
 
-class TemplateURLTableModel : public ChromeViews::TableModel {
+class TemplateURLTableModel : public views::TableModel {
  public:
   explicit TemplateURLTableModel(TemplateURLModel* template_url_model);
 
@@ -54,7 +53,7 @@ class TemplateURLTableModel : public ChromeViews::TableModel {
   virtual int RowCount();
   virtual std::wstring GetText(int row, int column);
   virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(ChromeViews::TableModelObserver* observer);
+  virtual void SetObserver(views::TableModelObserver* observer);
   virtual bool HasGroups();
   virtual Groups GetGroups();
   virtual int GetGroupID(int row);
@@ -96,7 +95,7 @@ class TemplateURLTableModel : public ChromeViews::TableModel {
   // Notification that a model entry has fetched its icon.
   void FavIconAvailable(ModelEntry* entry);
 
-  ChromeViews::TableModelObserver* observer_;
+  views::TableModelObserver* observer_;
 
   // The entries.
   std::vector<ModelEntry*> entries_;
@@ -115,16 +114,14 @@ class TemplateURLTableModel : public ChromeViews::TableModel {
 
 // KeywordEditorView allows the user to edit keywords.
 
-class KeywordEditorView : public ChromeViews::View,
-                          public ChromeViews::TableViewObserver,
-                          public ChromeViews::NativeButton::Listener,
+class KeywordEditorView : public views::View,
+                          public views::TableViewObserver,
+                          public views::NativeButton::Listener,
                           public TemplateURLModelObserver,
-                          public ChromeViews::DialogDelegate {
+                          public views::DialogDelegate {
   friend class KeywordEditorViewTest;
   FRIEND_TEST(KeywordEditorViewTest, MakeDefault);
  public:
-  static void RegisterUserPrefs(PrefService* prefs);
-
   // Shows the KeywordEditorView for the specified profile. If there is a
   // KeywordEditorView already open, it is closed and a new one is shown.
   static void Show(Profile* profile);
@@ -146,8 +143,7 @@ class KeywordEditorView : public ChromeViews::View,
                          const std::wstring& url);
 
   // Overriden to invoke Layout.
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
-  virtual void GetPreferredSize(CSize* out);
+  virtual gfx::Size GetPreferredSize();
 
   // DialogDelegate methods:
   virtual bool CanResize() const;
@@ -155,7 +151,7 @@ class KeywordEditorView : public ChromeViews::View,
   virtual int GetDialogButtons() const;
   virtual bool Accept();
   virtual bool Cancel();
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
   // Returns the TemplateURLModel we're using.
   TemplateURLModel* template_url_model() const { return url_model_; }
@@ -172,7 +168,7 @@ class KeywordEditorView : public ChromeViews::View,
   virtual void OnDoubleClick();
 
   // Button::ButtonListener method.
-  virtual void ButtonPressed(ChromeViews::NativeButton* sender);
+  virtual void ButtonPressed(views::NativeButton* sender);
 
   // TemplateURLModelObserver notification.
   virtual void OnTemplateURLModelChanged();
@@ -196,15 +192,13 @@ class KeywordEditorView : public ChromeViews::View,
 
   // All the views are added as children, so that we don't need to delete
   // them directly.
-  ChromeViews::TableView* table_view_;
-  ChromeViews::NativeButton* add_button_;
-  ChromeViews::NativeButton* edit_button_;
-  ChromeViews::NativeButton* remove_button_;
-  ChromeViews::NativeButton* make_default_button_;
-  ChromeViews::CheckBox* enable_suggest_checkbox_;
+  views::TableView* table_view_;
+  views::NativeButton* add_button_;
+  views::NativeButton* edit_button_;
+  views::NativeButton* remove_button_;
+  views::NativeButton* make_default_button_;
 
   DISALLOW_COPY_AND_ASSIGN(KeywordEditorView);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_KEYWORD_EDITOR_VIEW_H_
-

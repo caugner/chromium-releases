@@ -9,16 +9,18 @@
 
 #include "base/gfx/rect.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/controller.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
+#include "chrome/browser/location_bar.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/browser/views/info_bubble.h"
 #include "chrome/common/gfx/chrome_font.h"
-#include "chrome/views/hwnd_view.h"
-#include "chrome/views/image_view.h"
-#include "chrome/views/label.h"
+#include "chrome/views/controls/hwnd_view.h"
+#include "chrome/views/controls/image_view.h"
+#include "chrome/views/controls/label.h"
 #include "chrome/views/painter.h"
 
+class CommandUpdater;
 class GURL;
 class Profile;
 
@@ -30,10 +32,10 @@ class Profile;
 //   of the URL bar strip and contains its content.
 //
 /////////////////////////////////////////////////////////////////////////////
-class LocationBarView : public ChromeViews::View,
+class LocationBarView : public LocationBar,
+                        public views::View,
                         public AutocompleteEditController {
  public:
-
   class Delegate {
    public:
     // Should return the current tab contents.
@@ -46,7 +48,7 @@ class LocationBarView : public ChromeViews::View,
   };
 
   LocationBarView(Profile* profile,
-                  CommandController* controller,
+                  CommandUpdater* command_updater,
                   ToolbarModel* model_,
                   Delegate* delegate,
                   bool popup_window_mode);
@@ -67,10 +69,9 @@ class LocationBarView : public ChromeViews::View,
   Profile* profile() { return profile_; }
 
   // Sizing functions
-  virtual void GetPreferredSize(CSize *out);
+  virtual gfx::Size GetPreferredSize();
 
   // Layout and Painting functions
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
   virtual void Layout();
   virtual void Paint(ChromeCanvas* canvas);
 
@@ -85,16 +86,15 @@ class LocationBarView : public ChromeViews::View,
   virtual void VisibleBoundsInRootChanged();
 
   // Event Handlers
-  virtual bool OnMousePressed(const ChromeViews::MouseEvent& event);
-  virtual bool OnMouseDragged(const ChromeViews::MouseEvent& event);
-  virtual void OnMouseReleased(const ChromeViews::MouseEvent& event,
-                               bool canceled);
+  virtual bool OnMousePressed(const views::MouseEvent& event);
+  virtual bool OnMouseDragged(const views::MouseEvent& event);
+  virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);
 
   // AutocompleteEditController
-  virtual void OnAutocompleteAccept(const std::wstring& url,
+  virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     PageTransition::Type transition,
-                                    const std::wstring& alternate_nav_url);
+                                    const GURL& alternate_nav_url);
   virtual void OnChanged();
   virtual void OnInputInProgress(bool in_progress) {
     delegate_->OnInputInProgress(in_progress);
@@ -109,33 +109,28 @@ class LocationBarView : public ChromeViews::View,
     return location_entry_.get();
   }
 
-  std::wstring location_input() {
-    return location_input_;
-  }
+  // Overridden from views::View:
+  virtual bool OverrideAccelerator(const views::Accelerator& accelerator);
 
-  WindowOpenDisposition disposition() {
-    return disposition_;
-  }
+  // Overridden from LocationBar:
+  virtual void ShowFirstRunBubble();
+  virtual std::wstring GetInputString() const;
+  virtual WindowOpenDisposition GetWindowOpenDisposition() const;
+  virtual PageTransition::Type GetPageTransition() const;
+  virtual void AcceptInput();
+  virtual void FocusLocation();
+  virtual void FocusSearch();
+  virtual void UpdateFeedIcon();
+  virtual void SaveStateToContents(TabContents* contents);
 
-  PageTransition::Type transition() {
-    return transition_;
-  }
-
-  // Shows a info bubble that tells the user what the omnibox is and allows
-  // to change the search providers.
-  void ShowFirstRunBubble();
-
-  // Overridden from View.
-  virtual bool OverrideAccelerator(const ChromeViews::Accelerator& accelerator);
-
-  static const int kTextVertMargin;
+  static const int kVertMargin;
   static const COLORREF kBackgroundColorByLevel[];
 
  protected:
   void Focus();
 
   // Overridden from Chrome::View.
-  virtual bool ShouldLookupAccelerators(const ChromeViews::KeyEvent& e);
+  virtual bool ShouldLookupAccelerators(const views::KeyEvent& e);
 
  private:
   // View used when the user has selected a keyword.
@@ -144,7 +139,7 @@ class LocationBarView : public ChromeViews::View,
   // complete description of the keyword, the second contains a truncated
   // version of the description. The second is used if there is not enough room
   // to display the complete description.
-  class SelectedKeywordView : public ChromeViews::View {
+  class SelectedKeywordView : public views::View {
    public:
     explicit SelectedKeywordView(Profile* profile);
     virtual ~SelectedKeywordView();
@@ -153,9 +148,8 @@ class LocationBarView : public ChromeViews::View,
 
     virtual void Paint(ChromeCanvas* canvas);
 
-    virtual void GetPreferredSize(CSize* out);
-    virtual void GetMinimumSize(CSize* out);
-    virtual void DidChangeBounds(const CRect& previous, const CRect& current);
+    virtual gfx::Size GetPreferredSize();
+    virtual gfx::Size GetMinimumSize();
     virtual void Layout();
 
     // The current keyword, or an empty string if no keyword is displayed.
@@ -174,13 +168,13 @@ class LocationBarView : public ChromeViews::View,
     std::wstring keyword_;
 
     // For painting the background.
-    ChromeViews::HorizontalPainter background_painter_;
+    views::HorizontalPainter background_painter_;
 
     // Label containing the complete description.
-    ChromeViews::Label full_label_;
+    views::Label full_label_;
 
     // Label containing the partial description.
-    ChromeViews::Label partial_label_;
+    views::Label partial_label_;
 
     Profile* profile_;
 
@@ -195,7 +189,7 @@ class LocationBarView : public ChromeViews::View,
   //
   // NOTE: This should really be called LocationBarKeywordHintView, but I
   // couldn't bring myself to use such a long name.
-  class KeywordHintView : public ChromeViews::View {
+  class KeywordHintView : public views::View {
    public:
     explicit KeywordHintView(Profile* profile);
     virtual ~KeywordHintView();
@@ -208,17 +202,16 @@ class LocationBarView : public ChromeViews::View,
     std::wstring keyword() const { return keyword_; }
 
     virtual void Paint(ChromeCanvas* canvas);
-    virtual void GetPreferredSize(CSize* out);
+    virtual gfx::Size GetPreferredSize();
     // The minimum size is just big enough to show the tab.
-    virtual void GetMinimumSize(CSize* out);
+    virtual gfx::Size GetMinimumSize();
     virtual void Layout();
-    void DidChangeBounds(const CRect& previous, const CRect& current);
 
     void set_profile(Profile* profile) { profile_ = profile; }
 
    private:
-    ChromeViews::Label leading_label_;
-    ChromeViews::Label trailing_label_;
+    views::Label leading_label_;
+    views::Label trailing_label_;
 
     // The keyword.
     std::wstring keyword_;
@@ -232,13 +225,45 @@ class LocationBarView : public ChromeViews::View,
   class ShowInfoBubbleTask;
   class ShowFirstRunBubbleTask;
 
+  class LocationBarImageView : public views::ImageView,
+                               public InfoBubbleDelegate  {
+  public:
+    LocationBarImageView();
+    virtual ~LocationBarImageView();
+
+    // Overridden from view for the mouse hovering.
+    virtual void OnMouseMoved(const views::MouseEvent& event);
+    virtual void OnMouseExited(const views::MouseEvent& event);
+    virtual bool OnMousePressed(const views::MouseEvent& event) = 0;
+
+    // InfoBubbleDelegate
+    void InfoBubbleClosing(InfoBubble* info_bubble, bool closed_by_escape);
+    bool CloseOnEscape() { return true; }
+
+    virtual void ShowInfoBubble() = 0;
+
+  protected:
+    void ShowInfoBubbleImpl(const std::wstring& text, SkColor text_color);
+
+  private:
+    friend class ShowInfoBubbleTask;
+
+    // The currently shown info bubble if any.
+    InfoBubble* info_bubble_;
+
+    // A task used to display the info bubble when the mouse hovers on the
+    // image.
+    ShowInfoBubbleTask* show_info_bubble_task_;
+
+    DISALLOW_COPY_AND_ASSIGN(LocationBarImageView);
+  };
+
   // SecurityImageView is used to display the lock or warning icon when the
   // current URL's scheme is https.
   //
   // If a message has been set with SetInfoBubbleText, it displays an info
   // bubble when the mouse hovers on the image.
-  class SecurityImageView : public ChromeViews::ImageView,
-                            public InfoBubbleDelegate  {
+  class SecurityImageView : public LocationBarImageView {
    public:
     enum Image {
       LOCK = 0,
@@ -252,21 +277,13 @@ class LocationBarView : public ChromeViews::View,
     void SetImageShown(Image image);
 
     // Overridden from view for the mouse hovering.
-    virtual void OnMouseMoved(const ChromeViews::MouseEvent& event);
-    virtual void OnMouseExited(const ChromeViews::MouseEvent& event);
-    virtual bool OnMousePressed(const ChromeViews::MouseEvent& event);
-
-    // InfoBubbleDelegate
-    void InfoBubbleClosing(InfoBubble* info_bubble);
-    bool CloseOnEscape() { return true; }
+    virtual bool OnMousePressed(const views::MouseEvent& event);
 
     void set_profile(Profile* profile) { profile_ = profile; }
 
+    virtual void ShowInfoBubble();
+
    private:
-    friend class ShowInfoBubbleTask;
-
-    void ShowInfoBubble();
-
     // The lock icon shown when using HTTPS.
     static SkBitmap* lock_icon_;
 
@@ -276,7 +293,8 @@ class LocationBarView : public ChromeViews::View,
     // The currently shown info bubble if any.
     InfoBubble* info_bubble_;
 
-    // A task used to display the info bubble when the mouse hovers on the image.
+    // A task used to display the info bubble when the mouse hovers on the
+    // image.
     ShowInfoBubbleTask* show_info_bubble_task_;
 
     Profile* profile_;
@@ -286,11 +304,38 @@ class LocationBarView : public ChromeViews::View,
     DISALLOW_EVIL_CONSTRUCTORS(SecurityImageView);
   };
 
+  // RssImageView is used to display the RSS icon when the page has a feed that
+  // you can subscribe to.
+  //
+  // If a message has been set with SetInfoBubbleText, it displays an info
+  // bubble when the mouse hovers on the image.
+  class RssImageView : public LocationBarImageView {
+  public:
+    explicit RssImageView(ToolbarModel* model);
+    virtual ~RssImageView();
+
+    // Overridden from view for the mouse hovering.
+    virtual bool OnMousePressed(const views::MouseEvent& event);
+
+    virtual void ShowInfoBubble();
+
+  private:
+    // The RSS icon shown when page has a feed.
+    static SkBitmap* rss_icon_;
+
+    ToolbarModel* model_;
+
+    DISALLOW_COPY_AND_ASSIGN(RssImageView);
+  };
+
   // Both Layout and OnChanged call into this. This updates the contents
   // of the 3 views: selected_keyword, keyword_hint and type_search_view. If
   // force_layout is true, or one of these views has changed in such a way as
   // to necessitate a layout, layout occurs as well.
   void DoLayout(bool force_layout);
+
+  // Returns the height in pixels of the margin at the top of the bar.
+  int TopMargin() const;
 
   // Returns the width in pixels of the contents of the edit.
   int TextDisplayWidth();
@@ -314,11 +359,14 @@ class LocationBarView : public ChromeViews::View,
   // If View fits in the specified region, it is made visible and the
   // bounds are adjusted appropriately. If the View does not fit, it is
   // made invisible.
-  void LayoutView(bool leading, ChromeViews::View* view, int text_width,
+  void LayoutView(bool leading, views::View* view, int text_width,
                   int max_width, gfx::Rect* bounds);
 
   // Sets the security icon to display.  Note that no repaint is done.
   void SetSecurityIcon(ToolbarModel::Icon icon);
+
+  // Sets the RSS icon visibility.
+  void SetRssIconVisibility(FeedList* feeds);
 
   // Sets the text that should be displayed in the info label and its associated
   // tooltip text.  Call with an empty string if the info label should be
@@ -329,10 +377,10 @@ class LocationBarView : public ChromeViews::View,
 
   // Sets the visibility of view to new_vis. Returns whether the visibility
   // changed.
-  bool ToggleVisibility(bool new_vis, ChromeViews::View* view);
+  bool ToggleVisibility(bool new_vis, views::View* view);
 
   // Helper for the Mouse event handlers that does all the real work.
-  void OnMouseEvent(const ChromeViews::MouseEvent& event, UINT msg);
+  void OnMouseEvent(const views::MouseEvent& event, UINT msg);
 
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal();
@@ -341,10 +389,10 @@ class LocationBarView : public ChromeViews::View,
   Profile* profile_;
 
   // The Autocomplete Edit field.
-  scoped_ptr<AutocompleteEditView> location_entry_;
+  scoped_ptr<AutocompleteEditViewWin> location_entry_;
 
-  // The command controller for this View.
-  CommandController* controller_;
+  // The CommandUpdater for the Browser object that corresponds to this View.
+  CommandUpdater* command_updater_;
 
   // The model.
   ToolbarModel* model_;
@@ -366,7 +414,7 @@ class LocationBarView : public ChromeViews::View,
   ChromeFont font_;
 
   // Location_entry view wrapper
-  ChromeViews::HWNDView* location_entry_view_;
+  views::HWNDView* location_entry_view_;
 
   // The following views are used to provide hints and remind the user as to
   // what is going in the edit. They are all added a children of the
@@ -380,13 +428,16 @@ class LocationBarView : public ChromeViews::View,
   KeywordHintView keyword_hint_view_;
 
   // Shown if the text is not a keyword or url.
-  ChromeViews::Label type_to_search_view_;
+  views::Label type_to_search_view_;
 
   // The view that shows the lock/warning when in HTTPS mode.
   SecurityImageView security_image_view_;
 
+  // The view that shows the RSS icon when the page has an RSS feed.
+  RssImageView rss_image_view_;
+
   // A label displayed after the lock icon to show some extra information.
-  ChromeViews::Label info_label_;
+  views::Label info_label_;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (font size / color). This is used for popups.
@@ -397,4 +448,3 @@ class LocationBarView : public ChromeViews::View,
 };
 
 #endif // CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H__
-

@@ -19,7 +19,7 @@ class HashMgr
 #ifdef HUNSPELL_CHROME_CLIENT
   // Not owned by this class, owned by the Hunspell object.
   hunspell::BDictReader* bdict_reader;
-  std::map<StringPiece, struct hentry *> custom_word_to_hentry_map_;
+  std::map<StringPiece, int> custom_word_to_affix_id_map_;
   std::vector<std::string*> pointer_to_strings_;
 #endif
   int             tablesize;
@@ -41,6 +41,10 @@ class HashMgr
 public:
 #ifdef HUNSPELL_CHROME_CLIENT
   HashMgr(hunspell::BDictReader* reader);
+  
+  // Return the hentry corresponding to the given word. Returns NULL if the 
+  // word is not there in the cache.
+  hentry* GetHentryFromHEntryCache(char* word);
 
   // Called before we do a new operation. This will empty the cache of pointers
   // to hentries that we have cached. In Chrome, we make these on-demand, but
@@ -89,6 +93,7 @@ private:
   // followed by the homonym pointer.
   typedef std::map<std::string, hentry*> HEntryCache;
   HEntryCache hentry_cache;
+
 #else
   int load_config(FILE* aff_handle);
   int parse_aliasf(char * line, FILE * af);

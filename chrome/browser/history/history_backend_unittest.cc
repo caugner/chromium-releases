@@ -2,17 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/gfx/jpeg_codec.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/in_memory_database.h"
-#include "chrome/common/jpeg_codec.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::Time;
 
 // This file only tests functionality where it is most convenient to call the
 // backend directly. Most of the history backend functions are tested by the
@@ -54,7 +59,7 @@ class HistoryBackendTest : public testing::Test {
   scoped_refptr<HistoryBackend> backend_;  // Will be NULL on init failure.
   scoped_ptr<InMemoryHistoryBackend> mem_backend_;
 
-  void AddRedirectChain(const wchar_t* sequence[], int page_id) {
+  void AddRedirectChain(const char* sequence[], int page_id) {
     HistoryService::RedirectList redirects;
     for (int i = 0; sequence[i] != NULL; ++i)
       redirects.push_back(GURL(sequence[i]));
@@ -75,11 +80,12 @@ class HistoryBackendTest : public testing::Test {
   bool loaded_;
 
  private:
-  friend HistoryBackendTestDelegate;
+  friend class HistoryBackendTestDelegate;
 
   // testing::Test
   virtual void SetUp() {
-    if (!file_util::CreateNewTempDirectory(L"BackendTest", &test_dir_))
+    if (!file_util::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
+                                           &test_dir_))
       return;
     backend_ = new HistoryBackend(test_dir_,
                                   new HistoryBackendTestDelegate(this),
@@ -101,14 +107,14 @@ class HistoryBackendTest : public testing::Test {
                                       HistoryDetails* details) {
     // Send the notifications directly to the in-memory database.
     Details<HistoryDetails> det(details);
-    mem_backend_->Observe(type, Source<HistoryTest>(NULL), det);
+    mem_backend_->Observe(type, Source<HistoryBackendTest>(NULL), det);
 
     // The backend passes ownership of the details pointer to us.
     delete details;
   }
 
   MessageLoop message_loop_;
-  std::wstring test_dir_;
+  FilePath test_dir_;
 };
 
 void HistoryBackendTestDelegate::SetInMemoryBackend(
@@ -175,12 +181,12 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // Get the two visits for the URLs we just added.
   VisitVector visits;
   backend_->db_->GetVisitsForURL(row1_id, &visits);
-  ASSERT_EQ(1, visits.size());
+  ASSERT_EQ(1U, visits.size());
   VisitID visit1_id = visits[0].visit_id;
 
   visits.clear();
   backend_->db_->GetVisitsForURL(row2_id, &visits);
-  ASSERT_EQ(1, visits.size());
+  ASSERT_EQ(1U, visits.size());
   VisitID visit2_id = visits[0].visit_id;
 
   // The in-memory backend should have been set and it should have gotten the
@@ -193,10 +199,15 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   ThumbnailScore score(0.25, true, true);
   scoped_ptr<SkBitmap> google_bitmap(
       JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
-  backend_->thumbnail_db_->SetPageThumbnail(row1_id, *google_bitmap, score);
+
+  Time time;
+  GURL gurl;
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row1_id, *google_bitmap,
+                                            score, time);
   scoped_ptr<SkBitmap> weewar_bitmap(
      JPEGCodec::Decode(kWeewarThumbnail, sizeof(kWeewarThumbnail)));
-  backend_->thumbnail_db_->SetPageThumbnail(row2_id, *weewar_bitmap, score);
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row2_id, *weewar_bitmap,
+                                            score, time);
 
   // Star row1.
   bookmark_model_.AddURL(
@@ -226,7 +237,7 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // All visits should be deleted for both URLs.
   VisitVector all_visits;
   backend_->db_->GetAllVisitsInRange(Time(), Time(), 0, &all_visits);
-  ASSERT_EQ(0, all_visits.size());
+  ASSERT_EQ(0U, all_visits.size());
 
   // All thumbnails should be deleted.
   std::vector<unsigned char> out_data;
@@ -256,7 +267,7 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   backend_->text_database_->GetTextMatches(L"Body", QueryOptions(),
                                            &text_matches,
                                            &first_time_searched);
-  EXPECT_EQ(0, text_matches.size());
+  EXPECT_EQ(0U, text_matches.size());
 }
 
 TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
@@ -307,7 +318,7 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   EXPECT_EQ(row2_id, backend_->db_->GetRowForURL(row2.url(), NULL));
   VisitVector visits;
   backend_->db_->GetVisitsForURL(row2_id, &visits);
-  EXPECT_EQ(0, visits.size());
+  EXPECT_EQ(0U, visits.size());
   // The favicon should still be valid.
   EXPECT_EQ(favicon2,
       backend_->thumbnail_db_->GetFavIconIDForFavIconURL(favicon_url2));
@@ -340,7 +351,7 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   // There should still be visits.
   visits.clear();
   backend_->db_->GetVisitsForURL(row1_id, &visits);
-  EXPECT_EQ(1, visits.size());
+  EXPECT_EQ(1U, visits.size());
 
   // The favicon should still be valid.
   EXPECT_EQ(favicon1,
@@ -350,9 +361,9 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
 TEST_F(HistoryBackendTest, GetPageThumbnailAfterRedirects) {
   ASSERT_TRUE(backend_.get());
 
-  const wchar_t* base_url = L"http://mail";
-  const wchar_t* thumbnail_url = L"http://mail.google.com";
-  const wchar_t* first_chain[] = {
+  const char* base_url = "http://mail";
+  const char* thumbnail_url = "http://mail.google.com";
+  const char* first_chain[] = {
     base_url,
     thumbnail_url,
     NULL
@@ -368,9 +379,9 @@ TEST_F(HistoryBackendTest, GetPageThumbnailAfterRedirects) {
   // Write a second URL chain so that if you were to simply check what
   // "http://mail" redirects to, you wouldn't see the URL that has
   // contains the thumbnail.
-  const wchar_t* second_chain[] = {
+  const char* second_chain[] = {
     base_url,
-    L"http://mail.google.com/somewhere/else",
+    "http://mail.google.com/somewhere/else",
     NULL
   };
   AddRedirectChain(second_chain, 1);
@@ -385,4 +396,3 @@ TEST_F(HistoryBackendTest, GetPageThumbnailAfterRedirects) {
 }
 
 }  // namespace history
-

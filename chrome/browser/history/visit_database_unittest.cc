@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -10,6 +11,10 @@
 #include "chrome/common/sqlite_compiled_statement.h"
 #include "chrome/common/sqlite_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
+
+using base::Time;
+using base::TimeDelta;
 
 namespace history {
 
@@ -27,7 +32,7 @@ bool IsVisitInfoEqual(const VisitRow& a,
 
 }  // namespace
 
-class VisitDatabaseTest : public testing::Test,
+class VisitDatabaseTest : public PlatformTest,
                           public URLDatabase,
                           public VisitDatabase {
  public:
@@ -37,12 +42,13 @@ class VisitDatabaseTest : public testing::Test,
  private:
   // Test setup.
   void SetUp() {
-    PathService::Get(base::DIR_TEMP, &db_file_);
-    db_file_.push_back(file_util::kPathSeparator);
-    db_file_.append(L"VisitTest.db");
+    PlatformTest::SetUp();
+    FilePath temp_dir;
+    PathService::Get(base::DIR_TEMP, &temp_dir);
+    db_file_ = temp_dir.AppendASCII("VisitTest.db");
     file_util::Delete(db_file_, false);
 
-    EXPECT_EQ(SQLITE_OK, sqlite3_open(WideToUTF8(db_file_).c_str(), &db_));
+    EXPECT_EQ(SQLITE_OK, OpenSqliteDb(db_file_, &db_));
     statement_cache_ = new SqliteStatementCache(db_);
 
     // Initialize the tables for this test.
@@ -55,6 +61,7 @@ class VisitDatabaseTest : public testing::Test,
     delete statement_cache_;
     sqlite3_close(db_);
     file_util::Delete(db_file_, false);
+    PlatformTest::TearDown();
   }
 
   // Provided for URL/VisitDatabase.
@@ -65,7 +72,7 @@ class VisitDatabaseTest : public testing::Test,
     return *statement_cache_;
   }
 
-  std::wstring db_file_;
+  FilePath db_file_;
   sqlite3* db_;
   SqliteStatementCache* statement_cache_;
 };
@@ -90,7 +97,7 @@ TEST_F(VisitDatabaseTest, Add) {
   // Query the first two.
   std::vector<VisitRow> matches;
   EXPECT_TRUE(GetVisitsForURL(visit_info1.url_id, &matches));
-  EXPECT_EQ(2, matches.size());
+  EXPECT_EQ(static_cast<size_t>(2), matches.size());
 
   // Make sure we got both (order in result set is visit time).
   EXPECT_TRUE(IsVisitInfoEqual(matches[0], visit_info1) &&
@@ -119,7 +126,7 @@ TEST_F(VisitDatabaseTest, Delete) {
   // First make sure all the visits are there.
   std::vector<VisitRow> matches;
   EXPECT_TRUE(GetVisitsForURL(visit_info1.url_id, &matches));
-  EXPECT_EQ(3, matches.size());
+  EXPECT_EQ(static_cast<size_t>(3), matches.size());
   EXPECT_TRUE(IsVisitInfoEqual(matches[0], visit_info1) &&
               IsVisitInfoEqual(matches[1], visit_info2) &&
               IsVisitInfoEqual(matches[2], visit_info3));
@@ -132,7 +139,7 @@ TEST_F(VisitDatabaseTest, Delete) {
   visit_info3.referring_visit = visit_info1.visit_id;
   matches.clear();
   EXPECT_TRUE(GetVisitsForURL(visit_info1.url_id, &matches));
-  EXPECT_EQ(2, matches.size());
+  EXPECT_EQ(static_cast<size_t>(2), matches.size());
   EXPECT_TRUE(IsVisitInfoEqual(matches[0], visit_info1) &&
               IsVisitInfoEqual(matches[1], visit_info3));
 }
@@ -211,7 +218,7 @@ TEST_F(VisitDatabaseTest, GetVisibleVisitsInRange) {
   // order, but not the redirect & subframe ones later.
   VisitVector results;
   GetVisibleVisitsInRange(Time(), Time(), false, 0, &results);
-  ASSERT_EQ(3, results.size());
+  ASSERT_EQ(static_cast<size_t>(3), results.size());
   EXPECT_TRUE(IsVisitInfoEqual(results[0], visit_info4) &&
               IsVisitInfoEqual(results[1], visit_info2) &&
               IsVisitInfoEqual(results[2], visit_info1));
@@ -219,7 +226,7 @@ TEST_F(VisitDatabaseTest, GetVisibleVisitsInRange) {
   // If we want only the most recent one, it should give us the same results
   // minus the first (duplicate of the second) one.
   GetVisibleVisitsInRange(Time(), Time(), true, 0, &results);
-  ASSERT_EQ(2, results.size());
+  ASSERT_EQ(static_cast<size_t>(2), results.size());
   EXPECT_TRUE(IsVisitInfoEqual(results[0], visit_info4) &&
               IsVisitInfoEqual(results[1], visit_info2));
 
@@ -227,14 +234,13 @@ TEST_F(VisitDatabaseTest, GetVisibleVisitsInRange) {
   // exclusive.
   GetVisibleVisitsInRange(visit_info2.visit_time, visit_info4.visit_time,
                           false, 0, &results);
-  ASSERT_EQ(1, results.size());
+  ASSERT_EQ(static_cast<size_t>(1), results.size());
   EXPECT_TRUE(IsVisitInfoEqual(results[0], visit_info2));
 
   // Query for a max count and make sure we get only that number.
   GetVisibleVisitsInRange(Time(), Time(), false, 2, &results);
-  ASSERT_EQ(2, results.size());
+  ASSERT_EQ(static_cast<size_t>(2), results.size());
   EXPECT_TRUE(IsVisitInfoEqual(results[0], visit_info4) &&
               IsVisitInfoEqual(results[1], visit_info2));
 }
-
 }  // namespace history

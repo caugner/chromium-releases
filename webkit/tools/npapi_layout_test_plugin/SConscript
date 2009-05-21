@@ -9,51 +9,49 @@ env_res = env_res.Clone()
 
 input_files = [
     'main.cpp',
-    env_res.RES('npapi_layout_test_plugin.rc'),
     'PluginObject.cpp',
-    'TestObject.cpp',
-    'npapi_layout_test_plugin.def',
+    'TestObject.cpp'
 ]
 
-env.Append(
-    CCFLAGS = [
-        '/TP',
-        '/WX',
-    ],
+if env.Bit('windows'):
+  input_files.extend([
+      env_res.RES('npapi_layout_test_plugin.rc'),
+      'npapi_layout_test_plugin.def'
+  ])
 
-    LIBS = [
-        'comctl32.lib',
-        'rpcrt4.lib',
-        'shlwapi.lib',
-        'winmm.lib',
-    ],
+  env.Append(
+      CCFLAGS = [
+          '/TP',
+          '/WX',
+      ],
 
-    LINKFLAGS = [
-        '/DELAYLOAD:"dwmapi.dll"',
-        '/DELAYLOAD:"uxtheme.dll"',
-        '/FIXED:No',
-        '/SUBSYSTEM:CONSOLE',
-        '/MACHINE:X86',
-        '/safeseh',
-        '/dynamicbase',
-        '/ignore:4199',
-        '/nxcompat',
-    ],
-)
+      LIBS = [
+          'comctl32.lib',
+          'rpcrt4.lib',
+          'shlwapi.lib',
+          'winmm.lib',
+      ],
 
-dll = env.ChromeSharedLibrary(['npapi_layout_test_plugin',
-                         'npapi_layout_test_plugin.lib',
-                         'npapi_layout_test_plugin.ilk',
-                         'npapi_layout_test_plugin.pdb'],
-                        input_files)
+      LINKFLAGS = [
+          '/DELAYLOAD:"dwmapi.dll"',
+          '/DELAYLOAD:"uxtheme.dll"',
+          '/FIXED:No',
+          '/SUBSYSTEM:CONSOLE',
+          '/MACHINE:X86',
+          '/safeseh',
+          '/dynamicbase',
+          '/ignore:4199',
+          '/nxcompat',
+      ],
+  )
 
-# TODO(sgk):  goes away when env.ChromeSharedLibrary() knows how
-# to do this for us.
-env.Install('$LIBS_DIR', dll[1])
+dll = env.ChromeSharedLibrary('npapi_layout_test_plugin', input_files)
 
-i = env.Install('$TARGET_ROOT/plugins', dll)
+env.ChromeMSVSProject(('$WEBKIT_DIR/tools/npapi_layout_test_plugin/' +
+                     'npapi_layout_test_plugin.vcproj'),
+                guid='{BE6D5659-A8D5-4890-A42C-090DD10EF62C}')
+
+# Install ourselves into the destination root so that dependent tests
+# can find us.
+i = env.Install('$DESTINATION_ROOT/plugins', dll)
 env.Alias('webkit', i)
-
-i = env.Install('$TARGET_ROOT', dll)
-env.Alias('webkit', i)
-

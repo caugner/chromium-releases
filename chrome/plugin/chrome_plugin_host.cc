@@ -4,15 +4,20 @@
 
 #include "chrome/plugin/chrome_plugin_host.h"
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/plugin_process.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
 #include "net/base/data_url.h"
+#include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/resource_type.h"
@@ -61,7 +66,8 @@ class PluginRequestHandlerProxy
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info) {
+      const ResourceLoaderBridge::ResponseInfo& info,
+      bool content_filtered) {
     response_headers_ = info.headers;
     plugin_->functions().response_funcs->start_completed(
         cprequest_.get(), CPERR_SUCCESS);
@@ -80,7 +86,8 @@ class PluginRequestHandlerProxy
     }
   }
 
-  virtual void OnCompletedRequest(const URLRequestStatus& status) {
+  virtual void OnCompletedRequest(const URLRequestStatus& status,
+                                  const std::string& security_info) {
     completed_ = true;
 
     if (!status.is_success()) {
@@ -132,17 +139,19 @@ class PluginRequestHandlerProxy
 
   CPError Start() {
     bridge_.reset(
-        PluginThread::GetPluginThread()->resource_dispatcher()->CreateBridge(
+        PluginThread::current()->resource_dispatcher()->CreateBridge(
             cprequest_->method,
             GURL(cprequest_->url),
             GURL(cprequest_->url),  // TODO(jackson): policy url?
             GURL(),  // TODO(mpcomplete): referrer?
+            "null",  // frame_origin
+            "null",  // main_frame_origin
             extra_headers_,
             load_flags_,
             GetCurrentProcessId(),
             ResourceType::OBJECT,
-            false,  // TODO (jcampan): mixed-content?
-            cprequest_->context));
+            cprequest_->context,
+            MSG_ROUTING_CONTROL));
     if (!bridge_.get())
       return CPERR_FAILURE;
 
@@ -246,9 +255,9 @@ void STDCALL CPB_SetKeepProcessAlive(CPID id, CPBool keep_alive) {
   if (desired_value != g_keep_process_alive) {
     g_keep_process_alive = desired_value;
     if (g_keep_process_alive)
-      PluginProcess::AddRefProcess();
+      PluginProcess::current()->AddRefProcess();
     else
-      PluginProcess::ReleaseProcess();
+      PluginProcess::current()->ReleaseProcess();
   }
 }
 
@@ -256,8 +265,24 @@ CPError STDCALL CPB_GetCookies(CPID id, CPBrowsingContext context,
                                const char* url, char** cookies) {
   CHECK(ChromePluginLib::IsPluginThread());
   std::string cookies_str;
-  PluginThread::GetPluginThread()->Send(
-      new PluginProcessHostMsg_GetCookies(context, GURL(url), &cookies_str));
+
+  WebPluginProxy* webplugin = WebPluginProxy::FromCPBrowsingContext(context);
+  // There are two contexts in which we can be asked for cookies:
+  // 1. From a script context.  webplugin will be non-NULL.
+  // 2. From a global browser context (think: Gears UpdateTask).  webplugin will
+  //    be NULL and context will (loosely) represent a browser Profile.
+  // In case 1, we *must* route through the renderer process, otherwise we race
+  // with renderer script that may have set cookies.  In case 2, we are running
+  // out-of-band with script, so we don't need to stay in sync with any
+  // particular renderer.
+  // See http://b/issue?id=1487502.
+  if (webplugin) {
+    cookies_str = webplugin->GetCookies(GURL(url), GURL(url));
+  } else {
+    PluginThread::current()->Send(
+        new PluginProcessHostMsg_GetCookies(context, GURL(url), &cookies_str));
+  }
+
   *cookies = CPB_StringDup(CPB_Alloc, cookies_str);
   return CPERR_SUCCESS;
 }
@@ -317,9 +342,9 @@ int STDCALL CPB_GetBrowsingContextInfo(
     if (buf_size < sizeof(char*))
       return sizeof(char*);
 
-    std::wstring wretval;
-    PluginThread::GetPluginThread()->Send(
-        new PluginProcessHostMsg_GetPluginDataDir(&wretval));
+    std::wstring wretval = CommandLine::ForCurrentProcess()->
+        GetSwitchValue(switches::kPluginDataDir);
+    DCHECK(!wretval.empty());
     file_util::AppendToPath(&wretval, chrome::kChromePluginDataDirname);
     *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, WideToUTF8(wretval));
     return CPERR_SUCCESS;
@@ -485,10 +510,9 @@ CPError STDCALL CPB_SendMessage(CPID id, const void *data, uint32 data_len) {
   CHECK(ChromePluginLib::IsPluginThread());
   const uint8* data_ptr = static_cast<const uint8*>(data);
   std::vector<uint8> v(data_ptr, data_ptr + data_len);
-  if (!PluginThread::GetPluginThread()->Send(
-          new PluginProcessHostMsg_PluginMessage(v))) {
+  if (!PluginThread::current()->Send(new PluginProcessHostMsg_PluginMessage(v)))
     return CPERR_FAILURE;
-  }
+
   return CPERR_SUCCESS;
 }
 
@@ -498,7 +522,7 @@ CPError STDCALL CPB_SendSyncMessage(CPID id, const void *data, uint32 data_len,
   const uint8* data_ptr = static_cast<const uint8*>(data);
   std::vector<uint8> v(data_ptr, data_ptr + data_len);
   std::vector<uint8> r;
-  if (!PluginThread::GetPluginThread()->Send(
+  if (!PluginThread::current()->Send(
           new PluginProcessHostMsg_PluginSyncMessage(v, &r))) {
     return CPERR_FAILURE;
   }
@@ -518,13 +542,25 @@ CPError STDCALL CPB_SendSyncMessage(CPID id, const void *data, uint32 data_len,
 CPError STDCALL CPB_PluginThreadAsyncCall(CPID id,
                                           void (*func)(void *),
                                           void *user_data) {
-  MessageLoop *message_loop = PluginThread::GetPluginThread()->message_loop();
+  MessageLoop *message_loop = PluginThread::current()->message_loop();
   if (!message_loop) {
     return CPERR_FAILURE;
   }
   message_loop->PostTask(FROM_HERE, NewRunnableFunction(func, user_data));
 
   return CPERR_SUCCESS;
+}
+
+CPError STDCALL CPB_OpenFileDialog(CPID id,
+                                   CPBrowsingContext context,
+                                   bool multiple_files,
+                                   const char *title,
+                                   const char *filter,
+                                   void *user_data) {
+  NOTREACHED() <<
+    "Open file dialog should only be called from the renderer process.";
+
+  return CPERR_FAILURE;
 }
 
 }  // namespace
@@ -557,6 +593,7 @@ CPBrowserFuncs* GetCPBrowserFuncsForPlugin() {
     browser_funcs.handle_command = CPB_HandleCommand;
     browser_funcs.send_sync_message = CPB_SendSyncMessage;
     browser_funcs.plugin_thread_async_call = CPB_PluginThreadAsyncCall;
+    browser_funcs.open_file_dialog = CPB_OpenFileDialog;
 
     browser_funcs.request_funcs = &request_funcs;
     browser_funcs.response_funcs = &response_funcs;
@@ -580,4 +617,3 @@ CPBrowserFuncs* GetCPBrowserFuncsForPlugin() {
 
   return &browser_funcs;
 }
-

@@ -5,6 +5,9 @@
 #include "net/base/ssl_config_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using base::TimeDelta;
+using base::TimeTicks;
+
 namespace {
 
 class SSLConfigServiceTest : public testing::Test {
@@ -81,4 +84,3 @@ TEST(SSLConfigServiceTest, GetTest) {
   // Restore the original value.
   net::SSLConfigService::SetRevCheckingEnabled(config.rev_checking_enabled);
 }
-

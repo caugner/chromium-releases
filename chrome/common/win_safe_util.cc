@@ -8,6 +8,7 @@
 
 #include "chrome/common/win_safe_util.h"
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -15,80 +16,13 @@
 
 namespace win_util {
 
-// This is the COM IAttachmentExecute interface definition.
-// In the current Chrome headers it is not present because the _WIN32_IE macro
-// is not set at the XPSP2 or IE60 level. We have placed guards to avoid double
-// declaration in case we change the _WIN32_IE macro.
-#ifndef __IAttachmentExecute_INTERFACE_DEFINED__
-#define __IAttachmentExecute_INTERFACE_DEFINED__
-
-typedef
-enum tagATTACHMENT_PROMPT
-{	ATTACHMENT_PROMPT_NONE	= 0,
-ATTACHMENT_PROMPT_SAVE	= 0x1,
-ATTACHMENT_PROMPT_EXEC	= 0x2,
-ATTACHMENT_PROMPT_EXEC_OR_SAVE	= 0x3
-} 	ATTACHMENT_PROMPT;
-
-typedef
-enum tagATTACHMENT_ACTION
-{	ATTACHMENT_ACTION_CANCEL	= 0,
-ATTACHMENT_ACTION_SAVE	= 0x1,
-ATTACHMENT_ACTION_EXEC	= 0x2
-} 	ATTACHMENT_ACTION;
-
-MIDL_INTERFACE("73db1241-1e85-4581-8e4f-a81e1d0f8c57")
-IAttachmentExecute : public IUnknown
-{
-public:
-  virtual HRESULT STDMETHODCALLTYPE SetClientTitle(
-    /* [string][in] */ LPCWSTR pszTitle) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SetClientGuid(
-    /* [in] */ REFGUID guid) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SetLocalPath(
-    /* [string][in] */ LPCWSTR pszLocalPath) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SetFileName(
-    /* [string][in] */ LPCWSTR pszFileName) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SetSource(
-    /* [string][in] */ LPCWSTR pszSource) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SetReferrer(
-    /* [string][in] */ LPCWSTR pszReferrer) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE CheckPolicy( void) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE Prompt(
-    /* [in] */ HWND hwnd,
-    /* [in] */ ATTACHMENT_PROMPT prompt,
-    /* [out] */ ATTACHMENT_ACTION *paction) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE Save( void) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE Execute(
-    /* [in] */ HWND hwnd,
-    /* [string][in] */ LPCWSTR pszVerb,
-    HANDLE *phProcess) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE SaveWithUI(
-    HWND hwnd) = 0;
-
-  virtual HRESULT STDMETHODCALLTYPE ClearClientState( void) = 0;
-
-};
-
-#endif  // __IAttachmentExecute_INTERFACE_DEFINED__
-
 // This function implementation is based on the attachment execution
 // services functionally deployed with IE6 or Service pack 2. This
 // functionality is exposed in the IAttachmentExecute COM interface.
 // more information at:
 // http://msdn2.microsoft.com/en-us/library/ms647048.aspx
 bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
-                           const std::wstring& full_path,
+                           const FilePath& full_path,
                            const std::wstring& source_url,
                            bool ask_for_app) {
   ATL::CComPtr<IAttachmentExecute> attachment_services;
@@ -118,7 +52,7 @@ bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
   // what the documentation calls evidence. Which we provide now:
   //
   // Set the file itself as evidence.
-  hr = attachment_services->SetLocalPath(full_path.c_str());
+  hr = attachment_services->SetLocalPath(full_path.value().c_str());
   if (FAILED(hr))
     return false;
   // Set the origin URL as evidence.
@@ -161,9 +95,9 @@ bool SaferOpenItemViaShell(HWND hwnd, const std::wstring& window_title,
   return OpenItemViaShellNoZoneCheck(full_path, ask_for_app);
 }
 
-bool SetInternetZoneIdentifier(const std::wstring& full_path) {
+bool SetInternetZoneIdentifier(const FilePath& full_path) {
   const DWORD kShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-  std::wstring path = full_path + L":Zone.Identifier";
+  std::wstring path = full_path.value() + L":Zone.Identifier";
   HANDLE file = CreateFile(path.c_str(), GENERIC_WRITE, kShare, NULL,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (INVALID_HANDLE_VALUE == file)
@@ -184,4 +118,3 @@ bool SetInternetZoneIdentifier(const std::wstring& full_path) {
 }
 
 }  // namespace win_util
-

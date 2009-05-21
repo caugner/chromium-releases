@@ -9,15 +9,11 @@
 //-----------------------------------------------------------------------------
 // PluginProcess messages
 // These are messages sent from the browser to the plugin process.
-IPC_BEGIN_MESSAGES(PluginProcess, 3)
+IPC_BEGIN_MESSAGES(PluginProcess)
   // Tells the plugin process to create a new channel for communication with a
   // renderer.  The channel name is returned in a
   // PluginProcessHostMsg_ChannelCreated message.
-  // The renderer_handle is the handle of the renderer process requesting
-  // the channel. It has to be valid in the context of the plugin process.
-  IPC_MESSAGE_CONTROL2(PluginProcessMsg_CreateChannel,
-                       int /* process_id */,
-                       HANDLE /* renderer handle */)
+  IPC_MESSAGE_CONTROL0(PluginProcessMsg_CreateChannel)
 
   IPC_MESSAGE_CONTROL1(PluginProcessMsg_ShutdownResponse,
                        bool /* ok to shutdown */)
@@ -35,10 +31,9 @@ IPC_END_MESSAGES(PluginProcess)
 //-----------------------------------------------------------------------------
 // PluginProcessHost messages
 // These are messages sent from the plugin process to the browser process.
-IPC_BEGIN_MESSAGES(PluginProcessHost, 4)
+IPC_BEGIN_MESSAGES(PluginProcessHost)
   // Response to a PluginProcessMsg_CreateChannel message.
-  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_ChannelCreated,
-                       int /* process_id */,
+  IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_ChannelCreated,
                        std::wstring /* channel_name */)
 
   IPC_MESSAGE_ROUTED3(PluginProcessHostMsg_DownloadUrl,
@@ -62,11 +57,6 @@ IPC_BEGIN_MESSAGES(PluginProcessHost, 4)
                               std::vector<uint8> /* opaque data */,
                               std::vector<uint8> /* opaque data response */)
 
-  // Retrieve the given type of info that is associated with the given
-  // CPBrowsingContext.  Returns the result in a string.
-  IPC_SYNC_MESSAGE_CONTROL0_1(PluginProcessHostMsg_GetPluginDataDir,
-                              std::wstring /* data_dir_retval */)
-
   // Used to get cookies for the given URL.  The request_context is a
   // CPBrowsingContext, but is passed as int32 to avoid compilation errors.
   IPC_SYNC_MESSAGE_CONTROL2_1(PluginProcessHostMsg_GetCookies,
@@ -74,13 +64,30 @@ IPC_BEGIN_MESSAGES(PluginProcessHost, 4)
                               GURL /* url */,
                               std::string /* cookies */)
 
+  // Get the list of proxies to use for |url|, as a semicolon delimited list
+  // of "<TYPE> <HOST>:<PORT>" | "DIRECT". See also ViewHostMsg_ResolveProxy
+  // which does the same thing.
+  IPC_SYNC_MESSAGE_CONTROL1_2(PluginProcessHostMsg_ResolveProxy,
+                              GURL /* url */,
+                              int /* network error */,
+                              std::string /* proxy list */)
+
+  // Creates a child window of the given parent window on the UI thread.
+  IPC_SYNC_MESSAGE_CONTROL1_1(PluginProcessHostMsg_CreateWindow,
+                              HWND /* parent */,
+                              HWND /* child */)
+
+  // Destroys the given window on the UI thread.
+  IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_DestroyWindow,
+                       HWND /* window */)
+
 IPC_END_MESSAGES(PluginProcessHost)
 
 
 //-----------------------------------------------------------------------------
 // Plugin messages
 // These are messages sent from the renderer process to the plugin process.
-IPC_BEGIN_MESSAGES(Plugin, 5)
+IPC_BEGIN_MESSAGES(Plugin)
   // Tells the plugin process to create a new plugin instance with the given
   // id.  A corresponding WebPluginDelegateStub is created which hosts the
   // WebPluginDelegateImpl.
@@ -102,6 +109,14 @@ IPC_BEGIN_MESSAGES(Plugin, 5)
                              PluginMsg_Init_Params,
                              bool /* result */)
 
+  // Used to synchronously request a paint for windowless plugins.
+  IPC_SYNC_MESSAGE_ROUTED1_0(PluginMsg_Paint,
+                             gfx::Rect /* damaged_rect */)
+
+  // Sent by the renderer after it paints from its backing store so that the
+  // plugin knows it can send more invalidates.
+  IPC_MESSAGE_ROUTED0(PluginMsg_DidPaint)
+
   IPC_SYNC_MESSAGE_ROUTED0_1(PluginMsg_Print,
                              PluginMsg_PrintResponse_Params /* params */)
 
@@ -112,12 +127,15 @@ IPC_BEGIN_MESSAGES(Plugin, 5)
   IPC_SYNC_MESSAGE_ROUTED1_0(PluginMsg_DidFinishLoadWithReason,
                              int /* reason */)
 
-  IPC_MESSAGE_ROUTED5(PluginMsg_UpdateGeometry,
+  // Updates the plugin location.  For windowless plugins, windowless_buffer
+  // contains a buffer that the plugin draws into.  background_buffer is used
+  // for transparent windowless plugins, and holds the background of the plugin
+  // rectangle.
+  IPC_MESSAGE_ROUTED4(PluginMsg_UpdateGeometry,
                       gfx::Rect /* window_rect */,
                       gfx::Rect /* clip_rect */,
-                      bool /* visible */,
-                      SharedMemoryHandle /* windowless_buffer */,
-                      SharedMemoryLock /* windowless_buffer_lock */)
+                      base::SharedMemoryHandle /* windowless_buffer */,
+                      base::SharedMemoryHandle /* background_buffer */)
 
   IPC_SYNC_MESSAGE_ROUTED0_0(PluginMsg_SetFocus)
 
@@ -179,7 +197,7 @@ IPC_END_MESSAGES(Plugin)
 // PluginHost messages
 // These are messages sent from the plugin process to the renderer process.
 // They all map to the corresponding WebPlugin methods.
-IPC_BEGIN_MESSAGES(PluginHost, 6)
+IPC_BEGIN_MESSAGES(PluginHost)
   // Sends the plugin window information to the renderer.
   // The window parameter is a handle to the window if the plugin is a windowed
   // plugin. It is NULL for windowless plugins.
@@ -196,8 +214,6 @@ IPC_BEGIN_MESSAGES(PluginHost, 6)
 
   IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_CancelResource,
                              int /* id */)
-
-  IPC_MESSAGE_ROUTED0(PluginHostMsg_Invalidate)
 
   IPC_MESSAGE_ROUTED1(PluginHostMsg_InvalidateRect,
                       gfx::Rect /* rect */)
@@ -253,7 +269,7 @@ IPC_END_MESSAGES(PluginHost)
 // NPObject messages
 // These are messages used to marshall NPObjects.  They are sent both from the
 // plugin to the renderer and from the renderer to the plugin.
-IPC_BEGIN_MESSAGES(NPObject, 7)
+IPC_BEGIN_MESSAGES(NPObject)
   IPC_SYNC_MESSAGE_ROUTED0_0(NPObjectMsg_Release)
 
   IPC_SYNC_MESSAGE_ROUTED1_1(NPObjectMsg_HasMethod,
@@ -291,8 +307,9 @@ IPC_BEGIN_MESSAGES(NPObject, 7)
                              std::vector<NPIdentifier_Param> /* value */,
                              bool /* result */)
 
-  IPC_SYNC_MESSAGE_ROUTED1_2(NPObjectMsg_Evaluate,
+  IPC_SYNC_MESSAGE_ROUTED2_2(NPObjectMsg_Evaluate,
                              std::string /* script */,
+                             bool /* popups_allowed */,
                              NPVariant_Param /* result_param */,
                              bool /* result */)
 
@@ -300,4 +317,3 @@ IPC_BEGIN_MESSAGES(NPObject, 7)
                              std::string /* message */)
 
 IPC_END_MESSAGES(NPObject)
-

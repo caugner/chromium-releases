@@ -5,14 +5,16 @@
 #ifndef CHROME_BROWSER_VIEWS_PAGE_INFO_WINDOW_H__
 #define CHROME_BROWSER_VIEWS_PAGE_INFO_WINDOW_H__
 
-#include "chrome/views/dialog_delegate.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/window.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/window/dialog_delegate.h"
+#include "chrome/views/window/window.h"
+#include "googleurl/src/gurl.h"
 
 // The page info window displays information regarding the current page,
 // including security information.
 
-namespace ChromeViews {
+namespace views {
 class TabbedPane;
 }
 
@@ -22,8 +24,8 @@ class PrefService;
 class Profile;
 class X509Certificate;
 
-class PageInfoWindow : public ChromeViews::DialogDelegate,
-                       public ChromeViews::NativeButton::Listener {
+class PageInfoWindow : public views::DialogDelegate,
+                       public views::NativeButton::Listener {
  public:
   enum TabID {
     GENERAL = 0,
@@ -31,11 +33,19 @@ class PageInfoWindow : public ChromeViews::DialogDelegate,
 
   };
 
-  // Creates and shows a new PageInfoWindow.
-  static void Create(Profile* profile,
-                     NavigationEntry* nav_entry,
-                     HWND parent_hwnd,
-                     TabID tab);
+  // Creates and shows a new page info window for the main page.
+  static void CreatePageInfo(Profile* profile,
+                             NavigationEntry* nav_entry,
+                             HWND parent_hwnd,
+                             TabID tab);
+
+  // Creates and shows a new page info window for the frame at |url| with the
+  // specified SSL information.
+  static void CreateFrameInfo(Profile* profile,
+                              const GURL& url,
+                              const NavigationEntry::SSLStatus& ssl,
+                              HWND parent_hwnd,
+                              TabID tab);
 
   static void RegisterPrefs(PrefService* prefs);
 
@@ -43,30 +53,32 @@ class PageInfoWindow : public ChromeViews::DialogDelegate,
   virtual ~PageInfoWindow();
 
   virtual void Init(Profile* profile,
-                    NavigationEntry* navigation_entry,
+                    const GURL& url,
+                    const NavigationEntry::SSLStatus& ssl,
+                    NavigationEntry::PageType page_type,
+                    bool show_history,
                     HWND parent);
 
-  // ChromeViews::Window overridden method.
+  // views::Window overridden method.
   void Show();
 
-  // ChromeViews::NativeButton::Listener method.
-  virtual void ButtonPressed(ChromeViews::NativeButton* sender);
+  // views::NativeButton::Listener method.
+  virtual void ButtonPressed(views::NativeButton* sender);
 
-  // ChromeViews::DialogDelegate methods:
+  // views::DialogDelegate methods:
   virtual int GetDialogButtons() const;
   virtual std::wstring GetWindowTitle() const;
-  virtual void SaveWindowPosition(const CRect& bounds,
-                                  bool maximized,
-                                  bool always_on_top);
-  virtual bool RestoreWindowPosition(CRect* bounds,
-                                     bool* maximized,
-                                     bool* always_on_top);
-  virtual ChromeViews::View* GetContentsView();
+  virtual std::wstring GetWindowName() const;
+  virtual views::View* GetContentsView();
 
  private:
-  ChromeViews::View* CreateGeneralTabView();
-  ChromeViews::View* CreateSecurityTabView(Profile* profile,
-                                           NavigationEntry* navigation_entry);
+  views::View* CreateGeneralTabView();
+  views::View* CreateSecurityTabView(
+      Profile* profile,
+      const GURL& url,
+      const NavigationEntry::SSLStatus& ssl,
+      NavigationEntry::PageType page_type,
+      bool show_history);
 
   // Offsets the specified rectangle so it is showing on the screen and shifted
   // from its original location.
@@ -75,7 +87,7 @@ class PageInfoWindow : public ChromeViews::DialogDelegate,
   // Shows various information for the specified certificate in a new dialog.
   void ShowCertDialog(int cert_id);
 
-  ChromeViews::NativeButton* cert_info_button_;
+  views::NativeButton* cert_info_button_;
 
   // The id of the server cert for this page (0 means no cert).
   int cert_id_;

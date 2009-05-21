@@ -76,9 +76,9 @@ void PluginChannelBase::CleanupChannels() {
 
 bool PluginChannelBase::Init(MessageLoop* ipc_message_loop,
                              bool create_pipe_now) {
-  channel_.reset(new IPC::SyncChannel(channel_name_, mode_, this, NULL,
-                                      ipc_message_loop, create_pipe_now,
-                                      PluginProcess::GetShutDownEvent()));
+  channel_.reset(new IPC::SyncChannel(
+      channel_name_, mode_, this, NULL, ipc_message_loop, create_pipe_now,
+      PluginProcess::current()->GetShutDownEvent()));
   channel_valid_ = true;
   return true;
 }
@@ -181,7 +181,8 @@ void PluginChannelBase::RemoveRoute(int route_id) {
 }
 
 void PluginChannelBase::OnControlMessageReceived(const IPC::Message& msg) {
-  NOTREACHED() << "should override in subclass if you care about control messages";
+  NOTREACHED() <<
+      "should override in subclass if you care about control messages";
 }
 
 void PluginChannelBase::OnChannelError() {

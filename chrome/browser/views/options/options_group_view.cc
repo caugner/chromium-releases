@@ -8,17 +8,16 @@
 #include "chrome/browser/views/options/options_group_view.h"
 
 #include "base/gfx/native_theme.h"
-#include "base/gfx/skia_utils.h"
-#include "chrome/app/locales/locale_settings.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/gfx/chrome_font.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/label.h"
-#include "chrome/views/separator.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/separator.h"
+#include "grit/locale_settings.h"
+#include "grit/generated_resources.h"
 
 static const int kLeftColumnWidthChars = 20;
 static const int kOptionsGroupViewColumnSpacing = 30;
@@ -26,13 +25,13 @@ static const int kOptionsGroupViewColumnSpacing = 30;
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsGroupView, public:
 
-OptionsGroupView::OptionsGroupView(ChromeViews::View* contents,
+OptionsGroupView::OptionsGroupView(views::View* contents,
                                    const std::wstring& title,
                                    const std::wstring& description,
                                    bool show_separator)
     : contents_(contents),
-      title_label_(new ChromeViews::Label(title)),
-      description_label_(new ChromeViews::Label(description)),
+      title_label_(new views::Label(title)),
+      description_label_(new views::Label(description)),
       separator_(NULL),
       show_separator_(show_separator),
       highlighted_(false) {
@@ -41,13 +40,14 @@ OptionsGroupView::OptionsGroupView(ChromeViews::View* contents,
       rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, ChromeFont::BOLD);
   title_label_->SetFont(title_font);
   SkColor title_color = gfx::NativeTheme::instance()->GetThemeColorWithDefault(
-      gfx::NativeTheme::BUTTON, BP_GROUPBOX, GBS_NORMAL, TMT_TEXTCOLOR, COLOR_WINDOWTEXT);
+      gfx::NativeTheme::BUTTON, BP_GROUPBOX, GBS_NORMAL, TMT_TEXTCOLOR,
+      COLOR_WINDOWTEXT);
   title_label_->SetColor(title_color);
   title_label_->SetMultiLine(true);
-  title_label_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  title_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
   description_label_->SetMultiLine(true);
-  description_label_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  description_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 }
 
 void OptionsGroupView::SetHighlighted(bool highlighted) {
@@ -60,7 +60,7 @@ int OptionsGroupView::GetContentsWidth() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// OptionsGroupView, ChromeViews::View overrides:
+// OptionsGroupView, views::View overrides:
 
 void OptionsGroupView::Paint(ChromeCanvas* canvas) {
   if (highlighted_) {
@@ -75,8 +75,8 @@ void OptionsGroupView::Paint(ChromeCanvas* canvas) {
 }
 
 void OptionsGroupView::ViewHierarchyChanged(bool is_add,
-                                            ChromeViews::View* parent,
-                                            ChromeViews::View* child) {
+                                            views::View* parent,
+                                            views::View* child) {
   if (is_add && child == this)
     Init();
 }
@@ -85,8 +85,8 @@ void OptionsGroupView::ViewHierarchyChanged(bool is_add,
 // OptionsGroupView, private:
 
 void OptionsGroupView::Init() {
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
   GridLayout* layout = new GridLayout(this);
   SetLayoutManager(layout);
@@ -96,7 +96,7 @@ void OptionsGroupView::Init() {
   std::wstring left_column_chars =
       l10n_util::GetString(IDS_OPTIONS_DIALOG_LEFT_COLUMN_WIDTH_CHARS);
   int left_column_width =
-      font.ave_char_width() * _wtoi(left_column_chars.c_str());
+      font.GetExpectedTextWidth(_wtoi(left_column_chars.c_str()));
 
   const int two_column_layout_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(two_column_layout_id);
@@ -129,9 +129,8 @@ void OptionsGroupView::Init() {
     column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                           GridLayout::USE_PREF, 0, 0);
 
-    separator_ = new ChromeViews::Separator;
+    separator_ = new views::Separator;
     layout->StartRow(0, single_column_layout_id);
     layout->AddView(separator_);
   }
 }
-

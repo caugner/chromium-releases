@@ -8,9 +8,15 @@
 #include <winhttp.h>
 
 #include "base/histogram.h"
+#include "base/string_util.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
+#include "net/proxy/proxy_info.h"
 
 #pragma comment(lib, "winhttp.lib")
+
+using base::TimeDelta;
+using base::TimeTicks;
 
 namespace net {
 
@@ -24,20 +30,11 @@ static BOOL CallWinHttpGetProxyForUrl(HINTERNET session, LPCWSTR url,
   // Record separately success and failure times since they will have very
   // different characteristics.
   if (rv) {
-    UMA_HISTOGRAM_LONG_TIMES(L"Net.GetProxyForUrl_OK", time_delta);
+    UMA_HISTOGRAM_LONG_TIMES("Net.GetProxyForUrl_OK", time_delta);
   } else {
-    UMA_HISTOGRAM_LONG_TIMES(L"Net.GetProxyForUrl_FAIL", time_delta);
+    UMA_HISTOGRAM_LONG_TIMES("Net.GetProxyForUrl_FAIL", time_delta);
   }
   return rv;
-}
-
-static void FreeConfig(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* config) {
-  if (config->lpszAutoConfigUrl)
-    GlobalFree(config->lpszAutoConfigUrl);
-  if (config->lpszProxy)
-    GlobalFree(config->lpszProxy);
-  if (config->lpszProxyBypass)
-    GlobalFree(config->lpszProxyBypass);
 }
 
 static void FreeInfo(WINHTTP_PROXY_INFO* info) {
@@ -48,36 +45,15 @@ static void FreeInfo(WINHTTP_PROXY_INFO* info) {
 }
 
 ProxyResolverWinHttp::ProxyResolverWinHttp()
-    : session_handle_(NULL) {
+    : ProxyResolver(true), session_handle_(NULL) {
 }
 
 ProxyResolverWinHttp::~ProxyResolverWinHttp() {
   CloseWinHttpSession();
 }
 
-int ProxyResolverWinHttp::GetProxyConfig(ProxyConfig* config) {
-  WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ie_config = {0};
-  if (!WinHttpGetIEProxyConfigForCurrentUser(&ie_config)) {
-    LOG(ERROR) << "WinHttpGetIEProxyConfigForCurrentUser failed: " <<
-        GetLastError();
-    return ERR_FAILED;  // TODO(darin): Bug 1189288: translate error code.
-  }
-
-  if (ie_config.fAutoDetect)
-    config->auto_detect = true;
-  if (ie_config.lpszProxy)
-    config->proxy_server = WideToASCII(ie_config.lpszProxy);
-  if (ie_config.lpszProxyBypass)
-    config->proxy_bypass = WideToASCII(ie_config.lpszProxyBypass);
-  if (ie_config.lpszAutoConfigUrl)
-    config->pac_url = WideToASCII(ie_config.lpszAutoConfigUrl);
-
-  FreeConfig(&ie_config);
-  return OK;
-}
-
-int ProxyResolverWinHttp::GetProxyForURL(const std::string& query_url,
-                                         const std::string& pac_url,
+int ProxyResolverWinHttp::GetProxyForURL(const GURL& query_url,
+                                         const GURL& pac_url,
                                          ProxyInfo* results) {
   // If we don't have a WinHTTP session, then create a new one.
   if (!session_handle_ && !OpenWinHttpSession())
@@ -92,7 +68,7 @@ int ProxyResolverWinHttp::GetProxyForURL(const std::string& query_url,
   WINHTTP_AUTOPROXY_OPTIONS options = {0};
   options.fAutoLogonIfChallenged = FALSE;
   options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
-  std::wstring pac_url_wide = ASCIIToWide(pac_url);
+  std::wstring pac_url_wide = ASCIIToWide(pac_url.spec());
   options.lpszAutoConfigUrl =
       pac_url_wide.empty() ? L"http://wpad/wpad.dat" : pac_url_wide.c_str();
 
@@ -105,12 +81,13 @@ int ProxyResolverWinHttp::GetProxyForURL(const std::string& query_url,
   // get good performance in the case where WinHTTP uses an out-of-process
   // resolver.  This is important for Vista and Win2k3.
   BOOL ok = CallWinHttpGetProxyForUrl(
-      session_handle_, ASCIIToWide(query_url).c_str(), &options, &info);
+      session_handle_, ASCIIToWide(query_url.spec()).c_str(), &options, &info);
   if (!ok) {
     if (ERROR_WINHTTP_LOGIN_FAILURE == GetLastError()) {
       options.fAutoLogonIfChallenged = TRUE;
       ok = CallWinHttpGetProxyForUrl(
-          session_handle_, ASCIIToWide(query_url).c_str(), &options, &info);
+          session_handle_, ASCIIToWide(query_url.spec()).c_str(),
+          &options, &info);
     }
     if (!ok) {
       DWORD error = GetLastError();
@@ -132,6 +109,20 @@ int ProxyResolverWinHttp::GetProxyForURL(const std::string& query_url,
       results->UseDirect();
       break;
     case WINHTTP_ACCESS_TYPE_NAMED_PROXY:
+      // According to MSDN:
+      //
+      // The proxy server list contains one or more of the following strings
+      // separated by semicolons or whitespace.
+      //
+      // ([<scheme>=][<scheme>"://"]<server>[":"<port>])
+      //
+      // Based on this description, ProxyInfo::UseNamedProxy() isn't
+      // going to handle all the variations (in particular <scheme>=).
+      //
+      // However in practice, it seems that WinHTTP is simply returning
+      // things like "foopy1:80;foopy2:80". It strips out the non-HTTP
+      // proxy types, and stops the list when PAC encounters a "DIRECT".
+      // So UseNamedProxy() should work OK.
       results->UseNamedProxy(WideToASCII(info.lpszProxy));
       break;
     default:
@@ -171,4 +162,3 @@ void ProxyResolverWinHttp::CloseWinHttpSession() {
 }
 
 }  // namespace net
-

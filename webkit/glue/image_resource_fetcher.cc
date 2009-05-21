@@ -4,9 +4,11 @@
 
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "ImageSourceSkia.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 #undef LOG
 
 #include "webkit/glue/image_resource_fetcher.h"
@@ -54,4 +56,3 @@ void ImageResourceFetcher::OnURLFetchComplete(
     // download the favicon).
   web_view_->ImageResourceDownloadDone(this, errored, image);
 }
-

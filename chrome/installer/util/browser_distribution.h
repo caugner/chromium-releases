@@ -17,9 +17,8 @@ class BrowserDistribution {
 
   static BrowserDistribution* GetDistribution();
 
-  virtual void DoPostUninstallOperations(const installer::Version& version);
-
-  virtual void DoPreUninstallOperations();
+  virtual void DoPostUninstallOperations(const installer::Version& version,
+                                         const std::wstring& local_data_path);
 
   virtual std::wstring GetApplicationName();
 
@@ -27,8 +26,12 @@ class BrowserDistribution {
 
   virtual std::wstring GetPublisherName();
 
+  virtual std::wstring GetAppDescription();
+
   virtual int GetInstallReturnCode(
       installer_util::InstallStatus install_status);
+
+  virtual std::wstring GetStateKey();
 
   virtual std::wstring GetUninstallLinkName();
 
@@ -47,4 +50,3 @@ class BrowserDistribution {
 };
 
 #endif  // CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
-

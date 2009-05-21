@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/gfx/point.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/tabs/hwnd_photobooth.h"
 #include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/views/hwnd_view_container.h"
+#include "chrome/views/widget/widget_win.h"
 #include "skia/include/SkBitmap.h"
 
 namespace {
@@ -56,7 +56,7 @@ HWNDPhotobooth::~HWNDPhotobooth() {
 
 void HWNDPhotobooth::ReplaceHWND(HWND new_hwnd) {
   if (IsWindow(current_hwnd_) &&
-      GetParent(current_hwnd_) == capture_window_->GetHWND()) {
+      GetParent(current_hwnd_) == capture_window_->GetNativeView()) {
     // We need to hide the window too, so it doesn't show up in the TaskBar or
     // be parented to the desktop.
     ShowWindow(current_hwnd_, SW_HIDE);
@@ -66,7 +66,7 @@ void HWNDPhotobooth::ReplaceHWND(HWND new_hwnd) {
 
   if (IsWindow(new_hwnd)) {
     // Insert the TabContents into the capture window.
-    SetParent(current_hwnd_, capture_window_->GetHWND());
+    SetParent(current_hwnd_, capture_window_->GetNativeView());
 
     // Show the window (it may not be visible). This is the only safe way of
     // doing this. ShowWindow does not work.
@@ -83,7 +83,7 @@ void HWNDPhotobooth::PaintScreenshotIntoCanvas(
   // Our contained window may have been re-parented. Make sure it belongs to
   // us until someone calls ReplaceHWND(NULL).
   if (IsWindow(current_hwnd_) &&
-      GetParent(current_hwnd_) != capture_window_->GetHWND()) {
+      GetParent(current_hwnd_) != capture_window_->GetNativeView()) {
     ReplaceHWND(current_hwnd_);
   }
 
@@ -143,7 +143,7 @@ void HWNDPhotobooth::CreateCaptureWindow(HWND initial_hwnd) {
   gfx::Point window_position = GetCaptureWindowPosition();
   gfx::Rect capture_bounds(window_position.x(), window_position.y(),
                            contents_rect.Width(), contents_rect.Height());
-  capture_window_ = new ChromeViews::HWNDViewContainer;
+  capture_window_ = new views::WidgetWin;
   capture_window_->set_window_style(WS_POPUP);
   // WS_EX_TOOLWINDOW ensures the capture window doesn't produce a Taskbar
   // button.
@@ -151,9 +151,9 @@ void HWNDPhotobooth::CreateCaptureWindow(HWND initial_hwnd) {
   capture_window_->Init(NULL, capture_bounds, false);
   // If the capture window isn't visible, blitting from the TabContents'
   // HWND's DC to the capture bitmap produces blankness.
-  capture_window_->ShowWindow(SW_SHOWNOACTIVATE);
+  capture_window_->Show();
   SetLayeredWindowAttributes(
-      capture_window_->GetHWND(), RGB(0xFF, 0xFF, 0xFF), 0xFF, LWA_ALPHA);
+      capture_window_->GetNativeView(), RGB(0xFF, 0xFF, 0xFF), 0xFF, LWA_ALPHA);
 
   ReplaceHWND(initial_hwnd);
 }

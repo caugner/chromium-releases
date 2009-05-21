@@ -54,6 +54,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
 const char kTestCompleteCookie[] = "status";
@@ -75,27 +76,16 @@ class PluginTest : public UITest {
                       KEY_WRITE)) {
         regkey.CreateKey(L"CHROME.EXE", KEY_READ);
       }
-      if (!launch_arguments_.empty())
-        launch_arguments_.append(L" ");
-      launch_arguments_.append(L"--" kNoNativeActiveXShimSwitch);
+      launch_arguments_.AppendSwitch(kNoNativeActiveXShimSwitch);
 
     } else if (strcmp(test_info->name(), "MediaPlayerOld") == 0) {
       // When testing the old WMP plugin, we need to force Chrome to not load
       // the new plugin.
-      if (!launch_arguments_.empty())
-        launch_arguments_.append(L" ");
-
-      launch_arguments_.append(L"--" kUseOldWMPPluginSwitch);
-      launch_arguments_.append(L" ");
-      launch_arguments_.append(L"--" kNoNativeActiveXShimSwitch);
+      launch_arguments_.AppendSwitch(kUseOldWMPPluginSwitch);
+      launch_arguments_.AppendSwitch(kNoNativeActiveXShimSwitch);
     } else if (strcmp(test_info->name(), "FlashSecurity") == 0) {
-      if (!launch_arguments_.empty())
-        launch_arguments_.append(L" ");
-
-      launch_arguments_.append(L"--");
-      launch_arguments_.append(switches::kTestSandbox); 
-      launch_arguments_.append(L"=");
-      launch_arguments_.append(L"security_tests.dll");
+      launch_arguments_.AppendSwitchWithValue(switches::kTestSandbox,
+                                              L"security_tests.dll");
     }
 
     UITest::SetUp();
@@ -149,7 +139,8 @@ TEST_F(PluginTest, MediaPlayerNew) {
   TestPlugin(L"wmp_new.html", kShortWaitTimeout);
 }
 
-TEST_F(PluginTest, MediaPlayerOld) {
+// http://crbug.com/4809
+TEST_F(PluginTest, DISABLED_MediaPlayerOld) {
   TestPlugin(L"wmp_old.html", kLongWaitTimeout);
 }
 
@@ -169,7 +160,8 @@ TEST_F(PluginTest, FlashSecurity) {
   TestPlugin(L"flash.html", kShortWaitTimeout);
 }
 
-TEST_F(PluginTest, Java) {
+// http://crbug.com/8690
+TEST_F(PluginTest, DISABLED_Java) {
   TestPlugin(L"Java.html", kShortWaitTimeout);
 }
 
@@ -202,7 +194,7 @@ class ActiveXTest : public PluginTest {
         L"\\activex_test_control.dll";
     HMODULE h = LoadLibrary(test_control_path.c_str());
     ASSERT_TRUE(h != NULL) << "Failed to load activex_test_control.dll";
-    const char* func_name = register_server ? 
+    const char* func_name = register_server ?
                                 "DllRegisterServer" : "DllUnregisterServer";
     DllRegUnregServerFunc func = reinterpret_cast<DllRegUnregServerFunc>(
         GetProcAddress(h, func_name));

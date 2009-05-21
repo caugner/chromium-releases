@@ -5,9 +5,9 @@
 #include "chrome/views/border.h"
 
 #include "base/logging.h"
+#include "chrome/common/gfx/chrome_canvas.h"
 
-namespace ChromeViews {
-
+namespace views {
 
 namespace {
 
@@ -103,5 +103,4 @@ Border* Border::CreateEmptyBorder(int top, int left, int bottom, int right) {
   return new EmptyBorder(top, left, bottom, right);
 }
 
-} // namespace
-
+}  // namespace views

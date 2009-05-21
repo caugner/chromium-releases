@@ -37,6 +37,9 @@ enum {
   // If present, upload progress messages should be provided to initiator.
   LOAD_ENABLE_UPLOAD_PROGRESS = 1 << 6,
 
+  // If present, try to download the resource to a standalone file.
+  LOAD_ENABLE_DOWNLOAD_FILE = 1 << 7,
+
   // If present, ignores certificate mismatches with the domain name.
   // (The default behavior is to trigger an OnSSLCertificateError callback.)
   LOAD_IGNORE_CERT_COMMON_NAME_INVALID = 1 << 8,
@@ -60,9 +63,16 @@ enum {
   // This load will not make any changes to cookies, including storing new
   // cookies or updating existing ones.
   LOAD_DO_NOT_SAVE_COOKIES = 1 << 13,
+
+  // An SDCH dictionary was advertised, and an SDCH encoded response is
+  // possible.
+  LOAD_SDCH_DICTIONARY_ADVERTISED = 1 << 14,
+
+  // Do not resolve proxies. This override is used when downloading PAC files
+  // to avoid having a circular dependency.
+  LOAD_BYPASS_PROXY = 1 << 15,
 };
 
 }  // namespace net
 
 #endif  // NET_BASE_LOAD_FLAGS_H__
-

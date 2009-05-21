@@ -5,12 +5,14 @@
 #include "config.h"
 #include <string>
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "HTTPHeaderMap.h"
 #include "ResourceHandle.h"
 #include "ResourceHandleClient.h"
-#include "String.h"
-#pragma warning(pop)
+#include "PlatformString.h"
+MSVC_POP_WARNING();
 
 #undef LOG
 #include "base/logging.h"
@@ -31,11 +33,16 @@ MultipartResponseDelegate::MultipartResponseDelegate(
       first_received_data_(true),
       processing_headers_(false),
       stop_sending_(false) {
-  boundary_.append(boundary);
+  // Some servers report a boundary prefixed with "--".  See bug 5786.
+  if (StartsWithASCII(boundary, "--", true)) {
+    boundary_.assign(boundary);
+  } else {
+    boundary_.append(boundary);
+  }
 }
 
 void MultipartResponseDelegate::OnReceivedData(const char* data, int data_len) {
-  // stop_sending_ means that we've already received the final boundary token. 
+  // stop_sending_ means that we've already received the final boundary token.
   // The server should stop sending us data at this point, but if it does, we
   // just throw it away.
   if (stop_sending_)
@@ -56,7 +63,7 @@ void MultipartResponseDelegate::OnReceivedData(const char* data, int data_len) {
     int pos = PushOverLine(data_, 0);
     if (pos)
       data_ = data_.substr(pos);
-    
+
     if (data_.length() < boundary_.length() + 2) {
       // We don't have enough data yet to make a boundary token.  Just wait
       // until the next chunk of data arrives.
@@ -87,7 +94,6 @@ void MultipartResponseDelegate::OnReceivedData(const char* data, int data_len) {
   }
   DCHECK(!processing_headers_);
 
-  int token_line_feed = 1;
   size_t boundary_pos;
   while ((boundary_pos = FindBoundary()) != std::string::npos) {
     if (boundary_pos > 0) {
@@ -200,7 +206,7 @@ bool MultipartResponseDelegate::ParseHeaders() {
     "Range",
     "Set-Cookie"
   };
-  for (int i = 0; i < arraysize(replace_headers); ++i) {
+  for (size_t i = 0; i < arraysize(replace_headers); ++i) {
     std::string name(replace_headers[i]);
     std::string value = net::GetSpecificHeader(headers, name);
     if (!value.empty()) {
@@ -210,7 +216,7 @@ bool MultipartResponseDelegate::ParseHeaders() {
   }
   // Send the response!
   client_->didReceiveResponse(job_, response);
-  
+
   return true;
 }
 
@@ -235,7 +241,6 @@ size_t MultipartResponseDelegate::FindBoundary() {
 bool MultipartResponseDelegate::ReadMultipartBoundary(
     const WebCore::ResourceResponse& response,
     std::string* multipart_boundary) {
-
   WebCore::String content_type = response.httpHeaderField("Content-Type");
   std::string content_type_as_string =
       webkit_glue::StringToStdString(content_type);
@@ -246,12 +251,21 @@ bool MultipartResponseDelegate::ReadMultipartBoundary(
   }
 
   boundary_start_offset += strlen("boundary=");
-  size_t boundary_end_offset = content_type.length();
+
+  size_t boundary_end_offset =
+      content_type_as_string.find(';', boundary_start_offset);
+
+  if (boundary_end_offset == std::string::npos)
+    boundary_end_offset = content_type_as_string.length();
 
   size_t boundary_length = boundary_end_offset - boundary_start_offset;
 
-  *multipart_boundary = 
+  *multipart_boundary =
       content_type_as_string.substr(boundary_start_offset, boundary_length);
+  // The byte range response can have quoted boundary strings. This is legal
+  // as per MIME specifications. Individual data fragements however don't
+  // contain quoted boundary strings.
+  TrimString(*multipart_boundary, "\"", multipart_boundary);
   return true;
 }
 
@@ -260,7 +274,7 @@ bool MultipartResponseDelegate::ReadContentRanges(
     int* content_range_lower_bound,
     int* content_range_upper_bound) {
 
-  std::string content_range = 
+  std::string content_range =
       webkit_glue::StringToStdString(
           response.httpHeaderField("Content-Range"));
 
@@ -279,7 +293,7 @@ bool MultipartResponseDelegate::ReadContentRanges(
     return false;
   }
 
-  size_t byte_range_lower_bound_characters = 
+  size_t byte_range_lower_bound_characters =
       byte_range_lower_bound_end_offset - byte_range_lower_bound_start_offset;
   std::string byte_range_lower_bound =
       content_range.substr(byte_range_lower_bound_start_offset,

@@ -1,5 +1,5 @@
 /*
-** Copyright 2007, Google Inc.
+** Copyright 2007, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License"); 
 ** you may not use this file except in compliance with the License. 
@@ -41,7 +41,7 @@ struct SkBitmapProcState {
     
     typedef SkFixed (*FixedTileProc)(SkFixed, int);
     typedef int (*IntTileProc)(int, int);
-
+    
     MatrixProc          fMatrixProc;        // chooseProcs
     SampleProc32        fSampleProc32;      // chooseProcs
     SampleProc16        fSampleProc16;      // chooseProcs

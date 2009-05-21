@@ -10,13 +10,19 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/meta_table_helper.h"
-#include "chrome/browser/template_url.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/sqlite_utils.h"
 #include "skia/include/SkBitmap.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "webkit/glue/autofill_form.h"
 
-class Time;
+namespace base {
+  class Time;
+}
 struct PasswordForm;
+#if defined(OS_WIN)
 struct IE7PasswordInfo;
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -76,8 +82,16 @@ class WebDatabase {
   // Adds |form| to the list of remembered password forms.
   bool AddLogin(const PasswordForm& form);
 
+#if defined(OS_WIN)
   // Adds |info| to the list of imported passwords from ie7/ie8.
   bool AddIE7Login(const IE7PasswordInfo& info);
+
+  // Removes |info| from the list of imported passwords from ie7/ie8.
+  bool RemoveIE7Login(const IE7PasswordInfo& info);
+
+  // Return the ie7/ie8 login matching |info|.
+  bool GetIE7Login(const IE7PasswordInfo& info, IE7PasswordInfo* result);
+#endif
 
   // Updates remembered password form.
   bool UpdateLogin(const PasswordForm& form);
@@ -85,22 +99,16 @@ class WebDatabase {
   // Removes |form| from the list of remembered password forms.
   bool RemoveLogin(const PasswordForm& form);
 
-  // Removes |info| from the list of imported passwords from ie7/ie8.
-  bool RemoveIE7Login(const IE7PasswordInfo& info);
-
   // Removes all logins created from |delete_begin| onwards (inclusive) and
   // before |delete_end|. You may use a null Time value to do an unbounded
   // delete in either direction.
-  bool RemoveLoginsCreatedBetween(const Time delete_begin,
-                                  const Time delete_end);
+  bool RemoveLoginsCreatedBetween(const base::Time delete_begin,
+                                  const base::Time delete_end);
 
   // Loads a list of matching password forms into the specified vector |forms|.
   // The list will contain all possibly relevant entries to the observed |form|,
   // including blacklisted matches.
   bool GetLogins(const PasswordForm& form, std::vector<PasswordForm*>* forms);
-
-  // Return the ie7/ie8 login matching |info|.
-  bool GetIE7Login(const IE7PasswordInfo& info, IE7PasswordInfo* result);
 
   // Loads the complete list of password forms into the specified vector |forms|
   // if include_blacklisted is true, otherwise only loads those which are
@@ -108,6 +116,72 @@ class WebDatabase {
   // the 'Never for this site' button.
   bool GetAllLogins(std::vector<PasswordForm*>* forms,
                     bool include_blacklisted);
+
+  //////////////////////////////////////////////////////////////////////////////
+  //
+  // Autofill
+  //
+  //////////////////////////////////////////////////////////////////////////////
+
+  // Records the form elements in |elements| in the database in the autofill
+  // table.
+  bool AddAutofillFormElements(
+      const std::vector<AutofillForm::Element>& elements);
+
+  // Records a single form element in in the database in the autofill table.
+  bool AddAutofillFormElement(const AutofillForm::Element& element);
+
+  // Retrieves a vector of all values which have been recorded in the autofill
+  // table as the value in a form element with name |name| and which start with
+  // |prefix|.  The comparison of the prefix is case insensitive.
+  bool GetFormValuesForElementName(const std::wstring& name,
+                                   const std::wstring& prefix,
+                                   std::vector<std::wstring>* values,
+                                   int limit);
+
+  // Removes rows from autofill_dates if they were created on or after
+  // |delete_begin| and strictly before |delete_end|.  Decrements the count of
+  // the corresponding rows in the autofill table, and removes those rows if the
+  // count goes to 0.
+  bool RemoveFormElementsAddedBetween(const base::Time delete_begin,
+                                      const base::Time delete_end);
+
+  // Removes from autofill_dates rows with given pair_id where date_created lies
+  // between delte_begin and delte_end.
+  bool RemoveFormElementForTimeRange(int64 pair_id,
+                                     const base::Time delete_begin,
+                                     const base::Time delete_end,
+                                     int* how_many);
+
+  // Increments the count in the row corresponding to |pair_id| by |delta|.
+  // Removes the row from the table if the count becomes 0.
+  bool AddToCountOfFormElement(int64 pair_id, int delta);
+
+  // Gets the pair_id and count entries from name and value specified in
+  // |element|.  Sets *count to 0 if there is no such row in the table.
+  bool GetIDAndCountOfFormElement(const AutofillForm::Element& element,
+                                  int64* pair_id,
+                                  int* count);
+
+  // Gets the count only given the pair_id.
+  bool GetCountOfFormElement(int64 pair_id,
+                             int* count);
+
+  // Updates the count entry in the row corresponding to |pair_id| to |count|.
+  bool SetCountOfFormElement(int64 pair_id, int count);
+
+  // Adds a new row to the autofill table with name and value given in
+  // |element|.  Sets *pair_id to the pair_id of the new row.
+  bool InsertFormElement(const AutofillForm::Element& element, int64* pair_id);
+
+  // Adds a new row to the autofill_dates table.
+  bool InsertPairIDAndDate(int64 pair_id, const base::Time date_created);
+
+  // Removes row from the autofill tables given |pair_id|.
+  bool RemoveFormElementForID(int64 pair_id);
+
+  // Removes row from the autofill tables for the given |name| |value| pair.
+  bool RemoveFormElement(const std::wstring& name, const std::wstring& value);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -124,10 +198,18 @@ class WebDatabase {
   bool RemoveWebApp(const GURL& url);
 
  private:
-  friend class WebDatabaseTest;
+  FRIEND_TEST(WebDatabaseTest, Autofill);
+
+  // Removes empty values for autofill that were incorrectly stored in the DB
+  // (see bug http://crbug.com/6111).
+  // TODO(jcampan): http://crbug.com/7564 remove when we think all users have
+  //                run this code.
+  bool ClearAutofillEmptyValueElements();
 
   bool InitKeywordsTable();
   bool InitLoginsTable();
+  bool InitAutofillTable();
+  bool InitAutofillDatesTable();
   bool InitWebAppIconsTable();
   bool InitWebAppsTable();
 
@@ -137,7 +219,7 @@ class WebDatabase {
   int transaction_nesting_;
   MetaTableHelper meta_table_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(WebDatabase);
+  DISALLOW_COPY_AND_ASSIGN(WebDatabase);
 };
 
 #endif  // CHROME_BROWSER_WEBDATA_WEB_DATABASE_H__

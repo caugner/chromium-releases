@@ -7,22 +7,24 @@
 // keep the profile clean. Clients of this class must handle the NULL return
 // value, however.
 
-#ifndef CHROME_TEST_TESTING_BROWSER_PROCESS_H__
-#define CHROME_TEST_TESTING_BROWSER_PROCESS_H__
+#ifndef CHROME_TEST_TESTING_BROWSER_PROCESS_H_
+#define CHROME_TEST_TESTING_BROWSER_PROCESS_H_
+
+#include "build/build_config.h"
 
 #include <string>
 
-#include "base/shared_event.h"
 #include "base/string_util.h"
+#include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/notification_service.h"
-#include "base/logging.h"
 
 class TestingBrowserProcess : public BrowserProcess {
  public:
-  TestingBrowserProcess() {
-    shutdown_event_ = ::CreateEvent(NULL, TRUE, FALSE, NULL);
+  TestingBrowserProcess()
+      : shutdown_event_(new base::WaitableEvent(true, false)) {
   }
+
   virtual ~TestingBrowserProcess() {
   }
 
@@ -73,6 +75,10 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
+  virtual DevToolsManager* devtools_manager() {
+    return NULL;
+  }
+
   virtual ClipboardService* clipboard_service() {
     return NULL;
   }
@@ -102,7 +108,7 @@ class TestingBrowserProcess : public BrowserProcess {
     return false;
   }
 
-  virtual ChromeViews::AcceleratorHandler* accelerator_handler() {
+  virtual views::AcceleratorHandler* accelerator_handler() {
     return NULL;
   }
 
@@ -119,17 +125,14 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual MemoryModel memory_model() { return HIGH_MEMORY_MODEL; }
 
-  virtual SuspendController* suspend_controller() { return NULL; }
-
-  virtual bool IsUsingNewFrames() { return false; }
-
-  virtual HANDLE shutdown_event() { return shutdown_event_; }
+  virtual base::WaitableEvent* shutdown_event() {
+    return shutdown_event_.get();
+  }
 
  private:
   NotificationService notification_service_;
-  HANDLE shutdown_event_;
-  DISALLOW_EVIL_CONSTRUCTORS(TestingBrowserProcess);
+  scoped_ptr<base::WaitableEvent> shutdown_event_;
+  DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };
 
-#endif  // CHROME_TEST_TESTING_BROWSER_PROCESS_H__
-
+#endif  // CHROME_TEST_TESTING_BROWSER_PROCESS_H_

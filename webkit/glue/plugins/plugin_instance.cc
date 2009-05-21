@@ -2,11 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "config.h"
+
+#include "build/build_config.h"
+#if defined(OS_LINUX)
+#define MOZ_X11 1
+#endif
+
 #include "webkit/glue/plugins/plugin_instance.h"
 
+#include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/thread_local_storage.h"
+#include "base/thread_local.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
@@ -14,30 +23,35 @@
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/plugins/plugin_string_stream.h"
+#if defined(OS_WIN)
 #include "webkit/glue/plugins/mozilla_extensions.h"
+#endif
 #include "net/base/escape.h"
 
-namespace NPAPI
-{
+namespace NPAPI {
 
-// TODO(evanm): don't rely on static initialization.
-ThreadLocalStorage::Slot PluginInstance::plugin_instance_tls_index_;
+// Use TLS to store the PluginInstance object during its creation.  We need to
+// pass this instance to the service manager (MozillaExtensionApi) created as a
+// result of NPN_GetValue in the context of NP_Initialize.
+static base::LazyInstance<base::ThreadLocalPointer<PluginInstance> > lazy_tls(
+    base::LINKER_INITIALIZED);
 
 PluginInstance::PluginInstance(PluginLib *plugin, const std::string &mime_type)
     : plugin_(plugin),
       npp_(0),
       host_(PluginHost::Singleton()),
       npp_functions_(plugin->functions()),
+#if defined(OS_WIN)
       hwnd_(0),
+#endif
       windowless_(false),
       transparent_(true),
-      mime_type_(mime_type),
       webplugin_(0),
+      mime_type_(mime_type),
+      get_notify_data_(NULL),
       use_mozilla_user_agent_(false),
       message_loop_(MessageLoop::current()),
       load_manually_(false),
-      throttle_invalidate_(false),
-      get_notify_data_(NULL),
       in_close_streams_(false) {
   npp_ = new NPP_t();
   npp_->ndata = 0;
@@ -69,17 +83,6 @@ PluginStreamUrl *PluginInstance::CreateStream(int resource_id,
 
   AddStream(stream);
   return stream;
-}
-
-void PluginInstance::SendStream(const std::string &url,
-                                bool notify_needed,
-                                void *notify_data) {
-  if (notify_needed) {
-    host_->host_functions()->geturlnotify(npp(), url.c_str(), NULL,
-                                          notify_data);
-  } else {
-    host_->host_functions()->geturl(npp(), url.c_str(), NULL);
-  }
 }
 
 void PluginInstance::AddStream(PluginStream* stream) {
@@ -121,6 +124,7 @@ void PluginInstance::CloseStreams() {
   in_close_streams_ = false;
 }
 
+#if defined(OS_WIN)
 bool PluginInstance::HandleEvent(UINT message, WPARAM wParam, LPARAM lParam) {
   if (!windowless_)
     return false;
@@ -131,6 +135,13 @@ bool PluginInstance::HandleEvent(UINT message, WPARAM wParam, LPARAM lParam) {
   windowEvent.wParam = static_cast<uint32>(wParam);
   return NPP_HandleEvent(&windowEvent) != 0;
 }
+#elif defined(OS_LINUX)
+bool PluginInstance::HandleEvent(XEvent* event) {
+  if (!windowless_)
+    return false;
+  return NPP_HandleEvent(event);
+}
+#endif
 
 bool PluginInstance::Start(const GURL& url,
                            char** const param_names,
@@ -204,10 +215,17 @@ void PluginInstance::NPP_Destroy() {
     DCHECK(savedData == 0);
   }
 
+#if defined(OS_WIN)
   // Clean up back references to this instance if any
   if (mozilla_extenstions_) {
     mozilla_extenstions_->DetachFromInstance();
     mozilla_extenstions_ = NULL;
+  }
+#endif
+
+  for (unsigned int file_index = 0; file_index < files_created_.size();
+       file_index++) {
+    file_util::Delete(files_created_[file_index], false);
   }
 }
 
@@ -276,6 +294,12 @@ void PluginInstance::NPP_StreamAsFile(NPStream *stream, const char *fname) {
   if (npp_functions_->asfile != 0) {
     npp_functions_->asfile(npp_, stream, fname);
   }
+
+  // Creating a temporary FilePath instance on the stack as the explicit
+  // FilePath constructor with StringType as an argument causes a compiler
+  // error when invoked via vector push back.
+  FilePath file_name = FilePath::FromWStringHack(UTF8ToWide(fname));
+  files_created_.push_back(file_name);
 }
 
 void PluginInstance::NPP_URLNotify(const char *url,
@@ -360,8 +384,7 @@ void PluginInstance::DidReceiveManualResponse(const std::string& url,
   plugin_data_stream_ = CreateStream(-1, url, mime_type, false, NULL);
 
   plugin_data_stream_->DidReceiveResponse(mime_type, headers, expected_length,
-                                          last_modified, &cancel);
-  AddStream(plugin_data_stream_.get());
+                                          last_modified, true, &cancel);
 }
 
 void PluginInstance::DidReceiveManualData(const char* buffer, int length) {
@@ -396,7 +419,8 @@ void PluginInstance::PluginThreadAsyncCall(void (*func)(void *),
 
 void PluginInstance::OnPluginThreadAsyncCall(void (*func)(void *),
                                              void *userData) {
-  // We are invoking an arbitrary callback provided by a third
+#if defined(OS_WIN)
+    // We are invoking an arbitrary callback provided by a third
   // party plugin. It's better to wrap this into an exception
   // block to protect us from crashes.
   __try {
@@ -405,23 +429,24 @@ void PluginInstance::OnPluginThreadAsyncCall(void (*func)(void *),
     // Maybe we can disable a crashing plugin.
     // But for now, just continue.
   }
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 PluginInstance* PluginInstance::SetInitializingInstance(
     PluginInstance* instance) {
-  PluginInstance* old_instance =
-      static_cast<PluginInstance*>(plugin_instance_tls_index_.Get());
-  plugin_instance_tls_index_.Set(instance);
+  PluginInstance* old_instance = lazy_tls.Pointer()->Get();
+  lazy_tls.Pointer()->Set(instance);
   return old_instance;
 }
 
 PluginInstance* PluginInstance::GetInitializingInstance() {
-  PluginInstance* instance =
-      static_cast<PluginInstance*>(plugin_instance_tls_index_.Get());
-  return instance;
+  return lazy_tls.Pointer()->Get();
 }
 
 NPError PluginInstance::GetServiceManager(void** service_manager) {
+#if defined(OS_WIN)
   if (!mozilla_extenstions_) {
     mozilla_extenstions_ = new MozillaExtensionApi(this);
   }
@@ -429,6 +454,9 @@ NPError PluginInstance::GetServiceManager(void** service_manager) {
   DCHECK(mozilla_extenstions_);
   mozilla_extenstions_->QueryInterface(nsIServiceManager::GetIID(),
                                        service_manager);
+#else
+  NOTIMPLEMENTED();
+#endif
   return NPERR_NO_ERROR;
 }
 
@@ -478,7 +506,7 @@ void PluginInstance::RequestRead(NPStream* stream, NPByteRange* range_list) {
       webplugin_->InitiateHTTPRangeRequest(
           stream->url, range_info.c_str(),
           plugin_stream,
-          plugin_stream->notify_needed(), 
+          plugin_stream->notify_needed(),
           plugin_stream->notify_data());
       break;
     }
@@ -486,4 +514,3 @@ void PluginInstance::RequestRead(NPStream* stream, NPByteRange* range_list) {
 }
 
 }  // namespace NPAPI
-

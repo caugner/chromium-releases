@@ -7,27 +7,53 @@
 
 #include <string>
 #include <vector>
+#include <map>
 
 #include "base/basictypes.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
+#include "chrome/browser/renderer_host/resource_handler.h"
 #include "chrome/common/filter_policy.h"
-#include "chrome/common/ipc_message.h"
 #include "chrome/common/ipc_message_utils.h"
+#include "chrome/common/modal_dialog_event.h"
 #include "chrome/common/page_transition_types.h"
+#include "chrome/common/transport_dib.h"
 #include "googleurl/src/gurl.h"
+#include "media/audio/audio_output.h"
 #include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_status.h"
-#include "webkit/glue/cache_manager.h"
-#include "webkit/glue/context_node_types.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "webkit/glue/autofill_form.h"
+#include "webkit/glue/context_menu.h"
+#include "webkit/glue/feed.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 #include "webkit/glue/resource_loader_bridge.h"
+#include "webkit/glue/screen_info.h"
+#include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webdropdata.h"
+#include "webkit/glue/webinputevent.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/webview_delegate.h"
+
+#if defined(OS_POSIX)
+#include "skia/include/SkBitmap.h"
+#endif
+
+struct ViewHostMsg_UpdateFeedList_Params {
+  // The page_id for this navigation, or -1 if it is a new navigation.  Back,
+  // Forward, and Reload navigations should have a valid page_id.  If the load
+  // succeeds, then this page_id will be reflected in the resulting
+  // ViewHostMsg_FrameNavigate message.
+  int32 page_id;
+
+  // The list of available feeds.
+  scoped_refptr<FeedList> feedlist;
+};
 
 // Parameters structure for ViewMsg_Navigate, which has too many data
 // parameters to be reasonably put in a predefined IPC message.
@@ -40,6 +66,10 @@ struct ViewMsg_Navigate_Params {
 
   // The URL to load.
   GURL url;
+
+  // The URL to send in the "Referer" header field. Can be empty if there is
+  // no referrer.
+  GURL referrer;
 
   // The type of transition.
   PageTransition::Type transition;
@@ -101,55 +131,13 @@ struct ViewHostMsg_FrameNavigate_Params {
 
   // True if this was a post request.
   bool is_post;
-};
 
-// Parameters structure for ViewHostMsg_ContextMenu, which has too many data
-// parameters to be reasonably put in a predefined IPC message.
-// FIXME(beng): This would be more useful in the future and more efficient
-//              if the parameters here weren't so literally mapped to what
-//              they contain for the ContextMenu task. It might be better
-//              to make the string fields more generic so that this object
-//              could be used for more contextual actions.
-struct ViewHostMsg_ContextMenu_Params {
-  // This is the type of Context Node that the context menu was invoked on.
-  ContextNode::Type type;
+  // Whether the content of the frame was replaced with some alternate content
+  // (this can happen if the resource was insecure).
+  bool is_content_filtered;
 
-  // These values represent the coordinates of the mouse when the context menu
-  // was invoked.  Coords are relative to the associated RenderView's origin.
-  int x;
-  int y;
-
-  // This is the URL of the link that encloses the node the context menu was
-  // invoked on.
-  GURL link_url;
-
-  // This is the URL of the image the context menu was invoked on.
-  GURL image_url;
-
-  // This is the URL of the top level page that the context menu was invoked
-  // on.
-  GURL page_url;
-
-  // This is the URL of the subframe that the context menu was invoked on.
-  GURL frame_url;
-
-  // This is the text of the selection that the context menu was invoked on.
-  std::wstring selection_text;
-
-  // The misspelled word under the cursor, if any. Used to generate the
-  // |dictionary_suggestions| list.
-  std::wstring misspelled_word;
-
-  // Suggested replacements for a misspelled word under the cursor.
-  // This vector gets populated in the render process host
-  // by intercepting ViewHostMsg_ContextMenu in ResourceMessageFilter
-  // and populating dictionary_suggestions if the type is EDITABLE
-  // and the misspelled_word is not empty.
-  std::vector<std::wstring> dictionary_suggestions;
-
-  // These flags indicate to the browser whether the renderer believes it is
-  // able to perform the corresponding action.
-  int edit_flags;
+  // The status code of the HTTP request.
+  int http_status_code;
 };
 
 // Values that may be OR'd together to form the 'flags' parameter of a
@@ -173,9 +161,8 @@ struct ViewHostMsg_PaintRect_Flags {
 };
 
 struct ViewHostMsg_PaintRect_Params {
-  // The bitmap to be painted into the rect given by bitmap_rect.  Valid only
-  // in the context of the renderer process.
-  SharedMemoryHandle bitmap;
+  // The bitmap to be painted into the rect given by bitmap_rect.
+  TransportDIB::Id bitmap;
 
   // The position and size of the bitmap.
   gfx::Rect bitmap_rect;
@@ -207,9 +194,8 @@ struct ViewHostMsg_PaintRect_Params {
 // Parameters structure for ViewHostMsg_ScrollRect, which has too many data
 // parameters to be reasonably put in a predefined IPC message.
 struct ViewHostMsg_ScrollRect_Params {
-  // The bitmap to be painted into the rect exposed by scrolling.  This handle
-  // is valid only in the context of the renderer process.
-  SharedMemoryHandle bitmap;
+  // The bitmap to be painted into the rect exposed by scrolling.
+  TransportDIB::Id bitmap;
 
   // The position and size of the bitmap.
   gfx::Rect bitmap_rect;
@@ -256,6 +242,14 @@ struct ViewHostMsg_Resource_Request {
   // The referrer to use (may be empty).
   GURL referrer;
 
+  // The origin of the frame that is associated with this request.  This is used
+  // to update our mixed content state.
+  std::string frame_origin;
+
+  // The origin of the main frame (top-level frame) that is associated with this
+  // request.  This is used to update our mixed content state.
+  std::string main_frame_origin;
+
   // Additional HTTP request headers.
   std::string headers;
 
@@ -269,35 +263,11 @@ struct ViewHostMsg_Resource_Request {
   // object).
   ResourceType::Type resource_type;
 
-  // True if this request is for a resource loaded over HTTP when the main page
-  // was loaded over HTTPS.
-  bool mixed_content;
-
   // Used by plugin->browser requests to get the correct URLRequestContext.
   uint32 request_context;
 
   // Optional upload data (may be empty).
   std::vector<net::UploadData::Element> upload_content;
-};
-
-// Parameters for a resource response header.
-struct ViewMsg_Resource_ResponseHead
-    : webkit_glue::ResourceLoaderBridge::ResponseInfo {
-  // The response status.
-  URLRequestStatus status;
-
-  // Specifies if the resource should be filtered before being displayed
-  // (insecure resources can be filtered to keep the page secure).
-  FilterPolicy::Type filter_policy;
-};
-
-// Parameters for a synchronous resource response.
-struct ViewHostMsg_SyncLoad_Result : ViewMsg_Resource_ResponseHead {
-  // The final URL after any redirects.
-  GURL final_url;
-
-  // The response data.
-  std::string data;
 };
 
 // Parameters for a render request.
@@ -353,7 +323,7 @@ struct ViewMsg_PrintPages_Params {
 struct ViewHostMsg_DidPrintPage_Params {
   // A shared memory handle to the EMF data. This data can be quite large so a
   // memory map needs to be used.
-  SharedMemoryHandle emf_data_handle;
+  base::SharedMemoryHandle emf_data_handle;
 
   // Size of the EMF data.
   unsigned data_size;
@@ -375,28 +345,23 @@ enum ViewHostMsg_ImeControl {
   IME_COMPLETE_COMPOSITION,
 };
 
-// Multi-pass include of render_messages_internal.  Preprocessor magic allows
-// us to use 1 header to define the enums and classes for our render messages.
-#define IPC_MESSAGE_MACROS_ENUMS
-#include "chrome/common/render_messages_internal.h"
+// Parameters for creating an audio output stream.
+struct ViewHostMsg_Audio_CreateStream {
+  // Format request for the stream.
+  AudioManager::Format format;
 
-#ifdef IPC_MESSAGE_MACROS_LOG_ENABLED
-// When we are supposed to create debug strings, we run it through twice, once
-// with debug strings on, and once with only CLASSES on to generate both types
-// of messages.
-#  undef IPC_MESSAGE_MACROS_LOG
-#  define IPC_MESSAGE_MACROS_CLASSES
-#  include "chrome/common/render_messages_internal.h"
+  // Number of channels.
+  int channels;
 
-#  undef IPC_MESSAGE_MACROS_CLASSES
-#  define IPC_MESSAGE_MACROS_LOG
-#  include "chrome/common/render_messages_internal.h"
-#else
-// No debug strings requested, just define the classes
-#  define IPC_MESSAGE_MACROS_CLASSES
-#  include "chrome/common/render_messages_internal.h"
-#endif
+  // Sampling rate (frequency) of the output stream.
+  int sample_rate;
 
+  // Number of bits per sample;
+  int bits_per_sample;
+
+  // Number of bytes per packet.
+  size_t packet_size;
+};
 
 namespace IPC {
 
@@ -427,6 +392,9 @@ struct ParamTraits<ResourceType::Type> {
        break;
      case ResourceType::OBJECT:
        type = L"OBJECT";
+       break;
+     case ResourceType::MEDIA:
+       type = L"MEDIA";
        break;
      default:
        type = L"UNKNOWN";
@@ -472,8 +440,49 @@ struct ParamTraits<FilterPolicy::Type> {
 };
 
 template <>
-struct ParamTraits<ContextNode::Type> {
-  typedef ContextNode::Type param_type;
+struct ParamTraits<ContextNode> {
+  typedef ContextNode param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(p.type);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    int type;
+    if (!m->ReadInt(iter, &type))
+      return false;
+    *p = ContextNode(type);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    std::wstring event = L"";
+
+    if (!p.type) {
+      event.append(L"NONE");
+    } else {
+      event.append(L"(");
+      if (p.type & ContextNode::PAGE)
+        event.append(L"PAGE|");
+      if (p.type & ContextNode::FRAME)
+        event.append(L"FRAME|");
+      if (p.type & ContextNode::LINK)
+        event.append(L"LINK|");
+      if (p.type & ContextNode::IMAGE)
+        event.append(L"IMAGE|");
+      if (p.type & ContextNode::SELECTION)
+        event.append(L"SELECTION|");
+      if (p.type & ContextNode::EDITABLE)
+        event.append(L"EDITABLE|");
+      if (p.type & ContextNode::MISSPELLED_WORD)
+        event.append(L"MISSPELLED_WORD|");
+      event.append(L")");
+    }
+
+    LogParam(event, l);
+  }
+};
+
+template <>
+struct ParamTraits<WebInputEvent::Type> {
+  typedef WebInputEvent::Type param_type;
   static void Write(Message* m, const param_type& p) {
     m->WriteInt(p);
   }
@@ -481,7 +490,7 @@ struct ParamTraits<ContextNode::Type> {
     int type;
     if (!m->ReadInt(iter, &type))
       return false;
-    *p = ContextNode::FromInt(type);
+    *p = static_cast<WebInputEvent::Type>(type);
     return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
@@ -505,6 +514,9 @@ struct ParamTraits<ContextNode::Type> {
      case WebInputEvent::MOUSE_WHEEL:
       type = L"MOUSE_WHEEL";
       break;
+     case WebInputEvent::RAW_KEY_DOWN:
+      type = L"RAW_KEY_DOWN";
+      break;
      case WebInputEvent::KEY_DOWN:
       type = L"KEY_DOWN";
       break;
@@ -520,55 +532,138 @@ struct ParamTraits<ContextNode::Type> {
   }
 };
 
+// Traits for ViewHostMsg_UpdateFeedList_Params structure to pack/unpack.
 template <>
-struct ParamTraits<WebInputEvent::Type> {
-  typedef WebInputEvent::Type param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteInt(p);
+struct ParamTraits<ViewHostMsg_UpdateFeedList_Params> {
+  typedef ViewHostMsg_UpdateFeedList_Params param_type;
+  static void Write(Message* msg, const param_type& param) {
+    WriteParam(msg, param.page_id);
+    WriteParam(msg, param.feedlist->list().size());
+    for (std::vector<FeedItem>::const_iterator iter =
+             param.feedlist->list().begin();
+         iter != param.feedlist->list().end(); iter++) {
+      WriteParam(msg, iter->title);
+      WriteParam(msg, iter->type);
+      WriteParam(msg, iter->url);
+    }
   }
-  static bool Read(const Message* m, void** iter, param_type* p) {
-    int type;
-    if (!m->ReadInt(iter, &type))
+  static bool Read(const Message* msg, void** iter, param_type* param) {
+    param->feedlist = new FeedList();
+    if (!ReadParam(msg, iter, &param->page_id))
       return false;
-    *p = static_cast<WebInputEvent::Type>(type);
-    return true;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    std::wstring event;
-    switch (p) {
-     case ContextNode::NONE:
-      event = L"NONE";
-      break;
-     case ContextNode::PAGE:
-      event = L"PAGE";
-      break;
-     case ContextNode::FRAME:
-      event = L"FRAME";
-      break;
-     case ContextNode::LINK:
-      event = L"LINK";
-      break;
-     case ContextNode::IMAGE:
-      event = L"IMAGE";
-      break;
-     case ContextNode::IMAGE_LINK:
-      event = L"IMAGE_LINK";
-      break;
-     case ContextNode::SELECTION:
-      event = L"SELECTION";
-      break;
-     case ContextNode::EDITABLE:
-      event = L"EDITABLE";
-      break;
-     case ContextNode::MISPELLED_WORD:
-      event = L"MISPELLED_WORD";
-      break;
-     default:
-      event = L"UNKNOWN";
-      break;
+
+    size_t arraysize = 0;
+    if (!ReadParam(msg, iter, &arraysize))
+      return false;
+
+    if (arraysize > FeedList::kMaxFeeds) {
+      NOTREACHED() << L"Too many feeds sent by the renderer";
+      return false;
     }
 
-    LogParam(event, l);
+    bool ret = true;
+    for (size_t i = 0; i < arraysize; i++) {
+      FeedItem feeditem;
+      ret = ReadParam(msg, iter, &feeditem.title) &&
+            ReadParam(msg, iter, &feeditem.type) &&
+            ReadParam(msg, iter, &feeditem.url);
+      if (!ret)
+        return ret;
+      param->feedlist->Add(feeditem);
+    }
+
+    return ret;
+  }
+  static void Log(const param_type& param, std::wstring* log) {
+    log->append(L"(");
+    LogParam(param.page_id, log);
+    log->append(L", {");
+    for (std::vector<FeedItem>::const_iterator iter =
+             param.feedlist->list().begin();
+         iter != param.feedlist->list().end(); iter++) {
+      log->append(L"[");
+      LogParam(iter->title, log);
+      log->append(L", ");
+      LogParam(iter->type, log);
+      log->append(L", ");
+      LogParam(iter->url, log);
+      log->append(L"]");
+    }
+    log->append(L"})");
+  }
+};
+
+template <>
+struct ParamTraits<webkit_glue::WebAccessibility::InParams> {
+  typedef webkit_glue::WebAccessibility::InParams param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.object_id);
+    WriteParam(m, p.function_id);
+    WriteParam(m, p.child_id);
+    WriteParam(m, p.input_long1);
+    WriteParam(m, p.input_long2);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return
+      ReadParam(m, iter, &p->object_id) &&
+      ReadParam(m, iter, &p->function_id) &&
+      ReadParam(m, iter, &p->child_id) &&
+      ReadParam(m, iter, &p->input_long1) &&
+      ReadParam(m, iter, &p->input_long2);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.object_id, l);
+    l->append(L", ");
+    LogParam(p.function_id, l);
+    l->append(L", ");
+    LogParam(p.child_id, l);
+    l->append(L", ");
+    LogParam(p.input_long1, l);
+    l->append(L", ");
+    LogParam(p.input_long2, l);
+    l->append(L")");
+  }
+};
+
+template <>
+struct ParamTraits<webkit_glue::WebAccessibility::OutParams> {
+  typedef webkit_glue::WebAccessibility::OutParams param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.object_id);
+    WriteParam(m, p.output_long1);
+    WriteParam(m, p.output_long2);
+    WriteParam(m, p.output_long3);
+    WriteParam(m, p.output_long4);
+    WriteParam(m, p.output_string);
+    WriteParam(m, p.return_code);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return
+      ReadParam(m, iter, &p->object_id) &&
+      ReadParam(m, iter, &p->output_long1) &&
+      ReadParam(m, iter, &p->output_long2) &&
+      ReadParam(m, iter, &p->output_long3) &&
+      ReadParam(m, iter, &p->output_long4) &&
+      ReadParam(m, iter, &p->output_string) &&
+      ReadParam(m, iter, &p->return_code);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.object_id, l);
+    l->append(L", ");
+    LogParam(p.output_long1, l);
+    l->append(L", ");
+    LogParam(p.output_long2, l);
+    l->append(L", ");
+    LogParam(p.output_long3, l);
+    l->append(L", ");
+    LogParam(p.output_long4, l);
+    l->append(L", ");
+    LogParam(p.output_string, l);
+    l->append(L", ");
+    LogParam(p.return_code, l);
+    l->append(L")");
   }
 };
 
@@ -613,6 +708,7 @@ struct ParamTraits<ViewMsg_Navigate_Params> {
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.page_id);
     WriteParam(m, p.url);
+    WriteParam(m, p.referrer);
     WriteParam(m, p.transition);
     WriteParam(m, p.state);
     WriteParam(m, p.reload);
@@ -621,6 +717,7 @@ struct ParamTraits<ViewMsg_Navigate_Params> {
     return
       ReadParam(m, iter, &p->page_id) &&
       ReadParam(m, iter, &p->url) &&
+      ReadParam(m, iter, &p->referrer) &&
       ReadParam(m, iter, &p->transition) &&
       ReadParam(m, iter, &p->state) &&
       ReadParam(m, iter, &p->reload);
@@ -680,6 +777,36 @@ struct ParamTraits<PasswordForm> {
   }
 };
 
+// Traits for AutofillForm_Params structure to pack/unpack.
+template <>
+struct ParamTraits<AutofillForm> {
+  typedef AutofillForm param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.elements.size());
+    for (std::vector<AutofillForm::Element>::const_iterator itr =
+        p.elements.begin();
+        itr != p.elements.end();
+        itr++) {
+      WriteParam(m, itr->name);
+      WriteParam(m, itr->value);
+    }
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+      bool result = true;
+      size_t elements_size = 0;
+      result = result && ReadParam(m, iter, &elements_size);
+      p->elements.resize(elements_size);
+      for (size_t i = 0; i < elements_size; i++) {
+        result = result && ReadParam(m, iter, &(p->elements[i].name));
+        result = result && ReadParam(m, iter, &(p->elements[i].value));
+      }
+      return result;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<AutofillForm>");
+  }
+};
+
 // Traits for ViewHostMsg_FrameNavigate_Params structure to pack/unpack.
 template <>
 struct ParamTraits<ViewHostMsg_FrameNavigate_Params> {
@@ -699,6 +826,8 @@ struct ParamTraits<ViewHostMsg_FrameNavigate_Params> {
     WriteParam(m, p.gesture);
     WriteParam(m, p.contents_mime_type);
     WriteParam(m, p.is_post);
+    WriteParam(m, p.is_content_filtered);
+    WriteParam(m, p.http_status_code);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return
@@ -715,7 +844,9 @@ struct ParamTraits<ViewHostMsg_FrameNavigate_Params> {
       ReadParam(m, iter, &p->security_info) &&
       ReadParam(m, iter, &p->gesture) &&
       ReadParam(m, iter, &p->contents_mime_type) &&
-      ReadParam(m, iter, &p->is_post);
+      ReadParam(m, iter, &p->is_post) &&
+      ReadParam(m, iter, &p->is_content_filtered) &&
+      ReadParam(m, iter, &p->http_status_code);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -746,16 +877,19 @@ struct ParamTraits<ViewHostMsg_FrameNavigate_Params> {
     LogParam(p.contents_mime_type, l);
     l->append(L", ");
     LogParam(p.is_post, l);
+    l->append(L", ");
+    LogParam(p.is_content_filtered, l);
+    l->append(L", ");
+    LogParam(p.http_status_code, l);
     l->append(L")");
   }
 };
 
-// Traits for ViewHostMsg_ContextMenu_Params structure to pack/unpack.
 template <>
-struct ParamTraits<ViewHostMsg_ContextMenu_Params> {
-  typedef ViewHostMsg_ContextMenu_Params param_type;
+struct ParamTraits<ContextMenuParams> {
+  typedef ContextMenuParams param_type;
   static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.type);
+    WriteParam(m, p.node);
     WriteParam(m, p.x);
     WriteParam(m, p.y);
     WriteParam(m, p.link_url);
@@ -765,11 +899,13 @@ struct ParamTraits<ViewHostMsg_ContextMenu_Params> {
     WriteParam(m, p.selection_text);
     WriteParam(m, p.misspelled_word);
     WriteParam(m, p.dictionary_suggestions);
+    WriteParam(m, p.spellcheck_enabled);
     WriteParam(m, p.edit_flags);
+    WriteParam(m, p.security_info);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return
-      ReadParam(m, iter, &p->type) &&
+      ReadParam(m, iter, &p->node) &&
       ReadParam(m, iter, &p->x) &&
       ReadParam(m, iter, &p->y) &&
       ReadParam(m, iter, &p->link_url) &&
@@ -779,10 +915,12 @@ struct ParamTraits<ViewHostMsg_ContextMenu_Params> {
       ReadParam(m, iter, &p->selection_text) &&
       ReadParam(m, iter, &p->misspelled_word) &&
       ReadParam(m, iter, &p->dictionary_suggestions) &&
-      ReadParam(m, iter, &p->edit_flags);
+      ReadParam(m, iter, &p->spellcheck_enabled) &&
+      ReadParam(m, iter, &p->edit_flags) &&
+      ReadParam(m, iter, &p->security_info);
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"<ViewHostMsg_ContextMenu_Params>");
+    l->append(L"<ContextMenuParams>");
   }
 };
 
@@ -869,6 +1007,7 @@ struct ParamTraits<WebPluginGeometry> {
     WriteParam(m, p.window);
     WriteParam(m, p.window_rect);
     WriteParam(m, p.clip_rect);
+    WriteParam(m, p.cutout_rects);
     WriteParam(m, p.visible);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
@@ -876,6 +1015,7 @@ struct ParamTraits<WebPluginGeometry> {
       ReadParam(m, iter, &p->window) &&
       ReadParam(m, iter, &p->window_rect) &&
       ReadParam(m, iter, &p->clip_rect) &&
+      ReadParam(m, iter, &p->cutout_rects) &&
       ReadParam(m, iter, &p->visible);
   }
   static void Log(const param_type& p, std::wstring* l) {
@@ -885,6 +1025,8 @@ struct ParamTraits<WebPluginGeometry> {
     LogParam(p.window_rect, l);
     l->append(L", ");
     LogParam(p.clip_rect, l);
+    l->append(L", ");
+    LogParam(p.cutout_rects, l);
     l->append(L", ");
     LogParam(p.visible, l);
     l->append(L")");
@@ -923,7 +1065,7 @@ struct ParamTraits<WebPluginInfo> {
   typedef WebPluginInfo param_type;
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.name);
-    WriteParam(m, p.file);
+    WriteParam(m, p.path);
     WriteParam(m, p.version);
     WriteParam(m, p.desc);
     WriteParam(m, p.mime_types);
@@ -931,7 +1073,7 @@ struct ParamTraits<WebPluginInfo> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
       ReadParam(m, iter, &r->name) &&
-      ReadParam(m, iter, &r->file) &&
+      ReadParam(m, iter, &r->path) &&
       ReadParam(m, iter, &r->version) &&
       ReadParam(m, iter, &r->desc) &&
       ReadParam(m, iter, &r->mime_types);
@@ -940,7 +1082,8 @@ struct ParamTraits<WebPluginInfo> {
     l->append(L"(");
     LogParam(p.name, l);
     l->append(L", ");
-    LogParam(p.file, l);
+    l->append(L", ");
+    LogParam(p.path, l);
     l->append(L", ");
     LogParam(p.version, l);
     l->append(L", ");
@@ -1018,27 +1161,80 @@ struct ParamTraits<net::UploadData::Element> {
   }
 };
 
-// Traits for CacheManager::UsageStats
+// Traits for WebKit::WebCache::UsageStats
 template <>
-struct ParamTraits<CacheManager::UsageStats> {
-  typedef CacheManager::UsageStats param_type;
+struct ParamTraits<WebKit::WebCache::UsageStats> {
+  typedef WebKit::WebCache::UsageStats param_type;
   static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.min_dead_capacity);
-    WriteParam(m, p.max_dead_capacity);
+    WriteParam(m, p.minDeadCapacity);
+    WriteParam(m, p.maxDeadCapacity);
     WriteParam(m, p.capacity);
-    WriteParam(m, p.live_size);
-    WriteParam(m, p.dead_size);
+    WriteParam(m, p.liveSize);
+    WriteParam(m, p.deadSize);
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
-      ReadParam(m, iter, &r->min_dead_capacity) &&
-      ReadParam(m, iter, &r->max_dead_capacity) &&
+      ReadParam(m, iter, &r->minDeadCapacity) &&
+      ReadParam(m, iter, &r->maxDeadCapacity) &&
       ReadParam(m, iter, &r->capacity) &&
-      ReadParam(m, iter, &r->live_size) &&
-      ReadParam(m, iter, &r->dead_size);
+      ReadParam(m, iter, &r->liveSize) &&
+      ReadParam(m, iter, &r->deadSize);
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"<CacheManager::UsageStats>");
+    l->append(L"<WebCache::UsageStats>");
+  }
+};
+
+template <>
+struct ParamTraits<WebKit::WebCache::ResourceTypeStat> {
+  typedef WebKit::WebCache::ResourceTypeStat param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.count);
+    WriteParam(m, p.size);
+    WriteParam(m, p.liveSize);
+    WriteParam(m, p.decodedSize);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    bool result =
+        ReadParam(m, iter, &r->count) &&
+        ReadParam(m, iter, &r->size) &&
+        ReadParam(m, iter, &r->liveSize) &&
+        ReadParam(m, iter, &r->decodedSize);
+    return result;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"%d %d %d %d", p.count, p.size, p.liveSize,
+        p.decodedSize));
+  }
+};
+
+template <>
+struct ParamTraits<WebKit::WebCache::ResourceTypeStats> {
+  typedef WebKit::WebCache::ResourceTypeStats param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.images);
+    WriteParam(m, p.cssStyleSheets);
+    WriteParam(m, p.scripts);
+    WriteParam(m, p.xslStyleSheets);
+    WriteParam(m, p.fonts);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    bool result =
+      ReadParam(m, iter, &r->images) &&
+      ReadParam(m, iter, &r->cssStyleSheets) &&
+      ReadParam(m, iter, &r->scripts) &&
+      ReadParam(m, iter, &r->xslStyleSheets) &&
+      ReadParam(m, iter, &r->fonts);
+    return result;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<WebCoreStats>");
+    LogParam(p.images, l);
+    LogParam(p.cssStyleSheets, l);
+    LogParam(p.scripts, l);
+    LogParam(p.xslStyleSheets, l);
+    LogParam(p.fonts, l);
+    l->append(L"</WebCoreStats>");
   }
 };
 
@@ -1101,11 +1297,12 @@ struct ParamTraits<ViewHostMsg_Resource_Request> {
     WriteParam(m, p.url);
     WriteParam(m, p.policy_url);
     WriteParam(m, p.referrer);
+    WriteParam(m, p.frame_origin);
+    WriteParam(m, p.main_frame_origin);
     WriteParam(m, p.headers);
     WriteParam(m, p.load_flags);
     WriteParam(m, p.origin_pid);
     WriteParam(m, p.resource_type);
-    WriteParam(m, p.mixed_content);
     WriteParam(m, p.request_context);
     WriteParam(m, p.upload_content);
   }
@@ -1115,11 +1312,12 @@ struct ParamTraits<ViewHostMsg_Resource_Request> {
       ReadParam(m, iter, &r->url) &&
       ReadParam(m, iter, &r->policy_url) &&
       ReadParam(m, iter, &r->referrer) &&
+      ReadParam(m, iter, &r->frame_origin) &&
+      ReadParam(m, iter, &r->main_frame_origin) &&
       ReadParam(m, iter, &r->headers) &&
       ReadParam(m, iter, &r->load_flags) &&
       ReadParam(m, iter, &r->origin_pid) &&
       ReadParam(m, iter, &r->resource_type) &&
-      ReadParam(m, iter, &r->mixed_content) &&
       ReadParam(m, iter, &r->request_context) &&
       ReadParam(m, iter, &r->upload_content);
   }
@@ -1131,13 +1329,15 @@ struct ParamTraits<ViewHostMsg_Resource_Request> {
     l->append(L", ");
     LogParam(p.referrer, l);
     l->append(L", ");
+    LogParam(p.frame_origin, l);
+    l->append(L", ");
+    LogParam(p.main_frame_origin, l);
+    l->append(L", ");
     LogParam(p.load_flags, l);
     l->append(L", ");
     LogParam(p.origin_pid, l);
     l->append(L", ");
     LogParam(p.resource_type, l);
-    l->append(L", ");
-    LogParam(p.mixed_content, l);
     l->append(L", ");
     LogParam(p.request_context, l);
     l->append(L")");
@@ -1197,12 +1397,14 @@ struct ParamTraits<URLRequestStatus> {
 };
 
 template <>
-struct ParamTraits<scoped_refptr<net::HttpResponseHeaders>> {
+struct ParamTraits<scoped_refptr<net::HttpResponseHeaders> > {
   typedef scoped_refptr<net::HttpResponseHeaders> param_type;
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.get() != NULL);
-    if (p)
-      p->Persist(m, false);
+    if (p) {
+      // Do not disclose Set-Cookie headers over IPC.
+      p->Persist(m, net::HttpResponseHeaders::PERSIST_SANS_COOKIES);
+    }
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     bool has_object;
@@ -1229,6 +1431,7 @@ struct ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo> {
     WriteParam(m, p.charset);
     WriteParam(m, p.security_info);
     WriteParam(m, p.content_length);
+    WriteParam(m, p.response_data_file);
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
@@ -1238,7 +1441,8 @@ struct ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo> {
       ReadParam(m, iter, &r->mime_type) &&
       ReadParam(m, iter, &r->charset) &&
       ReadParam(m, iter, &r->security_info) &&
-      ReadParam(m, iter, &r->content_length);
+      ReadParam(m, iter, &r->content_length) &&
+      ReadParam(m, iter, &r->response_data_file);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -1257,10 +1461,9 @@ struct ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo> {
   }
 };
 
-// Traits for ViewMsg_Resource_ResponseHead
 template <>
-struct ParamTraits<ViewMsg_Resource_ResponseHead> {
-  typedef ViewMsg_Resource_ResponseHead param_type;
+struct ParamTraits<ResourceResponseHead> {
+  typedef ResourceResponseHead param_type;
   static void Write(Message* m, const param_type& p) {
     ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo>::Write(m, p);
     WriteParam(m, p.status);
@@ -1268,7 +1471,9 @@ struct ParamTraits<ViewMsg_Resource_ResponseHead> {
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
-      ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo>::Read(m, iter, r) &&
+      ParamTraits<webkit_glue::ResourceLoaderBridge::ResponseInfo>::Read(m,
+                                                                         iter,
+                                                                         r) &&
       ReadParam(m, iter, &r->status) &&
       ReadParam(m, iter, &r->filter_policy);
   }
@@ -1278,18 +1483,17 @@ struct ParamTraits<ViewMsg_Resource_ResponseHead> {
   }
 };
 
-// Traits for ViewHostMsg_Resource_SyncLoad_Response
 template <>
-struct ParamTraits<ViewHostMsg_SyncLoad_Result> {
-  typedef ViewHostMsg_SyncLoad_Result param_type;
+struct ParamTraits<SyncLoadResult> {
+  typedef SyncLoadResult param_type;
   static void Write(Message* m, const param_type& p) {
-    ParamTraits<ViewMsg_Resource_ResponseHead>::Write(m, p);
+    ParamTraits<ResourceResponseHead>::Write(m, p);
     WriteParam(m, p.final_url);
     WriteParam(m, p.data);
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
-      ParamTraits<ViewMsg_Resource_ResponseHead>::Read(m, iter, r) &&
+      ParamTraits<ResourceResponseHead>::Read(m, iter, r) &&
       ReadParam(m, iter, &r->final_url) &&
       ReadParam(m, iter, &r->data);
   }
@@ -1422,6 +1626,7 @@ struct ParamTraits<WebPreferences> {
     WriteParam(m, p.minimum_logical_font_size);
     WriteParam(m, p.default_encoding);
     WriteParam(m, p.javascript_enabled);
+    WriteParam(m, p.web_security_enabled);
     WriteParam(m, p.javascript_can_open_windows_automatically);
     WriteParam(m, p.loads_images_automatically);
     WriteParam(m, p.plugins_enabled);
@@ -1430,39 +1635,38 @@ struct ParamTraits<WebPreferences> {
     WriteParam(m, p.shrinks_standalone_images_to_fit);
     WriteParam(m, p.uses_universal_detector);
     WriteParam(m, p.text_areas_are_resizable);
-    WriteParam(m, p.dashboard_compatibility_mode);
     WriteParam(m, p.java_enabled);
     WriteParam(m, p.user_style_sheet_enabled);
     WriteParam(m, p.user_style_sheet_location);
-    WriteParam(m, p.user_agent);
+    WriteParam(m, p.uses_page_cache);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return
-      ReadParam(m, iter, &p->standard_font_family) &&
-      ReadParam(m, iter, &p->fixed_font_family) &&
-      ReadParam(m, iter, &p->serif_font_family) &&
-      ReadParam(m, iter, &p->sans_serif_font_family) &&
-      ReadParam(m, iter, &p->cursive_font_family) &&
-      ReadParam(m, iter, &p->fantasy_font_family) &&
-      ReadParam(m, iter, &p->default_font_size) &&
-      ReadParam(m, iter, &p->default_fixed_font_size) &&
-      ReadParam(m, iter, &p->minimum_font_size) &&
-      ReadParam(m, iter, &p->minimum_logical_font_size) &&
-      ReadParam(m, iter, &p->default_encoding) &&
-      ReadParam(m, iter, &p->javascript_enabled) &&
-      ReadParam(m, iter, &p->javascript_can_open_windows_automatically) &&
-      ReadParam(m, iter, &p->loads_images_automatically) &&
-      ReadParam(m, iter, &p->plugins_enabled) &&
-      ReadParam(m, iter, &p->dom_paste_enabled) &&
-      ReadParam(m, iter, &p->developer_extras_enabled) &&
-      ReadParam(m, iter, &p->shrinks_standalone_images_to_fit) &&
-      ReadParam(m, iter, &p->uses_universal_detector) &&
-      ReadParam(m, iter, &p->text_areas_are_resizable) &&
-      ReadParam(m, iter, &p->dashboard_compatibility_mode) &&
-      ReadParam(m, iter, &p->java_enabled) &&
-      ReadParam(m, iter, &p->user_style_sheet_enabled) &&
-      ReadParam(m, iter, &p->user_style_sheet_location) &&
-      ReadParam(m, iter, &p->user_agent);
+        ReadParam(m, iter, &p->standard_font_family) &&
+        ReadParam(m, iter, &p->fixed_font_family) &&
+        ReadParam(m, iter, &p->serif_font_family) &&
+        ReadParam(m, iter, &p->sans_serif_font_family) &&
+        ReadParam(m, iter, &p->cursive_font_family) &&
+        ReadParam(m, iter, &p->fantasy_font_family) &&
+        ReadParam(m, iter, &p->default_font_size) &&
+        ReadParam(m, iter, &p->default_fixed_font_size) &&
+        ReadParam(m, iter, &p->minimum_font_size) &&
+        ReadParam(m, iter, &p->minimum_logical_font_size) &&
+        ReadParam(m, iter, &p->default_encoding) &&
+        ReadParam(m, iter, &p->javascript_enabled) &&
+        ReadParam(m, iter, &p->web_security_enabled) &&
+        ReadParam(m, iter, &p->javascript_can_open_windows_automatically) &&
+        ReadParam(m, iter, &p->loads_images_automatically) &&
+        ReadParam(m, iter, &p->plugins_enabled) &&
+        ReadParam(m, iter, &p->dom_paste_enabled) &&
+        ReadParam(m, iter, &p->developer_extras_enabled) &&
+        ReadParam(m, iter, &p->shrinks_standalone_images_to_fit) &&
+        ReadParam(m, iter, &p->uses_universal_detector) &&
+        ReadParam(m, iter, &p->text_areas_are_resizable) &&
+        ReadParam(m, iter, &p->java_enabled) &&
+        ReadParam(m, iter, &p->user_style_sheet_enabled) &&
+        ReadParam(m, iter, &p->user_style_sheet_location) &&
+        ReadParam(m, iter, &p->uses_page_cache);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"<WebPreferences>");
@@ -1474,23 +1678,27 @@ template <>
 struct ParamTraits<WebDropData> {
   typedef WebDropData param_type;
   static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.identity);
     WriteParam(m, p.url);
     WriteParam(m, p.url_title);
+    WriteParam(m, p.file_extension);
     WriteParam(m, p.filenames);
     WriteParam(m, p.plain_text);
-    WriteParam(m, p.cf_html);
     WriteParam(m, p.text_html);
+    WriteParam(m, p.html_base_url);
     WriteParam(m, p.file_description_filename);
     WriteParam(m, p.file_contents);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return
+      ReadParam(m, iter, &p->identity) &&
       ReadParam(m, iter, &p->url) &&
       ReadParam(m, iter, &p->url_title) &&
+      ReadParam(m, iter, &p->file_extension) &&
       ReadParam(m, iter, &p->filenames) &&
       ReadParam(m, iter, &p->plain_text) &&
-      ReadParam(m, iter, &p->cf_html) &&
       ReadParam(m, iter, &p->text_html) &&
+      ReadParam(m, iter, &p->html_base_url) &&
       ReadParam(m, iter, &p->file_description_filename) &&
       ReadParam(m, iter, &p->file_contents);
   }
@@ -1499,6 +1707,185 @@ struct ParamTraits<WebDropData> {
   }
 };
 
+// Traits for ScreenInfo
+template <>
+struct ParamTraits<webkit_glue::ScreenInfo> {
+  typedef webkit_glue::ScreenInfo param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.depth);
+    WriteParam(m, p.depth_per_component);
+    WriteParam(m, p.is_monochrome);
+    WriteParam(m, p.rect);
+    WriteParam(m, p.available_rect);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return
+      ReadParam(m, iter, &p->depth) &&
+      ReadParam(m, iter, &p->depth_per_component) &&
+      ReadParam(m, iter, &p->is_monochrome) &&
+      ReadParam(m, iter, &p->rect) &&
+      ReadParam(m, iter, &p->available_rect);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<webkit_glue::ScreenInfo>");
+  }
+};
+
+template<>
+struct ParamTraits<ModalDialogEvent> {
+  typedef ModalDialogEvent param_type;
+#if defined(OS_WIN)
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.event);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return ReadParam(m, iter, &p->event);
+  }
+#else
+  static void Write(Message* m, const param_type& p) {
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return true;
+  }
+#endif
+
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<ModalDialogEvent>");
+  }
+};
+
+// Traits for AudioManager::Format.
+template <>
+struct ParamTraits<AudioManager::Format> {
+  typedef AudioManager::Format param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    int type;
+    if (!m->ReadInt(iter, &type))
+      return false;
+    *p = static_cast<AudioManager::Format>(type);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    std::wstring format;
+    switch (p) {
+     case AudioManager::AUDIO_PCM_LINEAR:
+       format = L"AUDIO_PCM_LINEAR";
+       break;
+     case AudioManager::AUDIO_PCM_DELTA:
+       format = L"AUDIO_PCM_DELTA";
+       break;
+     case AudioManager::AUDIO_MOCK:
+       format = L"AUDIO_MOCK";
+       break;
+     default:
+       format = L"AUDIO_LAST_FORMAT";
+       break;
+    }
+    LogParam(format, l);
+  }
+};
+
+// Traits for ViewHostMsg_Audio_CreateStream.
+template <>
+struct ParamTraits<ViewHostMsg_Audio_CreateStream> {
+  typedef ViewHostMsg_Audio_CreateStream param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.format);
+    WriteParam(m, p.channels);
+    WriteParam(m, p.sample_rate);
+    WriteParam(m, p.bits_per_sample);
+    WriteParam(m, p.packet_size);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return
+      ReadParam(m, iter, &p->format) &&
+      ReadParam(m, iter, &p->channels) &&
+      ReadParam(m, iter, &p->sample_rate) &&
+      ReadParam(m, iter, &p->bits_per_sample) &&
+      ReadParam(m, iter, &p->packet_size);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<ViewHostMsg_Audio_CreateStream>(");
+    LogParam(p.format, l);
+    l->append(L", ");
+    LogParam(p.channels, l);
+    l->append(L", ");
+    LogParam(p.sample_rate, l);
+    l->append(L", ");
+    LogParam(p.bits_per_sample, l);
+    l->append(L", ");
+    LogParam(p.packet_size, l);
+    l->append(L")");
+  }
+};
+
+
+#if defined(OS_POSIX)
+
+// TODO(port): this shouldn't exist. However, the plugin stuff is really using
+// HWNDS (NativeView), and making Windows calls based on them. I've not figured
+// out the deal with plugins yet.
+template <>
+struct ParamTraits<gfx::NativeView> {
+  typedef gfx::NativeView param_type;
+  static void Write(Message* m, const param_type& p) {
+    NOTIMPLEMENTED();
+  }
+
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    NOTIMPLEMENTED();
+    *p = NULL;
+    return true;
+  }
+
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"<gfx::NativeView>"));
+  }
+};
+
+#endif  // defined(OS_POSIX)
+
+template <>
+struct ParamTraits<AudioOutputStream::State> {
+  typedef AudioOutputStream::State param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    int type;
+    if (!m->ReadInt(iter, &type))
+      return false;
+    *p = static_cast<AudioOutputStream::State>(type);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    std::wstring state;
+    switch (p) {
+     case AudioOutputStream::STATE_PAUSED:
+      state = L"AudioOutputStream::STATE_PAUSED";
+      break;
+     case AudioOutputStream::STATE_STARTED:
+      state = L"AudioOutputStream::STATE_STARTED";
+      break;
+     case AudioOutputStream::STATE_ERROR:
+       state = L"AudioOutputStream::STATE_ERROR";
+       break;
+     default:
+      state = L"UNKNOWN";
+      break;
+    }
+
+    LogParam(state, l);
+  }
+};
+
 }  // namespace IPC
+
+
+#define MESSAGES_INTERNAL_FILE "chrome/common/render_messages_internal.h"
+#include "chrome/common/ipc_message_macros.h"
 
 #endif  // CHROME_COMMON_RENDER_MESSAGES_H_

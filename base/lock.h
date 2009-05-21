@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,23 @@
 
 #include "base/lock_impl.h"
 
-// A convenient wrapper for a critical section.
-//
-// NOTE: A thread may acquire the same lock multiple times, but it must call
-// Release for each call to Acquire in order to finally release the lock.
-//
-// Complication: UnitTest for DeathTests catch DCHECK exceptions, so we need
-// to write code assuming DCHECK will throw.  This means we need to save any
-// assertable value in a local until we can safely throw.
+// A convenient wrapper for an OS specific critical section.
+
 class Lock {
  public:
-  Lock();
-  ~Lock();
-  void Acquire();
-  void Release();
+  Lock() : lock_() {}
+  ~Lock() {}
+  void Acquire() { lock_.Lock(); }
+  void Release() { lock_.Unlock(); }
   // If the lock is not held, take it and return true. If the lock is already
-  // held by something else, immediately return false.
-  bool Try();
+  // held by another thread, immediately return false.
+  bool Try() { return lock_.Try(); }
+
+  // In debug builds this method checks that the lock has been acquired by the
+  // calling thread.  If the lock has not been acquired, then the method
+  // will DCHECK().  In non-debug builds, the LockImpl's implementation of
+  // AssertAcquired() is an empty inline method.
+  void AssertAcquired() const { return lock_.AssertAcquired(); }
 
   // Return the underlying lock implementation.
   // TODO(awalker): refactor lock and condition variables so that this is
@@ -31,23 +31,7 @@ class Lock {
   LockImpl* lock_impl() { return &lock_; }
 
  private:
-  LockImpl lock_;  // User-supplied underlying lock implementation.
-
-  // All private data is implicitly protected by spin_lock_.
-  // Be VERY careful to only access under that lock.
-  int32 recursion_count_shadow_;
-
-  // Allow access to GetCurrentThreadRecursionCount()
-  friend class AutoUnlock;
-  int32 GetCurrentThreadRecursionCount();
-
-#ifndef NDEBUG
-  // Even in Debug mode, the expensive tallies won't be calculated by default.
-  bool recursion_used_;
-  int32 acquisition_count_;
-
-  int32 contention_count_;
-#endif  // NDEBUG
+  LockImpl lock_;  // Platform specific underlying lock implementation.
 
   DISALLOW_COPY_AND_ASSIGN(Lock);
 };
@@ -55,11 +39,12 @@ class Lock {
 // A helper class that acquires the given Lock while the AutoLock is in scope.
 class AutoLock {
  public:
-  AutoLock(Lock& lock) : lock_(lock) {
+  explicit AutoLock(Lock& lock) : lock_(lock) {
     lock_.Acquire();
   }
 
   ~AutoLock() {
+    lock_.AssertAcquired();
     lock_.Release();
   }
 
@@ -68,28 +53,23 @@ class AutoLock {
   DISALLOW_COPY_AND_ASSIGN(AutoLock);
 };
 
-// AutoUnlock is a helper class for ConditionVariable instances
-// that is analogous to AutoLock.  It provides for nested Releases
-// of a lock for the Wait functionality of a ConditionVariable class.
-// The destructor automatically does the corresponding Acquire
-// calls (to return to the initial nested lock state).
-
-// Instances of AutoUnlock can ***ONLY*** validly be constructed if the
-// caller currently holds the lock provided as the constructor's argument.
-// If that ***REQUIREMENT*** is violated in debug mode, a DCHECK will
-// be generated in the Lock class.  In production (non-debug),
-// the results are undefined (and probably bad) if the caller
-// is not already holding the indicated lock.
-class ConditionVariable;
+// AutoUnlock is a helper that will Release() the |lock| argument in the
+// constructor, and re-Acquire() it in the destructor.
 class AutoUnlock {
- private:  // Everything is private, so only our friend can use us.
-  friend class ConditionVariable;  // The only user of this class.
-  explicit AutoUnlock(Lock& lock);
-  ~AutoUnlock();
+ public:
+  explicit AutoUnlock(Lock& lock) : lock_(lock) {
+    // We require our caller to have the lock.
+    lock_.AssertAcquired();
+    lock_.Release();
+  }
 
-  Lock* lock_;
-  int release_count_;
+  ~AutoUnlock() {
+    lock_.Acquire();
+  }
+
+ private:
+  Lock& lock_;
+  DISALLOW_COPY_AND_ASSIGN(AutoUnlock);
 };
 
 #endif  // BASE_LOCK_H_
-

@@ -4,8 +4,15 @@
 
 #include "chrome/plugin/npobject_util.h"
 
+// TODO(port) Just compile an empty file on posix so we can generate the
+// libplugin target needed by other targets. This whole file does compile (see
+// r9934), but it doesn't link because of undefined refs to files which aren't
+// compiling yet (e.g. npobject_proxy stuff).
+#if defined(OS_WIN)
+
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/win_util.h"
+
 #include "chrome/plugin/npobject_proxy.h"
 #include "chrome/plugin/plugin_channel_base.h"
 #include "webkit/glue/plugins/nphostapi.h"
@@ -34,7 +41,8 @@ static bool NPN_InvokePatch(NPP npp, NPObject *npobj,
                             const NPVariant *args,
                             uint32_t argCount,
                             NPVariant *result) {
-  return NPObjectProxy::NPInvokePrivate(npp, npobj, false, methodName, args, argCount, result);
+  return NPObjectProxy::NPInvokePrivate(npp, npobj, false, methodName, args,
+                                        argCount, result);
 }
 
 static bool NPN_InvokeDefaultPatch(NPP npp,
@@ -42,7 +50,8 @@ static bool NPN_InvokeDefaultPatch(NPP npp,
                                    const NPVariant *args,
                                    uint32_t argCount,
                                    NPVariant *result) {
-  return NPObjectProxy::NPInvokePrivate(npp, npobj, true, 0, args, argCount, result);
+  return NPObjectProxy::NPInvokePrivate(npp, npobj, true, 0, args, argCount,
+                                        result);
 }
 
 static bool NPN_HasPropertyPatch(NPP npp,
@@ -124,6 +133,7 @@ bool IsPluginProcess() {
   return g_plugin_process;
 }
 
+#if defined(OS_WIN)
 void CreateNPIdentifierParam(NPIdentifier id, NPIdentifier_Param* param) {
   param->identifier = id;
 }
@@ -135,7 +145,8 @@ NPIdentifier CreateNPIdentifier(const NPIdentifier_Param& param) {
 void CreateNPVariantParam(const NPVariant& variant,
                           PluginChannelBase* channel,
                           NPVariant_Param* param,
-                          bool release) {
+                          bool release,
+                          base::WaitableEvent* modal_dialog_event) {
   switch (variant.type) {
     case NPVariantType_Void:
       param->type = NPVARIANT_PARAM_VOID;
@@ -171,15 +182,21 @@ void CreateNPVariantParam(const NPVariant& variant,
         // Don't release, because our original variant is the same as our proxy.
         release = false;
       } else {
-        // NPObjectStub adds its own reference to the NPObject it owns, so if we
-        // were supposed to release the corresponding variant (release==true),
-        // we should still do that.
-        param->type = NPVARIANT_PARAM_OBJECT_ROUTING_ID;
-        int route_id = channel->GenerateRouteID();
-        NPObjectStub* object_stub = new NPObjectStub(
-            variant.value.objectValue, channel, route_id);
-        param->npobject_routing_id = route_id;
-        param->npobject_pointer = variant.value.objectValue;
+        // The channel could be NULL if there was a channel error. The caller's
+        // Send call will fail anyways.
+        if (channel) {
+          // NPObjectStub adds its own reference to the NPObject it owns, so if
+          // we were supposed to release the corresponding variant
+          // (release==true), we should still do that.
+          param->type = NPVARIANT_PARAM_OBJECT_ROUTING_ID;
+          int route_id = channel->GenerateRouteID();
+          NPObjectStub* object_stub = new NPObjectStub(
+              variant.value.objectValue, channel, route_id, modal_dialog_event);
+          param->npobject_routing_id = route_id;
+          param->npobject_pointer = variant.value.objectValue;
+        } else {
+          param->type = NPVARIANT_PARAM_VOID;
+        }
       }
       break;
     }
@@ -194,7 +211,7 @@ void CreateNPVariantParam(const NPVariant& variant,
 void CreateNPVariant(const NPVariant_Param& param,
                      PluginChannelBase* channel,
                      NPVariant* result,
-                     HANDLE modal_dialog_event) {
+                     base::WaitableEvent* modal_dialog_event) {
   switch (param.type) {
     case NPVARIANT_PARAM_VOID:
       result->type = NPVariantType_Void;
@@ -223,14 +240,16 @@ void CreateNPVariant(const NPVariant_Param& param,
       break;
     case NPVARIANT_PARAM_OBJECT_ROUTING_ID:
       result->type = NPVariantType_Object;
-      result->value.objectValue = NPObjectProxy::Create(channel,
-                                                        param.npobject_routing_id,
-                                                        param.npobject_pointer,
-                                                        modal_dialog_event);
+      result->value.objectValue =
+          NPObjectProxy::Create(channel,
+                                param.npobject_routing_id,
+                                param.npobject_pointer,
+                                modal_dialog_event);
       break;
     case NPVARIANT_PARAM_OBJECT_POINTER:
       result->type = NPVariantType_Object;
-      result->value.objectValue = static_cast<NPObject*>(param.npobject_pointer);
+      result->value.objectValue =
+          static_cast<NPObject*>(param.npobject_pointer);
       NPN_RetainObject(result->value.objectValue);
       break;
     default:
@@ -238,3 +257,6 @@ void CreateNPVariant(const NPVariant_Param& param,
   }
 }
 
+#endif  // defined(OS_WIN)
+
+#endif  // defined(OS_WIN)

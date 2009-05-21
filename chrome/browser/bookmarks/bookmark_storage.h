@@ -7,11 +7,17 @@
 
 #include "base/ref_counted.h"
 #include "base/task.h"
-#include "chrome/browser/browser_process.h"
 
 class BookmarkModel;
+class BookmarkStorageBackend;
+class FilePath;
 class Profile;
+class MessageLoop;
 class Value;
+
+namespace base {
+class Thread;
+}
 
 // BookmarkStorage handles reading/write the bookmark bar model. The
 // BookmarkModel uses the BookmarkStorage to load bookmarks from disk, as well
@@ -70,8 +76,8 @@ class BookmarkStorage : public base::RefCountedThreadSafe<BookmarkStorage> {
 class BookmarkStorageBackend :
     public base::RefCountedThreadSafe<BookmarkStorageBackend> {
  public:
-  explicit BookmarkStorageBackend(const std::wstring& path,
-                                  const std::wstring& tmp_histor_path);
+  explicit BookmarkStorageBackend(const FilePath& path,
+                                  const FilePath& tmp_history_path);
 
   // Writes the specified value to disk. This takes ownership of |value| and
   // deletes it when done.

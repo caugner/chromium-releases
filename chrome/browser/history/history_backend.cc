@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
@@ -15,13 +16,19 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/download_types.h"
+#include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/notification_types.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/sqlite_utils.h"
+#include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/registry_controlled_domain.h"
+
+using base::Time;
+using base::TimeDelta;
+using base::TimeTicks;
 
 /* The HistoryBackend consists of a number of components:
 
@@ -72,32 +79,6 @@ static const int kMaxRedirectCount = 32;
 // The number of days old a history entry can be before it is considered "old"
 // and is archived.
 static const int kArchiveDaysThreshold = 90;
-
-// Comparison used when inserting entries into visits vector.
-static bool VisitOccursAfter(const PageVisit& elem1,
-                              const PageVisit& elem2) {
-  return elem1.visit_time > elem2.visit_time;
-}
-
-static bool IsMatchingHost(const URLRow& row,
-                           const std::string& host_name) {
-  const GURL& url = row.url();
-  if (!url.is_valid() || !url.IsStandard())
-    return false;
-
-  const std::string& spec = url.spec();
-  url_parse::Parsed parsed = url.parsed_for_possibly_invalid_spec();
-  if (!parsed.host.is_nonempty())
-    return false;  // Empty host.
-
-  if (parsed.host.len != host_name.size())
-    return false;  // Hosts are different lengths, can not match.
-
-  // TODO(brettw) we may want to also match hosts ending with a period, since
-  // these will typically be the same.
-  return strncmp(&spec[parsed.host.begin], host_name.c_str(),
-                 host_name.size()) == 0;
-}
 
 // This task is run on a timer so that commits happen at regular intervals
 // so they are batched together. The important thing about this class is that
@@ -185,15 +166,14 @@ class HistoryBackend::URLQuerier {
 
 // HistoryBackend --------------------------------------------------------------
 
-HistoryBackend::HistoryBackend(const std::wstring& history_dir,
+HistoryBackend::HistoryBackend(const FilePath& history_dir,
                                Delegate* delegate,
                                BookmarkService* bookmark_service)
     : delegate_(delegate),
       history_dir_(history_dir),
-#pragma warning(suppress: 4355)  // OK to pass "this" here.
-      expirer_(this, bookmark_service),
-      backend_destroy_message_loop_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(expirer_(this, bookmark_service)),
       recent_redirects_(kMaxRedirectCount),
+      backend_destroy_message_loop_(NULL),
       backend_destroy_task_(NULL),
       segment_queried_(false),
       bookmark_service_(bookmark_service) {
@@ -258,16 +238,12 @@ void HistoryBackend::NotifyRenderProcessHostDestruction(const void* host) {
   tracker_.NotifyRenderProcessHostDestruction(host);
 }
 
-std::wstring HistoryBackend::GetThumbnailFileName() const {
-  std::wstring thumbnail_name = history_dir_;
-  file_util::AppendToPath(&thumbnail_name, chrome::kThumbnailsFilename);
-  return thumbnail_name;
+FilePath HistoryBackend::GetThumbnailFileName() const {
+  return history_dir_.Append(chrome::kThumbnailsFilename);
 }
 
-std::wstring HistoryBackend::GetArchivedFileName() const {
-  std::wstring archived_name = history_dir_;
-  file_util::AppendToPath(&archived_name, chrome::kArchivedHistoryFilename);
-  return archived_name;
+FilePath HistoryBackend::GetArchivedFileName() const {
+  return history_dir_.Append(chrome::kArchivedHistoryFilename);
 }
 
 SegmentID HistoryBackend::GetLastSegmentID(VisitID from_visit) {
@@ -370,6 +346,11 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
     last_recorded_time_ = last_requested_time_;
   }
 
+  // If the user is adding older history, we need to make sure our times
+  // are correct.
+  if (request->time < first_recorded_time_)
+    first_recorded_time_ = request->time;
+
   if (request->redirects.size() <= 1) {
     // The single entry is both a chain start and end.
     PageTransition::Type t = request->transition |
@@ -389,7 +370,7 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
 
     PageTransition::Type redirect_info = PageTransition::CHAIN_START;
 
-    if (request->redirects[0].SchemeIs("about")) {
+    if (request->redirects[0].SchemeIs(chrome::kAboutScheme)) {
       // When the redirect source + referrer is "about" we skip it. This
       // happens when a page opens a new frame/window to about:blank and then
       // script sets the URL to somewhere else (used to hide the referrer). It
@@ -491,13 +472,11 @@ void HistoryBackend::InitImpl() {
 
   // Compute the file names. Note that the index file can be removed when the
   // text db manager is finished being hooked up.
-  std::wstring history_name = history_dir_;
-  file_util::AppendToPath(&history_name, chrome::kHistoryFilename);
-  std::wstring thumbnail_name = GetThumbnailFileName();
-  std::wstring archived_name = GetArchivedFileName();
-  std::wstring tmp_bookmarks_file = history_dir_;
-  file_util::AppendToPath(&tmp_bookmarks_file,
-                          chrome::kHistoryBookmarksFileName);
+  FilePath history_name = history_dir_.Append(chrome::kHistoryFilename);
+  FilePath thumbnail_name = GetThumbnailFileName();
+  FilePath archived_name = GetArchivedFileName();
+  FilePath tmp_bookmarks_file = history_dir_.Append(
+      chrome::kHistoryBookmarksFileName);
 
   // History database.
   db_.reset(new HistoryDatabase());
@@ -521,23 +500,34 @@ void HistoryBackend::InitImpl() {
   // Fill the in-memory database and send it back to the history service on the
   // main thread.
   InMemoryHistoryBackend* mem_backend = new InMemoryHistoryBackend;
-  if (mem_backend->Init(history_name))
+  if (mem_backend->Init(history_name.ToWStringHack()))
     delegate_->SetInMemoryBackend(mem_backend);  // Takes ownership of pointer.
   else
     delete mem_backend;  // Error case, run without the in-memory DB.
   db_->BeginExclusiveMode();  // Must be after the mem backend read the data.
 
+  // Create the history publisher which needs to be passed on to the text and
+  // thumbnail databases for publishing history.
+  history_publisher_.reset(new HistoryPublisher());
+  if (!history_publisher_->Init()) {
+    // The init may fail when there are no indexers wanting our history.
+    // Hence no need to log the failure.
+    history_publisher_.reset();
+  }
+
   // Full-text database. This has to be first so we can pass it to the
   // HistoryDatabase for migration.
-  text_database_.reset(new TextDatabaseManager(history_dir_, db_.get()));
-  if (!text_database_->Init()) {
+  text_database_.reset(new TextDatabaseManager(history_dir_,
+                                               db_.get(), db_.get()));
+  if (!text_database_->Init(history_publisher_.get())) {
     LOG(WARNING) << "Text database initialization failed, running without it.";
     text_database_.reset();
   }
 
   // Thumbnail database.
   thumbnail_db_.reset(new ThumbnailDatabase());
-  if (thumbnail_db_->Init(thumbnail_name) != INIT_OK) {
+  if (thumbnail_db_->Init(thumbnail_name,
+                          history_publisher_.get()) != INIT_OK) {
     // Unlike the main database, we don't error out when the database is too
     // new because this error is much less severe. Generally, this shouldn't
     // happen since the thumbnail and main datbase versions should be in sync.
@@ -573,10 +563,13 @@ void HistoryBackend::InitImpl() {
   if (text_database_.get())
     text_database_->BeginTransaction();
 
+  // Get the first item in our database.
+  db_->GetStartDate(&first_recorded_time_);
+
   // Start expiring old stuff.
   expirer_.StartArchivingOldStuff(TimeDelta::FromDays(kArchiveDaysThreshold));
 
-  HISTOGRAM_TIMES(L"History.InitTime",
+  HISTOGRAM_TIMES("History.InitTime",
                   TimeTicks::Now() - beginning_time);
 }
 
@@ -604,7 +597,6 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
     // Update of an existing row.
     if (PageTransition::StripQualifier(transition) != PageTransition::RELOAD)
       url_info.set_visit_count(url_info.visit_count() + 1);
-    int old_typed_count = url_info.typed_count();
     if (typed_increment)
       url_info.set_typed_count(url_info.typed_count() + typed_increment);
     url_info.set_last_visit(time);
@@ -645,7 +637,7 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   if (visit_id) {
     URLVisitedDetails* details = new URLVisitedDetails;
     details->row = url_info;
-    BroadcastNotifications(NOTIFY_HISTORY_URL_VISITED, details);
+    BroadcastNotifications(NotificationType::HISTORY_URL_VISITED, details);
   }
 
   return std::make_pair(url_id, visit_id);
@@ -725,7 +717,8 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls) {
   //
   // TODO(brettw) bug 1140015: Add an "add page" notification so the history
   // views can keep in sync.
-  BroadcastNotifications(NOTIFY_HISTORY_TYPED_URLS_MODIFIED, modified);
+  BroadcastNotifications(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
+                         modified);
 
   ScheduleCommit();
 }
@@ -780,7 +773,8 @@ void HistoryBackend::SetPageTitle(const GURL& url,
       if (changed_urls[i].typed_count() > 0)
         modified->changed_urls.push_back(changed_urls[i]);
     }
-    BroadcastNotifications(NOTIFY_HISTORY_TYPED_URLS_MODIFIED, modified);
+    BroadcastNotifications(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
+                           modified);
   }
 
   // Update the full text index.
@@ -934,6 +928,13 @@ void HistoryBackend::UpdateDownload(int64 received_bytes,
     db_->UpdateDownload(received_bytes, state, db_handle);
 }
 
+// Update the path of a particular download entry.
+void HistoryBackend::UpdateDownloadPath(const std::wstring& path,
+                                        int64 db_handle) {
+  if (db_.get())
+    db_->UpdateDownloadPath(path, db_handle);
+}
+
 // Create a new download entry and pass back the db_handle to it.
 void HistoryBackend::CreateDownload(
     scoped_refptr<DownloadCreateRequest> request,
@@ -998,7 +999,7 @@ void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
   request->ForwardResult(QueryHistoryRequest::TupleType(request->handle(),
                                                         &request->value));
 
-  HISTOGRAM_TIMES(L"History.QueryHistory",
+  HISTOGRAM_TIMES("History.QueryHistory",
                   TimeTicks::Now() - beginning_time);
 }
 
@@ -1042,6 +1043,9 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
     // snippets and stuff don't apply to basic querying.
     result->AppendURLBySwapping(&url_result);
   }
+
+  if (options.begin_time <= first_recorded_time_)
+    result->set_reached_beginning(true);
 }
 
 void HistoryBackend::QueryHistoryFTS(const std::wstring& text_query,
@@ -1092,6 +1096,9 @@ void HistoryBackend::QueryHistoryFTS(const std::wstring& text_query,
     // result of the swap.
     result->AppendURLBySwapping(&url_result);
   }
+
+  if (options.begin_time <= first_recorded_time_)
+    result->set_reached_beginning(true);
 }
 
 // Frontend to GetMostRecentRedirectsFrom from the history thread.
@@ -1173,9 +1180,13 @@ void HistoryBackend::SetPageThumbnail(
   if (!db_.get() || !thumbnail_db_.get())
     return;
 
-  URLID url_id = db_->GetRowForURL(url, NULL);
-  if (url_id)
-    thumbnail_db_->SetPageThumbnail(url_id, thumbnail, score);
+  URLRow url_row;
+  URLID url_id = db_->GetRowForURL(url, &url_row);
+  if (url_id) {
+    thumbnail_db_->SetPageThumbnail(url, url_id, thumbnail, score,
+                                    url_row.last_visit());
+  }
+
   ScheduleCommit();
 }
 
@@ -1228,7 +1239,7 @@ void HistoryBackend::GetPageThumbnailDirectly(
     if (!success)
       *data = NULL;  // This will tell the callback there was an error.
 
-    HISTOGRAM_TIMES(L"History.GetPageThumbnail",
+    HISTOGRAM_TIMES("History.GetPageThumbnail",
                     TimeTicks::Now() - beginning_time);
   }
 }
@@ -1328,7 +1339,7 @@ void HistoryBackend::SetImportedFavicons(
     // Send the notification about the changed favicon URLs.
     FavIconChangeDetails* changed_details = new FavIconChangeDetails;
     changed_details->urls.swap(favicons_changed);
-    BroadcastNotifications(NOTIFY_FAVICON_CHANGED, changed_details);
+    BroadcastNotifications(NotificationType::FAVICON_CHANGED, changed_details);
   }
 }
 
@@ -1394,7 +1405,7 @@ void HistoryBackend::GetFavIconForURL(
           TimeDelta::FromDays(kFavIconRefetchDays);
     }
 
-    HISTOGRAM_TIMES(L"History.GetFavIconForURL",
+    HISTOGRAM_TIMES("History.GetFavIconForURL",
                     TimeTicks::Now() - beginning_time);
   }
 
@@ -1472,7 +1483,7 @@ void HistoryBackend::SetFavIconMapping(const GURL& page_url,
   // Send the notification about the changed favicons.
   FavIconChangeDetails* changed_details = new FavIconChangeDetails;
   changed_details->urls.swap(favicons_changed);
-  BroadcastNotifications(NOTIFY_FAVICON_CHANGED, changed_details);
+  BroadcastNotifications(NotificationType::FAVICON_CHANGED, changed_details);
 
   ScheduleCommit();
 }
@@ -1577,6 +1588,7 @@ void HistoryBackend::ReleaseDBTasks() {
 void HistoryBackend::DeleteURL(const GURL& url) {
   expirer_.DeleteURL(url);
 
+  db_->GetStartDate(&first_recorded_time_);
   // Force a commit, if the user is deleting something for privacy reasons, we
   // want to get it on disk ASAP.
   Commit();
@@ -1604,7 +1616,13 @@ void HistoryBackend::ExpireHistoryBetween(
     }
   }
 
+  if (begin_time <= first_recorded_time_)
+    db_->GetStartDate(&first_recorded_time_);
+
   request->ForwardResult(ExpireHistoryRequest::TupleType());
+
+  if (history_publisher_.get())
+    history_publisher_->DeleteUserHistoryBetween(begin_time, end_time);
 }
 
 void HistoryBackend::URLsNoLongerBookmarked(const std::set<GURL>& urls) {
@@ -1708,7 +1726,7 @@ void HistoryBackend::DeleteAllHistory() {
   if (archived_db_.get()) {
     // Close the database and delete the file.
     archived_db_.reset();
-    std::wstring archived_file_name = GetArchivedFileName();
+    FilePath archived_file_name = GetArchivedFileName();
     file_util::Delete(archived_file_name, false);
 
     // Now re-initialize the database (which may fail).
@@ -1722,11 +1740,13 @@ void HistoryBackend::DeleteAllHistory() {
     }
   }
 
+  db_->GetStartDate(&first_recorded_time_);
+
   // Send out the notfication that history is cleared. The in-memory datdabase
   // will pick this up and clear itself.
   URLsDeletedDetails* details = new URLsDeletedDetails;
   details->all_history = true;
-  BroadcastNotifications(NOTIFY_HISTORY_URLS_DELETED, details);
+  BroadcastNotifications(NotificationType::HISTORY_URLS_DELETED, details);
 }
 
 bool HistoryBackend::ClearAllThumbnailHistory(
@@ -1815,6 +1835,8 @@ bool HistoryBackend::ClearAllMainHistory(
   db_->CommitTransaction();
   db_->Vacuum();
   db_->BeginTransaction();
+  db_->GetStartDate(&first_recorded_time_);
+
   return true;
 }
 
@@ -1825,4 +1847,3 @@ BookmarkService* HistoryBackend::GetBookmarkService() {
 }
 
 }  // namespace history
-

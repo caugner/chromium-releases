@@ -2,16 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_TASK_H__
-#define BASE_TASK_H__
+#ifndef BASE_TASK_H_
+#define BASE_TASK_H_
 
-#include <set>
-
-#include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/non_thread_safe.h"
 #include "base/revocable_store.h"
-#include "base/time.h"
 #include "base/tracked.h"
 #include "base/tuple.h"
 
@@ -70,7 +65,7 @@ class CancelableTask : public Task {
 //
 //     // The factories are not thread safe, so always invoke on
 //     // |MessageLoop::current()|.
-//     MessageLoop::current()->PostTask(FROM_HERE,
+//     MessageLoop::current()->PostDelayedTask(FROM_HERE,
 //         some_method_factory_.NewRunnableMethod(&MyClass::SomeMethod),
 //         kSomeMethodDelayMS);
 //   }
@@ -336,7 +331,9 @@ inline CancelableTask* NewRunnableMethod(T* object, Method method) {
 
 template <class T, class Method, class A>
 inline CancelableTask* NewRunnableMethod(T* object, Method method, const A& a) {
-  return new RunnableMethod<T, Method, Tuple1<A> >(object, method, MakeTuple(a));
+  return new RunnableMethod<T, Method, Tuple1<A> >(object,
+                                                   method,
+                                                   MakeTuple(a));
 }
 
 template <class T, class Method, class A, class B>
@@ -371,6 +368,34 @@ inline CancelableTask* NewRunnableMethod(T* object, Method method,
                             Tuple5<A, B, C, D, E> >(object,
                                                     method,
                                                     MakeTuple(a, b, c, d, e));
+}
+
+template <class T, class Method, class A, class B, class C, class D, class E,
+          class F>
+inline CancelableTask* NewRunnableMethod(T* object, Method method,
+                                          const A& a, const B& b,
+                                          const C& c, const D& d, const E& e,
+                                          const F& f) {
+  return new RunnableMethod<T,
+                            Method,
+                            Tuple6<A, B, C, D, E, F> >(object,
+                                                       method,
+                                                       MakeTuple(a, b, c, d, e,
+                                                                 f));
+}
+
+template <class T, class Method, class A, class B, class C, class D, class E,
+          class F, class G>
+inline CancelableTask* NewRunnableMethod(T* object, Method method,
+                                         const A& a, const B& b,
+                                         const C& c, const D& d, const E& e,
+                                         const F& f, const G& g) {
+  return new RunnableMethod<T,
+                            Method,
+                            Tuple7<A, B, C, D, E, F, G> >(object,
+                                                          method,
+                                                          MakeTuple(a, b, c, d,
+                                                                    e, f, g));
 }
 
 // RunnableFunction and NewRunnableFunction implementation ---------------------
@@ -411,7 +436,8 @@ inline CancelableTask* NewRunnableFunction(Function function, const A& a) {
 template <class Function, class A, class B>
 inline CancelableTask* NewRunnableFunction(Function function,
                                            const A& a, const B& b) {
-  return new RunnableFunction<Function, Tuple2<A, B> >(function, MakeTuple(a, b));
+  return new RunnableFunction<Function, Tuple2<A, B> >(function,
+                                                       MakeTuple(a, b));
 }
 
 template <class Function, class A, class B, class C>
@@ -563,7 +589,8 @@ struct Callback1 {
 };
 
 template <class T, typename Arg1>
-typename Callback1<Arg1>::Type* NewCallback(T* object, void (T::*method)(Arg1)) {
+typename Callback1<Arg1>::Type* NewCallback(T* object,
+                                            void (T::*method)(Arg1)) {
   return new CallbackImpl<T, void (T::*)(Arg1), Tuple1<Arg1> >(object, method);
 }
 
@@ -625,5 +652,18 @@ typename Callback5<Arg1, Arg2, Arg3, Arg4, Arg5>::Type* NewCallback(
       Tuple5<Arg1, Arg2, Arg3, Arg4, Arg5> >(object, method);
 }
 
-#endif  // BASE_TASK_H__
+// An UnboundMethod is a wrapper for a method where the actual object is
+// provided at Run dispatch time.
+template <class T, class Method, class Params>
+class UnboundMethod {
+ public:
+  UnboundMethod(Method m, Params p) : m_(m), p_(p) {}
+  void Run(T* obj) const {
+    DispatchToMethod(obj, m_, p_);
+  }
+ private:
+  Method m_;
+  Params p_;
+};
 
+#endif  // BASE_TASK_H_

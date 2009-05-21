@@ -8,13 +8,14 @@
 #include <windows.h>
 typedef HANDLE FileHandle;
 typedef HANDLE MutexHandle;
-#endif
-
-#if defined(OS_MACOSX)
+#elif defined(OS_MACOSX)
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach-o/dyld.h>
+#elif defined(OS_LINUX)
+#include <sys/syscall.h>
+#include <time.h>
 #endif
 
 #if defined(OS_POSIX)
@@ -39,13 +40,13 @@ typedef pthread_mutex_t* MutexHandle;
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-  
+
 namespace logging {
 
 bool g_enable_dcheck = false;
 
 const char* const log_severity_names[LOG_NUM_SEVERITIES] = {
-  "INFO", "WARNING", "ERROR", "FATAL" };
+  "INFO", "WARNING", "ERROR", "ERROR_REPORT", "FATAL" };
 
 int min_log_level = 0;
 LogLockingState lock_log_file = LOCK_LOG_FILE;
@@ -88,8 +89,11 @@ bool log_timestamp = true;
 bool log_tickcount = false;
 
 // An assert handler override specified by the client to be called instead of
-// the debug message dialog.
+// the debug message dialog and process termination.
 LogAssertHandlerFunction log_assert_handler = NULL;
+// An report handler override specified by the client to be called instead of
+// the debug message dialog.
+LogReportHandlerFunction log_report_handler = NULL;
 
 // The lock is used if log file locking is false. It helps us avoid problems
 // with multiple threads writing to the log file at the same time.  Use
@@ -119,9 +123,8 @@ int32 CurrentThreadId() {
   return GetCurrentThreadId();
 #elif defined(OS_MACOSX)
   return mach_thread_self();
-#else
-  NOTIMPLEMENTED();
-  return 0;
+#elif defined(OS_LINUX)
+  return syscall(__NR_gettid);
 #endif
 }
 
@@ -130,9 +133,15 @@ uint64 TickCount() {
   return GetTickCount();
 #elif defined(OS_MACOSX)
   return mach_absolute_time();
-#else
-  NOTIMPLEMENTED();
-  return 0;
+#elif defined(OS_LINUX)
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  uint64 absolute_micro =
+    static_cast<int64>(ts.tv_sec) * 1000000 +
+    static_cast<int64>(ts.tv_nsec) / 1000;
+
+  return absolute_micro;
 #endif
 }
 
@@ -222,7 +231,8 @@ void InitLogMutex() {
 
 void InitLogging(const PathChar* new_log_file, LoggingDestination logging_dest,
                  LogLockingState lock_log, OldFileDeletionState delete_old) {
-  g_enable_dcheck = CommandLine().HasSwitch(switches::kEnableDCHECK);
+  g_enable_dcheck =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableDCHECK);
 
   if (log_file) {
     // calling InitLogging twice or after some log call has already opened the
@@ -284,6 +294,10 @@ void SetLogAssertHandler(LogAssertHandlerFunction handler) {
   log_assert_handler = handler;
 }
 
+void SetLogReportHandler(LogReportHandlerFunction handler) {
+  log_report_handler = handler;
+}
+
 // Displays a message box to the user with the error message in it. For
 // Windows programs, it's possible that the message loop is messed up on
 // a fatal error, and creating a MessageBox will cause that message loop
@@ -341,6 +355,13 @@ LogMessage::LogMessage(const char* file, int line, const CheckOpString& result)
   stream_ << "Check failed: " << (*result.str_);
 }
 
+LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
+                       const CheckOpString& result)
+    : severity_(severity) {
+  Init(file, line);
+  stream_ << "Check failed: " << (*result.str_);
+}
+
 LogMessage::LogMessage(const char* file, int line)
      : severity_(LOG_INFO) {
   Init(file, line);
@@ -385,7 +406,8 @@ void LogMessage::Init(const char* file, int line) {
   }
   if (log_tickcount)
     stream_ << TickCount() << ':';
-  stream_ << log_severity_names[severity_] << ":" << file << "(" << line << ")] ";
+  stream_ << log_severity_names[severity_] << ":" << file <<
+             "(" << line << ")] ";
 
   message_start_ = stream_.tellp();
 }
@@ -431,16 +453,16 @@ LogMessage::~LogMessage() {
     // problems with unit tests, especially on the buildbots.
     fprintf(stderr, "%s", str_newline.c_str());
   }
-  
+
   // write to log file
   if (logging_destination != LOG_NONE &&
       logging_destination != LOG_ONLY_TO_SYSTEM_DEBUG_LOG &&
       InitializeLogFileHandle()) {
-    // we can have multiple threads and/or processes, so try to prevent them from
-    // clobbering each other's writes
+    // We can have multiple threads and/or processes, so try to prevent them
+    // from clobbering each other's writes.
     if (lock_log_file == LOCK_LOG_FILE) {
       // Ensure that the mutex is initialized in case the client app did not
-      // call InitLogging. This is not thread safe. See below
+      // call InitLogging. This is not thread safe. See below.
       InitLogMutex();
 
 #if defined(OS_WIN)
@@ -465,7 +487,11 @@ LogMessage::~LogMessage() {
 #if defined(OS_WIN)
     SetFilePointer(log_file, 0, 0, SEEK_END);
     DWORD num_written;
-    WriteFile(log_file, (void*)str_newline.c_str(), (DWORD)str_newline.length(), &num_written, NULL);
+    WriteFile(log_file,
+              static_cast<const void*>(str_newline.c_str()),
+              static_cast<DWORD>(str_newline.length()),
+              &num_written,
+              NULL);
 #else
     fprintf(log_file, "%s", str_newline.c_str());
 #endif
@@ -490,14 +516,26 @@ LogMessage::~LogMessage() {
         // make a copy of the string for the handler out of paranoia
         log_assert_handler(std::string(stream_.str()));
       } else {
-        // don't use the string with the newline, get a fresh version to send to
-        // the debug message process
+        // Don't use the string with the newline, get a fresh version to send to
+        // the debug message process. We also don't display assertions to the
+        // user in release mode. The enduser can't do anything with this
+        // information, and displaying message boxes when the application is
+        // hosed can cause additional problems.
+#ifndef NDEBUG
         DisplayDebugMessage(stream_.str());
+#endif
         // Crash the process to generate a dump.
         DebugUtil::BreakDebugger();
         // TODO(mmentovai): when we have breakpad support, generate a breakpad
         // dump, but until then, do not invoke the Apple crash reporter.
       }
+    }
+  } else if (severity_ == LOG_ERROR_REPORT) {
+    // We are here only if the user runs with --enable-dcheck in release mode.
+    if (log_report_handler) {
+      log_report_handler(std::string(stream_.str()));
+    } else {
+      DisplayDebugMessage(stream_.str());
     }
   }
 }
@@ -515,4 +553,3 @@ void CloseLogFile() {
 std::ostream& operator<<(std::ostream& out, const wchar_t* wstr) {
   return out << base::SysWideToUTF8(std::wstring(wstr));
 }
-

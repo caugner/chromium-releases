@@ -14,6 +14,10 @@
 
 namespace base {
 
+inline int strcasecmp(const char* s1, const char* s2) {
+  return _stricmp(s1, s2);
+}
+
 inline int strncasecmp(const char* s1, const char* s2, size_t count) {
   return _strnicmp(s1, s2, count);
 }
@@ -39,4 +43,3 @@ inline int vswprintf(wchar_t* buffer, size_t size,
 }  // namespace base
 
 #endif  // BASE_STRING_UTIL_WIN_H_
-

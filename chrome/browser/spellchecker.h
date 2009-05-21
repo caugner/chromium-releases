@@ -2,21 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_SPELLCHECKER_H__
-#define CHROME_BROWSER_SPELLCHECKER_H__
+#ifndef CHROME_BROWSER_SPELLCHECKER_H_
+#define CHROME_BROWSER_SPELLCHECKER_H_
 
 #include <vector>
 
+#include "base/string_util.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/spellcheck_worditerator.h"
+#include "chrome/common/l10n_util.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/pref_member.h"
 
 #include "base/task.h"
 #include "unicode/uscript.h"
 
+class FilePath;
 class Hunspell;
 class PrefService;
 class Profile;
 class MessageLoop;
 class URLRequestContext;
+
+namespace file_util {
+class MemoryMappedFile;
+}
 
 // The Browser's Spell Checker. It checks and suggests corrections.
 //
@@ -30,6 +41,14 @@ class URLRequestContext;
 // deleted on the I/O thread itself.
 class SpellChecker : public base::RefCountedThreadSafe<SpellChecker> {
  public:
+  // ASCII string representing a language and/or region, e.g. "en-US".
+  typedef std::string Language;
+  typedef std::vector<Language> Languages;
+  // Languages that are suitable for display to the user.
+  // TODO(port): this should be string16, but we need to port
+  // l10n_util::SortStrings to string16 first.
+  typedef std::vector<std::wstring> DisplayLanguages;
+
   // Creates the spellchecker by reading dictionaries from the given directory,
   // and defaulting to the given language. Both strings must be provided.
   //
@@ -38,12 +57,10 @@ class SpellChecker : public base::RefCountedThreadSafe<SpellChecker> {
   // The |custom_dictionary_file_name| should be left blank so that Spellchecker
   // can figure out the custom dictionary file. It is non empty only for unit
   // testing.
-  SpellChecker(const std::wstring& dict_dir,
-               const std::wstring& language,
+  SpellChecker(const FilePath& dict_dir,
+               const Language& language,
                URLRequestContext* request_context,
-               const std::wstring& custom_dictionary_file_name);
-
-  static void RegisterUserPrefs(PrefService* prefs);
+               const FilePath& custom_dictionary_file_name);
 
   // Only delete on the I/O thread (see above).
   ~SpellChecker();
@@ -67,11 +84,30 @@ class SpellChecker : public base::RefCountedThreadSafe<SpellChecker> {
   //    b) Add the word to a file in disk for custom dictionary.
   void AddWord(const std::wstring& word);
 
+  // Get SpellChecker supported languages.
+  static void SpellCheckLanguages(Languages* languages);
+
+  // This function computes a vector of strings which are to be displayed in
+  // the context menu over a text area for changing spell check languages. It
+  // returns the index of the current spell check language in the vector.
+  // TODO(port): this should take a vector of string16, but the implementation
+  // has some dependencies in l10n util that need porting first.
+  static int GetSpellCheckLanguagesToDisplayInContextMenu(
+      Profile* profile,
+      DisplayLanguages* display_languages);
+
+  // This function returns the corresponding language-region code for the
+  // spell check language. For example, for hi, it returns hi-IN.
+  static Language GetSpellCheckLanguageRegion(Language input_language);
+
+  // This function returns ll (language code) from ll-RR where 'RR' (region
+  // code) is redundant. However, if the region code matters, it's preserved.
+  // That is, it returns 'hi' and 'en-GB' for 'hi-IN' and 'en-GB' respectively.
+  static Language GetLanguageFromLanguageRegion(Language input_language);
+
  private:
   // Download dictionary files when required.
   class DictionaryDownloadController;
-
-  SpellChecker::SpellChecker();
 
   // Initializes the Hunspell Dictionary.
   bool Initialize();
@@ -83,27 +119,31 @@ class SpellChecker : public base::RefCountedThreadSafe<SpellChecker> {
   void set_file_is_downloading(bool value);
 
   // Memory maps the given .bdic file. On success, it will return true and will
-  // place the data and lenght into the given out parameters.
+  // place the data and length into the given out parameters.
   bool MapBdictFile(const unsigned char** data, size_t* length);
 
   // Returns whether or not the given word is a contraction of valid words
   // (e.g. "word:word").
-  bool IsValidContraction(const std::wstring& word);
+  bool IsValidContraction(const string16& word);
+
+  // Return the file name of the dictionary, including the path and the version
+  // numbers.
+  FilePath GetVersionedFileName(const Language& language,
+                                const FilePath& dict_dir);
+
+  static Language GetCorrespondingSpellCheckLanguage(const Language& language);
 
   // Path to the spellchecker file.
-  std::wstring bdict_file_name_;
+  FilePath bdict_file_name_;
 
   // Path to the custom dictionary file.
-  std::wstring custom_dictionary_file_name_;
+  FilePath custom_dictionary_file_name_;
 
-  // We memory-map the BDict file for spellchecking. These are the handles
-  // necessary for that.
-  HANDLE bdict_file_;
-  HANDLE bdict_mapping_;
-  const unsigned char* bdict_mapped_data_;
+  // We memory-map the BDict file.
+  scoped_ptr<file_util::MemoryMappedFile> bdict_file_;
 
   // The hunspell dictionary in use.
-  Hunspell *hunspell_;
+  scoped_ptr<Hunspell> hunspell_;
 
   // Represents character attributes used for filtering out characters which
   // are not supported by this SpellChecker object.
@@ -147,8 +187,7 @@ class SpellChecker : public base::RefCountedThreadSafe<SpellChecker> {
   // using NewRunableMethod on these objects.
   ScopedRunnableMethodFactory<SpellChecker> dic_download_state_changer_factory_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SpellChecker);
+  DISALLOW_COPY_AND_ASSIGN(SpellChecker);
 };
 
-#endif  // #ifndef CHROME_BROWSER_SPELLCHECKER_H__
-
+#endif  // #ifndef CHROME_BROWSER_SPELLCHECKER_H_

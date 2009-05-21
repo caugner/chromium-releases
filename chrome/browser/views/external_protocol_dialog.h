@@ -5,19 +5,19 @@
 #ifndef CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H__
 #define CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H__
 
-#include "chrome/views/dialog_delegate.h"
+#include "chrome/views/window/dialog_delegate.h"
 #include "googleurl/src/gurl.h"
 
 class MessageBoxView;
 class TabContents;
 
-class ExternalProtocolDialog : public ChromeViews::DialogDelegate {
+class ExternalProtocolDialog : public views::DialogDelegate {
  public:
   // Creates and runs a External Protocol dialog box.
   // |url| - The url of the request.
   // |command| - the command that ShellExecute will run.
   // |render_process_host_id| and |routing_id| are used by
-  // tab_util::GetTabContentsByID to aquire the tab contents associated with
+  // tab_util::GetWebContentsByID to aquire the tab contents associated with
   // this dialog.
   // NOTE: There is a race between the Time of Check and the Time Of Use for
   //       the command line. Since the caller (web page) does not have access
@@ -34,16 +34,16 @@ class ExternalProtocolDialog : public ChromeViews::DialogDelegate {
 
   virtual ~ExternalProtocolDialog();
 
-  // ChromeViews::DialogDelegate Methods:
+  // views::DialogDelegate Methods:
   virtual int GetDialogButtons() const;
   virtual int GetDefaultDialogButton() const;
   virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
-  virtual void WindowClosing();
+  virtual void DeleteDelegate();
   virtual bool Accept();
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
-  // ChromeViews::WindowDelegate Methods:
+  // views::WindowDelegate Methods:
   virtual bool IsAlwaysOnTop() const { return false; }
   virtual bool IsModal() const { return false; }
 
@@ -66,4 +66,3 @@ class ExternalProtocolDialog : public ChromeViews::DialogDelegate {
 };
 
 #endif // CHROME_BROWSER_EXTERNAL_PROTOCOL_DIALOG_H__
-

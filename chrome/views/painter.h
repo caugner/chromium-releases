@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_VIEWS_PAINTER_H__
-#define CHROME_VIEWS_PAINTER_H__
+#ifndef CHROME_VIEWS_PAINTER_H_
+#define CHROME_VIEWS_PAINTER_H_
 
 #include <vector>
 
@@ -13,7 +13,7 @@
 class ChromeCanvas;
 class SkBitmap;
 
-namespace ChromeViews {
+namespace views {
 
 // Painter, as the name implies, is responsible for painting in a particular
 // region. Think of Painter as a Border or Background that can be painted
@@ -81,10 +81,10 @@ class ImagePainter : public Painter {
   DISALLOW_EVIL_CONSTRUCTORS(ImagePainter);
 };
 
-// HorizontalPainter paints 3 images into a box: left, center and right. The left
-// and right images are drawn to size at the left/right edges of the region.
-// The center is tiled in the remaining space. All images must have the same
-// height.
+// HorizontalPainter paints 3 images into a box: left, center and right. The
+// left and right images are drawn to size at the left/right edges of the
+// region. The center is tiled in the remaining space. All images must have the
+// same height.
 class HorizontalPainter : public Painter {
  public:
   // Constructs a new HorizontalPainter loading the specified image names.
@@ -115,7 +115,6 @@ class HorizontalPainter : public Painter {
   DISALLOW_EVIL_CONSTRUCTORS(HorizontalPainter);
 };
 
-}
+}  // namespace views
 
-#endif  // CHROME_VIEWS_PAINTER_H__
-
+#endif  // CHROME_VIEWS_PAINTER_H_

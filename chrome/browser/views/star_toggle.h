@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_STAR_TOGGLE_H__
-#define CHROME_BROWSER_VIEWS_STAR_TOGGLE_H__
+#ifndef CHROME_BROWSER_VIEWS_STAR_TOGGLE_H_
+#define CHROME_BROWSER_VIEWS_STAR_TOGGLE_H_
 
 #include "chrome/views/view.h"
 #include "chrome/views/event.h"
+
+class SkBitmap;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -14,7 +16,7 @@
 // Delegate when the state changes.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class StarToggle : public ChromeViews::View {
+class StarToggle : public views::View {
  public:
   class Delegate {
    public:
@@ -41,11 +43,11 @@ class StarToggle : public ChromeViews::View {
 
   // Overriden from view.
   void Paint(ChromeCanvas* canvas);
-  void GetPreferredSize(CSize* out);
-  virtual bool OnMousePressed(const ChromeViews::MouseEvent& e);
-  virtual bool OnMouseDragged(const ChromeViews::MouseEvent& event);
-  virtual void OnMouseReleased(const ChromeViews::MouseEvent& e, bool canceled);
-  bool OnKeyPressed(const ChromeViews::KeyEvent& e);
+  gfx::Size GetPreferredSize();
+  virtual bool OnMousePressed(const views::MouseEvent& e);
+  virtual bool OnMouseDragged(const views::MouseEvent& event);
+  virtual void OnMouseReleased(const views::MouseEvent& e, bool canceled);
+  bool OnKeyPressed(const views::KeyEvent& e);
 
  private:
   // The state.
@@ -64,5 +66,4 @@ class StarToggle : public ChromeViews::View {
   DISALLOW_EVIL_CONSTRUCTORS(StarToggle);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_STAR_TOGGLE_H__
-
+#endif  // CHROME_BROWSER_VIEWS_STAR_TOGGLE_H_

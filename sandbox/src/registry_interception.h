@@ -25,9 +25,14 @@ SANDBOX_INTERCEPT NTSTATUS WINAPI TargetNtOpenKey(
     NtOpenKeyFunction orig_OpenKey, PHANDLE key, ACCESS_MASK desired_access,
     POBJECT_ATTRIBUTES object_attributes);
 
+// Interception of NtOpenKeyEx on the child process.
+// It should never be called directly
+SANDBOX_INTERCEPT NTSTATUS WINAPI TargetNtOpenKeyEx(
+    NtOpenKeyExFunction orig_OpenKeyEx, PHANDLE key, ACCESS_MASK desired_access,
+    POBJECT_ATTRIBUTES object_attributes, DWORD unknown);
+
 }  // extern "C"
 
 }  // namespace sandbox
 
 #endif  // SANDBOX_SRC_REGISTRY_INTERCEPTION_H__
-

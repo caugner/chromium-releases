@@ -9,9 +9,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/gfx/rect.h"
+#include "base/gfx/native_widget_types.h"
 
-typedef struct HWND__* HWND;
+// TODO(port): this typedef is obviously incorrect on non-Windows
+// platforms, but now a lot of code now accidentally depends on them
+// existing.  #ifdef out these declarations and fix all the users.
 typedef void* HANDLE;
 
 class GURL;
@@ -38,13 +42,13 @@ struct WebPluginInfo {
   // The name of the plugin (i.e. Flash).
   std::wstring name;
 
-  // The path to the dll.
-  std::wstring file;
+  // The path to the plugin file (DLL/bundle/library).
+  FilePath path;
 
   // The version number of the plugin file (may be OS-specific)
   std::wstring version;
 
-  // A description of the plugin that we get from it's version info.
+  // A description of the plugin that we get from its version info.
   std::wstring desc;
 
   // A list of all the mime types that this plugin supports.
@@ -54,9 +58,12 @@ struct WebPluginInfo {
 
 // Describes the new location for a plugin window.
 struct WebPluginGeometry {
-  HWND window;
+  gfx::NativeView window;
   gfx::Rect window_rect;
+  // Clip rect (include) and cutouts (excludes), relative to
+  // window_rect origin.
   gfx::Rect clip_rect;
+  std::vector<gfx::Rect> cutout_rects;
   bool visible;
 };
 
@@ -82,7 +89,8 @@ class WebPlugin {
   // The pump_messages_event is a event handle which is valid only for
   // windowless plugins and is used in NPP_HandleEvent calls to pump messages
   // if the plugin enters a modal loop.
-  virtual void SetWindow(HWND window, HANDLE pump_messages_event) = 0;
+  virtual void SetWindow(gfx::NativeView window,
+                         HANDLE pump_messages_event) = 0;
   // Cancels a pending request.
   virtual void CancelResource(int id) = 0;
   virtual void Invalidate() = 0;
@@ -93,9 +101,6 @@ class WebPlugin {
 
   // Returns the DOM element that loaded the plugin.
   virtual NPObject* GetPluginElement() = 0;
-
-  // Returns the WebFrame that contains this plugin.
-  virtual WebFrame* GetWebFrame() = 0;
 
   // Cookies
   virtual void SetCookie(const GURL& url,
@@ -119,7 +124,7 @@ class WebPlugin {
 
   // Handles GetURL/GetURLNotify/PostURL/PostURLNotify requests initiated
   // by plugins.
-  virtual void HandleURLRequest(const char *method, 
+  virtual void HandleURLRequest(const char *method,
                                 bool is_javascript_url,
                                 const char* target, unsigned int len,
                                 const char* buf, bool is_file_data,
@@ -145,17 +150,20 @@ class WebPluginResourceClient {
  public:
   virtual ~WebPluginResourceClient() {}
   virtual void WillSendRequest(const GURL& url) = 0;
+  // The request_is_seekable parameter indicates whether byte range requests
+  // can be issued for the underlying stream.
   virtual void DidReceiveResponse(const std::string& mime_type,
                                   const std::string& headers,
                                   uint32 expected_length,
                                   uint32 last_modified,
+                                  bool request_is_seekable,
                                   bool* cancel) = 0;
-  virtual void DidReceiveData(const char* buffer, int length, 
+  virtual void DidReceiveData(const char* buffer, int length,
                               int data_offset) = 0;
   virtual void DidFinishLoading() = 0;
   virtual void DidFail() = 0;
+  virtual bool IsMultiByteResponseExpected() = 0;
 };
 
 
 #endif  // #ifndef WEBKIT_GLUE_WEBPLUGIN_H__
-

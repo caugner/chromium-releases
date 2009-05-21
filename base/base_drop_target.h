@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_BASE_DROP_TARGET_H__
-#define BASE_BASE_DROP_TARGET_H__
+#ifndef BASE_BASE_DROP_TARGET_H_
+#define BASE_BASE_DROP_TARGET_H_
 
-#include <atlbase.h>
 #include <objidl.h>
-#include <shobjidl.h>
 
-#include "base/basictypes.h"
+#include "base/ref_counted.h"
+
+struct IDropTargetHelper;
 
 // A DropTarget implementation that takes care of the nitty gritty
 // of dnd. While this class is concrete, subclasses will most likely
@@ -18,6 +18,8 @@
 // Because BaseDropTarget is ref counted you shouldn't delete it directly,
 // rather wrap it in a scoped_refptr. Be sure and invoke RevokeDragDrop(m_hWnd)
 // before the HWND is deleted too.
+//
+// This class is meant to be used in a STA and is not multithread-safe.
 class BaseDropTarget : public IDropTarget {
  public:
   // Create a new BaseDropTarget associating it with the given HWND.
@@ -83,13 +85,16 @@ class BaseDropTarget : public IDropTarget {
                        POINT cursor_position,
                        DWORD effect);
 
+  // Return the drag identity.
+  static int32 GetDragIdentity() { return drag_identity_; }
+
  private:
   // Returns the cached drop helper, creating one if necessary. The returned
   // object is not addrefed. May return NULL if the object couldn't be created.
   static IDropTargetHelper* DropHelper();
 
   // The data object currently being dragged over this drop target.
-  CComPtr<IDataObject> current_data_object_;
+  scoped_refptr<IDataObject> current_data_object_;
 
   // A helper object that is used to provide drag image support while the mouse
   // is dragging over the content area.
@@ -100,6 +105,14 @@ class BaseDropTarget : public IDropTarget {
   // since often, DnD will never be used. Instead, we force this penalty to the
   // first time it is actually used.
   static IDropTargetHelper* cached_drop_target_helper_;
+
+  // The drag identity (id). An up-counter that increases when the cursor first
+  // moves over the HWND in a DnD session (OnDragEnter). 0 is reserved to mean
+  // the "no/unknown" identity, and is used for initialization. The identity is
+  // sent to the renderer in drag enter notifications. Note: the identity value
+  // is passed over the renderer NPAPI interface to gears, so use int32 instead
+  // of int here.
+  static int32 drag_identity_;
 
   // The HWND of the source. This HWND is used to determine coordinates for
   // mouse events that are sent to the renderer notifying various drag states.
@@ -114,5 +127,4 @@ class BaseDropTarget : public IDropTarget {
   DISALLOW_EVIL_CONSTRUCTORS(BaseDropTarget);
 };
 
-#endif  // BASE_BASE_DROP_TARGET_H__
-
+#endif  // BASE_BASE_DROP_TARGET_H_

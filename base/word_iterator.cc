@@ -8,7 +8,7 @@
 #include "unicode/ubrk.h"
 #include "unicode/ustring.h"
 
-const int WordIterator::npos = -1;
+const size_t npos = -1;
 
 WordIterator::WordIterator(const std::wstring& str, BreakType break_type)
     : iter_(NULL),
@@ -54,7 +54,7 @@ bool WordIterator::Init() {
   int32_t destLength;
   u_strFromWCS(&chars_[0], chars_.size(), &destLength, string_.data(),
                string_.length(), &error);
-  
+
   iter_ = ubrk_open(break_type, NULL, &chars_[0], destLength, &status);
 #endif
   if (U_FAILURE(status)) {
@@ -72,7 +72,7 @@ bool WordIterator::Advance() {
     pos_ = npos;
     return false;
   } else {
-    pos_ = static_cast<int>(pos);
+    pos_ = static_cast<size_t>(pos);
     return true;
   }
 }
@@ -82,7 +82,6 @@ bool WordIterator::IsWord() const {
 }
 
 std::wstring WordIterator::GetWord() const {
-  DCHECK(prev_ >= 0 && pos_ >= 0);
+  DCHECK(prev_ != npos && pos_ != npos);
   return string_.substr(prev_, pos_ - prev_);
 }
-

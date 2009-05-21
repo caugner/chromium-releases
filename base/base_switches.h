@@ -4,8 +4,8 @@
 
 // Defines all the "base" command-line switches.
 
-#ifndef BASE_SWITCHES_H__
-#define BASE_SWITCHES_H__
+#ifndef BASE_BASE_SWITCHES_H_
+#define BASE_BASE_SWITCHES_H_
 
 namespace switches {
 
@@ -16,8 +16,8 @@ extern const wchar_t kFullMemoryCrashReport[];
 extern const wchar_t kNoErrorDialogs[];
 extern const wchar_t kProcessType[];
 extern const wchar_t kEnableDCHECK[];
+extern const wchar_t kForceHTTPS[];
 
 }  // namespace switches
 
-#endif  // CHROME_COMMON_CHROME_SWITCHES_H__
-
+#endif  // BASE_BASE_SWITCHES_H_

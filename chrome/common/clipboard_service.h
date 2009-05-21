@@ -2,29 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_COMMON_CLIPBOARD_SERIVCE_H__
-#define CHROME_COMMON_CLIPBOARD_SERIVCE_H__
-
-#include <string>
-#include <vector>
+#ifndef CHROME_COMMON_CLIPBOARD_SERVICE_H_
+#define CHROME_COMMON_CLIPBOARD_SERVICE_H_
 
 #include "base/clipboard.h"
 
-class SkBitmap;
-
 class ClipboardService : public Clipboard {
  public:
-  ClipboardService();
-
-  // Adds a bitmap to the clipboard
-  // This is the slowest way to copy a bitmap to the clipboard as we must fist
-  // memcpy the bits into GDI and the blit the bitmap to the clipboard.
-  void WriteBitmap(const SkBitmap& bitmap);
+  ClipboardService() {}
 
  private:
 
-  DISALLOW_EVIL_CONSTRUCTORS(ClipboardService);
+  DISALLOW_COPY_AND_ASSIGN(ClipboardService);
 };
 
-#endif  // CHROME_COMMON_CLIPBOARD_SERIVCE_H__
-
+#endif  // CHROME_COMMON_CLIPBOARD_SERVICE_H_

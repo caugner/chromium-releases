@@ -21,14 +21,22 @@ class MemEntryImpl : public Entry {
   virtual void Doom();
   virtual void Close();
   virtual std::string GetKey() const;
-  virtual Time GetLastUsed() const;
-  virtual Time GetLastModified() const;
+  virtual base::Time GetLastUsed() const;
+  virtual base::Time GetLastModified() const;
   virtual int32 GetDataSize(int index) const;
-  virtual int ReadData(int index, int offset, char* buf, int buf_len,
+  virtual int ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
                        net::CompletionCallback* completion_callback);
-  virtual int WriteData(int index, int offset, const char* buf, int buf_len,
+  virtual int WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
                         net::CompletionCallback* completion_callback,
                         bool truncate);
+  virtual base::PlatformFile UseExternalFile(int index) {
+    // MemEntryImpl doesn't support caching to an external file.
+    return base::kInvalidPlatformFileValue;
+  }
+  virtual base::PlatformFile GetPlatformFile(int index) {
+    // MemEntryImpl doesn't support caching to an external file.
+    return base::kInvalidPlatformFileValue;
+  }
 
   // Performs the initialization of a EntryImpl that will be added to the
   // cache.
@@ -57,6 +65,10 @@ class MemEntryImpl : public Entry {
   bool InUse();
 
  private:
+   enum {
+     NUM_STREAMS = 3
+   };
+
   ~MemEntryImpl();
 
   // Grows and cleans up the data buffer.
@@ -66,14 +78,14 @@ class MemEntryImpl : public Entry {
   void UpdateRank(bool modified);
 
   std::string key_;
-  std::vector<char> data_[2];  // User data.
-  int32 data_size_[2];
+  std::vector<char> data_[NUM_STREAMS];  // User data.
+  int32 data_size_[NUM_STREAMS];
   int ref_count_;
 
   MemEntryImpl* next_;         // Pointers for the LRU list.
   MemEntryImpl* prev_;
-  Time last_modified_;         // LRU information.
-  Time last_used_;
+  base::Time last_modified_;         // LRU information.
+  base::Time last_used_;
   MemBackendImpl* backend_;    // Back pointer to the cache.
   bool doomed_;                // True if this entry was removed from the cache.
 
@@ -83,4 +95,3 @@ class MemEntryImpl : public Entry {
 }  // namespace disk_cache
 
 #endif  // NET_DISK_CACHE_MEM_ENTRY_IMPL_H__
-
