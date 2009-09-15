@@ -48,6 +48,44 @@ TEST(ProxyServerTest, FromURI) {
        "PROXY foopy:10"
     },
 
+    // IPv6 HTTP proxy URIs:
+    {
+       "[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10",  // No scheme.
+       "[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10",
+       net::ProxyServer::SCHEME_HTTP,
+       "FEDC:BA98:7654:3210:FEDC:BA98:7654:3210",
+       10,
+       "[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10",
+       "PROXY [FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10"
+    },
+    {
+       "http://[3ffe:2a00:100:7031::1]",  // No port.
+       "[3ffe:2a00:100:7031::1]:80",
+       net::ProxyServer::SCHEME_HTTP,
+       "3ffe:2a00:100:7031::1",
+       80,
+       "[3ffe:2a00:100:7031::1]:80",
+       "PROXY [3ffe:2a00:100:7031::1]:80"
+    },
+    {
+       "http://[::192.9.5.5]",
+       "[::192.9.5.5]:80",
+       net::ProxyServer::SCHEME_HTTP,
+       "::192.9.5.5",
+       80,
+       "[::192.9.5.5]:80",
+       "PROXY [::192.9.5.5]:80"
+    },
+    {
+       "http://[::FFFF:129.144.52.38]:80",
+       "[::FFFF:129.144.52.38]:80",
+       net::ProxyServer::SCHEME_HTTP,
+       "::FFFF:129.144.52.38",
+       80,
+       "[::FFFF:129.144.52.38]:80",
+       "PROXY [::FFFF:129.144.52.38]:80"
+    },
+
     // SOCKS4 proxy URIs:
     {
        "socks4://foopy",  // No port.
@@ -87,15 +125,37 @@ TEST(ProxyServerTest, FromURI) {
        "foopy:10",
        "SOCKS5 foopy:10"
     },
+
+    // SOCKS proxy URIs (should default to SOCKS4)
+    {
+       "socks://foopy",  // No port.
+       "socks4://foopy:1080",
+       net::ProxyServer::SCHEME_SOCKS4,
+       "foopy",
+       1080,
+       "foopy:1080",
+       "SOCKS foopy:1080"
+    },
+    {
+       "socks://foopy:10",
+       "socks4://foopy:10",
+       net::ProxyServer::SCHEME_SOCKS4,
+       "foopy",
+       10,
+       "foopy:10",
+       "SOCKS foopy:10"
+    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    net::ProxyServer uri = net::ProxyServer::FromURI(tests[i].input_uri);
+    net::ProxyServer uri =
+        net::ProxyServer::FromURI(tests[i].input_uri,
+                                  net::ProxyServer::SCHEME_HTTP);
     EXPECT_TRUE(uri.is_valid());
     EXPECT_FALSE(uri.is_direct());
     EXPECT_EQ(tests[i].expected_uri, uri.ToURI());
     EXPECT_EQ(tests[i].expected_scheme, uri.scheme());
-    EXPECT_EQ(tests[i].expected_host, uri.host());
+    EXPECT_EQ(tests[i].expected_host, uri.HostNoBrackets());
     EXPECT_EQ(tests[i].expected_port, uri.port());
     EXPECT_EQ(tests[i].expected_host_and_port, uri.host_and_port());
     EXPECT_EQ(tests[i].expected_pac_string, uri.ToPacString());
@@ -110,7 +170,8 @@ TEST(ProxyServerTest, DefaultConstructor) {
 // Test parsing of the special URI form "direct://". Analagous to the "DIRECT"
 // entry in a PAC result.
 TEST(ProxyServerTest, Direct) {
-  net::ProxyServer uri = net::ProxyServer::FromURI("direct://");
+  net::ProxyServer uri =
+      net::ProxyServer::FromURI("direct://", net::ProxyServer::SCHEME_HTTP);
   EXPECT_TRUE(uri.is_valid());
   EXPECT_TRUE(uri.is_direct());
   EXPECT_EQ("direct://", uri.ToURI());
@@ -124,7 +185,6 @@ TEST(ProxyServerTest, Invalid) {
     "   ",
     "dddf:",   // not a valid port
     "dddd:d",  // not a valid port
-    "socks://foopy",  // not a valid scheme (needs to be socks4 or sock5).
     "http://",  // not a valid host/port.
     "direct://xyz",  // direct is not allowed a host/port.
     "http:/",  // ambiguous, but will fail because of bad port.
@@ -133,7 +193,8 @@ TEST(ProxyServerTest, Invalid) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    net::ProxyServer uri = net::ProxyServer::FromURI(tests[i]);
+    net::ProxyServer uri =
+        net::ProxyServer::FromURI(tests[i], net::ProxyServer::SCHEME_HTTP);
     EXPECT_FALSE(uri.is_valid());
     EXPECT_FALSE(uri.is_direct());
     EXPECT_FALSE(uri.is_http());
@@ -150,7 +211,8 @@ TEST(ProxyServerTest, Whitespace) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    net::ProxyServer uri = net::ProxyServer::FromURI(tests[i]);
+    net::ProxyServer uri =
+        net::ProxyServer::FromURI(tests[i], net::ProxyServer::SCHEME_HTTP);
     EXPECT_EQ("foopy:80", uri.ToURI());
   }
 }

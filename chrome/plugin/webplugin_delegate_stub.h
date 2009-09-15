@@ -11,18 +11,22 @@
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
-#include "chrome/common/ipc_channel.h"
+#include "chrome/common/transport_dib.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_channel.h"
 #include "third_party/npapi/bindings/npapi.h"
 
-class GURL;
 class PluginChannel;
 class WebPluginProxy;
 class WebPluginDelegate;
 struct PluginMsg_Init_Params;
 struct PluginMsg_DidReceiveResponseParams;
-struct PluginMsg_PrintResponse_Params;
 struct PluginMsg_URLRequestReply_Params;
 class WebCursor;
+
+namespace WebKit {
+class WebInputEvent;
+}
 
 // Converts the IPC messages from WebPluginDelegateProxy into calls to the
 // actual WebPluginDelegate object.
@@ -57,23 +61,23 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
 
   void OnDidFinishLoadWithReason(int reason);
   void OnSetFocus();
-  void OnHandleEvent(const NPEvent& event, bool* handled,
-                     WebCursor* cursor);
+  void OnHandleInputEvent(const WebKit::WebInputEvent* event,
+                          bool* handled, WebCursor* cursor);
 
   void OnPaint(const gfx::Rect& damaged_rect);
   void OnDidPaint();
 
-  void OnPrint(PluginMsg_PrintResponse_Params* params);
+  void OnPrint(base::SharedMemoryHandle* shared_memory, size_t* size);
 
   void OnUpdateGeometry(const gfx::Rect& window_rect,
                         const gfx::Rect& clip_rect,
-                        const base::SharedMemoryHandle& windowless_buffer,
-                        const base::SharedMemoryHandle& background_buffer);
-  void OnGetPluginScriptableObject(int* route_id, void** npobject_ptr);
+                        const TransportDIB::Handle& windowless_buffer,
+                        const TransportDIB::Handle& background_buffer);
+  void OnGetPluginScriptableObject(int* route_id, intptr_t* npobject_ptr);
   void OnSendJavaScriptStream(const std::string& url,
                               const std::wstring& result,
                               bool success, bool notify_needed,
-                              int notify_data);
+                              intptr_t notify_data);
 
   void OnDidReceiveManualResponse(
       const std::string& url,
@@ -87,21 +91,24 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
       const PluginMsg_URLRequestReply_Params& params);
 
   void OnURLRequestRouted(const std::string& url, bool notify_needed,
-                          HANDLE notify_data);
+                          intptr_t notify_data);
 
   void CreateSharedBuffer(size_t size,
                           base::SharedMemory* shared_buf,
                           base::SharedMemoryHandle* remote_handle);
 
-  int instance_id_;
   std::string mime_type_;
+  int instance_id_;
 
   scoped_refptr<PluginChannel> channel_;
 
   WebPluginDelegate* delegate_;
   WebPluginProxy* webplugin_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegateStub);
+  // The url of the main frame hosting the plugin.
+  GURL page_url_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(WebPluginDelegateStub);
 };
 
 #endif  // CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_

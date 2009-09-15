@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/browser_with_test_window_test.h"
 #include "chrome/test/testing_profile.h"
 
@@ -16,10 +17,12 @@ typedef BrowserWithTestWindowTest BrowserCommandsTest;
 // Tests IDC_SELECT_TAB_0, IDC_SELECT_NEXT_TAB, IDC_SELECT_PREVIOUS_TAB and
 // IDC_SELECT_LAST_TAB.
 TEST_F(BrowserCommandsTest, TabNavigationAccelerators) {
+  GURL about_blank(chrome::kAboutBlankURL);
+
   // Create three tabs.
-  AddTestingTab(browser());
-  AddTestingTab(browser());
-  AddTestingTab(browser());
+  AddTab(browser(), about_blank);
+  AddTab(browser(), about_blank);
+  AddTab(browser(), about_blank);
 
   // Select the second tab.
   browser()->SelectTabContentsAt(1, false);
@@ -43,15 +46,14 @@ TEST_F(BrowserCommandsTest, TabNavigationAccelerators) {
 
 // Tests IDC_DUPLICATE_TAB.
 TEST_F(BrowserCommandsTest, DuplicateTab) {
-  GURL url1 = test_url_with_path("1");
-  GURL url2 = test_url_with_path("2");
-  GURL url3 = test_url_with_path("3");
+  GURL url1("http://foo/1");
+  GURL url2("http://foo/2");
+  GURL url3("http://foo/3");
 
   // Navigate to the three urls, then go back.
-  AddTestingTab(browser());
-  browser()->OpenURL(url1, GURL(), CURRENT_TAB, PageTransition::TYPED);
-  browser()->OpenURL(url2, GURL(), CURRENT_TAB, PageTransition::TYPED);
-  browser()->OpenURL(url3, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  AddTab(browser(), url1);
+  NavigateAndCommitActiveTab(url2);
+  NavigateAndCommitActiveTab(url3);
 
   size_t initial_window_count = BrowserList::size();
 
@@ -66,13 +68,13 @@ TEST_F(BrowserCommandsTest, DuplicateTab) {
   ASSERT_EQ(2, browser()->tab_count());
 
   // Verify the stack of urls.
-  NavigationController* controller =
+  NavigationController& controller =
       browser()->GetTabContentsAt(1)->controller();
-  ASSERT_EQ(3, controller->GetEntryCount());
-  ASSERT_EQ(2, controller->GetCurrentEntryIndex());
-  ASSERT_TRUE(url1 == controller->GetEntryAtIndex(0)->url());
-  ASSERT_TRUE(url2 == controller->GetEntryAtIndex(1)->url());
-  ASSERT_TRUE(url3 == controller->GetEntryAtIndex(2)->url());
+  ASSERT_EQ(3, controller.entry_count());
+  ASSERT_EQ(2, controller.GetCurrentEntryIndex());
+  ASSERT_TRUE(url1 == controller.GetEntryAtIndex(0)->url());
+  ASSERT_TRUE(url2 == controller.GetEntryAtIndex(1)->url());
+  ASSERT_TRUE(url3 == controller.GetEntryAtIndex(2)->url());
 }
 
 TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
@@ -81,11 +83,11 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   profile()->BlockUntilBookmarkModelLoaded();
 
   // Navigate to a url.
-  GURL url1 = test_url_with_path("1");
-  AddTestingTab(browser());
+  GURL url1("http://foo/1");
+  AddTab(browser(), url1);
   browser()->OpenURL(url1, GURL(), CURRENT_TAB, PageTransition::TYPED);
 
-  // TODO(beng): remove this once we can use WebContentses directly in testing
+  // TODO(beng): remove this once we can use TabContentses directly in testing
   //             instead of the TestTabContents which causes this command not to
   //             be enabled when the tab is added (and selected).
   browser()->command_updater()->UpdateCommandEnabled(IDC_STAR, true);
@@ -96,4 +98,70 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   // It should now be bookmarked in the bookmark model.
   EXPECT_EQ(profile(), browser()->profile());
   EXPECT_TRUE(browser()->profile()->GetBookmarkModel()->IsBookmarked(url1));
+}
+
+// Tests back/forward in new tab (Control + Back/Forward button in the UI).
+TEST_F(BrowserCommandsTest, BackForwardInNewTab) {
+  GURL url1("http://foo/1");
+  GURL url2("http://foo/2");
+
+  // Make a tab with the two pages navigated in it.
+  AddTab(browser(), url1);
+  NavigateAndCommitActiveTab(url2);
+
+  // Go back in a new background tab.
+  browser()->GoBack(NEW_BACKGROUND_TAB);
+  EXPECT_EQ(0, browser()->selected_index());
+  ASSERT_EQ(2, browser()->tab_count());
+
+  // The original tab should be unchanged.
+  TabContents* zeroth = browser()->GetTabContentsAt(0);
+  EXPECT_EQ(url2, zeroth->GetURL());
+  EXPECT_TRUE(zeroth->controller().CanGoBack());
+  EXPECT_FALSE(zeroth->controller().CanGoForward());
+
+  // The new tab should be like the first one but navigated back.
+  TabContents* first = browser()->GetTabContentsAt(1);
+  EXPECT_EQ(url1, browser()->GetTabContentsAt(1)->GetURL());
+  EXPECT_FALSE(first->controller().CanGoBack());
+  EXPECT_TRUE(first->controller().CanGoForward());
+
+  // Select the second tab and make it go forward in a new background tab.
+  browser()->SelectTabContentsAt(1, true);
+  // TODO(brettw) bug 11055: It should not be necessary to commit the load here,
+  // but because of this bug, it will assert later if we don't. When the bug is
+  // fixed, one of the three commits here related to this bug should be removed
+  // (to test both codepaths).
+  CommitPendingLoad(&first->controller());
+  EXPECT_EQ(1, browser()->selected_index());
+  browser()->GoForward(NEW_BACKGROUND_TAB);
+
+  // The previous tab should be unchanged and still in the foreground.
+  EXPECT_EQ(url1, first->GetURL());
+  EXPECT_FALSE(first->controller().CanGoBack());
+  EXPECT_TRUE(first->controller().CanGoForward());
+  EXPECT_EQ(1, browser()->selected_index());
+
+  // There should be a new tab navigated forward.
+  ASSERT_EQ(3, browser()->tab_count());
+  TabContents* second = browser()->GetTabContentsAt(2);
+  EXPECT_EQ(url2, second->GetURL());
+  EXPECT_TRUE(second->controller().CanGoBack());
+  EXPECT_FALSE(second->controller().CanGoForward());
+
+  // Now do back in a new foreground tab. Don't bother re-checking every sngle
+  // thing above, just validate that it's opening properly.
+  browser()->SelectTabContentsAt(2, true);
+  // TODO(brettw) bug 11055: see the comment above about why we need this.
+  CommitPendingLoad(&second->controller());
+  browser()->GoBack(NEW_FOREGROUND_TAB);
+  ASSERT_EQ(3, browser()->selected_index());
+  ASSERT_EQ(url1, browser()->GetSelectedTabContents()->GetURL());
+
+  // Same thing again for forward.
+  // TODO(brettw) bug 11055: see the comment above about why we need this.
+  CommitPendingLoad(&browser()->GetSelectedTabContents()->controller());
+  browser()->GoForward(NEW_FOREGROUND_TAB);
+  ASSERT_EQ(4, browser()->selected_index());
+  ASSERT_EQ(url2, browser()->GetSelectedTabContents()->GetURL());
 }

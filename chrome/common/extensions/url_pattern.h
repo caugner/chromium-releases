@@ -1,8 +1,10 @@
 // Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-#ifndef CHROME_BROWSER_EXTENSIONS_MATCH_PATTERN_H_
-#define CHROME_BROWSER_EXTENSIONS_MATCH_PATTERN_H_
+#ifndef CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_
+#define CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_
+
+#include <string>
 
 #include "googleurl/src/gurl.h"
 
@@ -10,7 +12,7 @@
 // subset of URL syntax:
 //
 // <url-pattern> := <scheme>://<host><path>
-// <scheme> := 'http' | 'https' | 'file' | 'ftp' | 'chrome-ui'
+// <scheme> := 'http' | 'https' | 'file' | 'ftp' | 'chrome'
 // <host> := '*' | '*.' <anychar except '/' and '*'>+
 // <path> := '/' <any chars>
 //
@@ -21,7 +23,6 @@
 // - http://*/*
 // - http://*/foo*
 // - https://*.google.com/foo*bar
-// - chrome-ui://foo/bar
 // - file://monkey*
 // - http://127.0.0.1/*
 //
@@ -31,6 +32,7 @@
 // - http://foo.*.bar/baz -- * must be first component
 // - http:/bar -- scheme separator not found
 // - foo://* -- invalid scheme
+// - chrome:// -- we don't support chrome internal URLs
 //
 // Design rationale:
 // * We need to be able to tell users what 'sites' a given URLPattern will
@@ -40,8 +42,7 @@
 //   patterns to URLPatterns as possible. Greasemonkey @include patterns are
 //   simple globs, so this won't be perfect.
 // * Although we would like to support any scheme, it isn't clear what to tell
-//   users about URLPatterns that affect data or javascript URLs, and saying
-//   something useful about chrome-extension URLs is more work, so those are
+//   users about URLPatterns that affect data or javascript URLs, so those are
 //   left out for now.
 //
 // From a 2008-ish crawl of userscripts.org, the following patterns were found
@@ -68,6 +69,10 @@
 // than the original glob, which is probably better than nothing.
 class URLPattern {
  public:
+  // Returns true if the specified scheme can be used in URL patterns, and false
+  // otherwise.
+  static bool IsValidScheme(const std::string& scheme);
+
   URLPattern() : match_subdomains_(false) {}
 
   // Initializes this instance by parsing the provided string. On failure, the
@@ -75,7 +80,7 @@ class URLPattern {
   bool Parse(const std::string& pattern_str);
 
   // Returns true if this instance matches the specified URL.
-  bool MatchesUrl(const GURL& url);
+  bool MatchesUrl(const GURL& url) const;
 
   std::string GetAsString() const;
 
@@ -96,10 +101,10 @@ class URLPattern {
 
  private:
   // Returns true if |test| matches our host.
-  bool MatchesHost(const GURL& test);
+  bool MatchesHost(const GURL& test) const;
 
   // Returns true if |test| matches our path.
-  bool MatchesPath(const GURL& test);
+  bool MatchesPath(const GURL& test) const;
 
   // The scheme for the pattern.
   std::string scheme_;
@@ -118,7 +123,7 @@ class URLPattern {
   // The path with "?" and "\" characters escaped for use with the
   // MatchPattern() function. This is populated lazily, the first time it is
   // needed.
-  std::string path_escaped_;
+  mutable std::string path_escaped_;
 };
 
-#endif  // CHROME_BROWSER_EXTENSIONS_MATCH_PATTERN_H_
+#endif  // CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_

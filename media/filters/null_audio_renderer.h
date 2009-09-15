@@ -37,10 +37,7 @@ class NullAudioRenderer : public AudioRendererBase, PlatformThread::Delegate {
   }
 
   // Compatible with any audio/x-uncompressed MediaFormat.
-  static bool IsMediaFormatSupported(const MediaFormat* media_format);
-
-  // MediaFilter implementation.
-  virtual void SetPlaybackRate(float playback_rate);
+  static bool IsMediaFormatSupported(const MediaFormat& media_format);
 
   // AudioRenderer implementation.
   virtual void SetVolume(float volume);
@@ -55,13 +52,10 @@ class NullAudioRenderer : public AudioRendererBase, PlatformThread::Delegate {
   virtual ~NullAudioRenderer();
 
   // AudioRendererBase implementation.
-  virtual bool OnInitialize(const MediaFormat* media_format);
+  virtual bool OnInitialize(const MediaFormat& media_format);
   virtual void OnStop();
 
  private:
-  // Current playback rate.
-  float playback_rate_;
-
   // A number to convert bytes written in FillBuffer to milliseconds based on
   // the audio format.  Calculated in OnInitialize by looking at the decoder's
   // MediaFormat.

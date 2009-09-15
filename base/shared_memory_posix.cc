@@ -70,6 +70,12 @@ SharedMemoryHandle SharedMemory::NULLHandle() {
   return SharedMemoryHandle();
 }
 
+// static
+void SharedMemory::CloseHandle(const SharedMemoryHandle& handle) {
+  DCHECK(handle.fd >= 0);
+  close(handle.fd);
+}
+
 bool SharedMemory::Create(const std::wstring &name, bool read_only,
                           bool open_existing, size_t size) {
   read_only_ = read_only;
@@ -134,11 +140,12 @@ bool SharedMemory::FilenameForMemoryName(const std::wstring &memname,
   return true;
 }
 
-// Current expectation is that Cromium only really needs
-// unique/private shmem as specified by "name == L"".
-// TODO(port): confirm that assumption.
+// Chromium mostly only use the unique/private shmem as specified by
+// "name == L"". The exception is in the StatsTable.
 // TODO(jrg): there is no way to "clean up" all unused named shmem if
 // we restart from a crash.  (That isn't a new problem, but it is a problem.)
+// In case we want to delete it later, it may be useful to save the value
+// of mem_filename after FilenameForMemoryName().
 bool SharedMemory::CreateOrOpen(const std::wstring &name,
                                 int posix_flags, size_t size) {
   DCHECK(mapped_file_ == -1);
@@ -152,7 +159,6 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
 
     FilePath path;
     fp = file_util::CreateAndOpenTemporaryShmemFile(&path);
-    name_ = UTF8ToWide(path.value());
 
     // Deleting the file prevents anyone else from mapping it in
     // (making it private), and prevents the need for cleanup (once
@@ -163,7 +169,6 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
     if (FilenameForMemoryName(name, &mem_filename) == false)
       return false;
 
-    name_ = mem_filename;
     std::string mode;
     switch (posix_flags) {
       case (O_RDWR | O_CREAT):
@@ -220,7 +225,14 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
   }
 
   mapped_file_ = dup(fileno(fp));
-  DCHECK(mapped_file_ >= 0);
+  if (mapped_file_ == -1) {
+    if (errno == EMFILE) {
+      LOG(WARNING) << "Shared memory creation failed; out of file descriptors";
+      return false;
+    } else {
+      NOTREACHED() << "Call to dup failed, errno=" << errno;
+    }
+  }
 
   struct stat st;
   if (fstat(mapped_file_, &st))
@@ -271,10 +283,8 @@ bool SharedMemory::ShareToProcessCommon(ProcessHandle process,
 
 
 void SharedMemory::Close() {
-
   Unmap();
 
-  std::string posix_name(WideToUTF8(name_));
   if (mapped_file_ > 0) {
     close(mapped_file_);
     mapped_file_ = -1;

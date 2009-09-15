@@ -213,6 +213,35 @@ void VisitDatabase::GetAllVisitsInRange(Time begin_time, Time end_time,
   FillVisitVector(*statement, visits);
 }
 
+void VisitDatabase::GetVisitsInRangeForTransition(
+    Time begin_time,
+    Time end_time,
+    int max_results,
+    PageTransition::Type transition,
+    VisitVector* visits) {
+  DCHECK(visits);
+  visits->clear();
+
+  SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
+      "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
+      "WHERE visit_time >= ? AND visit_time < ? "
+      "AND (transition & ?) == ?"
+      "ORDER BY visit_time LIMIT ?");
+  if (!statement.is_valid())
+    return;
+
+  // See GetVisibleVisitsInRange for more info on how these times are bound.
+  int64 end = end_time.ToInternalValue();
+  statement->bind_int64(0, begin_time.ToInternalValue());
+  statement->bind_int64(1, end ? end : std::numeric_limits<int64>::max());
+  statement->bind_int(2, PageTransition::CORE_MASK);
+  statement->bind_int(3, transition);
+  statement->bind_int64(4,
+      max_results ? max_results : std::numeric_limits<int64>::max());
+
+  FillVisitVector(*statement, visits);
+}
+
 void VisitDatabase::GetVisibleVisitsInRange(Time begin_time, Time end_time,
                                             bool most_recent_visit_only,
                                             int max_count,
@@ -224,7 +253,8 @@ void VisitDatabase::GetVisibleVisitsInRange(Time begin_time, Time end_time,
       "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
       "WHERE visit_time >= ? AND visit_time < ? "
       "AND (transition & ?) != 0 "  // CHAIN_END
-      "AND (transition & ?) NOT IN (?, ?) "  // NO SUBFRAME
+      "AND (transition & ?) NOT IN (?, ?, ?) "  // NO SUBFRAME or
+                                                // KEYWORD_GENERATED
       "ORDER BY visit_time DESC, id DESC");
   if (!statement.is_valid())
     return;
@@ -239,6 +269,7 @@ void VisitDatabase::GetVisibleVisitsInRange(Time begin_time, Time end_time,
   statement->bind_int(3, PageTransition::CORE_MASK);
   statement->bind_int(4, PageTransition::AUTO_SUBFRAME);
   statement->bind_int(5, PageTransition::MANUAL_SUBFRAME);
+  statement->bind_int(6, PageTransition::KEYWORD_GENERATED);
 
   std::set<URLID> found_urls;
   while (statement->step() == SQLITE_ROW) {
@@ -325,6 +356,31 @@ bool VisitDatabase::GetRedirectFromVisit(VisitID from_visit,
   return true;
 }
 
+bool VisitDatabase::GetRedirectToVisit(VisitID to_visit,
+                                       VisitID* from_visit,
+                                       GURL* from_url) {
+  VisitRow row;
+  if (!GetRowForVisit(to_visit, &row))
+    return false;
+
+  if (from_visit)
+    *from_visit = row.referring_visit;
+
+  if (from_url) {
+    SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
+        "SELECT u.url "
+        "FROM visits v JOIN urls u ON v.url = u.id "
+        "WHERE v.id = ?");
+    statement->bind_int64(0, row.referring_visit);
+
+    if (statement->step() != SQLITE_ROW)
+      return false;
+
+    *from_url = GURL(statement->column_string(0));
+  }
+  return true;
+}
+
 bool VisitDatabase::GetVisitCountToHost(const GURL& url,
                                         int* count,
                                         Time* first_visit) {
@@ -371,7 +427,7 @@ bool VisitDatabase::GetVisitCountToHost(const GURL& url,
 bool VisitDatabase::GetStartDate(Time* first_visit) {
   SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
       "SELECT MIN(visit_time) FROM visits WHERE visit_time != 0");
-  if (!statement.is_valid() || statement->step() != SQLITE_ROW || 
+  if (!statement.is_valid() || statement->step() != SQLITE_ROW ||
       statement->column_int64(0) == 0) {
     *first_visit = Time::Now();
     return false;

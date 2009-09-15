@@ -6,20 +6,22 @@
 #define WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H_
 
 #include <string>
-#include <vector>
 
 #include "base/gfx/native_widget_types.h"
+#include "build/build_config.h"
 #include "third_party/npapi/bindings/npapi.h"
 
-// TODO(port): put in OS_WIN check.
-typedef struct HDC__* HDC;
 struct NPObject;
 
 class FilePath;
 class GURL;
-class WebCursor;
 class WebPlugin;
 class WebPluginResourceClient;
+
+namespace WebKit {
+class WebInputEvent;
+struct WebCursorInfo;
+}
 
 namespace gfx {
 class Rect;
@@ -28,26 +30,24 @@ class Rect;
 // This is the interface that a plugin implementation needs to provide.
 class WebPluginDelegate {
  public:
-#if defined(OS_WIN)
   enum PluginQuirks {
-    PLUGIN_QUIRK_SETWINDOW_TWICE = 1,
-    PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE = 2,
-    PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY = 4,
-    PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY = 8,
-    PLUGIN_QUIRK_DONT_ALLOW_MULTIPLE_INSTANCES = 16,
-    PLUGIN_QUIRK_DIE_AFTER_UNLOAD = 32,
-    PLUGIN_QUIRK_PATCH_TRACKPOPUP_MENU = 64,
-    PLUGIN_QUIRK_PATCH_SETCURSOR = 128,
-    PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS = 256,
+    PLUGIN_QUIRK_SETWINDOW_TWICE = 1,  // Win32
+    PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE = 2,  // Win32
+    PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY = 4,  // Win32
+    PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY = 8,  // Win32
+    PLUGIN_QUIRK_DONT_ALLOW_MULTIPLE_INSTANCES = 16,  // Win32
+    PLUGIN_QUIRK_DIE_AFTER_UNLOAD = 32,  // Win32
+    PLUGIN_QUIRK_PATCH_SETCURSOR = 64,  // Win32
+    PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS = 128,  // Win32
+    PLUGIN_QUIRK_WINDOWLESS_OFFSET_WINDOW_TO_DRAW = 256,  // Linux
   };
-#endif
 
   WebPluginDelegate() {}
   virtual ~WebPluginDelegate() {}
 
   static WebPluginDelegate* Create(const FilePath& filename,
                                    const std::string& mime_type,
-                                   gfx::NativeView containing_view);
+                                   gfx::PluginWindowHandle containing_view);
 
   // Initializes the plugin implementation with the given (UTF8) arguments.
   // Note that the lifetime of WebPlugin must be longer than this delegate.
@@ -87,7 +87,8 @@ class WebPluginDelegate {
 
   // For windowless plugins, gives them a user event like mouse/keyboard.
   // Returns whether the event was handled.
-  virtual bool HandleEvent(NPEvent* event, WebCursor* cursor) = 0;
+  virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
+                                WebKit::WebCursorInfo* cursor) = 0;
 
   // Gets the NPObject associated with the plugin for scripting.
   virtual NPObject* GetPluginScriptableObject() = 0;
@@ -99,13 +100,11 @@ class WebPluginDelegate {
   // Returns the process id of the process that is running the plugin.
   virtual int GetProcessId() = 0;
 
-  virtual void FlushGeometryUpdates() = 0;
-
   // The result of the script execution is returned via this function.
   virtual void SendJavaScriptStream(const std::string& url,
                                     const std::wstring& result,
                                     bool success, bool notify_needed,
-                                    int notify_data) = 0;
+                                    intptr_t notify_data) = 0;
 
   // Receives notification about data being available.
   virtual void DidReceiveManualResponse(const std::string& url,
@@ -133,12 +132,12 @@ class WebPluginDelegate {
   virtual WebPluginResourceClient* CreateResourceClient(int resource_id,
                                                         const std::string &url,
                                                         bool notify_needed,
-                                                        void *notify_data,
-                                                        void* stream) = 0;
+                                                        intptr_t notify_data,
+                                                        intptr_t stream) = 0;
 
   // Notifies the delegate about a Get/Post URL request getting routed.
   virtual void URLRequestRouted(const std::string&url, bool notify_needed,
-                                void* notify_data) = 0;
+                                intptr_t notify_data) = 0;
 
   virtual bool IsWindowless() const;
 
@@ -146,10 +145,8 @@ class WebPluginDelegate {
 
   virtual const gfx::Rect& GetClipRect() const;
 
-#if defined(OS_WIN)
-  // Returns a combinaison of PluginQuirks.
+  // Returns a combination of PluginQuirks.
   virtual int GetQuirks() const;
-#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebPluginDelegate);

@@ -5,13 +5,14 @@
 #include "chrome/browser/sessions/base_session_service.h"
 
 #include "base/pickle.h"
+#include "base/stl_util-inl.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sessions/session_backend.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/common/stl_util-inl.h"
+#include "webkit/glue/webkit_glue.h"
 
 // InternalGetCommandsRequest -------------------------------------------------
 
@@ -37,15 +38,15 @@ void WriteStringToPickle(Pickle& pickle, int* bytes_written, int max_bytes,
   }
 }
 
-// Wide version of WriteStringToPickle.
-void WriteWStringToPickle(Pickle& pickle, int* bytes_written, int max_bytes,
-                          const std::wstring& str) {
-  int num_bytes = str.size() * sizeof(wchar_t);
+// string16 version of WriteStringToPickle.
+void WriteString16ToPickle(Pickle& pickle, int* bytes_written, int max_bytes,
+                           const string16& str) {
+  int num_bytes = str.size() * sizeof(char16);
   if (*bytes_written + num_bytes < max_bytes) {
     *bytes_written += num_bytes;
-    pickle.WriteWString(str);
+    pickle.WriteString16(str);
   } else {
-    pickle.WriteWString(std::wstring());
+    pickle.WriteString16(string16());
   }
 }
 
@@ -157,11 +158,16 @@ SessionCommand* BaseSessionService::CreateUpdateTabNavigationCommand(
   WriteStringToPickle(pickle, &bytes_written, max_state_size,
                       entry.display_url().spec());
 
-  WriteWStringToPickle(pickle, &bytes_written, max_state_size,
-                       UTF16ToWideHack(entry.title()));
+  WriteString16ToPickle(pickle, &bytes_written, max_state_size, entry.title());
 
-  WriteStringToPickle(pickle, &bytes_written, max_state_size,
-                      entry.content_state());
+  if (entry.has_post_data()) {
+    // Remove the form data, it may contain sensitive information.
+    WriteStringToPickle(pickle, &bytes_written, max_state_size,
+        webkit_glue::RemoveFormDataFromHistoryState(entry.content_state()));
+  } else {
+    WriteStringToPickle(pickle, &bytes_written, max_state_size,
+                        entry.content_state());
+  }
 
   pickle.WriteInt(entry.transition_type());
   int type_mask = entry.has_post_data() ? TabNavigation::HAS_POST_DATA : 0;
@@ -209,16 +215,11 @@ bool BaseSessionService::RestoreUpdateTabNavigationCommand(
 }
 
 bool BaseSessionService::ShouldTrackEntry(const NavigationEntry& entry) {
-  // Don't track entries that have post data. Post data may contain passwords
-  // and other sensitive data users don't want stored to disk.
-  return entry.display_url().is_valid() && !entry.has_post_data();
+  return entry.display_url().is_valid();
 }
 
 bool BaseSessionService::ShouldTrackEntry(const TabNavigation& navigation) {
-  // Don't track entries that have post data. Post data may contain passwords
-  // and other sensitive data users don't want stored to disk.
-  return navigation.url().is_valid() &&
-         (navigation.type_mask() & TabNavigation::HAS_POST_DATA) == 0;
+  return navigation.url().is_valid();
 }
 
 BaseSessionService::Handle BaseSessionService::ScheduleGetLastSessionCommands(

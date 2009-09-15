@@ -11,7 +11,8 @@
 #include <vector>
 
 #include "base/ref_counted.h"
-#include "chrome/common/ipc_channel.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_channel.h"
 
 namespace base {
 class WaitableEvent;
@@ -32,7 +33,8 @@ class NPObjectStub : public IPC::Channel::Listener,
   NPObjectStub(NPObject* npobject,
                PluginChannelBase* channel,
                int route_id,
-               base::WaitableEvent* modal_dialog_event);
+               base::WaitableEvent* modal_dialog_event,
+               const GURL& page_url);
   ~NPObjectStub();
 
   // IPC::Message::Sender implementation:
@@ -72,22 +74,27 @@ class NPObjectStub : public IPC::Channel::Listener,
   void OnInvalidate();
   void OnEnumeration(std::vector<NPIdentifier_Param>* value,
                      bool* result);
+  void OnConstruct(const std::vector<NPVariant_Param>& args,
+                   IPC::Message* reply_msg);
   void OnEvaluate(const std::string& script, bool popups_allowed,
                   IPC::Message* reply_msg);
   void OnSetException(const std::string& message);
 
  private:
   NPObject* npobject_;
-  int route_id_;
   scoped_refptr<PluginChannelBase> channel_;
-
-  base::WaitableEvent* modal_dialog_event_;
+  int route_id_;
 
   // These variables are used to ensure that the window script object is not
   // called after the plugin widget has gone away, as the frame manually
   // deallocates it and ignores the refcount to avoid leaks.
   bool valid_;
   WebPluginDelegateProxy* web_plugin_delegate_proxy_;
+
+  base::WaitableEvent* modal_dialog_event_;
+
+  // The url of the main frame hosting the plugin.
+  GURL page_url_;
 };
 
 #endif  // CHROME_PLUGIN_NPOBJECT_STUB_H_

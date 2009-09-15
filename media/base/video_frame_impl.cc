@@ -47,6 +47,53 @@ void VideoFrameImpl::CreateFrame(VideoSurface::Format format,
   *frame_out = alloc_worked ? frame : NULL;
 }
 
+// static
+void VideoFrameImpl::CreateEmptyFrame(scoped_refptr<VideoFrame>* frame_out) {
+  *frame_out = new VideoFrameImpl(VideoSurface::EMPTY, 0, 0);
+}
+
+// static
+void VideoFrameImpl::CreateBlackFrame(int width, int height,
+                                      scoped_refptr<VideoFrame>* frame_out) {
+  DCHECK_GT(width, 0);
+  DCHECK_GT(height, 0);
+
+  // Create our frame.
+  scoped_refptr<VideoFrame> frame;
+  const base::TimeDelta kZero;
+  VideoFrameImpl::CreateFrame(VideoSurface::YV12, width, height, kZero, kZero,
+                              &frame);
+  DCHECK(frame);
+
+  // Now set the data to YUV(0,128,128).
+  const uint8 kBlackY = 0x00;
+  const uint8 kBlackUV = 0x80;
+  VideoSurface surface;
+  frame->Lock(&surface);
+  DCHECK_EQ(VideoSurface::YV12, surface.format) << "Expected YV12 surface";
+
+  // Fill the Y plane.
+  for (size_t i = 0; i < surface.height; ++i) {
+    memset(surface.data[VideoSurface::kYPlane], kBlackY, surface.width);
+    surface.data[VideoSurface::kYPlane]
+        += surface.strides[VideoSurface::kYPlane];
+  }
+
+  // Fill the U and V planes.
+  for (size_t i = 0; i < (surface.height / 2); ++i) {
+    memset(surface.data[VideoSurface::kUPlane], kBlackUV, surface.width / 2);
+    memset(surface.data[VideoSurface::kVPlane], kBlackUV, surface.width / 2);
+    surface.data[VideoSurface::kUPlane] +=
+        surface.strides[VideoSurface::kUPlane];
+    surface.data[VideoSurface::kVPlane] +=
+        surface.strides[VideoSurface::kVPlane];
+  }
+  frame->Unlock();
+
+  // Success!
+  *frame_out = frame;
+}
+
 static inline size_t RoundUp(size_t value, size_t alignment) {
   // Check that |alignment| is a power of 2.
   DCHECK((alignment + (alignment - 1)) == (alignment | (alignment - 1)));
@@ -122,6 +169,7 @@ VideoFrameImpl::~VideoFrameImpl() {
 
 bool VideoFrameImpl::Lock(VideoSurface* surface) {
   DCHECK(!locked_);
+  DCHECK_NE(surface_.format, VideoSurface::EMPTY);
   if (locked_) {
     memset(surface, 0, sizeof(*surface));
     return false;
@@ -134,7 +182,12 @@ bool VideoFrameImpl::Lock(VideoSurface* surface) {
 
 void VideoFrameImpl::Unlock() {
   DCHECK(locked_);
+  DCHECK_NE(surface_.format, VideoSurface::EMPTY);
   locked_ = false;
+}
+
+bool VideoFrameImpl::IsEndOfStream() const {
+  return surface_.format == VideoSurface::EMPTY;
 }
 
 }  // namespace media

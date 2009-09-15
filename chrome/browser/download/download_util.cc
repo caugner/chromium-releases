@@ -1,33 +1,36 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // Download utility implementation
 
-#include <string>
-
 #include "chrome/browser/download/download_util.h"
 
-#include "base/base_drag_source.h"
+#include <string>
+
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/file_util.h"
-#include "base/scoped_clipboard_writer.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/drag_utils.h"
-#include "chrome/common/clipboard_service.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/os_exchange_data.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/view.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
-#include "SkPath.h"
-#include "SkShader.h"
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkShader.h"
+
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
+#include "app/os_exchange_data.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/base_drag_source.h"
+#include "views/drag_utils.h"
+#endif
 
 namespace download_util {
 
@@ -48,10 +51,12 @@ bool CanOpenDownload(DownloadItem* download) {
 }
 
 void OpenDownload(DownloadItem* download) {
-  if (download->state() == DownloadItem::IN_PROGRESS)
+  if (download->state() == DownloadItem::IN_PROGRESS) {
     download->set_open_when_complete(!download->open_when_complete());
-  else if (download->state() == DownloadItem::COMPLETE)
-    download->manager()->OpenDownloadInShell(download, NULL);
+  } else if (download->state() == DownloadItem::COMPLETE) {
+    download->NotifyObserversDownloadOpened();
+    download->manager()->OpenDownload(download, NULL);
+  }
 }
 
 // Download progress painting --------------------------------------------------
@@ -64,15 +69,15 @@ SkBitmap* g_background_16 = NULL;
 SkBitmap* g_foreground_32 = NULL;
 SkBitmap* g_background_32 = NULL;
 
-void PaintDownloadProgress(ChromeCanvas* canvas,
+void PaintDownloadProgress(gfx::Canvas* canvas,
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
                            views::View* containing_view,
+#endif
                            int origin_x,
                            int origin_y,
                            int start_angle,
                            int percent_done,
                            PaintDownloadProgressSize size) {
-  DCHECK(containing_view);
-
   // Load up our common bitmaps
   if (!g_background_16) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -88,8 +93,6 @@ void PaintDownloadProgress(ChromeCanvas* canvas,
   const int kProgressIconSize = (size == BIG) ? kBigProgressIconSize :
                                                 kSmallProgressIconSize;
 
-  int height = background->height();
-
   // We start by storing the bounds of the background and foreground bitmaps
   // so that it is easy to mirror the bounds if the UI layout is RTL.
   gfx::Rect background_bounds(origin_x, origin_y,
@@ -97,11 +100,13 @@ void PaintDownloadProgress(ChromeCanvas* canvas,
   gfx::Rect foreground_bounds(origin_x, origin_y,
                               foreground->width(), foreground->height());
 
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
   // Mirror the positions if necessary.
   int mirrored_x = containing_view->MirroredLeftPointForRect(background_bounds);
   background_bounds.set_x(mirrored_x);
   mirrored_x = containing_view->MirroredLeftPointForRect(foreground_bounds);
   foreground_bounds.set_x(mirrored_x);
+#endif
 
   // Draw the background progress image.
   SkPaint background_paint;
@@ -163,14 +168,14 @@ void PaintDownloadProgress(ChromeCanvas* canvas,
                         foreground_paint);
 }
 
-void PaintDownloadComplete(ChromeCanvas* canvas,
+void PaintDownloadComplete(gfx::Canvas* canvas,
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
                            views::View* containing_view,
+#endif
                            int origin_x,
                            int origin_y,
                            double animation_progress,
                            PaintDownloadProgressSize size) {
-  DCHECK(containing_view);
-
   // Load up our common bitmaps.
   if (!g_foreground_16) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -180,11 +185,13 @@ void PaintDownloadComplete(ChromeCanvas* canvas,
 
   SkBitmap* complete = (size == BIG) ? g_foreground_32 : g_foreground_16;
 
-  // Mirror the positions if necessary.
   gfx::Rect complete_bounds(origin_x, origin_y,
                             complete->width(), complete->height());
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
+  // Mirror the positions if necessary.
   complete_bounds.set_x(
       containing_view->MirroredLeftPointForRect(complete_bounds));
+#endif
 
   // Start at full opacity, then loop back and forth five times before ending
   // at zero opacity.
@@ -200,7 +207,7 @@ void PaintDownloadComplete(ChromeCanvas* canvas,
   canvas->saveLayerAlpha(&bounds,
                          static_cast<int>(255.0 * opacity),
                          SkCanvas::kARGB_ClipLayer_SaveFlag);
-  canvas->drawARGB(0, 255, 255, 255, SkPorterDuff::kClear_Mode);
+  canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
   canvas->restore();
 }
@@ -210,8 +217,9 @@ void PaintDownloadComplete(ChromeCanvas* canvas,
 int GetBigProgressIconSize() {
   static int big_progress_icon_size = 0;
   if (big_progress_icon_size == 0) {
-    std::wstring locale_size_str =
-        l10n_util::GetString(IDS_DOWNLOAD_BIG_PROGRESS_SIZE);
+    string16 locale_size_str =
+        WideToUTF16Hack(
+        l10n_util::GetString(IDS_DOWNLOAD_BIG_PROGRESS_SIZE));
     bool rc = StringToInt(locale_size_str, &big_progress_icon_size);
     if (!rc || big_progress_icon_size < kBigProgressIconSize) {
       NOTREACHED();
@@ -226,8 +234,10 @@ int GetBigProgressIconOffset() {
   return (GetBigProgressIconSize() - kBigIconSize) / 2;
 }
 
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 // Download dragging
 void DragDownload(const DownloadItem* download, SkBitmap* icon) {
+#if defined(OS_WIN)
   DCHECK(download);
 
   // Set up our OLE machinery
@@ -242,6 +252,10 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon) {
   DWORD effects;
   DoDragDrop(data.get(), drag_source.get(), DROPEFFECT_COPY | DROPEFFECT_LINK,
              &effects);
+#else
+  NOTIMPLEMENTED();
+#endif
 }
+#endif
 
 }  // namespace download_util

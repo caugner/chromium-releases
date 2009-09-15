@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/event_recorder.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/icu_util.h"
 #include "base/memory_debug.h"
@@ -22,9 +23,9 @@
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/http/http_cache.h"
-#include "net/base/ssl_test_util.h"
+#include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request_context.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "webkit/api/public/WebKit.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/extensions/v8/gc_extension.h"
@@ -94,8 +95,7 @@ int main(int argc, char* argv[]) {
   // Suppress abort message in v8 library in debugging mode (but not
   // actually under a debugger).  V8 calls abort() when it hits
   // assertion errors.
-  if (suppress_error_dialogs &&
-      !parsed_command_line.HasSwitch(test_shell::kGDB)) {
+  if (suppress_error_dialogs) {
     platform.SuppressErrorReporting();
   }
 
@@ -123,17 +123,21 @@ int main(int argc, char* argv[]) {
       parsed_command_line.HasSwitch(test_shell::kEnableFileCookies))
     net::CookieMonster::EnableFileScheme();
 
-  std::wstring cache_path =
-      parsed_command_line.GetSwitchValue(test_shell::kCacheDir);
-  if (cache_path.empty()) {
+  FilePath cache_path = FilePath::FromWStringHack(
+      parsed_command_line.GetSwitchValue(test_shell::kCacheDir));
+  // If the cache_path is empty and it's layout_test_mode, leave it empty
+  // so we use an in-memory cache. This makes running multiple test_shells
+  // in parallel less flaky.
+  if (cache_path.empty() && !layout_test_mode) {
     PathService::Get(base::DIR_EXE, &cache_path);
-    file_util::AppendToPath(&cache_path, L"cache");
+    cache_path = cache_path.AppendASCII("cache");
   }
 
   // Initializing with a default context, which means no on-disk cookie DB,
   // and no support for directory listings.
   SimpleResourceLoaderBridge::Init(
-      new TestShellRequestContext(cache_path, cache_mode, layout_test_mode));
+      new TestShellRequestContext(cache_path.ToWStringHack(),
+                                  cache_mode, layout_test_mode));
 
   // Load ICU data tables
   icu_util::Initialize();
@@ -167,20 +171,20 @@ int main(int argc, char* argv[]) {
   }
 
   // Treat the first loose value as the initial URL to open.
-  std::wstring uri;
+  FilePath uri;
 
   // Default to a homepage if we're interactive.
   if (!layout_test_mode) {
     PathService::Get(base::DIR_SOURCE_ROOT, &uri);
-    file_util::AppendToPath(&uri, L"webkit");
-    file_util::AppendToPath(&uri, L"data");
-    file_util::AppendToPath(&uri, L"test_shell");
-    file_util::AppendToPath(&uri, L"index.html");
+    uri = uri.AppendASCII("webkit");
+    uri = uri.AppendASCII("data");
+    uri = uri.AppendASCII("test_shell");
+    uri = uri.AppendASCII("index.html");
   }
 
   std::vector<std::wstring> loose_values = parsed_command_line.GetLooseValues();
   if (loose_values.size() > 0)
-    uri = loose_values[0];
+    uri = FilePath::FromWStringHack(loose_values[0]);
 
   std::wstring js_flags =
     parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
@@ -205,23 +209,23 @@ int main(int argc, char* argv[]) {
   StatsTable::set_current(table);
 
   TestShell* shell;
-  if (TestShell::CreateNewWindow(uri, &shell)) {
+  if (TestShell::CreateNewWindow(uri.ToWStringHack(), &shell)) {
     if (record_mode || playback_mode) {
       platform.SetWindowPositionForRecording(shell);
       WebKit::registerExtension(extensions_v8::PlaybackExtension::Get());
     }
 
-    shell->Show(shell->webView(), NEW_WINDOW);
+    shell->Show(WebKit::WebNavigationPolicyNewWindow);
 
     if (parsed_command_line.HasSwitch(test_shell::kDumpStatsTable))
       shell->DumpStatsTableOnExit();
 
     bool no_events = parsed_command_line.HasSwitch(test_shell::kNoEvents);
     if ((record_mode || playback_mode) && !no_events) {
-      std::wstring script_path = cache_path;
+      FilePath script_path = cache_path;
       // Create the cache directory in case it doesn't exist.
       file_util::CreateDirectory(cache_path);
-      file_util::AppendToPath(&script_path, L"script.log");
+      script_path = script_path.AppendASCII("script.log");
       if (record_mode)
         base::EventRecorder::current()->StartRecording(script_path);
       if (playback_mode)
@@ -232,11 +236,6 @@ int main(int argc, char* argv[]) {
       base::MemoryDebug::SetMemoryInUseEnabled(true);
       // Dump all in use memory at startup
       base::MemoryDebug::DumpAllMemoryInUse();
-    }
-
-    if (parsed_command_line.HasSwitch(test_shell::kEnableVideo)) {
-      // TODO(scherkus): check for any DLL dependencies.
-      webkit_glue::SetMediaPlayerAvailable(true);
     }
 
     // See if we need to run the tests.
@@ -257,34 +256,57 @@ int main(int argc, char* argv[]) {
           params.dump_tree = false;
       }
 
-      if (uri.length() == 0) {
+      if (uri.empty()) {
         // Watch stdin for URLs.
         char filenameBuffer[kPathBufSize];
         while (fgets(filenameBuffer, sizeof(filenameBuffer), stdin)) {
-          char *newLine = strchr(filenameBuffer, '\n');
+          // When running layout tests we pass new line separated
+          // tests to TestShell. Each line is a space separated list
+          // of filename, timeout and expected pixel hash. The timeout
+          // and the pixel hash are optional.
+          char* newLine = strchr(filenameBuffer, '\n');
           if (newLine)
             *newLine = '\0';
           if (!*filenameBuffer)
             continue;
 
-          params.test_url = filenameBuffer;
+          params.test_url = strtok(filenameBuffer, " ");
+
+          int old_timeout_ms = TestShell::GetLayoutTestTimeout();
+
+          char* timeout = strtok(NULL, " ");
+          if (timeout) {
+            TestShell::SetFileTestTimeout(atoi(timeout));
+            char* pixel_hash = strtok(NULL, " ");
+            if (pixel_hash)
+              params.pixel_hash = pixel_hash;
+          }
+
           if (!TestShell::RunFileTest(params))
             break;
+
+          TestShell::SetFileTestTimeout(old_timeout_ms);
         }
       } else {
-        params.test_url = WideToUTF8(uri).c_str();
+        // TODO(ojan): Provide a way for run-singly tests to pass
+        // in a hash and then set params.pixel_hash here.
+        params.test_url = WideToUTF8(uri.ToWStringHack()).c_str();
         TestShell::RunFileTest(params);
       }
 
       shell->CallJSGC();
       shell->CallJSGC();
-      if (shell) {
-        // When we finish the last test, cleanup the LayoutTestController.
-        // It may have references to not-yet-cleaned up windows.  By
-        // cleaning up here we help purify reports.
-        shell->ResetTestController();
-        delete shell;
-      }
+
+      // When we finish the last test, cleanup the LayoutTestController.
+      // It may have references to not-yet-cleaned up windows.  By
+      // cleaning up here we help purify reports.
+      shell->ResetTestController();
+
+      // Flush any remaining messages before we kill ourselves.
+      // http://code.google.com/p/chromium/issues/detail?id=9500
+      MessageLoop::current()->RunAllPending();
+
+      delete shell;
     } else {
       MessageLoop::current()->Run();
     }

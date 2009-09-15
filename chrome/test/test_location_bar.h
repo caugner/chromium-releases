@@ -17,27 +17,35 @@ class TestLocationBar : public LocationBar {
   }
 
   void set_input_string(const std::wstring& input_string) {
-   input_string_ = input_string;
+    input_string_ = input_string;
   }
   void set_disposition(WindowOpenDisposition disposition) {
-   disposition_ = disposition;
+    disposition_ = disposition;
   }
   void set_transition(PageTransition::Type transition) {
-   transition_ = transition;
+    transition_ = transition;
   }
 
   // Overridden from LocationBar:
-  virtual void ShowFirstRunBubble() {}
+  virtual void ShowFirstRunBubble(bool use_OEM_bubble) {}
   virtual std::wstring GetInputString() const { return input_string_; }
   virtual WindowOpenDisposition GetWindowOpenDisposition() const {
     return disposition_;
   }
   virtual PageTransition::Type GetPageTransition() const { return transition_; }
   virtual void AcceptInput() {}
+  virtual void AcceptInputWithDisposition(WindowOpenDisposition) {}
   virtual void FocusLocation() {}
   virtual void FocusSearch() {}
-  virtual void UpdateFeedIcon() {}
+  virtual void UpdatePageActions() {}
   virtual void SaveStateToContents(TabContents* contents) {}
+  virtual void Revert() {}
+  virtual AutocompleteEditView* location_entry() {
+    return NULL;
+  }
+  virtual LocationBarTesting* GetLocationBarForTesting() {
+    return NULL;
+  }
 
  private:
 
@@ -51,4 +59,4 @@ class TestLocationBar : public LocationBar {
 };
 
 
-#endif  // #ifndef CHROME_TEST_TEST_LOCATION_BAR_H_
+#endif  // CHROME_TEST_TEST_LOCATION_BAR_H_

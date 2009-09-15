@@ -76,6 +76,7 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "HTMLFormElement.h"  // need this before Document.h
 #include "Chrome.h"
 #include "ChromeClientChromium.h"
+#include "ClipboardUtilitiesChromium.h"
 #include "Console.h"
 #include "Document.h"
 #include "DocumentFragment.h"  // Only needed for ReplaceSelectionCommand.h :(
@@ -84,6 +85,7 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "DOMWindow.h"
 #include "Editor.h"
 #include "EventHandler.h"
+#include "FormState.h"
 #include "Frame.h"
 #include "FrameChromium.h"
 #include "FrameLoader.h"
@@ -91,11 +93,17 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "FrameTree.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "HTMLCollection.h"
 #include "HTMLHeadElement.h"
+#include "HTMLInputElement.h"
+#include "HTMLFrameOwnerElement.h"
 #include "HTMLLinkElement.h"
 #include "HTMLNames.h"
 #include "HistoryItem.h"
 #include "InspectorController.h"
+#if defined(OS_MACOSX)
+#include "LocalCurrentGraphicsContext.h"
+#endif
 #include "markup.h"
 #include "Page.h"
 #include "PlatformContextSkia.h"
@@ -104,6 +112,7 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #if defined(OS_WIN)
 #include "RenderThemeChromiumWin.h"
 #endif
+#include "RenderView.h"
 #include "RenderWidget.h"
 #include "ReplaceSelectionCommand.h"
 #include "ResourceHandle.h"
@@ -124,27 +133,32 @@ MSVC_POP_WARNING();
 
 #undef LOG
 
+#include "base/base_switches.h"
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/gfx/rect.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
-#include "base/time.h"
 #include "net/base/net_errors.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
+#include "webkit/api/public/WebConsoleMessage.h"
+#include "webkit/api/public/WebFindOptions.h"
+#include "webkit/api/public/WebForm.h"
+#include "webkit/api/public/WebHistoryItem.h"
+#include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebScriptSource.h"
+#include "webkit/api/public/WebSize.h"
+#include "webkit/api/public/WebURLError.h"
 #include "webkit/glue/alt_error_page_resource_fetcher.h"
+#include "webkit/glue/chrome_client_impl.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/dom_operations_private.h"
-#include "webkit/glue/feed.h"
-#include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webdatasource_impl.h"
-#include "webkit/glue/weberror_impl.h"
 #include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/webhistoryitem_impl.h"
-#include "webkit/glue/weburlrequest_impl.h"
 #include "webkit/glue/webtextinput_impl.h"
 #include "webkit/glue/webview_impl.h"
 
@@ -158,6 +172,7 @@ MSVC_POP_WARNING();
 #endif
 
 using base::Time;
+
 using WebCore::ChromeClientChromium;
 using WebCore::Color;
 using WebCore::Document;
@@ -173,7 +188,7 @@ using WebCore::FrameLoadType;
 using WebCore::FrameTree;
 using WebCore::FrameView;
 using WebCore::HistoryItem;
-using WebCore::HTMLFrameElementBase;
+using WebCore::HTMLFormElement;
 using WebCore::IntRect;
 using WebCore::KURL;
 using WebCore::Node;
@@ -183,13 +198,34 @@ using WebCore::RenderObject;
 using WebCore::ResourceError;
 using WebCore::ResourceHandle;
 using WebCore::ResourceRequest;
+using WebCore::ResourceResponse;
 using WebCore::VisibleSelection;
+using WebCore::ScriptValue;
+using WebCore::SecurityOrigin;
 using WebCore::SharedBuffer;
 using WebCore::String;
 using WebCore::SubstituteData;
 using WebCore::TextIterator;
 using WebCore::VisiblePosition;
 using WebCore::XPathResult;
+
+using WebKit::WebCanvas;
+using WebKit::WebConsoleMessage;
+using WebKit::WebData;
+using WebKit::WebDataSource;
+using WebKit::WebFindOptions;
+using WebKit::WebHistoryItem;
+using WebKit::WebForm;
+using WebKit::WebRect;
+using WebKit::WebScriptSource;
+using WebKit::WebSize;
+using WebKit::WebString;
+using WebKit::WebURL;
+using WebKit::WebURLError;
+using WebKit::WebURLRequest;
+using WebKit::WebURLResponse;
+
+using webkit_glue::AltErrorPageResourceFetcher;
 
 // Key for a StatsCounter tracking how many WebFrames are active.
 static const char* const kWebFrameActiveCount = "WebFrameActiveCount";
@@ -293,6 +329,10 @@ class ChromePrintContext : public WebCore::PrintContext {
     printed_page_width_ = width;
     WebCore::PrintContext::begin(printed_page_width_);
   }
+  float getPageShrink(int pageNumber) const {
+    IntRect pageRect = m_pageRects[pageNumber];
+    return printed_page_width_ / pageRect.width();
+  }
   // Spools the printed page, a subrect of m_frame.
   // Skip the scale step. NativeTheme doesn't play well with scaling. Scaling
   // is done browser side instead.
@@ -321,13 +361,29 @@ class ChromePrintContext : public WebCore::PrintContext {
 
 int WebFrameImpl::live_object_count_ = 0;
 
+// static
+WebFrame* WebFrame::RetrieveFrameForEnteredContext() {
+  WebCore::Frame* frame =
+      WebCore::ScriptController::retrieveFrameForEnteredContext();
+  if (frame)
+    return WebFrameImpl::FromFrame(frame);
+  else
+    return NULL;
+}
+
+// static
+WebFrame* WebFrame::RetrieveFrameForCurrentContext() {
+  WebCore::Frame* frame =
+      WebCore::ScriptController::retrieveFrameForCurrentContext();
+  if (frame)
+    return WebFrameImpl::FromFrame(frame);
+  else
+    return NULL;
+}
+
 WebFrameImpl::WebFrameImpl()
-// Don't complain about using "this" in initializer list.
-MSVC_PUSH_DISABLE_WARNING(4355)
-  : frame_loader_client_(this),
-    scope_matches_factory_(this),
-MSVC_POP_WARNING()
-    currently_loading_request_(NULL),
+  : ALLOW_THIS_IN_INITIALIZER_LIST(frame_loader_client_(this)),
+    ALLOW_THIS_IN_INITIALIZER_LIST(scope_matches_factory_(this)),
     plugin_delegate_(NULL),
     active_match_frame_(NULL),
     active_match_index_(-1),
@@ -353,10 +409,8 @@ WebFrameImpl::~WebFrameImpl() {
 // WebFrame -------------------------------------------------------------------
 
 void WebFrameImpl::InitMainFrame(WebViewImpl* webview_impl) {
-  webview_impl_ = webview_impl;
-
   RefPtr<Frame> frame =
-      Frame::create(webview_impl_->page(), 0, &frame_loader_client_);
+      Frame::create(webview_impl->page(), 0, &frame_loader_client_);
   frame_ = frame.get();
 
   // Add reference on behalf of FrameLoader.  See comments in
@@ -368,124 +422,89 @@ void WebFrameImpl::InitMainFrame(WebViewImpl* webview_impl) {
   frame_->init();
 }
 
-void WebFrameImpl::LoadRequest(WebRequest* request) {
-  SubstituteData data;
-  InternalLoadRequest(request, data, false);
+void WebFrameImpl::Reload() {
+  frame_->loader()->saveDocumentAndScrollState();
+
+  StopLoading();  // Make sure existing activity stops.
+  frame_->loader()->reload();
 }
 
-void WebFrameImpl::InternalLoadRequest(const WebRequest* request,
-                                       const SubstituteData& data,
-                                       bool replace) {
-  const WebRequestImpl* request_impl =
-      static_cast<const WebRequestImpl*>(request);
+void WebFrameImpl::LoadRequest(const WebURLRequest& request) {
+  const ResourceRequest* resource_request =
+      webkit_glue::WebURLRequestToResourceRequest(&request);
+  DCHECK(resource_request);
 
-  const ResourceRequest& resource_request =
-      request_impl->frame_load_request().resourceRequest();
-
-  // Special-case javascript URLs.  Do not interrupt the existing load when
-  // asked to load a javascript URL unless the script generates a result.
-  // We can't just use FrameLoader::executeIfJavaScriptURL because it doesn't
-  // handle redirects properly.
-  const KURL& kurl = resource_request.url();
-  if (!data.isValid() && kurl.protocol() == "javascript") {
-    // Don't attempt to reload javascript URLs.
-    if (resource_request.cachePolicy() == ReloadIgnoringCacheData)
-      return;
-
-    // We can't load a javascript: URL if there is no Document!
-    if (!frame_->document())
-      return;
-
-    // TODO(darin): Is this the best API to use here?  It works and seems good,
-    // but will it change out from under us?
-    String script = decodeURLEscapeSequences(
-        kurl.string().substring(sizeof("javascript:")-1));
-    WebCore::ScriptValue result = frame_->loader()->executeScript(script, true);
-    String scriptResult;
-    if (result.getString(scriptResult) &&
-        !frame_->loader()->isScheduledLocationChangePending()) {
-      // TODO(darin): We need to figure out how to represent this in session
-      // history.  Hint: don't re-eval script when the user or script navigates
-      // back-n-forth (instead store the script result somewhere).
-      LoadDocumentData(kurl, scriptResult, String("text/html"), String());
-    }
+  if (resource_request->url().protocolIs("javascript")) {
+    LoadJavaScriptURL(resource_request->url());
     return;
   }
 
-  StopLoading();  // make sure existing activity stops
+  StopLoading();  // Make sure existing activity stops.
+  frame_->loader()->load(*resource_request, false);
+}
 
-  // Keep track of the request temporarily.  This is effectively a way of
-  // passing the request to callbacks that may need it.  See
-  // WebFrameLoaderClient::createDocumentLoader.
-  currently_loading_request_ = request;
+void WebFrameImpl::LoadHistoryItem(const WebHistoryItem& item) {
+  RefPtr<HistoryItem> history_item =
+      webkit_glue::WebHistoryItemToHistoryItem(item);
+  DCHECK(history_item.get());
 
-  // If we have a current datasource, save the request info on it immediately.
-  // This is because WebCore may not actually initiate a load on the toplevel
-  // frame for some subframe navigations, so we want to update its request.
-  WebDataSourceImpl* datasource = GetDataSourceImpl();
-  if (datasource)
-    CacheCurrentRequestInfo(datasource);
+  StopLoading();  // Make sure existing activity stops.
 
-  if (data.isValid()) {
-    frame_->loader()->load(resource_request, data, false);
-    if (replace) {
-      // Do this to force WebKit to treat the load as replacing the currently
-      // loaded page.
-      frame_->loader()->setReplacing();
-    }
-  } else if (request_impl->history_item()) {
-    // Use the history item if we have one, otherwise fall back to standard
-    // load.
-    RefPtr<HistoryItem> current_item = frame_->loader()->currentHistoryItem();
-
-    // If there is no current_item, which happens when we are navigating in
-    // session history after a crash, we need to manufacture one otherwise
-    // WebKit hoarks. This is probably the wrong thing to do, but it seems to
-    // work.
-    if (!current_item) {
-      current_item = HistoryItem::create();
-      current_item->setLastVisitWasFailure(true);
-      frame_->loader()->setCurrentHistoryItem(current_item);
-      webview_impl_->SetCurrentHistoryItem(current_item.get());
-    }
-
-    frame_->loader()->goToItem(request_impl->history_item().get(),
-                               WebCore::FrameLoadTypeIndexedBackForward);
-  } else if (resource_request.cachePolicy() == ReloadIgnoringCacheData) {
-    frame_->loader()->reload();
-  } else {
-    frame_->loader()->load(resource_request, false);
+  // If there is no current_item, which happens when we are navigating in
+  // session history after a crash, we need to manufacture one otherwise WebKit
+  // hoarks. This is probably the wrong thing to do, but it seems to work.
+  RefPtr<HistoryItem> current_item = frame_->loader()->currentHistoryItem();
+  if (!current_item) {
+    current_item = HistoryItem::create();
+    current_item->setLastVisitWasFailure(true);
+    frame_->loader()->setCurrentHistoryItem(current_item);
+    GetWebViewImpl()->SetCurrentHistoryItem(current_item.get());
   }
 
-  currently_loading_request_ = NULL;
+  frame_->loader()->goToItem(history_item.get(),
+                             WebCore::FrameLoadTypeIndexedBackForward);
 }
 
-void WebFrameImpl::LoadHTMLString(const std::string& html_text,
-                                  const GURL& base_url) {
-  WebRequestImpl request(base_url);
-  LoadAlternateHTMLString(&request, html_text, GURL(), false);
-}
-
-void WebFrameImpl::LoadAlternateHTMLString(const WebRequest* request,
-                                           const std::string& html_text,
-                                           const GURL& display_url,
-                                           bool replace) {
-  int len = static_cast<int>(html_text.size());
-  RefPtr<SharedBuffer> buf = SharedBuffer::create(html_text.data(), len);
-
+void WebFrameImpl::LoadData(const WebData& data,
+                            const WebString& mime_type,
+                            const WebString& text_encoding,
+                            const WebURL& base_url,
+                            const WebURL& unreachable_url,
+                            bool replace) {
   SubstituteData subst_data(
-      buf, String("text/html"), String("UTF-8"),
-      webkit_glue::GURLToKURL(display_url));
+      webkit_glue::WebDataToSharedBuffer(data),
+      webkit_glue::WebStringToString(mime_type),
+      webkit_glue::WebStringToString(text_encoding),
+      webkit_glue::WebURLToKURL(unreachable_url));
   DCHECK(subst_data.isValid());
 
-  InternalLoadRequest(request, subst_data, replace);
+  StopLoading();  // Make sure existing activity stops.
+  frame_->loader()->load(ResourceRequest(webkit_glue::WebURLToKURL(base_url)),
+                         subst_data, false);
+  if (replace) {
+    // Do this to force WebKit to treat the load as replacing the currently
+    // loaded page.
+    frame_->loader()->setReplacing();
+  }
+}
+
+void WebFrameImpl::LoadHTMLString(const WebData& data,
+                                  const WebURL& base_url,
+                                  const WebURL& unreachable_url,
+                                  bool replace) {
+  LoadData(data,
+           WebString::fromUTF8("text/html"),
+           WebString::fromUTF8("UTF-8"),
+           base_url,
+           unreachable_url,
+           replace);
 }
 
 GURL WebFrameImpl::GetURL() const {
   const WebDataSource* ds = GetDataSource();
   if (!ds)
     return GURL();
-  return ds->GetRequest().GetURL();
+  return ds->request().url();
 }
 
 GURL WebFrameImpl::GetFavIconURL() const {
@@ -523,123 +542,29 @@ GURL WebFrameImpl::GetOSDDURL() const {
   return GURL();
 }
 
-scoped_refptr<FeedList> WebFrameImpl::GetFeedList() const {
-  scoped_refptr<FeedList> feedlist = new FeedList();
-
-  WebCore::FrameLoader* frame_loader = frame_->loader();
-  if (frame_loader->state() != WebCore::FrameStateComplete ||
-      !frame_->document() ||
-      !frame_->document()->head() ||
-      frame_->tree()->parent())
-    return feedlist;
-
-  // We only consider HTML documents with <head> tags.
-  // (Interestingly, isHTMLDocument() returns false for some pages --
-  // perhaps an XHTML thing?  It doesn't really matter because head() is
-  // a method on Documents anyway.)
-  WebCore::HTMLHeadElement* head = frame_->document()->head();
-  if (!head)
-    return feedlist;
-
-  // Iterate through all children of the <head>, looking for feed links.
-  for (WebCore::Node* node = head->firstChild();
-       node; node = node->nextSibling()) {
-    // Skip over all nodes except <link ...>.
-    if (!node->isHTMLElement())
-      continue;
-    if (!static_cast<WebCore::Element*>(node)->hasLocalName("link"))
-      continue;
-
-    const WebCore::HTMLLinkElement* link =
-        static_cast<WebCore::HTMLLinkElement*>(node);
-
-    // Look at the 'rel' tag and see if we have a feed.
-    std::wstring rel = webkit_glue::StringToStdWString(link->rel());
-    bool is_feed = false;
-    if (LowerCaseEqualsASCII(rel, "feed") ||
-        LowerCaseEqualsASCII(rel, "feed alternate")) {
-      // rel="feed" or rel="alternate feed" always means this is a feed.
-      is_feed = true;
-    } else if (LowerCaseEqualsASCII(rel, "alternate")) {
-      // Otherwise, rel="alternate" may mean a feed if it has a certain mime
-      // type.
-      std::wstring link_type = webkit_glue::StringToStdWString(link->type());
-      TrimWhitespace(link_type, TRIM_ALL, &link_type);
-      if (LowerCaseEqualsASCII(link_type, "application/atom+xml") ||
-          LowerCaseEqualsASCII(link_type, "application/rss+xml")) {
-        is_feed = true;
-      }
-    }
-
-    if (is_feed) {
-      FeedItem feedItem;
-      feedItem.title = webkit_glue::StringToStdWString(link->title());
-      TrimWhitespace(feedItem.title, TRIM_ALL, &feedItem.title);
-      feedItem.type = webkit_glue::StringToStdWString(link->type());
-      TrimWhitespace(feedItem.type, TRIM_ALL, &feedItem.type);
-      feedItem.url = webkit_glue::KURLToGURL(link->href());
-      feedlist->Add(feedItem);
-    }
+int WebFrameImpl::GetContentsPreferredWidth() const {
+  if ((frame_->document() != NULL) &&
+      (frame_->document()->renderView() != NULL)) {
+    return frame_->document()->renderView()->minPrefWidth();
+  } else {
+    return 0;
   }
-
-  return feedlist;
 }
 
-bool WebFrameImpl::GetPreviousHistoryState(std::string* history_state) const {
+WebHistoryItem WebFrameImpl::GetPreviousHistoryItem() const {
   // We use the previous item here because documentState (filled-out forms)
   // only get saved to history when it becomes the previous item.  The caller
-  // is expected to query the history state after a navigation occurs, after
+  // is expected to query the history item after a navigation occurs, after
   // the desired history item has become the previous entry.
-  RefPtr<HistoryItem> item = webview_impl_->GetPreviousHistoryItem();
-  if (!item)
-    return false;
-
-  static StatsCounterTimer history_timer("GetHistoryTimer");
-  StatsScope<StatsCounterTimer> history_scope(history_timer);
-
-  webkit_glue::HistoryItemToString(item, history_state);
-  return true;
+  return webkit_glue::HistoryItemToWebHistoryItem(
+      GetWebViewImpl()->GetPreviousHistoryItem());
 }
 
-bool WebFrameImpl::GetCurrentHistoryState(std::string* state) const {
-  if (frame_->loader())
-    frame_->loader()->saveDocumentAndScrollState();
-  RefPtr<HistoryItem> item = frame_->page()->backForwardList()->currentItem();
-  if (!item)
-    return false;
+WebHistoryItem WebFrameImpl::GetCurrentHistoryItem() const {
+  frame_->loader()->saveDocumentAndScrollState();
 
-  webkit_glue::HistoryItemToString(item, state);
-  return true;
-}
-
-bool WebFrameImpl::HasCurrentHistoryState() const {
-  return frame_->page()->backForwardList()->currentItem() != NULL;
-}
-
-void WebFrameImpl::LoadDocumentData(const KURL& base_url,
-                                    const String& data,
-                                    const String& mime_type,
-                                    const String& charset) {
-  // TODO(darin): This is wrong.  We need to re-cast this in terms of a call to
-  // one of the FrameLoader::load(...) methods.  Else, WebCore will be angry!!
-
-  // Requiring a base_url here seems like a good idea for security reasons.
-  ASSERT(!base_url.isEmpty());
-  ASSERT(!mime_type.isEmpty());
-
-  StopLoading();
-
-  // Reset any pre-existing scroll offset
-  frameview()->setScrollPosition(WebCore::IntPoint());
-
-  // Make sure the correct document type is constructed.
-  frame_->loader()->setResponseMIMEType(mime_type);
-
-  // TODO(darin): Inform the FrameLoader of the charset somehow.
-
-  frame_->loader()->begin(base_url);
-  frame_->loader()->write(data);
-  frame_->loader()->end();
+  return webkit_glue::HistoryItemToWebHistoryItem(
+      frame_->page()->backForwardList()->currentItem());
 }
 
 static WebDataSource* DataSourceForDocLoader(DocumentLoader* loader) {
@@ -647,8 +572,6 @@ static WebDataSource* DataSourceForDocLoader(DocumentLoader* loader) {
 }
 
 WebDataSource* WebFrameImpl::GetDataSource() const {
-  if (!frame_->loader())
-    return NULL;
   return DataSourceForDocLoader(frame_->loader()->documentLoader());
 }
 
@@ -658,8 +581,6 @@ WebDataSourceImpl* WebFrameImpl::GetDataSourceImpl() const {
 
 WebDataSource* WebFrameImpl::GetProvisionalDataSource() const {
   FrameLoader* frame_loader = frame_->loader();
-  if (!frame_loader)
-    return NULL;
 
   // We regard the policy document loader as still provisional.
   DocumentLoader* doc_loader = frame_loader->provisionalDocumentLoader();
@@ -671,30 +592,6 @@ WebDataSource* WebFrameImpl::GetProvisionalDataSource() const {
 
 WebDataSourceImpl* WebFrameImpl::GetProvisionalDataSourceImpl() const {
   return static_cast<WebDataSourceImpl*>(GetProvisionalDataSource());
-}
-
-void WebFrameImpl::CacheCurrentRequestInfo(WebDataSourceImpl* datasource) {
-  // Cache our current request info on the data source.  It contains its
-  // own requests, so the extra data needs to be transferred.
-  scoped_refptr<WebRequest::ExtraData> extra;
-
-  // Our extra data may come from a request issued via LoadRequest, or a
-  // history navigation from WebCore.
-  if (currently_loading_request_) {
-    extra = currently_loading_request_->GetExtraData();
-  } else if (currently_loading_history_item_) {
-    extra = currently_loading_history_item_->GetExtraData();
-    currently_loading_history_item_ = 0;
-  }
-
-  // We must only update this if it is valid, or the valid state will be lost.
-  if (extra)
-    datasource->SetExtraData(extra);
-}
-
-void WebFrameImpl::set_currently_loading_history_item(
-    WebHistoryItemImpl* item) {
-  currently_loading_history_item_ = item;
 }
 
 void WebFrameImpl::StopLoading() {
@@ -795,7 +692,23 @@ bool WebFrameImpl::GetInViewSourceMode() const {
 }
 
 WebView* WebFrameImpl::GetView() const {
-  return webview_impl_;
+  return GetWebViewImpl();
+}
+
+void WebFrameImpl::GetForms(std::vector<WebForm>* results) const {
+  results->clear();
+  if (!frame_)
+    return;
+  RefPtr<WebCore::HTMLCollection> forms = frame_->document()->forms();
+  unsigned int form_count = forms->length();
+  for (unsigned int i = 0; i < form_count; ++i) {
+    Node* node = forms->item(i);
+    // Strange but true, sometimes item can be NULL.
+    if (node) {
+      results->push_back(webkit_glue::HTMLFormElementToWebForm(
+          static_cast<HTMLFormElement*>(node)));
+    }
+  }
 }
 
 std::string WebFrameImpl::GetSecurityOrigin() const {
@@ -817,7 +730,7 @@ void WebFrameImpl::BindToWindowObject(const std::wstring& name,
 
   String key = webkit_glue::StdWStringToString(name);
 #if USE(V8)
-  frame_->script()->BindToWindowObject(frame_, key, object);
+  frame_->script()->bindToWindowObject(frame_, key, object);
 #endif
 
 #if USE(JSC)
@@ -846,6 +759,13 @@ void WebFrameImpl::CallJSGC() {
 #endif
 }
 
+void WebFrameImpl::GrantUniversalAccess() {
+  DCHECK(frame_ && frame_->document());
+  if (frame_ && frame_->document()) {
+    frame_->document()->securityOrigin()->grantUniversalAccess();
+  }
+}
+
 void WebFrameImpl::GetContentAsPlainText(int max_chars,
                                          std::wstring* text) const {
   text->clear();
@@ -862,10 +782,19 @@ NPObject* WebFrameImpl::GetWindowNPObject() {
   return frame_->script()->windowScriptNPObject();
 }
 
+#if USE(V8)
+  // Returns the V8 context for this frame, or an empty handle if there is
+  // none.
+v8::Local<v8::Context> WebFrameImpl::GetScriptContext() {
+  if (!frame_)
+    return v8::Local<v8::Context>();
+
+  return frame_->script()->proxy()->context();
+}
+#endif
+
 void WebFrameImpl::InvalidateArea(AreaToInvalidate area) {
   ASSERT(frame() && frame()->view());
-#if defined(OS_WIN)
-  // TODO(pinkerton): Fix Mac invalidation to be more like Win ScrollView
   FrameView* view = frame()->view();
 
   if ((area & INVALIDATE_ALL) == INVALIDATE_ALL) {
@@ -886,7 +815,6 @@ void WebFrameImpl::InvalidateArea(AreaToInvalidate area) {
       view->invalidateRect(scroll_bar_vert);
     }
   }
-#endif
 }
 
 void WebFrameImpl::IncreaseMatchCount(int count, int request_id) {
@@ -903,7 +831,7 @@ void WebFrameImpl::IncreaseMatchCount(int count, int request_id) {
                                                  frames_scoping_count_ == 0);
 }
 
-void WebFrameImpl::ReportFindInPageSelection(const gfx::Rect& selection_rect,
+void WebFrameImpl::ReportFindInPageSelection(const WebRect& selection_rect,
                                              int active_match_ordinal,
                                              int request_id) {
   // Update the UI with the latest selection rect.
@@ -922,29 +850,38 @@ void WebFrameImpl::ResetMatchCount() {
   frames_scoping_count_ = 0;
 }
 
-bool WebFrameImpl::Find(const FindInPageRequest& request,
+bool WebFrameImpl::Find(int request_id,
+                        const string16& search_text,
+                        const WebFindOptions& options,
                         bool wrap_within_frame,
-                        gfx::Rect* selection_rect) {
-  WebCore::String webcore_string =
-      webkit_glue::String16ToString(request.search_string);
+                        WebRect* selection_rect) {
+  WebCore::String webcore_string = webkit_glue::String16ToString(search_text);
 
   WebFrameImpl* const main_frame_impl =
       static_cast<WebFrameImpl*>(GetView()->GetMainFrame());
 
-  if (!request.find_next)
+  if (!options.findNext)
     frame()->page()->unmarkAllTextMatches();
+  else
+    SetMarkerActive(active_match_.get(), false);  // Active match is changing.
 
   // Starts the search from the current selection.
   bool start_in_selection = true;
 
+  // If the user has selected something since the last Find operation we want
+  // to start from there. Otherwise, we start searching from where the last Find
+  // operation left off (either a Find or a FindNext operation).
+  VisibleSelection selection(frame()->selection()->selection());
+  if (selection.isNone() && active_match_) {
+    selection = VisibleSelection(active_match_.get());
+    frame()->selection()->setSelection(selection);
+  }
+
   DCHECK(frame() && frame()->view());
-  bool found = frame()->findString(webcore_string, request.forward,
-                                   request.match_case, wrap_within_frame,
+  bool found = frame()->findString(webcore_string, options.forward,
+                                   options.matchCase, wrap_within_frame,
                                    start_in_selection);
   if (found) {
-#if defined(OS_WIN)
-    WebCore::RenderThemeChromiumWin::setFindInPageMode(true);
-#endif
     // Store which frame was active. This will come in handy later when we
     // change the active match ordinal below.
     WebFrameImpl* old_active_frame = main_frame_impl->active_match_frame_;
@@ -966,9 +903,11 @@ bool WebFrameImpl::Find(const FindInPageRequest& request,
     } else {
       active_match_ = new_selection.toNormalizedRange();
       curr_selection_rect = active_match_->boundingBox();
+      SetMarkerActive(active_match_.get(), true);  // Active.
+      ClearSelection();  // WebKit draws the highlighting for all matches.
     }
 
-    if (!request.find_next) {
+    if (!options.findNext) {
       // This is a Find operation, so we set the flag to ask the scoping effort
       // to find the active rect for us so we can update the ordinal (n of m).
       locating_active_rect_ = true;
@@ -977,33 +916,30 @@ bool WebFrameImpl::Find(const FindInPageRequest& request,
         // If the active frame has changed it means that we have a multi-frame
         // page and we just switch to searching in a new frame. Then we just
         // want to reset the index.
-        if (request.forward)
+        if (options.forward)
           active_match_index_ = 0;
         else
           active_match_index_ = last_match_count_ - 1;
       } else {
         // We are still the active frame, so increment (or decrement) the
         // |active_match_index|, wrapping if needed (on single frame pages).
-        request.forward ? ++active_match_index_ : --active_match_index_;
+        options.forward ? ++active_match_index_ : --active_match_index_;
         if (active_match_index_ + 1 > last_match_count_)
           active_match_index_ = 0;
         if (active_match_index_ + 1 == 0)
           active_match_index_ = last_match_count_ - 1;
       }
-#if defined(OS_WIN)
-      // TODO(pinkerton): Fix Mac scrolling to be more like Win ScrollView
       if (selection_rect) {
-        gfx::Rect rect = webkit_glue::FromIntRect(
+        WebRect rect = webkit_glue::IntRectToWebRect(
             frame()->view()->convertToContainingWindow(curr_selection_rect));
-        rect.Offset(-frameview()->scrollOffset().width(),
-                    -frameview()->scrollOffset().height());
+        rect.x -= frameview()->scrollOffset().width();
+        rect.y -= frameview()->scrollOffset().height();
         *selection_rect = rect;
 
         ReportFindInPageSelection(rect,
                                   active_match_index_ + 1,
-                                  request.request_id);
+                                  request_id);
       }
-#endif
     }
   } else {
     // Nothing was found in this frame.
@@ -1018,6 +954,7 @@ bool WebFrameImpl::Find(const FindInPageRequest& request,
 
 int WebFrameImpl::OrdinalOfFirstMatchForFrame(WebFrameImpl* frame) const {
   int ordinal = 0;
+  WebViewImpl* web_view = GetWebViewImpl();
   WebFrameImpl* const main_frame_impl =
     static_cast<WebFrameImpl*>(GetView()->GetMainFrame());
   // Iterate from the main frame up to (but not including) |frame| and
@@ -1025,7 +962,7 @@ int WebFrameImpl::OrdinalOfFirstMatchForFrame(WebFrameImpl* frame) const {
   for (WebFrameImpl* it = main_frame_impl;
        it != frame;
        it = static_cast<WebFrameImpl*>(
-           webview_impl_->GetNextFrameAfter(it, true))) {
+           web_view->GetNextFrameAfter(it, true))) {
     if (it->last_match_count_ > 0)
       ordinal += it->last_match_count_;
   }
@@ -1033,7 +970,7 @@ int WebFrameImpl::OrdinalOfFirstMatchForFrame(WebFrameImpl* frame) const {
   return ordinal;
 }
 
-bool WebFrameImpl::ShouldScopeMatches(FindInPageRequest request) {
+bool WebFrameImpl::ShouldScopeMatches(const string16& search_text) {
   // Don't scope if we can't find a frame or if the frame is not visible.
   // The user may have closed the tab/application, so abort.
   if (!frame() || !Visible())
@@ -1048,7 +985,7 @@ bool WebFrameImpl::ShouldScopeMatches(FindInPageRequest request) {
       !last_search_string_.empty() && last_match_count_ == 0) {
     // Check to see if the search string prefixes match.
     string16 previous_search_prefix =
-        request.search_string.substr(0, last_search_string_.length());
+        search_text.substr(0, last_search_string_.length());
 
     if (previous_search_prefix == last_search_string_) {
       return false;  // Don't search this frame, it will be fruitless.
@@ -1076,7 +1013,7 @@ void WebFrameImpl::InvalidateIfNecessary() {
   }
 }
 
-void WebFrameImpl::AddMarker(WebCore::Range* range) {
+void WebFrameImpl::AddMarker(WebCore::Range* range, bool active_match) {
   // Use a TextIterator to visit the potentially multiple nodes the range
   // covers.
   TextIterator markedText(range);
@@ -1088,7 +1025,8 @@ void WebFrameImpl::AddMarker(WebCore::Range* range) {
         WebCore::DocumentMarker::TextMatch,
         textPiece->startOffset(exception),
         textPiece->endOffset(exception),
-        "" };
+        "",
+        active_match };
 
     if (marker.endOffset > marker.startOffset) {
       // Find the node to add a marker to and add it.
@@ -1109,9 +1047,18 @@ void WebFrameImpl::AddMarker(WebCore::Range* range) {
   }
 }
 
-void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
+void WebFrameImpl::SetMarkerActive(WebCore::Range* range, bool active) {
+  if (!range)
+    return;
+
+  frame()->document()->setMarkersActive(range, active);
+}
+
+void WebFrameImpl::ScopeStringMatches(int request_id,
+                                      const string16& search_text,
+                                      const WebFindOptions& options,
                                       bool reset) {
-  if (!ShouldScopeMatches(request))
+  if (!ShouldScopeMatches(search_text))
     return;
 
   WebFrameImpl* main_frame_impl =
@@ -1136,13 +1083,14 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
     MessageLoop::current()->PostTask(FROM_HERE,
         scope_matches_factory_.NewRunnableMethod(
             &WebFrameImpl::ScopeStringMatches,
-            request,
+            request_id,
+            search_text,
+            options,
             false));  // false=we just reset, so don't do it again.
     return;
   }
 
-  WebCore::String webcore_string =
-      webkit_glue::String16ToString(request.search_string);
+  WebCore::String webcore_string = webkit_glue::String16ToString(search_text);
 
   RefPtr<Range> search_range(rangeOfContents(frame()->document()));
 
@@ -1177,7 +1125,7 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
     RefPtr<Range> result_range(findPlainText(search_range.get(),
                                             webcore_string,
                                             true,
-                                            request.match_case));
+                                            options.matchCase));
     if (result_range->collapsed(ec)) {
       if (!result_range->startContainer()->isInShadowTree())
         break;
@@ -1202,8 +1150,6 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
     if (frame()->editor()->insideVisibleArea(result_range.get())) {
       ++match_count;
 
-      AddMarker(result_range.get());
-
       setStart(search_range.get(), new_start);
       Node* shadow_tree_root = search_range->shadowTreeRootNode();
       if (search_range->collapsed(ec) && shadow_tree_root)
@@ -1224,26 +1170,27 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
       // match was found in active_selection_rect_ on the current frame. If we
       // find this rect during scoping it means we have found the active
       // tickmark.
+      bool found_active_match = false;
       if (locating_active_rect_ && (active_selection_rect == result_bounds)) {
         // We have found the active tickmark frame.
         main_frame_impl->active_match_frame_ = this;
+        found_active_match = true;
         // We also know which tickmark is active now.
         active_match_index_ = match_count - 1;
         // To stop looking for the active tickmark, we set this flag.
         locating_active_rect_ = false;
 
-  #if defined(OS_WIN)
-        // TODO(pinkerton): Fix Mac invalidation to be more like Win ScrollView
         // Notify browser of new location for the selected rectangle.
         result_bounds.move(-frameview()->scrollOffset().width(),
                            -frameview()->scrollOffset().height());
         ReportFindInPageSelection(
-            webkit_glue::FromIntRect(
+            webkit_glue::IntRectToWebRect(
                 frame()->view()->convertToContainingWindow(result_bounds)),
-                active_match_index_ + 1,
-                request.request_id);
-  #endif
+            active_match_index_ + 1,
+            request_id);
       }
+
+      AddMarker(result_range.get(), found_active_match);
     }
 
     resume_scoping_from_range_ = result_range;
@@ -1252,7 +1199,7 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
 
   // Remember what we search for last time, so we can skip searching if more
   // letters are added to the search string (and last outcome was 0).
-  last_search_string_ = request.search_string;
+  last_search_string_ = search_text;
 
   if (match_count > 0) {
     frame()->setMarkedTextMatchesAreHighlighted(true);
@@ -1260,7 +1207,7 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
     last_match_count_ += match_count;
 
     // Let the mainframe know how much we found during this pass.
-    main_frame_impl->IncreaseMatchCount(match_count, request.request_id);
+    main_frame_impl->IncreaseMatchCount(match_count, request_id);
   }
 
   if (timeout) {
@@ -1274,7 +1221,9 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
     MessageLoop::current()->PostTask(FROM_HERE,
         scope_matches_factory_.NewRunnableMethod(
             &WebFrameImpl::ScopeStringMatches,
-            request,
+            request_id,
+            search_text,
+            options,
             false));  // don't reset.
 
     return;  // Done for now, resume work later.
@@ -1288,12 +1237,10 @@ void WebFrameImpl::ScopeStringMatches(FindInPageRequest request,
   // If this is the last frame to finish scoping we need to trigger the final
   // update to be sent.
   if (main_frame_impl->frames_scoping_count_ == 0)
-    main_frame_impl->IncreaseMatchCount(0, request.request_id);
+    main_frame_impl->IncreaseMatchCount(0, request_id);
 
   // This frame is done, so show any scrollbar tickmarks we haven't drawn yet.
   InvalidateArea(INVALIDATE_SCROLLBAR);
-
-  return;
 }
 
 void WebFrameImpl::CancelPendingScopingEffort() {
@@ -1307,17 +1254,11 @@ void WebFrameImpl::SetFindEndstateFocusAndSelection() {
 
   if (this == main_frame_impl->active_match_frame() &&
       active_match_.get()) {
-    // If the user has changed the selection since the match was found, we
+    // If the user has set the selection since the match was found, we
     // don't focus anything.
     VisibleSelection selection(frame()->selection()->selection());
-    if (selection.isNone() || (selection.start() == selection.end()) ||
-        active_match_->boundingBox() !=
-            selection.toNormalizedRange()->boundingBox())
+    if (!selection.isNone())
       return;
-
-    // We will be setting focus ourselves, so we want the view to forget its
-    // stored focus node so that it won't change it after we are done.
-    static_cast<WebViewImpl*>(GetView())->ReleaseFocusReferences();
 
     // Try to find the first focusable node up the chain, which will, for
     // example, focus links if we have found text within the link.
@@ -1348,10 +1289,6 @@ void WebFrameImpl::StopFinding(bool clear_selection) {
   if (!clear_selection)
     SetFindEndstateFocusAndSelection();
   CancelPendingScopingEffort();
-
-#if defined(OS_WIN)
-  WebCore::RenderThemeChromiumWin::setFindInPageMode(false);
-#endif
 
   // Remove all markers for matches found and turn off the highlighting.
   if (this == static_cast<WebFrameImpl*>(GetView()->GetMainFrame()))
@@ -1385,50 +1322,6 @@ void WebFrameImpl::Cut() {
   if (d)
     d->UserMetricsRecordAction(L"Cut");
 }
-
-#if defined(OS_WIN)
-// Returns a copy of data from a data handle retrieved from the clipboard. The
-// data is decoded according to the format that it is in. The caller is
-// responsible for freeing the data.
-static wchar_t* GetDataFromHandle(HGLOBAL data_handle,
-                                  unsigned int clipboard_format) {
-  switch (clipboard_format) {
-    case CF_TEXT: {
-      char* string_data = static_cast<char*>(::GlobalLock(data_handle));
-      int n_chars = ::MultiByteToWideChar(CP_ACP, 0, string_data, -1, NULL, 0);
-      wchar_t* wcs_data =
-        static_cast<wchar_t*>(malloc((n_chars * sizeof(wchar_t)) +
-          sizeof(wchar_t)));
-      if (!wcs_data) {
-        ::GlobalUnlock(data_handle);
-        return NULL;
-      }
-
-      ::MultiByteToWideChar(CP_ACP, 0, string_data, -1, wcs_data, n_chars);
-      ::GlobalUnlock(data_handle);
-      wcs_data[n_chars] = '\0';
-      return wcs_data;
-    }
-    case CF_UNICODETEXT: {
-      wchar_t* string_data = static_cast<wchar_t*>(::GlobalLock(data_handle));
-      size_t data_size_in_bytes = ::GlobalSize(data_handle);
-      wchar_t* wcs_data =
-        static_cast<wchar_t*>(malloc(data_size_in_bytes + sizeof(wchar_t)));
-      if (!wcs_data) {
-        ::GlobalUnlock(data_handle);
-        return NULL;
-      }
-
-      size_t n_chars = static_cast<int>(data_size_in_bytes / sizeof(wchar_t));
-      wmemcpy_s(wcs_data, n_chars, string_data, n_chars);
-      ::GlobalUnlock(data_handle);
-      wcs_data[n_chars] = '\0';
-      return wcs_data;
-    }
-  }
-  return NULL;
-}
-#endif
 
 void WebFrameImpl::Paste() {
   frame()->editor()->paste();
@@ -1482,6 +1375,12 @@ void WebFrameImpl::ClearSelection() {
   frame()->selection()->clear();
 }
 
+bool WebFrameImpl::HasSelection() {
+  // frame()->selection()->isNone() never returns true.
+  return (frame()->selection()->start() !=
+      frame()->selection()->end());
+}
+
 std::string WebFrameImpl::GetSelection(bool as_html) {
   RefPtr<Range> range = frame()->selection()->toNormalizedRange();
   if (!range.get())
@@ -1491,8 +1390,17 @@ std::string WebFrameImpl::GetSelection(bool as_html) {
     String markup = WebCore::createMarkup(range.get(), 0);
     return webkit_glue::StringToStdString(markup);
   } else {
-    return webkit_glue::StringToStdString(range->text());
+    String text = range->text();
+#if defined(OS_WIN)
+    WebCore::replaceNewlinesWithWindowsStyleNewlines(text);
+#endif
+    WebCore::replaceNBSPWithSpace(text);
+    return webkit_glue::StringToStdString(text);
   }
+}
+
+std::string WebFrameImpl::GetFullPageHtml() {
+  return webkit_glue::StringToStdString(createFullMarkup(frame_->document()));
 }
 
 void WebFrameImpl::CreateFrameView() {
@@ -1509,21 +1417,25 @@ void WebFrameImpl::CreateFrameView() {
 
   frame_->setView(0);
 
-  WebCore::FrameView* view;
+  WebViewImpl* web_view = GetWebViewImpl();
+
+  RefPtr<WebCore::FrameView> view;
   if (is_main_frame) {
-    IntSize initial_size(
-        webview_impl_->size().width(), webview_impl_->size().height());
-    view = new FrameView(frame_, initial_size);
+    IntSize size = webkit_glue::WebSizeToIntSize(web_view->size());
+    view = FrameView::create(frame_, size);
   } else {
-    view = new FrameView(frame_);
+    view = FrameView::create(frame_);
   }
 
   frame_->setView(view);
 
+  if (web_view->GetIsTransparent())
+    view->setTransparent(true);
+
   // TODO(darin): The Mac code has a comment about this possibly being
   // unnecessary.  See installInFrame in WebCoreFrameBridge.mm
   if (frame_->ownerRenderer())
-    frame_->ownerRenderer()->setWidget(view);
+    frame_->ownerRenderer()->setWidget(view.get());
 
   if (HTMLFrameOwnerElement* owner = frame_->ownerElement()) {
     view->setCanHaveScrollbars(
@@ -1532,16 +1444,25 @@ void WebFrameImpl::CreateFrameView() {
 
   if (is_main_frame)
     view->setParentVisible(true);
-
-  // FrameViews are created with a refcount of 1 so it needs releasing after we
-  // assign it to a RefPtr.
-  view->deref();
 }
 
 // static
 WebFrameImpl* WebFrameImpl::FromFrame(WebCore::Frame* frame) {
   return static_cast<WebFrameLoaderClient*>(
       frame->loader()->client())->webframe();
+}
+
+WebViewImpl* WebFrameImpl::GetWebViewImpl() const {
+  if (!frame_ || !frame_->page())
+    return NULL;
+
+  // There are cases where a Frame may outlive its associated Page.  Get the
+  // WebViewImpl by accessing it indirectly through the Frame's Page so that we
+  // don't have to worry about cleaning up the WebFrameImpl -> WebViewImpl
+  // pointer. WebCore already clears the Frame's Page pointer when the Page is
+  // destroyed by the WebViewImpl.
+  return static_cast<ChromeClientImpl*>(
+      frame_->page()->chrome()->client())->webview();
 }
 
 // WebFrame --------------------------------------------------------------------
@@ -1558,15 +1479,16 @@ void WebFrameImpl::Layout() {
     FromFrame(child)->Layout();
 }
 
-void WebFrameImpl::Paint(skia::PlatformCanvas* canvas, const gfx::Rect& rect) {
+void WebFrameImpl::Paint(skia::PlatformCanvas* canvas, const WebRect& rect) {
   static StatsRate rendering("WebFramePaintTime");
   StatsScope<StatsRate> rendering_scope(rendering);
 
-  if (!rect.IsEmpty()) {
-    IntRect dirty_rect(rect.x(), rect.y(), rect.width(), rect.height());
+  if (!rect.isEmpty()) {
+    IntRect dirty_rect(webkit_glue::WebRectToIntRect(rect));
 #if defined(OS_MACOSX)
     CGContextRef context = canvas->getTopPlatformDevice().GetBitmapContext();
     GraphicsContext gc(context);
+    WebCore::LocalCurrentGraphicsContext localContext(&gc);
 #else
     PlatformContextSkia context(canvas);
 
@@ -1582,40 +1504,6 @@ void WebFrameImpl::Paint(skia::PlatformCanvas* canvas, const gfx::Rect& rect) {
   }
 }
 
-bool WebFrameImpl::CaptureImage(scoped_ptr<skia::BitmapPlatformDevice>* image,
-                                bool scroll_to_zero) {
-  if (!image) {
-    NOTREACHED();
-    return false;
-  }
-
-  // Must layout before painting.
-  Layout();
-
-  skia::PlatformCanvas canvas;
-  if (!canvas.initialize(frameview()->width(), frameview()->height(), true))
-    return false;
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-  PlatformContextSkia context(&canvas);
-  GraphicsContext gc(reinterpret_cast<PlatformGraphicsContext*>(&context));
-#elif defined(OS_MACOSX)
-  CGContextRef context = canvas.beginPlatformPaint();
-  GraphicsContext gc(context);
-#endif
-  frameview()->paint(&gc, IntRect(0, 0, frameview()->width(),
-                                  frameview()->height()));
-#if defined(OS_MACOSX)
-  canvas.endPlatformPaint();
-#endif
-
-  skia::BitmapPlatformDevice& device =
-      static_cast<skia::BitmapPlatformDevice&>(canvas.getTopPlatformDevice());
-
-  image->reset(new skia::BitmapPlatformDevice(device));
-  return true;
-}
-
 bool WebFrameImpl::IsLoading() {
   // I'm assuming this does what we want.
   return frame_->loader()->isLoading();
@@ -1623,7 +1511,6 @@ bool WebFrameImpl::IsLoading() {
 
 void WebFrameImpl::Closing() {
   alt_error_page_fetcher_.reset();
-  webview_impl_ = NULL;
   frame_ = NULL;
 }
 
@@ -1649,48 +1536,51 @@ void WebFrameImpl::DidReceiveData(DocumentLoader* loader,
 }
 
 void WebFrameImpl::DidFail(const ResourceError& error, bool was_provisional) {
-  // Make sure we never show errors in view source mode.
-  SetInViewSourceMode(false);
-
-  WebViewDelegate* delegate = webview_impl_->delegate();
+  WebViewImpl* web_view = GetWebViewImpl();
+  WebViewDelegate* delegate = web_view->delegate();
   if (delegate) {
-    WebErrorImpl web_error(error);
+    const WebURLError& web_error =
+        webkit_glue::ResourceErrorToWebURLError(error);
     if (was_provisional) {
-      delegate->DidFailProvisionalLoadWithError(webview_impl_, web_error,
-                                                this);
+      delegate->DidFailProvisionalLoadWithError(web_view, web_error, this);
     } else {
-      delegate->DidFailLoadWithError(webview_impl_, web_error, this);
+      delegate->DidFailLoadWithError(web_view, web_error, this);
     }
   }
 }
 
-void WebFrameImpl::LoadAlternateHTMLErrorPage(const WebRequest* request,
-                                              const WebError& error,
+void WebFrameImpl::LoadAlternateHTMLErrorPage(const WebURLRequest& request,
+                                              const WebURLError& error,
                                               const GURL& error_page_url,
                                               bool replace,
                                               const GURL& fake_url) {
-  // Load alternate HTML in place of the previous request.  We create a copy of
-  // the original request so we can replace its URL with a dummy URL.  That
-  // prevents other web content from the same origin as the failed URL to
-  // script the error page.
-  scoped_ptr<WebRequest> failed_request(request->Clone());
-  failed_request->SetURL(fake_url);
+  // Load alternate HTML in place of the previous request.  We use a fake_url
+  // for the Base URL.  That prevents other web content from the same origin
+  // as the failed URL to script the error page.
 
-  LoadAlternateHTMLString(failed_request.get(), std::string(),
-                          error.GetFailedURL(), replace);
+  LoadHTMLString("",  // Empty document
+                 fake_url,
+                 error.unreachableURL,
+                 replace);
 
-  WebErrorImpl weberror_impl(error);
-  alt_error_page_fetcher_.reset(
-      new AltErrorPageResourceFetcher(webview_impl_, weberror_impl, this,
-                                      error_page_url));
+  alt_error_page_fetcher_.reset(new AltErrorPageResourceFetcher(
+      error_page_url, this, error.unreachableURL,
+      NewCallback(this, &WebFrameImpl::AltErrorPageFinished)));
 }
 
-void WebFrameImpl::ExecuteScript(const webkit_glue::WebScriptSource& source) {
+void WebFrameImpl::DispatchWillSendRequest(WebURLRequest* request) {
+  ResourceResponse response;
+  frame_->loader()->client()->dispatchWillSendRequest(NULL, 0,
+      *webkit_glue::WebURLRequestToMutableResourceRequest(request),
+      response);
+}
+
+void WebFrameImpl::ExecuteScript(const WebScriptSource& source) {
   frame_->loader()->executeScript(
       WebCore::ScriptSourceCode(
-          webkit_glue::StdStringToString(source.source),
-          webkit_glue::GURLToKURL(source.url),
-          source.start_line));
+          webkit_glue::WebStringToString(source.code),
+          webkit_glue::WebURLToKURL(source.url),
+          source.startLine));
 }
 
 bool WebFrameImpl::InsertCSSStyles(const std::string& css) {
@@ -1713,17 +1603,31 @@ bool WebFrameImpl::InsertCSSStyles(const std::string& css) {
 }
 
 void WebFrameImpl::ExecuteScriptInNewContext(
-    const webkit_glue::WebScriptSource* sources_in, int num_sources) {
+    const WebScriptSource* sources_in, int num_sources) {
   Vector<WebCore::ScriptSourceCode> sources;
 
   for (int i = 0; i < num_sources; ++i) {
     sources.append(WebCore::ScriptSourceCode(
-        webkit_glue::StdStringToString(sources_in[i].source),
-        webkit_glue::GURLToKURL(sources_in[i].url),
-        sources_in[i].start_line));
+        webkit_glue::WebStringToString(sources_in[i].code),
+        webkit_glue::WebURLToKURL(sources_in[i].url),
+        sources_in[i].startLine));
   }
 
   frame_->script()->evaluateInNewContext(sources);
+}
+
+void WebFrameImpl::ExecuteScriptInNewWorld(
+    const WebScriptSource* sources_in, int num_sources) {
+  Vector<WebCore::ScriptSourceCode> sources;
+
+  for (int i = 0; i < num_sources; ++i) {
+    sources.append(WebCore::ScriptSourceCode(
+        webkit_glue::WebStringToString(sources_in[i].code),
+        webkit_glue::WebURLToKURL(sources_in[i].url),
+        sources_in[i].startLine));
+  }
+
+  frame_->script()->evaluateInNewWorld(sources);
 }
 
 std::wstring WebFrameImpl::GetName() {
@@ -1756,7 +1660,6 @@ PassRefPtr<Frame> WebFrameImpl::CreateChildFrame(
   RefPtr<Frame> child_frame = Frame::create(
       frame_->page(), owner_element, &webframe->frame_loader_client_);
   webframe->frame_ = child_frame.get();
-  webframe->webview_impl_ = webview_impl_;
 
   child_frame->tree()->setName(request.frameName());
 
@@ -1775,36 +1678,10 @@ PassRefPtr<Frame> WebFrameImpl::CreateChildFrame(
   if (!child_frame->tree()->parent())
     return NULL;
 
-  // The following code was pulled from WebFrame.mm:_loadURL, with minor
-  // modifications.  The purpose is to ensure we load the right HistoryItem for
-  // this child frame.
-  HistoryItem* parent_item = frame_->loader()->currentHistoryItem();
-  FrameLoadType load_type = frame_->loader()->loadType();
-  FrameLoadType child_load_type =
-      WebCore::FrameLoadTypeRedirectWithLockedBackForwardList;
-  KURL new_url = request.resourceRequest().url();
-
-  // If we're moving in the backforward list, we might want to replace the
-  // content of this child frame with whatever was there at that point.
-  if (parent_item && parent_item->children().size() != 0 &&
-      isBackForwardLoadType(load_type)) {
-    HistoryItem* child_item =
-        parent_item->childItemWithName(request.frameName());
-    if (child_item) {
-      // Use the original URL to ensure we get all the side-effects, such as
-      // onLoad handlers, of any redirects that happened. An example of where
-      // this is needed is Radar 3213556.
-      new_url = child_item->originalURL();
-      child_load_type = load_type;
-      child_frame->loader()->setProvisionalHistoryItem(child_item);
-    }
-  }
-
-  child_frame->loader()->loadURL(new_url,
-                                 request.resourceRequest().httpReferrer(),
-                                 child_frame->tree()->name(),
-                                 false,
-                                 child_load_type, 0, 0);
+  frame_->loader()->loadURLIntoChildFrame(
+      request.resourceRequest().url(),
+      request.resourceRequest().httpReferrer(),
+      child_frame.get());
 
   // A synchronous navigation (about:blank) would have already processed
   // onload, so it is possible for the frame to have already been destroyed by
@@ -1815,35 +1692,34 @@ PassRefPtr<Frame> WebFrameImpl::CreateChildFrame(
   return child_frame.release();
 }
 
-bool WebFrameImpl::ExecuteCoreCommandByName(const std::string& name,
+bool WebFrameImpl::ExecuteEditCommandByName(const std::string& name,
                                             const std::string& value) {
   ASSERT(frame());
   return frame()->editor()->command(webkit_glue::StdStringToString(name))
       .execute(webkit_glue::StdStringToString(value));
 }
 
-bool WebFrameImpl::IsCoreCommandEnabled(const std::string& name) {
+bool WebFrameImpl::IsEditCommandEnabled(const std::string& name) {
   ASSERT(frame());
   return frame()->editor()->command(webkit_glue::StdStringToString(name))
       .isEnabled();
 }
 
-void WebFrameImpl::AddMessageToConsole(const std::wstring& msg,
-                                       ConsoleMessageLevel level) {
+void WebFrameImpl::AddMessageToConsole(const WebConsoleMessage& message) {
   ASSERT(frame());
 
   WebCore::MessageLevel webcore_message_level;
-  switch (level) {
-    case MESSAGE_LEVEL_TIP:
+  switch (message.level) {
+    case WebConsoleMessage::LevelTip:
       webcore_message_level = WebCore::TipMessageLevel;
       break;
-    case MESSAGE_LEVEL_LOG:
+    case WebConsoleMessage::LevelLog:
       webcore_message_level = WebCore::LogMessageLevel;
       break;
-    case MESSAGE_LEVEL_WARNING:
+    case WebConsoleMessage::LevelWarning:
       webcore_message_level = WebCore::WarningMessageLevel;
       break;
-    case MESSAGE_LEVEL_ERROR:
+    case WebConsoleMessage::LevelError:
       webcore_message_level = WebCore::ErrorMessageLevel;
       break;
     default:
@@ -1852,8 +1728,9 @@ void WebFrameImpl::AddMessageToConsole(const std::wstring& msg,
   }
 
   frame()->domWindow()->console()->addMessage(
-      WebCore::OtherMessageSource, webcore_message_level,
-      webkit_glue::StdWStringToString(msg), 1, String());
+      WebCore::OtherMessageSource, WebCore::LogMessageType,
+      webcore_message_level, webkit_glue::WebStringToString(message.text),
+      1, String());
 }
 
 void WebFrameImpl::ClosePage() {
@@ -1862,39 +1739,34 @@ void WebFrameImpl::ClosePage() {
   frame_->loader()->closeURL();
 }
 
-gfx::Size WebFrameImpl::ScrollOffset() const {
+WebSize WebFrameImpl::ScrollOffset() const {
   WebCore::FrameView* view = frameview();
-  if (view) {
-    WebCore::IntSize s = view->scrollOffset();
-    return gfx::Size(s.width(), s.height());
-  }
+  if (view)
+    return webkit_glue::IntSizeToWebSize(view->scrollOffset());
 
-  return gfx::Size();
+  return WebSize();
 }
 
 void WebFrameImpl::SetAllowsScrolling(bool flag) {
   frame_->view()->setCanHaveScrollbars(flag);
 }
 
-bool WebFrameImpl::BeginPrint(const gfx::Size& page_size_px,
-                              int* page_count) {
+int WebFrameImpl::PrintBegin(const WebSize& page_size) {
   DCHECK_EQ(frame()->document()->isFrameSet(), false);
 
   print_context_.reset(new ChromePrintContext(frame()));
   WebCore::FloatRect rect(0, 0,
-                          static_cast<float>(page_size_px.width()),
-                          static_cast<float>(page_size_px.height()));
+                          static_cast<float>(page_size.width),
+                          static_cast<float>(page_size.height));
   print_context_->begin(rect.width());
   float page_height;
   // We ignore the overlays calculation for now since they are generated in the
   // browser. page_height is actually an output parameter.
   print_context_->computePageRects(rect, 0, 0, 1.0, page_height);
-  if (page_count)
-    *page_count = print_context_->pageCount();
-  return true;
+  return print_context_->pageCount();
 }
 
-float WebFrameImpl::PrintPage(int page, skia::PlatformCanvas* canvas) {
+float WebFrameImpl::PrintPage(int page, WebCanvas* canvas) {
   // Ensure correct state.
   if (!print_context_.get() || page < 0 || !frame() || !frame()->document()) {
     NOTREACHED();
@@ -1907,12 +1779,13 @@ float WebFrameImpl::PrintPage(int page, skia::PlatformCanvas* canvas) {
 #elif defined(OS_MACOSX)
   CGContextRef context = canvas->beginPlatformPaint();
   GraphicsContext spool(context);
+  WebCore::LocalCurrentGraphicsContext localContext(&spool);
 #endif
 
   return print_context_->spoolPage(spool, page);
 }
 
-void WebFrameImpl::EndPrint() {
+void WebFrameImpl::PrintEnd() {
   DCHECK(print_context_.get());
   if (print_context_.get())
     print_context_->end();
@@ -1920,7 +1793,7 @@ void WebFrameImpl::EndPrint() {
 }
 
 int WebFrameImpl::PendingFrameUnloadEventCount() const {
-  return frame()->eventHandler()->pendingFrameUnloadEventCount();
+  return frame()->domWindow()->pendingUnloadEventListeners();
 }
 
 void WebFrameImpl::RegisterPasswordListener(
@@ -1942,4 +1815,43 @@ void WebFrameImpl::ClearPasswordListeners() {
     delete iter->second;
   }
   password_listeners_.clear();
+}
+
+void WebFrameImpl::LoadJavaScriptURL(const KURL& url) {
+  // This is copied from FrameLoader::executeIfJavaScriptURL.  Unfortunately,
+  // we cannot just use that method since it is private, and it also doesn't
+  // quite behave as we require it to for bookmarklets.  The key difference is
+  // that we need to suppress loading the string result from evaluating the JS
+  // URL if executing the JS URL resulted in a location change.  We also allow
+  // a JS URL to be loaded even if scripts on the page are otherwise disabled.
+
+  if (!frame_->document() || !frame_->page())
+    return;
+
+  String script =
+      decodeURLEscapeSequences(url.string().substring(strlen("javascript:")));
+  ScriptValue result = frame_->loader()->executeScript(script, true);
+
+  String script_result;
+  if (!result.getString(script_result))
+    return;
+
+  SecurityOrigin* security_origin = frame_->document()->securityOrigin();
+
+  if (!frame_->loader()->isScheduledLocationChangePending()) {
+    frame_->loader()->stopAllLoaders();
+    frame_->loader()->begin(frame_->loader()->url(), true, security_origin);
+    frame_->loader()->write(script_result);
+    frame_->loader()->end();
+  }
+}
+
+void WebFrameImpl::AltErrorPageFinished(const GURL& unreachable_url,
+                                        const std::string& html) {
+  WebViewDelegate* d = GetWebViewImpl()->delegate();
+  if (!d)
+    return;
+  WebURLError error;
+  error.unreachableURL = unreachable_url;
+  d->LoadNavigationErrorPage(this, WebURLRequest(), error, html, true);
 }

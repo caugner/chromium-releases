@@ -8,8 +8,9 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
-#include "net/base/gzip_filter.h"
 #include "net/base/filter_unittest.h"
+#include "net/base/gzip_filter.h"
+#include "net/base/io_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #include "third_party/zlib/zlib.h"
@@ -57,12 +58,12 @@ class GZipUnitTest : public PlatformTest {
     gzip_encode_buffer_ = NULL;
 
     // Get the path of source data file.
-    std::wstring file_path;
+    FilePath file_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
-    file_util::AppendToPath(&file_path, L"net");
-    file_util::AppendToPath(&file_path, L"data");
-    file_util::AppendToPath(&file_path, L"filter_unittests");
-    file_util::AppendToPath(&file_path, L"google.txt");
+    file_path = file_path.AppendASCII("net");
+    file_path = file_path.AppendASCII("data");
+    file_path = file_path.AppendASCII("filter_unittests");
+    file_path = file_path.AppendASCII("google.txt");
 
     // Read data from the file into buffer.
     file_util::ReadFileToString(file_path, &source_buffer_);
@@ -251,32 +252,6 @@ TEST_F(GZipUnitTest, DecodeDeflate) {
 TEST_F(GZipUnitTest, DecodeGZip) {
   // Decode the compressed data with filter
   std::vector<Filter::FilterType> filter_types;
-  filter_types.push_back(Filter::FILTER_TYPE_GZIP);
-  MockFilterContext filter_context(kDefaultBufferSize);
-  scoped_ptr<Filter> filter(Filter::Factory(filter_types, filter_context));
-  ASSERT_TRUE(filter.get());
-  memcpy(filter->stream_buffer()->data(), gzip_encode_buffer_,
-         gzip_encode_len_);
-  filter->FlushStreamBuffer(gzip_encode_len_);
-
-  char gzip_decode_buffer[kDefaultBufferSize];
-  int gzip_decode_size = kDefaultBufferSize;
-  filter->ReadData(gzip_decode_buffer, &gzip_decode_size);
-
-  // Compare the decoding result with source data
-  EXPECT_TRUE(gzip_decode_size == source_len());
-  EXPECT_EQ(memcmp(source_buffer(), gzip_decode_buffer, source_len()), 0);
-}
-
-// SDCH scenario: decoding gzip data when content type says sdch,gzip.
-// This tests that sdch will degrade to pass through, and is what allows robust
-// handling when the response *might* be sdch,gzip by simply adding in the
-// tentative sdch decode.
-// All test code is otherwise modeled after the "basic" scenario above.
-TEST_F(GZipUnitTest, DecodeGZipWithMistakenSdch) {
-  // Decode the compressed data with filter
-  std::vector<Filter::FilterType> filter_types;
-  filter_types.push_back(Filter::FILTER_TYPE_SDCH);
   filter_types.push_back(Filter::FILTER_TYPE_GZIP);
   MockFilterContext filter_context(kDefaultBufferSize);
   scoped_ptr<Filter> filter(Filter::Factory(filter_types, filter_context));

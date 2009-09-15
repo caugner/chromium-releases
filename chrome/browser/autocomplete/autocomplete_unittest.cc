@@ -162,7 +162,7 @@ void AutocompleteProviderTest::Observe(NotificationType type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
   if (controller_->done()) {
-    result_.CopyFrom(controller_->result());
+    result_.CopyFrom(*(Details<const AutocompleteResult>(details).ptr()));
     MessageLoop::current()->Quit();
   }
 }
@@ -233,7 +233,14 @@ TEST(AutocompleteTest, InputType) {
 #endif  // defined(OS_WIN)
     { L"http://foo.com/", AutocompleteInput::URL },
     { L"127.0.0.1", AutocompleteInput::URL },
+    { L"127.0.1", AutocompleteInput::UNKNOWN },
+    { L"127.0.1/", AutocompleteInput::UNKNOWN },
     { L"browser.tabs.closeButtons", AutocompleteInput::UNKNOWN },
+    { L"\u6d4b\u8bd5", AutocompleteInput::UNKNOWN },
+    { L"[2001:]", AutocompleteInput::QUERY },  // Not a valid IP
+    { L"[2001:dB8::1]", AutocompleteInput::URL },
+    { L"192.168.0.256", AutocompleteInput::QUERY },  // Invalid IPv4 literal.
+    { L"[foo.com]", AutocompleteInput::QUERY },  // Invalid IPv6 literal.
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
@@ -242,6 +249,12 @@ TEST(AutocompleteTest, InputType) {
     EXPECT_EQ(input_cases[i].type, input.type()) << "Input: " <<
         input_cases[i].input;
   }
+}
+
+// This tests for a regression where certain input in the omnibox caused us to
+// crash. As long as the test completes without crashing, we're fine.
+TEST(AutocompleteTest, InputCrash) {
+  AutocompleteInput input(L"\uff65@s", std::wstring(), true, false, false);
 }
 
 // Test that we can properly compare matches' relevance when at least one is
@@ -268,6 +281,51 @@ TEST(AutocompleteMatch, MoreRelevant) {
     m2.relevance = cases[i].r2;
     EXPECT_EQ(cases[i].expected_result,
               AutocompleteMatch::MoreRelevant(m1, m2));
+  }
+}
+
+TEST(AutocompleteInput, ParseForEmphasizeComponent) {
+  using url_parse::Component;
+  Component kInvalidComponent(0, -1);
+  struct test_data {
+    const wchar_t* input;
+    const Component scheme;
+    const Component host;
+  } input_cases[] = {
+    { L"", kInvalidComponent, kInvalidComponent },
+    { L"?", kInvalidComponent, kInvalidComponent },
+    { L"?http://foo.com/bar", kInvalidComponent, kInvalidComponent },
+    { L"foo/bar baz", kInvalidComponent, Component(0, 3) },
+    { L"http://foo/bar baz", Component(0, 4), Component(7, 3) },
+    { L"link:foo.com", Component(0, 4), kInvalidComponent },
+    { L"www.foo.com:81", kInvalidComponent, Component(0, 11) },
+    { L"\u6d4b\u8bd5", kInvalidComponent, Component(0, 2) },
+    { L"view-source:http://www.foo.com/", Component(12, 4), Component(19, 11) },
+    { L"view-source:https://example.com/",
+      Component(12, 5), Component(20, 11) },
+    { L"view-source:", Component(0, 11), kInvalidComponent },
+    { L"view-source:garbage", kInvalidComponent, Component(12, 7) },
+    { L"view-source:http://http://foo", Component(12, 4), Component(19, 4) },
+    { L"view-source:view-source:http://example.com/",
+      Component(12, 11), kInvalidComponent }
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+    Component scheme, host;
+    AutocompleteInput::ParseForEmphasizeComponents(input_cases[i].input,
+                                                   std::wstring(),
+                                                   &scheme,
+                                                   &host);
+    AutocompleteInput input(input_cases[i].input, std::wstring(), true, false,
+                            false);
+    EXPECT_EQ(input_cases[i].scheme.begin, scheme.begin) << "Input: " <<
+        input_cases[i].input;
+    EXPECT_EQ(input_cases[i].scheme.len, scheme.len) << "Input: " <<
+        input_cases[i].input;
+    EXPECT_EQ(input_cases[i].host.begin, host.begin) << "Input: " <<
+        input_cases[i].input;
+    EXPECT_EQ(input_cases[i].host.len, host.len) << "Input: " <<
+        input_cases[i].input;
   }
 }
 

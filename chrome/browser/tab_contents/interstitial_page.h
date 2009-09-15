@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_TAB_CONTENTS_INTERSTITIAL_PAGE_H_
 #define CHROME_BROWSER_TAB_CONTENTS_INTERSTITIAL_PAGE_H_
 
+#include <map>
 #include <string>
 
 #include "base/gfx/size.h"
@@ -15,7 +16,8 @@
 
 class MessageLoop;
 class NavigationEntry;
-class WebContents;
+class TabContents;
+class TabContentsView;
 
 // This class is a base class for interstitial pages, pages that show some
 // informative message asking for user validation before reaching the target
@@ -26,7 +28,7 @@ class WebContents;
 // that when the interstitial shows, the current entry is the target URL.
 //
 // InterstitialPage instances take care of deleting themselves when closed
-// through a navigation, the WebContents closing them or the tab containing them
+// through a navigation, the TabContents closing them or the tab containing them
 // being closed.
 
 enum ResourceRequestAction {
@@ -44,7 +46,7 @@ class InterstitialPage : public NotificationObserver,
   // added to the navigation controller (so the interstitial page appears as a
   // new navigation entry). |new_navigation| should be false when the
   // interstitial was triggered by a loading a sub-resource in a page.
-  InterstitialPage(WebContents* tab, bool new_navigation, const GURL& url);
+  InterstitialPage(TabContents* tab, bool new_navigation, const GURL& url);
   virtual ~InterstitialPage();
 
   // Shows the interstitial page in the tab.
@@ -55,7 +57,7 @@ class InterstitialPage : public NotificationObserver,
 
   // Retrieves the InterstitialPage if any associated with the specified
   // |tab_contents| (used by ui tests).
-  static InterstitialPage* GetInterstitialPage(WebContents* web_contents);
+  static InterstitialPage* GetInterstitialPage(TabContents* tab_contents);
 
   // Sub-classes should return the HTML that should be displayed in the page.
   virtual std::string GetHTMLContents() { return std::string(); }
@@ -74,6 +76,15 @@ class InterstitialPage : public NotificationObserver,
   // Sizes the RenderViewHost showing the actual interstitial page contents.
   void SetSize(const gfx::Size& size);
 
+  bool action_taken() const { return action_taken_; }
+
+  // Sets the focus to the interstitial.
+  void Focus();
+
+  // Focus the first (last if reverse is true) element in the interstitial page.
+  // Called when tab traversing.
+  void FocusThroughTabTraversal(bool reverse);
+
  protected:
   // NotificationObserver method:
   virtual void Observe(NotificationType type,
@@ -81,37 +92,38 @@ class InterstitialPage : public NotificationObserver,
                        const NotificationDetails& details);
 
   // RenderViewHostDelegate implementation:
-  virtual Profile* GetProfile() const;
-  virtual WebPreferences GetWebkitPrefs() {
-    return WebPreferences();
-  }
+  virtual View* GetViewDelegate();
+  virtual const GURL& GetURL() const;
+  virtual void RenderViewGone(RenderViewHost* render_view_host);
   virtual void DidNavigate(RenderViewHost* render_view_host,
                            const ViewHostMsg_FrameNavigate_Params& params);
-  virtual void RenderViewGone(RenderViewHost* render_view_host);
-  virtual void DomOperationResponse(const std::string& json_string,
-                                    int automation_id);
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id,
                            const std::wstring& title);
-  virtual View* GetViewDelegate() const;
+  virtual void DomOperationResponse(const std::string& json_string,
+                                    int automation_id);
 
   // Invoked when the page sent a command through DOMAutomation.
-  virtual void CommandReceived(const std::string& command) { }
+  virtual void CommandReceived(const std::string& command) {}
 
   // Invoked with the NavigationEntry that is going to be added to the
   // navigation controller.
   // Gives an opportunity to sub-classes to set states on the |entry|.
   // Note that this is only called if the InterstitialPage was constructed with
   // |create_navigation_entry| set to true.
-  virtual void UpdateEntry(NavigationEntry* entry) { }
+  virtual void UpdateEntry(NavigationEntry* entry) {}
 
-  WebContents* tab() const { return tab_; }
+  TabContents* tab() const { return tab_; }
   const GURL& url() const { return url_; }
   RenderViewHost* render_view_host() const { return render_view_host_; }
 
-  // Creates and shows the RenderViewHost containing the interstitial content.
+  // Creates the RenderViewHost containing the interstitial content.
   // Overriden in unit tests.
   virtual RenderViewHost* CreateRenderViewHost();
+
+  // Creates the TabContentsView that shows the interstitial RVH.
+  // Overriden in unit tests.
+  virtual TabContentsView* CreateTabContentsView();
 
  private:
   // AutomationProvider needs access to Proceed and DontProceed to simulate
@@ -135,7 +147,7 @@ class InterstitialPage : public NotificationObserver,
   void TakeActionOnResourceDispatcher(ResourceRequestAction action);
 
   // The tab in which we are displayed.
-  WebContents* tab_;
+  TabContents* tab_;
 
   // The URL that is shown when the interstitial is showing.
   GURL url_;
@@ -143,6 +155,12 @@ class InterstitialPage : public NotificationObserver,
   // Whether this interstitial is shown as a result of a new navigation (in
   // which case a transient navigation entry is created).
   bool new_navigation_;
+
+  // Whether we should discard the pending navigation entry when not proceeding.
+  // This is to deal with cases where |new_navigation_| is true but a new
+  // pending entry was created since this interstitial was shown and we should
+  // not discard it.
+  bool should_discard_pending_nav_entry_;
 
   // Whether this interstitial is enabled.  See Disable() for more info.
   bool enabled_;
@@ -179,7 +197,7 @@ class InterstitialPage : public NotificationObserver,
 
   // We keep a map of the various blocking pages shown as the UI tests need to
   // be able to retrieve them.
-  typedef std::map<WebContents*,InterstitialPage*> InterstitialPageMap;
+  typedef std::map<TabContents*,InterstitialPage*> InterstitialPageMap;
   static InterstitialPageMap* tab_to_interstitial_page_;
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialPage);

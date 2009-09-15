@@ -4,7 +4,20 @@
 
 #include "base/clipboard.h"
 
+#include "base/gfx/size.h"
 #include "base/logging.h"
+
+namespace {
+
+// A compromised renderer could send us bad data, so validate it.
+bool IsBitmapSafe(const Clipboard::ObjectMapParams& params) {
+  const gfx::Size* size =
+      reinterpret_cast<const gfx::Size*>(&(params[1].front()));
+  return params[0].size() ==
+      static_cast<size_t>(size->width() * size->height() * 4);
+}
+
+}
 
 void Clipboard::DispatchObject(ObjectType type, const ObjectMapParams& params) {
   switch (type) {
@@ -38,8 +51,10 @@ void Clipboard::DispatchObject(ObjectType type, const ObjectMapParams& params) {
       WriteWebSmartPaste();
       break;
 
-#if defined(OS_WIN) || defined(OS_LINUX)  // This is just a stub on Linux
+#if defined(OS_WIN) || defined(OS_LINUX)
     case CBF_BITMAP:
+      if (!IsBitmapSafe(params))
+        return;
       WriteBitmap(&(params[0].front()), &(params[1].front()));
       break;
 #endif  // defined(OS_WIN) || defined(OS_LINUX)

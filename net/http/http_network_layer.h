@@ -11,14 +11,18 @@
 
 namespace net {
 
+class ClientSocketFactory;
+class HostResolver;
 class HttpNetworkSession;
 class ProxyInfo;
 class ProxyService;
 
 class HttpNetworkLayer : public HttpTransactionFactory {
  public:
-  // |proxy_service| must remain valid for the lifetime of HttpNetworkLayer.
-  explicit HttpNetworkLayer(ProxyService* proxy_service);
+  // |socket_factory|, |proxy_service| and |host_resolver| must remain valid
+  // for the lifetime of HttpNetworkLayer.
+  HttpNetworkLayer(ClientSocketFactory* socket_factory,
+                   HostResolver* host_resolver, ProxyService* proxy_service);
   // Construct a HttpNetworkLayer with an existing HttpNetworkSession which
   // contains a valid ProxyService.
   explicit HttpNetworkLayer(HttpNetworkSession* session);
@@ -26,7 +30,8 @@ class HttpNetworkLayer : public HttpTransactionFactory {
 
   // This function hides the details of how a network layer gets instantiated
   // and allows other implementations to be substituted.
-  static HttpTransactionFactory* CreateFactory(ProxyService* proxy_service);
+  static HttpTransactionFactory* CreateFactory(HostResolver* host_resolver,
+                                               ProxyService* proxy_service);
   // Create a transaction factory that instantiate a network layer over an
   // existing network session. Network session contains some valuable
   // information (e.g. authentication data) that we want to share across
@@ -43,6 +48,12 @@ class HttpNetworkLayer : public HttpTransactionFactory {
   HttpNetworkSession* GetSession();
 
  private:
+  // The factory we will use to create network sockets.
+  ClientSocketFactory* socket_factory_;
+
+  // The host resolver being used for the session.
+  scoped_refptr<HostResolver> host_resolver_;
+
   // The proxy service being used for the session.
   ProxyService* proxy_service_;
 

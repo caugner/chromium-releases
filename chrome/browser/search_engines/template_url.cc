@@ -4,14 +4,14 @@
 
 #include "chrome/browser/search_engines/template_url.h"
 
+#include "app/gfx/favicon_size.h"
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/gfx/favicon_size.h"
-#include "chrome/common/l10n_util.h"
 #include "net/base/escape.h"
 
 // The TemplateURLRef has any number of terms that need to be replaced. Each of
@@ -230,17 +230,17 @@ void TemplateURLRef::ParseHostAndSearchTermKey() const {
   }
 }
 
-GURL TemplateURLRef::ReplaceSearchTerms(
+std::wstring TemplateURLRef::ReplaceSearchTerms(
     const TemplateURL& host,
     const std::wstring& terms,
     int accepted_suggestion,
     const std::wstring& original_query_for_suggestion) const {
   ParseIfNecessary();
   if (!valid_)
-    return GURL();
+    return std::wstring();
 
   if (replacements_.empty())
-    return GURL(WideToUTF8(parsed_url_));
+    return parsed_url_;
 
   // Encode the search terms so that we know the encoding.
   const std::vector<std::string>& encodings = host.input_encodings();
@@ -317,7 +317,8 @@ GURL TemplateURLRef::ReplaceSearchTerms(
       }
 
       case LANGUAGE:
-        url.insert(i->index, g_browser_process->GetApplicationLocale());
+        url.insert(i->index,
+                   ASCIIToWide(g_browser_process->GetApplicationLocale()));
         break;
 
       case SEARCH_TERMS:
@@ -330,7 +331,7 @@ GURL TemplateURLRef::ReplaceSearchTerms(
     }
   }
 
-  return GURL(WideToUTF8(url));
+  return url;
 }
 
 bool TemplateURLRef::SupportsReplacement() const {
@@ -398,7 +399,8 @@ std::wstring TemplateURLRef::SearchTermToWide(const TemplateURL& host,
   std::wstring result;
 
   std::string unescaped =
-      UnescapeURLComponent(term, UnescapeRule::REPLACE_PLUS_WITH_SPACE);
+      UnescapeURLComponent(term, UnescapeRule::REPLACE_PLUS_WITH_SPACE |
+                                 UnescapeRule::URL_SPECIAL_CHARS);
   for (size_t i = 0; i < encodings.size(); ++i) {
     if (CodepageToWide(unescaped, encodings[i].c_str(),
                        OnStringUtilConversionError::FAIL, &result))
@@ -489,6 +491,19 @@ GURL TemplateURL::GenerateFaviconURL(const GURL& url) {
   rep.ClearQuery();
   rep.ClearRef();
   return url.ReplaceComponents(rep);
+}
+
+// static
+bool TemplateURL::SupportsReplacement(const TemplateURL* turl) {
+  return turl && turl->url() && turl->url()->SupportsReplacement();
+}
+
+std::wstring TemplateURL::AdjustedShortNameForLocaleDirection() const {
+  std::wstring bidi_safe_short_name;
+  if (l10n_util::AdjustStringForLocaleDirection(short_name_,
+                                                &bidi_safe_short_name))
+    return bidi_safe_short_name;
+  return short_name_;
 }
 
 void TemplateURL::SetSuggestionsURL(const std::wstring& suggestions_url,

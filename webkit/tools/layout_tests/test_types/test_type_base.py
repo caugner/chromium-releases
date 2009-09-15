@@ -48,16 +48,19 @@ class TestTypeBase(object):
   FILENAME_SUFFIX_WDIFF = "-wdiff.html"
   FILENAME_SUFFIX_COMPARE = "-diff.png"
 
-  def __init__(self, platform, root_output_dir):
+  def __init__(self, platform, root_output_dir, platform_new_results_dir):
     """Initialize a TestTypeBase object.
 
     Args:
       platform: the platform (e.g., 'chromium-mac-leopard') identifying the
-        platform-specific results to be used
+        platform-specific results to be used.
       root_output_dir: The unix style path to the output dir.
+      platform_new_results_dir: Name of the directory to put newly baselined
+        results in.
     """
     self._root_output_dir = root_output_dir
     self._platform = platform
+    self._platform_new_results_dir = platform_new_results_dir
 
   def _MakeOutputDirectory(self, filename):
     """Creates the output directory (if needed) for a given test filename."""
@@ -77,8 +80,8 @@ class TestTypeBase(object):
       modifier: type of the result file, e.g. ".txt" or ".png"
     """
     relative_dir = os.path.dirname(path_utils.RelativeTestFilename(filename))
-    output_dir = os.path.join(path_utils.PlatformResultsDir(self._platform),
-                              self._platform,
+    output_dir = os.path.join(path_utils.PlatformResultsEnclosingDir(self._platform),
+                              self._platform_new_results_dir,
                               relative_dir)
     output_file = os.path.basename(os.path.splitext(filename)[0] +
                                    self.FILENAME_SUFFIX_EXPECTED + modifier)
@@ -199,30 +202,40 @@ class TestTypeBase(object):
         #
         # http://mail.python.org/pipermail/python-list/2008-August/505753.html
         # http://bugs.python.org/issue3210
+        #
+        # It also has a threading bug, so we don't output wdiff if the Popen
+        # raises a ValueError.
+        # http://bugs.python.org/issue1236
         if _wdiff_available:
           wdiff = subprocess.Popen(cmd, stdout=subprocess.PIPE).communicate()[0]
+          wdiff_failed = False
+
       except OSError, e:
         if e.errno == errno.ENOENT or e.errno == errno.EACCES:
           _wdiff_available = False
         else:
           raise e
+      except ValueError, e:
+        wdiff_failed = True
+
+      out = open(filename, 'wb')
 
       if not _wdiff_available:
-        out = open(filename, 'wb')
         out.write(
             """wdiff not installed.<br/>"""
             """If you're running OS X, you can install via macports.<br/>"""
             """If running Ubuntu linux, you can run "sudo apt-get install"""
             """ wdiff".""")
-        out.close()
-        return
+      elif wdiff_failed:
+        out.write('wdiff failed due to running with multiple test_shells in '
+                  'parallel.')
+      else:
+        wdiff = cgi.escape(wdiff)
+        wdiff = wdiff.replace('##WDIFF_DEL##', '<span class=del>')
+        wdiff = wdiff.replace('##WDIFF_ADD##', '<span class=add>')
+        wdiff = wdiff.replace('##WDIFF_END##', '</span>')
+        out.write('<head><style>.del { background: #faa; } ')
+        out.write('.add { background: #afa; }</style></head>')
+        out.write('<pre>' + wdiff + '</pre>')
 
-      wdiff = cgi.escape(wdiff)
-      wdiff = wdiff.replace('##WDIFF_DEL##', '<span class=del>')
-      wdiff = wdiff.replace('##WDIFF_ADD##', '<span class=add>')
-      wdiff = wdiff.replace('##WDIFF_END##', '</span>')
-      out = open(filename, 'wb')
-      out.write('<head><style>.del { background: #faa; } ')
-      out.write('.add { background: #afa; }</style></head>')
-      out.write('<pre>' + wdiff + '</pre>')
       out.close()

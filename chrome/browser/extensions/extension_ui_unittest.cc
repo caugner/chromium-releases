@@ -4,9 +4,9 @@
 
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/extensions/extension.h"
 #include "chrome/browser/extensions/extensions_ui.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/json_value_serializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,13 +15,15 @@ namespace {
       std::string *error) {
     Value* value;
 
-    JSONFileValueSerializer serializer(path.ToWStringHack());
+    JSONFileValueSerializer serializer(path);
     value = serializer.Deserialize(error);
 
     return static_cast<DictionaryValue*>(value);
   }
 
-  static bool CompareExpectedAndActualOutput(const FilePath& extension_path,
+  static bool CompareExpectedAndActualOutput(
+      const FilePath& extension_path,
+      const std::vector<ExtensionPage>& pages,
       const FilePath& expected_output_path) {
     // TODO(rafaelw): Using the extension_path passed in above, causes this
     // unit test to fail on linux. The Values come back valid, but the
@@ -39,7 +41,7 @@ namespace {
     scoped_ptr<DictionaryValue> extension_data(DeserializeJSONTestData(
         manifest_path, &error));
     EXPECT_EQ("", error);
-    EXPECT_TRUE(extension.InitFromValue(*extension_data, &error));
+    EXPECT_TRUE(extension.InitFromValue(*extension_data, true, &error));
     EXPECT_EQ("", error);
 
     scoped_ptr<DictionaryValue>expected_output_data(DeserializeJSONTestData(
@@ -48,7 +50,7 @@ namespace {
 
     // Produce test output.
     scoped_ptr<DictionaryValue> actual_output_data(
-        ExtensionsDOMHandler::CreateExtensionDetailValue(&extension));
+        ExtensionsDOMHandler::CreateExtensionDetailValue(&extension, pages));
 
     // Compare the outputs.
     return expected_output_data->Equals(actual_output_data.get());
@@ -65,21 +67,31 @@ TEST(ExtensionUITest, GenerateExtensionsJSONData) {
   // Test Extension1
   extension_path = data_test_dir_path.AppendASCII("extensions")
       .AppendASCII("good")
-      .AppendASCII("extension1")
-      .AppendASCII("1");
+      .AppendASCII("Extensions")
+      .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
+      .AppendASCII("1.0.0.0");
+
+  std::vector<ExtensionPage> pages;
+  pages.push_back(ExtensionPage(
+      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/bar.html"),
+      42, 88));
+  pages.push_back(ExtensionPage(
+      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/dog.html"),
+      0, 0));
 
   expected_output_path = data_test_dir_path.AppendASCII("extensions")
       .AppendASCII("ui")
       .AppendASCII("create_extension_detail_value_expected_output")
       .AppendASCII("good-extension1.json");
 
-  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path,
+  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path, pages,
       expected_output_path)) << extension_path.value();
 
   // Test Extension2
   extension_path = data_test_dir_path.AppendASCII("extensions")
       .AppendASCII("good")
-      .AppendASCII("extension2")
+      .AppendASCII("Extensions")
+      .AppendASCII("hpiknbiabeeppbpihjehijgoemciehgk")
       .AppendASCII("2");
 
   expected_output_path = data_test_dir_path.AppendASCII("extensions")
@@ -87,13 +99,17 @@ TEST(ExtensionUITest, GenerateExtensionsJSONData) {
       .AppendASCII("create_extension_detail_value_expected_output")
       .AppendASCII("good-extension2.json");
 
-  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path,
+  // It's OK to have duplicate URLs, so long as the IDs are different.
+  pages[1].url = pages[0].url;
+
+  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path, pages,
       expected_output_path)) << extension_path.value();
 
   // Test Extension3
   extension_path = data_test_dir_path.AppendASCII("extensions")
       .AppendASCII("good")
-      .AppendASCII("extension3")
+      .AppendASCII("Extensions")
+      .AppendASCII("bjafgdebaacbbbecmhlhpofkepfkgcpa")
       .AppendASCII("1.0");
 
   expected_output_path = data_test_dir_path.AppendASCII("extensions")
@@ -101,6 +117,8 @@ TEST(ExtensionUITest, GenerateExtensionsJSONData) {
       .AppendASCII("create_extension_detail_value_expected_output")
       .AppendASCII("good-extension3.json");
 
-  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path,
+  pages.clear();
+
+  EXPECT_TRUE(CompareExpectedAndActualOutput(extension_path, pages,
       expected_output_path)) << extension_path.value();
 }

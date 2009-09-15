@@ -14,6 +14,7 @@
 
 #include <string>
 
+#include "base/clipboard.h"
 #include "base/string_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
@@ -43,6 +44,12 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
+#if defined(OS_LINUX)
+  virtual base::Thread* background_x11_thread() {
+    return NULL;
+  }
+#endif
+
   virtual base::Thread* file_thread() {
     return NULL;
   }
@@ -67,6 +74,10 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
+  virtual ThumbnailGenerator* GetThumbnailGenerator() {
+    return NULL;
+  }
+
   virtual sandbox::BrokerServices* broker_services() {
     return NULL;
   }
@@ -79,8 +90,12 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual ClipboardService* clipboard_service() {
-    return NULL;
+  virtual Clipboard* clipboard() {
+    if (!clipboard_.get()) {
+      // Note that we need a MessageLoop for the next call to work.
+      clipboard_.reset(new Clipboard);
+    }
+    return clipboard_.get();
   }
 
   virtual GoogleURLTracker* google_url_tracker() {
@@ -116,10 +131,10 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual const std::wstring& GetApplicationLocale() {
-    static std::wstring* value = NULL;
+  virtual const std::string& GetApplicationLocale() {
+    static std::string* value = NULL;
     if (!value)
-      value = new std::wstring(L"en");
+      value = new std::string("en");
     return *value;
   }
 
@@ -132,6 +147,8 @@ class TestingBrowserProcess : public BrowserProcess {
  private:
   NotificationService notification_service_;
   scoped_ptr<base::WaitableEvent> shutdown_event_;
+  scoped_ptr<Clipboard> clipboard_;
+
   DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };
 

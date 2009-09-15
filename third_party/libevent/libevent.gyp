@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'variables': {
-    'chromium_code': 1,
-  },
   'includes': [
     '../../build/common.gypi',
   ],
@@ -13,7 +10,7 @@
     {
       'target_name': 'libevent',
       'product_name': 'event',
-      'type': 'static_library',
+      'type': '<(library)',
       'sources': [
         'buffer.c',
         'evbuffer.c',

@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_VIEWS_REPOST_FORM_WARNING_VIEW_H_
 #define CHROME_BROWSER_VIEWS_REPOST_FORM_WARNING_VIEW_H_
 
-#include "chrome/common/notification_observer.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "chrome/common/notification_registrar.h"
+#include "views/window/dialog_delegate.h"
 
 class MessageBoxView;
 class NavigationController;
@@ -23,7 +23,8 @@ class RepostFormWarningView : public views::DialogDelegate,
 
   // views::DialogDelegate Methods:
   virtual std::wstring GetWindowTitle() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual void DeleteDelegate();
   virtual bool Cancel();
   virtual bool Accept();
@@ -39,6 +40,8 @@ class RepostFormWarningView : public views::DialogDelegate,
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  NotificationRegistrar registrar_;
 
   // The message box view whose commands we handle.
   MessageBoxView* message_box_view_;

@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_VIEWS_IMPORTING_PROGRESS_VIEW_H_
 
 #include "chrome/browser/importer/importer.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
 
 namespace views {
 class CheckmarkThrobber;
@@ -39,7 +39,8 @@ class ImportingProgressView : public views::View,
 
   // Overridden from views::DialogDelegate:
   virtual int GetDialogButtons() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
   virtual bool Cancel();

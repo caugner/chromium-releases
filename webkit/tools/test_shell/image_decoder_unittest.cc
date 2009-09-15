@@ -15,6 +15,23 @@
 
 using base::Time;
 
+namespace {
+
+// Determine if we should test with file specified by |path| based
+// on |file_selection| and the |threshold| for the file size.
+bool ShouldSkipFile(const std::wstring& path,
+                    ImageDecoderTestFileSelection file_selection,
+                    const int64 threshold) {
+  if (file_selection == TEST_ALL)
+    return false;
+
+  int64 image_size = 0;
+  file_util::GetFileSize(path, &image_size);
+  return (file_selection == TEST_SMALLER) == (image_size > threshold);
+}
+
+}  // anonymous namespace
+
 void ReadFileToVector(const std::wstring& path, Vector<char>* contents) {
   std::string contents_str;
   file_util::ReadFileToString(path, &contents_str);
@@ -29,21 +46,19 @@ std::wstring GetMD5SumPath(const std::wstring& path) {
 
 #ifdef CALCULATE_MD5_SUMS
 void SaveMD5Sum(const std::wstring& path, WebCore::RGBA32Buffer* buffer) {
-  // Create the file to write.
-  ScopedHandle handle(CreateFile(path.c_str(), GENERIC_WRITE, 0,
-                                 NULL, CREATE_ALWAYS,
-                                 FILE_ATTRIBUTE_NORMAL, NULL));
-  ASSERT_TRUE(handle.IsValid());
-
   // Calculate MD5 sum.
   MD5Digest digest;
-  SkAutoLockPixels bmp_lock(buffer->bitmap());
-  MD5Sum(buffer->bitmap().getPixels(),
-         buffer->rect().width() * buffer->rect().height() * sizeof(unsigned),
-         &digest);
+  scoped_ptr<NativeImageSkia> image_data(buffer->asNewNativeImage());
+  {
+    SkAutoLockPixels bmp_lock(*image_data);
+    MD5Sum(image_data->getPixels(),
+           image_data->width() * image_data->height() * sizeof(uint32_t),
+           &digest);
+  }
 
   // Write sum to disk.
-  int bytes_written = file_util::WriteFile(path, &digest, sizeof digest);
+  int bytes_written = file_util::WriteFile(path,
+      reinterpret_cast<const char*>(&digest), sizeof digest);
   ASSERT_EQ(sizeof digest, bytes_written);
 }
 #else
@@ -60,9 +75,13 @@ void VerifyImage(WebCore::ImageDecoder* decoder,
 
   // Calculate MD5 sum.
   MD5Digest actual_digest;
-  SkAutoLockPixels bmp_lock(image_buffer->bitmap());
-  MD5Sum(image_buffer->bitmap().getPixels(), image_buffer->rect().width() *
-      image_buffer->rect().height() * sizeof(unsigned), &actual_digest);
+  scoped_ptr<NativeImageSkia> image_data(image_buffer->asNewNativeImage());
+  {
+    SkAutoLockPixels bmp_lock(*image_data);
+    MD5Sum(image_data->getPixels(),
+           image_data->width() * image_data->height() * sizeof(uint32_t),
+           &actual_digest);
+  }
 
   // Read the MD5 sum off disk.
   std::string file_bytes;
@@ -78,7 +97,9 @@ void VerifyImage(WebCore::ImageDecoder* decoder,
 #endif
 
 void ImageDecoderTest::SetUp() {
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &data_dir_));
+  FilePath data_dir;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &data_dir));
+  data_dir_ = data_dir.ToWStringHack();
   file_util::AppendToPath(&data_dir_, L"webkit");
   file_util::AppendToPath(&data_dir_, L"data");
   file_util::AppendToPath(&data_dir_, format_ + L"_decoder");
@@ -111,10 +132,15 @@ bool ImageDecoderTest::ShouldImageFail(const std::wstring& path) const {
                         kBadSuffix.length(), kBadSuffix));
 }
 
-void ImageDecoderTest::TestDecoding() const {
+void ImageDecoderTest::TestDecoding(
+    ImageDecoderTestFileSelection file_selection,
+    const int64 threshold) const {
   const std::vector<std::wstring> image_files(GetImageFiles());
   for (std::vector<std::wstring>::const_iterator i(image_files.begin());
        i != image_files.end(); ++i) {
+    if (ShouldSkipFile(*i, file_selection, threshold))
+      continue;
+
     Vector<char> image_contents;
     ReadFileToVector(*i, &image_contents);
 
@@ -147,7 +173,9 @@ void ImageDecoderTest::TestDecoding() const {
 }
 
 #ifndef CALCULATE_MD5_SUMS
-void ImageDecoderTest::TestChunkedDecoding() const {
+void ImageDecoderTest::TestChunkedDecoding(
+    ImageDecoderTestFileSelection file_selection,
+    const int64 threshold) const {
   // Init random number generator with current day, so a failing case will fail
   // consistently over the course of a whole day.
   const Time today = Time::Now().LocalMidnight();
@@ -156,6 +184,9 @@ void ImageDecoderTest::TestChunkedDecoding() const {
   const std::vector<std::wstring> image_files(GetImageFiles());
   for (std::vector<std::wstring>::const_iterator i(image_files.begin());
        i != image_files.end(); ++i) {
+    if (ShouldSkipFile(*i, file_selection, threshold))
+      continue;
+
     if (ShouldImageFail(*i))
       continue;
 

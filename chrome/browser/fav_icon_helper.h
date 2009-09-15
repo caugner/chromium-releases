@@ -12,15 +12,16 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/common/ref_counted_util.h"
 #include "googleurl/src/gurl.h"
 
 class NavigationEntry;
 class Profile;
 class SkBitmap;
-class WebContents;
+class TabContents;
 
-// FavIconHelper is used to fetch the favicon for WebContents.
+// FavIconHelper is used to fetch the favicon for TabContents.
 //
 // FetchFavIcon requests the favicon from the history database. At this point
 // we only know the URL of the page, and not necessarily the url of the
@@ -61,19 +62,15 @@ class WebContents;
 // at which point we update the favicon of the NavigationEntry and notify
 // the database to save the favicon.
 
-class FavIconHelper {
+class FavIconHelper : public RenderViewHostDelegate::FavIcon {
  public:
-  explicit FavIconHelper(WebContents* web_contents);
+  explicit FavIconHelper(TabContents* tab_contents);
 
   // Initiates loading the favicon for the specified url.
   void FetchFavIcon(const GURL& url);
 
-  // Sets the url of the favicon for the specified page. This is invoked some
-  // time after FetchFavIcon.
-  void SetFavIconURL(const GURL& icon_url);
-
   // Sets the image data for the favicon. This is invoked asynchronously after
-  // we request the WebContents to download the favicon.
+  // we request the TabContents to download the favicon.
   void SetFavIcon(int download_id,
                   const GURL& icon_url,
                   const SkBitmap& image);
@@ -82,7 +79,7 @@ class FavIconHelper {
   void FavIconDownloadFailed(int download_id);
 
   // Converts the image data to an SkBitmap and sets it on the NavigationEntry.
-  // If the WebContents has a delegate, it is notified of the new favicon
+  // If the TabContents has a delegate, it is notified of the new favicon
   // (INVALIDATE_FAVICON).
   void UpdateFavIcon(NavigationEntry* entry,
                      const std::vector<unsigned char>& data);
@@ -99,6 +96,16 @@ class FavIconHelper {
     GURL url;
     GURL fav_icon_url;
   };
+
+  // RenderViewHostDelegate::Favicon implementation.
+  virtual void DidDownloadFavIcon(RenderViewHost* render_view_host,
+                                  int id,
+                                  const GURL& image_url,
+                                  bool errored,
+                                  const SkBitmap& image);
+  virtual void UpdateFavIconURL(RenderViewHost* render_view_host,
+                                int32 page_id,
+                                const GURL& icon_url);
 
   // Return the NavigationEntry for the active entry, or NULL if the active
   // entries URL does not match that of the URL last passed to FetchFavIcon.
@@ -135,8 +142,8 @@ class FavIconHelper {
   // wide. Does nothing if the image is empty.
   SkBitmap ConvertToFavIconSize(const SkBitmap& image);
 
-  // Hosting WebContents. We callback into this when done.
-  WebContents* web_contents_;
+  // Hosting TabContents. We callback into this when done.
+  TabContents* tab_contents_;
 
   // Used for history requests.
   CancelableRequestConsumer cancelable_consumer_;
@@ -145,17 +152,17 @@ class FavIconHelper {
   GURL url_;
 
   // Whether we got the url for the page back from the renderer.
-  // See "Favicon Details" in web_contents.cc for more details.
+  // See "Favicon Details" in tab_contents.cc for more details.
   bool got_fav_icon_url_;
 
   // Whether we got the initial response for the favicon back from the renderer.
-  // See "Favicon Details" in web_contents.cc for more details.
+  // See "Favicon Details" in tab_contents.cc for more details.
   bool got_fav_icon_from_history_;
 
   // Whether the favicon is out of date. If true, it means history knows about
   // the favicon, but we need to download the favicon because the icon has
   // expired.
-  // See "Favicon Details" in web_contents.cc for more details.
+  // See "Favicon Details" in tab_contents.cc for more details.
   bool fav_icon_expired_;
 
   // Requests to the renderer to download favicons.

@@ -58,13 +58,13 @@ class OmniboxTest : public UITest {
 bool OmniboxTest::IsMatch(const std::wstring& input_text,
                           const std::wstring& suggestion) {
   // This prefix list comes from the list used in history_url_provider.cc
-  // withiff the exception of "ftp." and "www.".
+  // with the exception of "ftp." and "www.".
   std::wstring prefixes[] = {L"", L"ftp://", L"http://", L"https://",
                              L"ftp.", L"www.", L"ftp://www.", L"ftp://ftp.",
                              L"http://www.", L"https://www."};
   std::wstring postfixes[] = {L"", L"/"};
-  for (int i = 0; i < sizeof(prefixes) / sizeof(std::wstring); ++i) {
-    for (int j = 0; j < sizeof(postfixes) / sizeof(std::wstring); ++j) {
+  for (size_t i = 0; i < arraysize(prefixes); ++i) {
+    for (size_t j = 0; j < arraysize(postfixes); ++j) {
       if (prefixes[i] + input_text + postfixes[j] == suggestion)
         return true;
     }
@@ -74,9 +74,9 @@ bool OmniboxTest::IsMatch(const std::wstring& input_text,
 
 void OmniboxTest::RunQueryChain(const std::wstring& input_text) {
   // Get a handle on the omnibox and give it focus.
-  scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  scoped_ptr<WindowProxy> window(browser->GetWindow());
-  scoped_ptr<AutocompleteEditProxy> autocomplete_edit(
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  scoped_refptr<AutocompleteEditProxy> autocomplete_edit(
       browser->GetAutocompleteEdit());
   ASSERT_TRUE(browser->ApplyAccelerator(IDC_FOCUS_LOCATION));
 

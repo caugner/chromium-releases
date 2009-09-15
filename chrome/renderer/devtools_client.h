@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/scoped_ptr.h"
-#include "chrome/renderer/devtools_messages.h"
 #include "webkit/glue/webdevtoolsclient_delegate.h"
 
 namespace IPC {
@@ -34,11 +33,21 @@ class DevToolsClient : public WebDevToolsClientDelegate {
   bool OnMessageReceived(const IPC::Message& message);
 
   // WebDevToolsClient::Delegate implementation
-  virtual void SendMessageToAgent(const std::string& raw_msg);
+  virtual void SendMessageToAgent(const std::string& class_name,
+                                  const std::string& method_name,
+                                  const std::string& raw_msg);
+  virtual void SendDebuggerCommandToAgent(const std::string& command);
+
+  virtual void ActivateWindow();
+  virtual void CloseWindow();
+  virtual void DockWindow();
+  virtual void UndockWindow();
+  virtual void ToggleInspectElementMode(bool enabled);
 
  private:
-  void DidDebugAttach();
-  void OnRpcMessage(const std::string& raw_msg);
+  void OnRpcMessage(const std::string& class_name,
+                    const std::string& method_name,
+                    const std::string& raw_msg);
 
   // Sends message to DevToolsAgent.
   void Send(const IPC::Message& tools_agent_message);

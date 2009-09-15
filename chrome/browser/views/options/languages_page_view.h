@@ -7,35 +7,36 @@
 
 #include "chrome/browser/views/options/options_page_view.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/view.h"
+#include "views/controls/combobox/combobox.h"
+#include "views/controls/button/button.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/view.h"
 
 namespace views {
-class CheckBox;
+class Checkbox;
 class Label;
-class TableModel;
+class NativeButton;
 class TableView;
 }
 
+class AddLanguageView;
 class LanguageComboboxModel;
 class LanguageOrderTableModel;
-class AddLanguageView;
+class TableModel;
 
 ///////////////////////////////////////////////////////////////////////////////
 // LanguagesPageView
 
 class LanguagesPageView : public OptionsPageView,
-                          public views::NativeButton::Listener,
+                          public views::ButtonListener,
                           public views::TableViewObserver,
-                          public views::ComboBox::Listener {
+                          public views::Combobox::Listener {
  public:
   explicit LanguagesPageView(Profile* profile);
   virtual ~LanguagesPageView();
 
-  // views::NativeButton::Listener implementation:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // views::ButtonListener implementation:
+  virtual void ButtonPressed(views::Button* sender);
 
   // Save Changes made to relevant pref members associated with this tab.
   // This is public since it is called by FontsLanguageWindowView in its
@@ -45,15 +46,15 @@ class LanguagesPageView : public OptionsPageView,
   // This is public because when user clicks OK in AddLanguageView dialog,
   // this is called back in the LanguagePageView delegate in order to add
   // this language to the table model in this tab.
-  void OnAddLanguage(const std::wstring& new_language);
+  void OnAddLanguage(const std::string& new_language);
 
  protected:
   // OptionsPageView implementation:
   virtual void InitControlLayout();
   virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
-  // views::ComboBox::Listener implementation:
-  virtual void ItemChanged(views::ComboBox* sender,
+  // views::Combobox::Listener implementation:
+  virtual void ItemChanged(views::Combobox* sender,
                            int prev_index,
                            int new_index);
 
@@ -75,9 +76,10 @@ class LanguagesPageView : public OptionsPageView,
   views::NativeButton* remove_button_;
   views::Label* language_info_label_;
   views::Label* ui_language_label_;
-  views::ComboBox* change_ui_language_combobox_;
-  views::ComboBox* change_dictionary_language_combobox_;
-  views::CheckBox* enable_spellchecking_checkbox_;
+  views::Combobox* change_ui_language_combobox_;
+  views::Combobox* change_dictionary_language_combobox_;
+  views::Checkbox* enable_autospellcorrect_checkbox_;
+  views::Checkbox* enable_spellchecking_checkbox_;
   views::Label* dictionary_language_label_;
 
   scoped_ptr<LanguageOrderTableModel> language_order_table_model_;
@@ -97,13 +99,18 @@ class LanguagesPageView : public OptionsPageView,
   // SpellChecker enable pref.
   BooleanPrefMember enable_spellcheck_;
 
+  // Auto spell correction pref.
+  BooleanPrefMember enable_autospellcorrect_;
+
   // This is assigned the new index of spellcheck language if the language
   // is changed. Otherwise, it remains -1, and pref members are not updated.
   int spellcheck_language_index_selected_;
-  std::wstring spellcheck_language_added_;
+  std::string spellcheck_language_added_;
 
   bool language_table_edited_;
   bool language_warning_shown_;
+  bool enable_spellcheck_checkbox_clicked_;
+  bool enable_autospellcorrect_checkbox_clicked_;
 
   DISALLOW_EVIL_CONSTRUCTORS(LanguagesPageView);
 };

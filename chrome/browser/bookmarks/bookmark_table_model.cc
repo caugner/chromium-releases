@@ -6,14 +6,21 @@
 
 #include <limits>
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "app/table_model_observer.h"
 #include "base/string_util.h"
 #include "base/time_format.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
+#include "chrome/browser/profile.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/pref_service.h"
 #include "googleurl/src/gurl.h"
+#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "net/base/escape.h"
+#include "net/base/net_util.h"
 
 namespace {
 
@@ -28,7 +35,7 @@ class VectorBackedBookmarkTableModel : public BookmarkTableModel {
       : BookmarkTableModel(model) {
   }
 
-  virtual BookmarkNode* GetNodeForRow(int row) {
+  virtual const BookmarkNode* GetNodeForRow(int row) {
     return nodes_[row];
   }
 
@@ -37,25 +44,25 @@ class VectorBackedBookmarkTableModel : public BookmarkTableModel {
   }
 
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index) {
     NotifyObserverOfChange(new_parent->GetChild(new_index));
   }
 
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {
+                                         const BookmarkNode* node) {
     NotifyObserverOfChange(node);
   }
 
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {
+                                   const BookmarkNode* node) {
     NotifyObserverOfChange(node);
   }
 
  protected:
-  void NotifyObserverOfChange(BookmarkNode* node) {
+  void NotifyObserverOfChange(const BookmarkNode* node) {
     if (!observer())
       return;
 
@@ -64,7 +71,7 @@ class VectorBackedBookmarkTableModel : public BookmarkTableModel {
       observer()->OnItemsChanged(index, 1);
   }
 
-  typedef std::vector<BookmarkNode*> Nodes;
+  typedef std::vector<const BookmarkNode*> Nodes;
   Nodes& nodes() { return nodes_; }
 
  private:
@@ -81,16 +88,16 @@ class VectorBackedBookmarkTableModel : public BookmarkTableModel {
 // node is moved.
 class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
  public:
-  FolderBookmarkTableModel(BookmarkModel* model, BookmarkNode* root_node)
+  FolderBookmarkTableModel(BookmarkModel* model, const BookmarkNode* root_node)
       : VectorBackedBookmarkTableModel(model),
         root_node_(root_node) {
     PopulateNodesFromRoot();
   }
 
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index) {
     if (old_parent == root_node_) {
       nodes().erase(nodes().begin() + old_index);
@@ -106,7 +113,7 @@ class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
   }
 
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {
     if (root_node_ == parent) {
       nodes().insert(nodes().begin() + index, parent->GetChild(index));
@@ -116,9 +123,9 @@ class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
   }
 
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
+                                   const BookmarkNode* parent,
                                    int index,
-                                   BookmarkNode* node) {
+                                   const BookmarkNode* node) {
     if (root_node_->HasAncestor(node)) {
       // We, or one of our ancestors was removed.
       root_node_ = NULL;
@@ -135,17 +142,17 @@ class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
   }
 
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {
+                                   const BookmarkNode* node) {
     NotifyChanged(node);
   }
 
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {
+                                         const BookmarkNode* node) {
     NotifyChanged(node);
   }
 
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node) {
+                                             const BookmarkNode* node) {
     if (node != root_node_)
       return;
 
@@ -157,7 +164,7 @@ class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
   }
 
  private:
-  void NotifyChanged(BookmarkNode* node) {
+  void NotifyChanged(const BookmarkNode* node) {
     if (node->GetParent() == root_node_ && observer())
       observer()->OnItemsChanged(node->GetParent()->IndexOfChild(node), 1);
   }
@@ -169,7 +176,7 @@ class FolderBookmarkTableModel : public VectorBackedBookmarkTableModel {
 
   // The node we're showing the children of. This is set to NULL if the node
   // (or one of its ancestors) is removed from the model.
-  BookmarkNode* root_node_;
+  const BookmarkNode* root_node_;
 
   DISALLOW_COPY_AND_ASSIGN(FolderBookmarkTableModel);
 };
@@ -184,16 +191,16 @@ class RecentlyBookmarkedTableModel : public VectorBackedBookmarkTableModel {
   }
 
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {
     if (parent->GetChild(index)->is_url())
       UpdateRecentlyBookmarked();
   }
 
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
+                                   const BookmarkNode* parent,
                                    int old_index,
-                                   BookmarkNode* old_node) {
+                                   const BookmarkNode* old_node) {
     if (old_node->is_url())
       UpdateRecentlyBookmarked();
   }
@@ -216,18 +223,22 @@ class RecentlyBookmarkedTableModel : public VectorBackedBookmarkTableModel {
 class BookmarkSearchTableModel : public VectorBackedBookmarkTableModel {
  public:
   BookmarkSearchTableModel(BookmarkModel* model,
-                           const std::wstring& search_text)
+                           const std::wstring& search_text,
+                           const std::wstring& languages)
       : VectorBackedBookmarkTableModel(model),
-        search_text_(search_text) {
+        search_text_(search_text),
+        languages_(languages) {
     bookmark_utils::GetBookmarksContainingText(
-        model, search_text, std::numeric_limits<int>::max(), &nodes());
+        model, search_text, std::numeric_limits<int>::max(),
+        languages, &nodes());
   }
 
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {
-    BookmarkNode* node = parent->GetChild(index);
-    if (bookmark_utils::DoesBookmarkContainText(node, search_text_)) {
+    const BookmarkNode* node = parent->GetChild(index);
+    if (bookmark_utils::DoesBookmarkContainText(
+        node, search_text_, languages_)) {
       nodes().push_back(node);
       if (observer())
         observer()->OnItemsAdded(static_cast<int>(nodes().size() - 1), 1);
@@ -235,9 +246,9 @@ class BookmarkSearchTableModel : public VectorBackedBookmarkTableModel {
   }
 
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
+                                   const BookmarkNode* parent,
                                    int index,
-                                   BookmarkNode* node) {
+                                   const BookmarkNode* node) {
     int internal_index = IndexOfNode(node);
     if (internal_index == -1)
       return;
@@ -249,6 +260,7 @@ class BookmarkSearchTableModel : public VectorBackedBookmarkTableModel {
 
  private:
   const std::wstring search_text_;
+  const std::wstring languages_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkSearchTableModel);
 };
@@ -265,15 +277,16 @@ BookmarkTableModel* BookmarkTableModel::CreateRecentlyBookmarkedModel(
 
 // static
 BookmarkTableModel* BookmarkTableModel::CreateBookmarkTableModelForFolder(
-    BookmarkModel* model, BookmarkNode* node) {
+    BookmarkModel* model, const BookmarkNode* node) {
   return new FolderBookmarkTableModel(model, node);
 }
 
 // static
 BookmarkTableModel* BookmarkTableModel::CreateSearchTableModel(
     BookmarkModel* model,
-    const std::wstring& text) {
-  return new BookmarkSearchTableModel(model, text);
+    const std::wstring& text,
+    const std::wstring& languages) {
+  return new BookmarkSearchTableModel(model, text, languages);
 }
 
 BookmarkTableModel::BookmarkTableModel(BookmarkModel* model)
@@ -288,7 +301,7 @@ BookmarkTableModel::~BookmarkTableModel() {
 }
 
 std::wstring BookmarkTableModel::GetText(int row, int column_id) {
-  BookmarkNode* node = GetNodeForRow(row);
+  const BookmarkNode* node = GetNodeForRow(row);
   switch (column_id) {
     case IDS_BOOKMARK_TABLE_TITLE: {
       std::wstring title = node->GetTitle();
@@ -307,7 +320,12 @@ std::wstring BookmarkTableModel::GetText(int row, int column_id) {
     case IDS_BOOKMARK_TABLE_URL: {
       if (!node->is_url())
         return std::wstring();
-      std::wstring url_text = UTF8ToWide(node->GetURL().spec());
+      std::wstring languages = model_ && model_->profile()
+          ? model_->profile()->GetPrefs()->GetString(prefs::kAcceptLanguages)
+          : std::wstring();
+      std::wstring url_text =
+          net::FormatUrl(node->GetURL(), languages, false, UnescapeRule::SPACES,
+          NULL, NULL);
       if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
         l10n_util::WrapStringWithLTRFormatting(&url_text);
       return url_text;
@@ -316,10 +334,25 @@ std::wstring BookmarkTableModel::GetText(int row, int column_id) {
     case IDS_BOOKMARK_TABLE_PATH: {
       std::wstring path;
       BuildPath(node->GetParent(), &path);
-      // Force path to have LTR directionality. The whole path needs to be
-      // marked with LRE-PDF, so that the path containing both LTR and RTL
-      // subfolder names (such as "CBA/FED/(xji)/.x.j.", in which, "CBA" and
-      // "FED" are subfolder names in Hebrew) can be displayed as LTR.
+      // Force path to have LTR directionality. The whole path (but not every
+      // single path component) is marked with LRE-PDF. For example,
+      // ALEPH/BET/GIMEL (using uppercase English for Hebrew) is supposed to
+      // appear (visually) as LEMIG/TEB/HPELA; foo/C/B/A.doc refers to file
+      // C.doc in directory B in directory A in directory foo, not to file
+      // A.doc in directory B in directory C in directory foo. The reason to
+      // mark the whole path, but not every single path component, as LTR is
+      // because paths need to get written in text documents, and that is how
+      // they will appear there. Being a saint and doing the tedious formatting
+      // to every single path component to get it to come out in the logical
+      // order will accomplish nothing but confuse people, since they will now
+      // see both formats being used, and will never know what anything means.
+      // Furthermore, doing the "logical" formatting with characters like LRM,
+      // LRE, and PDF to every single path component means that when someone
+      // copy/pastes your path, it will still contain those characters, and
+      // trying to access the file will fail because of them. Windows Explorer,
+      // Firefox, IE, Nautilus, gedit choose to format only the whole path as
+      // LTR too. The point here is to display the path the same way as it's
+      // displayed by other software.
       if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
         l10n_util::WrapStringWithLTRFormatting(&path);
       return path;
@@ -335,14 +368,14 @@ SkBitmap BookmarkTableModel::GetIcon(int row) {
   static SkBitmap* default_icon = ResourceBundle::GetSharedInstance().
         GetBitmapNamed(IDR_DEFAULT_FAVICON);
 
-  BookmarkNode* node = GetNodeForRow(row);
+  const BookmarkNode* node = GetNodeForRow(row);
   if (node->is_folder())
     return *folder_icon;
 
-  if (node->GetFavIcon().empty())
+  if (model_->GetFavIcon(node).empty())
     return *default_icon;
 
-  return node->GetFavIcon();
+  return model_->GetFavIcon(node);
 }
 
 void BookmarkTableModel::BookmarkModelBeingDeleted(BookmarkModel* model) {
@@ -350,7 +383,7 @@ void BookmarkTableModel::BookmarkModelBeingDeleted(BookmarkModel* model) {
   model_ = NULL;
 }
 
-int BookmarkTableModel::IndexOfNode(BookmarkNode* node) {
+int BookmarkTableModel::IndexOfNode(const BookmarkNode* node) {
   for (int i = RowCount() - 1; i >= 0; --i) {
     if (GetNodeForRow(i) == node)
       return i;
@@ -358,7 +391,8 @@ int BookmarkTableModel::IndexOfNode(BookmarkNode* node) {
   return -1;
 }
 
-void BookmarkTableModel::BuildPath(BookmarkNode* node, std::wstring* path) {
+void BookmarkTableModel::BuildPath(const BookmarkNode* node,
+                                   std::wstring* path) {
   if (!node) {
     NOTREACHED();
     return;
@@ -373,11 +407,5 @@ void BookmarkTableModel::BuildPath(BookmarkNode* node, std::wstring* path) {
   }
   BuildPath(node->GetParent(), path);
   path->append(l10n_util::GetString(IDS_BOOKMARK_TABLE_PATH_SEPARATOR));
-  // Force path to have LTR directionality. Otherwise, folder path "CBA/FED"
-  // (in which, "CBA" and "FED" stand for folder names in Hebrew, and "FED" is
-  // a subfolder of "CBA") will be displayed as "FED/CBA".
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
-    path->push_back(static_cast<wchar_t>(l10n_util::kLeftToRightMark));
-  }
   path->append(node->GetTitle());
 }

@@ -17,6 +17,7 @@ class ChildProcessInfo {
     RENDER_PROCESS,
     PLUGIN_PROCESS,
     WORKER_PROCESS,
+    UTILITY_PROCESS,
     UNKNOWN_PROCESS,
   };
 
@@ -72,16 +73,16 @@ class ChildProcessInfo {
   bool operator <(const ChildProcessInfo& rhs) const {
     if (process_.handle() != rhs.process_.handle())
       return process_ .handle() < rhs.process_.handle();
-    return name_ < rhs.name_;
+    return false;
   }
 
   bool operator ==(const ChildProcessInfo& rhs) const {
-    return (process_.handle() == rhs.process_.handle()) && (name_ == rhs.name_);
+    return process_.handle() == rhs.process_.handle();
   }
 
   // Generates a unique channel name for a child renderer/plugin process.
   // The "instance" pointer value is baked into the channel id.
-  static std::wstring GenerateRandomChannelID(void* instance);
+  static std::string GenerateRandomChannelID(void* instance);
 
  protected:
   void set_type(ProcessType type) { type_ = type; }

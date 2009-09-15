@@ -4,9 +4,9 @@
 
 #include "chrome/browser/cocoa/status_bubble_mac.h"
 
+#include "app/gfx/text_elider.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/common/gfx/text_elider.h"
 #include "googleurl/src/gurl.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 
@@ -83,9 +83,9 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
                                     kTextPositionX -
                                     kTextPadding);
   NSFont* font = [[window_ contentView] font];
-  ChromeFont font_chr =
-      ChromeFont::CreateFont(base::SysNSStringToWide([font fontName]),
-                             [font pointSize]);
+  gfx::Font font_chr =
+      gfx::Font::CreateFont(base::SysNSStringToWide([font fontName]),
+                            [font pointSize]);
 
   std::wstring status = gfx::ElideUrl(url, font_chr, text_width, languages);
   NSString* status_ns = base::SysWideToNSString(status);
@@ -188,6 +188,10 @@ void StatusBubbleMac::MouseMoved() {
   }
 }
 
+void StatusBubbleMac::UpdateDownloadShelfVisibility(bool visible) {
+  NOTIMPLEMENTED();
+}
+
 void StatusBubbleMac::Create() {
   if (window_)
     return;
@@ -213,7 +217,6 @@ void StatusBubbleMac::Create() {
   [parent_ addChildWindow:window_ ordered:NSWindowAbove];
 
   [window_ setAlphaValue:0.0f];
-  [window_ orderFront:nil];
 
   offset_ = 0;
   [view setStyle:STYLE_STANDARD];

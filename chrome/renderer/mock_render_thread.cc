@@ -1,18 +1,19 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/mock_render_thread.h"
 
-#include "chrome/common/ipc_message_utils.h"
 #include "chrome/common/render_messages.h"
+#include "ipc/ipc_message_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 MockRenderThread::MockRenderThread()
     : routing_id_(0),
       opener_id_(0),
       widget_(NULL),
-      reply_deserializer_(NULL) {
+      reply_deserializer_(NULL),
+      printer_(new MockPrinter) {
 }
 
 MockRenderThread::~MockRenderThread() {
@@ -71,6 +72,18 @@ void MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
   bool msg_is_ok = true;
   IPC_BEGIN_MESSAGE_MAP_EX(MockRenderThread, msg, msg_is_ok)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnMsgCreateWidget);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_OpenChannelToExtension,
+                        OnMsgOpenChannelToExtension);
+#if defined(OS_WIN)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetDefaultPrintSettings,
+                        OnGetDefaultPrintSettings);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptedPrint,
+                        OnScriptedPrint);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidGetPrintedPagesCount,
+                        OnDidGetPrintedPagesCount)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidPrintPage, OnDidPrintPage)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DuplicateSection, OnDuplicateSection)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 }
@@ -81,4 +94,45 @@ void MockRenderThread::OnMsgCreateWidget(int opener_id,
                                          int* route_id) {
   opener_id_ = opener_id;
   *route_id = routing_id_;
+}
+
+void MockRenderThread::OnMsgOpenChannelToExtension(
+    int routing_id, const std::string& extension_id,
+    const std::string& channel_name, int* port_id) {
+  *port_id = 0;
+}
+
+void MockRenderThread::OnDuplicateSection(
+    base::SharedMemoryHandle renderer_handle,
+    base::SharedMemoryHandle* browser_handle) {
+  // We don't have to duplicate the input handles since RenderViewTest does not
+  // separate a browser process from a renderer process.
+  *browser_handle = renderer_handle;
+}
+
+void MockRenderThread::OnGetDefaultPrintSettings(ViewMsg_Print_Params* params) {
+  if (printer_.get())
+    printer_->GetDefaultPrintSettings(params);
+}
+
+void MockRenderThread::OnScriptedPrint(
+    const ViewHostMsg_ScriptedPrint_Params& params,
+    ViewMsg_PrintPages_Params* settings) {
+  if (printer_.get()) {
+    printer_->ScriptedPrint(params.cookie,
+                            params.expected_pages_count,
+                            params.has_selection,
+                            settings);
+  }
+}
+
+void MockRenderThread::OnDidGetPrintedPagesCount(int cookie, int number_pages) {
+  if (printer_.get())
+    printer_->SetPrintedPagesCount(cookie, number_pages);
+}
+
+void MockRenderThread::OnDidPrintPage(
+    const ViewHostMsg_DidPrintPage_Params& params) {
+  if (printer_.get())
+    printer_->PrintPage(params);
 }

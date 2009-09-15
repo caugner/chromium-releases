@@ -1,32 +1,47 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/render_widget_host.h"
 
-#include "base/gfx/native_widget_types.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/keyboard_codes.h"
 #include "chrome/browser/renderer_host/backing_store.h"
+#include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
+#include "chrome/browser/renderer_host/render_widget_host_painting_observer.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/views/view.h"
+#include "views/view.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webinputevent.h"
 
 #if defined(OS_WIN)
 #include "base/gfx/gdi_util.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/common/win_util.h"
 #endif  // defined(OS_WIN)
+
+#if defined (OS_MACOSX)
+#include "webkit/api/public/WebScreenInfo.h"
+#include "webkit/api/public/mac/WebScreenInfoFactory.h"
+#endif
 
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
+
+using WebKit::WebInputEvent;
+using WebKit::WebKeyboardEvent;
+using WebKit::WebMouseEvent;
+using WebKit::WebMouseWheelEvent;
+using WebKit::WebTextDirection;
+
+#if defined (OS_MACOSX)
+using WebKit::WebScreenInfo;
+using WebKit::WebScreenInfoFactory;
+#endif
 
 // How long to (synchronously) wait for the renderer to respond with a
 // PaintRect message, when our backing-store is invalid, before giving up and
@@ -42,18 +57,23 @@ static const int kHungRendererDelayMs = 20000;
 
 RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
                                    int routing_id)
-    : view_(NULL),
+    : renderer_initialized_(false),
+      view_(NULL),
       process_(process),
+      painting_observer_(NULL),
       routing_id_(routing_id),
       is_loading_(false),
       is_hidden_(false),
       repaint_ack_pending_(false),
       resize_ack_pending_(false),
-      suppress_view_updating_(false),
       mouse_move_pending_(false),
       needs_repainting_on_restore_(false),
       is_unresponsive_(false),
-      view_being_painted_(false) {
+      in_get_backing_store_(false),
+      view_being_painted_(false),
+      text_direction_updated_(false),
+      text_direction_(WebKit::WebTextDirectionLeftToRight),
+      text_direction_canceled_(false) {
   if (routing_id_ == MSG_ROUTING_NONE)
     routing_id_ = process_->GetNextRoutingID();
 
@@ -70,18 +90,24 @@ RenderWidgetHost::~RenderWidgetHost() {
   process_->Release(routing_id_);
 }
 
+gfx::NativeViewId RenderWidgetHost::GetNativeViewId() {
+  if (view_)
+    return gfx::IdFromNativeView(view_->GetNativeView());
+  return NULL;
+}
+
 void RenderWidgetHost::Init() {
-  DCHECK(process_->channel());
+  DCHECK(process_->HasConnection());
+
+  renderer_initialized_ = true;
 
   // Send the ack along with the information on placement.
-  gfx::NativeView plugin_view = view_->GetPluginNativeView();
-  Send(new ViewMsg_CreatingNew_ACK(routing_id_,
-                                   gfx::IdFromNativeView(plugin_view)));
+  Send(new ViewMsg_CreatingNew_ACK(routing_id_, GetNativeViewId()));
   WasResized();
 }
 
 void RenderWidgetHost::Shutdown() {
-  if (process_->channel()) {
+  if (process_->HasConnection()) {
     // Tell the renderer object to close.
     process_->ReportExpectingClose(routing_id_);
     bool rv = Send(new ViewMsg_Close(routing_id_));
@@ -91,20 +117,39 @@ void RenderWidgetHost::Shutdown() {
   Destroy();
 }
 
-IPC_DEFINE_MESSAGE_MAP(RenderWidgetHost)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewReady, OnMsgRenderViewReady)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewGone, OnMsgRenderViewGone)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_Close, OnMsgClose)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_RequestMove, OnMsgRequestMove)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_PaintRect, OnMsgPaintRect)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_ScrollRect, OnMsgScrollRect)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_HandleInputEvent_ACK, OnMsgInputEventAck)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_Focus, OnMsgFocus)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_Blur, OnMsgBlur)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_SetCursor, OnMsgSetCursor)
-  IPC_MESSAGE_HANDLER(ViewHostMsg_ImeUpdateStatus, OnMsgImeUpdateStatus)
-  IPC_MESSAGE_UNHANDLED_ERROR()
-IPC_END_MESSAGE_MAP()
+void RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
+  bool msg_is_ok = true;
+  IPC_BEGIN_MESSAGE_MAP_EX(RenderWidgetHost, msg, msg_is_ok)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewReady, OnMsgRenderViewReady)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewGone, OnMsgRenderViewGone)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_Close, OnMsgClose)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_RequestMove, OnMsgRequestMove)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_PaintRect, OnMsgPaintRect)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ScrollRect, OnMsgScrollRect)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_HandleInputEvent_ACK, OnMsgInputEventAck)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_Focus, OnMsgFocus)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_Blur, OnMsgBlur)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SetCursor, OnMsgSetCursor)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ImeUpdateStatus, OnMsgImeUpdateStatus)
+#if defined(OS_LINUX)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_CreatePluginContainer,
+                        OnMsgCreatePluginContainer)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DestroyPluginContainer,
+                        OnMsgDestroyPluginContainer)
+#elif defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnMsgGetScreenInfo)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnMsgGetRootWindowRect)
+#endif
+    IPC_MESSAGE_UNHANDLED_ERROR()
+  IPC_END_MESSAGE_MAP_EX()
+
+  if (!msg_is_ok) {
+    // The message de-serialization failed. Kill the renderer process.
+    process()->ReceivedBadMessage(msg.type());
+  }
+}
 
 bool RenderWidgetHost::Send(IPC::Message* msg) {
   return process_->Send(msg);
@@ -127,6 +172,12 @@ void RenderWidgetHost::WasHidden() {
 
   // Tell the RenderProcessHost we were hidden.
   process_->WidgetHidden();
+
+  bool is_visible = false;
+  NotificationService::current()->Notify(
+      NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+      Source<RenderWidgetHost>(this),
+      Details<bool>(&is_visible));
 }
 
 void RenderWidgetHost::WasRestored() {
@@ -148,11 +199,19 @@ void RenderWidgetHost::WasRestored() {
   Send(new ViewMsg_WasRestored(routing_id_, needs_repainting));
 
   process_->WidgetRestored();
+
+  bool is_visible = true;
+  NotificationService::current()->Notify(
+      NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+      Source<RenderWidgetHost>(this),
+      Details<bool>(&is_visible));
 }
 
 void RenderWidgetHost::WasResized() {
-  if (resize_ack_pending_ || !process_->channel() || !view_)
+  if (resize_ack_pending_ || !process_->HasConnection() || !view_ ||
+      !renderer_initialized_) {
     return;
+  }
 
   gfx::Rect view_bounds = view_->GetViewBounds();
   gfx::Size new_size(view_bounds.width(), view_bounds.height());
@@ -169,6 +228,10 @@ void RenderWidgetHost::WasResized() {
   if (!Send(new ViewMsg_Resize(routing_id_, new_size,
                                GetRootWindowResizerRect())))
     resize_ack_pending_ = false;
+}
+
+void RenderWidgetHost::GotFocus() {
+  Focus();
 }
 
 void RenderWidgetHost::Focus() {
@@ -196,14 +259,27 @@ void RenderWidgetHost::SetIsLoading(bool is_loading) {
   view_->SetIsLoading(is_loading);
 }
 
-BackingStore* RenderWidgetHost::GetBackingStore() {
+BackingStore* RenderWidgetHost::GetBackingStore(bool force_create) {
   // We should not be asked to paint while we are hidden.  If we are hidden,
-  // then it means that our consumer failed to call WasRestored.
-  DCHECK(!is_hidden_) << "GetBackingStore called while hidden!";
+  // then it means that our consumer failed to call WasRestored. If we're not
+  // force creating the backing store, it's OK since we can feel free to give
+  // out our cached one if we have it.
+  DCHECK(!is_hidden_ || !force_create) <<
+      "GetBackingStore called while hidden!";
+
+  // We should never be called recursively; this can theoretically lead to
+  // infinite recursion and almost certainly leads to lower performance.
+  DCHECK(!in_get_backing_store_) << "GetBackingStore called recursively!";
+  in_get_backing_store_ = true;
 
   // We might have a cached backing store that we can reuse!
   BackingStore* backing_store =
       BackingStoreManager::GetBackingStore(this, current_size_);
+  if (!force_create) {
+    in_get_backing_store_ = false;
+    return backing_store;
+  }
+
   // If we fail to find a backing store in the cache, send out a request
   // to the renderer to paint the view if required.
   if (!backing_store && !repaint_ack_pending_ && !resize_ack_pending_ &&
@@ -220,21 +296,19 @@ BackingStore* RenderWidgetHost::GetBackingStore() {
     IPC::Message msg;
     TimeDelta max_delay = TimeDelta::FromMilliseconds(kPaintMsgTimeoutMS);
     if (process_->WaitForPaintMsg(routing_id_, max_delay, &msg)) {
-      suppress_view_updating_ = true;
       ViewHostMsg_PaintRect::Dispatch(
           &msg, this, &RenderWidgetHost::OnMsgPaintRect);
-      suppress_view_updating_ = false;
       backing_store = BackingStoreManager::GetBackingStore(this, current_size_);
     }
   }
 
+  in_get_backing_store_ = false;
   return backing_store;
 }
 
 BackingStore* RenderWidgetHost::AllocBackingStore(const gfx::Size& size) {
   if (!view_)
     return NULL;
-
   return view_->AllocBackingStore(size);
 }
 
@@ -275,12 +349,14 @@ void RenderWidgetHost::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
   // to note that WM_MOUSEMOVE events are anyways synthetic, but since our
   // thread is able to rapidly consume WM_MOUSEMOVE events, we may get way
   // more WM_MOUSEMOVE events than we wish to send to the renderer.
-  if (mouse_event.type == WebInputEvent::MOUSE_MOVE) {
+  if (mouse_event.type == WebInputEvent::MouseMove) {
     if (mouse_move_pending_) {
       next_mouse_move_.reset(new WebMouseEvent(mouse_event));
       return;
     }
     mouse_move_pending_ = true;
+  } else if (mouse_event.type == WebInputEvent::MouseDown) {
+    OnUserGesture();
   }
 
   ForwardInputEvent(mouse_event, sizeof(WebMouseEvent));
@@ -293,17 +369,17 @@ void RenderWidgetHost::ForwardWheelEvent(
 
 void RenderWidgetHost::ForwardKeyboardEvent(
     const NativeWebKeyboardEvent& key_event) {
-  if (key_event.type == WebKeyboardEvent::CHAR &&
-      (key_event.windows_key_code == base::VKEY_RETURN ||
-       key_event.windows_key_code == base::VKEY_SPACE)) {
-    OnEnterOrSpace();
+  if (key_event.type == WebKeyboardEvent::Char &&
+      (key_event.windowsKeyCode == base::VKEY_RETURN ||
+       key_event.windowsKeyCode == base::VKEY_SPACE)) {
+    OnUserGesture();
   }
 
   // Double check the type to make sure caller hasn't sent us nonsense that
   // will mess up our key queue.
-  if (WebInputEvent::IsKeyboardEventType(key_event.type)) {
+  if (WebInputEvent::isKeyboardEventType(key_event.type)) {
     // Don't add this key to the queue if we have no way to send the message...
-    if (!process_->channel())
+    if (!process_->HasConnection())
       return;
 
     // Put all WebKeyboardEvent objects in a queue since we can't trust the
@@ -319,7 +395,7 @@ void RenderWidgetHost::ForwardKeyboardEvent(
 
 void RenderWidgetHost::ForwardInputEvent(const WebInputEvent& input_event,
                                          int event_size) {
-  if (!process_->channel())
+  if (!process_->HasConnection())
     return;
 
   IPC::Message* message = new ViewMsg_HandleInputEvent(routing_id_);
@@ -334,7 +410,18 @@ void RenderWidgetHost::ForwardInputEvent(const WebInputEvent& input_event,
   StartHangMonitorTimeout(TimeDelta::FromMilliseconds(kHungRendererDelayMs));
 }
 
+void RenderWidgetHost::ForwardEditCommand(const std::string& name,
+      const std::string& value) {
+  // We don't need an implementation of this function here since the
+  // only place we use this is for the case of dropdown menus and other
+  // edge cases for which edit commands don't make sense.
+}
+
 void RenderWidgetHost::RendererExited() {
+  // Clearing this flag causes us to re-create the renderer when recovering
+  // from a crashed renderer.
+  renderer_initialized_ = false;
+
   // Must reset these to ensure that mouse move events work with a new renderer.
   mouse_move_pending_ = false;
   next_mouse_move_.reset();
@@ -350,6 +437,51 @@ void RenderWidgetHost::RendererExited() {
   }
 
   BackingStoreManager::RemoveBackingStore(this);
+}
+
+void RenderWidgetHost::UpdateTextDirection(WebTextDirection direction) {
+  text_direction_updated_ = true;
+  text_direction_ = direction;
+}
+
+void RenderWidgetHost::CancelUpdateTextDirection() {
+  if (text_direction_updated_)
+    text_direction_canceled_ = true;
+}
+
+void RenderWidgetHost::NotifyTextDirection() {
+  if (text_direction_updated_) {
+    if (!text_direction_canceled_)
+      Send(new ViewMsg_SetTextDirection(routing_id(), text_direction_));
+    text_direction_updated_ = false;
+    text_direction_canceled_ = false;
+  }
+}
+
+void RenderWidgetHost::ImeSetInputMode(bool activate) {
+  Send(new ViewMsg_ImeSetInputMode(routing_id(), activate));
+}
+
+void RenderWidgetHost::ImeSetComposition(const string16& ime_string,
+                                         int cursor_position,
+                                         int target_start,
+                                         int target_end) {
+  Send(new ViewMsg_ImeSetComposition(routing_id(),
+                                     WebKit::WebCompositionCommandSet,
+                                     cursor_position, target_start, target_end,
+                                     ime_string));
+}
+
+void RenderWidgetHost::ImeConfirmComposition(const string16& ime_string) {
+  Send(new ViewMsg_ImeSetComposition(routing_id(),
+                                     WebKit::WebCompositionCommandConfirm,
+                                     -1, -1, -1, ime_string));
+}
+
+void RenderWidgetHost::ImeCancelComposition() {
+  Send(new ViewMsg_ImeSetComposition(routing_id(),
+                                     WebKit::WebCompositionCommandDiscard,
+                                     -1, -1, -1, string16()));
 }
 
 gfx::Rect RenderWidgetHost::GetRootWindowResizerRect() const {
@@ -417,7 +549,10 @@ void RenderWidgetHost::OnMsgClose() {
 
 void RenderWidgetHost::OnMsgRequestMove(const gfx::Rect& pos) {
   // Note that we ignore the position.
-  view_->SetSize(pos.size());
+  if (view_) {
+    view_->SetSize(pos.size());
+    Send(new ViewMsg_Move_ACK(routing_id_));
+  }
 }
 
 void RenderWidgetHost::OnMsgPaintRect(
@@ -478,11 +613,9 @@ void RenderWidgetHost::OnMsgPaintRect(
   // Now paint the view. Watch out: it might be destroyed already.
   if (view_) {
     view_->MovePluginWindows(params.plugin_window_moves);
-    if (!suppress_view_updating_) {
-      view_being_painted_ = true;
-      view_->DidPaintRect(params.bitmap_rect);
-      view_being_painted_ = false;
-    }
+    view_being_painted_ = true;
+    view_->DidPaintRect(params.bitmap_rect);
+    view_being_painted_ = false;
   }
 
   if (paint_observer_.get())
@@ -496,6 +629,9 @@ void RenderWidgetHost::OnMsgPaintRect(
       WasResized();
     }
   }
+
+  if (painting_observer_)
+    painting_observer_->WidgetDidUpdateBackingStore(this);
 
   // Log the time delta for processing a paint message.
   TimeDelta delta = TimeTicks::Now() - paint_start;
@@ -543,6 +679,9 @@ void RenderWidgetHost::OnMsgScrollRect(
     view_being_painted_ = false;
   }
 
+  if (painting_observer_)
+    painting_observer_->WidgetDidUpdateBackingStore(this);
+
   // Log the time delta for processing a scroll message.
   TimeDelta delta = TimeTicks::Now() - scroll_start;
   UMA_HISTOGRAM_TIMES("MPArch.RWH_OnMsgScrollRect", delta);
@@ -558,20 +697,20 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
 
   void* iter = NULL;
   int type = 0;
-  bool r = message.ReadInt(&iter, &type);
-  DCHECK(r);
+  if (!message.ReadInt(&iter, &type) || (type < WebInputEvent::Undefined))
+    process()->ReceivedBadMessage(message.type());
 
-  if (type == WebInputEvent::MOUSE_MOVE) {
+  if (type == WebInputEvent::MouseMove) {
     mouse_move_pending_ = false;
 
     // now, we can send the next mouse move event
     if (next_mouse_move_.get()) {
-      DCHECK(next_mouse_move_->type == WebInputEvent::MOUSE_MOVE);
+      DCHECK(next_mouse_move_->type == WebInputEvent::MouseMove);
       ForwardMouseEvent(*next_mouse_move_);
     }
   }
 
-  if (WebInputEvent::IsKeyboardEventType(type)) {
+  if (WebInputEvent::isKeyboardEventType(type)) {
     if (key_queue_.size() == 0) {
       LOG(ERROR) << "Got a KeyEvent back from the renderer but we "
                  << "don't seem to have sent it to the renderer!";
@@ -581,8 +720,8 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
                  << type << "). Ignoring event.";
     } else {
       bool processed = false;
-      r = message.ReadBool(&iter, &processed);
-      DCHECK(r);
+      if (!message.ReadBool(&iter, &processed))
+        process()->ReceivedBadMessage(message.type());
 
       KeyQueue::value_type front_item = key_queue_.front();
       key_queue_.pop();
@@ -600,7 +739,7 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
 
 void RenderWidgetHost::OnMsgFocus() {
   // Only the user can focus a RenderWidgetHost.
-  NOTREACHED();
+  process()->ReceivedBadMessage(ViewHostMsg_Focus__ID);
 }
 
 void RenderWidgetHost::OnMsgBlur() {
@@ -623,9 +762,58 @@ void RenderWidgetHost::OnMsgImeUpdateStatus(int control,
   }
 }
 
+#if defined(OS_LINUX)
+
+void RenderWidgetHost::OnMsgCreatePluginContainer(
+    base::ProcessId pid,
+    gfx::PluginWindowHandle* container) {
+  *container = view_->CreatePluginContainer(pid);
+}
+
+void RenderWidgetHost::OnMsgDestroyPluginContainer(
+    gfx::PluginWindowHandle container) {
+  view_->DestroyPluginContainer(container);
+}
+
+#elif defined(OS_MACOSX)
+
+void RenderWidgetHost::OnMsgShowPopup(
+    const ViewHostMsg_ShowPopup_Params& params) {
+  view_->ShowPopupWithItems(params.bounds,
+                            params.item_height,
+                            params.selected_item,
+                            params.popup_items);
+}
+
+void RenderWidgetHost::OnMsgGetScreenInfo(gfx::NativeViewId view,
+                                          WebScreenInfo* results) {
+  gfx::NativeView native_view = view_ ? view_->GetNativeView() : NULL;
+  *results = WebScreenInfoFactory::screenInfo(native_view);
+}
+
+void RenderWidgetHost::OnMsgGetWindowRect(gfx::NativeViewId window_id,
+                                          gfx::Rect* results) {
+  if (view_) {
+    *results = view_->GetWindowRect();
+  }
+}
+
+void RenderWidgetHost::OnMsgGetRootWindowRect(gfx::NativeViewId window_id,
+                                              gfx::Rect* results) {
+  if (view_) {
+    *results = view_->GetRootWindowRect();
+  }
+}
+
+#endif
+
 void RenderWidgetHost::PaintBackingStoreRect(TransportDIB* bitmap,
                                              const gfx::Rect& bitmap_rect,
                                              const gfx::Size& view_size) {
+  // The view may be destroyed already.
+  if (!view_)
+    return;
+
   if (is_hidden_) {
     // Don't bother updating the backing store when we're hidden. Just mark it
     // as being totally invalid. This will cause a complete repaint when the

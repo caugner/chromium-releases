@@ -17,7 +17,7 @@ using base::TimeDelta;
 
 //------------------------------------------------------------------------------
 // static
-const size_t SdchManager::kMaxDictionarySize = 100000;
+const size_t SdchManager::kMaxDictionarySize = 1000000;
 
 // static
 const size_t SdchManager::kMaxDictionaryCount = 20;
@@ -32,7 +32,7 @@ SdchManager* SdchManager::Global() {
 
 // static
 void SdchManager::SdchErrorRecovery(ProblemCodes problem) {
-  static LinearHistogram histogram("Sdch.ProblemCodes_3", MIN_PROBLEM_CODE,
+  static LinearHistogram histogram("Sdch3.ProblemCodes_4", MIN_PROBLEM_CODE,
                                    MAX_PROBLEM_CODE - 1, MAX_PROBLEM_CODE);
   histogram.SetFlags(kUmaTargetedHistogramFlag);
   histogram.Add(problem);
@@ -45,12 +45,12 @@ void SdchManager::ClearBlacklistings() {
 }
 
 // static
-void SdchManager::ClearDomainBlacklisting(std::string domain) {
+void SdchManager::ClearDomainBlacklisting(const std::string& domain) {
   Global()->blacklisted_domains_.erase(StringToLowerASCII(domain));
 }
 
 // static
-int SdchManager::BlackListDomainCount(std::string domain) {
+int SdchManager::BlackListDomainCount(const std::string& domain) {
   if (Global()->blacklisted_domains_.end() ==
       Global()->blacklisted_domains_.find(domain))
     return 0;
@@ -58,7 +58,7 @@ int SdchManager::BlackListDomainCount(std::string domain) {
 }
 
 // static
-int SdchManager::BlacklistDomainExponential(std::string domain) {
+int SdchManager::BlacklistDomainExponential(const std::string& domain) {
   if (Global()->exponential_blacklist_count.end() ==
       Global()->exponential_blacklist_count.find(domain))
     return 0;
@@ -82,9 +82,17 @@ SdchManager::~SdchManager() {
 }
 
 // static
+void SdchManager::Shutdown() {
+  if (!global_ )
+    return;
+  global_->fetcher_.reset(NULL);
+}
+
+// static
 void SdchManager::BlacklistDomain(const GURL& url) {
   if (!global_ )
     return;
+  global_->SetAllowLatencyExperiment(url, false);
 
   std::string domain(StringToLowerASCII(url.host()));
   int count = global_->blacklisted_domains_[domain];
@@ -104,6 +112,7 @@ void SdchManager::BlacklistDomain(const GURL& url) {
 void SdchManager::BlacklistDomainForever(const GURL& url) {
   if (!global_ )
     return;
+  global_->SetAllowLatencyExperiment(url, false);
 
   std::string domain(StringToLowerASCII(url.host()));
   global_->exponential_blacklist_count[domain] = INT_MAX;
@@ -263,7 +272,7 @@ bool SdchManager::AddSdchDictionary(const std::string& dictionary_text,
     return false;
   }
 
-  UMA_HISTOGRAM_COUNTS("Sdch.Dictionary size loaded", dictionary_text.size());
+  UMA_HISTOGRAM_COUNTS("Sdch3.Dictionary size loaded", dictionary_text.size());
   DLOG(INFO) << "Loaded dictionary with client hash " << client_hash <<
       " and server hash " << server_hash;
   Dictionary* dictionary =
@@ -304,7 +313,7 @@ void SdchManager::GetAvailDictionaryList(const GURL& target_url,
   }
   // Watch to see if we have corrupt or numerous dictionaries.
   if (count > 0)
-    UMA_HISTOGRAM_COUNTS("Sdch.Advertisement_Count", count);
+    UMA_HISTOGRAM_COUNTS("Sdch3.Advertisement_Count", count);
 }
 
 SdchManager::Dictionary::Dictionary(const std::string& dictionary_text,
@@ -331,8 +340,8 @@ void SdchManager::GenerateHash(const std::string& dictionary_text,
   UrlSafeBase64Encode(first_48_bits, client_hash);
   UrlSafeBase64Encode(second_48_bits, server_hash);
 
-  DCHECK(server_hash->length() == 8);
-  DCHECK(client_hash->length() == 8);
+  DCHECK_EQ(server_hash->length(), 8u);
+  DCHECK_EQ(client_hash->length(), 8u);
 }
 
 // static
@@ -404,8 +413,10 @@ bool SdchManager::Dictionary::CanSet(const std::string& domain,
     // It is a postfix... so check to see if there's a dot in the prefix.
     size_t end_of_host_index = referrer_url_host.find_first_of('.');
     if (referrer_url_host.npos != end_of_host_index  &&
-        end_of_host_index < postfix_domain_index)
+        end_of_host_index < postfix_domain_index) {
+      SdchErrorRecovery(DICTIONARY_REFERER_URL_HAS_DOT_IN_PREFIX);
       return false;
+    }
   }
 
   if (!ports.empty()
@@ -417,7 +428,7 @@ bool SdchManager::Dictionary::CanSet(const std::string& domain,
 }
 
 // static
-bool SdchManager::Dictionary::CanUse(const GURL referring_url) {
+bool SdchManager::Dictionary::CanUse(const GURL& referring_url) {
   if (!SdchManager::Global()->IsInSupportedDomain(referring_url))
     return false;
   /*
@@ -496,7 +507,7 @@ bool SdchManager::Dictionary::PathMatch(const std::string& path,
   size_t prefix_length = restriction.size();
   if (prefix_length > path.size())
     return false;  // Can't be a prefix.
-  if (0 != restriction.compare(0, prefix_length, path))
+  if (0 != path.compare(0, prefix_length, restriction))
     return false;
   return restriction[prefix_length - 1] == '/' || path[prefix_length] == '/';
 }
@@ -506,4 +517,24 @@ bool SdchManager::Dictionary::DomainMatch(const GURL& gurl,
                                           const std::string& restriction) {
   // TODO(jar): This is not precisely a domain match definition.
   return gurl.DomainIs(restriction.data(), restriction.size());
+}
+
+//------------------------------------------------------------------------------
+// Methods for supporting latency experiments.
+
+bool SdchManager::AllowLatencyExperiment(const GURL& url) const {
+  return allow_latency_experiment_.end() !=
+      allow_latency_experiment_.find(url.host());
+}
+
+void SdchManager::SetAllowLatencyExperiment(const GURL& url, bool enable) {
+  if (enable) {
+    allow_latency_experiment_.insert(url.host());
+    return;
+  }
+  ExperimentSet::iterator it = allow_latency_experiment_.find(url.host());
+  if (allow_latency_experiment_.end() == it)
+    return;  // It was already erased, or never allowed.
+  SdchErrorRecovery(LATENCY_TEST_DISALLOWED);
+  allow_latency_experiment_.erase(it);
 }

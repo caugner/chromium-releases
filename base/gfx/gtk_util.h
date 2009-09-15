@@ -5,12 +5,17 @@
 #ifndef BASE_GFX_GTK_UTIL_H_
 #define BASE_GFX_GTK_UTIL_H_
 
+#include <stdint.h>
 #include <vector>
+
+#include <glib-object.h>
+
+#include "base/scoped_ptr.h"
 
 typedef struct _GdkColor GdkColor;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GdkRegion GdkRegion;
-typedef struct _GtkWidget GtkWidget;
+
 class SkBitmap;
 
 // Define a macro for creating GdkColors from RGB values.  This is a macro to
@@ -22,19 +27,38 @@ namespace gfx {
 
 class Rect;
 
-// Modify the given region by subtracting the given rectangles.
-void SubtractRectanglesFromRegion(GdkRegion* region,
-                                  const std::vector<gfx::Rect>& cutouts);
+extern const GdkColor kGdkWhite;
+extern const GdkColor kGdkBlack;
+extern const GdkColor kGdkGreen;
 
-// Convert and copy a SkBitmap to a GdkPixbuf.  NOTE: This is an expensive
-// operation, all of the pixels must be copied and their order swapped.
+// Convert and copy a SkBitmap to a GdkPixbuf. NOTE: this uses BGRAToRGBA, so
+// it is an expensive operation.
 GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap* bitmap);
 
-// Create a GtkBin with |child| as its child widget.  This bin will paint a
-// border of color |color| with the sizes specified in pixels.
-GtkWidget* CreateGtkBorderBin(GtkWidget* child, const GdkColor* color,
-                              int top, int bottom, int left, int right);
+// Modify the given region by subtracting the given rectangles.
+void SubtractRectanglesFromRegion(GdkRegion* region,
+                                  const std::vector<Rect>& cutouts);
 
 }  // namespace gfx
+
+namespace {
+// A helper class that will g_object_unref |p| when it goes out of scope.
+// This never adds a ref, it only unrefs.
+template <typename Type>
+struct GObjectUnrefer {
+  void operator()(Type* ptr) const {
+    if (ptr)
+      g_object_unref(ptr);
+  }
+};
+}  // namespace
+
+// It's not legal C++ to have a templatized typedefs, so we wrap it in a
+// struct.  When using this, you need to include ::Type.  E.g.,
+// ScopedGObject<GdkPixbufLoader>::Type loader(gdk_pixbuf_loader_new());
+template<class T>
+struct ScopedGObject {
+  typedef scoped_ptr_malloc<T, GObjectUnrefer<T> > Type;
+};
 
 #endif  // BASE_GFX_GTK_UTIL_H_

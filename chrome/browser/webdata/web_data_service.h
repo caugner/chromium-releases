@@ -11,19 +11,22 @@
 #include "base/lock.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
+#include "base/scoped_vector.h"
 #include "base/thread.h"
 #include "chrome/browser/webdata/web_database.h"
-#include "chrome/common/scoped_vector.h"
 #include "webkit/glue/autofill_form.h"
 
 #if defined(OS_WIN)
 struct IE7PasswordInfo;
 #endif
-struct PasswordForm;
 class FilePath;
 class GURL;
 class ShutdownTask;
 class TemplateURL;
+
+namespace webkit_glue {
+struct PasswordForm;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -153,7 +156,7 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   void Shutdown();
 
   // Returns false if Shutdown() has been called.
-  bool IsRunning();
+  bool IsRunning() const;
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -303,17 +306,20 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //////////////////////////////////////////////////////////////////////////////
   //
   // Password manager
+  // NOTE: These methods are all deprecated; new clients should use
+  // PasswordStore. These are only still here because Windows is (temporarily)
+  // still using them for its PasswordStore implementation.
   //
   //////////////////////////////////////////////////////////////////////////////
 
   // Updates the remembered password form.
-  void UpdateLogin(const PasswordForm& form);
+  void UpdateLogin(const webkit_glue::PasswordForm& form);
 
   // Adds |form| to the list of remembered password forms.
-  void AddLogin(const PasswordForm& form);
+  void AddLogin(const webkit_glue::PasswordForm& form);
 
   // Removes |form| from the list of remembered password forms.
-  void RemoveLogin(const PasswordForm& form);
+  void RemoveLogin(const webkit_glue::PasswordForm& form);
 
   // Removes all logins created in the specified daterange
   void RemoveLoginsCreatedBetween(const base::Time delete_begin,
@@ -326,20 +332,21 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   // |consumer| will be notified when the request is done. The result is of
   // type WDResult<std::vector<PasswordForm*>>.
   // The result will be null on failure. The |consumer| owns all PasswordForm's.
-  Handle GetLogins(const PasswordForm& form, WebDataServiceConsumer* consumer);
+  Handle GetLogins(const webkit_glue::PasswordForm& form,
+                   WebDataServiceConsumer* consumer);
 
   // Gets the complete list of password forms that have not been blacklisted and
   // are thus auto-fillable.
   // |consumer| will be notified when the request is done. The result is of
   // type WDResult<std::vector<PasswordForm*>>.
   // The result will be null on failure.  The |consumer| owns all PasswordForms.
-  Handle GetAllAutofillableLogins(WebDataServiceConsumer* consumer);
+  Handle GetAutofillableLogins(WebDataServiceConsumer* consumer);
 
-  // Gets the complete list of password forms.
+  // Gets the complete list of password forms that have been blacklisted.
   // |consumer| will be notified when the request is done. The result is of
   // type WDResult<std::vector<PasswordForm*>>.
   // The result will be null on failure. The |consumer| owns all PasswordForm's.
-  Handle GetAllLogins(WebDataServiceConsumer* consumer);
+  Handle GetBlacklistLogins(WebDataServiceConsumer* consumer);
 
 #if defined(OS_WIN)
   // Adds |info| to the list of imported passwords from ie7/ie8.
@@ -368,7 +375,7 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
 
   // Schedules a task to add form elements to the web database.
   void AddAutofillFormElements(
-      const std::vector<AutofillForm::Element>& elements);
+      const std::vector<webkit_glue::AutofillForm::Element>& elements);
 
   // Initiates the request for a vector of values which have been entered in
   // form input fields named |name|.  The method OnWebDataServiceRequestDone of
@@ -437,14 +444,14 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   // Password manager.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddLoginImpl(GenericRequest<PasswordForm>* request);
-  void UpdateLoginImpl(GenericRequest<PasswordForm>* request);
-  void RemoveLoginImpl(GenericRequest<PasswordForm>* request);
+  void AddLoginImpl(GenericRequest<webkit_glue::PasswordForm>* request);
+  void UpdateLoginImpl(GenericRequest<webkit_glue::PasswordForm>* request);
+  void RemoveLoginImpl(GenericRequest<webkit_glue::PasswordForm>* request);
   void RemoveLoginsCreatedBetweenImpl(
       GenericRequest2<base::Time, base::Time>* request);
-  void GetLoginsImpl(GenericRequest<PasswordForm>* request);
-  void GetAllAutofillableLoginsImpl(WebDataRequest* request);
-  void GetAllLoginsImpl(WebDataRequest* request);
+  void GetLoginsImpl(GenericRequest<webkit_glue::PasswordForm>* request);
+  void GetAutofillableLoginsImpl(WebDataRequest* request);
+  void GetBlacklistLoginsImpl(WebDataRequest* request);
 #if defined(OS_WIN)
   void AddIE7LoginImpl(GenericRequest<IE7PasswordInfo>* request);
   void RemoveIE7LoginImpl(GenericRequest<IE7PasswordInfo>* request);
@@ -457,7 +464,7 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //
   //////////////////////////////////////////////////////////////////////////////
   void AddAutofillFormElementsImpl(
-      GenericRequest<std::vector<AutofillForm::Element> >* request);
+      GenericRequest<std::vector<webkit_glue::AutofillForm::Element> >* request);
   void GetFormValuesForElementNameImpl(WebDataRequest* request,
       const std::wstring& name, const std::wstring& prefix, int limit);
   void RemoveFormElementsAddedBetweenImpl(

@@ -13,25 +13,26 @@
 #include <wininet.h>
 #endif
 
+#include "app/resource_bundle.h"
 #include "base/clipboard.h"
 #include "base/scoped_clipboard_writer.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/resource_bundle.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/net/render_dns_master.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebKitClient.h"
+#include "webkit/api/public/WebString.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 
-#include "SkBitmap.h"
 
 #if defined(OS_WIN)
 #include <strsafe.h>  // note: per msdn docs, this must *follow* other includes
@@ -145,18 +146,6 @@ ScopedClipboardWriterGlue::~ScopedClipboardWriterGlue() {
 
 namespace webkit_glue {
 
-// Global variable set during RenderProcess::GlobalInit if video was enabled
-// and our media libraries were successfully loaded.
-static bool g_media_player_available = false;
-
-void SetMediaPlayerAvailable(bool value) {
-  g_media_player_available = value;
-}
-
-bool IsMediaPlayerAvailable() {
-  return g_media_player_available;
-}
-
 void PrecacheUrl(const wchar_t* url, int url_length) {
   // TBD: jar: Need implementation that loads the targetted URL into our cache.
   // For now, at least prefetch DNS lookup
@@ -171,8 +160,8 @@ void AppendToLog(const char* file, int line, const char* msg) {
   logging::LogMessage(file, line).stream() << msg;
 }
 
-std::string GetDataResource(int resource_id) {
-  return ResourceBundle::GetSharedInstance().GetDataResource(resource_id);
+StringPiece GetDataResource(int resource_id) {
+  return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
 }
 
 #if defined(OS_WIN)
@@ -207,30 +196,26 @@ void ClipboardReadHTML(string16* markup, GURL* url) {
 }
 
 GURL GetInspectorURL() {
-  return GURL("chrome-ui://inspector/inspector.html");
+  return GURL(std::string(chrome::kChromeUIScheme) +
+              "://inspector/inspector.html");
 }
 
 std::string GetUIResourceProtocol() {
-  return "chrome-ui";
+  return "chrome";
 }
 
 bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  return RenderThread::current()->Send(
-      new ViewHostMsg_GetPlugins(refresh, plugins));
-}
-
-webkit_glue::ScreenInfo GetScreenInfo(gfx::NativeViewId window) {
-  webkit_glue::ScreenInfo results;
-  RenderThread::current()->Send(
-      new ViewHostMsg_GetScreenInfo(window, &results));
-  return results;
+  if (!RenderThread::current()->plugin_refresh_allowed())
+    refresh = false;
+  return RenderThread::current()->Send(new ViewHostMsg_GetPlugins(
+     refresh, plugins));
 }
 
 // static factory function
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
     const std::string& method,
     const GURL& url,
-    const GURL& policy_url,
+    const GURL& first_party_for_cookies,
     const GURL& referrer,
     const std::string& frame_origin,
     const std::string& main_frame_origin,
@@ -238,21 +223,29 @@ ResourceLoaderBridge* ResourceLoaderBridge::Create(
     int load_flags,
     int origin_pid,
     ResourceType::Type resource_type,
+    int app_cache_context_id,
     int routing_id) {
-  ResourceDispatcher* dispatch = RenderThread::current()->resource_dispatcher();
-  return dispatch->CreateBridge(method, url, policy_url, referrer,
+  ResourceDispatcher* dispatch = ChildThread::current()->resource_dispatcher();
+  return dispatch->CreateBridge(method, url, first_party_for_cookies, referrer,
                                 frame_origin, main_frame_origin, headers,
-                                load_flags, origin_pid, resource_type,
-                                0, routing_id);
+                                load_flags, origin_pid, resource_type, 0,
+                                app_cache_context_id, routing_id);
 }
 
 void NotifyCacheStats() {
   // Update the browser about our cache
   // NOTE: Since this can be called from the plugin process, we might not have
   // a RenderThread.  Do nothing in that case.
-  if (!IsPluginProcess())
+  if (RenderThread::current())
     RenderThread::current()->InformHostOfCacheStatsLater();
 }
 
+void CloseIdleConnections() {
+  RenderThread::current()->CloseIdleConnections();
+}
+
+void SetCacheMode(bool enabled) {
+  RenderThread::current()->SetCacheMode(enabled);
+}
 
 }  // namespace webkit_glue

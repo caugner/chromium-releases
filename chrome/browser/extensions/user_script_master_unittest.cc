@@ -11,10 +11,9 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace {
 
 // Test bringing up a master on a specific directory, putting a script
 // in there, etc.
@@ -22,7 +21,10 @@ namespace {
 class UserScriptMasterTest : public testing::Test,
                              public NotificationObserver {
  public:
-  UserScriptMasterTest() : shared_memory_(NULL) {}
+  UserScriptMasterTest()
+      : message_loop_(MessageLoop::TYPE_UI),
+        shared_memory_(NULL) {
+  }
 
   virtual void SetUp() {
     // Name a subdirectory of the temp directory.
@@ -35,18 +37,11 @@ class UserScriptMasterTest : public testing::Test,
     file_util::CreateDirectory(script_dir_);
 
     // Register for all user script notifications.
-    NotificationService::current()->AddObserver(
-        this,
-        NotificationType::USER_SCRIPTS_LOADED,
-        NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
+                   NotificationService::AllSources());
   }
 
   virtual void TearDown() {
-    NotificationService::current()->RemoveObserver(
-        this,
-        NotificationType::USER_SCRIPTS_LOADED,
-        NotificationService::AllSources());
-
     // Clean up test directory.
     ASSERT_TRUE(file_util::Delete(script_dir_, true));
     ASSERT_FALSE(file_util::PathExists(script_dir_));
@@ -55,12 +50,14 @@ class UserScriptMasterTest : public testing::Test,
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    DCHECK(type == NotificationType::USER_SCRIPTS_LOADED);
+    DCHECK(type == NotificationType::USER_SCRIPTS_UPDATED);
 
     shared_memory_ = Details<base::SharedMemory>(details).ptr();
     if (MessageLoop::current() == &message_loop_)
       MessageLoop::current()->Quit();
   }
+
+  NotificationRegistrar registrar_;
 
   // MessageLoop used in tests.
   MessageLoop message_loop_;
@@ -72,12 +69,8 @@ class UserScriptMasterTest : public testing::Test,
   base::SharedMemory* shared_memory_;
 };
 
-}  // namespace
-
-// Test that we *don't* get spurious notifications.
+// Test that we get notified even when there are no scripts.
 TEST_F(UserScriptMasterTest, NoScripts) {
-  // Set shared_memory_ to something non-NULL, so we can check it became NULL.
-  shared_memory_ = reinterpret_cast<base::SharedMemory*>(1);
 
   scoped_refptr<UserScriptMaster> master(
       new UserScriptMaster(MessageLoop::current(), script_dir_));
@@ -85,11 +78,11 @@ TEST_F(UserScriptMasterTest, NoScripts) {
   message_loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask);
   message_loop_.Run();
 
-  // There were no scripts in the script dir, so we shouldn't have gotten
-  // a notification.
-  ASSERT_EQ(NULL, shared_memory_);
+  ASSERT_TRUE(shared_memory_ != NULL);
 }
 
+// TODO(shess): Disabled on Linux because of missing DirectoryWatcher.
+#if defined(OS_WIN) || defined(OS_MACOSX)
 // Test that we get notified about new scripts after they're added.
 TEST_F(UserScriptMasterTest, NewScripts) {
   scoped_refptr<UserScriptMaster> master(
@@ -101,10 +94,15 @@ TEST_F(UserScriptMasterTest, NewScripts) {
   size_t written = file_util::WriteFile(path, content, sizeof(content));
   ASSERT_EQ(written, sizeof(content));
 
+  // Post a delayed task so that we fail rather than hanging if things
+  // don't work.
+  message_loop_.PostDelayedTask(FROM_HERE, new MessageLoop::QuitTask, 5000);
+
   message_loop_.Run();
 
   ASSERT_TRUE(shared_memory_ != NULL);
 }
+#endif
 
 // Test that we get notified about scripts if they're already in the test dir.
 TEST_F(UserScriptMasterTest, ExistingScripts) {

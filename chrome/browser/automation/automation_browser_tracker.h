@@ -7,7 +7,6 @@
 
 #include "chrome/browser/automation/automation_resource_tracker.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/browser_process.h"
 
 // Tracks Browser objects.
 class AutomationBrowserTracker : public AutomationResourceTracker<Browser*> {
@@ -16,17 +15,16 @@ public:
       : AutomationResourceTracker<Browser*>(automation) { }
 
   virtual ~AutomationBrowserTracker() {
-    ClearAllMappings();
   }
 
   virtual void AddObserver(Browser* resource) {
-    NotificationService::current()->AddObserver(
-        this, NotificationType::BROWSER_CLOSED, Source<Browser>(resource));
+    registrar_.Add(this, NotificationType::BROWSER_CLOSED,
+                   Source<Browser>(resource));
   }
 
   virtual void RemoveObserver(Browser* resource) {
-    NotificationService::current()->RemoveObserver(
-        this, NotificationType::BROWSER_CLOSED, Source<Browser>(resource));
+    registrar_.Remove(this, NotificationType::BROWSER_CLOSED,
+                      Source<Browser>(resource));
   }
 };
 

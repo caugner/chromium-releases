@@ -4,18 +4,31 @@
 
 #include "chrome/browser/views/importer_view.h"
 
+#include "app/l10n_util.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/window/window.h"
+#include "chrome/browser/browser_window.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/label.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/widget/widget.h"
+#include "views/window/window.h"
 
 using views::ColumnSet;
 using views::GridLayout;
+
+namespace browser {
+
+// Declared in browser_dialogs.h so caller's don't have to depend on our header.
+void ShowImporterView(views::Widget* parent,
+                      Profile* profile) {
+  views::Window::CreateChromeWindow(parent->GetNativeView(), gfx::Rect(),
+                                    new ImporterView(profile))->Show();
+}
+
+}  // namespace browser
 
 ImporterView::ImporterView(Profile* profile)
     : import_from_label_(NULL),
@@ -39,8 +52,8 @@ void ImporterView::SetupControl() {
   import_from_label_ =
       new views::Label(l10n_util::GetString(IDS_IMPORT_FROM_LABEL));
 
-  profile_combobox_ = new views::ComboBox(this);
-  profile_combobox_->SetListener(this);
+  profile_combobox_ = new views::Combobox(this);
+  profile_combobox_->set_listener(this);
 
   import_items_label_ =
       new views::Label(l10n_util::GetString(IDS_IMPORT_ITEMS_LABEL));
@@ -99,8 +112,8 @@ void ImporterView::Layout() {
 }
 
 std::wstring ImporterView::GetDialogButtonLabel(
-    DialogButton button) const {
-  if (button == DIALOGBUTTON_OK) {
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
     return l10n_util::GetString(IDS_IMPORT_COMMIT);
   } else {
     return std::wstring();
@@ -116,17 +129,15 @@ std::wstring ImporterView::GetWindowTitle() const {
 }
 
 bool ImporterView::Accept() {
-  if (!IsDialogButtonEnabled(DIALOGBUTTON_OK)) {
+  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
     return false;
   }
 
   uint16 items = GetCheckedItems();
 
-  Browser* browser = BrowserList::GetLastActive();
-  int selected_index = profile_combobox_->GetSelectedItem();
-  HWND parent_hwnd =
-      reinterpret_cast<HWND>(browser->window()->GetNativeHandle());
-  StartImportingWithUI(parent_hwnd, items, importer_host_.get(),
+  int selected_index = profile_combobox_->selected_item();
+  StartImportingWithUI(GetWidget()->GetNativeView(), items,
+                       importer_host_.get(),
                        importer_host_->GetSourceProfileInfoAt(selected_index),
                        profile_, this, false);
   // We return false here to prevent the window from being closed. We will be
@@ -139,7 +150,7 @@ views::View* ImporterView::GetContentsView() {
   return this;
 }
 
-int ImporterView::GetItemCount(views::ComboBox* source) {
+int ImporterView::GetItemCount(views::Combobox* source) {
   DCHECK(source == profile_combobox_);
   DCHECK(importer_host_.get());
   int item_count = importer_host_->GetAvailableProfileCount();
@@ -148,15 +159,15 @@ int ImporterView::GetItemCount(views::ComboBox* source) {
   return item_count;
 }
 
-std::wstring ImporterView::GetItemAt(views::ComboBox* source, int index) {
+std::wstring ImporterView::GetItemAt(views::Combobox* source, int index) {
   DCHECK(source == profile_combobox_);
   DCHECK(importer_host_.get());
   return importer_host_->GetSourceProfileNameAt(index);
 }
 
-void ImporterView::ItemChanged(views::ComboBox* combo_box,
+void ImporterView::ItemChanged(views::Combobox* combobox,
                                int prev_index, int new_index) {
-  DCHECK(combo_box);
+  DCHECK(combobox);
   DCHECK(checkbox_items_.size() >=
       static_cast<size_t>(importer_host_->GetAvailableProfileCount()));
 
@@ -186,23 +197,23 @@ void ImporterView::ImportComplete() {
   window()->Close();
 }
 
-views::CheckBox* ImporterView::InitCheckbox(const std::wstring& text,
+views::Checkbox* ImporterView::InitCheckbox(const std::wstring& text,
                                             bool checked) {
-  views::CheckBox* checkbox = new views::CheckBox(text);
-  checkbox->SetIsSelected(checked);
+  views::Checkbox* checkbox = new views::Checkbox(text);
+  checkbox->SetChecked(checked);
   return checkbox;
 }
 
 uint16 ImporterView::GetCheckedItems() {
   uint16 items = NONE;
-  if (history_checkbox_->IsEnabled() && history_checkbox_->IsSelected())
+  if (history_checkbox_->IsEnabled() && history_checkbox_->checked())
     items |= HISTORY;
-  if (favorites_checkbox_->IsEnabled() && favorites_checkbox_->IsSelected())
+  if (favorites_checkbox_->IsEnabled() && favorites_checkbox_->checked())
     items |= FAVORITES;
-  if (passwords_checkbox_->IsEnabled() && passwords_checkbox_->IsSelected())
+  if (passwords_checkbox_->IsEnabled() && passwords_checkbox_->checked())
     items |= PASSWORDS;
   if (search_engines_checkbox_->IsEnabled() &&
-      search_engines_checkbox_->IsSelected())
+      search_engines_checkbox_->checked())
     items |= SEARCH_ENGINES;
   return items;
 }
@@ -212,58 +223,38 @@ void ImporterView::SetCheckedItemsState(uint16 items) {
     history_checkbox_->SetEnabled(true);
   } else {
     history_checkbox_->SetEnabled(false);
-    history_checkbox_->SetIsSelected(false);
+    history_checkbox_->SetChecked(false);
   }
   if (items & FAVORITES) {
     favorites_checkbox_->SetEnabled(true);
   } else {
     favorites_checkbox_->SetEnabled(false);
-    favorites_checkbox_->SetIsSelected(false);
+    favorites_checkbox_->SetChecked(false);
   }
   if (items & PASSWORDS) {
     passwords_checkbox_->SetEnabled(true);
   } else {
     passwords_checkbox_->SetEnabled(false);
-    passwords_checkbox_->SetIsSelected(false);
+    passwords_checkbox_->SetChecked(false);
   }
   if (items & SEARCH_ENGINES) {
     search_engines_checkbox_->SetEnabled(true);
   } else {
     search_engines_checkbox_->SetEnabled(false);
-    search_engines_checkbox_->SetIsSelected(false);
+    search_engines_checkbox_->SetChecked(false);
   }
 }
 
 void ImporterView::SetCheckedItems(uint16 items) {
-  if (history_checkbox_->IsEnabled()) {
-    if (items & HISTORY) {
-      history_checkbox_->SetIsSelected(true);
-    } else {
-      history_checkbox_->SetIsSelected(false);
-    }
-  }
+  if (history_checkbox_->IsEnabled())
+    history_checkbox_->SetChecked(!!(items & HISTORY));
 
-  if (favorites_checkbox_->IsEnabled()) {
-    if (items & FAVORITES) {
-      favorites_checkbox_->SetIsSelected(true);
-    } else {
-      favorites_checkbox_->SetIsSelected(false);
-    }
-  }
+  if (favorites_checkbox_->IsEnabled())
+    favorites_checkbox_->SetChecked(!!(items & FAVORITES));
 
-  if (passwords_checkbox_->IsEnabled()) {
-    if (items & PASSWORDS) {
-      passwords_checkbox_->SetIsSelected(true);
-    } else {
-      passwords_checkbox_->SetIsSelected(false);
-    }
-  }
+  if (passwords_checkbox_->IsEnabled())
+    passwords_checkbox_->SetChecked(!!(items & PASSWORDS));
 
-  if (search_engines_checkbox_->IsEnabled()) {
-    if (items & SEARCH_ENGINES) {
-      search_engines_checkbox_->SetIsSelected(true);
-    } else {
-      search_engines_checkbox_->SetIsSelected(false);
-    }
-  }
+  if (search_engines_checkbox_->IsEnabled())
+    search_engines_checkbox_->SetChecked(!!(items & SEARCH_ENGINES));
 }

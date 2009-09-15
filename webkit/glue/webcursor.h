@@ -17,6 +17,8 @@ typedef struct HICON__* HICON;
 typedef HICON HCURSOR;
 #elif defined(OS_LINUX)
 // GdkCursorType is an enum, which we can't forward-declare.  :(
+// If you work around this, be sure to fix webkit.gyp:glue to not put
+// GTK in the export_dependent_settings section!
 #include <gdk/gdkcursor.h>
 #elif defined(OS_MACOSX)
 #ifdef __OBJC__
@@ -28,9 +30,9 @@ class NSCursor;
 
 class Pickle;
 
-namespace WebCore {
-class Image;
-class PlatformCursor;
+namespace WebKit {
+class WebImage;
+struct WebCursorInfo;
 }
 
 // This class encapsulates a cross-platform description of a cursor.  Platform
@@ -40,12 +42,16 @@ class PlatformCursor;
 class WebCursor {
  public:
   WebCursor();
-  explicit WebCursor(const WebCore::PlatformCursor& platform_cursor);
+  explicit WebCursor(const WebKit::WebCursorInfo& cursor_info);
   ~WebCursor();
 
   // Copy constructor/assignment operator combine.
   WebCursor(const WebCursor& other);
   const WebCursor& operator=(const WebCursor& other);
+
+  // Conversion from/to WebCursorInfo.
+  void InitFromCursorInfo(const WebKit::WebCursorInfo& cursor_info);
+  void GetCursorInfo(WebKit::WebCursorInfo* cursor_info) const;
 
   // Serialization / De-serialization
   bool Deserialize(const Pickle* pickle, void** iter);
@@ -73,7 +79,8 @@ class WebCursor {
 
 #elif defined(OS_LINUX)
   // Return the stock GdkCursorType for this cursor, or GDK_CURSOR_IS_PIXMAP
-  // if it's a custom cursor.
+  // if it's a custom cursor. Return GDK_LAST_CURSOR to indicate that the cursor
+  // should be set to the system default.
   GdkCursorType GetCursorType() const;
 
   // Return a new GdkCursor* for this cursor.  Only valid if GetCursorType
@@ -107,7 +114,8 @@ class WebCursor {
   // Platform specific cleanup.
   void CleanupPlatformData();
 
-  void SetCustomData(WebCore::Image* image);
+  void SetCustomData(const WebKit::WebImage& image);
+  void ImageFromCustomData(WebKit::WebImage* image) const;
 
   // WebCore::PlatformCursor type.
   int type_;

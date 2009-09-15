@@ -6,16 +6,32 @@
 
 #include "webkit/tools/test_shell/webwidget_host.h"
 
-#include "base/gfx/platform_canvas_mac.h"
+#include "base/gfx/platform_canvas.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "base/logging.h"
-#include "webkit/glue/webinputevent.h"
-#include "webkit/glue/webwidget.h"
+#include "webkit/api/public/mac/WebInputEventFactory.h"
+#include "webkit/api/public/mac/WebScreenInfoFactory.h"
+#include "webkit/api/public/WebInputEvent.h"
+#include "webkit/api/public/WebPopupMenu.h"
+#include "webkit/api/public/WebScreenInfo.h"
+#include "webkit/api/public/WebSize.h"
+#include "webkit/tools/test_shell/test_shell.h"
+
+using WebKit::WebInputEvent;
+using WebKit::WebInputEventFactory;
+using WebKit::WebKeyboardEvent;
+using WebKit::WebMouseEvent;
+using WebKit::WebMouseWheelEvent;
+using WebKit::WebPopupMenu;
+using WebKit::WebScreenInfo;
+using WebKit::WebScreenInfoFactory;
+using WebKit::WebSize;
+using WebKit::WebWidgetClient;
 
 /*static*/
 WebWidgetHost* WebWidgetHost::Create(NSView* parent_view,
-                                     WebWidgetDelegate* delegate) {
+                                     WebWidgetClient* client) {
   WebWidgetHost* host = new WebWidgetHost();
 
   NSRect content_rect = [parent_view frame];
@@ -26,9 +42,9 @@ WebWidgetHost* WebWidgetHost::Create(NSView* parent_view,
 
   // win_util::SetWindowUserData(host->hwnd_, host);
 
-  host->webwidget_ = WebWidget::Create(delegate);
-  host->webwidget_->Resize(gfx::Size(content_rect.size.width,
-                                     content_rect.size.height));
+  host->webwidget_ = WebPopupMenu::create(client);
+  host->webwidget_->resize(WebSize(content_rect.size.width,
+                                   content_rect.size.height));
   return host;
 }
 
@@ -135,7 +151,7 @@ WebWidgetHost::~WebWidgetHost() {
 
   TrackMouseLeave(false);
 
-  webwidget_->Close();
+  webwidget_->close();
 }
 
 void WebWidgetHost::UpdatePaintRect(const gfx::Rect& rect) {
@@ -164,7 +180,7 @@ void WebWidgetHost::Paint() {
                                                  flipped:NO]];
 
   // This may result in more invalidation
-  webwidget_->Layout();
+  webwidget_->layout();
 
   // Scroll the canvas if necessary
   scroll_rect_ = client_rect.Intersect(scroll_rect_);
@@ -206,39 +222,46 @@ void WebWidgetHost::Paint() {
   }
 }
 
+WebScreenInfo WebWidgetHost::GetScreenInfo() {
+  return WebScreenInfoFactory::screenInfo(view_);
+}
+
 void WebWidgetHost::Resize(const gfx::Rect& rect) {
   // Force an entire re-paint.  TODO(darin): Maybe reuse this memory buffer.
   DiscardBackingStore();
-  webwidget_->Resize(gfx::Size(rect.width(), rect.height()));
+  webwidget_->resize(WebSize(rect.width(), rect.height()));
 }
 
 void WebWidgetHost::MouseEvent(NSEvent *event) {
-  WebMouseEvent web_event(event, view_);
+  const WebMouseEvent& web_event = WebInputEventFactory::mouseEvent(
+      event, view_);
   switch (web_event.type) {
-    case WebInputEvent::MOUSE_MOVE:
+    case WebInputEvent::MouseMove:
       TrackMouseLeave(true);
       break;
-    case WebInputEvent::MOUSE_LEAVE:
+    case WebInputEvent::MouseLeave:
       TrackMouseLeave(false);
       break;
     default:
       break;
   }
-  webwidget_->HandleInputEvent(&web_event);
+  webwidget_->handleInputEvent(web_event);
 }
 
 void WebWidgetHost::WheelEvent(NSEvent *event) {
-  WebMouseWheelEvent web_event(event, view_);
-  webwidget_->HandleInputEvent(&web_event);
+  webwidget_->handleInputEvent(
+      WebInputEventFactory::mouseWheelEvent(event, view_));
 }
 
 void WebWidgetHost::KeyEvent(NSEvent *event) {
-  WebKeyboardEvent web_event(event);
-  webwidget_->HandleInputEvent(&web_event);
+  webwidget_->handleInputEvent(WebInputEventFactory::keyboardEvent(event));
 }
 
 void WebWidgetHost::SetFocus(bool enable) {
-  webwidget_->SetFocus(enable);
+  // Ignore focus calls in layout test mode so that tests don't mess with each
+  // other's focus when running in parallel.
+  if (!TestShell::layout_test_mode())
+    webwidget_->setFocus(enable);
 }
 
 void WebWidgetHost::TrackMouseLeave(bool track) {
@@ -257,6 +280,6 @@ void WebWidgetHost::PaintRect(const gfx::Rect& rect) {
   DCHECK(canvas_.get());
 
   set_painting(true);
-  webwidget_->Paint(canvas_.get(), rect);
+  webwidget_->paint(canvas_.get(), rect);
   set_painting(false);
 }

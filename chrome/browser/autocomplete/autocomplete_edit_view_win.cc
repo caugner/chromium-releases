@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,11 @@
 
 #include <locale>
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/l10n_util_win.h"
+#include "app/os_exchange_data.h"
+#include "app/win_util.h"
 #include "base/base_drag_source.h"
 #include "base/base_drop_target.h"
 #include "base/basictypes.h"
@@ -22,7 +27,6 @@
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/drag_utils.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
@@ -30,17 +34,14 @@
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/location_bar_view.h"
-#include "chrome/common/clipboard_service.h"
-#include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/utils.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/l10n_util_win.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/os_exchange_data.h"
-#include "chrome/common/win_util.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_win.h"
+#include "views/drag_utils.h"
+#include "views/focus/focus_util_win.h"
+#include "views/widget/widget.h"
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
 
@@ -102,7 +103,7 @@ class EditDropTarget : public BaseDropTarget {
   // this is false regardless of whether the clipboard has a string.
   bool drag_has_string_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(EditDropTarget);
+  DISALLOW_COPY_AND_ASSIGN(EditDropTarget);
 };
 
 // A helper method for determining a valid DROPEFFECT given the allowed
@@ -311,26 +312,15 @@ AutocompleteEditViewWin::ScopedSuspendUndo::~ScopedSuspendUndo() {
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditViewWin
 
-// TODO (jcampan): these colors should be derived from the system colors to
-// ensure they show properly. Bug #948807.
-// Colors used to emphasize the scheme in the URL.
-
 namespace {
-
-const COLORREF kSecureSchemeColor = RGB(0, 150, 20);
-const COLORREF kInsecureSchemeColor = RGB(200, 0, 0);
-
-// Colors used to strike-out the scheme when it is insecure.
-const SkColor kSchemeStrikeoutColor = SkColorSetRGB(210, 0, 0);
-const SkColor kSchemeSelectedStrikeoutColor =
-    SkColorSetRGB(255, 255, 255);
 
 // These are used to hook the CRichEditCtrl's calls to BeginPaint() and
 // EndPaint() and provide a memory DC instead.  See OnPaint().
 HWND edit_hwnd = NULL;
 PAINTSTRUCT paint_struct;
 
-HDC BeginPaintIntercept(HWND hWnd, LPPAINTSTRUCT lpPaint) {
+// Intercepted method for BeginPaint(). Must use __stdcall convention.
+HDC WINAPI BeginPaintIntercept(HWND hWnd, LPPAINTSTRUCT lpPaint) {
   if (!edit_hwnd || (hWnd != edit_hwnd))
     return ::BeginPaint(hWnd, lpPaint);
 
@@ -338,7 +328,8 @@ HDC BeginPaintIntercept(HWND hWnd, LPPAINTSTRUCT lpPaint) {
   return paint_struct.hdc;
 }
 
-BOOL EndPaintIntercept(HWND hWnd, const PAINTSTRUCT* lpPaint) {
+// Intercepted method for EndPaint(). Must use __stdcall convention.
+BOOL WINAPI EndPaintIntercept(HWND hWnd, const PAINTSTRUCT* lpPaint) {
   return (edit_hwnd && (hWnd == edit_hwnd)) ?
       true : ::EndPaint(hWnd, lpPaint);
 }
@@ -390,17 +381,20 @@ base::LazyInstance<PaintPatcher> g_paint_patcher(base::LINKER_INITIALIZED);
 }  // namespace
 
 AutocompleteEditViewWin::AutocompleteEditViewWin(
-    const ChromeFont& font,
+    const gfx::Font& font,
     AutocompleteEditController* controller,
     ToolbarModel* toolbar_model,
     views::View* parent_view,
     HWND hwnd,
     Profile* profile,
     CommandUpdater* command_updater,
-    bool popup_window_mode)
+    bool popup_window_mode,
+    AutocompletePopupPositioner* popup_positioner)
     : model_(new AutocompleteEditModel(this, controller, profile)),
-      popup_view_(new AutocompletePopupViewWin(font, this, model_.get(),
-                                               profile)),
+      popup_view_(AutocompletePopupView::CreatePopupView(font, this,
+                                                         model_.get(),
+                                                         profile,
+                                                         popup_positioner)),
       controller_(controller),
       parent_view_(parent_view),
       toolbar_model_(toolbar_model),
@@ -411,6 +405,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       tracking_double_click_(false),
       double_click_time_(0),
       can_discard_mousemove_(false),
+      ignore_ime_messages_(false),
       font_(font),
       possible_drag_(false),
       in_drag_(false),
@@ -418,7 +413,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       drop_highlight_position_(-1),
       background_color_(0),
       scheme_security_level_(ToolbarModel::NORMAL) {
-  model_->set_popup_model(popup_view_->model());
+  model_->set_popup_model(popup_view_->GetModel());
 
   saved_selection_for_focus_change_.cpMin = -1;
 
@@ -457,40 +452,11 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
   const long kTwipsPerPixel = kTwipsPerInch / GetDeviceCaps(dc, LOGPIXELSY);
   ::ReleaseDC(NULL, dc);
 
-  // Set the default character style -- adjust to our desired baseline and make
-  // text grey.
+  // Set the default character style -- adjust to our desired baseline.
   CHARFORMAT cf = {0};
-  cf.dwMask = CFM_OFFSET | CFM_COLOR;
+  cf.dwMask = CFM_OFFSET;
   cf.yOffset = -font_y_adjustment_ * kTwipsPerPixel;
-  cf.crTextColor = GetSysColor(COLOR_GRAYTEXT);
   SetDefaultCharFormat(cf);
-
-  // Set up context menu.
-  context_menu_.reset(new Menu(this, Menu::TOPLEFT, m_hWnd));
-  if (popup_window_mode_) {
-    context_menu_->AppendMenuItemWithLabel(IDS_COPY,
-                                           l10n_util::GetString(IDS_COPY));
-  } else {
-    context_menu_->AppendMenuItemWithLabel(IDS_UNDO,
-                                           l10n_util::GetString(IDS_UNDO));
-    context_menu_->AppendSeparator();
-    context_menu_->AppendMenuItemWithLabel(IDS_CUT,
-                                           l10n_util::GetString(IDS_CUT));
-    context_menu_->AppendMenuItemWithLabel(IDS_COPY,
-                                           l10n_util::GetString(IDS_COPY));
-    context_menu_->AppendMenuItemWithLabel(IDS_PASTE,
-                                           l10n_util::GetString(IDS_PASTE));
-    // GetContextualLabel() will override this next label with the
-    // IDS_PASTE_AND_SEARCH label as needed.
-    context_menu_->AppendMenuItemWithLabel(
-        IDS_PASTE_AND_GO, l10n_util::GetString(IDS_PASTE_AND_GO));
-    context_menu_->AppendSeparator();
-    context_menu_->AppendMenuItemWithLabel(
-        IDS_SELECT_ALL, l10n_util::GetString(IDS_SELECT_ALL));
-    context_menu_->AppendSeparator();
-    context_menu_->AppendMenuItemWithLabel(
-        IDS_EDIT_SEARCH_ENGINES, l10n_util::GetString(IDS_EDIT_SEARCH_ENGINES));
-  }
 
   // By default RichEdit has a drop target. Revoke it so that we can install our
   // own. Revoke takes care of deleting the existing one.
@@ -538,7 +504,8 @@ void AutocompleteEditViewWin::Update(
   const ToolbarModel::SecurityLevel security_level =
       toolbar_model_->GetSchemeSecurityLevel();
   const COLORREF background_color =
-      LocationBarView::kBackgroundColorByLevel[security_level];
+      skia::SkColorToCOLORREF(LocationBarView::GetColor(
+          security_level == ToolbarModel::SECURE, LocationBarView::BACKGROUND));
   const bool changed_security_level =
       (security_level != scheme_security_level_);
 
@@ -648,19 +615,34 @@ void AutocompleteEditViewWin::SetWindowTextAndCaretPos(const std::wstring& text,
                                                        size_t caret_pos) {
   HIMC imm_context = ImmGetContext(m_hWnd);
   if (imm_context) {
-    // In Windows Vista, SetWindowText() automatically completes any ongoing
+    // In Windows Vista, SetWindowText() automatically cancels any ongoing
     // IME composition, and updates the text of the underlying edit control.
     // In Windows XP, however, SetWindowText() gets applied to the IME
     // composition string if it exists, and doesn't update the underlying edit
-    // control. To avoid this, we force the IME to complete any outstanding
+    // control. To avoid this, we force the IME to cancel any outstanding
     // compositions here.  This is harmless in Vista and in cases where the IME
     // isn't composing.
-    ImmNotifyIME(imm_context, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+
+    // NOTE: We MUST ignore messages like WM_IME_COMPOSITION that may be sent as
+    // a result of doing this.  Until the SetWindowText() call below, the
+    // underlying edit (on XP) has out-of-date text in it; for problems this can
+    // cause, see OnImeComposition().
+    ignore_ime_messages_ = true;
+    ImmNotifyIME(imm_context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
     ImmReleaseContext(m_hWnd, imm_context);
+    ignore_ime_messages_ = false;
   }
 
   SetWindowText(text.c_str());
   PlaceCaretAt(caret_pos);
+}
+
+void AutocompleteEditViewWin::SetForcedQuery() {
+  const std::wstring current_text(GetText());
+  if (current_text.empty() || (current_text[0] != '?'))
+    SetUserText(L"?");
+  else
+    SetSelection(current_text.length(), 1);
 }
 
 bool AutocompleteEditViewWin::IsSelectAll() {
@@ -719,7 +701,7 @@ void AutocompleteEditViewWin::UpdatePopup() {
 }
 
 void AutocompleteEditViewWin::ClosePopup() {
-  popup_view_->model()->StopAutocomplete();
+  popup_view_->GetModel()->StopAutocomplete();
 }
 
 IAccessible* AutocompleteEditViewWin::GetIAccessible() {
@@ -884,14 +866,51 @@ void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
     model_->PasteAndGo();
 }
 
-bool AutocompleteEditViewWin::OverrideAccelerator(
-    const views::Accelerator& accelerator) {
-  // Only override <esc>.
-  if ((accelerator.GetKeyCode() != VK_ESCAPE) || accelerator.IsAltDown())
-    return false;
+bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
+    const views::KeyEvent& e) {
+  int c = e.GetCharacter();
+  // We don't process ALT + numpad digit as accelerators, they are used for
+  // entering special characters.  We do translate alt-home.
+  if (e.IsAltDown() && (c != VK_HOME) &&
+      win_util::IsNumPadDigit(c, e.IsExtendedKey()))
+    return true;
 
-  ScopedFreeze freeze(this, GetTextObjectModel());
-  return model_->OnEscapeKeyPressed();
+  // Skip accelerators for key combinations omnibox wants to crack. This list
+  // should be synced with OnKeyDownOnlyWritable() (but for tab which is dealt
+  // with above in LocationBarView::SkipDefaultKeyEventProcessing).
+  //
+  // We cannot return true for all keys because we still need to handle some
+  // accelerators (e.g., F5 for reload the page should work even when the
+  // Omnibox gets focused).
+  switch (c) {
+    case VK_ESCAPE: {
+      ScopedFreeze freeze(this, GetTextObjectModel());
+      return model_->OnEscapeKeyPressed();
+    }
+
+    case VK_RETURN:
+      return true;
+
+    case VK_UP:
+    case VK_DOWN:
+      return !e.IsAltDown();
+
+    case VK_DELETE:
+    case VK_INSERT:
+      return !e.IsAltDown() && e.IsShiftDown() && !e.IsControlDown();
+
+    case 'X':
+    case 'V':
+      return !e.IsAltDown() && e.IsControlDown();
+
+    case VK_BACK:
+    case 0xbb:  // We don't use VK_OEM_PLUS in case the macro isn't defined.
+                // (e.g., we don't have this symbol in embeded environment).
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 void AutocompleteEditViewWin::HandleExternalMsg(UINT msg,
@@ -907,12 +926,16 @@ void AutocompleteEditViewWin::HandleExternalMsg(UINT msg,
   SendMessage(msg, flags, MAKELPARAM(client_point.x, client_point.y));
 }
 
-bool AutocompleteEditViewWin::IsCommandEnabled(int id) const {
-  switch (id) {
+bool AutocompleteEditViewWin::IsCommandIdChecked(int command_id) const {
+  return false;
+}
+
+bool AutocompleteEditViewWin::IsCommandIdEnabled(int command_id) const {
+  switch (command_id) {
     case IDS_UNDO:         return !!CanUndo();
-    case IDS_CUT:          return !!CanCut();
-    case IDS_COPY:         return !!CanCopy();
-    case IDS_PASTE:        return !!CanPaste();
+    case IDC_CUT:          return !!CanCut();
+    case IDC_COPY:         return !!CanCopy();
+    case IDC_PASTE:        return !!CanPaste();
     case IDS_PASTE_AND_GO: return CanPasteAndGo(GetClipboardText());
     case IDS_SELECT_ALL:   return !!CanSelectAll();
     case IDS_EDIT_SEARCH_ENGINES:
@@ -921,21 +944,28 @@ bool AutocompleteEditViewWin::IsCommandEnabled(int id) const {
   }
 }
 
-bool AutocompleteEditViewWin::GetContextualLabel(int id,
-                                                 std::wstring* out) const {
-  if ((id != IDS_PASTE_AND_GO) ||
-      // No need to change the default IDS_PASTE_AND_GO label unless this is a
-      // search.
-      !model_->is_paste_and_search())
-    return false;
-
-  out->assign(l10n_util::GetString(IDS_PASTE_AND_SEARCH));
-  return true;
+bool AutocompleteEditViewWin::GetAcceleratorForCommandId(
+    int command_id,
+    views::Accelerator* accelerator) {
+  return parent_view_->GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
-void AutocompleteEditViewWin::ExecuteCommand(int id) {
+bool AutocompleteEditViewWin::IsLabelForCommandIdDynamic(int command_id) const {
+  // No need to change the default IDS_PASTE_AND_GO label unless this is a
+  // search.
+  return command_id == IDS_PASTE_AND_GO;
+}
+
+std::wstring AutocompleteEditViewWin::GetLabelForCommandId(
+    int command_id) const {
+  DCHECK(command_id == IDS_PASTE_AND_GO);
+  return l10n_util::GetString(model_->is_paste_and_search() ?
+      IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO);
+}
+
+void AutocompleteEditViewWin::ExecuteCommand(int command_id) {
   ScopedFreeze freeze(this, GetTextObjectModel());
-  if (id == IDS_PASTE_AND_GO) {
+  if (command_id == IDS_PASTE_AND_GO) {
     // This case is separate from the switch() below since we don't want to wrap
     // it in OnBefore/AfterPossibleChange() calls.
     model_->PasteAndGo();
@@ -943,20 +973,20 @@ void AutocompleteEditViewWin::ExecuteCommand(int id) {
   }
 
   OnBeforePossibleChange();
-  switch (id) {
+  switch (command_id) {
     case IDS_UNDO:
       Undo();
       break;
 
-    case IDS_CUT:
+    case IDC_CUT:
       Cut();
       break;
 
-    case IDS_COPY:
+    case IDC_COPY:
       Copy();
       break;
 
-    case IDS_PASTE:
+    case IDC_PASTE:
       Paste();
       break;
 
@@ -1126,13 +1156,14 @@ void AutocompleteEditViewWin::OnChar(TCHAR ch, UINT repeat_count, UINT flags) {
 }
 
 void AutocompleteEditViewWin::OnContextMenu(HWND window, const CPoint& point) {
+  BuildContextMenu();
   if (point.x == -1 || point.y == -1) {
     POINT p;
     GetCaretPos(&p);
     MapWindowPoints(HWND_DESKTOP, &p, 1);
-    context_menu_->RunMenuAt(p.x, p.y);
+    context_menu_->RunContextMenuAt(gfx::Point(p));
   } else {
-    context_menu_->RunMenuAt(point.x, point.y);
+    context_menu_->RunContextMenuAt(gfx::Point(point));
   }
 }
 
@@ -1141,22 +1172,31 @@ void AutocompleteEditViewWin::OnCopy() {
   if (text.empty())
     return;
 
-  ScopedClipboardWriter scw(g_browser_process->clipboard_service());
-  scw.WriteText(text);
-
+  ScopedClipboardWriter scw(g_browser_process->clipboard());
   // Check if the user is copying the whole address bar.  If they are, we
   // assume they are trying to copy a URL and write this to the clipboard as a
   // hyperlink.
-  if (static_cast<int>(text.length()) < GetTextLength())
-    return;
-
-  // The entire control is selected.  Let's see what the user typed.  We can't
-  // use model_->CurrentTextIsURL() or model_->GetDataForURLExport() because
-  // right now the user is probably holding down control to cause the copy,
-  // which will screw up our calculation of the desired_tld.
-  GURL url;
-  if (model_->GetURLForText(text, &url))
-    scw.WriteHyperlink(text, url.spec());
+  if (static_cast<int>(text.length()) >= GetTextLength()) {
+    // The entire control is selected.  Let's see what the user typed.  We
+    // can't use model_->CurrentTextIsURL() or model_->GetDataForURLExport()
+    // because right now the user is probably holding down control to cause the
+    // copy, which will screw up our calculation of the desired_tld.
+    GURL url;
+    if (model_->GetURLForText(text, &url)) {
+      // If the scheme is http or https and the user isn't editing,
+      // we should copy the true URL instead of the (unescaped) display
+      // string to avoid encoding and escaping issues when pasting this text
+      // elsewhere.
+      if ((url.SchemeIs("http") || url.SchemeIs("https")) &&
+          !model_->user_input_in_progress())
+        scw.WriteText(UTF8ToWide(url.spec()));
+      else
+        scw.WriteText(text);
+      scw.WriteHyperlink(text, url.spec());
+      return;
+    }
+  }
+  scw.WriteText(text);
 }
 
 void AutocompleteEditViewWin::OnCut() {
@@ -1186,6 +1226,17 @@ LRESULT AutocompleteEditViewWin::OnGetObject(UINT uMsg,
 LRESULT AutocompleteEditViewWin::OnImeComposition(UINT message,
                                                   WPARAM wparam,
                                                   LPARAM lparam) {
+  if (ignore_ime_messages_) {
+    // This message was sent while we're in the middle of meddling with the
+    // underlying edit control.  If we handle it below, OnAfterPossibleChange()
+    // can get bogus text for the edit, and rerun autocomplete, destructively
+    // modifying the result set that we're in the midst of using.  For example,
+    // if SetWindowTextAndCaretPos() was called due to the user clicking an
+    // entry in the popup, we're in the middle of executing SetSelectedLine(),
+    // and changing the results can cause checkfailures.
+    return DefWindowProc(message, wparam, lparam);
+  }
+
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   LRESULT result = DefWindowProc(message, wparam, lparam);
@@ -1205,7 +1256,9 @@ LRESULT AutocompleteEditViewWin::OnImeComposition(UINT message,
 LRESULT AutocompleteEditViewWin::OnImeNotify(UINT message,
                                              WPARAM wparam,
                                              LPARAM lparam) {
-  if (wparam == IMN_SETOPENSTATUS) {
+  // NOTE: I'm not sure this is ever reached with |ignore_ime_messages_| set,
+  // but if it is, the safe thing to do is to only call DefWindowProc().
+  if (!ignore_ime_messages_ && (wparam == IMN_SETOPENSTATUS)) {
     // A user has activated (or deactivated) IMEs (but not started a
     // composition).
     // Some IMEs get confused when we accept keywords while they are composing
@@ -1565,11 +1618,24 @@ void AutocompleteEditViewWin::OnPaste() {
     // different behaviors in such a case.
     if (IsSelectAll())
       model_->on_paste_replacing_all();
+    // Force a Paste operation to trigger the text_changed code in
+    // OnAfterPossibleChange(), even if identical contents are pasted into the
+    // text box.
+    text_before_change_.clear();
     ReplaceSel(text.c_str(), true);
   }
 }
 
 void AutocompleteEditViewWin::OnSetFocus(HWND focus_wnd) {
+  views::FocusManager* focus_manager = parent_view_->GetFocusManager();
+  if (focus_manager) {
+    // Notify the FocusManager that the focused view is now the location bar
+    // (our parent view).
+    focus_manager->SetFocusedView(parent_view_);
+  } else {
+    NOTREACHED();
+  }
+
   model_->OnSetFocus(GetKeyState(VK_CONTROL) < 0);
 
   // Notify controller if it needs to show hint UI of some kind.
@@ -1607,6 +1673,16 @@ void AutocompleteEditViewWin::OnWindowPosChanging(WINDOWPOS* window_pos) {
   SetMsgHandled(true);
 }
 
+BOOL AutocompleteEditViewWin::OnMouseWheel(UINT flags,
+                                           short delta,
+                                           CPoint point) {
+  // Forward the mouse-wheel message to the window under the mouse.
+  if (!views::RerouteMouseWheel(m_hWnd, MAKEWPARAM(flags, delta),
+                                MAKELPARAM(point.x, point.y)))
+    SetMsgHandled(false);
+  return 0;
+}
+
 void AutocompleteEditViewWin::HandleKeystroke(UINT message,
                                               TCHAR key,
                                               UINT repeat_count,
@@ -1614,6 +1690,15 @@ void AutocompleteEditViewWin::HandleKeystroke(UINT message,
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   DefWindowProc(message, key, MAKELPARAM(repeat_count, flags));
+
+  // CRichEditCtrl automatically turns on IMF_AUTOKEYBOARD when the user
+  // inputs an RTL character, making it difficult for the user to control
+  // what language is set as they type. Force this off to make the edit's
+  // behavior more stable.
+  const int lang_options = SendMessage(EM_GETLANGOPTIONS, 0, 0);
+  if (lang_options & IMF_AUTOKEYBOARD)
+    SendMessage(EM_SETLANGOPTIONS, 0, lang_options & ~IMF_AUTOKEYBOARD);
+
   OnAfterPossibleChange();
 }
 
@@ -1624,6 +1709,8 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
   // WM_SYSKEYDOWN, so we need to check (flags & KF_ALTDOWN) in various places
   // in this function even with a WM_SYSKEYDOWN handler.
 
+  // Update LocationBarView::SkipDefaultKeyEventProcessing() as well when you
+  // add some key combinations here.
   int count = repeat_count;
   switch (key) {
     case VK_RETURN:
@@ -1631,14 +1718,18 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
           NEW_FOREGROUND_TAB : CURRENT_TAB, false);
       return true;
 
-    case VK_UP:
-      count = -count;
+    case VK_PRIOR:
+    case VK_NEXT:
+      count = model_->result().size();
       // FALL THROUGH
+    case VK_UP:
     case VK_DOWN:
-      if (flags & KF_ALTDOWN)
+      // Ignore alt + numpad, but treat alt + (non-numpad) like (non-numpad).
+      if ((flags & KF_ALTDOWN) && !(flags & KF_EXTENDED))
         return false;
 
-      model_->OnUpOrDownKeyPressed(count);
+      model_->OnUpOrDownKeyPressed(((key == VK_PRIOR) || (key == VK_UP)) ?
+          -count : count);
       return true;
 
     // Hijacking Editing Commands
@@ -1672,12 +1763,15 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
           OnBeforePossibleChange();
           Cut();
           OnAfterPossibleChange();
-        } else if (popup_view_->model()->IsOpen()) {
-          // This is a bit overloaded, but we hijack Shift-Delete in this
-          // case to delete the current item from the pop-up.  We prefer cutting
-          // to this when possible since that's the behavior more people expect
-          // from Shift-Delete, and it's more commonly useful.
-          popup_view_->model()->TryDeletingCurrentItem();
+        } else {
+          AutocompletePopupModel* popup_model = popup_view_->GetModel();
+          if (popup_model->IsOpen()) {
+            // This is a bit overloaded, but we hijack Shift-Delete in this
+            // case to delete the current item from the pop-up.  We prefer
+            // cutting to this when possible since that's the behavior more
+            // people expect from Shift-Delete, and it's more commonly useful.
+            popup_model->TryDeletingCurrentItem();
+          }
         }
       }
       return true;
@@ -1694,6 +1788,11 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
       return true;
 
     case VK_INSERT:
+      // Ignore insert by itself, so we don't turn overtype mode on/off.
+      if (!(flags & KF_ALTDOWN) && (GetKeyState(VK_SHIFT) >= 0) &&
+          (GetKeyState(VK_CONTROL) >= 0))
+        return true;
+      // FALL THROUGH
     case 'V':
       if ((flags & KF_ALTDOWN) ||
           (GetKeyState((key == 'V') ? VK_CONTROL : VK_SHIFT) >= 0))
@@ -1735,6 +1834,8 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
     }
 
     case 0xbb:  // Ctrl-'='.  Triggers subscripting (even in plain text mode).
+                // We don't use VK_OEM_PLUS in case the macro isn't defined.
+                // (e.g., we don't have this symbol in embeded environment).
       return true;
 
     default:
@@ -1820,23 +1921,40 @@ bool AutocompleteEditViewWin::IsSelectAllForRange(const CHARRANGE& sel) const {
 
 LONG AutocompleteEditViewWin::ClipXCoordToVisibleText(
     LONG x, bool is_triple_click) const {
-  // Clip the X coordinate to the left edge of the text.  Careful:
+  // Clip the X coordinate to the left edge of the text. Careful:
   // PosFromChar(0) may return a negative X coordinate if the beginning of the
   // text has scrolled off the edit, so don't go past the clip rect's edge.
+  PARAFORMAT2 pf2;
+  GetParaFormat(pf2);
+  // Calculation of the clipped coordinate is more complicated if the paragraph
+  // layout is RTL layout, or if there is RTL characters inside the LTR layout
+  // paragraph.
+  bool ltr_text_in_ltr_layout = true;
+  if ((pf2.wEffects & PFE_RTLPARA) ||
+      l10n_util::StringContainsStrongRTLChars(GetText())) {
+    ltr_text_in_ltr_layout = false;
+  }
+  const int length = GetTextLength();
   RECT r;
   GetRect(&r);
-  const int left_bound = std::max(r.left, PosFromChar(0).x);
-  if (x < left_bound)
-    return left_bound;
-
-  // See if we need to clip to the right edge of the text.
-  const int length = GetTextLength();
-  // Asking for the coordinate of any character past the end of the text gets
-  // the pixel just to the right of the last character.
-  const int right_bound = std::min(r.right, PosFromChar(length).x);
-  if ((length == 0) || (x < right_bound))
-    return x;
-
+  // The values returned by PosFromChar() seem to refer always
+  // to the left edge of the character's bounding box.
+  const LONG first_position_x = PosFromChar(0).x;
+  LONG min_x = first_position_x;
+  if (!ltr_text_in_ltr_layout) {
+    for (int i = 1; i < length; ++i)
+      min_x = std::min(min_x, PosFromChar(i).x);
+  }
+  const LONG left_bound = std::max(r.left, min_x);
+  // PosFromChar(length) is a phantom character past the end of the text. It is
+  // not necessarily a right bound; in RTL controls it may be a left bound. So
+  // treat it as a right bound only if it is to the right of the first
+  // character.
+  LONG right_bound = r.right;
+  LONG end_position_x = PosFromChar(length).x;
+  if (end_position_x >= first_position_x) {
+    right_bound = std::min(right_bound, end_position_x);  // LTR case.
+  }
   // For trailing characters that are 2 pixels wide of less (like "l" in some
   // fonts), we have a problem:
   //   * Clicks on any pixel within the character will place the cursor before
@@ -1847,6 +1965,12 @@ LONG AutocompleteEditViewWin::ClipXCoordToVisibleText(
   // triple-click, and moving to one past the last pixel in all other
   // scenarios.  This way, all clicks that can move the cursor will place it at
   // the end of the text, but triple-click will still work.
+  if (x < left_bound) {
+    return (is_triple_click && ltr_text_in_ltr_layout) ? left_bound - 1 :
+                                                         left_bound;
+  }
+  if ((length == 0) || (x < right_bound))
+    return x;
   return is_triple_click ? (right_bound - 1) : right_bound;
 }
 
@@ -1865,37 +1989,43 @@ void AutocompleteEditViewWin::EmphasizeURLComponents() {
   // this input.  This can tell us whether an UNKNOWN input string is going to
   // be treated as a search or a navigation, and is the same method the Paste
   // And Go system uses.
-  url_parse::Parsed parts;
-  AutocompleteInput::Parse(GetText(), model_->GetDesiredTLD(), &parts, NULL);
-  const bool emphasize = model_->CurrentTextIsURL() && (parts.host.len > 0);
+  url_parse::Component scheme, host;
+  AutocompleteInput::ParseForEmphasizeComponents(
+      GetText(), model_->GetDesiredTLD(), &scheme, &host);
+  const bool emphasize = model_->CurrentTextIsURL() && (host.len > 0);
 
   // Set the baseline emphasis.
   CHARFORMAT cf = {0};
   cf.dwMask = CFM_COLOR;
   cf.dwEffects = 0;
-  cf.crTextColor = GetSysColor(emphasize ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT);
+  const bool is_secure = (scheme_security_level_ == ToolbarModel::SECURE);
+  // If we're going to emphasize parts of the text, then the baseline state
+  // should be "de-emphasized".  If not, then everything should be rendered in
+  // the standard text color.
+  cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(is_secure,
+      emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));
   SelectAll(false);
   SetSelectionCharFormat(cf);
 
   if (emphasize) {
     // We've found a host name, give it more emphasis.
-    cf.crTextColor = GetSysColor(COLOR_WINDOWTEXT);
-    SetSelection(parts.host.begin, parts.host.end());
+    cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(
+        is_secure, LocationBarView::TEXT));
+    SetSelection(host.begin, host.end());
     SetSelectionCharFormat(cf);
   }
 
   // Emphasize the scheme for security UI display purposes (if necessary).
   insecure_scheme_component_.reset();
-  if (!model_->user_input_in_progress() && parts.scheme.is_nonempty() &&
+  if (!model_->user_input_in_progress() && scheme.is_nonempty() &&
       (scheme_security_level_ != ToolbarModel::NORMAL)) {
-    if (scheme_security_level_ == ToolbarModel::SECURE) {
-      cf.crTextColor = kSecureSchemeColor;
-    } else {
-      insecure_scheme_component_.begin = parts.scheme.begin;
-      insecure_scheme_component_.len = parts.scheme.len;
-      cf.crTextColor = kInsecureSchemeColor;
+    if (!is_secure) {
+      insecure_scheme_component_.begin = scheme.begin;
+      insecure_scheme_component_.len = scheme.len;
     }
-    SetSelection(parts.scheme.begin, parts.scheme.end());
+    cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(
+        is_secure, LocationBarView::SECURITY_TEXT));
+    SetSelection(scheme.begin, scheme.end());
     SetSelectionCharFormat(cf);
   }
 
@@ -1960,7 +2090,7 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   // Create a canvas as large as |scheme_rect| to do our drawing, and initialize
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
-  ChromeCanvas canvas(scheme_rect.Width(), scheme_rect.Height(), false);
+  gfx::Canvas canvas(scheme_rect.Width(), scheme_rect.Height(), false);
   // TODO (jcampan): This const_cast should not be necessary once the SKIA
   // API has been changed to return a non-const bitmap.
   (const_cast<SkBitmap&>(canvas.getDevice()->accessBitmap(true))).
@@ -1991,7 +2121,8 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   canvas.save();
   if (selection_rect.isEmpty() ||
       canvas.clipRect(selection_rect, SkRegion::kDifference_Op)) {
-    paint.setColor(kSchemeStrikeoutColor);
+    paint.setColor(LocationBarView::GetColor(false,
+        LocationBarView::SCHEME_STRIKEOUT));
     canvas.drawLine(start_point.fX, start_point.fY,
                     end_point.fX, end_point.fY, paint);
   }
@@ -1999,7 +2130,8 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
 
   // Draw the selected portion of the stroke.
   if (!selection_rect.isEmpty() && canvas.clipRect(selection_rect)) {
-    paint.setColor(kSchemeSelectedStrikeoutColor);
+    paint.setColor(LocationBarView::GetColor(false,
+                                             LocationBarView::SELECTED_TEXT));
     canvas.drawLine(start_point.fX, start_point.fY,
                     end_point.fX, end_point.fY, paint);
   }
@@ -2042,7 +2174,7 @@ void AutocompleteEditViewWin::TextChanged() {
 
 std::wstring AutocompleteEditViewWin::GetClipboardText() const {
   // Try text format.
-  ClipboardService* clipboard = g_browser_process->clipboard_service();
+  Clipboard* clipboard = g_browser_process->clipboard();
   if (clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType())) {
     std::wstring text;
     clipboard->ReadText(&text);
@@ -2210,4 +2342,31 @@ void AutocompleteEditViewWin::RepaintDropHighlight(int position) {
         min_loc.x + 2, font_ascent_ + font_descent_ + font_y_adjustment_};
     InvalidateRect(&highlight_bounds, false);
   }
+}
+
+void AutocompleteEditViewWin::BuildContextMenu() {
+  if (context_menu_contents_.get())
+    return;
+
+  context_menu_contents_.reset(new views::SimpleMenuModel(this));
+  // Set up context menu.
+  if (popup_window_mode_) {
+    context_menu_contents_->AddItemWithStringId(IDS_COPY, IDS_COPY);
+  } else {
+    context_menu_contents_->AddItemWithStringId(IDS_UNDO, IDS_UNDO);
+    context_menu_contents_->AddSeparator();
+    context_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
+    context_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
+    context_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
+    // GetContextualLabel() will override this next label with the
+    // IDS_PASTE_AND_SEARCH label as needed.
+    context_menu_contents_->AddItemWithStringId(IDS_PASTE_AND_GO,
+                                                IDS_PASTE_AND_GO);
+    context_menu_contents_->AddSeparator();
+    context_menu_contents_->AddItemWithStringId(IDS_SELECT_ALL, IDS_SELECT_ALL);
+    context_menu_contents_->AddSeparator();
+    context_menu_contents_->AddItemWithStringId(IDS_EDIT_SEARCH_ENGINES,
+                                                IDS_EDIT_SEARCH_ENGINES);
+  }
+  context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
 }

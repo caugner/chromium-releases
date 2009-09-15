@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "unicode/uniset.h"
 
 #include "base/string_piece.h"
 #include "base/sys_string_conversions.h"
@@ -23,37 +22,9 @@ namespace {
 
 const FilePath::CharType kExtensionSeparator = FILE_PATH_LITERAL('.');
 
-}
+}  // namespace
 
 namespace file_util {
-
-void PathComponents(const FilePath& path,
-                    std::vector<FilePath::StringType>* components) {
-  DCHECK(components);
-  if (!components)
-    return;
-
-  FilePath::StringType path_str = path.value();
-  FilePath::StringType::size_type start = 0;
-  FilePath::StringType::size_type end =
-      path_str.find_first_of(FilePath::kSeparators);
-
-  // If the path starts with a separator, add it to components.
-  if (end == start) {
-    components->push_back(FilePath::StringType(path_str, 0, 1));
-    start = end + 1;
-    end = path_str.find_first_of(FilePath::kSeparators, start);
-  }
-  while (end != FilePath::StringType::npos) {
-    FilePath::StringType component =
-        FilePath::StringType(path_str, start, end - start);
-    components->push_back(component);
-    start = end + 1;
-    end = path_str.find_first_of(FilePath::kSeparators, start);
-  }
-
-  components->push_back(FilePath::StringType(path_str, start));
-}
 
 bool EndsWithSeparator(const FilePath& path) {
   FilePath::StringType value = path.value();
@@ -89,12 +60,6 @@ FilePath::StringType GetFileExtensionFromPath(const FilePath& path) {
   return FilePath::StringType(last_dot == FilePath::StringType::npos ?
                               FILE_PATH_LITERAL("") :
                               file_name, last_dot+1);
-}
-
-std::wstring GetFilenameWithoutExtensionFromPath(const std::wstring& path) {
-  std::wstring file_name = GetFilenameFromPath(path);
-  std::wstring::size_type last_dot = file_name.rfind(L'.');
-  return file_name.substr(0, last_dot);
 }
 
 void InsertBeforeExtension(FilePath* path, const FilePath::StringType& suffix) {
@@ -144,76 +109,6 @@ void ReplaceExtension(FilePath* path, const FilePath::StringType& extension) {
   value.append(clean_extension);
 }
 
-void ReplaceIllegalCharacters(std::wstring* file_name, int replace_char) {
-  DCHECK(file_name);
-
-  // Control characters, formatting characters, non-characters, and
-  // some printable ASCII characters regarded as dangerous ('"*/:<>?\\').
-  // See  http://blogs.msdn.com/michkap/archive/2006/11/03/941420.aspx
-  // and http://msdn2.microsoft.com/en-us/library/Aa365247.aspx
-  // TODO(jungshik): Revisit the set. ZWJ and ZWNJ are excluded because they
-  // are legitimate in Arabic and some S/SE Asian scripts. However, when used
-  // elsewhere, they can be confusing/problematic.
-  // Also, consider wrapping the set with our Singleton class to create and
-  // freeze it only once. Note that there's a trade-off between memory and
-  // speed.
-
-  UErrorCode status = U_ZERO_ERROR;
-#if defined(WCHAR_T_IS_UTF16)
-  UnicodeSet illegal_characters(UnicodeString(
-      L"[[\"*/:<>?\\\\|][:Cc:][:Cf:] - [\u200c\u200d]]"), status);
-#else
-  UnicodeSet illegal_characters(UNICODE_STRING_SIMPLE(
-      "[[\"*/:<>?\\\\|][:Cc:][:Cf:] - [\\u200c\\u200d]]").unescape(), status);
-#endif
-  DCHECK(U_SUCCESS(status));
-  // Add non-characters. If this becomes a performance bottleneck by
-  // any chance, check |ucs4 & 0xFFFEu == 0xFFFEu|, instead.
-  illegal_characters.add(0xFDD0, 0xFDEF);
-  for (int i = 0; i <= 0x10; ++i) {
-    int plane_base = 0x10000 * i;
-    illegal_characters.add(plane_base + 0xFFFE, plane_base + 0xFFFF);
-  }
-  illegal_characters.freeze();
-  DCHECK(!illegal_characters.contains(replace_char) && replace_char < 0x10000);
-
-  // Remove leading and trailing whitespace.
-  TrimWhitespace(*file_name, TRIM_ALL, file_name);
-
-  std::wstring::size_type i = 0;
-  std::wstring::size_type length = file_name->size();
-  const wchar_t* wstr = file_name->data();
-#if defined(WCHAR_T_IS_UTF16)
-  // Using |span| method of UnicodeSet might speed things up a bit, but
-  // it's not likely to matter here.
-  std::wstring temp;
-  temp.reserve(length);
-  while (i < length) {
-    UChar32 ucs4;
-    std::wstring::size_type prev = i;
-    U16_NEXT(wstr, i, length, ucs4);
-    if (illegal_characters.contains(ucs4)) {
-      temp.push_back(replace_char);
-    } else if (ucs4 < 0x10000) {
-      temp.push_back(ucs4);
-    } else {
-      temp.push_back(wstr[prev]);
-      temp.push_back(wstr[prev + 1]);
-    }
-  }
-  file_name->swap(temp);
-#elif defined(WCHAR_T_IS_UTF32)
-  while (i < length) {
-    if (illegal_characters.contains(wstr[i])) {
-      (*file_name)[i] = replace_char;
-    }
-    ++i;
-  }
-#else
-#error wchar_t* should be either UTF-16 or UTF-32
-#endif
-}
-
 bool ContentsEqual(const FilePath& filename1, const FilePath& filename2) {
   // We open the file in binary format even if they are text files because
   // we are just comparing that bytes are exactly same in both files and not
@@ -234,18 +129,57 @@ bool ContentsEqual(const FilePath& filename1, const FilePath& filename2) {
     file1.read(buffer1, BUFFER_SIZE);
     file2.read(buffer2, BUFFER_SIZE);
 
-    if ((file1.eof() && !file2.eof()) ||
-        (!file1.eof() && file2.eof()) ||
+    if ((file1.eof() != file2.eof()) ||
         (file1.gcount() != file2.gcount()) ||
         (memcmp(buffer1, buffer2, file1.gcount()))) {
       file1.close();
       file2.close();
       return false;
     }
-  } while (!file1.eof() && !file2.eof());
+  } while (!file1.eof() || !file2.eof());
 
   file1.close();
   file2.close();
+  return true;
+}
+
+bool TextContentsEqual(const FilePath& filename1, const FilePath& filename2) {
+  std::ifstream file1(filename1.value().c_str(), std::ios::in);
+  std::ifstream file2(filename2.value().c_str(), std::ios::in);
+
+  // Even if both files aren't openable (and thus, in some sense, "equal"),
+  // any unusable file yields a result of "false".
+  if (!file1.is_open() || !file2.is_open())
+    return false;
+
+  do {
+    std::string line1, line2;
+    getline(file1, line1);
+    getline(file2, line2);
+
+    // Check for mismatched EOF states, or any error state.
+    if ((file1.eof() != file2.eof()) ||
+        file1.bad() || file2.bad()) {
+      return false;
+    }
+
+    // Trim all '\r' and '\n' characters from the end of the line.
+    std::string::size_type end1 = line1.find_last_not_of("\r\n");
+    if (end1 == std::string::npos)
+      line1.clear();
+    else if (end1 + 1 < line1.length())
+      line1.erase(end1 + 1);
+
+    std::string::size_type end2 = line2.find_last_not_of("\r\n");
+    if (end2 == std::string::npos)
+      line2.clear();
+    else if (end2 + 1 < line2.length())
+      line2.erase(end2 + 1);
+
+    if (line1 != line2)
+      return false;
+  } while (!file1.eof() || !file2.eof());
+
   return true;
 }
 
@@ -263,6 +197,14 @@ bool ReadFileToString(const FilePath& path, std::string* contents) {
   CloseFile(file);
 
   return true;
+}
+
+FILE* CreateAndOpenTemporaryFile(FilePath* path) {
+  FilePath directory;
+  if (!GetTempDir(&directory))
+    return false;
+
+  return CreateAndOpenTemporaryFileInDir(directory, path);
 }
 
 bool GetFileSize(const FilePath& file_path, int64* file_size) {
@@ -474,13 +416,6 @@ int ReadFile(const std::wstring& filename, char* data, int size) {
 bool SetCurrentDirectory(const std::wstring& directory) {
   return SetCurrentDirectory(FilePath::FromWStringHack(directory));
 }
-void TrimFilename(std::wstring* path) {
-  if (EndsWithSeparator(path)) {
-    TrimTrailingSeparator(path);
-  } else {
-    *path = FilePath::FromWStringHack(*path).DirName().ToWStringHack();
-  }
-}
 void UpOneDirectory(std::wstring* dir) {
   FilePath path = FilePath::FromWStringHack(*dir);
   FilePath directory = path.DirName();
@@ -502,4 +437,23 @@ void UpOneDirectoryOrEmpty(std::wstring* dir) {
 int WriteFile(const std::wstring& filename, const char* data, int size) {
   return WriteFile(FilePath::FromWStringHack(filename), data, size);
 }
+
+///////////////////////////////////////////////
+// FileEnumerator
+//
+// Note: the main logic is in file_util_<platform>.cc
+
+bool FileEnumerator::ShouldSkip(const FilePath& path) {
+  FilePath::StringType basename = path.BaseName().value();
+  return IsDot(path) || (IsDotDot(path) && !(INCLUDE_DOT_DOT & file_type_));
+}
+
+bool FileEnumerator::IsDot(const FilePath& path) {
+  return FILE_PATH_LITERAL(".") == path.BaseName().value();
+}
+
+bool FileEnumerator::IsDotDot(const FilePath& path) {
+  return FILE_PATH_LITERAL("..") == path.BaseName().value();
+}
+
 }  // namespace

@@ -13,14 +13,18 @@
 #define CHROME_BROWSER_RENDERER_HOST_RESOURCE_DISPATCHER_HOST_H_
 
 #include <map>
+#include <string>
+#include <vector>
 
+#include "base/basictypes.h"
+#include "base/logging.h"
 #include "base/observer_list.h"
 #include "base/process.h"
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/resource_handler.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/filter_policy.h"
-#include "chrome/common/ipc_message.h"
+#include "ipc/ipc_message.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_type.h"
 
@@ -32,8 +36,11 @@ class MessageLoop;
 class PluginService;
 class SafeBrowsingService;
 class SaveFileManager;
+class SSLClientAuthHandler;
 class URLRequestContext;
+class WebKitThread;
 struct ViewHostMsg_Resource_Request;
+struct ViewMsg_ClosePage_Params;
 
 class ResourceDispatcherHost : public URLRequest::Delegate {
  public:
@@ -59,13 +66,14 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
         const ViewHostMsg_Resource_Request& request_data) = 0;
 
    protected:
-    Receiver(ChildProcessInfo::ProcessType type) : ChildProcessInfo(type) { }
-    virtual ~Receiver() { }
+    explicit Receiver(ChildProcessInfo::ProcessType type)
+        : ChildProcessInfo(type) {}
+    virtual ~Receiver() {}
   };
 
   // Holds the data we would like to associate with each request
   class ExtraRequestInfo : public URLRequest::UserData {
-   friend class ResourceDispatcherHost;
+    friend class ResourceDispatcherHost;
    public:
     ExtraRequestInfo(ResourceHandler* handler,
                      ChildProcessInfo::ProcessType process_type,
@@ -79,6 +87,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
         : resource_handler(handler),
           cross_site_handler(NULL),
           login_handler(NULL),
+          ssl_client_auth_handler(NULL),
           process_type(process_type),
           process_id(process_id),
           route_id(route_id),
@@ -109,6 +118,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
     CrossSiteResourceHandler* cross_site_handler;
 
     LoginHandler* login_handler;
+
+    SSLClientAuthHandler* ssl_client_auth_handler;
 
     ChildProcessInfo::ProcessType process_type;
 
@@ -173,6 +184,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
 
   class Observer {
    public:
+    virtual ~Observer() {}
     virtual void OnRequestStarted(ResourceDispatcherHost* resource_dispatcher,
                                   URLRequest* request) = 0;
     virtual void OnResponseCompleted(
@@ -188,7 +200,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
     GlobalRequestID() : process_id(-1), request_id(-1) {
     }
     GlobalRequestID(int process_id, int request_id)
-        : process_id(process_id), request_id(request_id) { }
+        : process_id(process_id), request_id(request_id) {
+    }
 
     int process_id;
     int request_id;
@@ -237,6 +250,10 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
                      int request_id,
                      bool from_renderer);
 
+  // Follows a deferred redirect for the given request.
+  void FollowDeferredRedirect(int process_id,
+                              int request_id);
+
   // Returns true if it's ok to send the data. If there are already too many
   // data messages pending, it pauses the request and returns false. In this
   // case the caller should not send the data.
@@ -279,10 +296,14 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
     return safe_browsing_;
   }
 
+  WebKitThread* webkit_thread() const {
+    return webkit_thread_.get();
+  }
+
   MessageLoop* ui_loop() const { return ui_loop_; }
 
   // Called when the onunload handler for a cross-site request has finished.
-  void OnClosePageACK(int process_id, int request_id);
+  void OnClosePageACK(const ViewMsg_ClosePage_Params& params);
 
   // Force cancels any pending requests for the given process.
   void CancelRequestsForProcess(int process_id);
@@ -293,9 +314,13 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
 
   // URLRequest::Delegate
   virtual void OnReceivedRedirect(URLRequest* request,
-                                  const GURL& new_url);
+                                  const GURL& new_url,
+                                  bool* defer_redirect);
   virtual void OnAuthRequired(URLRequest* request,
                               net::AuthChallengeInfo* auth_info);
+  virtual void OnCertificateRequested(
+      URLRequest* request,
+      net::SSLCertRequestInfo* cert_request_info);
   virtual void OnSSLCertificateError(URLRequest* request,
                                      int cert_error,
                                      net::X509Certificate* cert);
@@ -303,21 +328,18 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   virtual void OnReadCompleted(URLRequest* request, int bytes_read);
   void OnResponseCompleted(URLRequest* request);
 
-  // Helper function to get our extra data out of a request. The given request
+  // Helper functions to get our extra data out of a request. The given request
   // must have been one we created so that it has the proper extra data pointer.
-  static ExtraRequestInfo* ExtraInfoForRequest(URLRequest* request) {
-    ExtraRequestInfo* r = static_cast<ExtraRequestInfo*>(request->user_data());
-    DLOG_IF(WARNING, !r) << "Request doesn't seem to have our data";
-    return r;
-  }
+  static ExtraRequestInfo* ExtraInfoForRequest(URLRequest* request);
+  static const ExtraRequestInfo* ExtraInfoForRequest(const URLRequest* request);
 
-  static const ExtraRequestInfo* ExtraInfoForRequest(
-      const URLRequest* request) {
-    const ExtraRequestInfo* r =
-        static_cast<const ExtraRequestInfo*>(request->user_data());
-    DLOG_IF(WARNING, !r) << "Request doesn't seem to have our data";
-    return r;
-  }
+  // Extracts the render view/process host's identifiers from the given request
+  // and places them in the given out params (both required). If there are no
+  // such IDs associated with the request (such as non-page-related requests),
+  // this function will return false and both out params will be -1.
+  static bool RenderViewForRequest(const URLRequest* request,
+                                   int* render_process_host_id,
+                                   int* render_view_host_id);
 
   // Adds an observer.  The observer will be called on the IO thread.  To
   // observe resource events on the UI thread, subscribe to the
@@ -358,7 +380,18 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   void DataReceivedACK(int process_id, int request_id);
 
   // Needed for the sync IPC message dispatcher macros.
-  bool Send(IPC::Message* message) { delete message; return false; }
+  bool Send(IPC::Message* message) {
+    delete message;
+    return false;
+  }
+
+  static void DisableHttpPrioritization() {
+    g_is_http_prioritization_enabled = false;
+  }
+
+  static bool IsHttpPrioritizationEnabled() {
+    return g_is_http_prioritization_enabled;
+  }
 
  private:
   FRIEND_TEST(ResourceDispatcherHostTest, TestBlockedRequestsProcessDies);
@@ -370,6 +403,10 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   class ShutdownTask;
 
   friend class ShutdownTask;
+
+  void SetExtraInfoForRequest(URLRequest* request, ExtraRequestInfo* info) {
+    request->SetUserData(NULL, info);
+  }
 
   // A shutdown helper that runs on the IO thread.
   void OnShutdown();
@@ -388,7 +425,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   // Internal function to finish an async IO which has completed.  Returns
   // true if there is more data to read (e.g. we haven't read EOF yet and
   // no errors have occurred).
-  bool CompleteRead(URLRequest *, int* bytes_read);
+  bool CompleteRead(URLRequest*, int* bytes_read);
 
   // Internal function to finish handling the ResponseStarted message.  Returns
   // true on success.
@@ -424,7 +461,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   // It may be enhanced in the future to provide some kind of prioritization
   // mechanism. We should also consider a hashtable or binary tree if it turns
   // out we have a lot of things here.
-  typedef std::map<GlobalRequestID,URLRequest*> PendingRequestList;
+  typedef std::map<GlobalRequestID, URLRequest*> PendingRequestList;
 
   // Deletes the pending request identified by the iterator passed in.
   // This function will invalidate the iterator passed in. Callers should
@@ -435,7 +472,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   void NotifyResponseStarted(URLRequest* request, int process_id);
 
   // Notify our observers that a request has been redirected.
-  void NofityReceivedRedirect(URLRequest* request,
+  void NotifyReceivedRedirect(URLRequest* request,
                               int process_id,
                               const GURL& new_url);
 
@@ -443,7 +480,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   // handled, the function returns true. False otherwise.
   bool HandleExternalProtocol(int request_id,
                               int process_id,
-                              int tab_contents_id,
+                              int route_id,
                               const GURL& url,
                               ResourceType::Type resource_type,
                               ResourceHandler* handler);
@@ -468,9 +505,9 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
                     IPC::Message* sync_result,  // only valid for sync
                     int route_id);  // only valid for async
   void OnDataReceivedACK(int request_id);
-  void OnDownloadProgressACK(int request_id);
   void OnUploadProgressACK(int request_id);
   void OnCancelRequest(int request_id);
+  void OnFollowRedirect(int request_id);
 
   // Returns true if the message passed in is a resource related message.
   static bool IsResourceDispatcherHostMessage(const IPC::Message&);
@@ -498,6 +535,9 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   scoped_refptr<SaveFileManager> save_file_manager_;
 
   scoped_refptr<SafeBrowsingService> safe_browsing_;
+
+  // We own the WebKit thread and see to its destruction.
+  scoped_ptr<WebKitThread> webkit_thread_;
 
   // Request ID for browser initiated requests. request_ids generated by
   // child processes are counted up from 0, while browser created requests
@@ -541,6 +581,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   // Used during IPC message dispatching so that the handlers can get a pointer
   // to the source of the message.
   Receiver* receiver_;
+
+  static bool g_is_http_prioritization_enabled;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHost);
 };

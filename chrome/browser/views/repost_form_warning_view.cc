@@ -4,13 +4,15 @@
 
 #include "chrome/browser/views/repost_form_warning_view.h"
 
+#include "app/l10n_util.h"
+#include "app/message_box_flags.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/views/controls/message_box_view.h"
-#include "chrome/views/window/window.h"
 #include "grit/generated_resources.h"
+#include "views/controls/message_box_view.h"
+#include "views/window/window.h"
 
 // Implementation of function declared in
 // browser/tab_contents/repost_form_warning.h
@@ -24,7 +26,7 @@ RepostFormWarningView::RepostFormWarningView(
       : navigation_controller_(navigation_controller),
         message_box_view_(NULL) {
   message_box_view_ = new MessageBoxView(
-      MessageBoxView::kIsConfirmMessageBox,
+      MessageBoxFlags::kIsConfirmMessageBox,
       l10n_util::GetString(IDS_HTTP_POST_WARNING),
       L"");
   // TODO(beng): fix this - this dialog box should be shown by a method on the
@@ -35,17 +37,14 @@ RepostFormWarningView::RepostFormWarningView(
         window()->GetNativeHandle());
   }
   views::Window::CreateChromeWindow(root_hwnd, gfx::Rect(), this)->Show();
-  NotificationService::current()->AddObserver(
-      this, NotificationType::LOAD_START, NotificationService::AllSources());
-  NotificationService::current()->AddObserver(
-      this, NotificationType::TAB_CLOSING, NotificationService::AllSources());
+
+  registrar_.Add(this, NotificationType::LOAD_START,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::TAB_CLOSING,
+                 NotificationService::AllSources());
 }
 
 RepostFormWarningView::~RepostFormWarningView() {
-  NotificationService::current()->RemoveObserver(
-      this, NotificationType::LOAD_START, NotificationService::AllSources());
-  NotificationService::current()->RemoveObserver(
-      this, NotificationType::TAB_CLOSING, NotificationService::AllSources());
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -56,10 +55,10 @@ std::wstring RepostFormWarningView::GetWindowTitle() const {
 }
 
 std::wstring RepostFormWarningView::GetDialogButtonLabel(
-    DialogButton button) const {
-  if (button == DialogDelegate::DIALOGBUTTON_OK)
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
     return l10n_util::GetString(IDS_HTTP_POST_WARNING_RESEND);
-  if (button == DialogDelegate::DIALOGBUTTON_CANCEL)
+  if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL)
     return l10n_util::GetString(IDS_HTTP_POST_WARNING_CANCEL);
   return L"";
 }

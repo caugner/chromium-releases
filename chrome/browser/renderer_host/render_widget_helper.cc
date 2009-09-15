@@ -4,9 +4,11 @@
 
 #include "chrome/browser/renderer_host/render_widget_helper.h"
 
+#include "base/eintr_wrapper.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/render_messages.h"
 
@@ -49,7 +51,6 @@ RenderWidgetHelper::RenderWidgetHelper()
 #elif defined(OS_POSIX)
       event_(false /* auto-reset */, false),
 #endif
-      block_popups_(false),
       resource_dispatcher_host_(NULL) {
 }
 
@@ -83,14 +84,13 @@ void RenderWidgetHelper::CancelResourceRequests(int render_widget_id) {
   }
 }
 
-void RenderWidgetHelper::CrossSiteClosePageACK(int new_render_process_host_id,
-                                               int new_request_id) {
+void RenderWidgetHelper::CrossSiteClosePageACK(
+    const ViewMsg_ClosePage_Params& params) {
   if (g_browser_process->io_thread()) {
     g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(this,
                           &RenderWidgetHelper::OnCrossSiteClosePageACK,
-                          new_render_process_host_id,
-                          new_request_id));
+                          params));
   }
 }
 
@@ -195,10 +195,8 @@ void RenderWidgetHelper::OnCancelResourceRequests(
 }
 
 void RenderWidgetHelper::OnCrossSiteClosePageACK(
-    int new_render_process_host_id,
-    int new_request_id) {
-  resource_dispatcher_host_->OnClosePageACK(
-      new_render_process_host_id, new_request_id);
+    ViewMsg_ClosePage_Params params) {
+  resource_dispatcher_host_->OnClosePageACK(params);
 }
 
 void RenderWidgetHelper::CreateNewWindow(int opener_id,
@@ -206,14 +204,6 @@ void RenderWidgetHelper::CreateNewWindow(int opener_id,
                                          base::ProcessHandle render_process,
                                          int* route_id,
                                          ModalDialogEvent* modal_dialog_event) {
-  if (!user_gesture && block_popups_) {
-    *route_id = MSG_ROUTING_NONE;
-#if defined(OS_WIN)
-    modal_dialog_event->event = NULL;
-#endif
-    return;
-  }
-
   *route_id = GetNextRoutingID();
 
   ModalDialogEvent modal_dialog_event_internal;
@@ -236,19 +226,16 @@ void RenderWidgetHelper::CreateNewWindow(int opener_id,
   resource_dispatcher_host_->BlockRequestsForRoute(
       render_process_id_, *route_id);
 
-  // The easiest way to reach RenderViewHost is just to send a routed message.
-  ViewHostMsg_CreateWindowWithRoute msg(opener_id, *route_id,
-                                        modal_dialog_event_internal);
-
   ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidgetHelper::OnCreateWindowOnUI, msg, *route_id));
+      this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id,
+      modal_dialog_event_internal));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnUI(
-    const IPC::Message& message, int route_id) {
-  RenderProcessHost* host = RenderProcessHost::FromID(render_process_id_);
+    int opener_id, int route_id, ModalDialogEvent modal_dialog_event) {
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
-    host->OnMessageReceived(message);
+    host->CreateNewWindow(route_id, modal_dialog_event);
 
   g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(this, &RenderWidgetHelper::OnCreateWindowOnIO, route_id));
@@ -263,16 +250,46 @@ void RenderWidgetHelper::CreateNewWidget(int opener_id,
                                          bool activatable,
                                          int* route_id) {
   *route_id = GetNextRoutingID();
-  ViewHostMsg_CreateWidgetWithRoute msg(opener_id, *route_id, activatable);
   ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidgetHelper::OnCreateWidgetOnUI, msg));
+      this, &RenderWidgetHelper::OnCreateWidgetOnUI, opener_id, *route_id,
+      activatable));
 }
 
 void RenderWidgetHelper::OnCreateWidgetOnUI(
-    const IPC::Message& message) {
-  RenderProcessHost* host = RenderProcessHost::FromID(render_process_id_);
+    int opener_id, int route_id, bool activatable) {
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
-    host->OnMessageReceived(message);
+    host->CreateNewWidget(route_id, activatable);
+}
+
+void RenderWidgetHelper::SignalModalDialogEvent(int routing_id) {
+  ui_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(
+          this, &RenderWidgetHelper::SignalModalDialogEventOnUI,
+          routing_id));
+}
+
+void RenderWidgetHelper::SignalModalDialogEventOnUI(int routing_id) {
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_,
+                                                routing_id);
+  if (host) {
+    host->SignalModalDialogEvent();
+  }
+}
+
+void RenderWidgetHelper::ResetModalDialogEvent(int routing_id) {
+  ui_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(
+          this, &RenderWidgetHelper::ResetModalDialogEventOnUI,
+          routing_id));
+}
+
+void RenderWidgetHelper::ResetModalDialogEventOnUI(int routing_id) {
+  RenderViewHost* host = RenderViewHost::FromID(render_process_id_,
+                                                routing_id);
+  if (host) {
+    host->ResetModalDialogEvent();
+  }
 }
 
 #if defined(OS_MACOSX)
@@ -313,7 +330,7 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
     i = allocated_dibs_.find(dib_id);
 
   if (i != allocated_dibs_.end()) {
-    close(i->second);
+    HANDLE_EINTR(close(i->second));
     allocated_dibs_.erase(i);
   } else {
     DLOG(WARNING) << "Renderer asked us to free unknown transport DIB";
@@ -323,7 +340,7 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
 void RenderWidgetHelper::ClearAllocatedDIBs() {
   for (std::map<TransportDIB::Id, int>::iterator
        i = allocated_dibs_.begin(); i != allocated_dibs_.end(); ++i) {
-    close(i->second);
+    HANDLE_EINTR(close(i->second));
   }
 
   allocated_dibs_.clear();

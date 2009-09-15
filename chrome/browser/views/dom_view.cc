@@ -4,37 +4,41 @@
 
 #include "chrome/browser/views/dom_view.h"
 
-#include "chrome/browser/dom_ui/dom_ui_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "views/focus/focus_manager.h"
 
-DOMView::DOMView(const GURL& contents)
-    : contents_(contents), initialized_(false), host_(NULL) {
+DOMView::DOMView() : initialized_(false), tab_contents_(NULL) {
   SetFocusable(true);
 }
 
 DOMView::~DOMView() {
-  if (host_) {
+  if (tab_contents_.get())
     Detach();
-    host_->Destroy();
-    host_ = NULL;
-  }
 }
 
 bool DOMView::Init(Profile* profile, SiteInstance* instance) {
   if (initialized_)
     return true;
+
   initialized_ = true;
-
-  // TODO(timsteele): This should use a separate factory method; e.g
-  // a DOMUIHostFactory rather than TabContentsFactory, because DOMView's
-  // should only be associated with instances of DOMUIHost.
-  TabContentsType type = TabContents::TypeForURL(&contents_);
-  TabContents* tab_contents = TabContents::CreateWithType(type, profile,
-                                                          instance);
-  host_ = tab_contents->AsDOMUIHost();
-  DCHECK(host_);
-
-  views::HWNDView::Attach(host_->GetNativeView());
-  host_->SetupController(profile);
-  host_->controller()->LoadURL(contents_, GURL(), PageTransition::START_PAGE);
+  tab_contents_.reset(new TabContents(profile, instance,
+                                      MSG_ROUTING_NONE, NULL));
+  views::NativeViewHost::Attach(tab_contents_->GetNativeView());
   return true;
+}
+
+void DOMView::LoadURL(const GURL& url) {
+  DCHECK(initialized_);
+  tab_contents_->controller().LoadURL(url, GURL(), PageTransition::START_PAGE);
+}
+
+bool DOMView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
+  // Don't move the focus to the next view when tab is pressed, we want the
+  // key event to be propagated to the render view for doing the tab traversal
+  // there.
+  return views::FocusManager::IsTabTraversalKeyEvent(e);
+}
+
+void DOMView::Focus() {
+  tab_contents_->Focus();
 }

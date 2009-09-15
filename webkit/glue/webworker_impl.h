@@ -5,20 +5,23 @@
 #ifndef WEBKIT_GLUE_WEBWORKER_IMPL_H_
 #define WEBKIT_GLUE_WEBWORKER_IMPL_H_
 
-#include "webkit/glue/webworker.h"
+#include "webkit/api/public/WebWorker.h"
 
 #if ENABLE(WORKERS)
 
-#include <vector>
 #include "ScriptExecutionContext.h"
+#include "WorkerLoaderProxy.h"
 #include "WorkerObjectProxy.h"
+#include <wtf/PassOwnPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-class ScriptExecutionContext;
 class Strng;
+class MessagePortChannel;
 class WorkerThread;
 };
+
+class WebView;
 
 // This class is used by the worker process code to talk to the WebCore::Worker
 // implementation.  It can't use it directly since it uses WebKit types, so this
@@ -26,42 +29,106 @@ class WorkerThread;
 // WebCore::WorkerObjectProxy, this class will conver to Chrome data types first
 // and then call the supplied WebWorkerClient.
 class WebWorkerImpl: public WebCore::WorkerObjectProxy,
-                     public WebWorker {
+                     public WebCore::WorkerLoaderProxy,
+                     public WebKit::WebWorker {
  public:
-  WebWorkerImpl(WebWorkerClient* client);
-  virtual ~WebWorkerImpl();
+  explicit WebWorkerImpl(WebKit::WebWorkerClient* client);
 
-  // WebCore::WorkerObjectProxy implementation.
-  void postMessageToWorkerObject(const WebCore::String& message);
-  void postExceptionToWorkerObject(const WebCore::String& errorMessage,
-                                   int lineNumber,
-                                   const WebCore::String& sourceURL);
-  void postConsoleMessageToWorkerObject(WebCore::MessageDestination destination,
-                                        WebCore::MessageSource source,
-                                        WebCore::MessageLevel level,
-                                        const WebCore::String& message,
-                                        int lineNumber,
-                                        const WebCore::String& sourceURL);
-  void confirmMessageFromWorkerObject(bool hasPendingActivity);
-  void reportPendingActivity(bool hasPendingActivity);
-  void workerContextDestroyed();
+  // WebCore::WorkerObjectProxy methods:
+  virtual void postMessageToWorkerObject(
+      const WebCore::String& message,
+      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+  virtual void postExceptionToWorkerObject(
+      const WebCore::String& error_message,
+      int line_number,
+      const WebCore::String& source_url);
+  virtual void postConsoleMessageToWorkerObject(
+      WebCore::MessageDestination destination,
+      WebCore::MessageSource source,
+      WebCore::MessageType type,
+      WebCore::MessageLevel level,
+      const WebCore::String& message,
+      int line_number,
+      const WebCore::String& source_url);
+  virtual void confirmMessageFromWorkerObject(bool has_pending_activity);
+  virtual void reportPendingActivity(bool has_pending_activity);
+  virtual void workerContextDestroyed();
 
-  // WebWorker implementation.
-  void StartWorkerContext(const GURL& script_url,
-                          const string16& user_agent,
-                          const string16& encoding,
-                          const string16& source_code);
-  void TerminateWorkerContext();
-  void PostMessageToWorkerContext(const string16& message);
-  void WorkerObjectDestroyed();
+  // WebCore::WorkerLoaderProxy methods:
+  virtual void postTaskToLoader(
+      WTF::PassRefPtr<WebCore::ScriptExecutionContext::Task>);
+  virtual void postTaskForModeToWorkerContext(
+      WTF::PassRefPtr<WebCore::ScriptExecutionContext::Task>,
+      const WebCore::String& mode);
+
+  // WebWorker methods:
+  virtual void startWorkerContext(const WebKit::WebURL& script_url,
+                                  const WebKit::WebString& user_agent,
+                                  const WebKit::WebString& source_code);
+  virtual void terminateWorkerContext();
+  virtual void postMessageToWorkerContext(const WebKit::WebString& message);
+  virtual void workerObjectDestroyed();
+
+  WebKit::WebWorkerClient* client() { return client_; }
+
+  // Executes the given task on the main thread.
+  static void DispatchTaskToMainThread(
+      PassRefPtr<WebCore::ScriptExecutionContext::Task> task);
 
  private:
+  virtual ~WebWorkerImpl();
+
+  // Tasks that are run on the worker thread.
   static void PostMessageToWorkerContextTask(
       WebCore::ScriptExecutionContext* context,
       WebWorkerImpl* this_ptr,
-      const WebCore::String& message);
+      const WebCore::String& message,
+      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
 
-  WebWorkerClient* client_;
+  // Function used to invoke tasks on the main thread.
+  static void InvokeTaskMethod(void* param);
+
+  // Tasks that are run on the main thread.
+  static void PostMessageTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr,
+      WebCore::String message,
+      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+  static void PostExceptionTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr,
+      const WebCore::String& error_message,
+      int line_number,
+      const WebCore::String& source_url);
+  static void PostConsoleMessageTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr,
+      int destination,
+      int source,
+      int type,
+      int level,
+      const WebCore::String& message,
+      int line_number,
+      const WebCore::String& source_url);
+  static void ConfirmMessageTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr,
+      bool has_pending_activity);
+  static void ReportPendingActivityTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr,
+      bool has_pending_activity);
+  static void WorkerContextDestroyedTask(
+      WebCore::ScriptExecutionContext* context,
+      WebWorkerImpl* this_ptr);
+
+  WebKit::WebWorkerClient* client_;
+
+  // 'shadow page' - created to proxy loading requests from the worker.
+  WTF::RefPtr<WebCore::ScriptExecutionContext> loading_document_;
+  WebView* web_view_;
+  bool asked_to_terminate_;
+
   WTF::RefPtr<WebCore::WorkerThread> worker_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(WebWorkerImpl);

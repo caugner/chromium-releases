@@ -5,7 +5,11 @@
 #include "config.h"
 #include "webkit/glue/event_conversion.h"
 
+#include "EventNames.h"
+#include "FrameView.h"
 #include "KeyboardCodes.h"
+#include "KeyboardEvent.h"
+#include "MouseEvent.h"
 #include "StringImpl.h"  // This is so that the KJS build works
 #include "PlatformKeyboardEvent.h"
 #include "PlatformMouseEvent.h"
@@ -15,99 +19,51 @@
 #undef LOG
 #include "base/gfx/point.h"
 #include "base/logging.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "webkit/api/public/WebInputEvent.h"
+#include "webkit/api/public/WebKit.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/webinputevent.h"
 #include "webkit/glue/webkit_glue.h"
 
 using namespace WebCore;
 
-// MakePlatformMouseEvent -----------------------------------------------------
+using WebKit::WebInputEvent;
+using WebKit::WebKeyboardEvent;
+using WebKit::WebMouseEvent;
+using WebKit::WebMouseWheelEvent;
 
-int MakePlatformMouseEvent::last_click_count_ = 0;
-uint32 MakePlatformMouseEvent::last_click_time_ = 0;
+// MakePlatformMouseEvent -----------------------------------------------------
 
 MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
                                                const WebMouseEvent& e) {
   // TODO(mpcomplete): widget is always toplevel, unless it's a popup.  We
   // may be able to get rid of this once we abstract popups into a WebKit API.
   m_position = widget->convertFromContainingWindow(IntPoint(e.x, e.y));
-  m_globalPosition = IntPoint(e.global_x, e.global_y);
+  m_globalPosition = IntPoint(e.globalX, e.globalY);
   m_button = static_cast<MouseButton>(e.button);
-  m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
-  m_ctrlKey = (e.modifiers & WebInputEvent::CTRL_KEY) != 0;
-  m_altKey = (e.modifiers & WebInputEvent::ALT_KEY) != 0;
-  m_metaKey = (e.modifiers & WebInputEvent::META_KEY) != 0;
+  m_shiftKey = (e.modifiers & WebInputEvent::ShiftKey) != 0;
+  m_ctrlKey = (e.modifiers & WebInputEvent::ControlKey) != 0;
+  m_altKey = (e.modifiers & WebInputEvent::AltKey) != 0;
+  m_metaKey = (e.modifiers & WebInputEvent::MetaKey) != 0;
   m_modifierFlags = e.modifiers;
-  m_timestamp = e.timestamp_sec;
-
-  // This differs slightly from the WebKit code in WebKit/win/WebView.cpp where
-  // their original code looks buggy.
-  static IntPoint last_click_position;
-  static MouseButton last_click_button = LeftButton;
-
-  const uint32 current_time = static_cast<uint32>(m_timestamp * 1000);
-#if defined(OS_WIN)
-  const bool cancel_previous_click =
-      (abs(last_click_position.x() - m_position.x()) >
-       (GetSystemMetrics(SM_CXDOUBLECLK) / 2)) ||
-      (abs(last_click_position.y() - m_position.y()) >
-       (GetSystemMetrics(SM_CYDOUBLECLK) / 2)) ||
-      ((current_time - last_click_time_) > GetDoubleClickTime());
-#elif defined(OS_MACOSX) || defined(OS_LINUX)
-  const bool cancel_previous_click = false;
-#endif
+  m_timestamp = e.timeStampSeconds;
+  m_clickCount = e.clickCount;
 
   switch (e.type) {
-    case WebInputEvent::MOUSE_MOVE:
-    case WebInputEvent::MOUSE_LEAVE:  // synthesize a move event
-      if (cancel_previous_click) {
-        last_click_count_ = 0;
-        last_click_position = IntPoint();
-        last_click_time_ = 0;
-      }
-      m_clickCount = last_click_count_;
+    case WebInputEvent::MouseMove:
+    case WebInputEvent::MouseLeave:  // synthesize a move event
       m_eventType = MouseEventMoved;
       break;
 
-  // TODO(port): make these platform agnostic when we restructure this code.
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-    case WebInputEvent::MOUSE_DOUBLE_CLICK:
-      ++m_clickCount;
-      // fall through
-    case WebInputEvent::MOUSE_DOWN:
-      ++m_clickCount;
-      last_click_time_ = current_time;
-      last_click_button = m_button;
+    case WebInputEvent::MouseDown:
       m_eventType = MouseEventPressed;
       break;
-#else
-    case WebInputEvent::MOUSE_DOWN:
-    case WebInputEvent::MOUSE_DOUBLE_CLICK:
-      if (!cancel_previous_click && (m_button == last_click_button)) {
-        ++last_click_count_;
-      } else {
-        last_click_count_ = 1;
-        last_click_position = m_position;
-      }
-      last_click_time_ = current_time;
-      last_click_button = m_button;
-      m_clickCount = last_click_count_;
-      m_eventType = MouseEventPressed;
-      break;
-#endif
 
-    case WebInputEvent::MOUSE_UP:
-      m_clickCount = last_click_count_;
+    case WebInputEvent::MouseUp:
       m_eventType = MouseEventReleased;
       break;
 
     default:
       NOTREACHED() << "unexpected mouse event type";
-  }
-
-  if (WebKit::layoutTestMode()) {
-    m_clickCount = e.layout_test_click_count;
   }
 }
 
@@ -116,18 +72,18 @@ MakePlatformMouseEvent::MakePlatformMouseEvent(Widget* widget,
 MakePlatformWheelEvent::MakePlatformWheelEvent(Widget* widget,
                                                const WebMouseWheelEvent& e) {
   m_position = widget->convertFromContainingWindow(IntPoint(e.x, e.y));
-  m_globalPosition = IntPoint(e.global_x, e.global_y);
-  m_deltaX = e.delta_x;
-  m_deltaY = e.delta_y;
-  m_wheelTicksX = e.wheel_ticks_x;
-  m_wheelTicksY = e.wheel_ticks_y;
+  m_globalPosition = IntPoint(e.globalX, e.globalY);
+  m_deltaX = e.deltaX;
+  m_deltaY = e.deltaY;
+  m_wheelTicksX = e.wheelTicksX;
+  m_wheelTicksY = e.wheelTicksY;
   m_isAccepted = false;
-  m_granularity = e.scroll_by_page ?
+  m_granularity = e.scrollByPage ?
       ScrollByPageWheelEvent : ScrollByPixelWheelEvent;
-  m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
-  m_ctrlKey = (e.modifiers & WebInputEvent::CTRL_KEY) != 0;
-  m_altKey = (e.modifiers & WebInputEvent::ALT_KEY) != 0;
-  m_metaKey = (e.modifiers & WebInputEvent::META_KEY) != 0;
+  m_shiftKey = (e.modifiers & WebInputEvent::ShiftKey) != 0;
+  m_ctrlKey = (e.modifiers & WebInputEvent::ControlKey) != 0;
+  m_altKey = (e.modifiers & WebInputEvent::AltKey) != 0;
+  m_metaKey = (e.modifiers & WebInputEvent::MetaKey) != 0;
 }
 
 // MakePlatformKeyboardEvent --------------------------------------------------
@@ -135,13 +91,13 @@ MakePlatformWheelEvent::MakePlatformWheelEvent(Widget* widget,
 static inline const PlatformKeyboardEvent::Type ToPlatformKeyboardEventType(
     WebInputEvent::Type type) {
   switch (type) {
-    case WebInputEvent::KEY_UP:
+    case WebInputEvent::KeyUp:
       return PlatformKeyboardEvent::KeyUp;
-    case WebInputEvent::KEY_DOWN:
+    case WebInputEvent::KeyDown:
       return PlatformKeyboardEvent::KeyDown;
-    case WebInputEvent::RAW_KEY_DOWN:
+    case WebInputEvent::RawKeyDown:
       return PlatformKeyboardEvent::RawKeyDown;
-    case WebInputEvent::CHAR:
+    case WebInputEvent::Char:
       return PlatformKeyboardEvent::Char;
     default:
       ASSERT_NOT_REACHED();
@@ -153,17 +109,17 @@ MakePlatformKeyboardEvent::MakePlatformKeyboardEvent(
     const WebKeyboardEvent& e) {
   m_type = ToPlatformKeyboardEventType(e.type);
   m_text = WebCore::String(e.text);
-  m_unmodifiedText = WebCore::String(e.unmodified_text);
-  m_keyIdentifier = WebCore::String(e.key_identifier);
-  m_autoRepeat = (e.modifiers & WebInputEvent::IS_AUTO_REPEAT) != 0;
-  m_windowsVirtualKeyCode = e.windows_key_code;
-  m_nativeVirtualKeyCode = e.native_key_code;
-  m_isKeypad = (e.modifiers & WebInputEvent::IS_KEYPAD) != 0;
-  m_shiftKey = (e.modifiers & WebInputEvent::SHIFT_KEY) != 0;
-  m_ctrlKey = (e.modifiers & WebInputEvent::CTRL_KEY) != 0;
-  m_altKey = (e.modifiers & WebInputEvent::ALT_KEY) != 0;
-  m_metaKey = (e.modifiers & WebInputEvent::META_KEY) != 0;
-  m_isSystemKey = e.system_key;
+  m_unmodifiedText = WebCore::String(e.unmodifiedText);
+  m_keyIdentifier = WebCore::String(e.keyIdentifier);
+  m_autoRepeat = (e.modifiers & WebInputEvent::IsAutoRepeat) != 0;
+  m_windowsVirtualKeyCode = e.windowsKeyCode;
+  m_nativeVirtualKeyCode = e.nativeKeyCode;
+  m_isKeypad = (e.modifiers & WebInputEvent::IsKeyPad) != 0;
+  m_shiftKey = (e.modifiers & WebInputEvent::ShiftKey) != 0;
+  m_ctrlKey = (e.modifiers & WebInputEvent::ControlKey) != 0;
+  m_altKey = (e.modifiers & WebInputEvent::AltKey) != 0;
+  m_metaKey = (e.modifiers & WebInputEvent::MetaKey) != 0;
+  m_isSystemKey = e.isSystemKey;
 }
 
 void MakePlatformKeyboardEvent::SetKeyType(Type type) {
@@ -195,5 +151,90 @@ bool MakePlatformKeyboardEvent::IsCharacterKey() const {
     default:
       break;
   }
+  return true;
+}
+
+static int GetWebInputModifiers(const WebCore::UIEventWithKeyState& event) {
+  int modifiers = 0;
+  if (event.ctrlKey())
+    modifiers |= WebInputEvent::ControlKey;
+  if (event.shiftKey())
+    modifiers |= WebInputEvent::ShiftKey;
+  if (event.altKey())
+    modifiers |= WebInputEvent::AltKey;
+  if (event.metaKey())
+    modifiers |= WebInputEvent::MetaKey;
+  return modifiers;
+}
+
+
+bool ToWebMouseEvent(const WebCore::FrameView& view,
+                     const WebCore::MouseEvent& event,
+                     WebKit::WebMouseEvent* web_event) {
+  if (event.type() == WebCore::eventNames().mousemoveEvent) {
+    web_event->type = WebInputEvent::MouseMove;
+  } else if (event.type() == WebCore::eventNames().mouseoutEvent) {
+    web_event->type = WebInputEvent::MouseLeave;
+  } else if (event.type() == WebCore::eventNames().mouseoverEvent) {
+    web_event->type = WebInputEvent::MouseEnter;
+  } else if (event.type() == WebCore::eventNames().mousedownEvent) {
+    web_event->type = WebInputEvent::MouseDown;
+  } else if (event.type() == WebCore::eventNames().mouseupEvent) {
+    web_event->type = WebInputEvent::MouseUp;
+  } else {
+    // Skip all other mouse events.
+    return false;
+  }
+  web_event->timeStampSeconds = event.timeStamp() * 1.0e-3;
+  switch (event.button()) {
+    case WebCore::LeftButton:
+      web_event->button = WebMouseEvent::ButtonLeft;
+      break;
+    case WebCore::MiddleButton:
+      web_event->button = WebMouseEvent::ButtonMiddle;
+      break;
+    case WebCore::RightButton:
+      web_event->button = WebMouseEvent::ButtonRight;
+      break;
+  }
+  web_event->modifiers = GetWebInputModifiers(event);
+  if (event.buttonDown()) {
+    switch (event.button()) {
+      case WebCore::LeftButton:
+        web_event->modifiers |= WebInputEvent::LeftButtonDown;
+        break;
+      case WebCore::MiddleButton:
+        web_event->modifiers |= WebInputEvent::MiddleButtonDown;
+        break;
+      case WebCore::RightButton:
+        web_event->modifiers |= WebInputEvent::RightButtonDown;
+        break;
+    }
+  }
+  WebCore::IntPoint p = view.contentsToWindow(WebCore::IntPoint(event.pageX(),
+                                                                event.pageY()));
+  web_event->globalX = event.screenX();
+  web_event->globalY = event.screenY();
+  web_event->windowX = p.x();
+  web_event->windowY = p.y();
+  web_event->x = event.offsetX();
+  web_event->y = event.offsetY();
+  return true;
+}
+
+bool ToWebKeyboardEvent(const WebCore::KeyboardEvent& event,
+                        WebKeyboardEvent* web_event) {
+  if (event.type() == WebCore::eventNames().keydownEvent) {
+    web_event->type = WebInputEvent::KeyDown;
+  } else if (event.type() == WebCore::eventNames().keyupEvent) {
+    web_event->type = WebInputEvent::KeyUp;
+  } else {
+    // Skip all other keyboard events.
+    return false;
+  }
+  web_event->modifiers = GetWebInputModifiers(event);
+  web_event->timeStampSeconds = event.timeStamp() * 1.0e-3;
+  web_event->windowsKeyCode = event.keyCode();
+  web_event->nativeKeyCode = event.keyEvent()->nativeVirtualKeyCode();
   return true;
 }

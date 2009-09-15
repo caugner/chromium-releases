@@ -6,8 +6,8 @@
 #include "base/multiprocess_test.h"
 #include "base/process_util.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/ipc_channel.h"
 #include "chrome/common/main_function_params.h"
+#include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // TODO(port): Bring up this test this on other platforms.
@@ -15,7 +15,7 @@
 
 using base::ProcessHandle;
 
-const std::wstring kRendererTestChannelName(L"test");
+const char kRendererTestChannelName[] = "test";
 
 extern int RendererMain(const MainFunctionParams& parameters);
 
@@ -53,11 +53,9 @@ void RendererMainTest::TearDown() {
 ProcessHandle RendererMainTest::SpawnChild(const std::wstring &procname,
                                            IPC::Channel *channel) {
   base::file_handle_mapping_vector fds_to_map;
-  int src_fd;
-  int dest_fd;
-  channel->GetClientFileDescriptorMapping(&src_fd, &dest_fd);
-  if (src_fd > -1) {
-    fds_to_map.push_back(std::pair<int,int>(src_fd, dest_fd));
+  const int ipcfd = channel->GetClientFileDescriptor();
+  if (ipcfd > -1) {
+    fds_to_map.push_back(std::pair<int,int>(ipcfd, 3));
   }
 
    return MultiProcessTest::SpawnChild(procname, fds_to_map, false);
@@ -80,7 +78,7 @@ MULTIPROCESS_TEST_MAIN(SimpleRenderer) {
   SandboxInitWrapper dummy_sandbox_init;
   CommandLine cl(*CommandLine::ForCurrentProcess());
   cl.AppendSwitchWithValue(switches::kProcessChannelID,
-                                     kRendererTestChannelName);
+                           ASCIIToWide(kRendererTestChannelName));
 
   MainFunctionParams dummy_params(cl, dummy_sandbox_init, NULL);
   return RendererMain(dummy_params);

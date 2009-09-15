@@ -7,23 +7,18 @@
 
 #include <utility>
 
-#include "base/gfx/rect.h"
 #include "base/file_path.h"
-#include "base/lock.h"
 #include "base/scoped_ptr.h"
-#include "base/task.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_marshaling.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/text_database_manager.h"
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
 #include "chrome/common/mru_cache.h"
-#include "chrome/common/scoped_vector.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BookmarkService;
@@ -142,9 +137,16 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                     const QueryOptions& options);
   void QueryRedirectsFrom(scoped_refptr<QueryRedirectsRequest> request,
                           const GURL& url);
+  void QueryRedirectsTo(scoped_refptr<QueryRedirectsRequest> request,
+                        const GURL& url);
 
   void GetVisitCountToHost(scoped_refptr<GetVisitCountToHostRequest> request,
                            const GURL& url);
+
+  void QueryTopURLsAndRedirects(
+      scoped_refptr<QueryTopURLsAndRedirectsRequest> request,
+      int result_count);
+
   // Computes the most recent URL(s) that the given canonical URL has
   // redirected to and returns true on success. There may be more than one
   // redirect in a row, so this function will fill the given array with the
@@ -153,7 +155,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   //
   // Backend for QueryRedirectsFrom.
   bool GetMostRecentRedirectsFrom(const GURL& url,
-                                  HistoryService::RedirectList* redirects);
+                                  history::RedirectList* redirects);
+
+  // Similar to above function except computes a chain of redirects to the
+  // given URL. Stores the most recent list of redirects ending at |url| in the
+  // given RedirectList. For example, if we have the redirect list A -> B -> C,
+  // then calling this function with url=C would fill redirects with {B, A}.
+  bool GetMostRecentRedirectsTo(const GURL& url,
+                                      history::RedirectList* redirects);
 
   // Thumbnails ----------------------------------------------------------------
 
@@ -208,7 +217,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Segment usage -------------------------------------------------------------
 
   void QuerySegmentUsage(scoped_refptr<QuerySegmentUsageRequest> request,
-                         const base::Time from_time);
+                         const base::Time from_time,
+                         int max_result_count);
   void DeleteOldSegmentData();
   void SetSegmentPresentationIndex(SegmentID segment_id, int index);
 
@@ -256,6 +266,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // added for each given URL at the last visit time in the URLRow.
   void AddPagesWithDetails(const std::vector<URLRow>& info);
 
+#if defined(UNIT_TEST)
+  HistoryDatabase* db() const { return db_.get(); }
+
+  ExpireHistoryBackend* expire_backend() { return &expirer_; }
+#endif
+
  private:
   friend class CommitLaterTask;  // The commit task needs to call Commit().
   friend class HistoryTest;  // So the unit tests can poke our innards.
@@ -289,7 +305,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // |cur_visit|. |cur_visit| is assumed to be valid. Assumes that
   // this HistoryBackend object has been Init()ed successfully.
   void GetRedirectsFromSpecificVisit(
-      VisitID cur_visit, HistoryService::RedirectList* redirects);
+      VisitID cur_visit, history::RedirectList* redirects);
+
+  // Similar to the above function except returns a redirect list ending
+  // at |cur_visit|.
+  void GetRedirectsToSpecificVisit(
+      VisitID cur_visit, history::RedirectList* redirects);
 
   // Thumbnail Helpers ---------------------------------------------------------
 
@@ -445,7 +466,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   //
   // As with AddPage, the last item in the redirect chain will be the
   // destination of the redirect (i.e., the key into recent_redirects_);
-  typedef MRUCache<GURL, HistoryService::RedirectList> RedirectCache;
+  typedef MRUCache<GURL, history::RedirectList> RedirectCache;
   RedirectCache recent_redirects_;
 
   // Timestamp of the last page addition request. We use this to detect when

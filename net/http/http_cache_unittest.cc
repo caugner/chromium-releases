@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,17 @@
 
 #include "base/hash_tables.h"
 #include "base/message_loop.h"
-#include "base/platform_file.h"
 #include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/load_flags.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/http/http_byte_range.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/http/http_transaction_unittest.h"
+#include "net/http/http_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -28,12 +30,28 @@ class MockDiskEntry : public disk_cache::Entry,
                       public base::RefCounted<MockDiskEntry> {
  public:
   MockDiskEntry()
-      : test_mode_(0), doomed_(false), platform_file_(global_platform_file_) {
+      : test_mode_(0), doomed_(false), sparse_(false), fail_requests_(false) {
   }
 
-  MockDiskEntry(const std::string& key)
-      : key_(key), doomed_(false), platform_file_(global_platform_file_) {
-    const MockTransaction* t = FindMockTransaction(GURL(key));
+  explicit MockDiskEntry(const std::string& key)
+      : key_(key), doomed_(false), sparse_(false), fail_requests_(false) {
+    //
+    // 'key' is prefixed with an identifier if it corresponds to a cached POST.
+    // Skip past that to locate the actual URL.
+    //
+    // TODO(darin): It breaks the abstraction a bit that we assume 'key' is an
+    // URL corresponding to a registered MockTransaction.  It would be good to
+    // have another way to access the test_mode.
+    //
+    GURL url;
+    if (isdigit(key[0])) {
+      size_t slash = key.find('/');
+      DCHECK(slash != std::string::npos);
+      url = GURL(key.substr(slash + 1));
+    } else {
+      url = GURL(key);
+    }
+    const MockTransaction* t = FindMockTransaction(url);
     DCHECK(t);
     test_mode_ = t->test_mode;
   }
@@ -52,6 +70,8 @@ class MockDiskEntry : public disk_cache::Entry,
   }
 
   virtual std::string GetKey() const {
+    if (fail_requests_)
+      return std::string();
     return key_;
   }
 
@@ -71,6 +91,9 @@ class MockDiskEntry : public disk_cache::Entry,
   virtual int ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
                        net::CompletionCallback* callback) {
     DCHECK(index >= 0 && index < 2);
+
+    if (fail_requests_)
+      return net::ERR_CACHE_READ_FAILURE;
 
     if (offset < 0 || offset > static_cast<int>(data_[index].size()))
       return net::ERR_FAILED;
@@ -92,6 +115,9 @@ class MockDiskEntry : public disk_cache::Entry,
     DCHECK(index >= 0 && index < 2);
     DCHECK(truncate);
 
+    if (fail_requests_)
+      return net::ERR_CACHE_READ_FAILURE;
+
     if (offset < 0 || offset > static_cast<int>(data_[index].size()))
       return net::ERR_FAILED;
 
@@ -101,17 +127,91 @@ class MockDiskEntry : public disk_cache::Entry,
     return buf_len;
   }
 
-  base::PlatformFile UseExternalFile(int index) {
-    return platform_file_;
+  virtual int ReadSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                             net::CompletionCallback* completion_callback) {
+    if (!sparse_)
+      return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
+    if (offset < 0)
+      return net::ERR_FAILED;
+
+    if (fail_requests_)
+      return net::ERR_CACHE_READ_FAILURE;
+
+    DCHECK(offset < kint32max);
+    int real_offset = static_cast<int>(offset);
+    if (!buf_len)
+      return 0;
+
+    int num = std::min(static_cast<int>(data_[1].size()) - real_offset,
+                       buf_len);
+    memcpy(buf->data(), &data_[1][real_offset], num);
+
+    if (!completion_callback || (test_mode_ & TEST_MODE_SYNC_CACHE_READ))
+      return num;
+
+    CallbackLater(completion_callback, num);
+    return net::ERR_IO_PENDING;
   }
 
-  base::PlatformFile GetPlatformFile(int index) {
-    return platform_file_;
+  virtual int WriteSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                              net::CompletionCallback* completion_callback) {
+    if (!sparse_) {
+      if (data_[1].size())
+        return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
+      sparse_ = true;
+    }
+    if (offset < 0)
+      return net::ERR_FAILED;
+    if (!buf_len)
+      return 0;
+
+    if (fail_requests_)
+      return net::ERR_CACHE_READ_FAILURE;
+
+    DCHECK(offset < kint32max);
+    int real_offset = static_cast<int>(offset);
+
+    if (static_cast<int>(data_[1].size()) < real_offset + buf_len)
+      data_[1].resize(real_offset + buf_len);
+
+    memcpy(&data_[1][real_offset], buf->data(), buf_len);
+    return buf_len;
   }
 
-  static void set_global_platform_file(base::PlatformFile platform_file) {
-    global_platform_file_ = platform_file;
+  virtual int GetAvailableRange(int64 offset, int len, int64* start) {
+    if (!sparse_)
+      return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
+    if (offset < 0)
+      return net::ERR_FAILED;
+
+    if (fail_requests_)
+      return net::ERR_CACHE_READ_FAILURE;
+
+    *start = offset;
+    DCHECK(offset < kint32max);
+    int real_offset = static_cast<int>(offset);
+    if (static_cast<int>(data_[1].size()) < real_offset)
+      return 0;
+
+    int num = std::min(static_cast<int>(data_[1].size()) - real_offset, len);
+    int count = 0;
+    for (; num > 0; num--, real_offset++) {
+      if (!count) {
+        if (data_[1][real_offset]) {
+          count++;
+          *start = real_offset;
+        }
+      } else {
+        if (!data_[1][real_offset])
+          break;
+        count++;
+      }
+    }
+    return count;
   }
+
+  // Fail most subsequent requests.
+  void set_fail_requests() { fail_requests_ = true; }
 
  private:
   // Unlike the callbacks for MockHttpTransaction, we want this one to run even
@@ -129,16 +229,15 @@ class MockDiskEntry : public disk_cache::Entry,
   std::vector<char> data_[2];
   int test_mode_;
   bool doomed_;
-  base::PlatformFile platform_file_;
-  static base::PlatformFile global_platform_file_;
+  bool sparse_;
+  bool fail_requests_;
 };
-
-base::PlatformFile MockDiskEntry::global_platform_file_ =
-    base::kInvalidPlatformFileValue;
 
 class MockDiskCache : public disk_cache::Backend {
  public:
-  MockDiskCache() : open_count_(0), create_count_(0), fail_requests_(0) {
+  MockDiskCache()
+      : open_count_(0), create_count_(0), fail_requests_(false),
+        soft_failures_(false) {
   }
 
   ~MockDiskCache() {
@@ -170,6 +269,9 @@ class MockDiskCache : public disk_cache::Backend {
     it->second->AddRef();
     *entry = it->second;
 
+    if (soft_failures_)
+      it->second->set_fail_requests();
+
     return true;
   }
 
@@ -189,6 +291,9 @@ class MockDiskCache : public disk_cache::Backend {
 
     new_entry->AddRef();
     *entry = new_entry;
+
+    if (soft_failures_)
+      new_entry->set_fail_requests();
 
     return true;
   }
@@ -234,12 +339,16 @@ class MockDiskCache : public disk_cache::Backend {
   // Fail any subsequent CreateEntry and OpenEntry.
   void set_fail_requests() { fail_requests_ = true; }
 
+  // Return entries that fail some of their requests.
+  void set_soft_failures(bool value) { soft_failures_ = value; }
+
  private:
   typedef base::hash_map<std::string, MockDiskEntry*> EntryMap;
   EntryMap entries_;
   int open_count_;
   int create_count_;
   bool fail_requests_;
+  bool soft_failures_;
 };
 
 class MockHttpCache {
@@ -270,13 +379,14 @@ void ReadAndVerifyTransaction(net::HttpTransaction* trans,
   int rv = ReadTransaction(trans, &content);
 
   EXPECT_EQ(net::OK, rv);
-  EXPECT_EQ(strlen(trans_info.data), content.size());
-  EXPECT_EQ(0, memcmp(trans_info.data, content.data(), content.size()));
+  std::string expected(trans_info.data);
+  EXPECT_EQ(expected, content);
 }
 
-void RunTransactionTest(net::HttpCache* cache,
-                        const MockTransaction& trans_info) {
-  MockHttpRequest request(trans_info);
+void RunTransactionTestWithRequest(net::HttpCache* cache,
+                                   const MockTransaction& trans_info,
+                                   const MockHttpRequest& request,
+                                   std::string* response_headers) {
   TestCompletionCallback callback;
 
   // write to the cache
@@ -292,7 +402,23 @@ void RunTransactionTest(net::HttpCache* cache,
   const net::HttpResponseInfo* response = trans->GetResponseInfo();
   ASSERT_TRUE(response);
 
+  if (response_headers)
+    response->headers->GetNormalizedHeaders(response_headers);
+
   ReadAndVerifyTransaction(trans.get(), trans_info);
+}
+
+void RunTransactionTest(net::HttpCache* cache,
+                        const MockTransaction& trans_info) {
+  return RunTransactionTestWithRequest(
+      cache, trans_info, MockHttpRequest(trans_info), NULL);
+}
+
+void RunTransactionTestWithResponse(net::HttpCache* cache,
+                                    const MockTransaction& trans_info,
+                                    std::string* response_headers) {
+  return RunTransactionTestWithRequest(
+      cache, trans_info, MockHttpRequest(trans_info), response_headers);
 }
 
 // This class provides a handler for kFastNoStoreGET_Transaction so that the
@@ -333,6 +459,124 @@ const MockTransaction kFastNoStoreGET_Transaction = {
   0
 };
 
+// This class provides a handler for kRangeGET_TransactionOK so that the range
+// request can be served on demand.
+class RangeTransactionServer {
+ public:
+  RangeTransactionServer() {
+    no_store = false;
+  }
+  ~RangeTransactionServer() {}
+
+  void set_no_store(bool value) { no_store = value; }
+
+  static void RangeHandler(const net::HttpRequestInfo* request,
+                           std::string* response_status,
+                           std::string* response_headers,
+                           std::string* response_data);
+
+ private:
+  static bool no_store;
+  DISALLOW_COPY_AND_ASSIGN(RangeTransactionServer);
+};
+
+// Static.
+void RangeTransactionServer::RangeHandler(const net::HttpRequestInfo* request,
+                                          std::string* response_status,
+                                          std::string* response_headers,
+                                          std::string* response_data) {
+  if (request->extra_headers.empty())
+    return;
+
+  std::vector<net::HttpByteRange> ranges;
+  if (!net::HttpUtil::ParseRanges(request->extra_headers, &ranges) ||
+      ranges.size() != 1)
+    return;
+  // We can handle this range request.
+  net::HttpByteRange byte_range = ranges[0];
+  EXPECT_TRUE(byte_range.ComputeBounds(80));
+  int start = static_cast<int>(byte_range.first_byte_position());
+  int end = static_cast<int>(byte_range.last_byte_position());
+
+  EXPECT_LT(end, 80);
+
+  std::string content_range = StringPrintf("Content-Range: bytes %d-%d/80\n",
+                                           start, end);
+  response_headers->append(content_range);
+
+  if (request->extra_headers.find("If-None-Match") == std::string::npos) {
+    EXPECT_EQ(9, end - start);
+    std::string data = StringPrintf("rg: %02d-%02d ", start, end);
+    *response_data = data;
+  } else {
+    response_status->assign("HTTP/1.1 304 Not Modified");
+    response_data->clear();
+  }
+}
+
+const MockTransaction kRangeGET_TransactionOK = {
+  "http://www.google.com/range",
+  "GET",
+  "Range: bytes = 40-49\r\n",
+  net::LOAD_NORMAL,
+  "HTTP/1.1 206 Partial Content",
+  "Last-Modified: Sat, 18 Apr 2009 01:10:43 GMT\n"
+  "ETag: \"foo\"\n"
+  "Accept-Ranges: bytes\n"
+  "Content-Length: 10\n",
+  "rg: 40-49 ",
+  TEST_MODE_NORMAL,
+  &RangeTransactionServer::RangeHandler,
+  0
+};
+
+// Returns true if the response headers (|response|) match a partial content
+// response for the range starting at |start| and ending at |end|.
+bool Verify206Response(std::string response, int start, int end) {
+  std::string raw_headers(net::HttpUtil::AssembleRawHeaders(response.data(),
+                                                            response.size()));
+  scoped_refptr<net::HttpResponseHeaders> headers =
+      new net::HttpResponseHeaders(raw_headers);
+
+  if (206 != headers->response_code())
+    return false;
+
+  int64 range_start, range_end, object_size;
+  if (!headers->GetContentRange(&range_start, &range_end, &object_size))
+    return false;
+  int64 content_length = headers->GetContentLength();
+
+  int length = end - start + 1;
+  if (content_length != length)
+    return false;
+
+  if (range_start != start)
+    return false;
+
+  if (range_end != end)
+    return false;
+
+  return true;
+}
+
+// Helper to represent a network HTTP response.
+struct Response {
+  // Set this response into |trans|.
+  void AssignTo(MockTransaction* trans) const {
+    trans->status = status;
+    trans->response_headers = headers;
+    trans->data = body;
+  }
+
+  std::string status_and_headers() const {
+    return std::string(status) + "\n" + std::string(headers);
+  }
+
+  const char* status;
+  const char* headers;
+  const char* body;
+};
+
 }  // namespace
 
 
@@ -370,6 +614,26 @@ TEST(HttpCache, SimpleGETNoDiskCache) {
   EXPECT_EQ(1, cache.network_layer()->transaction_count());
   EXPECT_EQ(0, cache.disk_cache()->open_count());
   EXPECT_EQ(0, cache.disk_cache()->create_count());
+}
+
+TEST(HttpCache, SimpleGETWithDiskFailures) {
+  MockHttpCache cache;
+
+  cache.disk_cache()->set_soft_failures(true);
+
+  // Read from the network, and fail to write to the cache.
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // This one should see an empty cache again.
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
 }
 
 TEST(HttpCache, SimpleGET_LoadOnlyFromCache_Hit) {
@@ -542,7 +806,8 @@ struct Context {
   TestCompletionCallback callback;
   scoped_ptr<net::HttpTransaction> trans;
 
-  Context(net::HttpTransaction* t) : result(net::ERR_IO_PENDING), trans(t) {
+  explicit Context(net::HttpTransaction* t)
+      : result(net::ERR_IO_PENDING), trans(t) {
   }
 };
 
@@ -635,7 +900,8 @@ TEST(HttpCache, SimpleGET_RacingReaders) {
   c = context_list[1];
   ASSERT_EQ(net::ERR_IO_PENDING, c->result);
   c->result = c->callback.WaitForResult();
-  ReadAndVerifyTransaction(c->trans.get(), kSimpleGET_Transaction);
+  if (c->result == net::OK)
+    ReadAndVerifyTransaction(c->trans.get(), kSimpleGET_Transaction);
 
   // At this point we have one reader, two pending transactions and a task on
   // the queue to move to the next transaction. Now we cancel the request that
@@ -649,7 +915,8 @@ TEST(HttpCache, SimpleGET_RacingReaders) {
     Context* c = context_list[i];
     if (c->result == net::ERR_IO_PENDING)
       c->result = c->callback.WaitForResult();
-    ReadAndVerifyTransaction(c->trans.get(), kSimpleGET_Transaction);
+    if (c->result == net::OK)
+      ReadAndVerifyTransaction(c->trans.get(), kSimpleGET_Transaction);
   }
 
   // We should not have had to re-open the disk entry.
@@ -897,15 +1164,383 @@ TEST(HttpCache, ETagGET_ConditionalRequest_304_NoStore) {
 TEST(HttpCache, SimplePOST_SkipsCache) {
   MockHttpCache cache;
 
-  // Test that we skip the cache for POST requests.  Eventually, we will want
-  // to cache these, but we'll still have cases where skipping the cache makes
-  // sense, so we want to make sure that it works properly.
+  // Test that we skip the cache for POST requests that do not have an upload
+  // identifier.
 
   RunTransactionTest(cache.http_cache(), kSimplePOST_Transaction);
 
   EXPECT_EQ(1, cache.network_layer()->transaction_count());
   EXPECT_EQ(0, cache.disk_cache()->open_count());
   EXPECT_EQ(0, cache.disk_cache()->create_count());
+}
+
+// Helper that does 4 requests using HttpCache:
+//
+// (1) loads |kUrl| -- expects |net_response_1| to be returned.
+// (2) loads |kUrl| from cache only -- expects |net_response_1| to be returned.
+// (3) loads |kUrl| using |extra_request_headers| -- expects |net_response_2| to
+//     be returned.
+// (4) loads |kUrl| from cache only -- expects |cached_response_2| to be
+//     returned.
+static void ConditionalizedRequestUpdatesCacheHelper(
+    const Response& net_response_1,
+    const Response& net_response_2,
+    const Response& cached_response_2,
+    const char* extra_request_headers) {
+  MockHttpCache cache;
+
+  // The URL we will be requesting.
+  const char* kUrl = "http://foobar.com/main.css";
+
+  // Junk network response.
+  static const Response kUnexpectedResponse = {
+    "HTTP/1.1 500 Unexpected",
+    "Server: unexpected_header",
+    "unexpected body"
+  };
+
+  // We will control the network layer's responses for |kUrl| using
+  // |mock_network_response|.
+  MockTransaction mock_network_response = { 0 };
+  mock_network_response.url = kUrl;
+  AddMockTransaction(&mock_network_response);
+
+  // Request |kUrl| for the first time. It should hit the network and
+  // receive |kNetResponse1|, which it saves into the HTTP cache.
+
+  MockTransaction request = { 0 };
+  request.url = kUrl;
+  request.method = "GET";
+  request.request_headers = "";
+
+  net_response_1.AssignTo(&mock_network_response);  // Network mock.
+  net_response_1.AssignTo(&request);                // Expected result.
+
+  std::string response_headers;
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(net_response_1.status_and_headers(), response_headers);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Request |kUrl| a second time. Now |kNetResponse1| it is in the HTTP
+  // cache, so we don't hit the network.
+
+  request.load_flags = net::LOAD_ONLY_FROM_CACHE;
+
+  kUnexpectedResponse.AssignTo(&mock_network_response);  // Network mock.
+  net_response_1.AssignTo(&request);                     // Expected result.
+
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(net_response_1.status_and_headers(), response_headers);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Request |kUrl| yet again, but this time give the request an
+  // "If-Modified-Since" header. This will cause the request to re-hit the
+  // network. However now the network response is going to be
+  // different -- this simulates a change made to the CSS file.
+
+  request.request_headers = extra_request_headers;
+  request.load_flags = net::LOAD_NORMAL;
+
+  net_response_2.AssignTo(&mock_network_response);  // Network mock.
+  net_response_2.AssignTo(&request);                // Expected result.
+
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(net_response_2.status_and_headers(), response_headers);
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Finally, request |kUrl| again. This request should be serviced from
+  // the cache. Moreover, the value in the cache should be |kNetResponse2|
+  // and NOT |kNetResponse1|. The previous step should have replaced the
+  // value in the cache with the modified response.
+
+  request.request_headers = "";
+  request.load_flags = net::LOAD_ONLY_FROM_CACHE;
+
+  kUnexpectedResponse.AssignTo(&mock_network_response);  // Network mock.
+  cached_response_2.AssignTo(&request);                  // Expected result.
+
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(cached_response_2.status_and_headers(), response_headers);
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&mock_network_response);
+}
+
+// Check that when an "if-modified-since" header is attached
+// to the request, the result still updates the cached entry.
+TEST(HttpCache, ConditionalizedRequestUpdatesCache1) {
+  // First network response for |kUrl|.
+  static const Response kNetResponse1 = {
+    "HTTP/1.1 200 OK",
+    "Date: Fri, 12 Jun 2009 21:46:42 GMT\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "body1"
+  };
+
+  // Second network response for |kUrl|.
+  static const Response kNetResponse2 = {
+    "HTTP/1.1 200 OK",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Last-Modified: Fri, 03 Jul 2009 02:14:27 GMT\n",
+    "body2"
+  };
+
+  const char* extra_headers =
+      "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\n";
+
+  ConditionalizedRequestUpdatesCacheHelper(
+      kNetResponse1, kNetResponse2, kNetResponse2, extra_headers);
+}
+
+// Check that when an "if-none-match" header is attached
+// to the request, the result updates the cached entry.
+TEST(HttpCache, ConditionalizedRequestUpdatesCache2) {
+  // First network response for |kUrl|.
+  static const Response kNetResponse1 = {
+    "HTTP/1.1 200 OK",
+    "Date: Fri, 12 Jun 2009 21:46:42 GMT\n"
+    "Etag: \"ETAG1\"\n"
+    "Expires: Wed, 7 Sep 2033 21:46:42 GMT\n",  // Should never expire.
+    "body1"
+  };
+
+  // Second network response for |kUrl|.
+  static const Response kNetResponse2 = {
+    "HTTP/1.1 200 OK",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Etag: \"ETAG2\"\n"
+    "Expires: Wed, 7 Sep 2033 21:46:42 GMT\n",  // Should never expire.
+    "body2"
+  };
+
+  const char* extra_headers = "If-None-Match: \"ETAG1\"\n";
+
+  ConditionalizedRequestUpdatesCacheHelper(
+      kNetResponse1, kNetResponse2, kNetResponse2, extra_headers);
+}
+
+// Check that when an "if-modified-since" header is attached
+// to a request, the 304 (not modified result) result updates the cached
+// headers, and the 304 response is returned rather than the cached response.
+TEST(HttpCache, ConditionalizedRequestUpdatesCache3) {
+  // First network response for |kUrl|.
+  static const Response kNetResponse1 = {
+    "HTTP/1.1 200 OK",
+    "Date: Fri, 12 Jun 2009 21:46:42 GMT\n"
+    "Server: server1\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "body1"
+  };
+
+  // Second network response for |kUrl|.
+  static const Response kNetResponse2 = {
+    "HTTP/1.1 304 Not Modified",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Server: server2\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    ""
+  };
+
+  static const Response kCachedResponse2 = {
+    "HTTP/1.1 200 OK",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Server: server2\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "body1"
+  };
+
+  const char* extra_headers =
+      "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\n";
+
+  ConditionalizedRequestUpdatesCacheHelper(
+      kNetResponse1, kNetResponse2, kCachedResponse2, extra_headers);
+}
+
+// Test that when doing an externally conditionalized if-modified-since
+// and there is no corresponding cache entry, a new cache entry is NOT
+// created (304 response).
+TEST(HttpCache, ConditionalizedRequestUpdatesCache4) {
+  MockHttpCache cache;
+
+  const char* kUrl = "http://foobar.com/main.css";
+
+  static const Response kNetResponse = {
+    "HTTP/1.1 304 Not Modified",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    ""
+  };
+
+  const char* kExtraRequestHeaders =
+      "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\n";
+
+  // We will control the network layer's responses for |kUrl| using
+  // |mock_network_response|.
+  MockTransaction mock_network_response = { 0 };
+  mock_network_response.url = kUrl;
+  AddMockTransaction(&mock_network_response);
+
+  MockTransaction request = { 0 };
+  request.url = kUrl;
+  request.method = "GET";
+  request.request_headers = kExtraRequestHeaders;
+
+  kNetResponse.AssignTo(&mock_network_response);  // Network mock.
+  kNetResponse.AssignTo(&request);                // Expected result.
+
+  std::string response_headers;
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(kNetResponse.status_and_headers(), response_headers);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(0, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&mock_network_response);
+}
+
+// Test that when doing an externally conditionalized if-modified-since
+// and there is no corresponding cache entry, a new cache entry is NOT
+// created (200 response).
+TEST(HttpCache, ConditionalizedRequestUpdatesCache5) {
+  MockHttpCache cache;
+
+  const char* kUrl = "http://foobar.com/main.css";
+
+  static const Response kNetResponse = {
+    "HTTP/1.1 200 OK",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "foobar!!!"
+  };
+
+  const char* kExtraRequestHeaders =
+      "If-Modified-Since: Wed, 06 Feb 2008 22:38:21 GMT\n";
+
+  // We will control the network layer's responses for |kUrl| using
+  // |mock_network_response|.
+  MockTransaction mock_network_response = { 0 };
+  mock_network_response.url = kUrl;
+  AddMockTransaction(&mock_network_response);
+
+  MockTransaction request = { 0 };
+  request.url = kUrl;
+  request.method = "GET";
+  request.request_headers = kExtraRequestHeaders;
+
+  kNetResponse.AssignTo(&mock_network_response);  // Network mock.
+  kNetResponse.AssignTo(&request);                // Expected result.
+
+  std::string response_headers;
+  RunTransactionTestWithResponse(
+      cache.http_cache(), request, &response_headers);
+
+  EXPECT_EQ(kNetResponse.status_and_headers(), response_headers);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(0, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&mock_network_response);
+}
+
+// Test that when doing an externally conditionalized if-modified-since
+// if the date does not match the cache entry's last-modified date,
+// then we do NOT use the response (304) to update the cache.
+// (the if-modified-since date is 2 days AFTER the cache's modification date).
+TEST(HttpCache, ConditionalizedRequestUpdatesCache6) {
+  static const Response kNetResponse1 = {
+    "HTTP/1.1 200 OK",
+    "Date: Fri, 12 Jun 2009 21:46:42 GMT\n"
+    "Server: server1\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "body1"
+  };
+
+  // Second network response for |kUrl|.
+  static const Response kNetResponse2 = {
+    "HTTP/1.1 304 Not Modified",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Server: server2\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    ""
+  };
+
+  // This is two days in the future from the original response's last-modified
+  // date!
+  const char* kExtraRequestHeaders =
+      "If-Modified-Since: Fri, 08 Feb 2008 22:38:21 GMT\n";
+
+  ConditionalizedRequestUpdatesCacheHelper(
+      kNetResponse1, kNetResponse2, kNetResponse1, kExtraRequestHeaders);
+}
+
+// Test that when doing an externally conditionalized if-none-match
+// if the etag does not match the cache entry's etag, then we do not use the
+// response (304) to update the cache.
+TEST(HttpCache, ConditionalizedRequestUpdatesCache7) {
+  static const Response kNetResponse1 = {
+    "HTTP/1.1 200 OK",
+    "Date: Fri, 12 Jun 2009 21:46:42 GMT\n"
+    "Etag: \"Foo1\"\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    "body1"
+  };
+
+  // Second network response for |kUrl|.
+  static const Response kNetResponse2 = {
+    "HTTP/1.1 304 Not Modified",
+    "Date: Wed, 22 Jul 2009 03:15:26 GMT\n"
+    "Etag: \"Foo2\"\n"
+    "Last-Modified: Wed, 06 Feb 2008 22:38:21 GMT\n",
+    ""
+  };
+
+  // Different etag from original response.
+  const char* kExtraRequestHeaders = "If-None-Match: \"Foo2\"\n";
+
+  ConditionalizedRequestUpdatesCacheHelper(
+      kNetResponse1, kNetResponse2, kNetResponse1, kExtraRequestHeaders);
+}
+
+TEST(HttpCache, UrlContainingHash) {
+  MockHttpCache cache;
+
+  // Do a typical GET request -- should write an entry into our cache.
+  MockTransaction trans(kTypicalGET_Transaction);
+  RunTransactionTest(cache.http_cache(), trans);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Request the same URL, but this time with a reference section (hash).
+  // Since the cache key strips the hash sections, this should be a cache hit.
+  std::string url_with_hash = std::string(trans.url) + "#multiple#hashes";
+  trans.url = url_with_hash.c_str();
+  trans.load_flags = net::LOAD_ONLY_FROM_CACHE;
+
+  RunTransactionTest(cache.http_cache(), trans);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
 }
 
 TEST(HttpCache, SimplePOST_LoadOnlyFromCache_Miss) {
@@ -937,12 +1572,42 @@ TEST(HttpCache, SimplePOST_LoadOnlyFromCache_Miss) {
   EXPECT_EQ(0, cache.disk_cache()->create_count());
 }
 
+TEST(HttpCache, SimplePOST_LoadOnlyFromCache_Hit) {
+  MockHttpCache cache;
+
+  // Test that we hit the cache for POST requests.
+
+  MockTransaction transaction(kSimplePOST_Transaction);
+
+  const int64 kUploadId = 1;  // Just a dummy value.
+
+  MockHttpRequest request(transaction);
+  request.upload_data = new net::UploadData();
+  request.upload_data->set_identifier(kUploadId);
+  request.upload_data->AppendBytes("hello", 5);
+
+  // Populate the cache.
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, request, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Load from cache.
+  request.load_flags |= net::LOAD_ONLY_FROM_CACHE;
+  RunTransactionTestWithRequest(cache.http_cache(), transaction, request, NULL);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
 TEST(HttpCache, RangeGET_SkipsCache) {
   MockHttpCache cache;
 
-  // Test that we skip the cache for POST requests.  Eventually, we will want
-  // to cache these, but we'll still have cases where skipping the cache makes
-  // sense, so we want to make sure that it works properly.
+  // Test that we skip the cache for range GET requests.  Eventually, we will
+  // want to cache these, but we'll still have cases where skipping the cache
+  // makes sense, so we want to make sure that it works properly.
 
   RunTransactionTest(cache.http_cache(), kRangeGET_Transaction);
 
@@ -965,6 +1630,159 @@ TEST(HttpCache, RangeGET_SkipsCache) {
   EXPECT_EQ(3, cache.network_layer()->transaction_count());
   EXPECT_EQ(0, cache.disk_cache()->open_count());
   EXPECT_EQ(0, cache.disk_cache()->create_count());
+}
+
+TEST(HttpCache, GET_Crazy206) {
+  MockHttpCache cache;
+  AddMockTransaction(&kRangeGET_TransactionOK);
+
+  // Test that receiving 206 for a regular request is handled correctly.
+
+  // Write to the cache.
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.request_headers = "";
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // This should read again from the net.
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+  RemoveMockTransaction(&kRangeGET_TransactionOK);
+}
+
+TEST(HttpCache, DISABLED_RangeGET_OK) {
+  MockHttpCache cache;
+  AddMockTransaction(&kRangeGET_TransactionOK);
+
+  // Test that we can cache range requests and fetch random blocks from the
+  // cache and the network.
+
+  std::string headers;
+
+  // Write to the cache (40-49).
+  RunTransactionTestWithResponse(cache.http_cache(), kRangeGET_TransactionOK,
+                                 &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 40, 49));
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Read from the cache (40-49).
+  RunTransactionTestWithResponse(cache.http_cache(), kRangeGET_TransactionOK,
+                                 &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 40, 49));
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure we are done with the previous transaction.
+  MessageLoop::current()->RunAllPending();
+
+  // Write to the cache (30-39).
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.request_headers = "Range: bytes = 30-39\r\n";
+  transaction.data = "rg: 30-39 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 30, 39));
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure we are done with the previous transaction.
+  MessageLoop::current()->RunAllPending();
+
+  // Write and read from the cache (20-59).
+  transaction.request_headers = "Range: bytes = 20-59\r\n";
+  transaction.data = "rg: 20-29 rg: 30-39 rg: 40-49 rg: 50-59 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 20, 59));
+  EXPECT_EQ(6, cache.network_layer()->transaction_count());
+  EXPECT_EQ(3, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&kRangeGET_TransactionOK);
+}
+
+TEST(HttpCache, DISABLED_UnknownRangeGET_1) {
+  MockHttpCache cache;
+  AddMockTransaction(&kRangeGET_TransactionOK);
+
+  // Test that we can cache range requests when the start or end is unknown.
+  // We start with one suffix request, followed by a request from a given point.
+
+  std::string headers;
+
+  // Write to the cache (70-79).
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.request_headers = "Range: bytes = -10\r\n";
+  transaction.data = "rg: 70-79 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 70, 79));
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure we are done with the previous transaction.
+  MessageLoop::current()->RunAllPending();
+
+  // Write and read from the cache (60-79).
+  transaction.request_headers = "Range: bytes = 60-\r\n";
+  transaction.data = "rg: 60-69 rg: 70-79 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 60, 79));
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&kRangeGET_TransactionOK);
+}
+
+TEST(HttpCache, DISABLED_UnknownRangeGET_2) {
+  MockHttpCache cache;
+  AddMockTransaction(&kRangeGET_TransactionOK);
+
+  // Test that we can cache range requests when the start or end is unknown.
+  // We start with one request from a given point, followed by a suffix request.
+
+  std::string headers;
+
+  // Write to the cache (70-79).
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.request_headers = "Range: bytes = 70-\r\n";
+  transaction.data = "rg: 70-79 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 70, 79));
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Make sure we are done with the previous transaction.
+  MessageLoop::current()->RunAllPending();
+
+  // Write and read from the cache (60-79).
+  transaction.request_headers = "Range: bytes = -20\r\n";
+  transaction.data = "rg: 60-69 rg: 70-79 ";
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_TRUE(Verify206Response(headers, 60, 79));
+  EXPECT_EQ(3, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&kRangeGET_TransactionOK);
 }
 
 TEST(HttpCache, SyncRead) {
@@ -1207,78 +2025,22 @@ TEST(HttpCache, OutlivedTransactions) {
   delete trans;
 }
 
-// Make sure Entry::UseExternalFile is called when a new entry is created in
-// a HttpCache with MEDIA type. Also make sure Entry::GetPlatformFile is called
-// when an entry is loaded from a HttpCache with MEDIA type. Also confirm we
-// will receive a file handle in ResponseInfo from a media cache.
-TEST(HttpCache, SimpleGET_MediaCache) {
-  // Initialize the HttpCache with MEDIA type.
+// Test that the disabled mode works.
+TEST(HttpCache, CacheDisabledMode) {
   MockHttpCache cache;
-  cache.http_cache()->set_type(net::HttpCache::MEDIA);
 
-  // Define some fake file handles for testing.
-  base::PlatformFile kFakePlatformFile1, kFakePlatformFile2;
-#if defined(OS_WIN)
-  kFakePlatformFile1 = reinterpret_cast<base::PlatformFile>(1);
-  kFakePlatformFile2 = reinterpret_cast<base::PlatformFile>(2);
-#else
-  kFakePlatformFile1 = 1;
-  kFakePlatformFile2 = 2;
-#endif
+  // write to the cache
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
 
-  ScopedMockTransaction trans_info(kSimpleGET_Transaction);
-  trans_info.load_flags |= net::LOAD_ENABLE_DOWNLOAD_FILE;
-  TestCompletionCallback callback;
+  // go into disabled mode
+  cache.http_cache()->set_mode(net::HttpCache::DISABLE);
 
-  {
-    // Set the fake file handle to MockDiskEntry so cache is written with an
-    // entry created with our fake file handle.
-    MockDiskEntry::set_global_platform_file(kFakePlatformFile1);
+  // force this transaction to write to the cache again
+  MockTransaction transaction(kSimpleGET_Transaction);
 
-    scoped_ptr<net::HttpTransaction> trans(
-        cache.http_cache()->CreateTransaction());
-    ASSERT_TRUE(trans.get());
+  RunTransactionTest(cache.http_cache(), transaction);
 
-    MockHttpRequest request(trans_info);
-
-    int rv = trans->Start(&request, &callback);
-    if (rv == net::ERR_IO_PENDING)
-      rv = callback.WaitForResult();
-    ASSERT_EQ(net::OK, rv);
-
-    const net::HttpResponseInfo* response = trans->GetResponseInfo();
-    ASSERT_TRUE(response);
-
-    ASSERT_EQ(kFakePlatformFile1, response->response_data_file);
-
-    ReadAndVerifyTransaction(trans.get(), trans_info);
-  }
-
-  // Load only from cache so we would get the same file handle.
-  trans_info.load_flags |= net::LOAD_ONLY_FROM_CACHE;
-
-  {
-    // Set a different file handle value to MockDiskEntry so any new entry
-    // created in the cache won't have the same file handle value.
-    MockDiskEntry::set_global_platform_file(kFakePlatformFile2);
-
-    scoped_ptr<net::HttpTransaction> trans(
-        cache.http_cache()->CreateTransaction());
-    ASSERT_TRUE(trans.get());
-
-    MockHttpRequest request(trans_info);
-
-    int rv = trans->Start(&request, &callback);
-    if (rv == net::ERR_IO_PENDING)
-      rv = callback.WaitForResult();
-    ASSERT_EQ(net::OK, rv);
-
-    const net::HttpResponseInfo* response = trans->GetResponseInfo();
-    ASSERT_TRUE(response);
-
-    // Make sure we get the same file handle as in the first request.
-    ASSERT_EQ(kFakePlatformFile1, response->response_data_file);
-
-    ReadAndVerifyTransaction(trans.get(), trans_info);
-  }
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
 }

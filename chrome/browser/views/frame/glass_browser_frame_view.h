@@ -5,12 +5,12 @@
 #ifndef CHROME_BROWSER_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_
 #define CHROME_BROWSER_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_
 
-#include "chrome/browser/views/frame/browser_frame.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/window/non_client_view.h"
+#include "chrome/browser/views/frame/browser_frame_win.h"
+#include "chrome/browser/views/frame/browser_non_client_frame_view.h"
+#include "views/controls/button/button.h"
+#include "views/window/non_client_view.h"
 
 class BrowserView;
-class GlassBrowserWindowResources;
 class SkBitmap;
 
 class GlassBrowserFrameView : public BrowserNonClientFrameView {
@@ -20,7 +20,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   virtual ~GlassBrowserFrameView();
 
   // Overridden from BrowserNonClientFrameView:
-  virtual gfx::Rect GetBoundsForTabStrip(TabStrip* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(TabStripWrapper* tabstrip) const;
   virtual void UpdateThrobber(bool running);
 
   // Overridden from views::NonClientFrameView:
@@ -35,7 +35,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
 
  protected:
   // Overridden from views::View:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
 
  private:
@@ -52,10 +52,10 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   int NonClientTopBorderHeight() const;
 
   // Paint various sub-components of this view.
-  void PaintDistributorLogo(ChromeCanvas* canvas);
-  void PaintToolbarBackground(ChromeCanvas* canvas);
-  void PaintOTRAvatar(ChromeCanvas* canvas);
-  void PaintRestoredClientEdge(ChromeCanvas* canvas);
+  void PaintDistributorLogo(gfx::Canvas* canvas);
+  void PaintToolbarBackground(gfx::Canvas* canvas);
+  void PaintOTRAvatar(gfx::Canvas* canvas);
+  void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
   void LayoutDistributorLogo();
@@ -95,7 +95,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
 
   static void InitClass();
   static SkBitmap* distributor_logo_;
-  static GlassBrowserWindowResources* resources_;
 
   static const int kThrobberIconCount = 24;
   static HICON throbber_icons_[kThrobberIconCount];

@@ -9,6 +9,7 @@
 
 #include "base/gfx/native_widget_types.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/history/snippet.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -32,23 +33,23 @@ namespace bookmark_utils {
 int PreferredDropOperation(int source_operations, int operations);
 
 // Returns the drag operations for the specified node.
-int BookmarkDragOperation(BookmarkNode* node);
+int BookmarkDragOperation(const BookmarkNode* node);
 
 // Returns the preferred drop operation on a bookmark menu/bar.
 // |parent| is the parent node the drop is to occur on and |index| the index the
 // drop is over.
 int BookmarkDropOperation(Profile* profile,
-			  const views::DropTargetEvent& event,
-			  const BookmarkDragData& data,
-			  BookmarkNode* parent,
-			  int index);
+                          const views::DropTargetEvent& event,
+                          const BookmarkDragData& data,
+                          const BookmarkNode* parent,
+                          int index);
 
 // Performs a drop of bookmark data onto |parent_node| at |index|. Returns the
 // type of drop the resulted.
 int PerformBookmarkDrop(Profile* profile,
-			const BookmarkDragData& data,
-			BookmarkNode* parent_node,
-			int index);
+                        const BookmarkDragData& data,
+                        const BookmarkNode* parent_node,
+                        int index);
 
 // Returns true if the bookmark data can be dropped on |drop_parent| at
 // |index|. A drop from a separate profile is always allowed, where as
@@ -57,14 +58,14 @@ int PerformBookmarkDrop(Profile* profile,
 // a child of |drop_parent| at |index|.
 bool IsValidDropLocation(Profile* profile,
                          const BookmarkDragData& data,
-                         BookmarkNode* drop_parent,
+                         const BookmarkNode* drop_parent,
                          int index);
 
 // Clones drag data, adding newly created nodes to |parent| starting at
 // |index_to_add_at|.
 void CloneDragData(BookmarkModel* model,
                    const std::vector<BookmarkDragData::Element>& elements,
-                   BookmarkNode* parent,
+                   const BookmarkNode* parent,
                    int index_to_add_at);
 
 // Recursively opens all bookmarks. |initial_disposition| dictates how the
@@ -72,79 +73,104 @@ void CloneDragData(BookmarkModel* model,
 // |navigator| is used to open the URLs. If |navigator| is NULL the last
 // tabbed browser with the profile |profile| is used. If there is no browser
 // with the specified profile a new one is created.
-void OpenAll(gfx::NativeWindow parent,
+void OpenAll(gfx::NativeView parent,
              Profile* profile,
              PageNavigator* navigator,
-             const std::vector<BookmarkNode*>& nodes,
+             const std::vector<const BookmarkNode*>& nodes,
              WindowOpenDisposition initial_disposition);
 
 // Convenience for opening a single BookmarkNode.
-void OpenAll(gfx::NativeWindow parent,
+void OpenAll(gfx::NativeView parent,
              Profile* profile,
              PageNavigator* navigator,
-             BookmarkNode* node,
+             const BookmarkNode* node,
              WindowOpenDisposition initial_disposition);
 
 // Copies nodes onto the clipboard. If |remove_nodes| is true the nodes are
 // removed after copied to the clipboard. The nodes are copied in such a way
 // that if pasted again copies are made.
 void CopyToClipboard(BookmarkModel* model,
-                     const std::vector<BookmarkNode*>& nodes,
+                     const std::vector<const BookmarkNode*>& nodes,
                      bool remove_nodes);
 
 // Pastes from the clipboard. The new nodes are added to |parent|, unless
 // |parent| is null in which case this does nothing. The nodes are inserted
 // at |index|. If |index| is -1 the nodes are added to the end.
 void PasteFromClipboard(BookmarkModel* model,
-                        BookmarkNode* parent,
+                        const BookmarkNode* parent,
                         int index);
 
 // Returns true if the user can copy from the pasteboard.
-bool CanPasteFromClipboard(BookmarkNode* node);
+bool CanPasteFromClipboard(const BookmarkNode* node);
 
 // Returns a vector containing up to |max_count| of the most recently modified
 // groups. This never returns an empty vector.
-std::vector<BookmarkNode*> GetMostRecentlyModifiedGroups(BookmarkModel* model,
-                                                         size_t max_count);
+std::vector<const BookmarkNode*> GetMostRecentlyModifiedGroups(
+    BookmarkModel* model, size_t max_count);
 
 // Returns the most recently added bookmarks. This does not return groups,
 // only nodes of type url.
 void GetMostRecentlyAddedEntries(BookmarkModel* model,
                                  size_t count,
-                                 std::vector<BookmarkNode*>* nodes);
+                                 std::vector<const BookmarkNode*>* nodes);
 
 // Used by GetBookmarksMatchingText to return a matching node and the location
 // of the match in the title.
 struct TitleMatch {
-  BookmarkNode* node;
+  const BookmarkNode* node;
 
   // Location of the matching words in the title of the node.
   Snippet::MatchPositions match_positions;
 };
 
-// Returns the bookmarks whose title contains text. At most |max_count|
-// matches are returned in |matches|.
-void GetBookmarksMatchingText(BookmarkModel* model,
-                              const std::wstring& text,
-                              size_t max_count,
-                              std::vector<TitleMatch>* matches);
-
 // Returns true if |n1| was added more recently than |n2|.
-bool MoreRecentlyAdded(BookmarkNode* n1, BookmarkNode* n2);
+bool MoreRecentlyAdded(const BookmarkNode* n1, const BookmarkNode* n2);
 
 // Returns up to |max_count| bookmarks from |model| whose url or title contains
-// the text |text|.
+// the text |text|.  |languages| is user's accept-language setting to decode
+// IDN.
 void GetBookmarksContainingText(BookmarkModel* model,
                                 const std::wstring& text,
                                 size_t max_count,
-                                std::vector<BookmarkNode*>* nodes);
+                                const std::wstring& languages,
+                                std::vector<const BookmarkNode*>* nodes);
 
 // Returns true if |node|'s url or title contains the string |text|.
-bool DoesBookmarkContainText(BookmarkNode* node, const std::wstring& text);
+// |languages| is user's accept-language setting to decode IDN.
+bool DoesBookmarkContainText(const BookmarkNode* node,
+                             const std::wstring& text,
+                             const std::wstring& languages);
+
+// Modifies a bookmark node (assuming that there's no magic that needs to be
+// done regarding moving from one folder to another).  If the URL changed or a
+// new node is explicitly being added, returns a pointer to the new node that
+// was created.  Otherwise the return value is identically |node|.
+const BookmarkNode* ApplyEditsWithNoGroupChange(
+    BookmarkModel* model,
+    const BookmarkNode* parent,
+    const BookmarkNode* node,
+    const std::wstring& new_title,
+    const GURL& new_url,
+    BookmarkEditor::Handler* handler);
+
+// Modifies a bookmark node assuming that the parent of the node may have
+// changed and the node will need to be removed and reinserted.  If the URL
+// changed or a new node is explicitly being added, returns a pointer to the
+// new node that was created.  Otherwise the return value is identically |node|.
+const BookmarkNode* ApplyEditsWithPossibleGroupChange(
+    BookmarkModel* model,
+    const BookmarkNode* new_parent,
+    const BookmarkNode* node,
+    const std::wstring& new_title,
+    const GURL& new_url,
+    BookmarkEditor::Handler* handler);
 
 // Toggles whether the bookmark bar is shown only on the new tab page or on
 // all tabs.  This is a preference modifier, not a visual modifier.
 void ToggleWhenVisible(Profile* profile);
+
+// Register local state prefs for bookmark bar view.
+void RegisterPrefs(PrefService* prefs);
 
 // Register user prefs for BookmarkBar, BookmarkView, ...
 void RegisterUserPrefs(PrefService* prefs);

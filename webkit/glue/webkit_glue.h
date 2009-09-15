@@ -16,11 +16,11 @@
 
 #include "base/clipboard.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/string16.h"
 
 class GURL;
 class SkBitmap;
+class StringPiece;
 class WebView;
 class WebFrame;
 struct WebPluginInfo;
@@ -31,8 +31,6 @@ class WebString;
 
 namespace webkit_glue {
 
-struct ScreenInfo;
-
 
 //---- BEGIN FUNCTIONS IMPLEMENTED BY WEBKIT/GLUE -----------------------------
 
@@ -40,10 +38,6 @@ void SetJavaScriptFlags(const std::wstring& flags);
 
 // Turn on the logging for notImplemented() calls from WebCore.
 void EnableWebCoreNotImplementedLogging();
-
-// Returns screen information corresponding to the given window.  This is the
-// default implementation.
-ScreenInfo GetScreenInfoHelper(gfx::NativeView window);
 
 // Returns the text of the document element.
 std::wstring DumpDocumentText(WebFrame* web_frame);
@@ -59,9 +53,10 @@ std::wstring DumpRenderer(WebFrame* web_frame);
 // Returns a dump of the scroll position of the webframe.
 std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive);
 
-// Returns a representation of the back/forward list.
-void DumpBackForwardList(WebView* view, void* previous_history_item,
-                         std::wstring* result);
+// Returns a dump of the given history state suitable for implementing the
+// dumpBackForwardList command of the layoutTestController.
+std::wstring DumpHistoryState(const std::string& history_state, int indent,
+                              bool is_current);
 
 // Cleans up state left over from the previous test run.
 void ResetBeforeTestRun(WebView* view);
@@ -83,6 +78,9 @@ const std::string& GetUserAgent(const GURL& url);
 // HistoryItemToString (in glue_serialize) that is used during session restore
 // if the saved state is empty.
 std::string CreateHistoryStateForURL(const GURL& url);
+
+// Removes any form data state from the history state string |content_state|.
+std::string RemoveFormDataFromHistoryState(const std::string& content_state);
 
 #ifndef NDEBUG
 // Checks various important objects to see if there are any in memory, and
@@ -111,14 +109,6 @@ WebKit::WebString FilePathStringToWebString(const FilePath::StringType& str);
 
 //---- BEGIN FUNCTIONS IMPLEMENTED BY EMBEDDER --------------------------------
 
-// Set during RenderProcess::GlobalInit when --enable-video has been passed in
-// and all media related libraries were successfully loaded.
-void SetMediaPlayerAvailable(bool value);
-
-// This function is called from WebCore::MediaPlayerPrivate,
-// Returns true if media player is available and can be created.
-bool IsMediaPlayerAvailable();
-
 // This function is called to request a prefetch of the entire URL, loading it
 // into our cache for (expected) future needs.  The given URL may NOT be in
 // canonical form and it will NOT be null-terminated; use the length instead.
@@ -139,7 +129,7 @@ string16 GetLocalizedString(int message_id);
 
 // Returns the raw data for a resource.  This resource must have been
 // specified as BINDATA in the relevant .rc file.
-std::string GetDataResource(int resource_id);
+StringPiece GetDataResource(int resource_id);
 
 #if defined(OS_WIN)
 // Loads and returns a cursor.
@@ -190,9 +180,6 @@ bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
 // false otherwise.
 bool IsPluginRunningInRendererProcess();
 
-// Returns screen information corresponding to the given window.
-ScreenInfo GetScreenInfo(gfx::NativeViewId window);
-
 // Returns a bool indicating if the Null plugin should be enabled or not.
 bool IsDefaultPluginEnabled();
 
@@ -211,6 +198,12 @@ bool FindProxyForUrl(const GURL& url, std::string* proxy_list);
 // Returns the locale that this instance of webkit is running as.  This is of
 // the form language-country (e.g., en-US or pt-BR).
 std::wstring GetWebKitLocale();
+
+// Close idle connections.  Used for debugging.
+void CloseIdleConnections();
+
+// Enable or disable the disk cache.  Used for debugging.
+void SetCacheMode(bool enabled);
 
 // ---- END FUNCTIONS IMPLEMENTED BY EMBEDDER ---------------------------------
 

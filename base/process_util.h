@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,11 @@
 #endif
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/process.h"
 
 #if defined(OS_WIN)
@@ -44,6 +46,8 @@ struct IoCounters {
   unsigned long long WriteTransferCount;
   unsigned long long OtherTransferCount;
 };
+
+#include "base/file_descriptor_shuffle.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -62,14 +66,20 @@ enum {
 };
 
 // Returns the id of the current process.
-int GetCurrentProcId();
+ProcessId GetCurrentProcId();
 
 // Returns the ProcessHandle of the current process.
 ProcessHandle GetCurrentProcessHandle();
 
 // Converts a PID to a process handle. This handle must be closed by
-// CloseProcessHandle when you are done with it.
-ProcessHandle OpenProcessHandle(int pid);
+// CloseProcessHandle when you are done with it. Returns true on success.
+bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle);
+
+// Converts a PID to a process handle. On Windows the handle is opened
+// with more access rights and must only be used by trusted code.
+// You have to close returned handle using CloseProcessHandle. Returns true
+// on success.
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Closes the process handle opened by OpenProcessHandle.
 void CloseProcessHandle(ProcessHandle process);
@@ -77,12 +87,27 @@ void CloseProcessHandle(ProcessHandle process);
 // Returns the unique ID for the specified process. This is functionally the
 // same as Windows' GetProcessId(), but works on versions of Windows before
 // Win XP SP1 as well.
-int GetProcId(ProcessHandle process);
+ProcessId GetProcId(ProcessHandle process);
+
+#if defined(OS_LINUX)
+// Returns the ID for the parent of the given process.
+ProcessId GetParentProcessId(ProcessHandle process);
+
+// Returns the path to the executable of the given process.
+FilePath GetProcessExecutablePath(ProcessHandle process);
+#endif
 
 #if defined(OS_POSIX)
 // Sets all file descriptors to close on exec except for stdin, stdout
 // and stderr.
+// TODO(agl): remove this function
+// WARNING: do not use. It's inherently race-prone in the face of
+// multi-threading.
 void SetAllFDsToCloseOnExec();
+// Close all file descriptors, expect those which are a destination in the
+// given multimap. Only call this function in a child process where you know
+// that there aren't any other threads.
+void CloseSuperfluousFds(const base::InjectiveMultimap& saved_map);
 #endif
 
 #if defined(OS_WIN)
@@ -111,25 +136,41 @@ bool LaunchApp(const std::wstring& cmdline,
 // As above, if wait is true, execute synchronously. The pid will be stored
 // in process_handle if that pointer is non-null.
 //
-// Note that the first argument in argv must point to the filename,
-// and must be fully specified.
+// Note that the first argument in argv must point to the executable filename.
+// If the filename is not fully specified, PATH will be searched.
 typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
 bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle);
-#endif
+#if defined(OS_LINUX)
+// Similar to above, but also (un)set environment variables in child process
+// through |environ|.
+typedef std::vector<std::pair<const char*, const char*> > environment_vector;
+bool LaunchApp(const std::vector<std::string>& argv,
+               const environment_vector& environ,
+               const file_handle_mapping_vector& fds_to_remap,
+               bool wait, ProcessHandle* process_handle);
+#endif  // defined(OS_LINUX)
+#endif  // defined(OS_POSIX)
 
-// Execute the application specified by cl. This function delegates to one
+// Executes the application specified by cl. This function delegates to one
 // of the above two platform-specific functions.
 bool LaunchApp(const CommandLine& cl,
                bool wait, bool start_hidden, ProcessHandle* process_handle);
+
+// Executes the application specified by |cl| and wait for it to exit. Stores
+// the output (stdout) in |output|. Redirects stderr to /dev/null. Returns true
+// on success (application launched and exited cleanly, with exit code
+// indicating success). |output| is modified only when the function finished
+// successfully.
+bool GetAppOutput(const CommandLine& cl, std::string* output);
 
 // Used to filter processes by process ID.
 class ProcessFilter {
  public:
   // Returns true to indicate set-inclusion and false otherwise.  This method
   // should not have side-effects and should be idempotent.
-  virtual bool Includes(uint32 pid, uint32 parent_pid) const = 0;
+  virtual bool Includes(ProcessId pid, ProcessId parent_pid) const = 0;
   virtual ~ProcessFilter() { }
 };
 
@@ -153,13 +194,17 @@ bool KillProcesses(const std::wstring& executable_name, int exit_code,
 // Returns true if this is successful, false otherwise.
 bool KillProcess(ProcessHandle process, int exit_code, bool wait);
 #if defined(OS_WIN)
-bool KillProcessById(DWORD process_id, int exit_code, bool wait);
+bool KillProcessById(ProcessId process_id, int exit_code, bool wait);
 #endif
 
 // Get the termination status (exit code) of the process and return true if the
-// status indicates the process crashed.  It is an error to call this if the
-// process hasn't terminated yet.
-bool DidProcessCrash(ProcessHandle handle);
+// status indicates the process crashed. |child_exited| is set to true iff the
+// child process has terminated. (|child_exited| may be NULL.)
+//
+// On Windows, it is an error to call this if the process hasn't terminated
+// yet. On POSIX, |child_exited| is set correctly since we detect terminate in
+// a different manner on POSIX.
+bool DidProcessCrash(bool* child_exited, ProcessHandle handle);
 
 // Waits for process to exit. In POSIX systems, if the process hasn't been
 // signaled then puts the exit code in |exit_code|; otherwise it's considered
@@ -172,17 +217,17 @@ bool WaitForExitCode(ProcessHandle handle, int* exit_code);
 // Returns after all processes have exited or wait_milliseconds have expired.
 // Returns true if all the processes exited, false otherwise.
 bool WaitForProcessesToExit(const std::wstring& executable_name,
-                            int wait_milliseconds,
+                            int64 wait_milliseconds,
                             const ProcessFilter* filter);
 
 // Wait for a single process to exit. Return true if it exited cleanly within
 // the given time limit.
 bool WaitForSingleProcess(ProcessHandle handle,
-                          int wait_milliseconds);
+                          int64 wait_milliseconds);
 
 // Returns true when |wait_milliseconds| have elapsed and the process
 // is still running.
-bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds);
+bool CrashAwareSleep(ProcessHandle handle, int64 wait_milliseconds);
 
 // Waits a certain amount of time (can be 0) for all the processes with a given
 // executable name to exit, then kills off any of them that are still around.
@@ -191,7 +236,7 @@ bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds);
 // any processes needed to be killed, true if they all exited cleanly within
 // the wait_milliseconds delay.
 bool CleanupProcesses(const std::wstring& executable_name,
-                      int wait_milliseconds,
+                      int64 wait_milliseconds,
                       int exit_code,
                       const ProcessFilter* filter);
 
@@ -289,28 +334,32 @@ class ProcessMetrics {
   ~ProcessMetrics();
 
   // Returns the current space allocated for the pagefile, in bytes (these pages
-  // may or may not be in memory).
-  size_t GetPagefileUsage();
+  // may or may not be in memory).  On Linux, this returns the total virtual
+  // memory size.
+  size_t GetPagefileUsage() const;
   // Returns the peak space allocated for the pagefile, in bytes.
-  size_t GetPeakPagefileUsage();
-  // Returns the current working set size, in bytes.
-  size_t GetWorkingSetSize();
+  size_t GetPeakPagefileUsage() const;
+  // Returns the current working set size, in bytes.  On Linux, this returns
+  // the resident set size.
+  size_t GetWorkingSetSize() const;
+  // Returns the peak working set size, in bytes.
+  size_t GetPeakWorkingSetSize() const;
   // Returns private usage, in bytes. Private bytes is the amount
   // of memory currently allocated to a process that cannot be shared.
   // Note: returns 0 on unsupported OSes: prior to XP SP2.
-  size_t GetPrivateBytes();
+  size_t GetPrivateBytes() const;
   // Fills a CommittedKBytes with both resident and paged
   // memory usage as per definition of CommittedBytes.
-  void GetCommittedKBytes(CommittedKBytes* usage);
+  void GetCommittedKBytes(CommittedKBytes* usage) const;
   // Fills a WorkingSetKBytes containing resident private and shared memory
   // usage in bytes, as per definition of WorkingSetBytes.
-  bool GetWorkingSetKBytes(WorkingSetKBytes* ws_usage);
+  bool GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const;
 
   // Computes the current process available memory for allocation.
   // It does a linear scan of the address space querying each memory region
   // for its free (unallocated) status. It is useful for estimating the memory
   // load and fragmentation.
-  bool CalculateFreeMemory(FreeMBytes* free);
+  bool CalculateFreeMemory(FreeMBytes* free) const;
 
   // Returns the CPU usage in percent since the last time this method was
   // called. The first time this method is called it returns 0 and will return
@@ -325,7 +374,7 @@ class ProcessMetrics {
   // If IO information is retrieved successfully, the function returns true
   // and fills in the IO_COUNTERS passed in. The function returns false
   // otherwise.
-  bool GetIOCounters(IoCounters* io_counters);
+  bool GetIOCounters(IoCounters* io_counters) const;
 
  private:
   explicit ProcessMetrics(ProcessHandle process);

@@ -13,14 +13,16 @@
       'targets': [
         {
           'target_name': 'default_plugin',
-          'type': 'static_library',
+          'type': '<(library)',
           'dependencies': [
-            '../../third_party/libxml/libxml.gyp:libxml',
+            '../../net/net.gyp:net_resources',
             '../../third_party/icu38/icu38.gyp:icui18n',
             '../../third_party/icu38/icu38.gyp:icuuc',
+            '../../third_party/libxml/libxml.gyp:libxml',
             '../../third_party/npapi/npapi.gyp:npapi',
+            '../activex_shim/activex_shim.gyp:activex_shim',
             '../webkit.gyp:webkit_resources',
-            '../../net/net.gyp:net_resources',
+            '../webkit.gyp:webkit_strings',
           ],
           'include_dirs': [
             '../..',
@@ -46,7 +48,7 @@
             'plugin_main.h',
           ],
           'link_settings': {
-            'libraries': ['-lUrlmon.lib'],
+            'libraries': ['-lurlmon.lib'],
           },
         },
       ],

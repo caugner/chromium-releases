@@ -34,7 +34,6 @@ class BrowserProxy : public AutomationResourceProxy {
                AutomationHandleTracker* tracker,
                int handle)
     : AutomationResourceProxy(tracker, sender, handle) {}
-  virtual ~BrowserProxy() {}
 
   // Activates the tab corresponding to (zero-based) tab_index. Returns true if
   // successful.
@@ -89,29 +88,30 @@ class BrowserProxy : public AutomationResourceProxy {
   //
   // Use GetTabCount to see how many windows you can ask for. Tab numbers
   // are 0-based.
-  TabProxy* GetTab(int tab_index) const;
+  scoped_refptr<TabProxy> GetTab(int tab_index) const;
 
   // Returns the TabProxy for the currently active tab, transferring
   // ownership of the pointer to the caller. On failure, returns NULL.
-  TabProxy* GetActiveTab() const;
+  scoped_refptr<TabProxy> GetActiveTab() const;
 
   // Like GetActiveTab, but returns NULL if no response is received before
   // the specified timout.
-  TabProxy* GetActiveTabWithTimeout(uint32 timeout_ms, bool* is_timeout) const;
+  scoped_refptr<TabProxy> GetActiveTabWithTimeout(uint32 timeout_ms,
+      bool* is_timeout) const;
 
   // Returns the WindowProxy for this browser's window. It can be used to
   // retreive view bounds, simulate clicks and key press events.  The caller
   // owns the returned WindowProxy.
   // On failure, returns NULL.
-  WindowProxy* GetWindow();
+  scoped_refptr<WindowProxy> GetWindow() const;
 
   // Returns an AutocompleteEdit for this browser's window. It can be used to
   // manipulate the omnibox.  The caller owns the returned pointer.
   // On failure, returns NULL.
-  AutocompleteEditProxy* GetAutocompleteEdit();
-
+  scoped_refptr<AutocompleteEditProxy> GetAutocompleteEdit();
 
   // Apply the accelerator with given id (IDC_BACK, IDC_NEWTAB ...)
+  // The list can be found at chrome/app/chrome_dll_resource.h
   // Returns true if the call was successful.
   //
   // The alternate way to test the accelerators is to use the Windows messaging
@@ -139,14 +139,9 @@ class BrowserProxy : public AutomationResourceProxy {
                                        bool press_escape_en_route);
 #endif  // defined(OS_WIN)
 
-  // Block the thread until the tab count changes.
-  // |count| is the original tab count.
-  // |new_count| is updated with the number of new tabs.
-  // |wait_timeout| is the timeout, in milliseconds, for waiting.
-  // Returns false if the tab count does not change.
-  bool WaitForTabCountToChange(int count, int* new_count, int wait_timeout);
-
   // Block the thread until the tab count is |count|.
+  // |wait_timeout| is the timeout, in milliseconds, for waiting.
+  // Returns true on success.
   bool WaitForTabCountToBecome(int count, int wait_timeout);
 
   // Block the thread until the specified tab is the active tab.
@@ -179,12 +174,25 @@ class BrowserProxy : public AutomationResourceProxy {
 
   // Run the specified command in the browser (see browser_commands.cc for the
   // list of supported commands).  Returns true if the command was successfully
-  // executed, false otherwise.
+  // dispatched, false otherwise.
+  bool RunCommandAsync(int browser_command) const;
+
+  // Run the specified command in the browser (see browser_commands.cc for the
+  // list of supported commands).  Returns true if the command was successfully
+  // dispatched and executed, false otherwise.
   bool RunCommand(int browser_command) const;
 
   // Returns whether the Bookmark bar is visible and whether we are animating
   // it into position. Returns false on failure.
   bool GetBookmarkBarVisibility(bool* is_visible, bool* is_animating);
+
+  // Fills |*is_visible| with whether the browser's download shelf is currently
+  // visible. The return value indicates success. On failure, |*is_visible| is
+  // unchanged.
+  bool IsShelfVisible(bool* is_visible);
+
+  // Shows or hides the download shelf.
+  bool SetShelfVisible(bool is_visible);
 
   // Sets the int value of the specified preference.
   bool SetIntPreference(const std::wstring& name, int value);
@@ -198,6 +206,8 @@ class BrowserProxy : public AutomationResourceProxy {
   // Sets the boolean value of the specified preference.
   bool SetBooleanPreference(const std::wstring& name, bool value);
 
+ protected:
+  virtual ~BrowserProxy() {}
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProxy);
 };

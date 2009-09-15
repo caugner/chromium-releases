@@ -6,18 +6,23 @@
 #define CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H__
 
 #include <string>
+#include <vector>
 
+#include "base/file_path.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
-#include "chrome/common/ipc_message.h"
+#include "chrome/common/transport_dib.h"
 #include "chrome/renderer/plugin_channel_host.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_message.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/webplugin_delegate.h"
 
-class GURL;
 struct NPObject;
 class NPObjectStub;
+struct NPVariant_Param;
 struct PluginHostMsg_URLRequest_Params;
 class RenderView;
 class SkBitmap;
@@ -25,10 +30,6 @@ class SkBitmap;
 namespace base {
 class SharedMemory;
 class WaitableEvent;
-}
-
-namespace skia {
-class PlatformCanvasWin;
 }
 
 // An implementation of WebPluginDelegate that proxies all calls to
@@ -48,21 +49,19 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   // Called to drop our pointer to the window script object.
   void DropWindowScriptObject() { window_script_object_ = NULL; }
 
-  // Called to flush any deferred geometry changes to the plugin process.
-  virtual void FlushGeometryUpdates();
-
   // WebPluginDelegate implementation:
   virtual void PluginDestroyed();
   virtual bool Initialize(const GURL& url, char** argn, char** argv, int argc,
                           WebPlugin* plugin, bool load_manually);
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect);
-  virtual void Paint(HDC hdc, const gfx::Rect& rect);
-  virtual void Print(HDC hdc);
+  virtual void Paint(gfx::NativeDrawingContext context, const gfx::Rect& rect);
+  virtual void Print(gfx::NativeDrawingContext context);
   virtual NPObject* GetPluginScriptableObject();
   virtual void DidFinishLoadWithReason(NPReason reason);
   virtual void SetFocus();
-  virtual bool HandleEvent(NPEvent* event, WebCursor* cursor);
+  virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
+                                WebKit::WebCursorInfo* cursor);
   virtual int GetProcessId();
 
   // IPC::Channel::Listener implementation:
@@ -75,7 +74,7 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   virtual void SendJavaScriptStream(const std::string& url,
                                     const std::wstring& result,
                                     bool success, bool notify_needed,
-                                    int notify_data);
+                                    intptr_t notify_data);
 
   virtual void DidReceiveManualResponse(const std::string& url,
                                         const std::string& mime_type,
@@ -90,12 +89,12 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   virtual WebPluginResourceClient* CreateResourceClient(int resource_id,
                                                         const std::string &url,
                                                         bool notify_needed,
-                                                        void* notify_data,
-                                                        void* existing_stream);
+                                                        intptr_t notify_data,
+                                                        intptr_t existing_stream);
 
   // Notifies the delegate about a Get/Post URL request getting routed
   virtual void URLRequestRouted(const std::string&url, bool notify_needed,
-                                void* notify_data);
+                                intptr_t notify_data);
 
  protected:
   template<class WebPluginDelegateProxy> friend class DeleteTask;
@@ -108,38 +107,50 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
 
   // Message handlers for messages that proxy WebPlugin methods, which
   // we translate into calls to the real WebPlugin.
-  void OnSetWindow(gfx::NativeView window,
-                   HANDLE modal_loop_pump_messages_event);
+  void OnSetWindow(gfx::PluginWindowHandle window);
+#if defined(OS_LINUX)
+  void OnCreatePluginContainer(gfx::PluginWindowHandle* container);
+  void OnDestroyPluginContainer(gfx::PluginWindowHandle container);
+#endif
+#if defined(OS_WIN)
+  void OnSetWindowlessPumpEvent(HANDLE modal_loop_pump_messages_event);
+#endif
   void OnCompleteURL(const std::string& url_in, std::string* url_out,
                      bool* result);
   void OnHandleURLRequest(const PluginHostMsg_URLRequest_Params& params);
   void OnCancelResource(int id);
   void OnInvalidateRect(const gfx::Rect& rect);
   void OnGetWindowScriptNPObject(int route_id, bool* success,
-                                 void** npobject_ptr);
-  void OnGetPluginElement(int route_id, bool* success, void** npobject_ptr);
+                                 intptr_t* npobject_ptr);
+  void OnGetPluginElement(int route_id, bool* success, intptr_t* npobject_ptr);
   void OnSetCookie(const GURL& url,
-                   const GURL& policy_url,
+                   const GURL& first_party_for_cookies,
                    const std::string& cookie);
-  void OnGetCookies(const GURL& url, const GURL& policy_url,
+  void OnGetCookies(const GURL& url, const GURL& first_party_for_cookies,
                     std::string* cookies);
   void OnShowModalHTMLDialog(const GURL& url, int width, int height,
                              const std::string& json_arguments,
                              std::string* json_retval);
+  void OnGetDragData(const NPVariant_Param& event, bool add_data,
+                     std::vector<NPVariant_Param>* values, bool* success);
+  void OnSetDropEffect(const NPVariant_Param& event, int effect,
+                       bool* success);
   void OnMissingPluginStatus(int status);
   void OnGetCPBrowsingContext(uint32* context);
   void OnCancelDocumentLoad();
   void OnInitiateHTTPRangeRequest(const std::string& url,
                                   const std::string& range_info,
-                                  HANDLE existing_stream, bool notify_needed,
-                                  HANDLE notify_data);
+                                  intptr_t existing_stream,
+                                  bool notify_needed,
+                                  intptr_t notify_data);
 
   // Draw a graphic indicating a crashed plugin.
-  void PaintSadPlugin(HDC hdc, const gfx::Rect& rect);
+  void PaintSadPlugin(gfx::NativeDrawingContext context, const gfx::Rect& rect);
 
-  // Returns true if the given rectangle is different in the hdc and the
-  // current background bitmap.
-  bool BackgroundChanged(HDC hdc, const gfx::Rect& rect);
+  // Returns true if the given rectangle is different in the native drawing
+  // context and the current background bitmap.
+  bool BackgroundChanged(gfx::NativeDrawingContext context,
+                         const gfx::Rect& rect);
 
   // Copies the given rectangle from the transport bitmap to the backing store.
   void CopyFromTransportToBacking(const gfx::Rect& rect);
@@ -148,8 +159,8 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   void ResetWindowlessBitmaps();
 
   // Creates a shared memory section and canvas.
-  bool CreateBitmap(scoped_ptr<base::SharedMemory>* memory,
-                    scoped_ptr<skia::PlatformCanvasWin>* canvas);
+  bool CreateBitmap(scoped_ptr<TransportDIB>* memory,
+                    scoped_ptr<skia::PlatformCanvas>* canvas);
 
   RenderView* render_view_;
   WebPlugin* plugin_;
@@ -161,8 +172,6 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   FilePath plugin_path_;
 
   gfx::Rect plugin_rect_;
-  gfx::Rect deferred_clip_rect_;
-  bool send_deferred_update_geometry_;
 
   NPObject* npobject_;
   NPObjectStub* window_script_object_;
@@ -183,14 +192,17 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   // store when we get an invalidate from it.  The background bitmap is used
   // for transparent plugins, as they need the backgroud data during painting.
   bool transparent_;
-  scoped_ptr<base::SharedMemory> backing_store_;
-  scoped_ptr<skia::PlatformCanvasWin> backing_store_canvas_;
-  scoped_ptr<base::SharedMemory> transport_store_;
-  scoped_ptr<skia::PlatformCanvasWin> transport_store_canvas_;
-  scoped_ptr<base::SharedMemory> background_store_;
-  scoped_ptr<skia::PlatformCanvasWin> background_store_canvas_;
+  scoped_ptr<TransportDIB> backing_store_;
+  scoped_ptr<skia::PlatformCanvas> backing_store_canvas_;
+  scoped_ptr<TransportDIB> transport_store_;
+  scoped_ptr<skia::PlatformCanvas> transport_store_canvas_;
+  scoped_ptr<TransportDIB> background_store_;
+  scoped_ptr<skia::PlatformCanvas> background_store_canvas_;
   // This lets us know which portion of the backing store has been painted into.
   gfx::Rect backing_store_painted_;
+
+  // The url of the main frame hosting the plugin.
+  GURL page_url_;
 
   DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegateProxy);
 };

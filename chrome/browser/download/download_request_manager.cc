@@ -11,7 +11,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
 
 // TabDownloadState ------------------------------------------------------------
@@ -66,10 +66,15 @@ void DownloadRequestManager::TabDownloadState::PromptUserForDownload(
   if (is_showing_prompt())
     return;  // Already showing prompt.
 
-  if (DownloadRequestManager::delegate_)
+  if (DownloadRequestManager::delegate_) {
     NotifyCallbacks(DownloadRequestManager::delegate_->ShouldAllowDownload());
-  else
+  } else {
     dialog_delegate_ = DownloadRequestDialogDelegate::Create(tab, this);
+    // TODO(estade): the dialog delegate isn't yet implemented on linux. Just
+    // assume we shouldn't allow the download.
+    if (dialog_delegate_ == NULL)
+      NotifyCallbacks(false);
+  }
 }
 
 void DownloadRequestManager::TabDownloadState::Cancel() {
@@ -99,7 +104,7 @@ void DownloadRequestManager::TabDownloadState::Observe(
       // request. If this happens we may let a download through that we
       // shouldn't have. But this is rather rare, and it is difficult to get
       // 100% right, so we don't deal with it.
-      NavigationEntry* entry = controller_->GetPendingEntry();
+      NavigationEntry* entry = controller_->pending_entry();
       if (!entry)
         return;
 
@@ -177,7 +182,7 @@ DownloadRequestManager::~DownloadRequestManager() {
 
 DownloadRequestManager::DownloadStatus
     DownloadRequestManager::GetDownloadStatus(TabContents* tab) {
-  TabDownloadState* state = GetDownloadState(tab->controller(), NULL, false);
+  TabDownloadState* state = GetDownloadState(&tab->controller(), NULL, false);
   return state ? state->download_status() : ALLOW_ONE_DOWNLOAD;
 }
 
@@ -193,13 +198,7 @@ void DownloadRequestManager::CanDownloadOnIOThread(int render_process_host_id,
 }
 
 void DownloadRequestManager::OnUserGesture(TabContents* tab) {
-  NavigationController* controller = tab->controller();
-  if (!controller) {
-    NOTREACHED();
-    return;
-  }
-
-  TabDownloadState* state = GetDownloadState(controller, NULL, false);
+  TabDownloadState* state = GetDownloadState(&tab->controller(), NULL, false);
   if (!state)
     return;
 
@@ -234,8 +233,8 @@ void DownloadRequestManager::CanDownload(int render_process_host_id,
                                          Callback* callback) {
   DCHECK(!ui_loop_ || MessageLoop::current() == ui_loop_);
 
-  WebContents* originating_tab =
-      tab_util::GetWebContentsByID(render_process_host_id, render_view_id);
+  TabContents* originating_tab =
+      tab_util::GetTabContentsByID(render_process_host_id, render_view_id);
   if (!originating_tab) {
     // The tab was closed, don't allow the download.
     ScheduleNotification(callback, false);
@@ -247,19 +246,16 @@ void DownloadRequestManager::CanDownload(int render_process_host_id,
 void DownloadRequestManager::CanDownloadImpl(
     TabContents* originating_tab,
     Callback* callback) {
+  // If the tab requesting the download is a constrained popup that is not
+  // shown, treat the request as if it came from the parent.
   TabContents* effective_tab = originating_tab;
-  if (effective_tab->delegate() &&
-      effective_tab->delegate()->GetConstrainingContents(effective_tab)) {
-    // The tab requesting the download is a constrained popup that is not
-    // shown, treat the request as if it came from the parent.
+  if (effective_tab->delegate()) {
     effective_tab =
         effective_tab->delegate()->GetConstrainingContents(effective_tab);
   }
 
-  NavigationController* controller = effective_tab->controller();
-  DCHECK(controller);
   TabDownloadState* state = GetDownloadState(
-      controller, originating_tab->controller(), true);
+      &effective_tab->controller(), &originating_tab->controller(), true);
   switch (state->download_status()) {
     case ALLOW_ALL_DOWNLOADS:
       ScheduleNotification(callback, true);

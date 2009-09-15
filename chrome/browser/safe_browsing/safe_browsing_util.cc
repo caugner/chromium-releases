@@ -170,9 +170,9 @@ bool VerifyMAC(const std::string& key, const std::string& mac,
   std::string decoded_mac;
   net::Base64Decode(mac_copy, &decoded_mac);
 
-  base::HMAC hmac(base::HMAC::SHA1,
-                  reinterpret_cast<const unsigned char*>(decoded_key.data()),
-                  static_cast<int>(decoded_key.length()));
+  base::HMAC hmac(base::HMAC::SHA1);
+  if (!hmac.Init(decoded_key))
+    return false;
   const std::string data_str(data, data_length);
   unsigned char digest[kSafeBrowsingMacDigestSize];
   if (!hmac.Sign(data_str, digest, kSafeBrowsingMacDigestSize))
@@ -193,7 +193,7 @@ void FreeChunks(std::deque<SBChunk>* chunks) {
 
 GURL GeneratePhishingReportUrl(const std::string& report_page,
                                const std::string& url_to_report) {
-  Locale locale = Locale::getDefault();
+  icu::Locale locale = icu::Locale::getDefault();
   const char* lang = locale.getLanguage();
   if (!lang)
     lang = "en";  // fallback

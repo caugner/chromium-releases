@@ -5,14 +5,15 @@
 #ifndef CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H__
 #define CHROME_BROWSER_HISTORY_EXPIRE_HISTORY_BACKEND_H__
 
+#include <queue>
 #include <set>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/task.h"
 #include "base/time.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/text_database_manager.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BookmarkService;
@@ -25,6 +26,7 @@ namespace history {
 class ArchivedDatabase;
 class HistoryDatabase;
 struct HistoryDetails;
+class TextDatabaseManager;
 class ThumbnailDatabase;
 
 // Delegate used to broadcast notifications to the main thread.
@@ -35,6 +37,18 @@ class BroadcastNotificationDelegate {
   virtual void BroadcastNotifications(NotificationType type,
                                       HistoryDetails* details_deleted) = 0;
 };
+
+// Encapsulates visit expiration criteria and type of visits to expire.
+class ExpiringVisitsReader {
+ public:
+  virtual ~ExpiringVisitsReader() {}
+  // Populates |visits| from |db|, using provided |end_time| and |max_visits|
+  // cap.
+  virtual bool Read(base::Time end_time, HistoryDatabase* db,
+                    VisitVector* visits, int max_visits) const = 0;
+};
+
+typedef std::vector<const ExpiringVisitsReader*> ExpiringVisitsReaders;
 
 // Helper component to HistoryBackend that manages expiration and deleting of
 // history, as well as moving data from the main database to the archived
@@ -86,33 +100,10 @@ class ExpireHistoryBackend {
   FRIEND_TEST(ExpireHistoryTest, DeleteTextIndexForURL);
   FRIEND_TEST(ExpireHistoryTest, DeleteFaviconsIfPossible);
   FRIEND_TEST(ExpireHistoryTest, ArchiveSomeOldHistory);
+  FRIEND_TEST(ExpireHistoryTest, ExpiringVisitsReader);
   friend class ::TestingProfile;
 
-  struct DeleteDependencies {
-    // The time range affected. These can be is_null() to be unbounded in one
-    // or both directions.
-    base::Time begin_time, end_time;
-
-    // ----- Filled by DeleteVisitRelatedInfo or manually if a function doesn't
-    //       call that function. -----
-
-    // The unique URL rows affected by this delete.
-    std::map<URLID, URLRow> affected_urls;
-
-    // ----- Filled by DeleteOneURL -----
-
-    // The URLs deleted during this operation.
-    std::vector<URLRow> deleted_urls;
-
-    // The list of all favicon IDs that the affected URLs had. Favicons will be
-    // shared between all URLs with the same favicon, so this is the set of IDs
-    // that we will need to check when the delete operations are complete.
-    std::set<FavIconID> affected_favicons;
-
-    // Tracks the set of databases that have changed so we can optimize when
-    // when we're done.
-    TextDatabaseManager::ChangeSet text_db_changes;
-  };
+  struct DeleteDependencies;
 
   // Removes the data from the full text index associated with the given URL
   // string/ID pair. If |update_visits| is set, the visits that reference the
@@ -207,19 +198,21 @@ class ExpireHistoryBackend {
   // Broadcast the URL deleted notification.
   void BroadcastDeleteNotifications(DeleteDependencies* dependencies);
 
-  // Schedules a call to DoArchiveIteration at the given time in the
-  // future.
-  void ScheduleArchive(base::TimeDelta delay);
+  // Schedules a call to DoArchiveIteration.
+  void ScheduleArchive();
 
-  // Calls ArchiveSomeOldHistory to expire some amount of old history, and
-  // schedules another call to happen in the future.
+  // Calls ArchiveSomeOldHistory to expire some amount of old history, according
+  // to the items in work queue, and schedules another call to happen in the
+  // future.
   void DoArchiveIteration();
 
   // Tries to expire the oldest |max_visits| visits from history that are older
   // than |time_threshold|. The return value indicates if we think there might
   // be more history to expire with the current time threshold (it does not
   // indicate success or failure).
-  bool ArchiveSomeOldHistory(base::Time time_threshold, int max_visits);
+  bool ArchiveSomeOldHistory(base::Time end_time,
+                             const ExpiringVisitsReader* reader,
+                             int max_visits);
 
   // Tries to detect possible bad history or inconsistencies in the database
   // and deletes items. For example, URLs with no visits.
@@ -228,6 +221,18 @@ class ExpireHistoryBackend {
   // Returns the BookmarkService, blocking until it is loaded. This may return
   // NULL.
   BookmarkService* GetBookmarkService();
+
+  // Initializes periodic expiration work queue by populating it with with tasks
+  // for all known readers.
+  void InitWorkQueue();
+
+  // Returns the reader for all visits. This method is only used by the unit
+  // tests.
+  const ExpiringVisitsReader* GetAllVisitsReader();
+
+  // Returns the reader for AUTO_SUBFRAME visits. This method is only used by
+  // the unit tests.
+  const ExpiringVisitsReader* GetAutoSubframeVisitsReader();
 
   // Non-owning pointer to the notification delegate (guaranteed non-NULL).
   BroadcastNotificationDelegate* delegate_;
@@ -245,6 +250,21 @@ class ExpireHistoryBackend {
   // The threshold for "old" history where we will automatically expire it to
   // the archived database.
   base::TimeDelta expiration_threshold_;
+
+  // List of all distinct types of readers. This list is used to populate the
+  // work queue.
+  ExpiringVisitsReaders readers_;
+
+  // Work queue for periodic expiration tasks, used by DoArchiveIteration() to
+  // determine what to do at an iteration, as well as populate it for future
+  // iterations.
+  std::queue<const ExpiringVisitsReader*> work_queue_;
+
+  // Readers for various types of visits.
+  // TODO(dglazkov): If you are adding another one, please consider reorganizing
+  // into a map.
+  scoped_ptr<ExpiringVisitsReader> all_visits_reader_;
+  scoped_ptr<ExpiringVisitsReader> auto_subframe_visits_reader_;
 
   // The BookmarkService; may be null. This is owned by the Profile.
   //

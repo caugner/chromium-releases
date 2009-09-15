@@ -17,13 +17,15 @@
 #include "base/singleton.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "webkit/api/public/WebCache.h"
 
 class PrefService;
 
 class WebCacheManager {
   // Unit tests are our friends.
   friend class WebCacheManagerTest;
+  FRIEND_TEST(WebCacheManagerBrowserTest, DISABLED_CrashOnceOnly);
 
  public:
   static void RegisterPrefs(PrefService* prefs);

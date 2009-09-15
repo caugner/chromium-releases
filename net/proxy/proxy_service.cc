@@ -8,7 +8,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
@@ -19,9 +18,12 @@
 #include "net/proxy/proxy_resolver_winhttp.h"
 #elif defined(OS_MACOSX)
 #include "net/proxy/proxy_resolver_mac.h"
+#elif defined(OS_LINUX)
+#include "net/proxy/proxy_config_service_linux.h"
 #endif
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_resolver_v8.h"
+#include "net/url_request/url_request_context.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -31,7 +33,21 @@ namespace net {
 // Config getter that fails every time.
 class ProxyConfigServiceNull : public ProxyConfigService {
  public:
+  // ProxyConfigService implementation:
   virtual int GetProxyConfig(ProxyConfig* config) {
+    return ERR_NOT_IMPLEMENTED;
+  }
+};
+
+// Proxy resolver that fails every time.
+class ProxyResolverNull : public ProxyResolver {
+ public:
+  ProxyResolverNull() : ProxyResolver(true /*does_fetch*/) {}
+
+  // ProxyResolver implementation:
+  virtual int GetProxyForURL(const GURL& /*query_url*/,
+                             const GURL& /*pac_url*/,
+                             ProxyInfo* /*results*/) {
     return ERR_NOT_IMPLEMENTED;
   }
 };
@@ -70,8 +86,8 @@ class NotifyFetchCompletionTask : public Task {
 // We rely on the fact that the origin thread (and its message loop) will not
 // be destroyed until after the PAC thread is destroyed.
 
-class ProxyService::PacRequest :
-    public base::RefCountedThreadSafe<ProxyService::PacRequest> {
+class ProxyService::PacRequest
+    : public base::RefCountedThreadSafe<ProxyService::PacRequest> {
  public:
   // |service| -- the ProxyService that owns this request.
   // |url|     -- the url of the query.
@@ -182,8 +198,8 @@ ProxyService::ProxyService(ProxyConfigService* config_service,
                            ProxyResolver* resolver)
     : config_service_(config_service),
       resolver_(resolver),
+      next_config_id_(1),
       config_is_bad_(false),
-      config_has_been_updated_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(proxy_script_fetcher_callback_(
           this, &ProxyService::OnScriptFetchCompletion)),
       fetched_pac_config_id_(ProxyConfig::INVALID_ID),
@@ -192,65 +208,51 @@ ProxyService::ProxyService(ProxyConfigService* config_service,
 }
 
 // static
-ProxyService* ProxyService::Create(const ProxyInfo* pi) {
-  if (pi) {
-    // The ProxyResolver is set to NULL, since it should never be called
-    // (because the configuration will never require PAC).
-    return new ProxyService(new ProxyConfigServiceFixed(*pi), NULL);
-  }
-#if defined(OS_WIN)
-  return new ProxyService(new ProxyConfigServiceWin(),
-                          new ProxyResolverWinHttp());
-#elif defined(OS_MACOSX)
-  return new ProxyService(new ProxyConfigServiceMac(),
-                          new ProxyResolverMac());
-#else
-  // TODO(port): implement ProxyConfigServiceLinux as well as make use of
-  // ProxyResolverV8 once it's implemented.
-  // See:
-  // - http://code.google.com/p/chromium/issues/detail?id=8143
-  // - http://code.google.com/p/chromium/issues/detail?id=2764
-  return CreateNull();
-#endif
-}
-
-// static
-ProxyService* ProxyService::CreateUsingV8Resolver(
-    const ProxyInfo* pi, URLRequestContext* url_request_context) {
-  if (pi) {
-    // The ProxyResolver is set to NULL, since it should never be called
-    // (because the configuration will never require PAC).
-    return new ProxyService(new ProxyConfigServiceFixed(*pi), NULL);
-  }
-
+ProxyService* ProxyService::Create(
+    const ProxyConfig* pc,
+    bool use_v8_resolver,
+    URLRequestContext* url_request_context,
+    MessageLoop* io_loop) {
   // Choose the system configuration service appropriate for each platform.
-  ProxyConfigService* config_service;
-#if defined(OS_WIN)
-  config_service = new ProxyConfigServiceWin();
-#elif defined(OS_MACOSX)
-  config_service = new ProxyConfigServiceMac();
-#else
-  // TODO(port): implement ProxyConfigServiceLinux.
-  // See: http://code.google.com/p/chromium/issues/detail?id=8143
-  return CreateNull();
-#endif
+  ProxyConfigService* proxy_config_service = pc ?
+      new ProxyConfigServiceFixed(*pc) :
+      CreateSystemProxyConfigService(io_loop);
 
-  // Create a ProxyService that uses V8 to evaluate PAC scripts.
+  ProxyResolver* proxy_resolver;
+
+  if (use_v8_resolver) {
+    // Send javascript errors and alerts to LOG(INFO).
+    HostResolver* host_resolver = url_request_context->host_resolver();
+    ProxyResolverV8::JSBindings* js_bindings =
+        ProxyResolverV8::CreateDefaultBindings(host_resolver, io_loop);
+
+    proxy_resolver = new ProxyResolverV8(js_bindings);
+  } else {
+    proxy_resolver = CreateNonV8ProxyResolver();
+  }
+
   ProxyService* proxy_service = new ProxyService(
-      config_service, new ProxyResolverV8());
+      proxy_config_service, proxy_resolver);
 
-  // Configure PAC script downloads to be issued using |url_request_context|.
-  proxy_service->SetProxyScriptFetcher(
-      ProxyScriptFetcher::Create(url_request_context));
+  if (!proxy_resolver->does_fetch()) {
+    // Configure PAC script downloads to be issued using |url_request_context|.
+    DCHECK(url_request_context);
+    proxy_service->SetProxyScriptFetcher(
+        ProxyScriptFetcher::Create(url_request_context));
+  }
 
   return proxy_service;
 }
 
 // static
+ProxyService* ProxyService::CreateFixed(const ProxyConfig& pc) {
+  return Create(&pc, false, NULL, NULL);
+}
+
+// static
 ProxyService* ProxyService::CreateNull() {
-  // The ProxyResolver is set to NULL, since it should never be called
-  // (because the configuration will never require PAC).
-  return new ProxyService(new ProxyConfigServiceNull, NULL);
+  // Use a configuration fetcher and proxy resolver which always fail.
+  return new ProxyService(new ProxyConfigServiceNull, new ProxyResolverNull);
 }
 
 int ProxyService::ResolveProxy(const GURL& url, ProxyInfo* result,
@@ -294,42 +296,7 @@ int ProxyService::TryToCompleteSynchronously(const GURL& url,
     result->config_was_tried_ = true;
 
     if (!config_.proxy_rules.empty()) {
-      if (ShouldBypassProxyForURL(url)) {
-        result->UseDirect();
-      } else {
-        // If proxies are specified on a per protocol basis, the proxy server
-        // field contains a list the format of which is as below:-
-        // "scheme1=url:port;scheme2=url:port", etc.
-        std::string url_scheme = url.scheme();
-
-        StringTokenizer proxy_server_list(config_.proxy_rules, ";");
-        while (proxy_server_list.GetNext()) {
-          StringTokenizer proxy_server_for_scheme(
-              proxy_server_list.token_begin(), proxy_server_list.token_end(),
-              "=");
-
-          while (proxy_server_for_scheme.GetNext()) {
-            const std::string& proxy_server_scheme =
-                proxy_server_for_scheme.token();
-
-            // If we fail to get the proxy server here, it means that
-            // this is a regular proxy server configuration, i.e. proxies
-            // are not configured per protocol.
-            if (!proxy_server_for_scheme.GetNext()) {
-              result->UseNamedProxy(proxy_server_scheme);
-              return OK;
-            }
-
-            if (proxy_server_scheme == url_scheme) {
-              result->UseNamedProxy(proxy_server_for_scheme.token());
-              return OK;
-            }
-          }
-        }
-        // We failed to find a matching proxy server for the current URL
-        // scheme. Default to direct.
-        result->UseDirect();
-      }
+      ApplyProxyRules(url, config_.proxy_rules, result);
       return OK;
     }
 
@@ -349,6 +316,38 @@ int ProxyService::TryToCompleteSynchronously(const GURL& url,
   // otherwise, we have no proxy config
   result->UseDirect();
   return OK;
+}
+
+void ProxyService::ApplyProxyRules(const GURL& url,
+                                   const ProxyConfig::ProxyRules& proxy_rules,
+                                   ProxyInfo* result) {
+  DCHECK(!proxy_rules.empty());
+
+  if (ShouldBypassProxyForURL(url)) {
+    result->UseDirect();
+    return;
+  }
+
+  switch (proxy_rules.type) {
+    case ProxyConfig::ProxyRules::TYPE_SINGLE_PROXY:
+      result->UseProxyServer(proxy_rules.single_proxy);
+      break;
+    case ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME: {
+      const ProxyServer* entry = proxy_rules.MapUrlSchemeToProxy(url.scheme());
+      if (entry) {
+        result->UseProxyServer(*entry);
+      } else {
+        // We failed to find a matching proxy server for the current URL
+        // scheme. Default to direct.
+        result->UseDirect();
+      }
+      break;
+    }
+    default:
+      result->UseDirect();
+      NOTREACHED();
+      break;
+  }
 }
 
 void ProxyService::InitPacThread() {
@@ -401,6 +400,9 @@ void ProxyService::ProcessPendingRequests(PacRequest* recent_req) {
 
     in_progress_fetch_config_id_ = config_.id();
 
+    LOG(INFO) << "Starting fetch of PAC script " << pac_url
+              << " for config_id=" << in_progress_fetch_config_id_;
+
     proxy_script_fetcher_->Fetch(
         pac_url, &in_progress_fetch_bytes_, &proxy_script_fetcher_callback_);
     return;
@@ -423,6 +425,12 @@ void ProxyService::RemoveFrontOfRequestQueue(PacRequest* expected_req) {
 void ProxyService::OnScriptFetchCompletion(int result) {
   DCHECK(IsFetchingPacScript());
   DCHECK(!resolver_->does_fetch());
+
+  LOG(INFO) << "Completed PAC script fetch for config_id="
+            << in_progress_fetch_config_id_
+            << " with error " << ErrorToString(result)
+            << ". Fetched a total of " << in_progress_fetch_bytes_.size()
+            << " bytes";
 
   // Notify the ProxyResolver of the new script data (will be empty string if
   // result != OK).
@@ -521,6 +529,12 @@ void ProxyService::SetProxyScriptFetcher(
   proxy_script_fetcher_.reset(proxy_script_fetcher);
 }
 
+void ProxyService::ResetConfigService(
+    ProxyConfigService* new_proxy_config_service) {
+  config_service_.reset(new_proxy_config_service);
+  UpdateConfig();
+}
+
 void ProxyService::DidCompletePacRequest(int config_id, int result_code) {
   // If we get an error that indicates a bad PAC config, then we should
   // remember that, and not try the PAC config again for a while.
@@ -533,21 +547,79 @@ void ProxyService::DidCompletePacRequest(int config_id, int result_code) {
   config_is_bad_ = true;
 }
 
+// static
+ProxyConfigService* ProxyService::CreateSystemProxyConfigService(
+    MessageLoop* io_loop) {
+#if defined(OS_WIN)
+  return new ProxyConfigServiceWin();
+#elif defined(OS_MACOSX)
+  return new ProxyConfigServiceMac();
+#elif defined(OS_LINUX)
+  ProxyConfigServiceLinux* linux_config_service
+      = new ProxyConfigServiceLinux();
+
+  // Assume we got called from the UI loop, which runs the default
+  // glib main loop, so the current thread is where we should be
+  // running gconf calls from.
+  MessageLoop* glib_default_loop = MessageLoopForUI::current();
+
+  // Synchronously fetch the current proxy config (since we are
+  // running on glib_default_loop). Additionally register for gconf
+  // notifications (delivered in |glib_default_loop|) to keep us
+  // updated on when the proxy config has changed.
+  linux_config_service->SetupAndFetchInitialConfig(glib_default_loop, io_loop);
+
+  return linux_config_service;
+#else
+  LOG(WARNING) << "Failed to choose a system proxy settings fetcher "
+                  "for this platform.";
+  return new ProxyConfigServiceNull();
+#endif
+}
+
+// static
+ProxyResolver* ProxyService::CreateNonV8ProxyResolver() {
+#if defined(OS_WIN)
+  return new ProxyResolverWinHttp();
+#elif defined(OS_MACOSX)
+  return new ProxyResolverMac();
+#else
+  LOG(WARNING) << "PAC support disabled because there is no fallback "
+                  "non-V8 implementation";
+  return new ProxyResolverNull();
+#endif
+}
+
 void ProxyService::UpdateConfig() {
-  config_has_been_updated_ = true;
+  bool is_first_update = !config_has_been_initialized();
 
   ProxyConfig latest;
-  if (config_service_->GetProxyConfig(&latest) != OK)
+  if (config_service_->GetProxyConfig(&latest) != OK) {
+    if (is_first_update) {
+      // Default to direct-connection if the first fetch fails.
+      LOG(INFO) << "Failed initial proxy configuration fetch.";
+      SetConfig(ProxyConfig());
+    }
     return;
+  }
   config_last_update_time_ = TimeTicks::Now();
 
-  if (latest.Equals(config_))
+  if (!is_first_update && latest.Equals(config_))
     return;
 
-  config_ = latest;
-  config_is_bad_ = false;
+  SetConfig(latest);
+}
 
-  // We have a new config, we should clear the list of bad proxies.
+void ProxyService::SetConfig(const ProxyConfig& config) {
+  config_ = config;
+
+  // Increment the ID to reflect that the config has changed.
+  config_.set_id(next_config_id_++);
+
+  LOG(INFO) << "New proxy configuration was loaded:\n" << config_;
+
+  // Reset state associated with latest config.
+  config_is_bad_ = false;
   proxy_retry_info_.clear();
 }
 
@@ -556,7 +628,7 @@ void ProxyService::UpdateConfigIfOld() {
   const TimeDelta kProxyConfigMaxAge = TimeDelta::FromSeconds(5);
 
   // Periodically check for a new config.
-  if (!config_has_been_updated_ ||
+  if (!config_has_been_initialized() ||
       (TimeTicks::Now() - config_last_update_time_) > kProxyConfigMaxAge)
     UpdateConfig();
 }
@@ -571,6 +643,10 @@ bool ProxyService::ShouldBypassProxyForURL(const GURL& url) {
   // percent-encoded characters.
   StringToLowerASCII(&url_domain);
 
+  // TODO(eroman): use GetHostAndPort().
+  std::string url_domain_and_port = url_domain + ":"
+      + IntToString(url.EffectiveIntPort());
+
   if (config_.proxy_bypass_local_names) {
     if (url.host().find('.') == std::string::npos)
       return true;
@@ -584,24 +660,48 @@ bool ProxyService::ShouldBypassProxyForURL(const GURL& url) {
     // If no scheme is specified then it indicates that all schemes are
     // allowed for the current entry. For matching this we just use
     // the protocol scheme of the url passed in.
-    if (bypass_url_domain.find("://") == std::string::npos) {
+    size_t scheme_colon = bypass_url_domain.find("://");
+    if (scheme_colon == std::string::npos) {
       std::string bypass_url_domain_with_scheme = url.scheme();
+      scheme_colon = bypass_url_domain_with_scheme.length();
       bypass_url_domain_with_scheme += "://";
       bypass_url_domain_with_scheme += bypass_url_domain;
 
       bypass_url_domain = bypass_url_domain_with_scheme;
     }
+    std::string* url_compare_reference = &url_domain;
+    size_t port_colon = bypass_url_domain.rfind(":");
+    if (port_colon > scheme_colon) {
+      // If our match pattern includes a colon followed by a digit,
+      // and either it's preceded by ']' (IPv6 with port)
+      // or has no other colon (IPv4),
+      // then match against <domain>:<port>.
+      // TODO(sdoyon): straighten this out, in particular the IPv6 brackets,
+      // and do the parsing in ProxyConfig when we do the CIDR matching
+      // mentioned below.
+      std::string::const_iterator domain_begin =
+          bypass_url_domain.begin() + scheme_colon + 3;  // after ://
+      std::string::const_iterator port_iter =
+          bypass_url_domain.begin() + port_colon;
+      std::string::const_iterator end = bypass_url_domain.end();
+      if ((port_iter + 1) < end && IsAsciiDigit(*(port_iter + 1)) &&
+          (*(port_iter - 1) == ']' ||
+           std::find(domain_begin, port_iter, ':') == port_iter))
+        url_compare_reference = &url_domain_and_port;
+    }
 
     StringToLowerASCII(&bypass_url_domain);
 
-    if (MatchPattern(url_domain, bypass_url_domain))
+    if (MatchPattern(*url_compare_reference, bypass_url_domain))
       return true;
 
     // Some systems (the Mac, for example) allow CIDR-style specification of
     // proxy bypass for IP-specified hosts (e.g.  "10.0.0.0/8"; see
     // http://www.tcd.ie/iss/internet/osx_proxy.php for a real-world example).
     // That's kinda cool so we'll provide that for everyone.
-    // TODO(avi): implement here
+    // TODO(avi): implement here. See: http://crbug.com/9835.
+    // IP addresses ought to be canonicalized for comparison (whether
+    // with CIDR, port, or IP address alone).
   }
 
   return false;

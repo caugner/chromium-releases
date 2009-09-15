@@ -20,23 +20,32 @@
 #include <string>
 
 #include "base/lock.h"
+#include "base/ref_counted.h"
 #include "chrome/browser/net/dns_host_info.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/common/net/dns.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
+
+using base::TimeDelta;
+
+namespace net {
+class HostResolver;
+}
+
+class MessageLoop;
 
 namespace chrome_browser_net {
 
 typedef chrome_common_net::NameList NameList;
 typedef std::map<std::string, DnsHostInfo> Results;
 
-class DnsMaster {
+class DnsMaster : public base::RefCountedThreadSafe<DnsMaster> {
  public:
-  // Too many concurrent lookups negate benefits of prefetching
-  // by trashing the OS cache.
-  static const size_t kMaxConcurrentLookups;
-
-  DnsMaster();
+  // |max_concurrent| specifies how many concurrent (paralell) prefetches will
+  // be performed. Host lookups will be issued on the |host_resolver_loop|
+  // thread, using the |host_resolver| instance.
+  DnsMaster(net::HostResolver* host_resolver, MessageLoop* host_resolver_loop,
+            TimeDelta max_queue_delay_ms, size_t max_concurrent);
   ~DnsMaster();
 
   // Cancel pending requests and prevent new ones from being made.
@@ -90,15 +99,47 @@ class DnsMaster {
   // values into the current referrer list.
   void DeserializeReferrers(const ListValue& referral_list);
 
+  // For unit test code only.
+  size_t max_concurrent_lookups() const { return max_concurrent_lookups_; }
+
  private:
   FRIEND_TEST(DnsMasterTest, BenefitLookupTest);
   FRIEND_TEST(DnsMasterTest, ShutdownWhenResolutionIsPendingTest);
   FRIEND_TEST(DnsMasterTest, SingleLookupTest);
   FRIEND_TEST(DnsMasterTest, ConcurrentLookupTest);
-  FRIEND_TEST(DnsMasterTest, MassiveConcurrentLookupTest);
+  FRIEND_TEST(DnsMasterTest, DISABLED_MassiveConcurrentLookupTest);
+  FRIEND_TEST(DnsMasterTest, PriorityQueuePushPopTest);
+  FRIEND_TEST(DnsMasterTest, PriorityQueueReorderTest);
   friend class WaitForResolutionHelper;  // For testing.
 
   class LookupRequest;
+
+  // A simple priority queue for handling host names.
+  // Some names that are queued up have |motivation| that requires very rapid
+  // handling.  For example, a sub-resource name lookup MUST be done before the
+  // actual sub-resource is fetched.  In contrast, a name that was speculatively
+  // noted in a page has to be resolved before the user "gets around to"
+  // clicking on a link.  By tagging (with a motivation) each push we make into
+  // this FIFO queue, the queue can re-order the more important names to service
+  // them sooner (relative to some low priority background resolutions).
+  class HostNameQueue {
+   public:
+    HostNameQueue();
+    ~HostNameQueue();
+    void Push(const std::string& hostname,
+              DnsHostInfo::ResolutionMotivation motivation);
+    bool IsEmpty() const;
+    std::string Pop();
+
+  private:
+    // The names in the queue that should be serviced (popped) ASAP.
+    std::queue<std::string> rush_queue_;
+    // The names in the queue that should only be serviced when rush_queue is
+    // empty.
+    std::queue<std::string> background_queue_;
+
+  DISALLOW_COPY_AND_ASSIGN(HostNameQueue);
+  };
 
   // A map that is keyed with the hostnames that we've learned were the cause
   // of loading additional hostnames.  The list of additional hostnames in held
@@ -125,9 +166,14 @@ class DnsMaster {
   // Only for testing;
   size_t peak_pending_lookups() const { return peak_pending_lookups_; }
 
-  // Access method for use by lookup request to pass resolution result.
+  // Access method for use by async lookup request to pass resolution result.
   void OnLookupFinished(LookupRequest* request,
                         const std::string& hostname, bool found);
+
+  // Underlying method for both async and synchronous lookup to update state.
+  void PrelockedLookupFinished(LookupRequest* request,
+                               const std::string& hostname,
+                               bool found);
 
   // "PreLocked" means that the caller has already Acquired lock_ in the
   // following method names.
@@ -136,16 +182,29 @@ class DnsMaster {
   DnsHostInfo* PreLockedResolve(const std::string& hostname,
                                 DnsHostInfo::ResolutionMotivation motivation);
 
-  // Take lookup requests from name_buffer_ and tell HostResolver
-  // to look them up asynchronously, provided we don't exceed
-  // concurrent resolution limit.
+  // Check to see if too much queuing delay has been noted for the given info,
+  // which indicates that there is "congestion" or growing delay in handling the
+  // resolution of names.  Rather than letting this congestion potentially grow
+  // without bounds, we abandon our queued efforts at pre-resolutions in such a
+  // case.
+  // To do this, we will recycle |info|, as well as all queued items, back to
+  // the state they had before they were queued up.  We can't do anything about
+  // the resolutions we've already sent off for processing on another thread, so
+  // we just let them complete.  On a slow system, subject to congestion, this
+  // will greatly reduce the number of resolutions done, but it will assure that
+  // any resolutions that are done, are in a timely and hence potentially
+  // helpful manner.
+  bool PreLockedCongestionControlPerformed(DnsHostInfo* info);
+
+  // Take lookup requests from work_queue_ and tell HostResolver to look them up
+  // asynchronously, provided we don't exceed concurrent resolution limit.
   void PreLockedScheduleLookups();
 
   // Synchronize access to variables listed below.
   Lock lock_;
 
-  // name_buffer_ holds a list of names we need to look up.
-  std::queue<std::string> name_buffer_;
+  // work_queue_ holds a list of names we need to look up.
+  HostNameQueue work_queue_;
 
   // results_ contains information for existing/prior prefetches.
   Results results_;
@@ -168,6 +227,18 @@ class DnsMaster {
   // A map of hosts that were evicted from our cache (after we prefetched them)
   // and before the HTTP stack tried to look them up.
   Results cache_eviction_map_;
+
+  // The number of concurrent lookups currently allowed.
+  const size_t max_concurrent_lookups_;
+
+  // The maximum queueing delay that is acceptable before we enter congestion
+  // reduction mode, and discard all queued (but not yet assigned) resolutions.
+  const TimeDelta max_queue_delay_;
+
+  // The host resovler we warm DNS entries for. The resolver (which is not
+  // thread safe) should be accessed only on |host_resolver_loop_|.
+  scoped_refptr<net::HostResolver> host_resolver_;
+  MessageLoop* host_resolver_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsMaster);
 };

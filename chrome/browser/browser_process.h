@@ -16,7 +16,7 @@
 #include "base/basictypes.h"
 
 class AutomationProviderList;
-class ClipboardService;
+class Clipboard;
 class DevToolsManager;
 class DownloadRequestManager;
 class GoogleURLTracker;
@@ -26,8 +26,9 @@ class PrefService;
 class ProfileManager;
 class DebuggerWrapper;
 class ResourceDispatcherHost;
-class WebAppInstallerService;
 class SuspendController;
+class ThumbnailGenerator;
+class WebAppInstallerService;
 
 namespace base {
 class Thread;
@@ -79,7 +80,7 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual DebuggerWrapper* debugger_wrapper() = 0;
   virtual DevToolsManager* devtools_manager() = 0;
-  virtual ClipboardService* clipboard_service() = 0;
+  virtual Clipboard* clipboard() = 0;
 
   // Returns the thread that we perform I/O coordination on (network requests,
   // communication with renderers, etc.
@@ -96,9 +97,20 @@ class BrowserProcess {
   // database. History has its own thread since it has much higher traffic.
   virtual base::Thread* db_thread() = 0;
 
+#if defined(OS_LINUX)
+  // Returns the thread that is used to process UI requests in cases were
+  // we can't route the request to the UI thread. Note that this thread
+  // should only be used by the IO thread and this method is only safe to call
+  // from the UI thread so, if you've ended up here, something has gone wrong.
+  // This method is only included for uniformity.
+  virtual base::Thread* background_x11_thread() = 0;
+#endif
+
   virtual sandbox::BrokerServices* broker_services() = 0;
 
   virtual IconManager* icon_manager() = 0;
+
+  virtual ThumbnailGenerator* GetThumbnailGenerator() = 0;
 
   virtual void InitBrokerServices(sandbox::BrokerServices*) = 0;
   virtual AutomationProviderList* InitAutomationProviderList() = 0;
@@ -117,13 +129,11 @@ class BrowserProcess {
   virtual GoogleURLTracker* google_url_tracker() = 0;
 
   // Returns the locale used by the application.
-  virtual const std::wstring& GetApplicationLocale() = 0;
+  virtual const std::string& GetApplicationLocale() = 0;
 
   virtual MemoryModel memory_model() = 0;
 
-#if defined(OS_WIN)
   DownloadRequestManager* download_request_manager();
-#endif
 
   // Returns an event that is signaled when the browser shutdown.
   virtual base::WaitableEvent* shutdown_event() = 0;

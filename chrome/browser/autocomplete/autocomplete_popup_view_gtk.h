@@ -7,17 +7,14 @@
 
 #include <gtk/gtk.h>
 
-#include <string>
-
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class AutocompletePopupModel;
 class AutocompleteEditModel;
 class AutocompleteEditViewGtk;
+class AutocompletePopupModel;
 class Profile;
 class SkBitmap;
 
@@ -25,7 +22,8 @@ class AutocompletePopupViewGtk : public AutocompletePopupView {
  public:
   AutocompletePopupViewGtk(AutocompleteEditViewGtk* edit_view,
                            AutocompleteEditModel* edit_model,
-                           Profile* profile);
+                           Profile* profile,
+                           AutocompletePopupPositioner* popup_positioner);
   ~AutocompletePopupViewGtk();
 
   // Implement the AutocompletePopupView interface.
@@ -34,19 +32,59 @@ class AutocompletePopupViewGtk : public AutocompletePopupView {
   virtual void UpdatePopupAppearance();
   virtual void OnHoverEnabledOrDisabled(bool disabled);
   virtual void PaintUpdatesNow();
-
-  AutocompletePopupModel* model() { return model_.get(); }
+  virtual AutocompletePopupModel* GetModel();
 
  private:
-  void Show();
+  void Show(size_t num_results);
   void Hide();
+
+  // Convert a y-coordinate to the closest line / result.
+  size_t LineFromY(int y);
+
+  // Accept a line of the results, for example, when the user clicks a line.
+  void AcceptLine(size_t line, WindowOpenDisposition disposition);
+
+  static gboolean HandleExposeThunk(GtkWidget* widget, GdkEventExpose* event,
+                                    gpointer userdata) {
+    return reinterpret_cast<AutocompletePopupViewGtk*>(userdata)->
+        HandleExpose(widget, event);
+  }
+  gboolean HandleExpose(GtkWidget* widget, GdkEventExpose* event);
+
+  static gboolean HandleMotionThunk(GtkWidget* widget, GdkEventMotion* event,
+                                    gpointer userdata) {
+    return reinterpret_cast<AutocompletePopupViewGtk*>(userdata)->
+        HandleMotion(widget, event);
+  }
+  gboolean HandleMotion(GtkWidget* widget, GdkEventMotion* event);
+
+  static gboolean HandleButtonPressThunk(GtkWidget* widget,
+                                         GdkEventButton* event,
+                                         gpointer userdata) {
+    return reinterpret_cast<AutocompletePopupViewGtk*>(userdata)->
+        HandleButtonPress(widget, event);
+  }
+  gboolean HandleButtonPress(GtkWidget* widget, GdkEventButton* event);
+
+  static gboolean HandleButtonReleaseThunk(GtkWidget* widget,
+                                           GdkEventButton* event,
+                                           gpointer userdata) {
+    return reinterpret_cast<AutocompletePopupViewGtk*>(userdata)->
+        HandleButtonRelease(widget, event);
+  }
+  gboolean HandleButtonRelease(GtkWidget* widget, GdkEventButton* event);
 
   scoped_ptr<AutocompletePopupModel> model_;
   AutocompleteEditViewGtk* edit_view_;
+  AutocompletePopupPositioner* popup_positioner_;
 
+  // Our popup window, which is the only widget used, and we paint it on our
+  // own.  This widget shouldn't be exposed outside of this class.
   GtkWidget* window_;
-  GtkWidget* vbox_;
+  // The pango layout object created from the window, cached across exposes.
+  PangoLayout* layout_;
 
+  // Whether our popup is currently open / shown, or closed / hidden.
   bool opened_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompletePopupViewGtk);

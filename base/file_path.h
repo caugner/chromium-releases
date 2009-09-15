@@ -70,6 +70,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/hash_tables.h"
+#include "base/string_piece.h"  // For implicit conversions.
 
 // Windows-style drive letter support and pathname separator characters can be
 // enabled and disabled independently, to aid testing.  These #defines are
@@ -121,9 +122,9 @@ class FilePath {
     return *this;
   }
 
-  bool operator==(const FilePath& that) const {
-    return path_ == that.path_;
-  }
+  bool operator==(const FilePath& that) const;
+
+  bool operator!=(const FilePath& that) const;
 
   // Required for some STL containers and operations
   bool operator<(const FilePath& that) const {
@@ -136,6 +137,18 @@ class FilePath {
 
   // Returns true if |character| is in kSeparators.
   static bool IsSeparator(CharType character);
+
+  // Returns a vector of all of the components of the provided path. It is
+  // equivalent to calling DirName().value() on the path's root component,
+  // and BaseName().value() on each child component.
+  void GetComponents(std::vector<FilePath::StringType>* components) const;
+
+  // Returns true if this FilePath is a strict parent of the |child|. Absolute
+  // and relative paths are accepted i.e. is /foo parent to /foo/bar and
+  // is foo parent to foo/bar. Does not convert paths to absolute, follow
+  // symlinks or directory navigation (e.g. ".."). A path is *NOT* its own
+  // parent.
+  bool IsParent(const FilePath& child) const;
 
   // Returns a FilePath corresponding to the directory containing the path
   // named by this object, stripping away the file component.  If this object
@@ -180,6 +193,10 @@ class FilePath {
   // Returns "" if BaseName() == "." or "..".
   FilePath ReplaceExtension(const StringType& extension) const;
 
+  // Returns true if the file path matches the specified extension. The test is
+  // case insensitive. Don't forget the leading period if appropriate.
+  bool MatchesExtension(const StringType& extension) const;
+
   // Returns a FilePath by appending a separator and the supplied path
   // component to this object's path.  Append takes care to avoid adding
   // excessive separators if this object's path already ends with a separator.
@@ -195,7 +212,7 @@ class FilePath {
   // On Linux, although it can use any 8-bit encoding for paths, we assume that
   // ASCII is a valid subset, regardless of the encoding, since many operating
   // system paths will always be ASCII.
-  FilePath AppendASCII(const std::string& component) const WARN_UNUSED_RESULT;
+  FilePath AppendASCII(const StringPiece& component) const WARN_UNUSED_RESULT;
 
   // Returns true if this FilePath contains an absolute path.  On Windows, an
   // absolute path begins with either a drive letter specification followed by
@@ -206,6 +223,10 @@ class FilePath {
   // Returns a copy of this FilePath that does not end with a trailing
   // separator.
   FilePath StripTrailingSeparators() const;
+
+  // Returns true if this FilePath contains any attempt to reference a parent
+  // directory (i.e. has a path component that is ".."
+  bool ReferencesParent() const;
 
   // Older Chromium code assumes that paths are always wstrings.
   // This function converts a wstring to a FilePath, and is useful to smooth

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/browser_process_impl.h"
 
+#include "app/l10n_util.h"
+#include "base/clipboard.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/thread.h"
@@ -15,8 +17,10 @@
 #include "chrome/browser/download/download_file.h"
 #include "chrome/browser/download/save_file_manager.h"
 #include "chrome/browser/google_url_tracker.h"
+#include "chrome/browser/icon_manager.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -24,18 +28,15 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/clipboard_service.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/automation/automation_provider_list.h"
-#include "chrome/browser/icon_manager.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/views/focus/view_storage.h"
-#include "chrome/views/widget/accelerator_handler.h"
+#include "views/focus/view_storage.h"
+#include "views/widget/accelerator_handler.h"
 #elif defined(OS_POSIX)
 // TODO(port): Remove the temporary scaffolding as we port the above headers.
 #include "chrome/common/temp_scaffolding_stubs.h"
@@ -112,7 +113,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       checked_for_new_frames_(false),
       using_new_frames_(false) {
   g_browser_process = this;
-  clipboard_service_.reset(new ClipboardService);
+  clipboard_.reset(new Clipboard);
   main_notification_service_.reset(new NotificationService);
 
   // Must be created after the NotificationService.
@@ -143,10 +144,16 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   // this destructor is run.
   automation_provider_list_.reset();
 
+  // We need to shutdown the SdchDictionaryFetcher as it regularly holds
+  // a pointer to a URLFetcher, and that URLFetcher (upon destruction) will do
+  // a PostDelayedTask onto the IO thread.  This shutdown call will both discard
+  // any pending URLFetchers, and avoid creating any more.
+  SdchDictionaryFetcher::Shutdown();
+
   // We need to destroy the MetricsService and GoogleURLTracker before the
   // io_thread_ gets destroyed, since both destructors can call the URLFetcher
-  // destructor, which does an InvokeLater operation on the IO thread.  (The IO
-  // thread will handle that URLFetcher operation before going away.)
+  // destructor, which does an PostDelayedTask operation on the IO thread.  (The
+  // IO thread will handle that URLFetcher operation before going away.)
   metrics_service_.reset();
   google_url_tracker_.reset();
 
@@ -168,8 +175,15 @@ BrowserProcessImpl::~BrowserProcessImpl() {
 
   // Shutdown DNS prefetching now to ensure that network stack objects
   // living on the IO thread get destroyed before the IO thread goes away.
-  io_thread_->message_loop()->PostTask(FROM_HERE,
-      NewRunnableFunction(chrome_browser_net::EnsureDnsPrefetchShutdown));
+  if (io_thread_.get()) {
+    io_thread_->message_loop()->PostTask(FROM_HERE,
+        NewRunnableFunction(chrome_browser_net::EnsureDnsPrefetchShutdown));
+  }
+
+#if defined(OS_LINUX)
+  // The IO thread must outlive the BACKGROUND_X11 thread.
+  background_x11_thread_.reset();
+#endif
 
   // Need to stop io_thread_ before resource_dispatcher_host_, since
   // io_thread_ may still deref ResourceDispatcherHost and handle resource
@@ -228,7 +242,7 @@ void BrowserProcessImpl::EndSession() {
     metrics->RecordStartOfSessionEnd();
 
     // MetricsService lazily writes to prefs, force it to write now.
-    local_state()->SavePersistentPrefs(file_thread());
+    local_state()->SavePersistentPrefs();
   }
 
   // We must write that the profile and metrics service shutdown cleanly,
@@ -248,11 +262,11 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
   return print_job_manager_.get();
 }
 
-const std::wstring& BrowserProcessImpl::GetApplicationLocale() {
+const std::string& BrowserProcessImpl::GetApplicationLocale() {
   DCHECK(CalledOnValidThread());
   if (locale_.empty()) {
-    locale_ = l10n_util::GetApplicationLocale(local_state()->GetString(
-        prefs::kApplicationLocale));
+    locale_ = l10n_util::GetApplicationLocale(
+        local_state()->GetString(prefs::kApplicationLocale));
   }
   return locale_;
 }
@@ -283,6 +297,16 @@ void BrowserProcessImpl::CreateIOThread() {
   // on the main thread. The service ctor is inexpensive and does not
   // invoke the io_thread() accessor.
   PluginService::GetInstance();
+
+#if defined(OS_LINUX)
+  // The lifetime of the BACKGROUND_X11 thread is a subset of the IO thread so
+  // we start it now.
+  scoped_ptr<base::Thread> background_x11_thread(
+      new BrowserProcessSubThread(ChromeThread::BACKGROUND_X11));
+  if (!background_x11_thread->Start())
+    return;
+  background_x11_thread_.swap(background_x11_thread);
+#endif
 
   scoped_ptr<base::Thread> thread(
       new BrowserProcessSubThread(ChromeThread::IO));
@@ -336,7 +360,7 @@ void BrowserProcessImpl::CreateLocalState() {
 
   FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
-  local_state_.reset(new PrefService(local_state_path));
+  local_state_.reset(new PrefService(local_state_path, file_thread()));
 }
 
 void BrowserProcessImpl::InitBrokerServices(
@@ -361,9 +385,9 @@ void BrowserProcessImpl::CreateDebuggerWrapper(int port) {
 }
 
 void BrowserProcessImpl::CreateDevToolsManager() {
-  DCHECK(!devtools_manager_.get());
+  DCHECK(devtools_manager_.get() == NULL);
   created_devtools_manager_ = true;
-  devtools_manager_.reset(new DevToolsManager());
+  devtools_manager_ = new DevToolsManager();
 }
 
 void BrowserProcessImpl::CreateAcceleratorHandler() {

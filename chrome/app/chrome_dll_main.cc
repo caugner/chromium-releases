@@ -15,35 +15,53 @@
 #include <atlapp.h>
 #include <malloc.h>
 #include <new.h>
+#elif defined(OS_POSIX)
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #if defined(OS_LINUX)
+#include <gdk/gdk.h>
+#include <glib.h>
 #include <gtk/gtk.h>
+#include <string.h>
 #endif
 
+#include "app/app_paths.h"
+#include "app/resource_bundle.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
+#if defined(OS_POSIX)
+#include "base/global_descriptors_posix.h"
+#endif
 #include "base/icu_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/stats_counters.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
 #if defined(OS_WIN)
 #include "base/win_util.h"
 #endif
+#if defined(OS_MACOSX)
+#include "chrome/app/breakpad_mac.h"
+#endif
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
+#include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/sandbox_init_wrapper.h"
+#include "ipc/ipc_switches.h"
 #if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
@@ -56,6 +74,8 @@ extern int BrowserMain(const MainFunctionParams&);
 extern int RendererMain(const MainFunctionParams&);
 extern int PluginMain(const MainFunctionParams&);
 extern int WorkerMain(const MainFunctionParams&);
+extern int UtilityMain(const MainFunctionParams&);
+extern int ZygoteMain(const MainFunctionParams&);
 
 #if defined(OS_WIN)
 // TODO(erikkay): isn't this already defined somewhere?
@@ -100,73 +120,98 @@ void PureCall() {
   __debugbreak();
 }
 
-int OnNoMemory(size_t memory_size) {
+void OnNoMemory() {
+  // Kill the process. This is important for security, since WebKit doesn't
+  // NULL-check many memory allocations. If a malloc fails, returns NULL, and
+  // the buffer is then used, it provides a handy mapping of memory starting at
+  // address 0 for an attacker to utilize.
   __debugbreak();
-  // Return memory_size so it is not optimized out. Make sure the return value
-  // is at least 1 so malloc/new is retried, especially useful when under a
-  // debugger.
-  return memory_size ? static_cast<int>(memory_size) : 1;
 }
 
 // Handlers to silently dump the current process when there is an assert in
 // chrome.
 void ChromeAssert(const std::string& str) {
   // Get the breakpad pointer from chrome.exe
-  typedef void (__stdcall *DumpProcessFunction)();
+  typedef void (__cdecl *DumpProcessFunction)();
   DumpProcessFunction DumpProcess = reinterpret_cast<DumpProcessFunction>(
-      ::GetProcAddress(::GetModuleHandle(L"chrome.exe"), "DumpProcess"));
+      ::GetProcAddress(::GetModuleHandle(chrome::kBrowserProcessExecutableName),
+                       "DumpProcess"));
   if (DumpProcess)
     DumpProcess();
 }
 
 #pragma optimize("", on)
 
-// Early versions of Chrome incorrectly registered a chromehtml: URL handler.
-// Later versions fixed the registration but in some cases (e.g. Vista and non-
-// admin installs) the fix could not be applied.  This prevents Chrome to be
-// launched with the incorrect format.
-// CORRECT: <broser.exe> -- "chromehtml:<url>"
-// INVALID: <broser.exe> "chromehtml:<url>"
-bool IncorrectChromeHtmlArguments(const std::wstring& command_line) {
-  const wchar_t kChromeHtml[] = L"-- \"chromehtml:";
-  const wchar_t kOffset = 5;  // Where chromehtml: starts in above
+// Early versions of Chrome incorrectly registered a chromehtml: URL handler,
+// which gives us nothing but trouble. Avoid launching chrome this way since
+// some apps fail to properly escape arguments.
+bool HasDeprecatedArguments(const std::wstring& command_line) {
+  const wchar_t kChromeHtml[] = L"chromehtml:";
   std::wstring command_line_lower = command_line;
-
   // We are only searching for ASCII characters so this is OK.
   StringToLowerASCII(&command_line_lower);
-
-  std::wstring::size_type pos = command_line_lower.find(
-      kChromeHtml + kOffset);
-
-  if (pos == std::wstring::npos)
-    return false;
-
-  // The browser is being launched with chromehtml: somewhere on the command
-  // line.  We will not launch unless it's preceded by the -- switch terminator.
-  if (pos >= kOffset) {
-    if (equal(kChromeHtml, kChromeHtml + arraysize(kChromeHtml) - 1,
-        command_line_lower.begin() + pos - kOffset)) {
-      return false;
-    }
-  }
-
-  return true;
+  std::wstring::size_type pos = command_line_lower.find(kChromeHtml);
+  return (pos != std::wstring::npos);
 }
 
 #endif  // OS_WIN
 
 #if defined(OS_LINUX)
-static void GtkFatalLogHandler(const gchar* log_domain,
-                               GLogLevelFlags log_level,
-                               const gchar* message,
-                               gpointer userdata) {
+static void GLibLogHandler(const gchar* log_domain,
+                           GLogLevelFlags log_level,
+                           const gchar* message,
+                           gpointer userdata) {
   if (!log_domain)
-    log_domain = "<all>";
+    log_domain = "<unknown>";
   if (!message)
     message = "<no message>";
 
-  NOTREACHED() << "GTK: (" << log_domain << "): " << message;
+  if (strstr(message, "Loading IM context type") ||
+      strstr(message, "wrong ELF class: ELFCLASS64")) {
+    // http://crbug.com/9643
+    // Until we have a real 64-bit build or all of these 32-bit package issues
+    // are sorted out, don't fatal on ELF 32/64-bit mismatch warnings and don't
+    // spam the user with more than one of them.
+    static bool alerted = false;
+    if (!alerted) {
+      LOG(ERROR) << "Bug 9643: " << log_domain << ": " << message;
+      alerted = true;
+    }
+  } else if (strstr(message, "gtk_widget_size_allocate(): attempt to "
+                             "allocate widget with width") &&
+             !GTK_CHECK_VERSION(2, 16, 1)) {
+    // This warning only occurs in obsolete versions of GTK and is harmless.
+    // http://crbug.com/11133
+  } else if (strstr(message, "Theme file for default has no") ||
+             strstr(message, "Theme directory")) {
+    LOG(ERROR) << "GTK theme error: " << message;
+  } else {
+#ifdef NDEBUG
+    LOG(ERROR) << log_domain << ": " << message;
+#else
+    LOG(FATAL) << log_domain << ": " << message;
+#endif
+  }
 }
+
+static void SetUpGLibLogHandler() {
+  // Register GLib-handled assertions to go through our logging system.
+  const char* kLogDomains[] = { NULL, "Gtk", "Gdk", "GLib", "GLib-GObject" };
+  for (size_t i = 0; i < arraysize(kLogDomains); i++) {
+    g_log_set_handler(kLogDomains[i],
+                      static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION |
+                                                  G_LOG_FLAG_FATAL |
+                                                  G_LOG_LEVEL_ERROR |
+                                                  G_LOG_LEVEL_CRITICAL |
+                                                  G_LOG_LEVEL_WARNING),
+                      GLibLogHandler,
+                      NULL);
+  }
+}
+#endif  // defined(OS_LINUX)
+
+#if defined(OS_WIN)
+extern "C" int _set_new_mode(int);
 #endif
 
 // Register the invalid param handler and pure call handler to be able to
@@ -176,8 +221,8 @@ void RegisterInvalidParamHandler() {
   _set_invalid_parameter_handler(InvalidParameter);
   _set_purecall_handler(PureCall);
   // Gather allocation failure.
-  _set_new_handler(&OnNoMemory);
-  // Make sure malloc() calls the new handler too.
+  std::set_new_handler(&OnNoMemory);
+  // Also enable the new handler for malloc() based failures.
   _set_new_mode(1);
 #endif
 }
@@ -246,7 +291,11 @@ int ChromeMain(int argc, const char** argv) {
 #endif
 
 #if defined(OS_MACOSX)
-  DebugUtil::DisableOSCrashDumps();
+  // If Breakpad is not present then turn off os crash dumps so we don't have
+  // to wait eons for Apple's Crash Reporter to generate a dump.
+  if (IsCrashReporterDisabled()) {
+    DebugUtil::DisableOSCrashDumps();
+  }
 #endif
   RegisterInvalidParamHandler();
 
@@ -259,19 +308,40 @@ int ChromeMain(int argc, const char** argv) {
   // its main event loop to get rid of the cruft.
   base::ScopedNSAutoreleasePool autorelease_pool;
 
+#if defined(OS_POSIX)
+  base::GlobalDescriptors* g_fds = Singleton<base::GlobalDescriptors>::get();
+  g_fds->Set(kPrimaryIPCChannel,
+             kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
+#if defined(OS_LINUX)
+  g_fds->Set(kCrashDumpSignal,
+             kCrashDumpSignal + base::GlobalDescriptors::kBaseDescriptor);
+#endif
+#endif
+
   // Initialize the command line.
 #if defined(OS_WIN)
   CommandLine::Init(0, NULL);
 #else
   CommandLine::Init(argc, argv);
 #endif
+
+#if defined(OS_MACOSX)
+  // Needs to be called after CommandLine::Init().
+  InitCrashProcessInfo();
+#endif
+
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
 
 #if defined(OS_WIN)
-   // Must do this before any other usage of command line!
-  if (::IncorrectChromeHtmlArguments(parsed_command_line.command_line_string()))
+  // Must do this before any other usage of command line!
+  if (HasDeprecatedArguments(parsed_command_line.command_line_string()))
     return 1;
 #endif
+
+#if defined(OS_POSIX)
+  // Always ignore SIGPIPE.  We check the return value of write().
+  CHECK(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
+#endif  // OS_POSIX
 
   int browser_pid;
   std::wstring process_type =
@@ -279,15 +349,34 @@ int ChromeMain(int argc, const char** argv) {
   if (process_type.empty()) {
     browser_pid = base::GetCurrentProcId();
   } else {
+#if defined(OS_WIN)
     std::wstring channel_name =
       parsed_command_line.GetSwitchValue(switches::kProcessChannelID);
 
     browser_pid = StringToInt(WideToASCII(channel_name));
     DCHECK(browser_pid != 0);
+#else
+    browser_pid = base::GetCurrentProcId();
+#endif
+
+#if defined(OS_POSIX)
+    // When you hit Ctrl-C in a terminal running the browser
+    // process, a SIGINT is delivered to the entire process group.
+    // When debugging the browser process via gdb, gdb catches the
+    // SIGINT for the browser process (and dumps you back to the gdb
+    // console) but doesn't for the child processes, killing them.
+    // The fix is to have child processes ignore SIGINT; they'll die
+    // on their own when the browser process goes away.
+    // Note that we *can't* rely on DebugUtil::BeingDebugged to catch this
+    // case because we are the child process, which is not being debugged.
+    if (!DebugUtil::BeingDebugged())
+      signal(SIGINT, SIG_IGN);
+#endif
   }
   SetupCRT(parsed_command_line);
 
   // Initialize the Chrome path provider.
+  app::RegisterPathProvider();
   chrome::RegisterPathProvider();
 
   // Initialize the Stats Counters table.  With this initialized,
@@ -297,11 +386,13 @@ int ChromeMain(int argc, const char** argv) {
   // of the process.  It is not cleaned up.
   // TODO(port): we probably need to shut this down correctly to avoid
   // leaking shared memory regions on posix platforms.
-  std::string statsfile =
-      StringPrintf("%s-%d", chrome::kStatsFilename, browser_pid);
-  StatsTable *stats_table = new StatsTable(statsfile,
-      chrome::kStatsMaxThreads, chrome::kStatsMaxCounters);
-  StatsTable::set_current(stats_table);
+  if (parsed_command_line.HasSwitch(switches::kEnableStatsTable)) {
+    std::string statsfile =
+        StringPrintf("%s-%d", chrome::kStatsFilename, browser_pid);
+    StatsTable *stats_table = new StatsTable(statsfile,
+        chrome::kStatsMaxThreads, chrome::kStatsMaxCounters);
+    StatsTable::set_current(stats_table);
+  }
 
   StatsScope<StatsCounterTimer>
       startup_timer(chrome::Counters::chrome_main());
@@ -330,7 +421,7 @@ int ChromeMain(int argc, const char** argv) {
   const std::wstring user_data_dir =
       parsed_command_line.GetSwitchValue(switches::kUserDataDir);
   if (!user_data_dir.empty())
-    PathService::Override(chrome::DIR_USER_DATA, user_data_dir);
+    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
   bool single_process =
 #if defined (GOOGLE_CHROME_BUILD)
@@ -384,26 +475,36 @@ int ChromeMain(int argc, const char** argv) {
   if (process_type == switches::kRendererProcess) {
     rv = RendererMain(main_params);
   } else if (process_type == switches::kPluginProcess) {
-#if defined(OS_WIN)
     rv = PluginMain(main_params);
-#endif
+  } else if (process_type == switches::kUtilityProcess) {
+    rv = UtilityMain(main_params);
   } else if (process_type == switches::kWorkerProcess) {
-#if defined(OS_WIN)
     rv = WorkerMain(main_params);
+  } else if (process_type == switches::kZygoteProcess) {
+#if defined(OS_LINUX)
+    if (ZygoteMain(main_params)) {
+      // Zygote::HandleForkRequest may have reallocated the command
+      // line so update it here with the new version.
+      const CommandLine& parsed_command_line =
+        *CommandLine::ForCurrentProcess();
+      MainFunctionParams main_params(parsed_command_line, sandbox_wrapper,
+                                     &autorelease_pool);
+      RendererMain(main_params);
+    }
+#else
+    NOTIMPLEMENTED();
 #endif
   } else if (process_type.empty()) {
 #if defined(OS_LINUX)
+    // Glib type system initialization. Needed at least for gconf,
+    // used in net/proxy/proxy_config_service_linux.cc. Most likely
+    // this is superfluous as gtk_init() ought to do this. It's
+    // definitely harmless, so retained as a reminder of this
+    // requirement for gconf.
+    g_type_init();
     // gtk_init() can change |argc| and |argv|, but nobody else uses them.
     gtk_init(&argc, const_cast<char***>(&argv));
-    // Register GTK assertions to go through our logging system.
-    g_log_set_handler(NULL,  // All logging domains.
-                      static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION |
-                                                  G_LOG_FLAG_FATAL |
-                                                  G_LOG_LEVEL_ERROR |
-                                                  G_LOG_LEVEL_CRITICAL |
-                                                  G_LOG_LEVEL_WARNING),
-                      GtkFatalLogHandler,
-                      NULL);
+    SetUpGLibLogHandler();
 #endif
 
     ScopedOleInitializer ole_initializer;

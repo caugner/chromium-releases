@@ -3,12 +3,14 @@
 // found in the LICENSE file.
 
 #include "net/http/http_response_info.h"
+
+#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_response_headers.h"
 
 namespace net {
 
 HttpResponseInfo::HttpResponseInfo()
-    : was_cached(false), response_data_file(base::kInvalidPlatformFileValue) {
+    : was_cached(false) {
 }
 
 HttpResponseInfo::~HttpResponseInfo() {

@@ -4,8 +4,7 @@
 
 #include "chrome/common/child_process.h"
 
-#include "base/basictypes.h"
-#include "base/string_util.h"
+#include "base/message_loop.h"
 #include "chrome/common/child_thread.h"
 
 ChildProcess* ChildProcess::child_process_;
@@ -35,32 +34,25 @@ ChildProcess::~ChildProcess() {
   child_process_ = NULL;
 }
 
-// Called on any thread
 void ChildProcess::AddRefProcess() {
-  base::AtomicRefCountInc(&ref_count_);
+  DCHECK(!child_thread_.get() ||  // null in unittests.
+         MessageLoop::current() == child_thread_->message_loop());
+  ref_count_++;
 }
 
-// Called on any thread
 void ChildProcess::ReleaseProcess() {
-  DCHECK(!base::AtomicRefCountIsZero(&ref_count_));
+  DCHECK(!child_thread_.get() ||  // null in unittests.
+         MessageLoop::current() == child_thread_->message_loop());
+  DCHECK(ref_count_);
   DCHECK(child_process_);
-  if (!base::AtomicRefCountDec(&ref_count_))
-    child_process_->OnFinalRelease();
+  if (--ref_count_)
+    return;
+
+  if (child_thread_.get())  // null in unittests.
+    child_thread_->OnProcessFinalRelease();
 }
 
 base::WaitableEvent* ChildProcess::GetShutDownEvent() {
   DCHECK(child_process_);
   return &child_process_->shutdown_event_;
-}
-
-// Called on any thread
-bool ChildProcess::ProcessRefCountIsZero() {
-  return base::AtomicRefCountIsZero(&ref_count_);
-}
-
-void ChildProcess::OnFinalRelease() {
-  if (child_thread_.get()) {
-    child_thread_->owner_loop()->PostTask(
-        FROM_HERE, new MessageLoop::QuitTask());
-  }
 }

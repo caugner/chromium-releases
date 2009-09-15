@@ -28,7 +28,7 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
-
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 //------------------------------------------------------------------------------
 // Create a public interface to help us load SDCH dictionaries.
@@ -90,6 +90,7 @@ class SdchManager {
     DICTIONARY_DOMAIN_NOT_MATCHING_SOURCE_URL = 24,
     DICTIONARY_PORT_NOT_MATCHING_SOURCE_URL = 25,
     DICTIONARY_HAS_NO_TEXT = 26,
+    DICTIONARY_REFERER_URL_HAS_DOT_IN_PREFIX = 27,
 
     // Dictionary loading problems.
     DICTIONARY_LOAD_ATTEMPT_FROM_DIFFERENT_HOST = 30,
@@ -99,6 +100,7 @@ class SdchManager {
     DICTIONARY_IS_TOO_LARGE= 34,
     DICTIONARY_COUNT_EXCEEDED = 35,
     DICTIONARY_ALREADY_SCHEDULED_TO_DOWNLOAD = 36,
+    DICTIONARY_ALREADY_TRIED_TO_DOWNLOAD = 37,
 
     // Failsafe hack.
     ATTEMPT_TO_DECODE_NON_HTTP_DATA = 40,
@@ -120,7 +122,7 @@ class SdchManager {
     CACHED_META_REFRESH_UNSUPPORTED = 75,  // As above, but pulled from cache.
     PASSING_THROUGH_NON_SDCH = 76,  // Non-html tagged as sdch but malformed.
     INCOMPLETE_SDCH_CONTENT = 77,   // Last window was not completely decoded.
-
+    PASS_THROUGH_404_CODE = 78,     // URL not found message passing through.
 
     // Common decoded recovery methods.
     META_REFRESH_CACHED_RECOVERY = 80,  // Probably startup tab loading.
@@ -130,13 +132,16 @@ class SdchManager {
     // (i.e., be able to be sure all dictionary advertisements are accounted
     // for).
 
-    UNFLUSHED_CONTENT = 90,   // Possible error in filter chaining.
-    MISSING_TIME_STATS = 91,  // Should never happen.
-    CACHE_DECODED = 92,       // No timing stats recorded.
-    OVER_10_MINUTES = 93,     // No timing stats will be recorded.
-    UNINITIALIZED = 94,       // Filter never even got initialized.
-    PRIOR_TO_DICTIONARY = 95, // We hadn't even parsed a dictionary selector.
-    DECODE_ERROR = 96,        // Something went wrong during decode.
+    UNFLUSHED_CONTENT = 90,    // Possible error in filter chaining.
+    // defunct = 91,           // MISSING_TIME_STATS (Should never happen.)
+    CACHE_DECODED = 92,        // No timing stats recorded.
+    // defunct = 93,           // OVER_10_MINUTES (No timing stats recorded.)
+    UNINITIALIZED = 94,        // Filter never even got initialized.
+    PRIOR_TO_DICTIONARY = 95,  // We hadn't even parsed a dictionary selector.
+    DECODE_ERROR = 96,         // Something went wrong during decode.
+
+    // Problem during the latency test.
+    LATENCY_TEST_DISALLOWED = 100,  // SDCH now failing, but it worked before!
 
     MAX_PROBLEM_CODE  // Used to bound histogram.
   };
@@ -155,6 +160,7 @@ class SdchManager {
 
    private:
     friend class SdchManager;  // Only manager can construct an instance.
+    FRIEND_TEST(SdchFilterTest, PathMatch);
 
     // Construct a vc-diff usable dictionary from the dictionary_text starting
     // at the given offset.  The supplied client_hash should be used to
@@ -178,7 +184,7 @@ class SdchManager {
 
     // Security method to check if we can use a dictionary to decompress a
     // target that arrived with a reference to this dictionary.
-    bool CanUse(const GURL referring_url);
+    bool CanUse(const GURL& referring_url);
 
     // Compare paths to see if they "match" for dictionary use.
     static bool PathMatch(const std::string& path,
@@ -212,6 +218,9 @@ class SdchManager {
 
   SdchManager();
   ~SdchManager();
+
+  // Discontinue fetching of dictionaries, as we're now shutting down.
+  static void Shutdown();
 
   // Provide access to the single instance of this class.
   static SdchManager* Global();
@@ -247,13 +256,13 @@ class SdchManager {
   static void ClearBlacklistings();
 
   // Unit test only, this function resets the blacklisting count for a domain.
-  static void ClearDomainBlacklisting(std::string domain);
+  static void ClearDomainBlacklisting(const std::string& domain);
 
   // Unit test only: indicate how many more times a domain will be blacklisted.
-  static int BlackListDomainCount(std::string domain);
+  static int BlackListDomainCount(const std::string& domain);
 
   // Unit test only: Indicate what current blacklist increment is for a domain.
-  static int BlacklistDomainExponential(std::string domain);
+  static int BlacklistDomainExponential(const std::string& domain);
 
   // Check to see if SDCH is enabled (globally), and the given URL is in a
   // supported domain (i.e., not blacklisted, and either the specific supported
@@ -301,8 +310,17 @@ class SdchManager {
   static void GenerateHash(const std::string& dictionary_text,
                            std::string* client_hash, std::string* server_hash);
 
+  // For Latency testing only, we need to know if we've succeeded in doing a
+  // round trip before starting our comparative tests.  If ever we encounter
+  // problems with SDCH, we opt-out of the test unless/until we perform a
+  // complete SDCH decoding.
+  bool AllowLatencyExperiment(const GURL& url) const;
+
+  void SetAllowLatencyExperiment(const GURL& url, bool enable);
+
  private:
-  typedef std::map<const std::string, int> DomainCounter;
+  typedef std::map<std::string, int> DomainCounter;
+  typedef std::set<std::string> ExperimentSet;
 
   // A map of dictionaries info indexed by the hash that the server provides.
   typedef std::map<std::string, Dictionary*> DictionaryMap;
@@ -332,6 +350,10 @@ class SdchManager {
   // Support exponential backoff in number of domain accesses before
   // blacklisting expires.
   DomainCounter exponential_blacklist_count;
+
+  // List of hostnames for which a latency experiment is allowed (because a
+  // round trip test has recently passed).
+  ExperimentSet allow_latency_experiment_;
 
   DISALLOW_COPY_AND_ASSIGN(SdchManager);
 };

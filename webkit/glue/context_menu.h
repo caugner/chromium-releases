@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_CONTEXT_NODE_TYPES_H__
-#define WEBKIT_GLUE_CONTEXT_NODE_TYPES_H__
+#ifndef WEBKIT_GLUE_CONTEXT_MENU_H_
+#define WEBKIT_GLUE_CONTEXT_MENU_H_
 
 #include <vector>
 
@@ -12,7 +12,7 @@
 
 // The type of node that the user may perform a contextual action on
 // in the WebView.
-struct ContextNode {
+struct ContextNodeType {
   enum TypeBit {
     // No node is selected
     NONE = 0x0,
@@ -37,6 +37,12 @@ struct ContextNode {
 
     // A misspelled word is selected
     MISSPELLED_WORD = 0x40,
+
+    // A video node is selected
+    VIDEO = 0x80,
+
+    // A video node is selected
+    AUDIO = 0x100,
   };
 
   enum Capability {
@@ -51,8 +57,37 @@ struct ContextNode {
   };
 
   int32 type;
-  ContextNode() : type(NONE) {}
-  explicit ContextNode(int32 t) : type(t) {}
+  ContextNodeType() : type(NONE) {}
+  explicit ContextNodeType(int32 t) : type(t) {}
+};
+
+// Parameters structure used in ContextMenuParams with attributes needed to
+// render the context menu for media elements.
+//
+// TODO(ajwong): Add support for multiple audio tracks and subtitles.
+struct ContextMenuMediaParams {
+  // Values for the bitfield representing the state of the media player.
+  // If the state is IN_ERROR, most media controls should disable
+  // themselves.
+  enum PlayerStateBit {
+    NO_STATE = 0x0,
+    IN_ERROR = 0x1,
+    PAUSED = 0x2,
+    MUTED = 0x4,
+    LOOP = 0x8,
+    CAN_SAVE = 0x10,
+  };
+
+  // A bitfield representing the current state of the player, such as
+  // playing, muted, etc.
+  int32 player_state;
+
+  // Whether a playable audio track is present.
+  bool has_audio;
+
+  ContextMenuMediaParams()
+      : player_state(NO_STATE), has_audio(false) {
+  }
 };
 
 // Parameters structure for ViewHostMsg_ContextMenu.
@@ -63,7 +98,7 @@ struct ContextNode {
 //              could be used for more contextual actions.
 struct ContextMenuParams {
   // This is the type of Context Node that the context menu was invoked on.
-  ContextNode node;
+  ContextNodeType node_type;
 
   // These values represent the coordinates of the mouse when the context menu
   // was invoked.  Coords are relative to the associated RenderView's origin.
@@ -74,8 +109,14 @@ struct ContextMenuParams {
   // invoked on.
   GURL link_url;
 
-  // This is the URL of the image the context menu was invoked on.
-  GURL image_url;
+  // The link URL to be used ONLY for "copy link address". We don't validate
+  // this field in the frontend process.
+  GURL unfiltered_link_url;
+
+  // This is the source URL for the element that the context menu was
+  // invoked on.  Example of elements with source URLs are img, audio, and
+  // video.
+  GURL src_url;
 
   // This is the URL of the top level page that the context menu was invoked
   // on.
@@ -83,6 +124,10 @@ struct ContextMenuParams {
 
   // This is the URL of the subframe that the context menu was invoked on.
   GURL frame_url;
+
+  // These are the parameters for the media element that the context menu
+  // was invoked on.
+  ContextMenuMediaParams media_params;
 
   // This is the text of the selection that the context menu was invoked on.
   std::wstring selection_text;
@@ -107,6 +152,9 @@ struct ContextMenuParams {
 
   // The security info for the resource we are showing the menu on.
   std::string security_info;
+
+  // The character encoding of the frame on which the menu is invoked.
+  std::string frame_charset;
 };
 
-#endif  // WEBKIT_GLUE_CONTEXT_NODE_TYPES_H__
+#endif  // WEBKIT_GLUE_CONTEXT_MENU_H_

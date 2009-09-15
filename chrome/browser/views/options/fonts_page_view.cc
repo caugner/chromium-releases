@@ -1,6 +1,9 @@
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "chrome/browser/views/options/fonts_page_view.h"
+
 #include <windows.h>
 #include <shlobj.h>
 #include <vsstyle.h>
@@ -8,32 +11,26 @@
 
 #include <vector>
 
-#include "chrome/browser/views/options/fonts_page_view.h"
-
+#include "app/gfx/canvas.h"
+#include "app/gfx/font.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/gfx/native_theme.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/browser/views/password_manager_view.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/button/radio_button.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/widget/widget.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/locale_settings.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "views/controls/button/native_button.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -41,7 +38,7 @@ static std::vector<CharacterEncoding::EncodingInfo> sorted_encoding_list;
 
 }  // namespace
 
-class DefaultEncodingComboboxModel : public views::ComboBox::Model {
+class DefaultEncodingComboboxModel : public views::Combobox::Model {
  public:
   DefaultEncodingComboboxModel() {
     canonical_encoding_names_length_ =
@@ -49,7 +46,7 @@ class DefaultEncodingComboboxModel : public views::ComboBox::Model {
     // Initialize the vector of all sorted encodings according to current
     // UI locale.
     if (!sorted_encoding_list.size()) {
-      std::wstring locale = g_browser_process->GetApplicationLocale();
+      std::string locale = g_browser_process->GetApplicationLocale();
       for (int i = 0; i < canonical_encoding_names_length_; i++) {
         sorted_encoding_list.push_back(CharacterEncoding::EncodingInfo(
             CharacterEncoding::GetEncodingCommandIdByIndex(i)));
@@ -61,11 +58,11 @@ class DefaultEncodingComboboxModel : public views::ComboBox::Model {
   virtual ~DefaultEncodingComboboxModel() {}
 
   // Overridden from views::Combobox::Model.
-  virtual int GetItemCount(views::ComboBox* source) {
+  virtual int GetItemCount(views::Combobox* source) {
     return canonical_encoding_names_length_;
   }
 
-  virtual std::wstring GetItemAt(views::ComboBox* source, int index) {
+  virtual std::wstring GetItemAt(views::Combobox* source, int index) {
     DCHECK(index >= 0 && canonical_encoding_names_length_ > index);
     return sorted_encoding_list[index].encoding_display_name;
   }
@@ -103,16 +100,17 @@ class FontDisplayView : public views::View {
   FontDisplayView();
   virtual ~FontDisplayView();
 
+  // This method takes in font size in pixel units, instead of the normal point
+  // unit because users expect the font size number to represent pixels and not
+  // points.
   void SetFontType(const std::wstring& font_name,
                    int font_size);
-
-  void SetFontType(ChromeFont font);
 
   std::wstring font_name() { return font_name_; }
   int font_size() { return font_size_; }
 
   // views::View overrides:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
 
@@ -137,24 +135,6 @@ FontDisplayView::FontDisplayView()
 FontDisplayView::~FontDisplayView() {
 }
 
-void FontDisplayView::SetFontType(ChromeFont font) {
-  if (font.FontName().empty())
-    return;
-
-  font_name_ = font.FontName();
-  font_size_ = font.FontSize();
-
-  // Append the font type and size here.
-  std::wstring displayed_text = font_name_;
-  displayed_text += L", ";
-  displayed_text += UTF8ToWide(StringPrintf("%d", font_size_));
-  displayed_text += L"pt";
-
-  // Set Label.
-  font_text_label_->SetText(displayed_text);
-  font_text_label_->SetFont(font);
-}
-
 void FontDisplayView::SetFontType(const std::wstring& font_name,
                                   int font_size) {
   if (font_name.empty())
@@ -167,13 +147,14 @@ void FontDisplayView::SetFontType(const std::wstring& font_name,
   // Append the font type and size.
   displayed_text += L", ";
   displayed_text += UTF8ToWide(::StringPrintf("%d", font_size_));
-  displayed_text += L"pt";
-  ChromeFont font = ChromeFont::CreateFont(font_name, font_size);
+  HDC hdc = GetDC(NULL);
+  int font_size_point = MulDiv(font_size, 72, GetDeviceCaps(hdc, LOGPIXELSY));
+  gfx::Font font = gfx::Font::CreateFont(font_name, font_size_point);
   font_text_label_->SetFont(font);
   font_text_label_->SetText(displayed_text);
 }
 
-void FontDisplayView::Paint(ChromeCanvas* canvas) {
+void FontDisplayView::Paint(gfx::Canvas* canvas) {
   HDC dc = canvas->beginPlatformPaint();
   RECT rect = { 0, 0, width(), height() };
   gfx::NativeTheme::instance()->PaintTextField(
@@ -187,17 +168,16 @@ void FontDisplayView::Layout() {
 }
 
 gfx::Size FontDisplayView::GetPreferredSize() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  ChromeFont font = rb.GetFont(ResourceBundle::BaseFont);
-  return gfx::Size(font.GetExpectedTextWidth(kFontDisplayMaxWidthChars),
-                   font.height() * kFontDisplayMaxHeightChars
-                       + 2 * kFontDisplayLabelPadding);
+  gfx::Size size = font_text_label_->GetPreferredSize();
+  size.set_width(size.width() + 2 * kFontDisplayLabelPadding);
+  size.set_height(size.height() + 2 * kFontDisplayLabelPadding);
+  return size;
 }
 
 void EmbellishTitle(views::Label* title_label) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  ChromeFont title_font =
-      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, ChromeFont::BOLD);
+  gfx::Font title_font =
+      rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
   title_label->SetFont(title_font);
   SkColor title_color =
       gfx::NativeTheme::instance()->GetThemeColorWithDefault(
@@ -207,7 +187,8 @@ void EmbellishTitle(views::Label* title_label) {
 }
 
 FontsPageView::FontsPageView(Profile* profile)
-    : select_font_dialog_(SelectFontDialog::Create(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+          select_font_dialog_(SelectFontDialog::Create(this))),
       fonts_group_title_(NULL),
       encoding_group_title_(NULL),
       fixed_width_font_change_page_button_(NULL),
@@ -224,7 +205,10 @@ FontsPageView::FontsPageView(Profile* profile)
       font_type_being_changed_(NONE),
       OptionsPageView(profile),
       font_changed_(false),
-      default_encoding_changed_(false) {
+      default_encoding_changed_(false),
+      serif_font_size_pixel_(0),
+      sans_serif_font_size_pixel_(0),
+      fixed_width_font_size_pixel_(0) {
   serif_name_.Init(prefs::kWebKitSerifFontFamily, profile->GetPrefs(), NULL);
   serif_size_.Init(prefs::kWebKitDefaultFontSize, profile->GetPrefs(), NULL);
 
@@ -244,22 +228,22 @@ FontsPageView::FontsPageView(Profile* profile)
 FontsPageView::~FontsPageView() {
 }
 
-void FontsPageView::ButtonPressed(views::NativeButton* sender) {
+void FontsPageView::ButtonPressed(views::Button* sender) {
   HWND owning_hwnd = GetAncestor(GetWidget()->GetNativeView(), GA_ROOT);
   std::wstring font_name;
   int font_size = 0;
   if (sender == serif_font_change_page_button_) {
     font_type_being_changed_ = SERIF;
     font_name = serif_font_display_view_->font_name();
-    font_size = serif_font_display_view_->font_size();
+    font_size = serif_font_size_pixel_;
   } else if (sender == sans_serif_font_change_page_button_) {
     font_type_being_changed_ = SANS_SERIF;
     font_name = sans_serif_font_display_view_->font_name();
-    font_size = sans_serif_font_display_view_->font_size();
+    font_size = sans_serif_font_size_pixel_;
   } else if (sender == fixed_width_font_change_page_button_) {
     font_type_being_changed_ = FIXED_WIDTH;
     font_name = fixed_width_font_display_view_->font_name();
-    font_size = fixed_width_font_display_view_->font_size();
+    font_size = fixed_width_font_size_pixel_;
   } else {
     NOTREACHED();
     return;
@@ -268,7 +252,7 @@ void FontsPageView::ButtonPressed(views::NativeButton* sender) {
   select_font_dialog_->SelectFont(owning_hwnd, NULL, font_name, font_size);
 }
 
-void FontsPageView::ItemChanged(views::ComboBox* combo_box,
+void FontsPageView::ItemChanged(views::Combobox* combo_box,
                                 int prev_index, int new_index) {
   if (combo_box == default_encoding_combobox_) {
     if (prev_index != new_index) {  // Default-Encoding has been changed.
@@ -280,20 +264,32 @@ void FontsPageView::ItemChanged(views::ComboBox* combo_box,
   }
 }
 
-void FontsPageView::FontSelected(const ChromeFont& font, void* params) {
-  if (ChromeFont(font).FontName().empty())
+void FontsPageView::FontSelected(const gfx::Font& const_font, void* params) {
+  gfx::Font font(const_font);
+  if (gfx::Font(font).FontName().empty())
     return;
-  int font_size = ChromeFont(font).FontSize();
+  int font_size = gfx::Font(font).FontSize();
+  // Currently we do not have separate font sizes for Serif and Sans Serif.
+  // Therefore, when Serif font size is changed, Sans-Serif font size changes,
+  // and vice versa.
   if (font_type_being_changed_ == SERIF) {
-    serif_font_display_view_->SetFontType(font);
-    sans_serif_font_display_view_->SetFontType(
-        sans_serif_font_display_view_->font_name(), font_size);
-  } else if (font_type_being_changed_ == SANS_SERIF) {
-    sans_serif_font_display_view_->SetFontType(font);
+    sans_serif_font_size_pixel_ = serif_font_size_pixel_ = font_size;
     serif_font_display_view_->SetFontType(
-        serif_font_display_view_->font_name(), font_size);
+        font.FontName(),
+        serif_font_size_pixel_);
+    sans_serif_font_display_view_->SetFontType(
+        sans_serif_font_display_view_->font_name(),
+        sans_serif_font_size_pixel_);
+  } else if (font_type_being_changed_ == SANS_SERIF) {
+    sans_serif_font_size_pixel_ = serif_font_size_pixel_ = font_size;
+    sans_serif_font_display_view_->SetFontType(
+        font.FontName(),
+        sans_serif_font_size_pixel_);
+    serif_font_display_view_->SetFontType(
+        serif_font_display_view_->font_name(),
+        sans_serif_font_size_pixel_);
   } else if (font_type_being_changed_ == FIXED_WIDTH) {
-    fixed_width_font_display_view_->SetFontType(font);
+    fixed_width_font_display_view_->SetFontType(font.FontName(), font_size);
   }
   font_changed_ = true;
 }
@@ -302,11 +298,11 @@ void FontsPageView::SaveChanges() {
   // Set Fonts.
   if (font_changed_) {
     serif_name_.SetValue(serif_font_display_view_->font_name());
-    serif_size_.SetValue(serif_font_display_view_->font_size());
+    serif_size_.SetValue(serif_font_size_pixel_);
     sans_serif_name_.SetValue(sans_serif_font_display_view_->font_name());
-    sans_serif_size_.SetValue(sans_serif_font_display_view_->font_size());
+    sans_serif_size_.SetValue(sans_serif_font_size_pixel_);
     fixed_width_name_.SetValue(fixed_width_font_display_view_->font_name());
-    fixed_width_size_.SetValue(fixed_width_font_display_view_->font_size());
+    fixed_width_size_.SetValue(fixed_width_font_size_pixel_);
   }
   // Set Encoding.
   if (default_encoding_changed_)
@@ -355,19 +351,22 @@ void FontsPageView::InitControlLayout() {
 
 void FontsPageView::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kWebKitFixedFontFamily) {
+    fixed_width_font_size_pixel_ = fixed_width_size_.GetValue();
     fixed_width_font_display_view_->SetFontType(
         fixed_width_name_.GetValue(),
-        fixed_width_size_.GetValue());
+        fixed_width_font_size_pixel_);
   }
   if (!pref_name || *pref_name == prefs::kWebKitSerifFontFamily) {
+    serif_font_size_pixel_ = serif_size_.GetValue();
     serif_font_display_view_->SetFontType(
         serif_name_.GetValue(),
-        serif_size_.GetValue());
+        serif_font_size_pixel_);
   }
   if (!pref_name || *pref_name == prefs::kWebKitSansSerifFontFamily) {
+    sans_serif_font_size_pixel_ = sans_serif_size_.GetValue();
     sans_serif_font_display_view_->SetFontType(
         sans_serif_name_.GetValue(),
-        sans_serif_size_.GetValue());
+        sans_serif_font_size_pixel_);
   }
 }
 
@@ -375,41 +374,38 @@ void FontsPageView::InitFontLayout() {
   // Fixed width.
   fixed_width_font_display_view_ = new FontDisplayView;
   fixed_width_font_change_page_button_ = new views::NativeButton(
+      this,
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_BUTTON_LABEL));
-  fixed_width_font_change_page_button_->SetListener(this);
 
   fixed_width_font_label_ = new views::Label(
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_FIXED_WIDTH_LABEL));
   fixed_width_font_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  fixed_width_font_label_->SetMultiLine(true);
 
   // Serif font.
   serif_font_display_view_ = new FontDisplayView;
   serif_font_change_page_button_ = new views::NativeButton(
+      this,
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_BUTTON_LABEL));
-  serif_font_change_page_button_->SetListener(this);
 
   serif_font_label_ = new views::Label(
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_SERIF_LABEL));
   serif_font_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  serif_font_label_->SetMultiLine(true);
 
   // Sans Serif font.
   sans_serif_font_display_view_ = new FontDisplayView;
   sans_serif_font_change_page_button_ = new views::NativeButton(
+      this,
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_BUTTON_LABEL));
-  sans_serif_font_change_page_button_->SetListener(this);
 
   sans_serif_font_label_ = new views::Label(
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_SANS_SERIF_LABEL));
   sans_serif_font_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  sans_serif_font_label_->SetMultiLine(true);
 
   // Now add the views.
   using views::GridLayout;
@@ -422,12 +418,10 @@ void FontsPageView::InitFontLayout() {
   const int triple_column_view_set_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(triple_column_view_set_id);
 
-  int label_width = ChromeFont().GetExpectedTextWidth(
-      _wtoi(l10n_util::GetString(IDS_FONTSLANG_LABEL_WIDTH).c_str()));
-  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
-                        GridLayout::FIXED, label_width, 0);
+  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
+  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
@@ -463,14 +457,14 @@ void FontsPageView::InitEncodingLayout() {
       l10n_util::GetString(
           IDS_FONT_LANGUAGE_SETTING_FONT_DEFAULT_ENCODING_SELECTOR_LABEL));
   default_encoding_combobox_model_.reset(new DefaultEncodingComboboxModel);
-  default_encoding_combobox_ = new views::ComboBox(
+  default_encoding_combobox_ = new views::Combobox(
       default_encoding_combobox_model_.get());
   int selected_encoding_index = default_encoding_combobox_model_->
       GetSelectedEncodingIndex(profile());
   default_encoding_combobox_->SetSelectedItem(selected_encoding_index);
   default_encoding_selected_ = default_encoding_combobox_model_->
       GetEncodingCharsetByIndex(selected_encoding_index);
-  default_encoding_combobox_->SetListener(this);
+  default_encoding_combobox_->set_listener(this);
 
   // Now add the views.
   using views::GridLayout;
@@ -489,7 +483,7 @@ void FontsPageView::InitEncodingLayout() {
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
-  // Add Encoding ComboBox.
+  // Add Encoding Combobox.
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(default_encoding_combobox_label_);
   layout->AddView(default_encoding_combobox_, 1, 1, GridLayout::FILL,

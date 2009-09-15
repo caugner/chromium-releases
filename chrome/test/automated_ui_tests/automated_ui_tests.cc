@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
@@ -18,14 +19,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/libxml_utils.h"
-#include "chrome/common/win_util.h"
 #include "chrome/test/automated_ui_tests/automated_ui_tests.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "chrome/views/view.h"
 #include "googleurl/src/gurl.h"
+#include "views/view.h"
 
 namespace {
 
@@ -72,7 +72,6 @@ const std::string kDialogs[] = {
   "About",
   "Options",
   "TaskManager",
-  "JavaScriptDebugger",
   "JavaScriptConsole",
   "ClearBrowsingData",
   "ImportSettings",
@@ -81,11 +80,11 @@ const std::string kDialogs[] = {
 };
 
 AutomatedUITest::AutomatedUITest()
-    : total_crashes_(0),
+    : test_start_time_(base::Time::NowFromSystemTime()),
+      total_crashes_(0),
       debug_logging_enabled_(false),
       post_action_delay_(0) {
   show_window_ = true;
-  GetSystemTimeAsFileTime(&test_start_time_);
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kDebugModeSwitch))
     debug_logging_enabled_ = true;
@@ -195,6 +194,7 @@ void AutomatedUITest::RunAutomatedUITest() {
         // Try and start up again.
         CloseBrowserAndServer();
         LaunchBrowserAndServer();
+        set_active_browser(automation()->GetBrowserWindow(0));
         if (DidCrash(true)) {
           no_errors = false;
           // We crashed again, so skip to the end of the this command.
@@ -283,11 +283,11 @@ bool AutomatedUITest::DoAction(const std::string & action) {
   } else if (LowerCaseEqualsASCII(action, "downloads")) {
     did_complete_action = ShowDownloads();
   } else if (LowerCaseEqualsASCII(action, "dragtableft")) {
-    did_complete_action = DragActiveTab(false, false);
+    did_complete_action = DragActiveTab(false);
   } else if (LowerCaseEqualsASCII(action, "dragtabout")) {
-    did_complete_action = DragActiveTab(false, true);
+    did_complete_action = DragTabOut();
   } else if (LowerCaseEqualsASCII(action, "dragtabright")) {
-    did_complete_action = DragActiveTab(true, false);
+    did_complete_action = DragActiveTab(true);
   } else if (LowerCaseEqualsASCII(action, "duplicatetab")) {
     did_complete_action = DuplicateTab();
   } else if (LowerCaseEqualsASCII(action, "editsearchengines")) {
@@ -306,14 +306,17 @@ bool AutomatedUITest::DoAction(const std::string & action) {
     did_complete_action = OpenImportSettingsDialog();
   } else if (LowerCaseEqualsASCII(action, "javascriptconsole")) {
     did_complete_action = JavaScriptConsole();
-  } else if (LowerCaseEqualsASCII(action, "javascriptdebugger")) {
-    did_complete_action = JavaScriptDebugger();
   } else if (LowerCaseEqualsASCII(action, "navigate")) {
-    did_complete_action = Navigate();
+    std::string url = "about:blank";
+    if (init_reader_.NodeAttribute("url", &url)) {
+      xml_writer_.AddAttribute("url", url);
+    }
+    GURL test_url(url);
+    did_complete_action = Navigate(test_url);
   } else if (LowerCaseEqualsASCII(action, "newtab")) {
     did_complete_action = NewTab();
   } else if (LowerCaseEqualsASCII(action, "openwindow")) {
-    did_complete_action = OpenAndActivateNewBrowserWindow();
+    did_complete_action = OpenAndActivateNewBrowserWindow(NULL);
   } else if (LowerCaseEqualsASCII(action, "options")) {
     did_complete_action = Options();
   } else if (LowerCaseEqualsASCII(action, "pagedown")) {
@@ -340,10 +343,11 @@ bool AutomatedUITest::DoAction(const std::string & action) {
     did_complete_action = ShowBookmarkBar();
   } else if (LowerCaseEqualsASCII(action, "setup")) {
     LaunchBrowserAndServer();
+    set_active_browser(automation()->GetBrowserWindow(0));
     did_complete_action = true;
   } else if (LowerCaseEqualsASCII(action, "sleep")) {
     // This is for debugging, it probably shouldn't be used real tests.
-    Sleep(kDebuggingTimeoutMsec);
+    PlatformThread::Sleep(kDebuggingTimeoutMsec);
     did_complete_action = true;
   } else if (LowerCaseEqualsASCII(action, "star")) {
     did_complete_action = StarPage();
@@ -391,37 +395,9 @@ bool AutomatedUITest::DoAction(const std::string & action) {
   return did_complete_action;
 }
 
-bool AutomatedUITest::OpenAndActivateNewBrowserWindow() {
-  if (!automation()->OpenNewBrowserWindow(SW_SHOWNORMAL)) {
-    AddWarningAttribute("failed_to_open_new_browser_window");
-    return false;
-  }
-  int num_browser_windows;
-  automation()->GetBrowserWindowCount(&num_browser_windows);
-  // Get the most recently opened browser window and activate the tab
-  // in order to activate this browser window.
-  scoped_ptr<BrowserProxy> browser(
-    automation()->GetBrowserWindow(num_browser_windows - 1));
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  bool is_timeout;
-  if (!browser->ActivateTabWithTimeout(0, action_max_timeout_ms(),
-                                       &is_timeout)) {
-    AddWarningAttribute("failed_to_activate_tab");
-    return false;
-  }
-  return true;
-}
-
-bool AutomatedUITest::BackButton() {
-  return RunCommand(IDC_BACK);
-}
-
 bool AutomatedUITest::ChangeEncoding() {
   // Get the encoding list that is used to populate the UI (encoding menu)
-  std::wstring cur_locale = g_browser_process->GetApplicationLocale();
+  std::string cur_locale = g_browser_process->GetApplicationLocale();
   const std::vector<CharacterEncoding::EncodingInfo>* encodings =
       CharacterEncoding::GetCurrentDisplayEncodings(
           cur_locale, L"ISO-8859-1,windows-1252", L"");
@@ -436,163 +412,47 @@ bool AutomatedUITest::ChangeEncoding() {
     index = base::RandInt(0, len);
   }
 
-  return RunCommand((*encodings)[index].encoding_id);
-}
-
-bool AutomatedUITest::CloseActiveTab() {
-  bool return_value = false;
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  int browser_windows_count;
-  int tab_count;
-  bool is_timeout;
-  browser->GetTabCountWithTimeout(&tab_count,
-                                  action_max_timeout_ms(),
-                                  &is_timeout);
-  automation()->GetBrowserWindowCount(&browser_windows_count);
-  // Avoid quitting the application by not closing the last window.
-  if (tab_count > 1) {
-    int new_tab_count;
-    return_value = browser->RunCommand(IDC_CLOSE_TAB);
-    // Wait for the tab to close before we continue.
-    if (!browser->WaitForTabCountToChange(tab_count,
-                                          &new_tab_count,
-                                          action_max_timeout_ms())) {
-      AddWarningAttribute("tab_count_failed_to_change");
-      return false;
-    }
-  } else if (tab_count == 1 && browser_windows_count > 1) {
-    int new_window_count;
-    return_value = browser->RunCommand(IDC_CLOSE_TAB);
-    // Wait for the window to close before we continue.
-    if (!automation()->WaitForWindowCountToChange(browser_windows_count,
-                                                  &new_window_count,
-                                                  action_max_timeout_ms())) {
-      AddWarningAttribute("window_count_failed_to_change");
-      return false;
-    }
-  } else {
-    AddInfoAttribute("would_have_exited_application");
-    return false;
-  }
-  return return_value;
-}
-
-bool AutomatedUITest::DuplicateTab() {
-  return RunCommand(IDC_DUPLICATE_TAB);
+  return RunCommandAsync((*encodings)[index].encoding_id);
 }
 
 bool AutomatedUITest::FindInPage() {
-  return RunCommand(IDC_FIND);
-}
-
-bool AutomatedUITest::ForwardButton() {
-  return RunCommand(IDC_FORWARD);
-}
-
-bool AutomatedUITest::GoOffTheRecord() {
-  return RunCommand(IDC_NEW_INCOGNITO_WINDOW);
+  return RunCommandAsync(IDC_FIND);
 }
 
 bool AutomatedUITest::Home() {
-  return RunCommand(IDC_HOME);
+  return RunCommandAsync(IDC_HOME);
 }
 
 bool AutomatedUITest::JavaScriptConsole() {
-  return RunCommand(IDC_JS_CONSOLE);
-}
-
-bool AutomatedUITest::JavaScriptDebugger() {
-  return RunCommand(IDC_DEBUGGER);
-}
-
-bool AutomatedUITest::Navigate() {
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  bool did_timeout;
-  scoped_ptr<TabProxy> tab(
-      browser->GetActiveTabWithTimeout(action_max_timeout_ms(), &did_timeout));
-  // TODO(devint): This might be masking a bug. I can't think of many
-  // valid cases where we would get a browser window, but not be able
-  // to return an active tab. Yet this has happened and has triggered crashes.
-  // Investigate this.
-  if (tab.get() == NULL) {
-    AddErrorAttribute("active_tab_not_found");
-    return false;
-  }
-  std::string url = "about:blank";
-  if (init_reader_.NodeAttribute("url", &url)) {
-    xml_writer_.AddAttribute("url", url);
-  }
-  GURL test_url(url);
-  did_timeout = false;
-  tab->NavigateToURLWithTimeout(test_url,
-                                command_execution_timeout_ms(),
-                                &did_timeout);
-
-  if (did_timeout) {
-    AddWarningAttribute("timeout");
-    return false;
-  }
-  return true;
-}
-
-bool AutomatedUITest::NewTab() {
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  int old_tab_count;
-  int new_tab_count;
-  bool is_timeout;
-  browser->GetTabCountWithTimeout(&old_tab_count,
-                                  action_max_timeout_ms(),
-                                  &is_timeout);
-  // Apply accelerator and wait for a new tab to open, if either
-  // fails, return false. Apply Accelerator takes care of logging its failure.
-  bool return_value = RunCommand(IDC_NEW_TAB);
-  if (!browser->WaitForTabCountToChange(old_tab_count,
-                                        &new_tab_count,
-                                        action_max_timeout_ms())) {
-    AddWarningAttribute("tab_count_failed_to_change");
-    return false;
-  }
-  return return_value;
+  return RunCommandAsync(IDC_JS_CONSOLE);
 }
 
 bool AutomatedUITest::OpenAboutDialog() {
-  return RunCommand(IDC_ABOUT);
+  return RunCommandAsync(IDC_ABOUT);
 }
 
 bool AutomatedUITest::OpenClearBrowsingDataDialog() {
-  return RunCommand(IDC_CLEAR_BROWSING_DATA);
+  return RunCommandAsync(IDC_CLEAR_BROWSING_DATA);
 }
 
 bool AutomatedUITest::OpenEditSearchEnginesDialog() {
-  return RunCommand(IDC_EDIT_SEARCH_ENGINES);
+  return RunCommandAsync(IDC_EDIT_SEARCH_ENGINES);
 }
 
 bool AutomatedUITest::OpenImportSettingsDialog() {
-  return RunCommand(IDC_IMPORT_SETTINGS);
+  return RunCommandAsync(IDC_IMPORT_SETTINGS);
 }
 
 bool AutomatedUITest::OpenTaskManagerDialog() {
-  return RunCommand(IDC_TASK_MANAGER);
+  return RunCommandAsync(IDC_TASK_MANAGER);
 }
 
 bool AutomatedUITest::OpenViewPasswordsDialog() {
-  return RunCommand(IDC_VIEW_PASSWORDS);
+  return RunCommandAsync(IDC_VIEW_PASSWORDS);
 }
 
 bool AutomatedUITest::Options() {
-  return RunCommand(IDC_OPTIONS);
+  return RunCommandAsync(IDC_OPTIONS);
 }
 
 bool AutomatedUITest::PressDownArrow() {
@@ -627,48 +487,40 @@ bool AutomatedUITest::PressUpArrow() {
   return SimulateKeyPressInActiveWindow(VK_UP, 0);
 }
 
-bool AutomatedUITest::ReloadPage() {
-  return RunCommand(IDC_RELOAD);
-}
-
-bool AutomatedUITest::RestoreTab() {
-  return RunCommand(IDC_RESTORE_TAB);
-}
-
 bool AutomatedUITest::SelectNextTab() {
-  return RunCommand(IDC_SELECT_NEXT_TAB);
+  return RunCommandAsync(IDC_SELECT_NEXT_TAB);
 }
 
 bool AutomatedUITest::SelectPreviousTab() {
-  return RunCommand(IDC_SELECT_PREVIOUS_TAB);
+  return RunCommandAsync(IDC_SELECT_PREVIOUS_TAB);
 }
 
 bool AutomatedUITest::ShowBookmarkBar() {
-  return RunCommand(IDC_SHOW_BOOKMARK_BAR);
+  return RunCommandAsync(IDC_SHOW_BOOKMARK_BAR);
 }
 
 bool AutomatedUITest::ShowDownloads() {
-  return RunCommand(IDC_SHOW_DOWNLOADS);
+  return RunCommandAsync(IDC_SHOW_DOWNLOADS);
 }
 
 bool AutomatedUITest::ShowHistory() {
-  return RunCommand(IDC_SHOW_HISTORY);
+  return RunCommandAsync(IDC_SHOW_HISTORY);
 }
 
 bool AutomatedUITest::StarPage() {
-  return RunCommand(IDC_STAR);
+  return RunCommandAsync(IDC_STAR);
 }
 
 bool AutomatedUITest::ViewSource() {
-  return RunCommand(IDC_VIEW_SOURCE);
+  return RunCommandAsync(IDC_VIEW_SOURCE);
 }
 
 bool AutomatedUITest::ZoomMinus() {
-  return RunCommand(IDC_ZOOM_MINUS);
+  return RunCommandAsync(IDC_ZOOM_MINUS);
 }
 
 bool AutomatedUITest::ZoomPlus() {
-  return RunCommand(IDC_ZOOM_PLUS);
+  return RunCommandAsync(IDC_ZOOM_PLUS);
 }
 
 bool AutomatedUITest::TestAboutChrome() {
@@ -732,12 +584,7 @@ bool AutomatedUITest::FuzzyTestDialog(int num_actions) {
 }
 
 bool AutomatedUITest::ForceCrash() {
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  scoped_ptr<TabProxy> tab(browser->GetActiveTab());
+  scoped_refptr<TabProxy> tab(GetActiveTab());
   GURL test_url("about:crash");
   bool did_timeout;
   tab->NavigateToURLWithTimeout(test_url, kDebuggingTimeoutMsec, &did_timeout);
@@ -748,119 +595,8 @@ bool AutomatedUITest::ForceCrash() {
   return true;
 }
 
-bool AutomatedUITest::DragActiveTab(bool drag_right, bool drag_out) {
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  scoped_ptr<WindowProxy> window(
-      GetAndActivateWindowForBrowser(browser.get()));
-  if (window.get() == NULL) {
-    AddErrorAttribute("active_window_not_found");
-    return false;
-  }
-  bool is_timeout;
-
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  int tab_count;
-  browser->GetTabCountWithTimeout(&tab_count,
-                                  action_max_timeout_ms(),
-                                  &is_timeout);
-  // As far as we're concerned, if we can't get a view for a tab, it doesn't
-  // exist, so cap tab_count at the number of tab view ids there are.
-  tab_count = std::min(tab_count, VIEW_ID_TAB_LAST - VIEW_ID_TAB_0);
-
-  int tab_index;
-  if (!browser->GetActiveTabIndexWithTimeout(&tab_index,
-                                             action_max_timeout_ms(),
-                                             &is_timeout)) {
-    AddWarningAttribute("no_active_tab");
-    return false;
-  }
-
-  gfx::Rect dragged_tab_bounds;
-  if (!window->GetViewBoundsWithTimeout(VIEW_ID_TAB_0 + tab_index,
-                                        &dragged_tab_bounds, false,
-                                        action_max_timeout_ms(),
-                                        &is_timeout)) {
-    AddWarningAttribute("no_tab_view_found");
-    return false;
-  }
-
-  // Click on the center of the tab, and drag it to the left or the right.
-  POINT dragged_tab_point(dragged_tab_bounds.CenterPoint().ToPOINT());
-  POINT destination_point(dragged_tab_point);
-
-  int window_count;
-  if (drag_out) {
-    destination_point.y += 3*dragged_tab_bounds.height();
-    automation()->GetBrowserWindowCount(&window_count);
-  } else if (drag_right) {
-    if (tab_index >= (tab_count-1)) {
-      AddInfoAttribute("index_cant_be_moved");
-      return false;
-    }
-    destination_point.x += 2*dragged_tab_bounds.width()/3;
-  } else {
-    if (tab_index <= 0) {
-      AddInfoAttribute("index_cant_be_moved");
-      return false;
-    }
-    destination_point.x -= 2*dragged_tab_bounds.width()/3;
-  }
-
-  if (!browser->SimulateDragWithTimeout(dragged_tab_point,
-                                        destination_point,
-                                        views::Event::EF_LEFT_BUTTON_DOWN,
-                                        action_max_timeout_ms(),
-                                        &is_timeout, false)) {
-    AddWarningAttribute("failed_to_simulate_drag");
-    return false;
-  }
-
-  // If we try to drag the tab out and the window we drag from contains more
-  // than just the dragged tab, we would expect the window count to increase
-  // because the dragged tab should open in a new window. If not, we probably
-  // just dragged into another tabstrip.
-  if (drag_out && tab_count > 1) {
-      int new_window_count;
-      automation()->GetBrowserWindowCount(&new_window_count);
-      if (new_window_count == window_count) {
-        AddInfoAttribute("no_new_browser_window");
-        return false;
-      }
-  }
-  return true;
-}
-
-WindowProxy* AutomatedUITest::GetAndActivateWindowForBrowser(
-    BrowserProxy* browser) {
-  bool did_timeout;
-  if (!browser->BringToFrontWithTimeout(action_max_timeout_ms(),
-                                        &did_timeout)) {
-    AddWarningAttribute("failed_to_bring_window_to_front");
-    return NULL;
-  }
-
-  WindowProxy* window = browser->GetWindow();
-  return window;
-}
-
-bool AutomatedUITest::RunCommand(int browser_command) {
-  scoped_ptr<BrowserProxy> browser(automation()->GetLastActiveBrowserWindow());
-  if (browser.get() == NULL) {
-    AddErrorAttribute("browser_window_not_found");
-    return false;
-  }
-  if (!browser->RunCommand(browser_command)) {
-    AddWarningAttribute("failure_running_browser_command");
-    return false;
-  }
-  return true;
-}
-
 bool AutomatedUITest::SimulateKeyPressInActiveWindow(wchar_t key, int flags) {
-  scoped_ptr<WindowProxy> window(automation()->GetActiveWindow());
+  scoped_refptr<WindowProxy> window(automation()->GetActiveWindow());
   if (window.get() == NULL) {
     AddErrorAttribute("active_window_not_found");
     return false;
@@ -953,6 +689,18 @@ void AutomatedUITest::AddErrorAttribute(const std::string &error) {
   xml_writer_.AddAttribute("error", error);
 }
 
+void AutomatedUITest::LogErrorMessage(const std::string &error) {
+  AddErrorAttribute(error);
+}
+
+void AutomatedUITest::LogWarningMessage(const std::string &warning) {
+  AddWarningAttribute(warning);
+}
+
+void AutomatedUITest::LogInfoMessage(const std::string &info) {
+  AddWarningAttribute(info);
+}
+
 std::wstring AutomatedUITest::GetMostRecentCrashDump() {
   std::wstring crash_dump_path;
   int file_count = 0;
@@ -994,7 +742,7 @@ std::wstring AutomatedUITest::GetMostRecentCrashDump() {
 }
 
 bool AutomatedUITest::DidCrash(bool update_total_crashes) {
-  std::wstring crash_dump_path;
+  FilePath crash_dump_path;
   PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
   // Each crash creates two dump files, so we divide by two here.
   int actual_crashes = file_util::CountFilesCreatedAfter(

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,16 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/platform_file.h"
 #include "base/string_util.h"
 #include "base/worker_pool.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_dir_job.h"
 
@@ -88,7 +92,8 @@ URLRequestFileJob::URLRequestFileJob(URLRequest* request,
       file_path_(file_path),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           io_callback_(this, &URLRequestFileJob::DidRead)),
-      is_directory_(false) {
+      is_directory_(false),
+      remaining_bytes_(0) {
 }
 
 URLRequestFileJob::~URLRequestFileJob() {
@@ -133,11 +138,24 @@ bool URLRequestFileJob::ReadRawData(net::IOBuffer* dest, int dest_size,
                                     int *bytes_read) {
   DCHECK_NE(dest_size, 0);
   DCHECK(bytes_read);
+  DCHECK_GE(remaining_bytes_, 0);
+
+  if (remaining_bytes_ < dest_size)
+    dest_size = static_cast<int>(remaining_bytes_);
+
+  // If we should copy zero bytes because |remaining_bytes_| is zero, short
+  // circuit here.
+  if (!dest_size) {
+    *bytes_read = 0;
+    return true;
+  }
 
   int rv = stream_.Read(dest->data(), dest_size, &io_callback_);
   if (rv >= 0) {
     // Data is immediately available.
     *bytes_read = rv;
+    remaining_bytes_ -= rv;
+    DCHECK_GE(remaining_bytes_, 0);
     return true;
   }
 
@@ -150,9 +168,36 @@ bool URLRequestFileJob::ReadRawData(net::IOBuffer* dest, int dest_size,
   return false;
 }
 
+bool URLRequestFileJob::GetContentEncodings(
+    std::vector<Filter::FilterType>* encoding_types) {
+  DCHECK(encoding_types->empty());
+
+  // Bug 9936 - .svgz files needs to be decompressed.
+  if (LowerCaseEqualsASCII(file_path_.Extension(), ".svgz"))
+    encoding_types->push_back(Filter::FILTER_TYPE_GZIP);
+
+  return !encoding_types->empty();
+}
+
 bool URLRequestFileJob::GetMimeType(std::string* mime_type) const {
   DCHECK(request_);
   return net::GetMimeTypeFromFile(file_path_, mime_type);
+}
+
+void URLRequestFileJob::SetExtraRequestHeaders(const std::string& headers) {
+  // We only care about "Range" header here.
+  std::vector<net::HttpByteRange> ranges;
+  if (net::HttpUtil::ParseRanges(headers, &ranges)) {
+    if (ranges.size() == 1) {
+      byte_range_ = ranges[0];
+    } else {
+      // We don't support multiple range requests in one single URL request,
+      // because we need to do multipart encoding here.
+      // TODO(hclam): decide whether we want to support multiple range requests.
+      NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
+                 net::ERR_REQUEST_RANGE_NOT_SATISFIABLE));
+    }
+  }
 }
 
 void URLRequestFileJob::DidResolve(
@@ -180,12 +225,33 @@ void URLRequestFileJob::DidResolve(
     rv = stream_.Open(file_path_, flags);
   }
 
-  if (rv == net::OK) {
-    set_expected_content_size(file_info.size);
-    NotifyHeadersComplete();
-  } else {
+  if (rv != net::OK) {
     NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, rv));
+    return;
   }
+
+  if (!byte_range_.ComputeBounds(file_info.size)) {
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
+               net::ERR_REQUEST_RANGE_NOT_SATISFIABLE));
+    return;
+  }
+
+  remaining_bytes_ = byte_range_.last_byte_position() -
+                     byte_range_.first_byte_position() + 1;
+  DCHECK_GE(remaining_bytes_, 0);
+
+  // Do the seek at the beginning of the request.
+  if (remaining_bytes_ > 0 &&
+      byte_range_.first_byte_position() != 0 &&
+      byte_range_.first_byte_position() !=
+          stream_.Seek(net::FROM_BEGIN, byte_range_.first_byte_position())) {
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
+               net::ERR_REQUEST_RANGE_NOT_SATISFIABLE));
+    return;
+  }
+
+  set_expected_content_size(remaining_bytes_);
+  NotifyHeadersComplete();
 }
 
 void URLRequestFileJob::DidRead(int result) {
@@ -196,6 +262,10 @@ void URLRequestFileJob::DidRead(int result) {
   } else {
     NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, result));
   }
+
+  remaining_bytes_ -= result;
+  DCHECK_GE(remaining_bytes_, 0);
+
   NotifyReadComplete(result);
 }
 
@@ -218,7 +288,7 @@ bool URLRequestFileJob::IsRedirectResponse(
   if (!resolved)
     return false;
 
-  *location = net::FilePathToFileURL(new_path);
+  *location = net::FilePathToFileURL(FilePath(new_path));
   *http_status_code = 301;
   return true;
 #else

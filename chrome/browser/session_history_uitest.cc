@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
+#include "app/l10n_util.h"
+#include "base/file_path.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -22,21 +22,17 @@ const wchar_t kDocRoot[] = L"chrome/test/data";
 class SessionHistoryTest : public UITest {
  protected:
   SessionHistoryTest() : UITest() {
-    FilePath path = FilePath::FromWStringHack(test_data_directory_);
-    path = path.AppendASCII("session_history");
-
-    url_prefix_ = UTF8ToWide(net::FilePathToFileURL(path).spec());
   }
 
   virtual void SetUp() {
     UITest::SetUp();
 
-    window_.reset(automation()->GetBrowserWindow(0));
+    window_ = automation()->GetBrowserWindow(0);
     ASSERT_TRUE(window_.get());
 
     int active_tab_index = -1;
     ASSERT_TRUE(window_->GetActiveTabIndex(&active_tab_index));
-    tab_.reset(window_->GetTab(active_tab_index));
+    tab_ = window_->GetTab(active_tab_index);
     ASSERT_TRUE(tab_.get());
   }
 
@@ -97,12 +93,9 @@ class SessionHistoryTest : public UITest {
   }
 
  protected:
-  wstring url_prefix_;
-  scoped_ptr<BrowserProxy> window_;
-  scoped_ptr<TabProxy> tab_;
+  scoped_refptr<BrowserProxy> window_;
+  scoped_refptr<TabProxy> tab_;
 };
-
-}  // namespace
 
 TEST_F(SessionHistoryTest, BasicBackForward) {
   scoped_refptr<HTTPTestServer> server =
@@ -319,7 +312,7 @@ TEST_F(SessionHistoryTest, DISABLED_CrossFrameFormBackForward) {
 
   // history is [blank, bot1, *form, post]
 
-  //ClickLink(L"abot2");
+  // ClickLink(L"abot2");
   GURL bot2("files/session_history/bot2.html");
   ASSERT_TRUE(tab_->NavigateToURL(bot2));
   EXPECT_EQ(L"bot2", GetTabTitle());
@@ -502,3 +495,22 @@ TEST_F(SessionHistoryTest, DISABLED_LocationReplace) {
       "files/session_history/replace.html?no-title.html")));
   EXPECT_EQ(L"", GetTabTitle());
 }
+
+TEST_F(SessionHistoryTest, LocationChangeInSubframe) {
+  scoped_refptr<HTTPTestServer> server =
+      HTTPTestServer::CreateServer(kDocRoot, NULL);
+  ASSERT_TRUE(server.get());
+
+  ASSERT_TRUE(tab_->NavigateToURL(server->TestServerPage(
+      "files/session_history/location_redirect.html")));
+  EXPECT_EQ(L"Default Title", GetTabTitle());
+
+  ASSERT_TRUE(tab_->NavigateToURL(GURL(
+      "javascript:void(frames[0].navigate())")));
+  EXPECT_EQ(L"foo", GetTabTitle());
+
+  ASSERT_TRUE(tab_->GoBack());
+  EXPECT_EQ(L"Default Title", GetTabTitle());
+}
+
+}  // namespace

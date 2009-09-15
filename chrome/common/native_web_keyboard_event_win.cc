@@ -4,12 +4,18 @@
 
 #include "chrome/common/native_web_keyboard_event.h"
 
+#include "webkit/api/public/win/WebInputEventFactory.h"
+
+using WebKit::WebInputEventFactory;
+using WebKit::WebKeyboardEvent;
+
 NativeWebKeyboardEvent::NativeWebKeyboardEvent() {
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
-    : WebKeyboardEvent(hwnd, message, wparam, lparam) {
+    : WebKeyboardEvent(
+          WebInputEventFactory::keyboardEvent(hwnd, message, wparam, lparam)) {
   os_event.hwnd = hwnd;
   os_event.message = message;
   os_event.wParam = wparam;

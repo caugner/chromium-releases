@@ -4,22 +4,26 @@
 
 #include "chrome/browser/importer/firefox2_importer.h"
 
+#include "app/l10n_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/mork_reader.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_parser.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/data_url.h"
+#include "webkit/glue/password_form.h"
 
 using base::Time;
+using webkit_glue::PasswordForm;
 
 // Firefox2Importer.
 
@@ -130,7 +134,7 @@ TemplateURL* Firefox2Importer::CreateTemplateURL(const std::wstring& title,
 void Firefox2Importer::ImportBookmarksFile(
     const std::wstring& file_path,
     const std::set<GURL>& default_urls,
-    bool first_run,
+    bool import_to_bookmark_bar,
     const std::wstring& first_folder_name,
     Importer* importer,
     std::vector<ProfileWriter::BookmarkEntry>* bookmarks,
@@ -184,16 +188,15 @@ void Firefox2Importer::ImportBookmarksFile(
       entry.url = url;
       entry.title = title;
 
-      if (first_run && toolbar_folder) {
+      if (import_to_bookmark_bar && toolbar_folder) {
         // Flatten the items in toolbar.
         entry.in_toolbar = true;
         entry.path.assign(path.begin() + toolbar_folder, path.end());
         toolbar_bookmarks.push_back(entry);
       } else {
-        // Insert the item into the "Imported from Firefox" folder after
-        // the first run.
+        // Insert the item into the "Imported from Firefox" folder.
         entry.path.assign(path.begin(), path.end());
-        if (first_run)
+        if (import_to_bookmark_bar)
           entry.path.erase(entry.path.begin());
         bookmarks->push_back(entry);
       }
@@ -252,7 +255,7 @@ void Firefox2Importer::ImportBookmarks() {
   else
     first_folder_name = l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_FIREFOX);
 
-  ImportBookmarksFile(file, default_urls, first_run(),
+  ImportBookmarksFile(file, default_urls, import_to_bookmark_bar(),
                       first_folder_name, this, &bookmarks, &template_urls,
                       &favicons);
 
@@ -261,7 +264,7 @@ void Firefox2Importer::ImportBookmarks() {
     main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
         &ProfileWriter::AddBookmarkEntry, bookmarks,
         first_folder_name,
-        first_run() ? ProfileWriter::FIRST_RUN : 0));
+        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
   }
   if (!parsing_bookmarks_html_file_ && !template_urls.empty() &&
       !cancelled()) {
@@ -447,8 +450,14 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
 
   // URL
   if (GetAttribute(attribute_list, kHrefAttribute, &value)) {
-    ReplaceSubstringsAfterOffset(&value, 0, "%22", "\"");
-    *url = GURL(value);
+    std::wstring w_url;
+    CodepageToWide(value, charset.c_str(), OnStringUtilConversionError::SKIP,
+      &w_url);
+    HTMLUnescape(&w_url);
+
+    string16 url16 = WideToUTF16Hack(w_url);
+
+    *url = GURL(url16);
   }
 
   // Favicon
@@ -491,8 +500,17 @@ bool Firefox2Importer::GetAttribute(const std::string& attribute_list,
     return false;  // Can't find the attribute.
 
   begin = attribute_list.find(kQuote, begin) + 1;
-  size_t end = attribute_list.find(kQuote, begin);
-  if (end == std::string::npos)
+
+  size_t end = begin + 1;
+  while (end < attribute_list.size()) {
+    if (attribute_list[end] == '"' &&
+        attribute_list[end - 1] != '\\') {
+      break;
+    }
+    end++;
+  }
+
+  if (end == attribute_list.size())
     return false;  // The value is not quoted.
 
   *value = attribute_list.substr(begin, end - begin);

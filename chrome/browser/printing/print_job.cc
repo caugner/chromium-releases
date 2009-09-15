@@ -5,10 +5,11 @@
 #include "chrome/browser/printing/print_job.h"
 
 #include "base/message_loop.h"
+#include "base/timer.h"
 #include "chrome/browser/printing/print_job_worker.h"
-#include "chrome/browser/printing/printed_document.h"
-#include "chrome/browser/printing/printed_page.h"
 #include "chrome/common/notification_service.h"
+#include "printing/printed_document.h"
+#include "printing/printed_page.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable:4355)  // 'this' : used in base member initializer list
@@ -56,8 +57,8 @@ void PrintJob::Initialize(PrintJobWorkerOwner* job,
   UpdatePrintedDocument(new PrintedDocument(settings_, source_, job->cookie()));
 
   // Don't forget to register to our own messages.
-  NotificationService::current()->AddObserver(
-      this, NotificationType::PRINT_JOB_EVENT, Source<PrintJob>(this));
+  registrar_.Add(this, NotificationType::PRINT_JOB_EVENT,
+                 Source<PrintJob>(this));
 }
 
 void PrintJob::Observe(NotificationType type,
@@ -65,21 +66,6 @@ void PrintJob::Observe(NotificationType type,
                        const NotificationDetails& details) {
   DCHECK_EQ(ui_message_loop_, MessageLoop::current());
   switch (type.value) {
-    case NotificationType::PRINTED_DOCUMENT_UPDATED: {
-      DCHECK(Source<PrintedDocument>(source).ptr() ==
-             document_.get());
-
-      // This notification may happens even if no job is started (i.e. print
-      // preview)
-      if (is_job_pending_ == true &&
-          Source<PrintedDocument>(source).ptr() == document_.get() &&
-          Details<PrintedPage>(details).ptr() != NULL) {
-        // Are we waiting for a page to print? The worker will know.
-        worker_->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-            worker_.get(), &PrintJobWorker::OnNewPage));
-      }
-      break;
-    }
     case NotificationType::PRINT_JOB_EVENT: {
       OnNotifyPrintJobEvent(*Details<JobEventDetails>(details).ptr());
       break;
@@ -152,8 +138,8 @@ void PrintJob::Stop() {
     ControlledWorkerShutdown();
 
     is_job_pending_ = false;
-    NotificationService::current()->RemoveObserver(
-        this, NotificationType::PRINT_JOB_EVENT, Source<PrintJob>(this));
+    registrar_.Remove(this, NotificationType::PRINT_JOB_EVENT,
+                      Source<PrintJob>(this));
   }
   // Flush the cached document.
   UpdatePrintedDocument(NULL);
@@ -228,21 +214,10 @@ PrintedDocument* PrintJob::document() const {
 void PrintJob::UpdatePrintedDocument(PrintedDocument* new_document) {
   if (document_.get() == new_document)
     return;
-  // Unregisters.
-  if (document_.get()) {
-    NotificationService::current()->RemoveObserver(
-        this,
-        NotificationType::PRINTED_DOCUMENT_UPDATED,
-        Source<PrintedDocument>(document_.get()));
-  }
+
   document_ = new_document;
 
-  // Registers.
   if (document_.get()) {
-    NotificationService::current()->AddObserver(
-        this,
-        NotificationType::PRINTED_DOCUMENT_UPDATED,
-        Source<PrintedDocument>(document_.get()));
     settings_ = document_->settings();
   }
 

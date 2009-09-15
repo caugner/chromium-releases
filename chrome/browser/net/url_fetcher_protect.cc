@@ -52,7 +52,7 @@ URLFetcherProtectEntry::URLFetcherProtectEntry(int sliding_window_period,
   ResetBackoff();
 }
 
-int URLFetcherProtectEntry::UpdateBackoff(EventType event_type) {
+int64 URLFetcherProtectEntry::UpdateBackoff(EventType event_type) {
   // request may be sent in different threads
   AutoLock lock(lock_);
 
@@ -71,7 +71,7 @@ int URLFetcherProtectEntry::UpdateBackoff(EventType event_type) {
       NOTREACHED();
   }
 
-  int wait = static_cast<int>(t.InMilliseconds());
+  int64 wait = t.InMilliseconds();
   DCHECK(wait >= 0);
   return wait;
 }
@@ -144,7 +144,8 @@ URLFetcherProtectManager* URLFetcherProtectManager::GetInstance() {
   return protect_manager_.get();
 }
 
-URLFetcherProtectEntry* URLFetcherProtectManager::Register(std::string id) {
+URLFetcherProtectEntry* URLFetcherProtectManager::Register(
+    const std::string& id) {
   AutoLock lock(lock_);
 
   ProtectService::iterator i = services_.find(id);
@@ -161,7 +162,7 @@ URLFetcherProtectEntry* URLFetcherProtectManager::Register(std::string id) {
 }
 
 URLFetcherProtectEntry* URLFetcherProtectManager::Register(
-    std::string id, URLFetcherProtectEntry* entry) {
+    const std::string& id, URLFetcherProtectEntry* entry) {
   AutoLock lock(lock_);
 
   ProtectService::iterator i = services_.find(id);

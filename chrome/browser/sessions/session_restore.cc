@@ -6,16 +6,20 @@
 
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/browser/tab_contents/web_contents_view.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 
@@ -48,6 +52,8 @@ class TabLoader : public NotificationObserver {
   void LoadTabs();
 
  private:
+  typedef std::set<NavigationController*> TabsLoading;
+
   // NotificationObserver method. Removes the specified tab and loads the next
   // tab.
   virtual void Observe(NotificationType type,
@@ -59,18 +65,13 @@ class TabLoader : public NotificationObserver {
   // from.
   void RemoveTab(NavigationController* tab);
 
-  // Adds the necessary listeners for the specified tab.
-  void AddListeners(NavigationController* controller);
-
-  // Removes the necessary listeners for the specified tab.
-  void RemoveListeners(NavigationController* controller);
+  NotificationRegistrar registrar_;
 
   // Has Load been invoked?
   bool loading_;
 
   // The set of tabs we've initiated loading on. This does NOT include the
   // selected tabs.
-  typedef std::set<NavigationController*> TabsLoading;
   TabsLoading tabs_loading_;
 
   // The tabs we need to load.
@@ -90,7 +91,10 @@ void TabLoader::AddTab(NavigationController* controller) {
     DCHECK(find(tabs_to_load_.begin(), tabs_to_load_.end(), controller) ==
            tabs_to_load_.end());
     tabs_to_load_.push_back(controller);
-    AddListeners(controller);
+    registrar_.Add(this, NotificationType::TAB_CLOSED,
+                   Source<NavigationController>(controller));
+    registrar_.Add(this, NotificationType::LOAD_STOP,
+                   Source<NavigationController>(controller));
   } else {
     // Should never get a NULL tab.
     NOTREACHED();
@@ -106,7 +110,7 @@ void TabLoader::LoadTabs() {
     tabs_loading_.insert(tab);
     tabs_to_load_.pop_front();
     tab->LoadIfNecessary();
-    if (tab && tab->active_contents()) {
+    if (tab && tab->tab_contents()) {
       int tab_index;
       Browser* browser = Browser::GetBrowserForController(tab, &tab_index);
       if (browser && browser->selected_index() != tab_index) {
@@ -117,16 +121,12 @@ void TabLoader::LoadTabs() {
         // NOTE: We need to do this here rather than when the tab is added to
         // the Browser as at that time not everything has been created, so that
         // the call would do nothing.
-        tab->active_contents()->WasHidden();
+        tab->tab_contents()->WasHidden();
       }
     }
   }
 
   if (tabs_to_load_.empty()) {
-    for (TabsLoading::iterator i = tabs_loading_.begin();
-         i != tabs_loading_.end(); ++i) {
-      RemoveListeners(*i);
-    }
     tabs_loading_.clear();
     delete this;
   }
@@ -146,7 +146,10 @@ void TabLoader::Observe(NotificationType type,
 }
 
 void TabLoader::RemoveTab(NavigationController* tab) {
-  RemoveListeners(tab);
+  registrar_.Remove(this, NotificationType::TAB_CLOSED,
+                    Source<NavigationController>(tab));
+  registrar_.Remove(this, NotificationType::LOAD_STOP,
+                    Source<NavigationController>(tab));
 
   TabsLoading::iterator i = tabs_loading_.find(tab);
   if (i != tabs_loading_.end())
@@ -156,24 +159,6 @@ void TabLoader::RemoveTab(NavigationController* tab) {
       find(tabs_to_load_.begin(), tabs_to_load_.end(), tab);
   if (j != tabs_to_load_.end())
     tabs_to_load_.erase(j);
-}
-
-void TabLoader::AddListeners(NavigationController* controller) {
-  NotificationService::current()->AddObserver(
-      this, NotificationType::TAB_CLOSED,
-      Source<NavigationController>(controller));
-  NotificationService::current()->AddObserver(
-      this, NotificationType::LOAD_STOP,
-      Source<NavigationController>(controller));
-}
-
-void TabLoader::RemoveListeners(NavigationController* controller) {
-  NotificationService::current()->RemoveObserver(
-      this, NotificationType::TAB_CLOSED,
-      Source<NavigationController>(controller));
-  NotificationService::current()->RemoveObserver(
-      this, NotificationType::LOAD_STOP,
-      Source<NavigationController>(controller));
 }
 
 // SessionRestoreImpl ---------------------------------------------------------
@@ -240,13 +225,16 @@ class SessionRestoreImpl : public NotificationObserver {
   void FinishedTabCreation(bool succeeded, bool created_tabbed_browser) {
     if (!created_tabbed_browser && always_create_tabbed_browser_) {
       Browser* browser = Browser::Create(profile_);
+      // Honor --pinned-tab-count if we're synchronous (which means we're run
+      // during startup) and the user specified urls on the command line.
+      bool honor_pin_tabs = synchronous_ && !urls_to_open_.empty();
       if (urls_to_open_.empty()) {
         // No tab browsers were created and no URLs were supplied on the command
         // line. Add an empty URL, which is treated as opening the users home
         // page.
         urls_to_open_.push_back(GURL());
       }
-      AppendURLsToBrowser(browser, urls_to_open_);
+      AppendURLsToBrowser(browser, urls_to_open_, honor_pin_tabs);
       browser->window()->Show();
     }
 
@@ -323,7 +311,7 @@ class SessionRestoreImpl : public NotificationObserver {
       current_browser->CloseAllTabs();
     }
     if (last_browser && !urls_to_open_.empty())
-      AppendURLsToBrowser(last_browser, urls_to_open_);
+      AppendURLsToBrowser(last_browser, urls_to_open_, false);
     // If last_browser is NULL and urls_to_open_ is non-empty,
     // FinishedTabCreation will create a new TabbedBrowser and add the urls to
     // it.
@@ -342,10 +330,11 @@ class SessionRestoreImpl : public NotificationObserver {
           std::min(selected_index,
                    static_cast<int>(tab.navigations.size() - 1)));
       tab_loader_->AddTab(
-          browser->AddRestoredTab(tab.navigations,
-                                  static_cast<int>(i - window.tabs.begin()),
-                                  selected_index,
-                                  false));
+          &browser->AddRestoredTab(tab.navigations,
+                                   static_cast<int>(i - window.tabs.begin()),
+                                   selected_index,
+                                   false,
+                                   tab.pinned)->controller());
     }
   }
 
@@ -365,16 +354,30 @@ class SessionRestoreImpl : public NotificationObserver {
     browser->window()->Show();
     // TODO(jcampan): http://crbug.com/8123 we should not need to set the
     //                initial focus explicitly.
-    if (browser->GetSelectedTabContents()->AsWebContents()) {
-      browser->GetSelectedTabContents()->AsWebContents()->view()->
-          SetInitialFocus();
-    }
+    browser->GetSelectedTabContents()->view()->SetInitialFocus();
   }
 
-  void AppendURLsToBrowser(Browser* browser, const std::vector<GURL>& urls) {
+  // Appends the urls in |urls| to |browser|. If |pin_tabs| is true the first n
+  // tabs are pinned, where n is the command line value for --pinned-tab-count.
+  void AppendURLsToBrowser(Browser* browser,
+                           const std::vector<GURL>& urls,
+                           bool pin_tabs) {
+    int pin_count = 0;
+    if (pin_tabs) {
+      std::wstring pin_count_string =
+          CommandLine::ForCurrentProcess()->GetSwitchValue(
+              switches::kPinnedTabCount);
+      if (!pin_count_string.empty())
+        pin_count = StringToInt(WideToUTF16Hack(pin_count_string));
+    }
+
     for (size_t i = 0; i < urls.size(); ++i) {
       browser->AddTabWithURL(urls[i], GURL(), PageTransition::START_PAGE,
-                            (i == 0), NULL);
+                            (i == 0), -1, false, NULL);
+      if (i < static_cast<size_t>(pin_count)) {
+        browser->tabstrip_model()->SetTabPinned(browser->tab_count() - 1,
+                                                true);
+      }
     }
   }
 
@@ -383,7 +386,8 @@ class SessionRestoreImpl : public NotificationObserver {
   void NotifySessionServiceOfRestoredTabs(Browser* browser, int initial_count) {
     SessionService* session_service = profile_->GetSessionService();
     for (int i = initial_count; i < browser->tab_count(); ++i)
-      session_service->TabRestored(browser->GetTabContentsAt(i)->controller());
+      session_service->TabRestored(&browser->GetTabContentsAt(i)->controller(),
+                                   browser->tabstrip_model()->IsTabPinned(i));
   }
 
   // The profile to create the sessions for.

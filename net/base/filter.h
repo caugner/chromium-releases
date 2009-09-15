@@ -33,11 +33,16 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "net/base/io_buffer.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
+
+class GURL;
+
+namespace net {
+class IOBuffer;
+}
 
 //------------------------------------------------------------------------------
 // Define an interface class that allows access to contextual information
@@ -48,6 +53,15 @@
 // or later filters in a chain.
 class FilterContext {
  public:
+  // Enum to control what histograms are emitted near end-of-life of this
+  // instance.
+  enum StatisticSelector {
+    SDCH_DECODE,
+    SDCH_PASSTHROUGH,
+    SDCH_EXPERIMENT_DECODE,
+    SDCH_EXPERIMENT_HOLDBACK,
+  };
+
   virtual ~FilterContext() {}
 
   // What mime type was specified in the header for this data?
@@ -65,6 +79,9 @@ class FilterContext {
   // Is data supplied from cache, or fresh across the net?
   virtual bool IsCachedContent() const = 0;
 
+  // Is this a download?
+  virtual bool IsDownload() const = 0;
+
   // Was this data flagged as a response to a request with an SDCH dictionary?
   virtual bool IsSdchResponse() const = 0;
 
@@ -72,12 +89,20 @@ class FilterContext {
   // pushed into a filter for processing)?
   virtual int64 GetByteReadCount() const = 0;
 
+  // What response code was received with the associated network transaction?
+  // For example: 200 is ok.   4xx are error codes. etc.
+  virtual int GetResponseCode() const = 0;
+
   // What is the desirable input buffer size for these filters?
   // This value is currently supplied by the context, and is constant for all
   // filters, even when they are part of a chain of filters. (i.e., we currently
   // don't change the input buffer sizes for a linked chain of filters, and the
   // buffer size for input to all filters in a chain is this one constant).
   virtual int GetInputStreamBufferSize() const = 0;
+
+  // The following method forces the context to emit a specific set of
+  // statistics as selected by the argument.
+  virtual void RecordPacketStats(StatisticSelector statistic) const = 0;
 };
 
 //------------------------------------------------------------------------------
@@ -172,6 +197,7 @@ class Filter {
   // advertised in the GET), as well as the mime type of the content.
   static void FixupEncodingTypes(const FilterContext& filter_context,
                                  std::vector<FilterType>* encoding_types);
+
  protected:
   explicit Filter(const FilterContext& filter_context);
 

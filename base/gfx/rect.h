@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,6 @@
 #if defined(OS_WIN)
 typedef struct tagRECT RECT;
 #elif defined(OS_LINUX)
-// It's wrong to hide GDK stuff behind OS_LINUX, but until we have a different
-// linux target, this is less complex.
 typedef struct _GdkRectangle GdkRectangle;
 #endif
 
@@ -88,7 +86,7 @@ class Rect {
   }
 
   // Returns true if the area of the rectangle is zero.
-  bool IsEmpty() const;
+  bool IsEmpty() const { return size_.IsEmpty(); }
 
   bool operator==(const Rect& other) const;
 

@@ -9,38 +9,74 @@
 
 #include <vector>
 
+#include "base/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/owned_widget_gtk.h"
 
 class BaseDownloadItemModel;
+class Browser;
 class CustomDrawButton;
 class DownloadItemGtk;
+class GtkThemeProvider;
+class SlideAnimatorGtk;
 
-class DownloadShelfGtk : public DownloadShelf {
+class DownloadShelfGtk : public DownloadShelf,
+                         public NotificationObserver {
  public:
-  explicit DownloadShelfGtk(TabContents* tab_contents);
+  explicit DownloadShelfGtk(Browser* browser, gfx::NativeView view);
 
   ~DownloadShelfGtk();
 
   // DownloadShelf implementation.
   virtual void AddDownload(BaseDownloadItemModel* download_model);
   virtual bool IsShowing() const;
+  virtual bool IsClosing() const;
+  virtual void Show();
+  virtual void Close();
+  virtual Browser* browser() const { return browser_; }
+
+  // Overridden from NotificationObserver:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+  // Returns the current height of the shelf.
+  int GetHeight() const;
 
  private:
-  // Show the shelf.
-  void Show();
+  // Remove |download_item| from the download shelf and delete it.
+  void RemoveDownloadItem(DownloadItemGtk* download_item);
 
-  // Hide the shelf.
-  void Hide();
+  // Get the leftmost non-download item widget on the shelf.
+  GtkWidget* GetRightBoundingWidget() const;
+
+  // Get the hbox download items ought to pack themselves into.
+  GtkWidget* GetHBox() const;
 
   static void OnButtonClick(GtkWidget* button, DownloadShelfGtk* toolbar);
 
-  // |hbox_| holds the download items and buttons of the shelf.
-  GtkWidget* hbox_;
+  // The browser that owns this download shelf.
+  Browser* browser_;
 
-  // |shelf_| is the highest level widget of the shelf. See the constructor
+  // The top level widget of the shelf.
+  scoped_ptr<SlideAnimatorGtk> slide_widget_;
+
+  // |hbox_| holds the download items and buttons of the shelf.
+  OwnedWidgetGtk hbox_;
+
+  // |shelf_| is the second highest level widget. See the constructor
   // for an explanation of the widget layout.
-  GtkWidget* shelf_;
+  OwnedWidgetGtk shelf_;
+
+  // A GtkEventBox which we color.
+  GtkWidget* padding_bg_;
+
+  // This hbox holds the link text and download icon. It also holds the
+  // distinction of being the leftmost non-download item widget on the shelf.
+  GtkWidget* link_hbox_;
 
   // The 'x' that the user can press to hide the download shelf.
   scoped_ptr<CustomDrawButton> close_button_;
@@ -50,6 +86,13 @@ class DownloadShelfGtk : public DownloadShelf {
 
   // The download items we have added to our shelf.
   std::vector<DownloadItemGtk*> download_items_;
+
+  // Gives us our colors and theme information.
+  GtkThemeProvider* theme_provider_;
+
+  NotificationRegistrar registrar_;
+
+  friend class DownloadItemGtk;
 };
 
 #endif  // CHROME_BROWSER_GTK_DOWNLOAD_SHELF_GTK_H_

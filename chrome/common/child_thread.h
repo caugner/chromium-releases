@@ -5,10 +5,12 @@
 #ifndef CHROME_COMMON_CHILD_THREAD_H_
 #define CHROME_COMMON_CHILD_THREAD_H_
 
+#include "base/basictypes.h"
+#include "base/scoped_ptr.h"
 #include "base/thread.h"
-#include "chrome/common/ipc_sync_channel.h"
 #include "chrome/common/message_router.h"
 #include "chrome/common/resource_dispatcher.h"
+#include "ipc/ipc_sync_channel.h"
 
 // Child processes's background thread should derive from this class.
 class ChildThread : public IPC::Channel::Listener,
@@ -32,6 +34,9 @@ class ChildThread : public IPC::Channel::Listener,
     return resource_dispatcher_.get();
   }
 
+  // Returns the one child thread.
+  static ChildThread* current();
+
  protected:
   friend class ChildProcess;
 
@@ -39,16 +44,16 @@ class ChildThread : public IPC::Channel::Listener,
   bool Run();
 
   // Overrides the channel name.  Used for --single-process mode.
-  void SetChannelName(const std::wstring& name) { channel_name_ = name; }
+  void SetChannelName(const std::string& name) { channel_name_ = name; }
+
+  // Called when the process refcount is 0.
+  void OnProcessFinalRelease();
 
  protected:
   // The required stack size if V8 runs on a thread.
   static const size_t kV8StackSize;
 
   virtual void OnControlMessageReceived(const IPC::Message& msg) { }
-
-  // Returns the one child thread.
-  static ChildThread* current();
 
   IPC::SyncChannel* channel() { return channel_.get(); }
 
@@ -64,7 +69,7 @@ class ChildThread : public IPC::Channel::Listener,
   // The message loop used to run tasks on the thread that started this thread.
   MessageLoop* owner_loop_;
 
-  std::wstring channel_name_;
+  std::string channel_name_;
   scoped_ptr<IPC::SyncChannel> channel_;
 
   // Used only on the background render thread to implement message routing
@@ -77,7 +82,12 @@ class ChildThread : public IPC::Channel::Listener,
   // NOTE: this object lives on the owner thread.
   scoped_ptr<ResourceDispatcher> resource_dispatcher_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ChildThread);
+  // If true, checks with the browser process before shutdown.  This avoids race
+  // conditions if the process refcount is 0 but there's an IPC message inflight
+  // that would addref it.
+  bool check_with_browser_before_shutdown_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChildThread);
 };
 
 #endif  // CHROME_COMMON_CHILD_THREAD_H_

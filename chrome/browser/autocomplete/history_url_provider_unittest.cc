@@ -11,6 +11,10 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#include "chrome/common/mac_app_names.h"
+#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -79,6 +83,14 @@ static TestURLInfo test_db[] = {
   {"http://bogussite.com/a", L"Bogus A", 10002, 10000, false},
   {"http://bogussite.com/b", L"Bogus B", 10001, 10000, false},
   {"http://bogussite.com/c", L"Bogus C", 10000, 10000, false},
+
+  // Domain name with number.
+  {"http://www.17173.com/", L"Domain with number", 3, 3, false},
+
+  // URLs to test exact-matching behavior.
+  {"http://go/", L"Intranet URL", 1, 1, false},
+  {"http://gooey/", L"Intranet URL 2", 5, 5, false},
+
 };
 
 class HistoryURLProviderTest : public testing::Test,
@@ -174,7 +186,6 @@ void HistoryURLProviderTest::RunTest(const std::wstring text,
 TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
   // Test that hosts get synthesized below popular pages.
   const std::string expected_nonsynth[] = {
-    "http://slash/",
     "http://slashdot.org/favorite_page.html",
     "http://slashdot.org/",
   };
@@ -183,7 +194,6 @@ TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
 
   // Test that hosts get synthesized above less popular pages.
   const std::string expected_synth[] = {
-    "http://kernel/",
     "http://kerneltrap.org/",
     "http://kerneltrap.org/not_very_popular.html",
   };
@@ -191,16 +201,11 @@ TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
           arraysize(expected_synth));
 
   // Test that unpopular pages are ignored completely.
-  const std::string expected_what_you_typed_only[] = {
-    "http://fresh/",
-  };
-  RunTest(L"fresh", std::wstring(), true, expected_what_you_typed_only,
-          arraysize(expected_what_you_typed_only));
+  RunTest(L"fresh", std::wstring(), true, NULL, 0);
 
   // Test that if we have a synthesized host that matches a suggestion, they
   // get combined into one.
   const std::string expected_combine[] = {
-    "http://news/",
     "http://news.google.com/",
     "http://news.google.com/?ned=us&topic=n",
   };
@@ -208,13 +213,12 @@ TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
           arraysize(expected_combine));
   // The title should also have gotten set properly on the host for the
   // synthesized one, since it was also in the results.
-  EXPECT_EQ(std::wstring(L"Google News"), matches_[1].description);
+  EXPECT_EQ(std::wstring(L"Google News"), matches_[0].description);
 
   // Test that short URL matching works correctly as the user types more
   // (several tests):
   // The entry for foo.com is the best of all five foo.com* entries.
   const std::string short_1[] = {
-    "http://foo/",
     "http://foo.com/",
     "http://foo.com/dir/another/again/myfile.html",
     "http://foo.com/dir/",
@@ -252,6 +256,20 @@ TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
   };
   RunTest(L"foo.com/dir/another/a", std::wstring(), true, short_4,
           arraysize(short_4));
+
+  // Exact matches should always be best no matter how much more another match
+  // has been typed.
+  const std::string short_5a[] = {
+    "http://gooey/",
+    "http://www.google.com/",
+  };
+  const std::string short_5b[] = {
+    "http://go/",
+    "http://gooey/",
+    "http://www.google.com/",
+  };
+  RunTest(L"g", std::wstring(), false, short_5a, arraysize(short_5a));
+  RunTest(L"go", std::wstring(), false, short_5b, arraysize(short_5b));
 }
 
 // Bookmarks have been moved out of the history db, resulting in this no longer
@@ -298,12 +316,12 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
   // will appear in A,B,C order in the results. The autocomplete query will
   // search for the most recent visit when looking for redirects, so this will
   // be found even though the previous visits had no redirects.
-  HistoryService::RedirectList redirects_to_a;
+  history::RedirectList redirects_to_a;
   redirects_to_a.push_back(GURL(redirect[1].url));
   redirects_to_a.push_back(GURL(redirect[2].url));
   redirects_to_a.push_back(GURL(redirect[0].url));
   history_service_->AddPage(GURL(redirect[0].url), NULL, 0, GURL(),
-                            PageTransition::TYPED, redirects_to_a);
+                            PageTransition::TYPED, redirects_to_a, true);
 
   // Because all the results are part of a redirect chain with other results,
   // all but the first one (A) should be culled. We should get the default
@@ -319,19 +337,17 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
 TEST_F(HistoryURLProviderTest, Fixup) {
   // Test for various past crashes we've had.
   RunTest(L"\\", std::wstring(), false, NULL, 0);
-
   RunTest(L"#", std::wstring(), false, NULL, 0);
+  RunTest(L"%20", std::wstring(), false, NULL, 0);
+  RunTest(L"\uff65@s", std::wstring(), false, NULL, 0);
+  RunTest(L"\u2015\u2015@ \uff7c", std::wstring(), false, NULL, 0);
 
-  const std::string crash_1[] = {"http://%20/"};
-  RunTest(L"%20", std::wstring(), false, crash_1, arraysize(crash_1));
-
-#if defined(OS_WIN)
   // Fixing up "file:" should result in an inline autocomplete offset of just
   // after "file:", not just after "file://".
   const std::wstring input_1(L"file:");
-  const std::string fixup_1[] = {"file:///", "file:///C:/foo.txt"};
+  const std::string fixup_1[] = {"file:///C:/foo.txt"};
   RunTest(input_1, std::wstring(), false, fixup_1, arraysize(fixup_1));
-  EXPECT_EQ(input_1.length(), matches_[1].inline_autocomplete_offset);
+  EXPECT_EQ(input_1.length(), matches_[0].inline_autocomplete_offset);
 
   // Fixing up "http:/" should result in an inline autocomplete offset of just
   // after "http:/", not just after "http:".
@@ -348,9 +364,13 @@ TEST_F(HistoryURLProviderTest, Fixup) {
   // rather than "0.0.0.56.com".
   std::string fixup_3[] = {"http://www.56.com/"};
   RunTest(L"56", L"com", true, fixup_3, arraysize(fixup_3));
-#elif defined(OS_POSIX)
-  // TODO(port): Fix this up once the dependencies have their UI bits
-  // extracted away.
-  NOTIMPLEMENTED();
-#endif
+
+  // An input looks like a IP address like "127.0.0.1" should result in
+  // "http://127.0.0.1/".
+  std::string fixup_4[] = {"http://127.0.0.1/"};
+  RunTest(L"127.0.0.1", std::wstring(), false, fixup_4, arraysize(fixup_4));
+
+  // An number "17173" should result in "http://www.17173.com/" in db.
+  std::string fixup_5[] = {"http://www.17173.com/"};
+  RunTest(L"17173", std::wstring(), false, fixup_5, arraysize(fixup_5));
 }

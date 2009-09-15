@@ -7,6 +7,7 @@
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
 #include <gtk/gtk.h>
+#include <gdk/gdkx.h>
 
 #include "base/gfx/gtk_util.h"
 #include "base/gfx/point.h"
@@ -14,23 +15,27 @@
 #include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "chrome/common/page_transition_types.h"
+#include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebRect.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webdatasource.h"
 #include "webkit/glue/webdropdata.h"
-#include "webkit/glue/weberror.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/weburlrequest.h"
+#include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webview.h"
+#include "webkit/glue/plugins/gtk_plugin_container_manager.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
-namespace {
+using WebKit::WebCursorInfo;
+using WebKit::WebNavigationPolicy;
+using WebKit::WebRect;
 
+namespace {
 
 enum SelectionClipboardType {
   TEXT_HTML,
@@ -87,12 +92,23 @@ WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
                                                      actual_mime_type))
     return NULL;
 
-  if (actual_mime_type && !actual_mime_type->empty())
-    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type,
-                                         shell_->webViewHost()->view_handle());
-  else
-    return WebPluginDelegateImpl::Create(info.path, mime_type,
-                                         shell_->webViewHost()->view_handle());
+  const std::string& mtype =
+      (actual_mime_type && !actual_mime_type->empty()) ? *actual_mime_type
+                                                       : mime_type;
+  // TODO(evanm): we probably shouldn't be doing this mapping to X ids at
+  // this level.
+  GdkNativeWindow plugin_parent =
+      GDK_WINDOW_XWINDOW(shell_->webViewHost()->view_handle()->window);
+
+  return WebPluginDelegateImpl::Create(info.path, mtype, plugin_parent);
+}
+
+gfx::PluginWindowHandle TestWebViewDelegate::CreatePluginContainer() {
+  return shell_->webViewHost()->CreatePluginContainer();
+}
+
+void TestWebViewDelegate::WillDestroyPluginWindow(unsigned long id) {
+  shell_->webViewHost()->OnPluginWindowDestroyed(id);
 }
 
 void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
@@ -104,27 +120,25 @@ void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
   gtk_widget_destroy(dialog);
 }
 
-void TestWebViewDelegate::Show(WebWidget* webwidget,
-                               WindowOpenDisposition disposition) {
-  WebWidgetHost* host = GetHostForWidget(webwidget);
+void TestWebViewDelegate::show(WebNavigationPolicy policy) {
+  WebWidgetHost* host = GetWidgetHost();
   GtkWidget* drawing_area = host->view_handle();
   GtkWidget* window =
       gtk_widget_get_parent(gtk_widget_get_parent(drawing_area));
   gtk_widget_show_all(window);
 }
 
-void TestWebViewDelegate::CloseWidgetSoon(WebWidget* webwidget) {
-  if (webwidget == shell_->webView()) {
+void TestWebViewDelegate::closeWidgetSoon() {
+  if (this == shell_->delegate()) {
     MessageLoop::current()->PostTask(FROM_HERE, NewRunnableFunction(
         &gtk_widget_destroy, GTK_WIDGET(shell_->mainWnd())));
-  } else if (webwidget == shell_->popup()) {
+  } else if (this == shell_->popup_delegate()) {
     shell_->ClosePopup();
   }
 }
 
-void TestWebViewDelegate::SetCursor(WebWidget* webwidget,
-                                    const WebCursor& cursor) {
-  current_cursor_ = cursor;
+void TestWebViewDelegate::didChangeCursor(const WebCursorInfo& cursor_info) {
+  current_cursor_.InitFromCursorInfo(cursor_info);
   GdkCursorType cursor_type = current_cursor_.GetCursorType();
   GdkCursor* gdk_cursor;
   if (cursor_type == GDK_CURSOR_IS_PIXMAP) {
@@ -138,18 +152,20 @@ void TestWebViewDelegate::SetCursor(WebWidget* webwidget,
     // non-pixmap branch.
     if (cursor_type_ == cursor_type)
       return;
-    gdk_cursor = gdk_cursor_new(cursor_type);
+    if (cursor_type_ == GDK_LAST_CURSOR)
+      gdk_cursor = NULL;
+    else
+      gdk_cursor = gdk_cursor_new(cursor_type);
   }
   cursor_type_ = cursor_type;
   gdk_window_set_cursor(shell_->webViewWnd()->window, gdk_cursor);
   // The window now owns the cursor.
-  gdk_cursor_unref(gdk_cursor);
+  if (gdk_cursor)
+    gdk_cursor_unref(gdk_cursor);
 }
 
-void TestWebViewDelegate::GetWindowRect(WebWidget* webwidget,
-                                        gfx::Rect* out_rect) {
-  DCHECK(out_rect);
-  WebWidgetHost* host = GetHostForWidget(webwidget);
+WebRect TestWebViewDelegate::windowRect() {
+  WebWidgetHost* host = GetWidgetHost();
   GtkWidget* drawing_area = host->view_handle();
   GtkWidget* vbox = gtk_widget_get_parent(drawing_area);
   GtkWidget* window = gtk_widget_get_parent(vbox);
@@ -159,27 +175,26 @@ void TestWebViewDelegate::GetWindowRect(WebWidget* webwidget,
   x += vbox->allocation.x + drawing_area->allocation.x;
   y += vbox->allocation.y + drawing_area->allocation.y;
 
-  out_rect->SetRect(x, y, drawing_area->allocation.width,
-                    drawing_area->allocation.height);
+  return WebRect(x, y,
+                 drawing_area->allocation.width,
+                 drawing_area->allocation.height);
 }
 
-void TestWebViewDelegate::SetWindowRect(WebWidget* webwidget,
-                                        const gfx::Rect& rect) {
-  if (webwidget == shell_->webView()) {
+void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
+  if (this == shell_->delegate()) {
     // ignored
-  } else if (webwidget == shell_->popup()) {
-    WebWidgetHost* host = GetHostForWidget(webwidget);
+  } else if (this == shell_->popup_delegate()) {
+    WebWidgetHost* host = GetWidgetHost();
     GtkWidget* drawing_area = host->view_handle();
     GtkWidget* window =
         gtk_widget_get_parent(gtk_widget_get_parent(drawing_area));
-    gtk_window_resize(GTK_WINDOW(window), rect.width(), rect.height());
-    gtk_window_move(GTK_WINDOW(window), rect.x(), rect.y());
+    gtk_window_resize(GTK_WINDOW(window), rect.width, rect.height);
+    gtk_window_move(GTK_WINDOW(window), rect.x, rect.y);
   }
 }
 
-void TestWebViewDelegate::GetRootWindowRect(WebWidget* webwidget,
-                                            gfx::Rect* out_rect) {
-  if (WebWidgetHost* host = GetHostForWidget(webwidget)) {
+WebRect TestWebViewDelegate::rootWindowRect() {
+  if (WebWidgetHost* host = GetWidgetHost()) {
     // We are being asked for the x/y and width/height of the entire browser
     // window.  This means the x/y is the distance from the corner of the
     // screen, and the width/height is the size of the entire browser window.
@@ -190,42 +205,24 @@ void TestWebViewDelegate::GetRootWindowRect(WebWidget* webwidget,
     gint x, y, width, height;
     gtk_window_get_position(GTK_WINDOW(window), &x, &y);
     gtk_window_get_size(GTK_WINDOW(window), &width, &height);
-    out_rect->SetRect(x, y, width, height);
+    return WebRect(x, y, width, height);
   }
+  return WebRect();
 }
 
-void TestWebViewDelegate::GetRootWindowResizerRect(WebWidget* webwidget,
-                                                   gfx::Rect* out_rect) {
+WebRect TestWebViewDelegate::windowResizerRect() {
   // Not necessary on Linux.
-  *out_rect = gfx::Rect();
+  return WebRect();
 }
 
-void TestWebViewDelegate::DidMove(WebWidget* webwidget,
-                                  const WebPluginGeometry& move) {
-  // The window on WebPluginGeometry is misnamed, as it's a view.  In our case
-  // it should be the GtkSocket of the plugin window.
-  GtkWidget* widget = move.window;
-  DCHECK(!GTK_WIDGET_NO_WINDOW(widget) && GTK_WIDGET_REALIZED(widget));
-
-  // Update the clipping region on the GdkWindow.
-  GdkRectangle clip_rect = move.clip_rect.ToGdkRectangle();
-  GdkRegion* clip_region = gdk_region_rectangle(&clip_rect);
-  gfx::SubtractRectanglesFromRegion(clip_region, move.cutout_rects);
-  gdk_window_shape_combine_region(widget->window, clip_region, 0, 0);
-  gdk_region_destroy(clip_region);
-
-  // Update the window position.  Resizing is handled by WebPluginDelegate.
-  // TODO(deanm): Verify that we only need to move and not resize.
-  // TODO(deanm): Can we avoid the X call if it's already at the right place,
-  // the GtkFixed knows where the child is, maybe it handles this for us?
-  WebWidgetHost* host = GetHostForWidget(webwidget);
-  gtk_fixed_move(GTK_FIXED(host->view_handle()),
-                 widget,
-                 move.window_rect.x(),
-                 move.window_rect.y());
+void TestWebViewDelegate::DidMovePlugin(const WebPluginGeometry& move) {
+  WebWidgetHost* host = GetWidgetHost();
+  GtkPluginContainerManager* plugin_container_manager =
+      static_cast<WebViewHost*>(host)->plugin_container_manager();
+  plugin_container_manager->MovePluginContainer(move);
 }
 
-void TestWebViewDelegate::RunModal(WebWidget* webwidget) {
+void TestWebViewDelegate::runModal() {
   NOTIMPLEMENTED();
 }
 
@@ -246,6 +243,7 @@ void TestWebViewDelegate::UpdateSelectionClipboard(bool is_empty_selection) {
   gtk_clipboard_set_with_data(clipboard, targets, num_targets,
                               SelectionClipboardGetContents, NULL,
                               shell_->webView());
+  gtk_target_list_unref(target_list);
   gtk_target_table_free(targets, num_targets);
 }
 

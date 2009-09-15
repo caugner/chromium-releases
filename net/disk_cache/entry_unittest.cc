@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 #include "net/disk_cache/disk_cache_test_base.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 #include "net/disk_cache/entry_impl.h"
+#include "net/disk_cache/mem_entry_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 
-extern int g_cache_tests_max_id;
 extern volatile int g_cache_tests_received;
 extern volatile bool g_cache_tests_error;
 
@@ -35,6 +35,11 @@ class DiskCacheEntryTest : public DiskCacheTestWithCache {
   void InvalidData();
   void DoomEntry();
   void DoomedEntry();
+  void BasicSparseIO(bool async);
+  void HugeSparseIO(bool async);
+  void GetAvailableRange();
+  void DoomSparseEntry();
+  void PartialSparseEntry();
 };
 
 void DiskCacheEntryTest::InternalSyncIO() {
@@ -95,22 +100,21 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   ASSERT_TRUE(NULL != entry1);
 
   // Let's verify that each IO goes to the right callback object.
-  CallbackTest callback1(1, false);
-  CallbackTest callback2(2, false);
-  CallbackTest callback3(3, false);
-  CallbackTest callback4(4, false);
-  CallbackTest callback5(5, false);
-  CallbackTest callback6(6, false);
-  CallbackTest callback7(7, false);
-  CallbackTest callback8(8, false);
-  CallbackTest callback9(9, false);
-  CallbackTest callback10(10, false);
-  CallbackTest callback11(11, false);
-  CallbackTest callback12(12, false);
-  CallbackTest callback13(13, false);
+  CallbackTest callback1(false);
+  CallbackTest callback2(false);
+  CallbackTest callback3(false);
+  CallbackTest callback4(false);
+  CallbackTest callback5(false);
+  CallbackTest callback6(false);
+  CallbackTest callback7(false);
+  CallbackTest callback8(false);
+  CallbackTest callback9(false);
+  CallbackTest callback10(false);
+  CallbackTest callback11(false);
+  CallbackTest callback12(false);
+  CallbackTest callback13(false);
 
   g_cache_tests_error = false;
-  g_cache_tests_max_id = 0;
   g_cache_tests_received = 0;
 
   MessageLoopHelper helper;
@@ -139,7 +143,6 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 3;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_STREQ("the data", buffer2->data());
 
@@ -155,7 +158,6 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 5;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_STREQ("big data goes here", buffer3->data());
   ret = entry1->ReadData(1, 0, buffer2, kSize2, &callback6);
@@ -165,7 +167,6 @@ void DiskCacheEntryTest::InternalAsyncIO() {
 
   memset(buffer3->data(), 0, kSize3);
 
-  g_cache_tests_max_id = 6;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_EQ(0, memcmp(buffer2->data(), buffer3->data(), 1500));
   ret = entry1->ReadData(1, 5000, buffer2, kSize2, &callback7);
@@ -201,7 +202,6 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 13;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
 
   EXPECT_FALSE(g_cache_tests_error);
@@ -274,18 +274,17 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   ASSERT_TRUE(cache_->CreateEntry("the first key", &entry1));
 
   // Let's verify that each IO goes to the right callback object.
-  CallbackTest callback1(1, false);
-  CallbackTest callback2(2, false);
-  CallbackTest callback3(3, false);
-  CallbackTest callback4(4, false);
-  CallbackTest callback5(5, false);
-  CallbackTest callback6(6, false);
-  CallbackTest callback7(7, false);
-  CallbackTest callback8(8, false);
-  CallbackTest callback9(9, false);
+  CallbackTest callback1(false);
+  CallbackTest callback2(false);
+  CallbackTest callback3(false);
+  CallbackTest callback4(false);
+  CallbackTest callback5(false);
+  CallbackTest callback6(false);
+  CallbackTest callback7(false);
+  CallbackTest callback8(false);
+  CallbackTest callback9(false);
 
   g_cache_tests_error = false;
-  g_cache_tests_max_id = 0;
   g_cache_tests_received = 0;
   int expected = 0;
 
@@ -306,7 +305,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 1;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
 
   memset(buffer2->data(), 0, kSize1);
@@ -315,7 +313,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 2;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_STREQ("the data", buffer1->data());
 
@@ -325,7 +322,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 3;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
 
   memset(buffer3->data(), 0, kSize3);
@@ -334,7 +330,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 4;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_STREQ("big data goes here", buffer3->data());
   ret = entry1->ReadData(1, 0, buffer2, kSize2, &callback5);
@@ -342,7 +337,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  g_cache_tests_max_id = 5;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   EXPECT_EQ(0, memcmp(buffer2->data(), buffer2->data(), 10000));
   ret = entry1->ReadData(1, 30000, buffer2, kSize2, &callback6);
@@ -361,7 +355,6 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
     expected++;
   EXPECT_EQ(37000, entry1->GetDataSize(1));
 
-  g_cache_tests_max_id = 9;
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
 
   EXPECT_FALSE(g_cache_tests_error);
@@ -816,6 +809,7 @@ void DiskCacheEntryTest::DoomedEntry() {
   EXPECT_EQ(2000, entry->WriteData(0, 0, buffer1, 2000, NULL, false));
   EXPECT_EQ(2000, entry->ReadData(0, 0, buffer2, 2000, NULL));
   EXPECT_EQ(0, memcmp(buffer1->data(), buffer2->data(), kSize1));
+  EXPECT_EQ(key, entry->GetKey());
   EXPECT_TRUE(initial < entry->GetLastModified());
   EXPECT_TRUE(initial < entry->GetLastUsed());
 
@@ -833,101 +827,479 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyDoomedEntry) {
   DoomEntry();
 }
 
-// Check that we can hint an entry to use external file and the return value
-// is a valid file handle.
-TEST_F(DiskCacheEntryTest, UseExternalFile) {
+// Test that child entries in a memory cache backend are not visible from
+// enumerations.
+TEST_F(DiskCacheEntryTest, MemoryOnlyEnumerationWithSparseEntries) {
+  SetMemoryOnlyMode();
   InitCache();
 
+  const int kSize = 4096;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  std::string key("the first key");
+  disk_cache::Entry* parent_entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &parent_entry));
+
+  // Writes to the parent entry.
+  EXPECT_EQ(kSize, parent_entry->WriteSparseData(0, buf, kSize, NULL));
+
+  // This write creates a child entry and writes to it.
+  EXPECT_EQ(kSize, parent_entry->WriteSparseData(8192, buf, kSize, NULL));
+
+  parent_entry->Close();
+
+  // Perform the enumerations.
+  void* iter = NULL;
+  disk_cache::Entry* entry = NULL;
+  int count = 0;
+  while (cache_->OpenNextEntry(&iter, &entry)) {
+    ASSERT_TRUE(entry != NULL);
+    ++count;
+    disk_cache::MemEntryImpl* mem_entry =
+        reinterpret_cast<disk_cache::MemEntryImpl*>(entry);
+    EXPECT_EQ(disk_cache::MemEntryImpl::kParentEntry, mem_entry->type());
+    mem_entry->Close();
+  }
+  EXPECT_EQ(1, count);
+}
+
+// Writes |buf_1| to offset and reads it back as |buf_2|.
+void VerifySparseIO(disk_cache::Entry* entry, int64 offset,
+                    net::IOBuffer* buf_1, int size, bool async,
+                    net::IOBuffer* buf_2) {
+  SimpleCallbackTest callback;
+  SimpleCallbackTest* cb = async ? &callback : NULL;
+
+  memset(buf_2->data(), 0, size);
+  int ret = entry->ReadSparseData(offset, buf_2, size, cb);
+  ret = callback.GetResult(ret);
+  EXPECT_EQ(0, ret);
+
+  ret = entry->WriteSparseData(offset, buf_1, size, cb);
+  ret = callback.GetResult(ret);
+  EXPECT_EQ(size, ret);
+
+  ret = entry->ReadSparseData(offset, buf_2, size, cb);
+  ret = callback.GetResult(ret);
+  EXPECT_EQ(size, ret);
+
+  EXPECT_EQ(0, memcmp(buf_1->data(), buf_2->data(), size));
+}
+
+// Reads |size| bytes from |entry| at |offset| and verifies that they are the
+// same as the content of the provided |buffer|.
+void VerifyContentSparseIO(disk_cache::Entry* entry, int64 offset, char* buffer,
+                           int size, bool async) {
+  SimpleCallbackTest callback;
+  SimpleCallbackTest* cb = async ? &callback : NULL;
+
+  scoped_refptr<net::IOBuffer> buf_1 = new net::IOBuffer(size);
+  memset(buf_1->data(), 0, size);
+  int ret = entry->ReadSparseData(offset, buf_1, size, cb);
+  ret = callback.GetResult(ret);
+  EXPECT_EQ(size, ret);
+
+  EXPECT_EQ(0, memcmp(buf_1->data(), buffer, size));
+}
+
+void DiskCacheEntryTest::BasicSparseIO(bool async) {
+  std::string key("the first key");
   disk_cache::Entry* entry;
-  ASSERT_TRUE(cache_->CreateEntry("key", &entry));
-  base::PlatformFile cache_file = entry->UseExternalFile(0);
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
 
-  // We should have a valid file handle.
-  EXPECT_NE(base::kInvalidPlatformFileValue, cache_file);
-  scoped_refptr<disk_cache::File> file(new disk_cache::File(cache_file));
+  const int kSize = 2048;
+  scoped_refptr<net::IOBuffer> buf_1 = new net::IOBuffer(kSize);
+  scoped_refptr<net::IOBuffer> buf_2 = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf_1->data(), kSize, false);
 
-  // 4KB.
-  size_t kDataSize = 0x1000;
-  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kDataSize);
+  // Write at offset 0.
+  VerifySparseIO(entry, 0, buf_1, kSize, async, buf_2);
 
-  CacheTestFillBuffer(buffer->data(), kDataSize, false);
-  ASSERT_EQ(0U, file->GetLength());
-  ASSERT_EQ(kDataSize, static_cast<size_t>(
-      entry->WriteData(0, 0, buffer, kDataSize, NULL, false)));
-  ASSERT_EQ(kDataSize, file->GetLength());
+  // Write at offset 0x400000 (4 MB).
+  VerifySparseIO(entry, 0x400000, buf_1, kSize, async, buf_2);
+
+  // Write at offset 0x800000000 (32 GB).
+  VerifySparseIO(entry, 0x800000000LL, buf_1, kSize, async, buf_2);
+
+  entry->Close();
+
+  // Check everything again.
+  ASSERT_TRUE(cache_->OpenEntry(key, &entry));
+  VerifyContentSparseIO(entry, 0, buf_1->data(), kSize, async);
+  VerifyContentSparseIO(entry, 0x400000, buf_1->data(), kSize, async);
+  VerifyContentSparseIO(entry, 0x800000000LL, buf_1->data(), kSize, async);
   entry->Close();
 }
 
-// Make sure we can use Entry::GetPlatformFile on an entry stored in an external
-// file and get a valid file handle.
-TEST_F(DiskCacheEntryTest, GetPlatformFile) {
+TEST_F(DiskCacheEntryTest, BasicSparseSyncIO) {
   InitCache();
+  BasicSparseIO(false);
+}
 
+TEST_F(DiskCacheEntryTest, MemoryOnlyBasicSparseSyncIO) {
+  SetMemoryOnlyMode();
+  InitCache();
+  BasicSparseIO(false);
+}
+
+TEST_F(DiskCacheEntryTest, BasicSparseAsyncIO) {
+  InitCache();
+  BasicSparseIO(true);
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyBasicSparseAsyncIO) {
+  SetMemoryOnlyMode();
+  InitCache();
+  BasicSparseIO(true);
+}
+
+void DiskCacheEntryTest::HugeSparseIO(bool async) {
+  std::string key("the first key");
   disk_cache::Entry* entry;
-  ASSERT_TRUE(cache_->CreateEntry("key", &entry));
-  EXPECT_NE(base::kInvalidPlatformFileValue, entry->UseExternalFile(0));
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
 
-  size_t kDataSize = 50;
-  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kDataSize);
+  // Write 1.2 MB so that we cover multiple entries.
+  const int kSize = 1200 * 1024;
+  scoped_refptr<net::IOBuffer> buf_1 = new net::IOBuffer(kSize);
+  scoped_refptr<net::IOBuffer> buf_2 = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf_1->data(), kSize, false);
 
-  // Fill the data buffer and write it to cache.
-  CacheTestFillBuffer(buffer->data(), kDataSize, false);
-  ASSERT_EQ(kDataSize,static_cast<size_t>(
-      entry->WriteData(0, 0, buffer, kDataSize, NULL, false)));
-
-  // Close the entry.
+  // Write at offset 0x20F0000 (33 MB - 64 KB).
+  VerifySparseIO(entry, 0x20F0000, buf_1, kSize, async, buf_2);
   entry->Close();
 
-  // Open the entry again and get it's file handle.
-  ASSERT_TRUE(cache_->OpenEntry("key", &entry));
-  base::PlatformFile cache_file = entry->GetPlatformFile(0);
+  // Check it again.
+  ASSERT_TRUE(cache_->OpenEntry(key, &entry));
+  VerifyContentSparseIO(entry, 0x20F0000, buf_1->data(), kSize, async);
+  entry->Close();
+}
 
-  // Make sure it's a valid file handle and verify the size of the file.
-  scoped_refptr<disk_cache::File> file(new disk_cache::File(cache_file));
-  ASSERT_EQ(kDataSize, file->GetLength());
+TEST_F(DiskCacheEntryTest, HugeSparseSyncIO) {
+  InitCache();
+  HugeSparseIO(false);
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyHugeSparseSyncIO) {
+  SetMemoryOnlyMode();
+  InitCache();
+  HugeSparseIO(false);
+}
+
+TEST_F(DiskCacheEntryTest, HugeSparseAsyncIO) {
+  InitCache();
+  HugeSparseIO(true);
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyHugeSparseAsyncIO) {
+  SetMemoryOnlyMode();
+  InitCache();
+  HugeSparseIO(true);
+}
+
+void DiskCacheEntryTest::GetAvailableRange() {
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
+
+  const int kSize = 16 * 1024;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  // Write at offset 0x20F0000 (33 MB - 64 KB), and 0x20F4400 (33 MB - 47 KB).
+  EXPECT_EQ(kSize, entry->WriteSparseData(0x20F0000, buf, kSize, NULL));
+  EXPECT_EQ(kSize, entry->WriteSparseData(0x20F4400, buf, kSize, NULL));
+
+  // We stop at the first empty block.
+  int64 start;
+  EXPECT_EQ(kSize, entry->GetAvailableRange(0x20F0000, kSize * 2, &start));
+  EXPECT_EQ(0x20F0000, start);
+
+  start = 0;
+  EXPECT_EQ(0, entry->GetAvailableRange(0, kSize, &start));
+  EXPECT_EQ(0, entry->GetAvailableRange(0x20F0000 - kSize, kSize, &start));
+  EXPECT_EQ(kSize, entry->GetAvailableRange(0, 0x2100000, &start));
+  EXPECT_EQ(0x20F0000, start);
+
+  // We should be able to Read based on the results of GetAvailableRange.
+  start = -1;
+  EXPECT_EQ(0, entry->GetAvailableRange(0x2100000, kSize, &start));
+  EXPECT_EQ(0, entry->ReadSparseData(start, buf, kSize, NULL));
+
+  start = 0;
+  EXPECT_EQ(0x2000, entry->GetAvailableRange(0x20F2000, kSize, &start));
+  EXPECT_EQ(0x20F2000, start);
+  EXPECT_EQ(0x2000, entry->ReadSparseData(start, buf, kSize, NULL));
+
+  // Make sure that we respect the |len| argument.
+  start = 0;
+  EXPECT_EQ(1, entry->GetAvailableRange(0x20F0001 - kSize, kSize, &start));
+  EXPECT_EQ(0x20F0000, start);
 
   entry->Close();
 }
 
-// Test the behavior of EntryImpl that small entries are kept in block files
-// or buffer, and only entries above certain size would be stored in an
-// external file, make sure GetPlatformFile() works with both cases without
-// using UseExternalFile().
-TEST_F(DiskCacheEntryTest, GetPlatformFileVariableEntrySize) {
+TEST_F(DiskCacheEntryTest, GetAvailableRange) {
+  InitCache();
+  GetAvailableRange();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyGetAvailableRange) {
+  SetMemoryOnlyMode();
+  InitCache();
+  GetAvailableRange();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyMisalignedSparseIO) {
+  SetMemoryOnlyMode();
   InitCache();
 
+  const int kSize = 8192;
+  scoped_refptr<net::IOBuffer> buf_1 = new net::IOBuffer(kSize);
+  scoped_refptr<net::IOBuffer> buf_2 = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf_1->data(), kSize, false);
+
+  std::string key("the first key");
   disk_cache::Entry* entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
 
-  // Make the buffer just larger than disk_cache::kMaxBlockSize.
-  const size_t kLargeDataSize = disk_cache::kMaxBlockSize + 1;
-  const size_t kSmallDataSize = kLargeDataSize / 2;
-  scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kLargeDataSize);
+  // This loop writes back to back starting from offset 0 and 9000.
+  for (int i = 0; i < kSize; i += 1024) {
+    scoped_refptr<net::WrappedIOBuffer> buf_3 =
+      new net::WrappedIOBuffer(buf_1->data() + i);
+    VerifySparseIO(entry, i, buf_3, 1024, false, buf_2);
+    VerifySparseIO(entry, 9000 + i, buf_3, 1024, false, buf_2);
+  }
 
-  // 1. First test with small entry.
-  ASSERT_TRUE(cache_->CreateEntry("small_entry", &entry));
+  // Make sure we have data written.
+  VerifyContentSparseIO(entry, 0, buf_1->data(), kSize, false);
+  VerifyContentSparseIO(entry, 9000, buf_1->data(), kSize, false);
 
-  CacheTestFillBuffer(buffer->data(), kSmallDataSize, false);
-  ASSERT_EQ(kSmallDataSize, static_cast<size_t>(
-      entry->WriteData(0, 0, buffer, kSmallDataSize, NULL, false)));
-
-  // Make sure we don't get an external file.
-  ASSERT_EQ(base::kInvalidPlatformFileValue, entry->GetPlatformFile(0));
-
-  entry->Close();
-
-  // 2. Test with large entry.
-  ASSERT_TRUE(cache_->CreateEntry("large_entry", &entry));
-
-  CacheTestFillBuffer(buffer->data(), kLargeDataSize, false);
-  ASSERT_EQ(kLargeDataSize, static_cast<size_t>(
-      entry->WriteData(0, 0, buffer, kLargeDataSize, NULL, false)));
-
-  base::PlatformFile cache_file = entry->GetPlatformFile(0);
-  EXPECT_NE(base::kInvalidPlatformFileValue, cache_file);
-
-  // Make sure it's a valid file handle and verify the size of the file.
-  scoped_refptr<disk_cache::File> file(new disk_cache::File(cache_file));
-  ASSERT_EQ(kLargeDataSize, file->GetLength());
+  // This tests a large write that spans 3 entries from a misaligned offset.
+  VerifySparseIO(entry, 20481, buf_1, 8192, false, buf_2);
 
   entry->Close();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyMisalignedGetAvailableRange) {
+  SetMemoryOnlyMode();
+  InitCache();
+
+  const int kSize = 8192;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  disk_cache::Entry* entry;
+  std::string key("the first key");
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
+
+  // Writes in the middle of an entry.
+  EXPECT_EQ(1024, entry->WriteSparseData(0, buf, 1024, NULL));
+  EXPECT_EQ(1024, entry->WriteSparseData(5120, buf, 1024, NULL));
+  EXPECT_EQ(1024, entry->WriteSparseData(10000, buf, 1024, NULL));
+
+  // Writes in the middle of an entry and spans 2 child entries.
+  EXPECT_EQ(8192, entry->WriteSparseData(50000, buf, 8192, NULL));
+
+  int64 start;
+  // Test that we stop at a discontinuous child at the second block.
+  EXPECT_EQ(1024, entry->GetAvailableRange(0, 10000, &start));
+  EXPECT_EQ(0, start);
+
+  // Test that number of bytes is reported correctly when we start from the
+  // middle of a filled region.
+  EXPECT_EQ(512, entry->GetAvailableRange(512, 10000, &start));
+  EXPECT_EQ(512, start);
+
+  // Test that we found bytes in the child of next block.
+  EXPECT_EQ(1024, entry->GetAvailableRange(1024, 10000, &start));
+  EXPECT_EQ(5120, start);
+
+  // Test that the desired length is respected. It starts within a filled
+  // region.
+  EXPECT_EQ(512, entry->GetAvailableRange(5500, 512, &start));
+  EXPECT_EQ(5500, start);
+
+  // Test that the desired length is respected. It starts before a filled
+  // region.
+  EXPECT_EQ(500, entry->GetAvailableRange(5000, 620, &start));
+  EXPECT_EQ(5120, start);
+
+  // Test that multiple blocks are scanned.
+  EXPECT_EQ(8192, entry->GetAvailableRange(40000, 20000, &start));
+  EXPECT_EQ(50000, start);
+
+  entry->Close();
+}
+
+void DiskCacheEntryTest::DoomSparseEntry() {
+  std::string key1("the first key");
+  std::string key2("the second key");
+  disk_cache::Entry *entry1, *entry2;
+  ASSERT_TRUE(cache_->CreateEntry(key1, &entry1));
+  ASSERT_TRUE(cache_->CreateEntry(key2, &entry2));
+
+  const int kSize = 4 * 1024;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  int64 offset = 1024;
+  // Write to a bunch of ranges.
+  for (int i = 0; i < 12; i++) {
+    EXPECT_EQ(kSize, entry1->WriteSparseData(offset, buf, kSize, NULL));
+    // Keep the second map under the default size.
+    if (i < 9)
+      EXPECT_EQ(kSize, entry2->WriteSparseData(offset, buf, kSize, NULL));
+    offset *= 4;
+  }
+
+  if (memory_only_)
+    EXPECT_EQ(2, cache_->GetEntryCount());
+  else
+    EXPECT_EQ(15, cache_->GetEntryCount());
+
+  // Doom the first entry while it's still open.
+  entry1->Doom();
+  entry1->Close();
+  entry2->Close();
+
+  // Doom the second entry after it's fully saved.
+  EXPECT_TRUE(cache_->DoomEntry(key2));
+
+  // Make sure we do all needed work. This may fail for entry2 if between Close
+  // and DoomEntry the system decides to remove all traces of the file from the
+  // system cache so we don't see that there is pending IO.
+  MessageLoop::current()->RunAllPending();
+
+  if (memory_only_)
+    EXPECT_EQ(0, cache_->GetEntryCount());
+  else
+    EXPECT_EQ(0, cache_->GetEntryCount());
+}
+
+TEST_F(DiskCacheEntryTest, DoomSparseEntry) {
+  InitCache();
+  DoomSparseEntry();
+}
+
+TEST_F(DiskCacheEntryTest, DISABLED_MemoryOnlyDoomSparseEntry) {
+  SetMemoryOnlyMode();
+  InitCache();
+  DoomSparseEntry();
+}
+
+void DiskCacheEntryTest::PartialSparseEntry() {
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
+
+  // We should be able to deal with IO that is not aligned to the block size
+  // of a sparse entry, at least to write a big range without leaving holes.
+  const int kSize = 4 * 1024;
+  scoped_refptr<net::IOBuffer> buf1 = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf1->data(), kSize, false);
+
+  // The first write is just to extend the entry.
+  EXPECT_EQ(kSize, entry->WriteSparseData(20000, buf1, kSize, NULL));
+  EXPECT_EQ(kSize, entry->WriteSparseData(500, buf1, kSize, NULL));
+  entry->Close();
+  ASSERT_TRUE(cache_->OpenEntry(key, &entry));
+
+  scoped_refptr<net::IOBuffer> buf2 = new net::IOBuffer(kSize);
+  memset(buf2->data(), 0, kSize);
+  EXPECT_EQ(0, entry->ReadSparseData(8000, buf2, kSize, NULL));
+
+  EXPECT_EQ(500, entry->ReadSparseData(kSize, buf2, kSize, NULL));
+  EXPECT_EQ(0, memcmp(buf2->data(), buf1->data() + kSize - 500, 500));
+  EXPECT_EQ(0, entry->ReadSparseData(0, buf2, kSize, NULL));
+
+  // This read should not change anything.
+  EXPECT_EQ(96, entry->ReadSparseData(24000, buf2, kSize, NULL));
+  EXPECT_EQ(500, entry->ReadSparseData(kSize, buf2, kSize, NULL));
+  EXPECT_EQ(0, entry->ReadSparseData(499, buf2, kSize, NULL));
+
+  int64 start;
+  if (memory_only_) {
+    EXPECT_EQ(100, entry->GetAvailableRange(0, 600, &start));
+    EXPECT_EQ(500, start);
+  } else {
+    EXPECT_EQ(1024, entry->GetAvailableRange(0, 2048, &start));
+    EXPECT_EQ(1024, start);
+  }
+  EXPECT_EQ(500, entry->GetAvailableRange(kSize, kSize, &start));
+  EXPECT_EQ(kSize, start);
+  EXPECT_EQ(3616, entry->GetAvailableRange(20 * 1024, 10000, &start));
+  EXPECT_EQ(20 * 1024, start);
+
+  // Now make another write and verify that there is no hole in between.
+  EXPECT_EQ(kSize, entry->WriteSparseData(500 + kSize, buf1, kSize, NULL));
+  EXPECT_EQ(7 * 1024 + 500, entry->GetAvailableRange(1024, 10000, &start));
+  EXPECT_EQ(1024, start);
+  EXPECT_EQ(kSize, entry->ReadSparseData(kSize, buf2, kSize, NULL));
+  EXPECT_EQ(0, memcmp(buf2->data(), buf1->data() + kSize - 500, 500));
+  EXPECT_EQ(0, memcmp(buf2->data() + 500, buf1->data(), kSize - 500));
+
+  entry->Close();
+}
+
+TEST_F(DiskCacheEntryTest, PartialSparseEntry) {
+  InitCache();
+  PartialSparseEntry();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryPartialSparseEntry) {
+  SetMemoryOnlyMode();
+  InitCache();
+  PartialSparseEntry();
+}
+
+TEST_F(DiskCacheEntryTest, CleanupSparseEntry) {
+  InitCache();
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
+
+  // Corrupt sparse children should be removed automatically.
+  const int kSize = 4 * 1024;
+  scoped_refptr<net::IOBuffer> buf1 = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf1->data(), kSize, false);
+
+  const int k1Meg = 1024 * 1024;
+  EXPECT_EQ(kSize, entry->WriteSparseData(8192, buf1, kSize, NULL));
+  EXPECT_EQ(kSize, entry->WriteSparseData(k1Meg + 8192, buf1, kSize, NULL));
+  EXPECT_EQ(kSize, entry->WriteSparseData(2 * k1Meg + 8192, buf1, kSize, NULL));
+  entry->Close();
+  EXPECT_EQ(4, cache_->GetEntryCount());
+
+  void* iter = NULL;
+  int count = 0;
+  std::string child_key[2];
+  while (cache_->OpenNextEntry(&iter, &entry)) {
+    ASSERT_TRUE(entry != NULL);
+    // Writing to an entry will alter the LRU list and invalidate the iterator.
+    if (entry->GetKey() != key && count < 2)
+      child_key[count++] = entry->GetKey();
+    entry->Close();
+  }
+  for (int i = 0; i < 2; i++) {
+    ASSERT_TRUE(cache_->OpenEntry(child_key[i], &entry));
+    // Overwrite the header's magic and signature.
+    EXPECT_EQ(12, entry->WriteData(2, 0, buf1, 12, NULL, false));
+    entry->Close();
+  }
+
+  EXPECT_EQ(4, cache_->GetEntryCount());
+  ASSERT_TRUE(cache_->OpenEntry(key, &entry));
+
+  // Two children should be gone. One while reading and one while writing.
+  EXPECT_EQ(0, entry->ReadSparseData(2 * k1Meg + 8192, buf1, kSize, NULL));
+  EXPECT_EQ(kSize, entry->WriteSparseData(k1Meg + 16384, buf1, kSize, NULL));
+  EXPECT_EQ(0, entry->ReadSparseData(k1Meg + 8192, buf1, kSize, NULL));
+
+  // We never touched this one.
+  EXPECT_EQ(kSize, entry->ReadSparseData(8192, buf1, kSize, NULL));
+  entry->Close();
+
+  // We re-created one of the corrupt children.
+  EXPECT_EQ(3, cache_->GetEntryCount());
 }

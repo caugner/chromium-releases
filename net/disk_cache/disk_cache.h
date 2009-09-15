@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/platform_file.h"
 #include "base/time.h"
+#include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
 
 namespace net {
@@ -35,7 +35,7 @@ class Backend;
 // based on the available disk space. The returned pointer can be NULL if a
 // fatal error is found.
 Backend* CreateCacheBackend(const std::wstring& path, bool force,
-                            int max_bytes);
+                            int max_bytes, net::CacheType type);
 
 // Returns an instance of a Backend implemented only in memory. The returned
 // object should be deleted when not needed anymore. max_bytes is the maximum
@@ -154,27 +154,58 @@ class Entry {
                         net::CompletionCallback* completion_callback,
                         bool truncate) = 0;
 
-  // Prepares a target stream as an external file, returns a corresponding
-  // base::PlatformFile if successful, returns base::kInvalidPlatformFileValue
-  // if fails. If this call returns a valid base::PlatformFile value (i.e.
-  // not base::kInvalidPlatformFileValue), there is no guarantee that the file
-  // is truncated. Implementor can always return base::kInvalidPlatformFileValue
-  // if external file is not available in that particular implementation.
-  // The caller should close the file handle returned by this method or there
-  // will be a leak.
-  // With a stream prepared as an external file, the stream would always be
-  // kept in an external file since creation, even if the stream has 0 bytes.
-  // So we need to be cautious about using this option for preparing a stream or
-  // we will end up having a lot of empty cache files. Calling this method also
-  // means that all data written to the stream will always be written to file
-  // directly *without* buffering.
-  virtual base::PlatformFile UseExternalFile(int index) = 0;
+  // Sparse entries support:
+  //
+  // A Backend implementation can support sparse entries, so the cache keeps
+  // track of which parts of the entry have been written before. The backend
+  // will never return data that was not written previously, so reading from
+  // such region will return 0 bytes read (or actually the number of bytes read
+  // before reaching that region).
+  //
+  // There are only two streams for sparse entries: a regular control stream
+  // (index 0) that must be accessed through the regular API (ReadData and
+  // WriteData), and one sparse stream that must me accessed through the sparse-
+  // aware API that follows. Calling a non-sparse aware method with an index
+  // argument other than 0 is a mistake that results in implementation specific
+  // behavior. Using a sparse-aware method with an entry that was not stored
+  // using the same API, or with a backend that doesn't support sparse entries
+  // will return ERR_CACHE_OPERATION_NOT_SUPPORTED.
+  //
+  // The storage granularity of the implementation should be at least 1 KB. In
+  // other words, storing less than 1 KB may result in an implementation
+  // dropping the data completely, and writing at offsets not aligned with 1 KB,
+  // or with lengths not a multiple of 1 KB may result in the first or last part
+  // of the data being discarded. However, two consecutive writes should not
+  // result in a hole in between the two parts as long as they are sequential
+  // (the second one starts where the first one ended), and there is no other
+  // write between them.
+  //
+  // The Backend implementation is free to evict any range from the cache at any
+  // moment, so in practice, the previously stated granularity of 1 KB is not
+  // as bad as it sounds.
 
-  // Returns an asynchronous read file handle for the cache stream referenced by
-  // |index|. Values other than base::kInvalidPlatformFileValue are successful
-  // and the file handle should be managed by the caller, i.e. the caller should
-  // close the handle after use or there will be a leak.
-  virtual base::PlatformFile GetPlatformFile(int index) = 0;
+  // Behaves like ReadData() except that this method is used to access sparse
+  // entries.
+  virtual int ReadSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                             net::CompletionCallback* completion_callback) = 0;
+
+  // Behaves like WriteData() except that this method is used to access sparse
+  // entries. |truncate| is not part of this interface because a sparse entry
+  // is not expected to be reused with new data. To delete the old data and
+  // start again, or to reduce the total size of the stream data (which implies
+  // that the content has changed), the whole entry should be doomed and
+  // re-created.
+  virtual int WriteSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                              net::CompletionCallback* completion_callback) = 0;
+
+  // Returns information about the currently stored portion of a sparse entry.
+  // |offset| and |len| describe a particular range that should be scanned to
+  // find out if it is stored or not. |start| will contain the offset of the
+  // first byte that is stored within this range, and the return value is the
+  // minimum number of consecutive stored bytes. Note that it is possible that
+  // this entry has stored more than the returned value. This method returns a
+  // net error code whenever the request cannot be completed successfully.
+  virtual int GetAvailableRange(int64 offset, int len, int64* start) = 0;
 
  protected:
   virtual ~Entry() {}

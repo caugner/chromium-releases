@@ -10,9 +10,8 @@
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/printing/print_job_worker_owner.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
-class ChromeFont;
 class GURL;
 class Thread;
 
@@ -118,11 +117,13 @@ class PrintJob : public base::RefCountedThreadSafe<PrintJob>,
   // eventual deadlock.
   void ControlledWorkerShutdown();
 
+  NotificationRegistrar registrar_;
+
   // Main message loop reference. Used to send notifications in the right
   // thread.
   MessageLoop* const ui_message_loop_;
 
-  // Source that generates the PrintedPage's (i.e. a WebContents). It will be
+  // Source that generates the PrintedPage's (i.e. a TabContents). It will be
   // set back to NULL if the source is deleted before this object.
   PrintedPagesSource* source_;
 

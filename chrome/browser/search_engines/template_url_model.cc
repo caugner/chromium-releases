@@ -6,20 +6,21 @@
 
 #include <algorithm>
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/stl_util-inl.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_parse.h"
@@ -91,30 +92,21 @@ TemplateURLModel::~TemplateURLModel() {
   }
 
   STLDeleteElements(&template_urls_);
-
-  NotificationService* ns = NotificationService::current();
-  if (profile_) {
-    ns->RemoveObserver(this, NotificationType::HISTORY_URL_VISITED,
-                       Source<Profile>(profile_->GetOriginalProfile()));
-  }
-  ns->RemoveObserver(this, NotificationType::GOOGLE_URL_UPDATED,
-                     NotificationService::AllSources());
 }
 
 void TemplateURLModel::Init(const Initializer* initializers,
                             int num_initializers) {
   // Register for notifications.
-  NotificationService* ns = NotificationService::current();
   if (profile_) {
     // TODO(sky): bug 1166191. The keywords should be moved into the history
     // db, which will mean we no longer need this notification and the history
     // backend can handle automatically adding the search terms as the user
     // navigates.
-    ns->AddObserver(this, NotificationType::HISTORY_URL_VISITED,
-                    Source<Profile>(profile_->GetOriginalProfile()));
+    registrar_.Add(this, NotificationType::HISTORY_URL_VISITED,
+                   Source<Profile>(profile_->GetOriginalProfile()));
   }
-  ns->AddObserver(this, NotificationType::GOOGLE_URL_UPDATED,
-                  NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::GOOGLE_URL_UPDATED,
+                 NotificationService::AllSources());
 
   // Add specific initializers, if any.
   for (int i(0); i < num_initializers; ++i) {
@@ -204,10 +196,9 @@ GURL TemplateURLModel::GenerateSearchURL(const TemplateURL* t_url) {
   if (!search_ref->SupportsReplacement())
     return GURL(WideToUTF8(search_ref->url()));
 
-  return search_ref->ReplaceSearchTerms(
-      *t_url,
-      kReplacementTerm,
-      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring());
+  return GURL(WideToUTF8(search_ref->ReplaceSearchTerms(
+      *t_url, kReplacementTerm, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
+      std::wstring())));
 }
 
 bool TemplateURLModel::CanReplaceKeyword(
@@ -692,9 +683,9 @@ void TemplateURLModel::Observe(NotificationType type,
     Details<history::URLVisitedDetails> visit_details(details);
 
     if (!loaded())
-      visits_to_add_.push_back(visit_details->row);
+      visits_to_add_.push_back(*visit_details.ptr());
     else
-      UpdateKeywordSearchTermsForURL(visit_details->row);
+      UpdateKeywordSearchTermsForURL(*visit_details.ptr());
   } else if (type == NotificationType::GOOGLE_URL_UPDATED) {
     if (loaded_)
       GoogleBaseURLChanged();
@@ -794,7 +785,7 @@ void TemplateURLModel::SaveDefaultSearchProviderToPrefs(
       t_url ? Int64ToWString(t_url->id()) : std::wstring();
   prefs->SetString(prefs::kDefaultSearchProviderID, id_string);
 
-  prefs->ScheduleSavePersistentPrefs(g_browser_process->file_thread());
+  prefs->ScheduleSavePersistentPrefs();
 }
 
 bool TemplateURLModel::LoadDefaultSearchProviderFromPrefs(
@@ -877,7 +868,8 @@ PrefService* TemplateURLModel::GetPrefs() {
 }
 
 void TemplateURLModel::UpdateKeywordSearchTermsForURL(
-    const history::URLRow& row) {
+    const history::URLVisitedDetails& details) {
+  const history::URLRow& row = details.row;
   if (!row.url().is_valid() ||
       !row.url().parsed_for_possibly_invalid_spec().query.is_nonempty()) {
     return;
@@ -918,6 +910,14 @@ void TemplateURLModel::UpdateKeywordSearchTermsForURL(
       }
       built_terms = true;
 
+      if (PageTransition::StripQualifier(details.transition) ==
+          PageTransition::KEYWORD) {
+        // The visit is the result of the user entering a keyword, generate a
+        // KEYWORD_GENERATED visit for the KEYWORD so that the keyword typed
+        // count is boosted.
+        AddTabToSearchVisit(**i);
+      }
+
       QueryTerms::iterator terms_iterator =
           query_terms.find(search_ref->GetSearchTermKey());
       if (terms_iterator != query_terms.end() &&
@@ -928,6 +928,33 @@ void TemplateURLModel::UpdateKeywordSearchTermsForURL(
       }
     }
   }
+}
+
+void TemplateURLModel::AddTabToSearchVisit(const TemplateURL& t_url) {
+  // Only add visits for entries the user hasn't modified. If the user modified
+  // the entry the keyword may no longer correspond to the host name. It may be
+  // possible to do something more sophisticated here, but it's so rare as to
+  // not be worth it.
+  if (!t_url.safe_for_autoreplace())
+    return;
+
+  if (!profile_)
+    return;
+
+  HistoryService* history =
+      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  if (!history)
+    return;
+
+  GURL url(URLFixerUpper::FixupURL(WideToUTF8(t_url.keyword()), std::string()));
+  if (!url.is_valid())
+    return;
+
+  // Synthesize a visit for the keyword. This ensures the url for the keyword is
+  // autocompleted even if the user doesn't type the url in directly.
+  history->AddPage(url, NULL, 0, GURL(),
+                   PageTransition::KEYWORD_GENERATED,
+                   history::RedirectList(), false);
 }
 
 // static

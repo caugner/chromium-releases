@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 #include <algorithm>
 #include <vector>
 
+#include "app/l10n_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/l10n_util.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -61,13 +61,28 @@ class CompareQuality {
 
 }  // namespace
 
+// static
+const TemplateURL* KeywordProvider::GetSubstitutingTemplateURLForInput(
+    Profile* profile,
+    const AutocompleteInput& input,
+    std::wstring* remaining_input) {
+  std::wstring keyword;
+  if (!ExtractKeywordFromInput(input, &keyword, remaining_input))
+    return NULL;
+
+  // Make sure the model is loaded. This is cheap and quickly bails out if
+  // the model is already loaded.
+  TemplateURLModel* model = profile->GetTemplateURLModel();
+  DCHECK(model);
+  model->Load();
+
+  const TemplateURL* template_url = model->GetTemplateURLForKeyword(keyword);
+  return TemplateURL::SupportsReplacement(template_url) ? template_url : NULL;
+}
+
 void KeywordProvider::Start(const AutocompleteInput& input,
                             bool minimal_changes) {
   matches_.clear();
-
-  if ((input.type() == AutocompleteInput::INVALID) ||
-      (input.type() == AutocompleteInput::FORCED_QUERY))
-    return;
 
   // Split user input into a keyword and some query input.
   //
@@ -82,10 +97,8 @@ void KeywordProvider::Start(const AutocompleteInput& input,
   // keywords, we might suggest keywords that haven't even been partially typed,
   // if the user uses them enough and isn't obviously typing something else.  In
   // this case we'd consider all input here to be query input.
-  std::wstring remaining_input;
-  std::wstring keyword(TemplateURLModel::CleanUserInputKeyword(
-      SplitKeywordFromInput(input.text(), &remaining_input)));
-  if (keyword.empty())
+  std::wstring keyword, remaining_input;
+  if (!ExtractKeywordFromInput(input, &keyword, &remaining_input))
     return;
 
   // Make sure the model is loaded. This is cheap and quickly bails out if
@@ -134,6 +147,19 @@ void KeywordProvider::Start(const AutocompleteInput& input,
 }
 
 // static
+bool KeywordProvider::ExtractKeywordFromInput(const AutocompleteInput& input,
+                                              std::wstring* keyword,
+                                              std::wstring* remaining_input) {
+  if ((input.type() == AutocompleteInput::INVALID) ||
+      (input.type() == AutocompleteInput::FORCED_QUERY))
+    return false;
+
+  *keyword = TemplateURLModel::CleanUserInputKeyword(
+      SplitKeywordFromInput(input.text(), remaining_input));
+  return !keyword->empty();
+}
+
+// static
 std::wstring KeywordProvider::SplitKeywordFromInput(
     const std::wstring& input,
     std::wstring* remaining_input) {
@@ -167,7 +193,7 @@ void KeywordProvider::FillInURLAndContents(
     if (element->url()->SupportsReplacement()) {
       // No query input; return a generic, no-destination placeholder.
       match->contents.assign(l10n_util::GetStringF(IDS_KEYWORD_SEARCH,
-          element->short_name(),
+          element->AdjustedShortNameForLocaleDirection(),
           l10n_util::GetString(IDS_EMPTY_KEYWORD_VALUE)));
       match->contents_class.push_back(
           ACMatchClassification(0, ACMatchClassification::DIM));
@@ -185,9 +211,9 @@ void KeywordProvider::FillInURLAndContents(
     // input, but we rely on later canonicalization functions to do more
     // fixup to make the URL valid if necessary.
     DCHECK(element->url()->SupportsReplacement());
-    match->destination_url = element->url()->ReplaceSearchTerms(
+    match->destination_url = GURL(WideToUTF8(element->url()->ReplaceSearchTerms(
       *element, remaining_input, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      std::wstring());
+      std::wstring())));
     std::vector<size_t> content_param_offsets;
     match->contents.assign(l10n_util::GetStringF(IDS_KEYWORD_SEARCH,
                                                  element->short_name(),
@@ -277,8 +303,7 @@ AutocompleteMatch KeywordProvider::CreateAutocompleteMatch(
                                               ACMatchClassification::DIM,
                                               &result.description_class);
 
-  // Keyword searches don't look like URLs.
-  result.transition = PageTransition::GENERATED;
+  result.transition = PageTransition::KEYWORD;
 
   return result;
 }

@@ -5,18 +5,17 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_TYPES_H__
 #define CHROME_BROWSER_HISTORY_HISTORY_TYPES_H__
 
-#include <algorithm>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/stack_container.h"
 #include "base/time.h"
 #include "chrome/browser/history/snippet.h"
 #include "chrome/common/page_transition_types.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/common/ref_counted_util.h"
 #include "googleurl/src/gurl.h"
 
 namespace history {
@@ -24,6 +23,13 @@ namespace history {
 // Forward declaration for friend statements.
 class HistoryBackend;
 class URLDatabase;
+
+// Structure to hold redirect lists for URLs.  For a redirect chain
+// A -> B -> C, and entry in the map would look like "A => {B -> C}".
+typedef std::map<GURL, scoped_refptr<RefCountedVector<GURL> > > RedirectMap;
+
+// Container for a list of URLs.
+typedef std::vector<GURL> RedirectList;
 
 typedef int64 StarID;  // Unique identifier for star entries.
 typedef int64 UIStarID;  // Identifier for star entries that come from the UI.

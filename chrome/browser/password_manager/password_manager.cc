@@ -4,19 +4,23 @@
 
 #include "chrome/browser/password_manager/password_manager.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/stl_util-inl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+
+using webkit_glue::PasswordForm;
+using webkit_glue::PasswordFormMap;
 
 // After a successful *new* login attempt, we take the PasswordFormManager in
 // provisional_save_manager_ and move it to a SavePasswordInfoBarDelegate while
@@ -86,20 +90,21 @@ void PasswordManager::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kPasswordManagerEnabled, true);
 }
 
-PasswordManager::PasswordManager(WebContents* web_contents)
+PasswordManager::PasswordManager(TabContents* tab_contents)
     : login_managers_deleter_(&pending_login_managers_),
-      web_contents_(web_contents),
+      tab_contents_(tab_contents),
       observer_(NULL) {
   password_manager_enabled_.Init(prefs::kPasswordManagerEnabled,
-      web_contents->profile()->GetPrefs(), NULL);
+      tab_contents->profile()->GetPrefs(), NULL);
 }
 
 PasswordManager::~PasswordManager() {
 }
 
 void PasswordManager::ProvisionallySavePassword(PasswordForm form) {
-  if (!web_contents_->controller() || !web_contents_->profile() ||
-      web_contents_->profile()->IsOffTheRecord() || !*password_manager_enabled_)
+  if (!tab_contents_->profile() ||
+      tab_contents_->profile()->IsOffTheRecord() ||
+      !*password_manager_enabled_)
     return;
 
   // No password to save? Then don't.
@@ -134,7 +139,7 @@ void PasswordManager::ProvisionallySavePassword(PasswordForm form) {
     return;
 
   form.ssl_valid = form.origin.SchemeIsSecure() &&
-      !web_contents_->controller()->ssl_manager()->
+      !tab_contents_->controller().ssl_manager()->
           ProcessedSSLErrorFromRequest();
   form.preferred = true;
   manager->ProvisionallySave(form);
@@ -160,18 +165,15 @@ void PasswordManager::DidStopLoading() {
   if (!provisional_save_manager_.get())
     return;
 
-  DCHECK(!web_contents_->profile()->IsOffTheRecord());
+  DCHECK(!tab_contents_->profile()->IsOffTheRecord());
   DCHECK(!provisional_save_manager_->IsBlacklisted());
 
-  if (!web_contents_->profile() ||
-      !web_contents_->profile()->GetWebDataService(Profile::IMPLICIT_ACCESS))
+  if (!tab_contents_->profile() ||
+      !tab_contents_->profile()->GetWebDataService(Profile::IMPLICIT_ACCESS))
     return;
-  if (!web_contents_->controller())
-    return;
-
   if (provisional_save_manager_->IsNewLogin()) {
-    web_contents_->AddInfoBar(
-        new SavePasswordInfoBarDelegate(web_contents_,
+    tab_contents_->AddInfoBar(
+        new SavePasswordInfoBarDelegate(tab_contents_,
                                         provisional_save_manager_.release()));
   } else {
     // If the save is not a new username entry, then we just want to save this
@@ -183,16 +185,14 @@ void PasswordManager::DidStopLoading() {
 
 void PasswordManager::PasswordFormsSeen(
     const std::vector<PasswordForm>& forms) {
-  if (!web_contents_->profile() ||
-      !web_contents_->profile()->GetWebDataService(Profile::EXPLICIT_ACCESS))
-    return;
-  if (!web_contents_->controller())
+  if (!tab_contents_->profile() ||
+      !tab_contents_->profile()->GetWebDataService(Profile::EXPLICIT_ACCESS))
     return;
   if (!*password_manager_enabled_)
     return;
 
   // Ask the SSLManager for current security.
-  bool had_ssl_error = web_contents_->controller()->ssl_manager()->
+  bool had_ssl_error = tab_contents_->controller().ssl_manager()->
       ProcessedSSLErrorFromRequest();
 
   std::vector<PasswordForm>::const_iterator iter;
@@ -209,7 +209,7 @@ void PasswordManager::PasswordFormsSeen(
     } else {
       bool ssl_valid = iter->origin.SchemeIsSecure() && !had_ssl_error;
       PasswordFormManager* manager =
-          new PasswordFormManager(web_contents_->profile(),
+          new PasswordFormManager(tab_contents_->profile(),
                                   this, *iter, ssl_valid);
       pending_login_managers_.push_back(manager);
       manager->FetchMatchingLoginsFromWebDatabase();
@@ -221,7 +221,7 @@ void PasswordManager::Autofill(
     const PasswordForm& form_for_autofill,
     const PasswordFormMap& best_matches,
     const PasswordForm* const preferred_match) const {
-  DCHECK(web_contents_);
+  DCHECK(tab_contents_);
   DCHECK(preferred_match);
   switch (form_for_autofill.scheme) {
     case PasswordForm::SCHEME_HTML: {
@@ -229,17 +229,19 @@ void PasswordManager::Autofill(
       // schemed password form may have been freed, so we need to distinguish.
       bool action_mismatch = form_for_autofill.action.GetWithEmptyPath() !=
                              preferred_match->action.GetWithEmptyPath();
-      PasswordFormDomManager::FillData fill_data;
-      PasswordFormDomManager::InitFillData(form_for_autofill,
-                                           best_matches, preferred_match,
-                                           action_mismatch,
-                                           &fill_data);
-      web_contents_->render_view_host()->FillPasswordForm(fill_data);
+      webkit_glue::PasswordFormDomManager::FillData fill_data;
+      webkit_glue::PasswordFormDomManager::InitFillData(form_for_autofill,
+                                                        best_matches,
+                                                        preferred_match,
+                                                        action_mismatch,
+                                                        &fill_data);
+      tab_contents_->render_view_host()->FillPasswordForm(fill_data);
       return;
     }
     default:
-      if (observer_)
+      if (observer_) {
         observer_->OnAutofillDataAvailable(preferred_match->username_value,
                                            preferred_match->password_value);
+      }
   }
 }

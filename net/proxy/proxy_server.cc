@@ -47,6 +47,8 @@ ProxyServer::Scheme GetSchemeFromURI(std::string::const_iterator begin,
     return ProxyServer::SCHEME_HTTP;
   if (LowerCaseEqualsASCII(begin, end, "socks4"))
     return ProxyServer::SCHEME_SOCKS4;
+  if (LowerCaseEqualsASCII(begin, end, "socks"))
+    return ProxyServer::SCHEME_SOCKS4;
   if (LowerCaseEqualsASCII(begin, end, "socks5"))
     return ProxyServer::SCHEME_SOCKS5;
   if (LowerCaseEqualsASCII(begin, end, "direct"))
@@ -56,10 +58,15 @@ ProxyServer::Scheme GetSchemeFromURI(std::string::const_iterator begin,
 
 }  // namespace
 
-const std::string& ProxyServer::host() const {
+std::string ProxyServer::HostNoBrackets() const {
   // Doesn't make sense to call this if the URI scheme doesn't
   // have concept of a host.
   DCHECK(is_valid() && !is_direct());
+
+  // Remove brackets from an RFC 2732-style IPv6 literal address.
+  const std::string::size_type len = host_.size();
+  if (len != 0 && host_[0] == '[' && host_[len - 1] == ']')
+    return host_.substr(1, len - 2);
   return host_;
 }
 
@@ -78,15 +85,17 @@ std::string ProxyServer::host_and_port() const {
 }
 
 // static
-ProxyServer ProxyServer::FromURI(const std::string& uri) {
-  return FromURI(uri.begin(), uri.end());
+ProxyServer ProxyServer::FromURI(const std::string& uri,
+                                 Scheme default_scheme) {
+  return FromURI(uri.begin(), uri.end(), default_scheme);
 }
 
 // static
 ProxyServer ProxyServer::FromURI(std::string::const_iterator begin,
-                                 std::string::const_iterator end) {
-  // We will default to HTTP if no scheme specifier was given.
-  Scheme scheme = SCHEME_HTTP;
+                                 std::string::const_iterator end,
+                                 Scheme default_scheme) {
+  // We will default to |default_scheme| if no scheme specifier was given.
+  Scheme scheme = default_scheme;
 
   // Trim the leading/trailing whitespace.
   HttpUtil::TrimLWS(&begin, &end);
@@ -200,7 +209,7 @@ ProxyServer ProxyServer::FromSchemeHostAndPort(
 
   if (scheme != SCHEME_INVALID && scheme != SCHEME_DIRECT) {
     // If the scheme has a host/port, parse it.
-    bool ok = net::GetHostAndPort(begin, end, &host, &port);
+    bool ok = net::ParseHostAndPort(begin, end, &host, &port);
     if (!ok)
       return ProxyServer();  // Invalid -- failed parsing <host>[":"<port>]
   }

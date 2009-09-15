@@ -8,6 +8,7 @@
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/entry_impl.h"
 #include "net/disk_cache/errors.h"
+#include "net/disk_cache/histogram_macros.h"
 
 using base::Time;
 
@@ -222,19 +223,23 @@ bool Rankings::GetRanking(CacheRankingsBlock* rankings) {
 
   backend_->OnEvent(Stats::OPEN_RANKINGS);
 
-  if (backend_->GetCurrentEntryId() != rankings->Data()->dirty) {
+  if (backend_->GetCurrentEntryId() != rankings->Data()->dirty ||
+      !backend_->IsOpen(rankings)) {
     // We cannot trust this entry, but we cannot initiate a cleanup from this
     // point (we may be in the middle of a cleanup already). Just get rid of
     // the invalid pointer and continue; the entry will be deleted when detected
     // from a regular open/create path.
     rankings->Data()->pointer = NULL;
+    rankings->Data()->dirty = backend_->GetCurrentEntryId() - 1;
+    if (!rankings->Data()->dirty)
+      rankings->Data()->dirty--;
     return true;
   }
 
   EntryImpl* cache_entry =
       reinterpret_cast<EntryImpl*>(rankings->Data()->pointer);
   rankings->SetData(cache_entry->rankings()->Data());
-  UMA_HISTOGRAM_TIMES("DiskCache.GetRankings", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "GetRankings", 0, start);
   return true;
 }
 
@@ -315,6 +320,7 @@ void Rankings::Remove(CacheRankingsBlock* node, List list) {
   Trace("Remove 0x%x (0x%x 0x%x)", node->address().value(), node->Data()->next,
         node->Data()->prev);
   DCHECK(node->HasData());
+  InvalidateIterators(node);
   Addr next_addr(node->Data()->next);
   Addr prev_addr(node->Data()->prev);
   if (!next_addr.is_initialized() || next_addr.is_separate_file() ||
@@ -391,7 +397,7 @@ void Rankings::UpdateRank(CacheRankingsBlock* node, bool modified, List list) {
   Time start = Time::Now();
   Remove(node, list);
   Insert(node, modified, list);
-  UMA_HISTOGRAM_TIMES("DiskCache.UpdateRank", Time::Now() - start);
+  CACHE_UMA(AGE_MS, "UpdateRank", 0, start);
 }
 
 void Rankings::CompleteTransaction() {
@@ -568,6 +574,19 @@ void Rankings::FreeRankingsBlock(CacheRankingsBlock* node) {
   TrackRankingsBlock(node, false);
 }
 
+void Rankings::TrackRankingsBlock(CacheRankingsBlock* node,
+                                  bool start_tracking) {
+  if (!node)
+    return;
+
+  IteratorPair current(node->address().value(), node);
+
+  if (start_tracking)
+    iterators_.push_back(current);
+  else
+    iterators_.remove(current);
+}
+
 int Rankings::SelfCheck() {
   int total = 0;
   for (int i = 0; i < LAST_ELEMENT; i++) {
@@ -721,19 +740,6 @@ bool Rankings::IsTail(CacheAddr addr) {
   return false;
 }
 
-void Rankings::TrackRankingsBlock(CacheRankingsBlock* node,
-                                  bool start_tracking) {
-  if (!node)
-    return;
-
-  IteratorPair current(node->address().value(), node);
-
-  if (start_tracking)
-    iterators_.push_back(current);
-  else
-    iterators_.remove(current);
-}
-
 // We expect to have just a few iterators at any given time, maybe two or three,
 // But we could have more than one pointing at the same mode. We walk the list
 // of cache iterators and update all that are pointing to the given node.
@@ -741,10 +747,21 @@ void Rankings::UpdateIterators(CacheRankingsBlock* node) {
   CacheAddr address = node->address().value();
   for (IteratorList::iterator it = iterators_.begin(); it != iterators_.end();
        ++it) {
-    if (it->first == address) {
+    if (it->first == address && it->second->HasData()) {
       CacheRankingsBlock* other = it->second;
       other->Data()->next = node->Data()->next;
       other->Data()->prev = node->Data()->prev;
+    }
+  }
+}
+
+void Rankings::InvalidateIterators(CacheRankingsBlock* node) {
+  CacheAddr address = node->address().value();
+  for (IteratorList::iterator it = iterators_.begin(); it != iterators_.end();
+       ++it) {
+    if (it->first == address) {
+      LOG(WARNING) << "Invalidating iterator at 0x" << std::hex << address;
+      it->second->Discard();
     }
   }
 }

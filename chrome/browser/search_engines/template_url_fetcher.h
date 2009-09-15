@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_TEMPLATE_URL_FETCHER_H_
 
 #include "base/gfx/native_widget_types.h"
-#include "chrome/common/scoped_vector.h"
+#include "base/scoped_vector.h"
 
 class GURL;
 class Profile;
 class TemplateURL;
-class WebContents;
+class TabContents;
 
 // TemplateURLFetcher is responsible for downloading OpenSearch description
 // documents, creating a TemplateURL from the OSDD, and adding the TemplateURL
@@ -29,7 +29,7 @@ class TemplateURLFetcher {
   void ScheduleDownload(const std::wstring& keyword,
                         const GURL& osdd_url,
                         const GURL& favicon_url,
-                        const gfx::NativeView parent_window,
+                        TabContents* source,
                         bool autodetected);
 
  private:

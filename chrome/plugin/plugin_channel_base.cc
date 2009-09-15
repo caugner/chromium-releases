@@ -2,22 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-
 #include "chrome/plugin/plugin_channel_base.h"
 
 #include "base/hash_tables.h"
-#include "chrome/common/ipc_sync_message.h"
-#include "chrome/plugin/plugin_process.h"
+#include "chrome/common/child_process.h"
+#include "ipc/ipc_sync_message.h"
 
-typedef base::hash_map<std::wstring, scoped_refptr<PluginChannelBase> >
+typedef base::hash_map<std::string, scoped_refptr<PluginChannelBase> >
     PluginChannelMap;
 
 static PluginChannelMap g_plugin_channels_;
 
 
 PluginChannelBase* PluginChannelBase::GetChannel(
-    const std::wstring& channel_name, IPC::Channel::Mode mode,
+    const std::string& channel_name, IPC::Channel::Mode mode,
     PluginChannelFactory factory, MessageLoop* ipc_message_loop,
     bool create_pipe_now) {
   scoped_refptr<PluginChannelBase> channel;
@@ -59,7 +57,7 @@ PluginChannelBase::~PluginChannelBase() {
 void PluginChannelBase::CleanupChannels() {
   // Make a copy of the references as we can't iterate the map since items will
   // be removed from it as we clean them up.
-  std::vector<scoped_refptr<PluginChannelBase>> channels;
+  std::vector<scoped_refptr<PluginChannelBase> > channels;
   for (PluginChannelMap::const_iterator iter = g_plugin_channels_.begin();
        iter != g_plugin_channels_.end();
        ++iter) {
@@ -78,7 +76,7 @@ bool PluginChannelBase::Init(MessageLoop* ipc_message_loop,
                              bool create_pipe_now) {
   channel_.reset(new IPC::SyncChannel(
       channel_name_, mode_, this, NULL, ipc_message_loop, create_pipe_now,
-      PluginProcess::current()->GetShutDownEvent()));
+      ChildProcess::current()->GetShutDownEvent()));
   channel_valid_ = true;
   return true;
 }

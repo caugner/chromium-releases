@@ -4,27 +4,27 @@
 
 #include "chrome/browser/options_window.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/options/advanced_page_view.h"
 #include "chrome/browser/views/options/content_page_view.h"
 #include "chrome/browser/views/options/general_page_view.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
 #ifdef CHROME_PERSONALIZATION
 #include "chrome/personalization/personalization.h"
 #include "chrome/personalization/views/user_data_page_view.h"
 #endif
-#include "chrome/views/controls/tabbed_pane.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/controls/tabbed_pane.h"
+#include "views/widget/root_view.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsWindowView
@@ -42,7 +42,9 @@ class OptionsWindowView : public views::View,
   void ShowOptionsPage(OptionsPage page, OptionsGroup highlight_group);
 
   // views::DialogDelegate implementation:
-  virtual int GetDialogButtons() const { return DIALOGBUTTON_CANCEL; }
+  virtual int GetDialogButtons() const {
+    return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  }
   virtual std::wstring GetWindowTitle() const;
   virtual void WindowClosing();
   virtual bool Cancel();
@@ -201,7 +203,7 @@ void OptionsWindowView::Init() {
                        content_page, false);
 
 #ifdef CHROME_PERSONALIZATION
-  if (!Personalization::IsP13NDisabled()) {
+  if (!Personalization::IsP13NDisabled(profile_)) {
     UserDataPageView* user_data_page = new UserDataPageView(profile_);
     tabs_->AddTabAtIndex(tab_index++,
                          l10n_util::GetString(IDS_OPTIONS_USER_DATA_TAB_LABEL),

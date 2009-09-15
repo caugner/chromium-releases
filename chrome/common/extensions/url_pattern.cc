@@ -15,12 +15,12 @@ static const char* kValidSchemes[] = {
   chrome::kHttpsScheme,
   chrome::kFileScheme,
   chrome::kFtpScheme,
-  chrome::kChromeUIScheme,
 };
 
 static const char kPathSeparator[] = "/";
 
-static bool IsValidScheme(const std::string& scheme) {
+// static
+bool URLPattern::IsValidScheme(const std::string& scheme) {
   for (size_t i = 0; i < arraysize(kValidSchemes); ++i) {
     if (scheme == kValidSchemes[i])
       return true;
@@ -80,7 +80,7 @@ bool URLPattern::Parse(const std::string& pattern) {
   return true;
 }
 
-bool URLPattern::MatchesUrl(const GURL &test) {
+bool URLPattern::MatchesUrl(const GURL &test) const {
   if (test.scheme() != scheme_)
     return false;
 
@@ -93,17 +93,25 @@ bool URLPattern::MatchesUrl(const GURL &test) {
   return true;
 }
 
-bool URLPattern::MatchesHost(const GURL& test) {
+bool URLPattern::MatchesHost(const GURL& test) const {
+  // If the hosts are exactly equal, we have a match.
   if (test.host() == host_)
     return true;
 
-  if (!match_subdomains_ || test.HostIsIPAddress())
+  // If we're matching subdomains, and we have no host in the match pattern,
+  // that means that we're matching all hosts, which means we have a match no
+  // matter what the test host is.
+  if (match_subdomains_ && host_.empty())
+    return true;
+
+  // Otherwise, we can only match if our match pattern matches subdomains.
+  if (!match_subdomains_)
     return false;
 
-  // If we're matching subdomains, and we have no host, that means the pattern
-  // was <scheme>://*/<whatever>, so we match anything.
-  if (host_.empty())
-    return true;
+  // We don't do subdomain matching against IP addresses, so we can give up now
+  // if the test host is an IP address.
+  if (test.HostIsIPAddress())
+    return false;
 
   // Check if the test host is a subdomain of our host.
   if (test.host().length() <= (host_.length() + 1))
@@ -116,7 +124,7 @@ bool URLPattern::MatchesHost(const GURL& test) {
   return test.host()[test.host().length() - host_.length() - 1] == '.';
 }
 
-bool URLPattern::MatchesPath(const GURL& test) {
+bool URLPattern::MatchesPath(const GURL& test) const {
   if (path_escaped_.empty()) {
     path_escaped_ = path_;
     ReplaceSubstringsAfterOffset(&path_escaped_, 0, "\\", "\\\\");

@@ -4,77 +4,53 @@
 
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 
-#import "base/sys_string_conversions.h"
-#import "chrome/app/chrome_dll_resource.h"
-#import "chrome/browser/browser.h"
-#import "chrome/browser/cocoa/bookmark_bar_state_controller.h"
+#include "app/l10n_util.h"
+#include "base/mac_util.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/cocoa/nsimage_cache.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/profile.h"
 #import "chrome/browser/cocoa/tab_strip_view.h"
 #import "chrome/browser/cocoa/tab_cell.h"
 #import "chrome/browser/cocoa/tab_contents_controller.h"
 #import "chrome/browser/cocoa/tab_controller.h"
+#import "chrome/browser/cocoa/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/cocoa/tab_view.h"
-#import "chrome/browser/tab_contents/tab_contents.h"
-#import "chrome/browser/tabs/tab_strip_model.h"
+#import "chrome/browser/cocoa/throbber_view.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
+#include "grit/generated_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 
-// The private methods the brige object needs from the controller.
-@interface TabStripController(BridgeMethods)
-- (void)insertTabWithContents:(TabContents*)contents
-                      atIndex:(NSInteger)index
-                 inForeground:(bool)inForeground;
-- (void)selectTabWithContents:(TabContents*)newContents
-             previousContents:(TabContents*)oldContents
-                      atIndex:(NSInteger)index
-                  userGesture:(bool)wasUserGesture;
-- (void)tabDetachedWithContents:(TabContents*)contents
-                        atIndex:(NSInteger)index;
-- (void)tabChangedWithContents:(TabContents*)contents
-                       atIndex:(NSInteger)index;
+NSString* const kTabStripNumberOfTabsChanged = @"kTabStripNumberOfTabsChanged";
+
+// A simple view class that prevents the windowserver from dragging the
+// area behind tabs. Sometimes core animation confuses it.
+@interface TabStripControllerDragBlockingView : NSView
 @end
-
-// A C++ bridge class to handle receiving notifications from the C++ tab
-// strip model. Doesn't do much on its own, just sends everything straight
-// to the Cocoa controller.
-class TabStripBridge : public TabStripModelObserver {
- public:
-  TabStripBridge(TabStripModel* model, TabStripController* controller);
-  ~TabStripBridge();
-
-  // Overridden from TabStripModelObserver
-  virtual void TabInsertedAt(TabContents* contents,
-                             int index,
-                             bool foreground);
-  virtual void TabDetachedAt(TabContents* contents, int index);
-  virtual void TabSelectedAt(TabContents* old_contents,
-                             TabContents* new_contents,
-                             int index,
-                             bool user_gesture);
-  virtual void TabMoved(TabContents* contents,
-                        int from_index,
-                        int to_index);
-  virtual void TabChangedAt(TabContents* contents, int index);
-  virtual void TabStripEmpty();
-
- private:
-  TabStripController* controller_;  // weak, owns me
-  TabStripModel* model_;  // weak, owned by Browser
-};
+@implementation TabStripControllerDragBlockingView
+- (BOOL)mouseDownCanMoveWindow {return NO;}
+- (void)drawRect:(NSRect)rect {}
+@end
 
 @implementation TabStripController
 
 - (id)initWithView:(TabStripView*)view
-           browser:(Browser*)browser {
-  DCHECK(view && browser);
+        switchView:(NSView*)switchView
+             model:(TabStripModel*)model {
+  DCHECK(view && switchView && model);
   if ((self = [super init])) {
     tabView_ = view;
-    tabModel_ = browser->tabstrip_model();
-    toolbarModel_ = browser->toolbar_model();
-    bookmarkModel_ = browser->profile()->GetBookmarkModel();
-    commands_ = browser->command_updater();
-    bridge_ = new TabStripBridge(tabModel_, self);
-    tabContentsArray_ = [[NSMutableArray alloc] init];
-    tabArray_ = [[NSMutableArray alloc] init];
-    bookmarkBarStateController_ = [[BookmarkBarStateController alloc]
-                                    initWithBrowser:browser];
+    switchView_ = switchView;
+    tabModel_ = model;
+    bridge_.reset(new TabStripModelObserverBridge(tabModel_, self));
+    tabContentsArray_.reset([[NSMutableArray alloc] init]);
+    tabArray_.reset([[NSMutableArray alloc] init]);
     // Take the only child view present in the nib as the new tab button. For
     // some reason, if the view is present in the nib apriori, it draws
     // correctly. If we create it in code and add it to the tab view, it draws
@@ -84,18 +60,18 @@ class TabStripBridge : public TabStripModelObserver {
     [newTabButton_ setTarget:nil];
     [newTabButton_ setAction:@selector(commandDispatch:)];
     [newTabButton_ setTag:IDC_NEW_TAB];
-
+    targetFrames_.reset([[NSMutableDictionary alloc] init]);
     [tabView_ setWantsLayer:YES];
+    dragBlockingView_.reset([[TabStripControllerDragBlockingView alloc]
+                              initWithFrame:NSZeroRect]);
+    [view addSubview:dragBlockingView_];
+    newTabTargetFrame_ = NSMakeRect(0, 0, 0, 0);
   }
   return self;
 }
 
-- (void)dealloc {
-  delete bridge_;
-  [bookmarkBarStateController_ release];
-  [tabContentsArray_ release];
-  [tabArray_ release];
-  [super dealloc];
++ (CGFloat)defaultTabHeight {
+  return 24.0;
 }
 
 // Finds the associated TabContentsController at the given |index| and swaps
@@ -103,23 +79,26 @@ class TabStripBridge : public TabStripModelObserver {
 - (void)swapInTabAtIndex:(NSInteger)index {
   TabContentsController* controller = [tabContentsArray_ objectAtIndex:index];
 
-  // Resize the new view to fit the window
-  NSView* contentView = [[tabView_ window] contentView];
+  // Resize the new view to fit the window. Calling |view| may lazily
+  // instantiate the TabContentsController from the nib. Until we call
+  // |-ensureContentsVisible|, the controller doesn't install the RWHVMac into
+  // the view hierarchy. This is in order to avoid sending the renderer a
+  // spurious default size loaded from the nib during the call to |-view|.
   NSView* newView = [controller view];
-  NSRect frame = [contentView bounds];
-  frame.size.height -= 14.0;
+  NSRect frame = [switchView_ bounds];
   [newView setFrame:frame];
+  [controller ensureContentsVisible];
 
   // Remove the old view from the view hierarchy. We know there's only one
-  // child of the contentView because we're the one who put it there. There
+  // child of |switchView_| because we're the one who put it there. There
   // may not be any children in the case of a tab that's been closed, in
   // which case there's no swapping going on.
-  NSArray* subviews = [contentView subviews];
+  NSArray* subviews = [switchView_ subviews];
   if ([subviews count]) {
     NSView* oldView = [subviews objectAtIndex:0];
-    [contentView replaceSubview:oldView with:newView];
+    [switchView_ replaceSubview:oldView with:newView];
   } else {
-    [contentView addSubview:newView];
+    [switchView_ addSubview:newView];
   }
 }
 
@@ -146,7 +125,7 @@ class TabStripBridge : public TabStripModelObserver {
 // Returns the index of the subview |view|. Returns -1 if not present.
 - (NSInteger)indexForTabView:(NSView*)view {
   NSInteger index = 0;
-  for (TabController* current in tabArray_) {
+  for (TabController* current in tabArray_.get()) {
     if ([current view] == view)
       return index;
     ++index;
@@ -165,9 +144,51 @@ class TabStripBridge : public TabStripModelObserver {
 // Called when the user clicks a tab. Tell the model the selection has changed,
 // which feeds back into us via a notification.
 - (void)selectTab:(id)sender {
-  int index = [self indexForTabView:sender];  // for testing...
+  int index = [self indexForTabView:sender];
   if (index >= 0 && tabModel_->ContainsIndex(index))
     tabModel_->SelectTabContentsAt(index, true);
+}
+
+// Called when the user closes a tab.  Asks the model to close the tab.
+- (void)closeTab:(id)sender {
+  int index = [self indexForTabView:sender];
+  if (tabModel_->ContainsIndex(index)) {
+    TabContents* contents = tabModel_->GetTabContentsAt(index);
+    if (contents)
+      UserMetrics::RecordAction(L"CloseTab_Mouse", contents->profile());
+    if ([self numberOfTabViews] > 1) {
+      tabModel_->CloseTabContentsAt(index);
+    } else {
+      // Use the standard window close if this is the last tab
+      // this prevents the tab from being removed from the model until after
+      // the window dissapears
+      [[tabView_ window] performClose:nil];
+    }
+  }
+}
+
+// Dispatch context menu commands for the given tab controller.
+- (void)commandDispatch:(TabStripModel::ContextMenuCommand)command
+          forController:(TabController*)controller {
+  int index = [self indexForTabView:[controller view]];
+  tabModel_->ExecuteContextMenuCommand(index, command);
+}
+
+// Returns YES if the specificed command should be enabled for the given
+// controller.
+- (BOOL)isCommandEnabled:(TabStripModel::ContextMenuCommand)command
+           forController:(TabController*)controller {
+  int index = [self indexForTabView:[controller view]];
+  return tabModel_->IsContextMenuCommandEnabled(index, command) ? YES : NO;
+}
+
+- (void)insertPlaceholderForTab:(TabView*)tab
+                          frame:(NSRect)frame
+                  yStretchiness:(CGFloat)yStretchiness {
+  placeholderTab_ = tab;
+  placeholderFrame_ = frame;
+  placeholderStretchiness_ = yStretchiness;
+  [self layoutTabs];
 }
 
 // Lay out all tabs in the order of their TabContentsControllers, which matches
@@ -186,6 +207,7 @@ class TabStripBridge : public TabStripModelObserver {
   const float kMaxTabWidth = [TabController maxTabWidth];
   const float kMinTabWidth = [TabController minTabWidth];
 
+  NSRect enclosingRect = NSZeroRect;
   [NSAnimationContext beginGrouping];
   [[NSAnimationContext currentContext] setDuration:0.2];
 
@@ -198,38 +220,94 @@ class TabStripBridge : public TabStripModelObserver {
               kMaxTabWidth),
           kMinTabWidth);
 
-  for (TabController* tab in tabArray_) {
-    // BOOL isPlaceholder = ![[[tab view] superview] isEqual:tabView_];
-    BOOL isPlaceholder = NO;
+  CGFloat minX = NSMinX(placeholderFrame_);
+
+  NSUInteger i = 0;
+  NSInteger gap = -1;
+  for (TabController* tab in tabArray_.get()) {
+    BOOL isPlaceholder = [[tab view] isEqual:placeholderTab_];
     NSRect tabFrame = [[tab view] frame];
-    // If the tab is all the way on the left, we consider it a new tab. We
-    // need to show it, but not animate the movement. We do however want to
-    // animate the display.
-    BOOL newTab = NSMinX(tabFrame) == 0;
+    tabFrame.size.height = [[self class] defaultTabHeight];
+    tabFrame.origin.y = 0;
+    tabFrame.origin.x = offset;
+
+    // If the tab is hidden, we consider it a new tab. We make it visible
+    // and animate it in.
+    BOOL newTab = [[tab view] isHidden];
     if (newTab) {
-      id visibilityTarget = visible ? [[tab view] animator] : [tab view];
-      [visibilityTarget setHidden:NO];
+      [[tab view] setHidden:NO];
     }
-    tabFrame.origin = NSMakePoint(offset, 0);
-    if (!isPlaceholder) {
-      // Set the tab's new frame and animate the tab to its new location. Don't
-      // animate if the window isn't visible or if the tab is new.
-      BOOL animate = visible && !newTab;
-      id frameTarget = animate ? [[tab view] animator] : [tab view];
+
+    if (isPlaceholder) {
+      // Move the current tab to the correct location intantly.
+      // We need a duration or else it doesn't cancel an inflight animation.
+      [NSAnimationContext beginGrouping];
+      [[NSAnimationContext currentContext] setDuration:0.000001];
+      tabFrame.origin.x = placeholderFrame_.origin.x;
+      // TODO(alcor): reenable this
+      //tabFrame.size.height += 10.0 * placeholderStretchiness_;
+      [[[tab view] animator] setFrame:tabFrame];
+      [NSAnimationContext endGrouping];
+
+      // Store the frame by identifier to aviod redundant calls to animator.
+      NSValue *identifier = [NSValue valueWithPointer:[tab view]];
+      [targetFrames_ setObject:[NSValue valueWithRect:tabFrame]
+                        forKey:identifier];
+      continue;
+    } else {
+      // If our left edge is to the left of the placeholder's left, but our mid
+      // is to the right of it we should slide over to make space for it.
+      if (placeholderTab_ && gap < 0 && NSMidX(tabFrame) > minX) {
+        gap = i;
+        offset += NSWidth(tabFrame);
+        offset -= kTabOverlap;
+        tabFrame.origin.x = offset;
+      }
+
+      // Animate the tab in by putting it below the horizon.
+      if (newTab && visible) {
+        [[tab view] setFrame:NSOffsetRect(tabFrame, 0, -NSHeight(tabFrame))];
+      }
+
+      id frameTarget = visible ? [[tab view] animator] : [tab view];
       tabFrame.size.width = [tab selected] ? kMaxTabWidth : baseTabWidth;
-      [frameTarget setFrame:tabFrame];
+
+      // Check the frame by identifier to avoid redundant calls to animator.
+      NSValue *identifier = [NSValue valueWithPointer:[tab view]];
+      NSValue *oldTargetValue = [targetFrames_ objectForKey:identifier];
+      if (!oldTargetValue ||
+          !NSEqualRects([oldTargetValue rectValue], tabFrame)) {
+        [frameTarget setFrame:tabFrame];
+        [targetFrames_ setObject:[NSValue valueWithRect:tabFrame]
+                          forKey:identifier];
+      }
+      enclosingRect = NSUnionRect(tabFrame, enclosingRect);
     }
 
     if (offset < availableWidth) {
       offset += NSWidth(tabFrame);
       offset -= kTabOverlap;
     }
+    i++;
   }
 
-  // Move the new tab button into place
-  [[newTabButton_ animator] setFrameOrigin:
-      NSMakePoint(MIN(availableWidth, offset + kNewTabButtonOffset), 0)];
+  NSRect newTabNewFrame = [newTabButton_ frame];
+  newTabNewFrame.origin =
+      NSMakePoint(MIN(availableWidth, offset + kNewTabButtonOffset), 0);
+  newTabNewFrame.origin.x = MAX(newTabNewFrame.origin.x,
+                                NSMaxX(placeholderFrame_));
+  if (i > 0 && [newTabButton_ isHidden]) {
+    [[newTabButton_ animator] setHidden:NO];
+  }
+
+  if (!NSEqualRects(newTabTargetFrame_, newTabNewFrame)) {
+    [newTabButton_ setFrame:newTabNewFrame];
+    newTabTargetFrame_ = newTabNewFrame;
+    // Move the new tab button into place.
+  }
+
   [NSAnimationContext endGrouping];
+  [dragBlockingView_ setFrame:enclosingRect];
 }
 
 // Handles setting the title of the tab based on the given |contents|. Uses
@@ -238,8 +316,11 @@ class TabStripBridge : public TabStripModelObserver {
   NSString* titleString = nil;
   if (contents)
     titleString = base::SysUTF16ToNSString(contents->GetTitle());
-  if (![titleString length])
-    titleString = NSLocalizedString(@"untitled", nil);
+  if (![titleString length]) {
+    titleString =
+      base::SysWideToNSString(
+          l10n_util::GetString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED));
+  }
   [tab setTitle:titleString];
 }
 
@@ -257,29 +338,39 @@ class TabStripBridge : public TabStripModelObserver {
   // the new controller with |contents| so it can be looked up later.
   TabContentsController* contentsController =
       [[[TabContentsController alloc] initWithNibName:@"TabContents"
-                                               bundle:nil
-                                             contents:contents
-                                             commands:commands_
-                                         toolbarModel:toolbarModel_
-                                        bookmarkModel:bookmarkModel_]
+                                             contents:contents]
           autorelease];
-  if ([self isBookmarkBarVisible])
-    [contentsController toggleBookmarkBar:YES];
   [tabContentsArray_ insertObject:contentsController atIndex:index];
 
-  // Make a new tab and add it to the strip. Keep track of its controller. We
-  // don't call |-layoutTabs| here because it will get called when the new
-  // tab is selected by the tab model.
+  // Make a new tab and add it to the strip. Keep track of its controller.
   TabController* newController = [self newTab];
   [tabArray_ insertObject:newController atIndex:index];
   NSView* newView = [newController view];
-  [tabView_ addSubview:newView];
+
+  // Set the originating frame to just below the strip so that it animates
+  // upwards as it's being initially layed out. Oddly, this works while doing
+  // something similar in |-layoutTabs| confuses the window server.
+  // TODO(pinkerton): I'm not happy with this animiation either, but it's
+  // a little better that just sliding over (maybe?).
+  [newView setFrame:NSOffsetRect([newView frame],
+                                 0, -[[self class] defaultTabHeight])];
+
+  [tabView_ addSubview:newView
+            positioned:inForeground ? NSWindowAbove : NSWindowBelow
+            relativeTo:nil];
 
   [self setTabTitle:newController withContents:contents];
 
-  // Select the newly created tab if in the foreground
-  if (inForeground)
-    [self swapInTabAtIndex:index];
+  // We don't need to call |-layoutTabs| if the tab will be in the foreground
+  // because it will get called when the new tab is selected by the tab model.
+  if (!inForeground) {
+    [self layoutTabs];
+  }
+
+  // Send a broadcast that the number of tabs have changed.
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kTabStripNumberOfTabsChanged
+                    object:self];
 }
 
 // Called when a notification is received from the model to select a particular
@@ -290,7 +381,7 @@ class TabStripBridge : public TabStripModelObserver {
                   userGesture:(bool)wasUserGesture {
   // De-select all other tabs and select the new tab.
   int i = 0;
-  for (TabController* current in tabArray_) {
+  for (TabController* current in tabArray_.get()) {
     [current setSelected:(i == index) ? YES : NO];
     ++i;
   }
@@ -309,8 +400,18 @@ class TabStripBridge : public TabStripModelObserver {
   // size than surrounding tabs if the user has many.
   [self layoutTabs];
 
+  if (oldContents) {
+    oldContents->view()->StoreFocus();
+    oldContents->WasHidden();
+  }
+
   // Swap in the contents for the new tab
   [self swapInTabAtIndex:index];
+
+  if (newContents) {
+    newContents->DidBecomeSelected();
+    newContents->view()->RestoreFocus();
+  }
 }
 
 // Called when a notification is received from the model that the given tab
@@ -328,147 +429,175 @@ class TabStripBridge : public TabStripModelObserver {
   NSView* tab = [self viewAtIndex:index];
   [tab removeFromSuperview];
 
+  NSValue *identifier = [NSValue valueWithPointer:tab];
+  [targetFrames_ removeObjectForKey:identifier];
+
   // Once we're totally done with the tab, delete its controller
   [tabArray_ removeObjectAtIndex:index];
+
+  // Send a broadcast that the number of tabs have changed.
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kTabStripNumberOfTabsChanged
+                    object:self];
 
   [self layoutTabs];
 }
 
+// A helper routine for creating an NSImageView to hold the fav icon for
+// |contents|.
+- (NSImageView*)favIconImageViewForContents:(TabContents*)contents {
+  NSRect iconFrame = NSMakeRect(0, 0, 16, 16);
+  NSImageView* view = [[[NSImageView alloc] initWithFrame:iconFrame]
+                          autorelease];
+
+  NSImage* image = nil;
+
+  NavigationEntry* navEntry = contents->controller().GetLastCommittedEntry();
+  if (navEntry != NULL) {
+    NavigationEntry::FaviconStatus favIcon = navEntry->favicon();
+    const SkBitmap& bitmap = favIcon.bitmap();
+    if (favIcon.is_valid() && !bitmap.isNull())
+      image = gfx::SkBitmapToNSImage(bitmap);
+  }
+
+  // Either we don't have a valid favicon or there was some issue converting it
+  // from an SkBitmap. Either way, just show the default.
+  if (!image) {
+    NSBundle* bundle = mac_util::MainAppBundle();
+    image = [[NSImage alloc] initByReferencingFile:
+             [bundle pathForResource:@"nav" ofType:@"pdf"]];
+    [image autorelease];
+  }
+
+  [view setImage:image];
+  return view;
+}
+
 // Called when a notification is received from the model that the given tab
-// has been updated.
+// has been updated. |loading| will be YES when we only want to update the
+// throbber state, not anything else about the (partially) loading tab.
 - (void)tabChangedWithContents:(TabContents*)contents
-                       atIndex:(NSInteger)index {
-  [self setTabTitle:[tabArray_ objectAtIndex:index] withContents:contents];
+                       atIndex:(NSInteger)index
+                   loadingOnly:(BOOL)loading {
+  if (!loading)
+    [self setTabTitle:[tabArray_ objectAtIndex:index] withContents:contents];
+
+  // Update the current loading state, replacing the icon with a throbber, or
+  // vice versa. This will get called repeatedly with the same state during a
+  // load, so we need to make sure we're not creating the throbber view over and
+  // over. However, when the page is done, every state change is important.
+  if (contents) {
+    static NSImage* throbberWaitingImage =
+        [nsimage_cache::ImageNamed(@"throbber_waiting.png") retain];
+    static NSImage* throbberLoadingImage =
+        [nsimage_cache::ImageNamed(@"throbber.png") retain];
+
+    TabController* tabController = [tabArray_ objectAtIndex:index];
+
+    TabLoadingState oldState = [tabController loadingState];
+
+    TabLoadingState newState = kTabDone;
+    NSImage* throbberImage = nil;
+    if (contents->waiting_for_response()) {
+      newState = kTabWaiting;
+      throbberImage = throbberWaitingImage;
+    } else if (contents->is_loading()) {
+      newState = kTabLoading;
+      throbberImage = throbberLoadingImage;
+    }
+
+    if (oldState != newState || newState == kTabDone) {
+      NSView* iconView = nil;
+      if (newState == kTabDone) {
+        iconView = [self favIconImageViewForContents:contents];
+      } else {
+        NSRect frame = NSMakeRect(0, 0, 16, 16);
+        iconView =
+            [[[ThrobberView alloc] initWithFrame:frame
+                                           image:throbberImage] autorelease];
+      }
+
+      [tabController setLoadingState:newState];
+      [tabController setIconView:iconView];
+    }
+  }
 
   TabContentsController* updatedController =
       [tabContentsArray_ objectAtIndex:index];
   [updatedController tabDidChange:contents];
 }
 
-- (LocationBar*)locationBar {
-  TabContentsController* selectedController =
-      [tabContentsArray_ objectAtIndex:tabModel_->selected_index()];
-  return [selectedController locationBar];
+// Called when a tab is moved (usually by drag&drop). Keep our parallel arrays
+// in sync with the tab strip model.
+- (void)tabMovedWithContents:(TabContents*)contents
+                    fromIndex:(NSInteger)from
+                      toIndex:(NSInteger)to {
+  scoped_nsobject<TabContentsController> movedController(
+      [[tabContentsArray_ objectAtIndex:from] retain]);
+  [tabContentsArray_ removeObjectAtIndex:from];
+  [tabContentsArray_ insertObject:movedController.get() atIndex:to];
+  scoped_nsobject<TabView> movedView(
+      [[tabArray_ objectAtIndex:from] retain]);
+  [tabArray_ removeObjectAtIndex:from];
+  [tabArray_ insertObject:movedView.get() atIndex:to];
+
+  [self layoutTabs];
 }
 
-- (void)updateToolbarWithContents:(TabContents*)tab
-               shouldRestoreState:(BOOL)shouldRestore {
-  // TODO(pinkerton): OS_WIN maintains this, but I'm not sure why. It's
-  // available by querying the model, which we have available to us.
-  currentTab_ = tab;
-
-  // tell the appropriate controller to update its state. |shouldRestore| being
-  // YES means we're going back to this tab and should put back any state
-  // associated with it.
-  TabContentsController* controller =
-      [tabContentsArray_ objectAtIndex:tabModel_->GetIndexOfTabContents(tab)];
-  [controller updateToolbarWithContents:shouldRestore ? tab : nil];
+- (void)setFrameOfSelectedTab:(NSRect)frame {
+  NSView *view = [self selectedTabView];
+  NSValue *identifier = [NSValue valueWithPointer:view];
+  [targetFrames_ setObject:[NSValue valueWithRect:frame]
+                    forKey:identifier];
+  [view setFrame:frame];
 }
 
-- (void)setStarredState:(BOOL)isStarred {
-  TabContentsController* selectedController =
-      [tabContentsArray_ objectAtIndex:tabModel_->selected_index()];
-  [selectedController setStarredState:isStarred];
-}
-
-// Return the rect, in WebKit coordinates (flipped), of the window's grow box
-// in the coordinate system of the content area of the currently selected tab.
-- (NSRect)selectedTabGrowBoxRect {
+- (NSView *)selectedTabView {
   int selectedIndex = tabModel_->selected_index();
-  if (selectedIndex == TabStripModel::kNoTab) {
-    // When the window is initially being constructed, there may be no currently
-    // selected tab, so pick the first one. If there aren't any, just bail with
-    // an empty rect.
-    selectedIndex = 0;
+  return [self viewAtIndex:selectedIndex];
+}
+
+// Find the index based on the x coordinate of the placeholder. If there is
+// no placeholder, this returns the end of the tab strip.
+- (int)indexOfPlaceholder {
+  double placeholderX = placeholderFrame_.origin.x;
+  int index = 0;
+  int location = 0;
+  const int count = tabModel_->count();
+  while (index < count) {
+    NSView* curr = [self viewAtIndex:index];
+    // The placeholder tab works by changing the frame of the tab being dragged
+    // to be the bounds of the placeholder, so we need to skip it while we're
+    // iterating, otherwise we'll end up off by one.  Note This only effects
+    // dragging to the right, not to the left.
+    if (curr == placeholderTab_) {
+      index++;
+      continue;
+    }
+    if (placeholderX <= NSMinX([curr frame]))
+      break;
+    index++;
+    location++;
   }
-  TabContentsController* selectedController =
-      [tabContentsArray_ objectAtIndex:selectedIndex];
-  if (!selectedController)
-    return NSZeroRect;
-  return [selectedController growBoxRect];
+  return location;
 }
 
-// Called to tell the selected tab to update its loading state.
-- (void)setIsLoading:(BOOL)isLoading {
-  // TODO(pinkerton): update the favicon on the selected tab view to/from
-  // a spinner?
-
-  TabContentsController* selectedController =
-      [tabContentsArray_ objectAtIndex:tabModel_->selected_index()];
-  [selectedController setIsLoading:isLoading];
+// Move the given tab at index |from| in this window to the location of the
+// current placeholder.
+- (void)moveTabFromIndex:(NSInteger)from {
+  int toIndex = [self indexOfPlaceholder];
+  tabModel_->MoveTabContentsAt(from, toIndex, true);
 }
 
-// Make the location bar the first responder, if possible.
-- (void)focusLocationBar {
-  TabContentsController* selectedController =
-      [tabContentsArray_ objectAtIndex:tabModel_->selected_index()];
-  [selectedController focusLocationBar];
+// Drop a given TabContents at the location of the current placeholder. If there
+// is no placeholder, it will go at the end. Used when dragging from another
+// window when we don't have access to the TabContents as part of our strip.
+- (void)dropTabContents:(TabContents*)contents {
+  int index = [self indexOfPlaceholder];
+
+  // Insert it into this tab strip. We want it in the foreground and to not
+  // inherit the current tab's group.
+  tabModel_->InsertTabContentsAt(index, contents, true, false);
 }
-
-- (BOOL)isBookmarkBarVisible {
-  return [bookmarkBarStateController_ visible];
-}
-
-// Called from BrowserWindowController
-- (void)toggleBookmarkBar {
-  [bookmarkBarStateController_ toggleBookmarkBar];
-  BOOL visible = [self isBookmarkBarVisible];
-  for (TabContentsController *controller in tabContentsArray_) {
-    [controller toggleBookmarkBar:visible];
-  }
-
-}
-
 
 @end
-
-//--------------------------------------------------------------------------
-
-TabStripBridge::TabStripBridge(TabStripModel* model,
-                               TabStripController* controller)
-    : controller_(controller), model_(model) {
-  // Register to be a listener on the model so we can get updates and tell
-  // the TabStripController about them.
-  model_->AddObserver(this);
-}
-
-TabStripBridge::~TabStripBridge() {
-  // Remove ourselves from receiving notifications.
-  model_->RemoveObserver(this);
-}
-
-void TabStripBridge::TabInsertedAt(TabContents* contents,
-                                   int index,
-                                   bool foreground) {
-  [controller_ insertTabWithContents:contents
-                             atIndex:index
-                        inForeground:foreground];
-}
-
-void TabStripBridge::TabDetachedAt(TabContents* contents, int index) {
-  [controller_ tabDetachedWithContents:contents atIndex:index];
-}
-
-void TabStripBridge::TabSelectedAt(TabContents* old_contents,
-                                   TabContents* new_contents,
-                                   int index,
-                                   bool user_gesture) {
-  [controller_ selectTabWithContents:new_contents
-                    previousContents:old_contents
-                             atIndex:index
-                         userGesture:user_gesture];
-}
-
-void TabStripBridge::TabMoved(TabContents* contents,
-                              int from_index,
-                              int to_index) {
-  NOTIMPLEMENTED();
-}
-
-void TabStripBridge::TabChangedAt(TabContents* contents, int index) {
-  [controller_ tabChangedWithContents:contents atIndex:index];
-}
-
-void TabStripBridge::TabStripEmpty() {
-  NOTIMPLEMENTED();
-}

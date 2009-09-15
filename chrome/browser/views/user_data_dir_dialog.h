@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/window/dialog_delegate.h"
 
 class MessageBoxView;
 namespace views {
@@ -32,8 +32,8 @@ class UserDataDirDialog : public views::DialogDelegate,
   std::wstring user_data_dir() { return user_data_dir_; }
 
   // views::DialogDelegate Methods:
-  virtual int GetDialogButtons() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
   virtual void DeleteDelegate();
   virtual bool Accept();
@@ -48,7 +48,7 @@ class UserDataDirDialog : public views::DialogDelegate,
   virtual bool Dispatch(const MSG& msg);
 
   // SelectFileDialog::Listener Methods:
-  virtual void FileSelected(const std::wstring& path, void* params);
+  virtual void FileSelected(const FilePath& path, int index, void* params);
   virtual void FileSelectionCanceled(void* params);
 
  private:

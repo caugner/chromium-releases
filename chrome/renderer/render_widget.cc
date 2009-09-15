@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,31 @@
 #include "chrome/common/transport_dib.h"
 #include "chrome/renderer/render_process.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/skia/include/core/SkShader.h"
+#include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebPopupMenu.h"
+#include "webkit/api/public/WebPopupMenuInfo.h"
+#include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebScreenInfo.h"
+#include "webkit/api/public/WebSize.h"
 
 #if defined(OS_POSIX)
-#include "skia/include/SkPixelRef.h"
-#include "skia/include/SkMallocPixelRef.h"
+#include "third_party/skia/include/core/SkPixelRef.h"
+#include "third_party/skia/include/core/SkMallocPixelRef.h"
 #endif  // defined(OS_POSIX)
 
-#include "webkit/glue/webinputevent.h"
-#include "webkit/glue/webwidget.h"
+#include "webkit/api/public/WebWidget.h"
+
+using WebKit::WebCompositionCommand;
+using WebKit::WebCursorInfo;
+using WebKit::WebInputEvent;
+using WebKit::WebNavigationPolicy;
+using WebKit::WebPopupMenu;
+using WebKit::WebPopupMenuInfo;
+using WebKit::WebRect;
+using WebKit::WebScreenInfo;
+using WebKit::WebSize;
+using WebKit::WebTextDirection;
 
 RenderWidget::RenderWidget(RenderThreadBase* render_thread, bool activatable)
     : routing_id_(MSG_ROUTING_NONE),
@@ -45,7 +62,8 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread, bool activatable)
       ime_control_new_state_(false),
       ime_control_updated_(false),
       ime_control_busy_(false),
-      activatable_(activatable) {
+      activatable_(activatable),
+      pending_window_rect_count_(0) {
   RenderProcess::current()->AddRefProcess();
   DCHECK(render_thread_);
 }
@@ -74,13 +92,21 @@ RenderWidget* RenderWidget::Create(int32 opener_id,
   return widget;
 }
 
+void RenderWidget::ConfigureAsExternalPopupMenu(const WebPopupMenuInfo& info) {
+  popup_params_.reset(new ViewHostMsg_ShowPopup_Params);
+  popup_params_->item_height = info.itemHeight;
+  popup_params_->selected_item = info.selectedIndex;
+  for (size_t i = 0; i < info.items.size(); ++i)
+    popup_params_->popup_items.push_back(WebMenuItem(info.items[i]));
+}
+
 void RenderWidget::Init(int32 opener_id) {
   DCHECK(!webwidget_);
 
   if (opener_id != MSG_ROUTING_NONE)
     opener_id_ = opener_id;
 
-  webwidget_ = WebWidget::Create(this);
+  webwidget_ = WebPopupMenu::create(this);
 
   bool result = render_thread_->Send(
       new ViewHostMsg_CreateWidget(opener_id, activatable_, &routing_id_));
@@ -119,6 +145,8 @@ IPC_DEFINE_MESSAGE_MAP(RenderWidget)
   IPC_MESSAGE_HANDLER(ViewMsg_ImeSetInputMode, OnImeSetInputMode)
   IPC_MESSAGE_HANDLER(ViewMsg_ImeSetComposition, OnImeSetComposition)
   IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnMsgRepaint)
+  IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
+  IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
   IPC_MESSAGE_UNHANDLED_ERROR()
 IPC_END_MESSAGE_MAP()
 
@@ -186,7 +214,7 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
   // When resizing, we want to wait to paint before ACK'ing the resize.  This
   // ensures that we only resize as fast as we can paint.  We only need to send
   // an ACK if we are resized to a non-empty rect.
-  webwidget_->Resize(new_size);
+  webwidget_->resize(new_size);
   if (!new_size.IsEmpty()) {
     DCHECK(!paint_rect_.IsEmpty());
 
@@ -222,7 +250,7 @@ void RenderWidget::OnWasRestored(bool needs_repainting) {
   set_next_paint_is_restore_ack();
 
   // Generate a full repaint.
-  DidInvalidateRect(webwidget_, gfx::Rect(size_.width(), size_.height()));
+  didInvalidateRect(gfx::Rect(size_.width(), size_.height()));
 }
 
 void RenderWidget::OnPaintRectAck() {
@@ -235,8 +263,16 @@ void RenderWidget::OnPaintRectAck() {
     current_paint_buf_ = NULL;
   }
 
+  // Notify subclasses
+  DidPaint();
+
   // Continue painting if necessary...
   DoDeferredPaint();
+}
+
+void RenderWidget::OnRequestMoveAck() {
+  DCHECK(pending_window_rect_count_);
+  pending_window_rect_count_--;
 }
 
 void RenderWidget::OnScrollRectAck() {
@@ -263,7 +299,7 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
       reinterpret_cast<const WebInputEvent*>(data);
   bool processed = false;
   if (webwidget_)
-    processed = webwidget_->HandleInputEvent(input_event);
+    processed = webwidget_->handleInputEvent(*input_event);
 
   IPC::Message* response = new ViewHostMsg_HandleInputEvent_ACK(routing_id_);
   response->WriteInt(input_event->type);
@@ -274,13 +310,13 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
 
 void RenderWidget::OnMouseCaptureLost() {
   if (webwidget_)
-    webwidget_->MouseCaptureLost();
+    webwidget_->mouseCaptureLost();
 }
 
 void RenderWidget::OnSetFocus(bool enable) {
   has_focus_ = enable;
   if (webwidget_)
-    webwidget_->SetFocus(enable);
+    webwidget_->setFocus(enable);
   if (enable) {
     // Force to retrieve the state of the focused widget to determine if we
     // should activate IMEs next time when this process calls the UpdateIME()
@@ -294,22 +330,31 @@ void RenderWidget::ClearFocus() {
   // We may have got the focus from the browser before this gets processed, in
   // which case we do not want to unfocus ourself.
   if (!has_focus_ && webwidget_)
-    webwidget_->SetFocus(false);
+    webwidget_->setFocus(false);
 }
 
 void RenderWidget::PaintRect(const gfx::Rect& rect,
                              skia::PlatformCanvas* canvas) {
-  // Bring the canvas into the coordinate system of the paint rect
+
+  // Bring the canvas into the coordinate system of the paint rect.
   canvas->translate(static_cast<SkScalar>(-rect.x()),
                     static_cast<SkScalar>(-rect.y()));
 
-  webwidget_->Paint(canvas, rect);
+  // If there is a custom background, tile it.
+  if (!background_.empty()) {
+    SkPaint paint;
+    SkShader* shader = SkShader::CreateBitmapShader(background_,
+                                                    SkShader::kRepeat_TileMode,
+                                                    SkShader::kRepeat_TileMode);
+    paint.setShader(shader)->unref();
+    paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+    canvas->drawPaint(paint);
+  }
+
+  webwidget_->paint(canvas, rect);
 
   // Flush to underlying bitmap.  TODO(darin): is this needed?
   canvas->getTopPlatformDevice().accessBitmap(false);
-
-  // Let the subclass observe this paint operations.
-  DidPaint();
 }
 
 void RenderWidget::DoDeferredPaint() {
@@ -325,7 +370,7 @@ void RenderWidget::DoDeferredPaint() {
   }
 
   // Layout may generate more invalidation...
-  webwidget_->Layout();
+  webwidget_->layout();
 
   // OK, save the current paint_rect to a local since painting may cause more
   // invalidation.  Some WebCore rendering objects only layout when painted.
@@ -340,6 +385,10 @@ void RenderWidget::DoDeferredPaint() {
     NOTREACHED();
     return;
   }
+
+  // We may get back a smaller canvas than we asked for.
+  damaged_rect.set_width(canvas->getDevice()->width());
+  damaged_rect.set_height(canvas->getDevice()->height());
 
   PaintRect(damaged_rect, canvas);
 
@@ -375,7 +424,7 @@ void RenderWidget::DoDeferredScroll() {
 
   // Layout may generate more invalidation, so we might have to bail on
   // optimized scrolling...
-  webwidget_->Layout();
+  webwidget_->layout();
 
   if (scroll_rect_.IsEmpty())
     return;
@@ -419,6 +468,10 @@ void RenderWidget::DoDeferredScroll() {
     return;
   }
 
+  // We may get back a smaller canvas than we asked for.
+  damaged_rect.set_width(canvas->getDevice()->width());
+  damaged_rect.set_height(canvas->getDevice()->height());
+
   // Set these parameters before calling Paint, since that could result in
   // further invalidates (uncommon).
   ViewHostMsg_ScrollRect_Params params;
@@ -444,18 +497,13 @@ void RenderWidget::DoDeferredScroll() {
 ///////////////////////////////////////////////////////////////////////////////
 // WebWidgetDelegate
 
-gfx::NativeViewId RenderWidget::GetContainingView(WebWidget* webwidget) {
-  return host_window_;
-}
-
-void RenderWidget::DidInvalidateRect(WebWidget* webwidget,
-                                     const gfx::Rect& rect) {
+void RenderWidget::didInvalidateRect(const WebRect& rect) {
   // We only want one pending DoDeferredPaint call at any time...
   bool paint_pending = !paint_rect_.IsEmpty();
 
   // If this invalidate overlaps with a pending scroll, then we have to
   // downgrade to invalidating the scroll rect.
-  if (rect.Intersects(scroll_rect_)) {
+  if (gfx::Rect(rect).Intersects(scroll_rect_)) {
     paint_rect_ = paint_rect_.Union(scroll_rect_);
     scroll_rect_ = gfx::Rect();
   }
@@ -480,11 +528,10 @@ void RenderWidget::DidInvalidateRect(WebWidget* webwidget,
       this, &RenderWidget::DoDeferredPaint));
 }
 
-void RenderWidget::DidScrollRect(WebWidget* webwidget, int dx, int dy,
-                                 const gfx::Rect& clip_rect) {
+void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
   if (dx != 0 && dy != 0) {
     // We only support scrolling along one axis at a time.
-    DidScrollRect(webwidget, 0, dy, clip_rect);
+    didScrollRect(0, dy, clip_rect);
     dy = 0;
   }
 
@@ -493,7 +540,7 @@ void RenderWidget::DidScrollRect(WebWidget* webwidget, int dx, int dy,
   // If we already have a pending scroll operation or if this scroll operation
   // intersects the existing paint region, then just failover to invalidating.
   if (!scroll_rect_.IsEmpty() || intersects_with_painting) {
-    if (!intersects_with_painting && scroll_rect_ == clip_rect) {
+    if (!intersects_with_painting && scroll_rect_ == gfx::Rect(clip_rect)) {
       // OK, we can just update the scroll delta (requires same scrolling axis)
       if (!dx && !scroll_delta_.x()) {
         scroll_delta_.set_y(scroll_delta_.y() + dy);
@@ -504,9 +551,9 @@ void RenderWidget::DidScrollRect(WebWidget* webwidget, int dx, int dy,
         return;
       }
     }
-    DidInvalidateRect(webwidget_, scroll_rect_);
+    didInvalidateRect(scroll_rect_);
     DCHECK(scroll_rect_.IsEmpty());
-    DidInvalidateRect(webwidget_, clip_rect);
+    didInvalidateRect(clip_rect);
     return;
   }
 
@@ -524,7 +571,10 @@ void RenderWidget::DidScrollRect(WebWidget* webwidget, int dx, int dy,
       this, &RenderWidget::DoDeferredScroll));
 }
 
-void RenderWidget::SetCursor(WebWidget* webwidget, const WebCursor& cursor) {
+void RenderWidget::didChangeCursor(const WebCursorInfo& cursor_info) {
+  // TODO(darin): Eliminate this temporary.
+  WebCursor cursor(cursor_info);
+
   // Only send a SetCursor message if we need to make a change.
   if (!current_cursor_.IsEqual(cursor)) {
     current_cursor_ = cursor;
@@ -539,8 +589,7 @@ void RenderWidget::SetCursor(WebWidget* webwidget, const WebCursor& cursor) {
 // This method provides us with the information about how to display the newly
 // created RenderWidget (i.e., as a constrained popup or as a new tab).
 //
-void RenderWidget::Show(WebWidget* webwidget,
-                        WindowOpenDisposition disposition) {
+void RenderWidget::show(WebNavigationPolicy) {
   DCHECK(!did_show_) << "received extraneous Show call";
   DCHECK(routing_id_ != MSG_ROUTING_NONE);
   DCHECK(opener_id_ != MSG_ROUTING_NONE);
@@ -550,12 +599,18 @@ void RenderWidget::Show(WebWidget* webwidget,
     // NOTE: initial_pos_ may still have its default values at this point, but
     // that's okay.  It'll be ignored if as_popup is false, or the browser
     // process will impose a default position otherwise.
-    render_thread_->Send(new ViewHostMsg_ShowWidget(
-        opener_id_, routing_id_, initial_pos_));
+    if (popup_params_.get()) {
+      popup_params_->bounds = initial_pos_;
+      Send(new ViewHostMsg_ShowPopup(routing_id_, *popup_params_));
+      popup_params_.reset();
+    } else {
+      Send(new ViewHostMsg_ShowWidget(opener_id_, routing_id_, initial_pos_));
+    }
+    SetPendingWindowRect(initial_pos_);
   }
 }
 
-void RenderWidget::Focus(WebWidget* webwidget) {
+void RenderWidget::didFocus() {
   // Prevent the widget from stealing the focus if it does not have focus
   // already.  We do this by explicitely setting the focus to false again.
   // We only let the browser focus the renderer.
@@ -565,44 +620,78 @@ void RenderWidget::Focus(WebWidget* webwidget) {
   }
 }
 
-void RenderWidget::Blur(WebWidget* webwidget) {
+void RenderWidget::didBlur() {
   Send(new ViewHostMsg_Blur(routing_id_));
 }
 
-void RenderWidget::CloseWidgetSoon(WebWidget* webwidget) {
+void RenderWidget::DoDeferredClose() {
+  Send(new ViewHostMsg_Close(routing_id_));
+}
+
+void RenderWidget::closeWidgetSoon() {
   // If a page calls window.close() twice, we'll end up here twice, but that's
   // OK.  It is safe to send multiple Close messages.
 
-  // Ask the RenderWidgetHost to initiate close.
-  Send(new ViewHostMsg_Close(routing_id_));
+  // Ask the RenderWidgetHost to initiate close.  We could be called from deep
+  // in Javascript.  If we ask the RendwerWidgetHost to close now, the window
+  // could be closed before the JS finishes executing.  So instead, post a
+  // message back to the message loop, which won't run until the JS is
+  // complete, and then the Close message can be sent.
+  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &RenderWidget::DoDeferredClose));
+}
+
+void RenderWidget::GenerateFullRepaint() {
+  didInvalidateRect(gfx::Rect(size_.width(), size_.height()));
 }
 
 void RenderWidget::Close() {
   if (webwidget_) {
-    webwidget_->Close();
+    webwidget_->close();
     webwidget_ = NULL;
   }
 }
 
-void RenderWidget::GetWindowRect(WebWidget* webwidget, gfx::Rect* rect) {
-  Send(new ViewHostMsg_GetWindowRect(routing_id_, host_window_, rect));
+WebRect RenderWidget::windowRect() {
+  if (pending_window_rect_count_)
+    return pending_window_rect_;
+
+  gfx::Rect rect;
+  Send(new ViewHostMsg_GetWindowRect(routing_id_, host_window_, &rect));
+  return rect;
 }
 
-void RenderWidget::SetWindowRect(WebWidget* webwidget, const gfx::Rect& pos) {
+void RenderWidget::setWindowRect(const WebRect& pos) {
   if (did_show_) {
     Send(new ViewHostMsg_RequestMove(routing_id_, pos));
+    SetPendingWindowRect(pos);
   } else {
     initial_pos_ = pos;
   }
 }
 
-void RenderWidget::GetRootWindowRect(WebWidget* webwidget, gfx::Rect* rect) {
-  Send(new ViewHostMsg_GetRootWindowRect(routing_id_, host_window_, rect));
+void RenderWidget::SetPendingWindowRect(const WebRect& rect) {
+  pending_window_rect_ = rect;
+  pending_window_rect_count_++;
 }
 
-void RenderWidget::GetRootWindowResizerRect(WebWidget* webwidget,
-                                            gfx::Rect* rect) {
-  *rect = resizer_rect_;
+WebRect RenderWidget::rootWindowRect() {
+  if (pending_window_rect_count_) {
+    // NOTE(mbelshe): If there is a pending_window_rect_, then getting
+    // the RootWindowRect is probably going to return wrong results since the
+    // browser may not have processed the Move yet.  There isn't really anything
+    // good to do in this case, and it shouldn't happen - since this size is
+    // only really needed for windowToScreen, which is only used for Popups.
+    return pending_window_rect_;
+  }
+
+  gfx::Rect rect;
+  Send(new ViewHostMsg_GetRootWindowRect(routing_id_, host_window_, &rect));
+  return rect;
+}
+
+WebRect RenderWidget::windowResizerRect() {
+  return resizer_rect_;
 }
 
 void RenderWidget::OnImeSetInputMode(bool is_active) {
@@ -612,17 +701,17 @@ void RenderWidget::OnImeSetInputMode(bool is_active) {
   ime_is_active_ = is_active;
 }
 
-void RenderWidget::OnImeSetComposition(int string_type,
+void RenderWidget::OnImeSetComposition(WebCompositionCommand command,
                                        int cursor_position,
                                        int target_start, int target_end,
-                                       const std::wstring& ime_string) {
-  if (webwidget_) {
-    ime_control_busy_ = true;
-    webwidget_->ImeSetComposition(string_type, cursor_position,
-                                  target_start, target_end,
-                                  ime_string);
-    ime_control_busy_ = false;
-  }
+                                       const string16& ime_string) {
+  if (!webwidget_)
+    return;
+  ime_control_busy_ = true;
+  webwidget_->handleCompositionEvent(command, cursor_position,
+                                     target_start, target_end,
+                                     ime_string);
+  ime_control_busy_ = false;
 }
 
 void RenderWidget::OnMsgRepaint(const gfx::Size& size_to_paint) {
@@ -632,7 +721,19 @@ void RenderWidget::OnMsgRepaint(const gfx::Size& size_to_paint) {
 
   set_next_paint_is_repaint_ack();
   gfx::Rect repaint_rect(size_to_paint.width(), size_to_paint.height());
-  DidInvalidateRect(webwidget_, repaint_rect);
+  didInvalidateRect(repaint_rect);
+}
+
+void RenderWidget::OnSetTextDirection(WebTextDirection direction) {
+  if (!webwidget_)
+    return;
+  webwidget_->setTextDirection(direction);
+}
+
+void RenderWidget::SetBackground(const SkBitmap& background) {
+  background_ = background;
+  // Generate a full repaint.
+  didInvalidateRect(gfx::Rect(size_.width(), size_.height()));
 }
 
 bool RenderWidget::next_paint_is_resize_ack() const {
@@ -666,9 +767,9 @@ void RenderWidget::UpdateIME() {
   // Retrieve the caret position from the focused widget and verify we should
   // enabled IMEs attached to the browser process.
   bool enable_ime = false;
-  gfx::Rect caret_rect;
+  WebRect caret_rect;
   if (!webwidget_ ||
-      !webwidget_->ImeUpdateStatus(&enable_ime, &caret_rect)) {
+      !webwidget_->queryCompositionStatus(&enable_ime, &caret_rect)) {
     // There are not any editable widgets attached to this process.
     // We should disable the IME to prevent it from sending CJK strings to
     // non-editable widgets.
@@ -712,8 +813,8 @@ void RenderWidget::UpdateIME() {
     // The input focus is not changed.
     // Notify the caret position to a browser process only if it is changed.
     if (ime_control_enable_ime_) {
-      if (caret_rect.x() != ime_control_x_ ||
-          caret_rect.y() != ime_control_y_) {
+      if (caret_rect.x != ime_control_x_ ||
+          caret_rect.y != ime_control_y_) {
         Send(new ViewHostMsg_ImeUpdateStatus(routing_id(), IME_MOVE_WINDOWS,
                                              caret_rect));
       }
@@ -722,12 +823,17 @@ void RenderWidget::UpdateIME() {
   // Save the updated IME status to prevent from sending the same IPC messages.
   ime_control_updated_ = false;
   ime_control_enable_ime_ = ime_control_new_state_;
-  ime_control_x_ = caret_rect.x();
-  ime_control_y_ = caret_rect.y();
+  ime_control_x_ = caret_rect.x;
+  ime_control_y_ = caret_rect.y;
 }
 
-void RenderWidget::DidMove(WebWidget* webwidget,
-                           const WebPluginGeometry& move) {
+WebScreenInfo RenderWidget::screenInfo() {
+  WebScreenInfo results;
+  Send(new ViewHostMsg_GetScreenInfo(routing_id_, host_window_, &results));
+  return results;
+}
+
+void RenderWidget::SchedulePluginMove(const WebPluginGeometry& move) {
   size_t i = 0;
   for (; i < plugin_window_moves_.size(); ++i) {
     if (plugin_window_moves_[i].window == move.window) {

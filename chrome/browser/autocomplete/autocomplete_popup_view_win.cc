@@ -11,6 +11,11 @@
 #include <atlmisc.h>
 #include <cmath>
 
+#include "app/gfx/canvas.h"
+#include "app/gfx/font.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
@@ -21,15 +26,13 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/views/location_bar_view.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/view.h"
 #include "grit/theme_resources.h"
 #include "third_party/icu38/public/common/unicode/ubidi.h"
+#include "views/view.h"
 
 // Padding between text and the star indicator, in pixels.
 static const int kStarPadding = 4;
@@ -84,10 +87,10 @@ int AutocompletePopupViewWin::MirroringContext::GetLeft(int x1, int x2) const {
 const wchar_t AutocompletePopupViewWin::DrawLineInfo::ellipsis_str[] =
     L"\x2026";
 
-AutocompletePopupViewWin::DrawLineInfo::DrawLineInfo(const ChromeFont& font) {
+AutocompletePopupViewWin::DrawLineInfo::DrawLineInfo(const gfx::Font& font) {
   // Create regular and bold fonts.
   regular_font = font.DeriveFont(-1);
-  bold_font = regular_font.DeriveFont(0, ChromeFont::BOLD);
+  bold_font = regular_font.DeriveFont(0, gfx::Font::BOLD);
 
   // The total padding added to each line (bottom padding is what is
   // left over after DrawEntry() specifies its top offset).
@@ -183,7 +186,7 @@ COLORREF AutocompletePopupViewWin::DrawLineInfo::AlphaBlend(
 }
 
 AutocompletePopupViewWin::AutocompletePopupViewWin(
-    const ChromeFont& font,
+    const gfx::Font& font,
     AutocompleteEditViewWin* edit_view,
     AutocompleteEditModel* edit_model,
     Profile* profile)
@@ -345,7 +348,8 @@ void AutocompletePopupViewWin::OnMouseMove(UINT keys, const CPoint& point) {
 
 void AutocompletePopupViewWin::OnPaint(HDC other_dc) {
   const AutocompleteResult& result = model_->result();
-  DCHECK(!result.empty());  // Shouldn't be drawing an empty popup.
+  CHECK(!result.empty());  // Shouldn't be drawing an empty popup; any empty
+                           // result set should have synchronously closed us.
 
   CPaintDC dc(m_hWnd);
 
@@ -365,8 +369,18 @@ void AutocompletePopupViewWin::OnPaint(HDC other_dc) {
   }
 
   // Only repaint the invalid lines.
+  // In rare cases, it seems possible to get line offsets off the end of the
+  // popup.  I suspect this can happen when the user invalidates a new line
+  // (e.g. by moving the mouse) and, before the paint request is serviced, hits
+  // a key that causes autocomplete to run, causing the results list to become
+  // shorter (at least initially).  So sanitize the line numbers here.
+  const size_t last_valid_line = result.size() - 1;
   const size_t first_line = PixelToLine(dc.m_ps.rcPaint.top);
-  const size_t last_line = PixelToLine(dc.m_ps.rcPaint.bottom);
+  if (first_line > last_valid_line)
+    return;
+  const size_t last_line =
+      std::min(PixelToLine(dc.m_ps.rcPaint.bottom), last_valid_line);
+
   for (size_t i = first_line; i <= last_line; ++i) {
     DrawLineInfo::LineStatus status;
     // Selection should take precedence over hover.
@@ -656,10 +670,23 @@ void AutocompletePopupViewWin::DrawEntry(HDC dc,
 }
 
 void AutocompletePopupViewWin::DrawStar(HDC dc, int x, int y) const {
-  ChromeCanvas canvas(star_->width(), star_->height(), false);
+  gfx::Canvas canvas(star_->width(), star_->height(), false);
   // Make the background completely transparent.
-  canvas.drawColor(SK_ColorBLACK, SkPorterDuff::kClear_Mode);
+  canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
   canvas.DrawBitmapInt(*star_, 0, 0);
   canvas.getTopPlatformDevice().drawToHDC(
       dc, mirroring_context_->GetLeft(x, x + star_->width()), y, NULL);
+}
+
+// static
+AutocompletePopupView* AutocompletePopupView::CreatePopupView(
+    const gfx::Font& font,
+    AutocompleteEditViewWin* edit_view,
+    AutocompleteEditModel* edit_model,
+    Profile* profile,
+    AutocompletePopupPositioner* popup_positioner) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableOmnibox2))
+    return new AutocompletePopupViewWin(font, edit_view, edit_model, profile);
+  return new AutocompletePopupContentsView(font, edit_view, edit_model,
+                                           profile, popup_positioner);
 }

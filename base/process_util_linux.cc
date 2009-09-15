@@ -7,11 +7,13 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <string>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
+#include <string>
+
+#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_tokenizer.h"
@@ -24,58 +26,128 @@ enum ParsingState {
   KEY_VALUE
 };
 
+// Reads /proc/<pid>/stat and populates |proc_stats| with the values split by
+// spaces.
+void GetProcStats(pid_t pid, std::vector<std::string>* proc_stats) {
+  FilePath stat_file("/proc");
+  stat_file = stat_file.Append(IntToString(pid));
+  stat_file = stat_file.Append("stat");
+  std::string mem_stats;
+  if (!file_util::ReadFileToString(stat_file, &mem_stats))
+    return;
+  SplitString(mem_stats, ' ', proc_stats);
+}
+
 }  // namespace
 
 namespace base {
 
+ProcessId GetParentProcessId(ProcessHandle process) {
+  FilePath stat_file("/proc");
+  stat_file = stat_file.Append(IntToString(process));
+  stat_file = stat_file.Append("status");
+  std::string status;
+  if (!file_util::ReadFileToString(stat_file, &status))
+    return -1;
+
+  StringTokenizer tokenizer(status, ":\n");
+  ParsingState state = KEY_NAME;
+  std::string last_key_name;
+  while (tokenizer.GetNext()) {
+    switch (state) {
+      case KEY_NAME:
+        last_key_name = tokenizer.token();
+        state = KEY_VALUE;
+        break;
+      case KEY_VALUE:
+        DCHECK(!last_key_name.empty());
+        if (last_key_name == "PPid") {
+          pid_t ppid = StringToInt(tokenizer.token());
+          return ppid;
+        }
+        state = KEY_NAME;
+        break;
+    }
+  }
+  NOTREACHED();
+  return -1;
+}
+
+FilePath GetProcessExecutablePath(ProcessHandle process) {
+  FilePath stat_file("/proc");
+  stat_file = stat_file.Append(IntToString(process));
+  stat_file = stat_file.Append("exe");
+  char exename[2048];
+  ssize_t len = readlink(stat_file.value().c_str(), exename, sizeof(exename));
+  if (len < 1) {
+    // No such process.  Happens frequently in e.g. TerminateAllChromeProcesses
+    return FilePath();
+  }
+  return FilePath(std::string(exename, len));
+}
+
 bool LaunchApp(const std::vector<std::string>& argv,
+               const environment_vector& environ,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle) {
-  bool retval = true;
+  pid_t pid = fork();
+  if (pid < 0)
+    return false;
 
-  char* argv_copy[argv.size() + 1];
-  for (size_t i = 0; i < argv.size(); i++) {
-    argv_copy[i] = new char[argv[i].size() + 1];
-    strcpy(argv_copy[i], argv[i].c_str());
-  }
-  argv_copy[argv.size()] = NULL;
-
-  // Make sure we don't leak any FDs to the child process by marking all FDs
-  // as close-on-exec.
-  SetAllFDsToCloseOnExec();
-
-  int pid = fork();
   if (pid == 0) {
-    for (file_handle_mapping_vector::const_iterator it = fds_to_remap.begin();
-         it != fds_to_remap.end();
-         ++it) {
-      int src_fd = it->first;
-      int dest_fd = it->second;
-      if (src_fd == dest_fd) {
-        int flags = fcntl(src_fd, F_GETFD);
-        if (flags != -1) {
-          fcntl(src_fd, F_SETFD, flags & ~FD_CLOEXEC);
+    // Child process
+    InjectiveMultimap fd_shuffle;
+    for (file_handle_mapping_vector::const_iterator
+        it = fds_to_remap.begin(); it != fds_to_remap.end(); ++it) {
+      fd_shuffle.push_back(InjectionArc(it->first, it->second, false));
+    }
+
+    for (environment_vector::const_iterator it = environ.begin();
+         it != environ.end(); ++it) {
+      if (it->first) {
+        if (it->second) {
+          setenv(it->first, it->second, 1);
+        } else {
+          unsetenv(it->first);
         }
-      } else {
-        dup2(src_fd, dest_fd);
       }
     }
 
-    execvp(argv_copy[0], argv_copy);
-  } else if (pid < 0) {
-    retval = false;
+    if (!ShuffleFileDescriptors(fd_shuffle))
+      exit(127);
+
+    // If we are using the SUID sandbox, it sets a magic environment variable
+    // ("SBX_D"), so we remove that variable from the environment here on the
+    // off chance that it's already set.
+    unsetenv("SBX_D");
+
+    CloseSuperfluousFds(fd_shuffle);
+
+    scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+    for (size_t i = 0; i < argv.size(); i++)
+      argv_cstr[i] = const_cast<char*>(argv[i].c_str());
+    argv_cstr[argv.size()] = NULL;
+    execvp(argv_cstr[0], argv_cstr.get());
+    LOG(ERROR) << "LaunchApp: exec failed!, argv_cstr[0] " << argv_cstr[0]
+        << ", errno " << errno;
+    exit(127);
   } else {
+    // Parent process
     if (wait)
-      waitpid(pid, 0, 0);
+      HANDLE_EINTR(waitpid(pid, 0, 0));
 
     if (process_handle)
       *process_handle = pid;
   }
 
-  for (size_t i = 0; i < argv.size(); i++)
-    delete[] argv_copy[i];
+  return true;
+}
 
-  return retval;
+bool LaunchApp(const std::vector<std::string>& argv,
+               const file_handle_mapping_vector& fds_to_remap,
+               bool wait, ProcessHandle* process_handle) {
+  base::environment_vector no_env;
+  return LaunchApp(argv, no_env, fds_to_remap, wait, process_handle);
 }
 
 bool LaunchApp(const CommandLine& cl,
@@ -200,11 +272,56 @@ bool NamedProcessIterator::IncludeEntry() {
   return filter_->Includes(entry_.pid, entry_.ppid);
 }
 
+// On linux, we return vsize.
+size_t ProcessMetrics::GetPagefileUsage() const {
+  std::vector<std::string> proc_stats;
+  GetProcStats(process_, &proc_stats);
+  const size_t kVmSize = 22;
+  if (proc_stats.size() > kVmSize)
+    return static_cast<size_t>(StringToInt(proc_stats[kVmSize]));
+  return 0;
+}
+
+size_t ProcessMetrics::GetPeakPagefileUsage() const {
+  // http://crbug.com/16251
+  return 0;
+}
+
+// On linux, we return RSS.
+size_t ProcessMetrics::GetWorkingSetSize() const {
+  std::vector<std::string> proc_stats;
+  GetProcStats(process_, &proc_stats);
+  const size_t kVmRss = 23;
+  if (proc_stats.size() > kVmRss) {
+    size_t num_pages = static_cast<size_t>(StringToInt(proc_stats[kVmRss]));
+    return num_pages * getpagesize();
+  }
+  return 0;
+}
+
+size_t ProcessMetrics::GetPeakWorkingSetSize() const {
+  // http://crbug.com/16251
+  return 0;
+}
+
+size_t ProcessMetrics::GetPrivateBytes() const {
+  // http://crbug.com/16251
+  return 0;
+}
+
+bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
+  // http://crbug.com/16251
+  return false;
+}
+
 // To have /proc/self/io file you must enable CONFIG_TASK_IO_ACCOUNTING
 // in your kernel configuration.
-bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) {
+bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
   std::string proc_io_contents;
-  if (!file_util::ReadFileToString(L"/proc/self/io", &proc_io_contents))
+  FilePath io_file("/proc");
+  io_file = io_file.Append(IntToString(process_));
+  io_file = io_file.Append("io");
+  if (!file_util::ReadFileToString(io_file, &proc_io_contents))
     return false;
 
   (*io_counters).OtherOperationCount = 0;

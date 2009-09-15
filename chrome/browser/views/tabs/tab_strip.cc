@@ -1,10 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/tabs/tab_strip.h"
 
+#include "app/drag_drop_types.h"
+#include "app/gfx/canvas.h"
+#include "app/gfx/path.h"
+#include "app/l10n_util.h"
+#include "app/os_exchange_data.h"
+#include "app/resource_bundle.h"
+#include "app/slide_animation.h"
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 #include "base/gfx/size.h"
+#include "base/stl_util-inl.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -12,23 +24,15 @@
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/tabs/dragged_tab_controller.h"
 #include "chrome/browser/views/tabs/tab.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/common/drag_drop_types.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/path.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/os_exchange_data.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/slide_animation.h"
-#include "chrome/common/stl_util-inl.h"
-#include "chrome/common/win_util.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/painter.h"
-#include "chrome/views/window/non_client_view.h"
-#include "chrome/views/window/window.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/controls/image_view.h"
+#include "views/painter.h"
+#include "views/widget/default_theme_provider.h"
+#include "views/window/non_client_view.h"
+#include "views/window/window.h"
 
 #undef min
 #undef max
@@ -75,7 +79,6 @@ class NewTabButton : public views::ImageButton {
   virtual void GetHitTestMask(gfx::Path* path) const {
     DCHECK(path);
 
-    SkScalar h = SkIntToScalar(height());
     SkScalar w = SkIntToScalar(width());
 
     // These values are defined by the shape of the new tab bitmap. Should that
@@ -225,13 +228,13 @@ class TabStrip::TabAnimation : public AnimationDelegate {
 
   const Type type_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TabAnimation);
+  DISALLOW_COPY_AND_ASSIGN(TabAnimation);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 // Handles insertion of a Tab at |index|.
-class InsertTabAnimation : public TabStrip::TabAnimation {
+class TabStrip::InsertTabAnimation : public TabStrip::TabAnimation {
  public:
   explicit InsertTabAnimation(TabStrip* tabstrip, int index)
       : TabAnimation(tabstrip, INSERT),
@@ -266,13 +269,13 @@ class InsertTabAnimation : public TabStrip::TabAnimation {
  private:
   int index_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(InsertTabAnimation);
+  DISALLOW_COPY_AND_ASSIGN(InsertTabAnimation);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 // Handles removal of a Tab from |index|
-class RemoveTabAnimation : public TabStrip::TabAnimation {
+class TabStrip::RemoveTabAnimation : public TabStrip::TabAnimation {
  public:
   RemoveTabAnimation(TabStrip* tabstrip, int index, TabContents* contents)
       : TabAnimation(tabstrip, REMOVE),
@@ -336,29 +339,33 @@ class RemoveTabAnimation : public TabStrip::TabAnimation {
       return;
     }
 
-    POINT pt;
-    GetCursorPos(&pt);
+#if defined(OS_WIN)
+    // Force the close button (that slides under the mouse) to highlight by
+    // saying the mouse just moved, but sending the same coordinates.
+    DWORD pos = GetMessagePos();
+    POINT cursor_point = {GET_X_LPARAM(pos), GET_Y_LPARAM(pos)};
     views::Widget* widget = tabstrip_->GetWidget();
-    RECT wr;
-    GetWindowRect(widget->GetNativeView(), &wr);
-    pt.x -= wr.left;
-    pt.y -= wr.top;
+    MapWindowPoints(NULL, widget->GetNativeView(), &cursor_point, 1);
 
+    static_cast<views::WidgetWin*>(widget)->ResetLastMouseMoveFlag();
     // Return to message loop - otherwise we may disrupt some operation that's
     // in progress.
-    PostMessage(widget->GetNativeView(), WM_MOUSEMOVE, 0,
-                MAKELPARAM(pt.x, pt.y));
+    SendMessage(widget->GetNativeView(), WM_MOUSEMOVE, 0,
+                MAKELPARAM(cursor_point.x, cursor_point.y));
+#else
+    NOTIMPLEMENTED();
+#endif
   }
 
   int index_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RemoveTabAnimation);
+  DISALLOW_COPY_AND_ASSIGN(RemoveTabAnimation);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 // Handles the movement of a Tab from one position to another.
-class MoveTabAnimation : public TabStrip::TabAnimation {
+class TabStrip::MoveTabAnimation : public TabStrip::TabAnimation {
  public:
   MoveTabAnimation(TabStrip* tabstrip, int tab_a_index, int tab_b_index)
       : TabAnimation(tabstrip, MOVE),
@@ -406,14 +413,14 @@ class MoveTabAnimation : public TabStrip::TabAnimation {
   gfx::Rect start_tab_a_bounds_;
   gfx::Rect start_tab_b_bounds_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(MoveTabAnimation);
+  DISALLOW_COPY_AND_ASSIGN(MoveTabAnimation);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 // Handles the animated resize layout of the entire TabStrip from one width
 // to another.
-class ResizeLayoutAnimation : public TabStrip::TabAnimation {
+class TabStrip::ResizeLayoutAnimation : public TabStrip::TabAnimation {
  public:
   explicit ResizeLayoutAnimation(TabStrip* tabstrip)
       : TabAnimation(tabstrip, RESIZE) {
@@ -461,7 +468,7 @@ class ResizeLayoutAnimation : public TabStrip::TabAnimation {
     }
   }
 
-  DISALLOW_EVIL_CONSTRUCTORS(ResizeLayoutAnimation);
+  DISALLOW_COPY_AND_ASSIGN(ResizeLayoutAnimation);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -491,44 +498,8 @@ TabStrip::~TabStrip() {
   RemoveMessageLoopObserver();
 }
 
-int TabStrip::GetPreferredHeight() {
-  return GetPreferredSize().height();
-}
-
 bool TabStrip::CanProcessInputEvents() const {
-  return IsAnimating() == NULL;
-}
-
-bool TabStrip::PointIsWithinWindowCaption(const gfx::Point& point) {
-  views::View* v = GetViewForPoint(point);
-
-  // If there is no control at this location, claim the hit was in the title
-  // bar to get a move action.
-  if (v == this)
-    return true;
-
-  // Check to see if the point is within the non-button parts of the new tab
-  // button. The button has a non-rectangular shape, so if it's not in the
-  // visual portions of the button we treat it as a click to the caption.
-  gfx::Point point_in_newtab_coords(point);
-  View::ConvertPointToView(this, newtab_button_, &point_in_newtab_coords);
-  if (newtab_button_->bounds().Contains(point) &&
-      !newtab_button_->HitTest(point_in_newtab_coords)) {
-    return true;
-  }
-
-  // All other regions, including the new Tab button, should be considered part
-  // of the containing Window's client area so that regular events can be
-  // processed for them.
-  return false;
-}
-
-bool TabStrip::IsCompatibleWith(TabStrip* other) {
-  return model_->profile() == other->model()->profile();
-}
-
-bool TabStrip::IsAnimating() const {
-  return active_animation_.get() != NULL;
+  return !IsAnimating();
 }
 
 void TabStrip::DestroyDragController() {
@@ -565,28 +536,17 @@ gfx::Rect TabStrip::GetIdealBounds(int index) {
   return tab_data_.at(index).ideal_bounds;
 }
 
-void TabStrip::UpdateLoadingAnimations() {
-  for (int i = 0, index = 0; i < GetTabCount(); ++i, ++index) {
-    Tab* current_tab = GetTabAt(i);
-    if (current_tab->closing()) {
-      --index;
-    } else {
-      TabContents* contents = model_->GetTabContentsAt(index);
-      if (!contents || !contents->is_loading()) {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_NONE);
-      } else if (contents->waiting_for_response()) {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_WAITING);
-      } else {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_LOADING);
-      }
-    }
-  }
+void TabStrip::InitTabStripButtons() {
+  newtab_button_ = new NewTabButton(this);
+  LoadNewTabButtonImage();
+  newtab_button_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_NEWTAB));
+  AddChildView(newtab_button_);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, views::View overrides:
 
-void TabStrip::PaintChildren(ChromeCanvas* canvas) {
+void TabStrip::PaintChildren(gfx::Canvas* canvas) {
   // Paint the tabs in reverse order, so they stack to the left.
   Tab* selected_tab = NULL;
   for (int i = GetTabCount() - 1; i >= 0; --i) {
@@ -601,11 +561,11 @@ void TabStrip::PaintChildren(ChromeCanvas* canvas) {
     }
   }
 
-  if (GetWidget()->AsWindow()->GetNonClientView()->UseNativeFrame()) {
+  if (GetThemeProvider()->ShouldUseNativeFrame()) {
     // Make sure unselected tabs are somewhat transparent.
     SkPaint paint;
     paint.setColor(SkColorSetARGB(200, 255, 255, 255));
-    paint.setPorterDuffXfermode(SkPorterDuff::kDstIn_Mode);
+    paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
     paint.setStyle(SkPaint::kFill_Style);
     canvas->FillRectInt(
         0, 0, width(),
@@ -648,6 +608,7 @@ void TabStrip::Layout() {
   GenerateIdealBounds();
   int tab_count = GetTabCount();
   int tab_right = 0;
+
   for (int i = 0; i < tab_count; ++i) {
     const gfx::Rect& bounds = tab_data_.at(i).ideal_bounds;
     GetTabAt(i)->SetBounds(bounds.x(), bounds.y(), bounds.width(),
@@ -698,24 +659,23 @@ int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
         model_->delegate()->CreateTabContentsForURL(
             url, GURL(), model_->profile(), PageTransition::TYPED, false,
             NULL);
-    model_->AddTabContents(contents, drop_index, PageTransition::GENERATED,
-                           true);
+    model_->AddTabContents(contents, drop_index, false,
+                           PageTransition::GENERATED, true);
   } else {
     UserMetrics::RecordAction(L"Tab_DropURLOnTab", model_->profile());
 
-    model_->GetTabContentsAt(drop_index)->controller()->
-        LoadURL(url, GURL(), PageTransition::GENERATED);
+    model_->GetTabContentsAt(drop_index)->controller().LoadURL(
+        url, GURL(), PageTransition::GENERATED);
     model_->SelectTabContentsAt(drop_index, true);
   }
 
   return GetDropEffect(event);
 }
 
-bool TabStrip::GetAccessibleRole(VARIANT* role) {
+bool TabStrip::GetAccessibleRole(AccessibilityTypes::Role* role) {
   DCHECK(role);
 
-  role->vt = VT_I4;
-  role->lVal = ROLE_SYSTEM_GROUPING;
+  *role = AccessibilityTypes::ROLE_GROUPING;
   return true;
 }
 
@@ -732,14 +692,9 @@ void TabStrip::SetAccessibleName(const std::wstring& name) {
 }
 
 views::View* TabStrip::GetViewForPoint(const gfx::Point& point) {
-  return GetViewForPoint(point, false);
-}
-
-views::View* TabStrip::GetViewForPoint(const gfx::Point& point,
-                                       bool can_create_floating) {
   // Return any view that isn't a Tab or this TabStrip immediately. We don't
   // want to interfere.
-  views::View* v = View::GetViewForPoint(point, can_create_floating);
+  views::View* v = View::GetViewForPoint(point);
   if (v && v != this && v->GetClassName() != Tab::kTabClassName)
     return v;
 
@@ -760,6 +715,18 @@ views::View* TabStrip::GetViewForPoint(const gfx::Point& point,
   // No need to do any floating view stuff, we don't use them in the TabStrip.
   return this;
 }
+
+void TabStrip::ThemeChanged() {
+  LoadNewTabButtonImage();
+}
+
+void TabStrip::ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child) {
+  if (is_add && child == this)
+    InitTabStripButtons();
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, TabStripModelObserver implementation:
@@ -806,11 +773,11 @@ void TabStrip::TabInsertedAt(TabContents* contents,
     if (index == TabStripModel::kNoTab) {
       TabData d = { tab, gfx::Rect() };
       tab_data_.push_back(d);
-      tab->UpdateData(contents);
+      tab->UpdateData(contents, false);
     } else {
       TabData d = { tab, gfx::Rect() };
       tab_data_.insert(tab_data_.begin() + index, d);
-      tab->UpdateData(contents);
+      tab->UpdateData(contents, false);
     }
   }
 
@@ -821,8 +788,7 @@ void TabStrip::TabInsertedAt(TabContents* contents,
 
   // Don't animate the first tab, it looks weird, and don't animate anything
   // if the containing window isn't visible yet.
-  if (GetTabCount() > 1 && GetWidget() &&
-      IsWindowVisible(GetWidget()->GetNativeView())) {
+  if (GetTabCount() > 1 && GetWindow() && GetWindow()->IsVisible()) {
     StartInsertTabAnimation(index);
   } else {
     Layout();
@@ -857,9 +823,9 @@ void TabStrip::TabSelectedAt(TabContents* old_contents,
   }
 }
 
-void TabStrip::TabMoved(TabContents* contents, int from_index, int to_index) {
+void TabStrip::TabMoved(TabContents* contents, int from_index, int to_index,
+                        bool pinned_state_changed) {
   Tab* tab = GetTabAt(from_index);
-  Tab* other_tab = GetTabAt(to_index);
   tab_data_.erase(tab_data_.begin() + from_index);
   TabData data = {tab, gfx::Rect()};
   tab_data_.insert(tab_data_.begin() + to_index, data);
@@ -867,11 +833,12 @@ void TabStrip::TabMoved(TabContents* contents, int from_index, int to_index) {
   StartMoveTabAnimation(from_index, to_index);
 }
 
-void TabStrip::TabChangedAt(TabContents* contents, int index) {
+void TabStrip::TabChangedAt(TabContents* contents, int index,
+                            bool loading_only) {
   // Index is in terms of the model. Need to make sure we adjust that index in
   // case we have an animation going.
   Tab* tab = GetTabAtAdjustForAnimation(index);
-  tab->UpdateData(contents);
+  tab->UpdateData(contents, loading_only);
   tab->UpdateFromModel();
 }
 
@@ -882,15 +849,7 @@ bool TabStrip::IsTabSelected(const Tab* tab) const {
   if (tab->closing())
     return false;
 
-  int tab_count = GetTabCount();
-  for (int i = 0, index = 0; i < tab_count; ++i, ++index) {
-    Tab* current_tab = GetTabAt(i);
-    if (current_tab->closing())
-      --index;
-    if (current_tab == tab)
-      return index == model_->selected_index();
-  }
-  return false;
+  return GetIndexOfTab(tab) == model_->selected_index();
 }
 
 void TabStrip::SelectTab(Tab* tab) {
@@ -912,6 +871,8 @@ void TabStrip::CloseTab(Tab* tab) {
     available_width_for_tabs_ = GetAvailableWidthForTabs(last_tab);
     resize_layout_scheduled_ = true;
     AddMessageLoopObserver();
+    // Note that the next call might not close the tab (because of unload
+    // hanlders or if the delegate veto the close).
     model_->CloseTabContentsAt(tab_index);
   }
 }
@@ -1008,13 +969,16 @@ bool TabStrip::HasAvailableDragActions() const {
 // TabStrip, views::BaseButton::ButtonListener implementation:
 
 void TabStrip::ButtonPressed(views::Button* sender) {
-  if (sender == newtab_button_)
-    model_->AddBlankTab(true);
+  if (sender == newtab_button_) {
+    UserMetrics::RecordAction(L"NewTab_Button", model_->profile());
+    model_->delegate()->AddBlankTab(true);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, MessageLoop::Observer implementation:
 
+#if defined(OS_WIN)
 void TabStrip::WillProcessMessage(const MSG& msg) {
 }
 
@@ -1047,23 +1011,106 @@ void TabStrip::DidProcessMessage(const MSG& msg) {
     case WM_MOUSEMOVE:
     case WM_MOUSELEAVE:
     case WM_NCMOUSELEAVE:
-      if (!IsCursorInTabStripZone()) {
-        // Mouse moved outside the tab slop zone, start a timer to do a resize
-        // layout after a short while...
-        if (resize_layout_factory_.empty()) {
-          MessageLoop::current()->PostDelayedTask(FROM_HERE,
-              resize_layout_factory_.NewRunnableMethod(
-                  &TabStrip::ResizeLayoutTabs),
-              kResizeTabsTimeMs);
-        }
-      } else {
-        // Mouse moved quickly out of the tab strip and then into it again, so
-        // cancel the timer so that the strip doesn't move when the mouse moves
-        // back over it.
-        resize_layout_factory_.RevokeAll();
-      }
+      HandleGlobalMouseMoveEvent();
       break;
   }
+}
+#else
+void TabStrip::WillProcessEvent(GdkEvent* event) {
+}
+
+void TabStrip::DidProcessEvent(GdkEvent* event) {
+  switch (event->type) {
+    case GDK_MOTION_NOTIFY:
+    case GDK_LEAVE_NOTIFY:
+      HandleGlobalMouseMoveEvent();
+      break;
+    default:
+      break;
+  }
+}
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// TabStrip, TabStripWrapper implementation:
+
+int TabStrip::GetPreferredHeight() {
+  return GetPreferredSize().height();
+}
+
+bool TabStrip::IsAnimating() const {
+  return active_animation_.get() != NULL;
+}
+
+void TabStrip::SetBackgroundOffset(gfx::Point offset) {
+  int tab_count = GetTabCount();
+  for (int i = 0; i < tab_count; ++i)
+    GetTabAt(i)->SetBackgroundOffset(offset);
+}
+
+bool TabStrip::PointIsWithinWindowCaption(const gfx::Point& point) {
+  views::View* v = GetViewForPoint(point);
+
+  // If there is no control at this location, claim the hit was in the title
+  // bar to get a move action.
+  if (v == this)
+    return true;
+
+  // Check to see if the point is within the non-button parts of the new tab
+  // button. The button has a non-rectangular shape, so if it's not in the
+  // visual portions of the button we treat it as a click to the caption.
+  gfx::Point point_in_newtab_coords(point);
+  View::ConvertPointToView(this, newtab_button_, &point_in_newtab_coords);
+  if (newtab_button_->bounds().Contains(point) &&
+      !newtab_button_->HitTest(point_in_newtab_coords)) {
+    return true;
+  }
+
+  // All other regions, including the new Tab button, should be considered part
+  // of the containing Window's client area so that regular events can be
+  // processed for them.
+  return false;
+}
+
+bool TabStrip::IsDragSessionActive() const {
+  return drag_controller_.get() != NULL;
+}
+
+bool TabStrip::IsCompatibleWith(TabStripWrapper* other) const {
+  return model_->profile() == other->AsTabStrip()->model()->profile();
+}
+
+void TabStrip::SetDraggedTabBounds(int tab_index, const gfx::Rect& tab_bounds) {
+}
+
+void TabStrip::UpdateLoadingAnimations() {
+  for (int i = 0, index = 0; i < GetTabCount(); ++i, ++index) {
+    Tab* current_tab = GetTabAt(i);
+    if (current_tab->closing()) {
+      --index;
+    } else {
+      TabContents* contents = model_->GetTabContentsAt(index);
+      if (!contents || !contents->is_loading()) {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_NONE);
+      } else if (contents->waiting_for_response()) {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_WAITING);
+      } else {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_LOADING);
+      }
+    }
+  }
+}
+
+views::View* TabStrip::GetView() {
+  return this;
+}
+
+BrowserTabStrip* TabStrip::AsBrowserTabStrip() {
+  return NULL;
+}
+
+TabStrip* TabStrip::AsTabStrip() {
+  return this;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1071,29 +1118,40 @@ void TabStrip::DidProcessMessage(const MSG& msg) {
 
 void TabStrip::Init() {
   model_->AddObserver(this);
-  newtab_button_ = new NewTabButton(this);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  SkBitmap* bitmap;
-
-  bitmap = rb.GetBitmapNamed(IDR_NEWTAB_BUTTON);
-  newtab_button_->SetImage(views::CustomButton::BS_NORMAL, bitmap);
-  newtab_button_->SetImage(views::CustomButton::BS_PUSHED,
-                           rb.GetBitmapNamed(IDR_NEWTAB_BUTTON_P));
-  newtab_button_->SetImage(views::CustomButton::BS_HOT,
-                           rb.GetBitmapNamed(IDR_NEWTAB_BUTTON_H));
-
-  newtab_button_size_.SetSize(bitmap->width(), bitmap->height());
-  actual_newtab_button_size_ = newtab_button_size_;
-
-  newtab_button_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_NEWTAB));
-  AddChildView(newtab_button_);
-
+  newtab_button_size_.SetSize(kNewTabButtonWidth, kNewTabButtonHeight);
   if (drop_indicator_width == 0) {
     // Direction doesn't matter, both images are the same size.
     SkBitmap* drop_image = GetDropArrowImage(true);
     drop_indicator_width = drop_image->width();
     drop_indicator_height = drop_image->height();
   }
+}
+
+void TabStrip::LoadNewTabButtonImage() {
+  ThemeProvider* tp = GetThemeProvider();
+
+  // If we don't have a theme provider yet, it means we do not have a
+  // root view, and are therefore in a test.
+  bool in_test = false;
+  if (tp == NULL) {
+    tp = new views::DefaultThemeProvider();
+    in_test = true;
+  }
+
+  SkBitmap* bitmap = tp->GetBitmapNamed(IDR_NEWTAB_BUTTON);
+  SkColor color = tp->GetColor(BrowserThemeProvider::COLOR_BUTTON_BACKGROUND);
+  SkBitmap* background = tp->GetBitmapNamed(
+      IDR_THEME_WINDOW_CONTROL_BACKGROUND);
+
+  newtab_button_->SetImage(views::CustomButton::BS_NORMAL, bitmap);
+  newtab_button_->SetImage(views::CustomButton::BS_PUSHED,
+                           tp->GetBitmapNamed(IDR_NEWTAB_BUTTON_P));
+  newtab_button_->SetImage(views::CustomButton::BS_HOT,
+                           tp->GetBitmapNamed(IDR_NEWTAB_BUTTON_H));
+  newtab_button_->SetBackground(color, background,
+                                tp->GetBitmapNamed(IDR_NEWTAB_BUTTON_MASK));
+  if (in_test)
+    delete tp;
 }
 
 Tab* TabStrip::GetTabAt(int index) const {
@@ -1187,6 +1245,12 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
 }
 
 void TabStrip::ResizeLayoutTabs() {
+  // We've been called back after the TabStrip has been emptied out (probably
+  // just prior to the window being destroyed). We need to do nothing here or
+  // else GetTabAt below will crash.
+  if (GetTabCount() == 0)
+    return;
+
   resize_layout_factory_.RevokeAll();
 
   // It is critically important that this is unhooked here, otherwise we will
@@ -1212,10 +1276,19 @@ bool TabStrip::IsCursorInTabStripZone() {
   bounds.set_origin(tabstrip_topleft);
   bounds.set_height(bounds.height() + kTabStripAnimationVSlop);
 
-  CPoint cursor_point;
-  GetCursorPos(&cursor_point);
+#if defined(OS_WIN)
+  DWORD pos = GetMessagePos();
+  gfx::Point cursor_point(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
+#elif defined(OS_LINUX)
+  // TODO: make sure this is right with multiple monitors.
+  GdkScreen* screen = gdk_screen_get_default();
+  GdkDisplay* display = gdk_screen_get_display(screen);
+  gint x, y;
+  gdk_display_get_pointer(display, NULL, &x, &y, NULL);
+  gfx::Point cursor_point(x, y);
+#endif
 
-  return bounds.Contains(cursor_point.x, cursor_point.y);
+  return bounds.Contains(cursor_point.x(), cursor_point.y());
 }
 
 void TabStrip::AddMessageLoopObserver() {
@@ -1259,9 +1332,14 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
                         drop_indicator_height);
 
   // If the rect doesn't fit on the monitor, push the arrow to the bottom.
+#if defined(OS_WIN)
   gfx::Rect monitor_bounds = win_util::GetMonitorBoundsForRect(drop_bounds);
   *is_beneath = (monitor_bounds.IsEmpty() ||
                  !monitor_bounds.Contains(drop_bounds));
+#else
+  *is_beneath = false;
+  NOTIMPLEMENTED();
+#endif
   if (*is_beneath)
     drop_bounds.Offset(0, drop_bounds.height() + height());
 
@@ -1322,9 +1400,13 @@ void TabStrip::SetDropIndex(int index, bool drop_before) {
   // Reposition the window. Need to show it too as the window is initially
   // hidden.
 
+#if defined(OS_WIN)
   drop_info_->arrow_window->SetWindowPos(
       HWND_TOPMOST, drop_bounds.x(), drop_bounds.y(), drop_bounds.width(),
       drop_bounds.height(), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 int TabStrip::GetDropEffect(const views::DropTargetEvent& event) {
@@ -1348,6 +1430,7 @@ TabStrip::DropInfo::DropInfo(int drop_index, bool drop_before, bool point_down)
     : drop_index(drop_index),
       drop_before(drop_before),
       point_down(point_down) {
+#if defined(OS_WIN)
   arrow_window = new views::WidgetWin;
   arrow_window->set_window_style(WS_POPUP);
   arrow_window->set_window_ex_style(WS_EX_TOPMOST | WS_EX_NOACTIVATE |
@@ -1358,14 +1441,18 @@ TabStrip::DropInfo::DropInfo(int drop_index, bool drop_before, bool point_down)
 
   arrow_window->Init(
       NULL,
-      gfx::Rect(0, 0, drop_indicator_width, drop_indicator_height),
-      true);
+      gfx::Rect(0, 0, drop_indicator_width, drop_indicator_height));
   arrow_window->SetContentsView(arrow_view);
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 TabStrip::DropInfo::~DropInfo() {
   // Close eventually deletes the window, which deletes arrow_view too.
+#if defined(OS_WIN)
   arrow_window->Close();
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1530,5 +1617,23 @@ void TabStrip::RemoveTabAt(int index) {
   if (!IsDragSessionActive() || !drag_controller_->IsDragSourceTab(removed)) {
     removed->GetParent()->RemoveChildView(removed);
     delete removed;
+  }
+}
+
+void TabStrip::HandleGlobalMouseMoveEvent() {
+  if (!IsCursorInTabStripZone()) {
+    // Mouse moved outside the tab slop zone, start a timer to do a resize
+    // layout after a short while...
+    if (resize_layout_factory_.empty()) {
+      MessageLoop::current()->PostDelayedTask(FROM_HERE,
+          resize_layout_factory_.NewRunnableMethod(
+              &TabStrip::ResizeLayoutTabs),
+          kResizeTabsTimeMs);
+    }
+  } else {
+    // Mouse moved quickly out of the tab strip and then into it again, so
+    // cancel the timer so that the strip doesn't move when the mouse moves
+    // back over it.
+    resize_layout_factory_.RevokeAll();
   }
 }

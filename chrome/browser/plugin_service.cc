@@ -7,16 +7,23 @@
 #include "chrome/browser/plugin_service.h"
 
 #include "base/command_line.h"
+#include "base/string_util.h"
 #include "base/thread.h"
+#include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/notification_type.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/render_messages.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
 // static
@@ -27,8 +34,7 @@ PluginService* PluginService::GetInstance() {
 PluginService::PluginService()
     : main_message_loop_(MessageLoop::current()),
       resource_dispatcher_host_(NULL),
-      ui_locale_(g_browser_process->GetApplicationLocale()),
-      plugin_shutdown_handler_(new ShutdownHandler) {
+      ui_locale_(ASCIIToWide(g_browser_process->GetApplicationLocale())) {
   // Have the NPAPI plugin list search for Chrome plugins as well.
   ChromePluginLib::RegisterPluginsWithNPAPI();
   // Load the one specified on the command line as well.
@@ -36,9 +42,37 @@ PluginService::PluginService()
   std::wstring path = command_line->GetSwitchValue(switches::kLoadPlugin);
   if (!path.empty())
     NPAPI::PluginList::AddExtraPluginPath(FilePath::FromWStringHack(path));
+
+#if defined(OS_WIN)
+  hkcu_key_.Create(
+      HKEY_CURRENT_USER, kRegistryMozillaPlugins, KEY_NOTIFY);
+  hklm_key_.Create(
+      HKEY_LOCAL_MACHINE, kRegistryMozillaPlugins, KEY_NOTIFY);
+  if (hkcu_key_.StartWatching()) {
+    hkcu_event_.reset(new base::WaitableEvent(hkcu_key_.watch_event()));
+    hkcu_watcher_.StartWatching(hkcu_event_.get(), this);
+  }
+
+  if (hklm_key_.StartWatching()) {
+    hklm_event_.reset(new base::WaitableEvent(hklm_key_.watch_event()));
+    hklm_watcher_.StartWatching(hklm_event_.get(), this);
+  }
+#endif
+
+  registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+                 NotificationService::AllSources());
 }
 
 PluginService::~PluginService() {
+#if defined(OS_WIN)
+  // Release the events since they're owned by RegKey, not WaitableEvent.
+  hkcu_watcher_.StopWatching();
+  hklm_watcher_.StopWatching();
+  hkcu_event_->Release();
+  hklm_event_->Release();
+#endif
 }
 
 void PluginService::GetPlugins(bool refresh,
@@ -61,12 +95,6 @@ void PluginService::SetChromePluginDataDir(const FilePath& data_dir) {
 const FilePath& PluginService::GetChromePluginDataDir() {
   AutoLock lock(lock_);
   return chrome_plugin_data_dir_;
-}
-
-void PluginService::AddExtraPluginDir(const FilePath& plugin_dir) {
-  AutoLock lock(lock_);
-  NPAPI::PluginList::ResetPluginsLoaded();
-  NPAPI::PluginList::AddExtraPluginDir(plugin_dir);
 }
 
 const std::wstring& PluginService::GetUILocale() {
@@ -131,29 +159,37 @@ void PluginService::OpenChannelToPlugin(
     const std::wstring& locale, IPC::Message* reply_msg) {
   DCHECK(MessageLoop::current() ==
          ChromeThread::GetMessageLoop(ChromeThread::IO));
-  FilePath plugin_path = GetPluginPath(url, mime_type, clsid, NULL);
+  // We don't need a policy URL here because that was already checked by a
+  // previous call to GetPluginPath.
+  GURL policy_url;
+  FilePath plugin_path = GetPluginPath(url, policy_url, mime_type, clsid, NULL);
   PluginProcessHost* plugin_host = FindOrStartPluginProcess(plugin_path, clsid);
   if (plugin_host) {
     plugin_host->OpenChannelToPlugin(renderer_msg_filter, mime_type, reply_msg);
   } else {
     PluginProcessHost::ReplyToRenderer(renderer_msg_filter,
-                                       std::wstring(),
+                                       IPC::ChannelHandle(),
                                        FilePath(),
                                        reply_msg);
   }
 }
 
 FilePath PluginService::GetPluginPath(const GURL& url,
+                                      const GURL& policy_url,
                                       const std::string& mime_type,
                                       const std::string& clsid,
                                       std::string* actual_mime_type) {
   AutoLock lock(lock_);
   bool allow_wildcard = true;
   WebPluginInfo info;
-  NPAPI::PluginList::Singleton()->GetPluginInfo(url, mime_type, clsid,
-                                                allow_wildcard, &info,
-                                                actual_mime_type);
-  return info.path;
+  if (NPAPI::PluginList::Singleton()->GetPluginInfo(url, mime_type, clsid,
+                                                    allow_wildcard, &info,
+                                                    actual_mime_type) &&
+      PluginAllowedForURL(info.path, policy_url)) {
+    return info.path;
+  }
+
+  return FilePath();
 }
 
 bool PluginService::GetPluginInfoByPath(const FilePath& plugin_path,
@@ -173,26 +209,73 @@ bool PluginService::HavePluginFor(const std::string& mime_type,
                                                        NULL);
 }
 
-void PluginService::Shutdown() {
-  plugin_shutdown_handler_->InitiateShutdown();
+void PluginService::OnWaitableEventSignaled(base::WaitableEvent* waitable_event) {
+#if defined(OS_WIN)
+  if (waitable_event == hkcu_event_.get()) {
+    hkcu_key_.StartWatching();
+  } else {
+    hklm_key_.StartWatching();
+  }
+
+  AutoLock lock(lock_);
+  NPAPI::PluginList::ResetPluginsLoaded();
+
+  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
+       it != RenderProcessHost::end(); ++it) {
+    it->second->Send(new ViewMsg_PurgePluginListCache());
+  }
+#endif
 }
 
-void PluginService::OnShutdown() {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
-       !iter.Done(); ++iter) {
-    static_cast<PluginProcessHost*>(*iter)->Shutdown();
+void PluginService::Observe(NotificationType type,
+                            const NotificationSource& source,
+                            const NotificationDetails& details) {
+  switch (type.value) {
+    case NotificationType::EXTENSIONS_LOADED: {
+      // TODO(mpcomplete): We also need to force a renderer to refresh its
+      // cache of the plugin list when we inject user scripts, since it could
+      // have a stale version by the time extensions are loaded.
+      // See: http://code.google.com/p/chromium/issues/detail?id=12306
+
+      ExtensionList* extensions = Details<ExtensionList>(details).ptr();
+      for (ExtensionList::iterator extension = extensions->begin();
+           extension != extensions->end(); ++extension) {
+        for (size_t i = 0; i < (*extension)->plugins().size(); ++i ) {
+          const Extension::PluginInfo& plugin = (*extension)->plugins()[i];
+          AutoLock lock(lock_);
+          NPAPI::PluginList::ResetPluginsLoaded();
+          NPAPI::PluginList::AddExtraPluginPath(plugin.path);
+          if (!plugin.is_public)
+            private_plugins_[plugin.path] = (*extension)->url();
+        }
+      }
+      break;
+    }
+
+    case NotificationType::EXTENSION_UNLOADED: {
+      // TODO(aa): Implement this. Also, will it be possible to delete the
+      // extension folder if this isn't unloaded?
+      // See: http://code.google.com/p/chromium/issues/detail?id=12306
+      break;
+    }
+
+    default:
+      DCHECK(false);
   }
 }
 
-void PluginService::ShutdownHandler::InitiateShutdown() {
-  g_browser_process->io_thread()->message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &ShutdownHandler::OnShutdown));
-}
+bool PluginService::PluginAllowedForURL(const FilePath& plugin_path,
+                                        const GURL& url) {
+  if (url.is_empty())
+    return true;  // Caller wants all plugins.
 
-void PluginService::ShutdownHandler::OnShutdown() {
-  PluginService* plugin_service = PluginService::GetInstance();
-  if (plugin_service) {
-    plugin_service->OnShutdown();
-  }
+  PrivatePluginMap::iterator it = private_plugins_.find(plugin_path);
+  if (it == private_plugins_.end())
+    return true;  // This plugin is not private, so it's allowed everywhere.
+
+  // We do a dumb compare of scheme and host, rather than using the domain
+  // service, since we only care about this for extensions.
+  const GURL& required_url = it->second;
+  return (url.scheme() == required_url.scheme() &&
+          url.host() == required_url.host());
 }

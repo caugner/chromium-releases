@@ -4,15 +4,22 @@
 
 #include "chrome/browser/views/bookmark_menu_button.h"
 
+#include "build/build_config.h"
+
+#if defined(OS_GTK)
+#include <gtk/gtk.h>
+#endif
+
+#include "app/resource_bundle.h"
+#include "app/os_exchange_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/view_ids.h"
-#include "chrome/common/os_exchange_data.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/widget/widget.h"
 #include "grit/theme_resources.h"
+#include "views/widget/widget.h"
 
 BookmarkMenuButton::BookmarkMenuButton(Browser* browser)
     : views::MenuButton(NULL, std::wstring(), NULL, false),
@@ -82,7 +89,7 @@ int BookmarkMenuButton::OnPerformDrop(const views::DropTargetEvent& event) {
   if (!model)
     return DragDropTypes::DRAG_NONE;
 
-  BookmarkNode* parent = model->GetBookmarkBarNode();
+  const BookmarkNode* parent = model->GetBookmarkBarNode();
   return bookmark_utils::PerformBookmarkDrop(
       browser_->profile(), data, parent, parent->GetChildCount());
 }
@@ -93,13 +100,13 @@ void BookmarkMenuButton::BookmarkMenuDeleted(
 }
 
 void BookmarkMenuButton::RunMenu(views::View* source,
-                                 const CPoint& pt,
+                                 const gfx::Point& pt,
                                  gfx::NativeView hwnd) {
   RunMenu(source, pt, hwnd, false);
 }
 
 void BookmarkMenuButton::RunMenu(views::View* source,
-                                 const CPoint& pt,
+                                 const gfx::Point& pt,
                                  gfx::NativeView hwnd,
                                  bool for_drop) {
   Profile* profile = browser_->profile();
@@ -129,9 +136,13 @@ void BookmarkMenuButton::StartShowFolderDropMenuTimer() {
   if (show_drop_menu_timer_.IsRunning())
     return;
 
+#if defined(OS_WIN)
   static DWORD delay = 0;
   if (!delay && !SystemParametersInfo(SPI_GETMENUSHOWDELAY, 0, &delay, 0))
     delay = 400;
+#else
+  static int delay = 400;
+#endif
   show_drop_menu_timer_.Start(base::TimeDelta::FromMilliseconds(delay),
                               this, &BookmarkMenuButton::ShowDropMenu);
 }
@@ -141,5 +152,5 @@ void BookmarkMenuButton::StopShowFolderDropMenuTimer() {
 }
 
 void BookmarkMenuButton::ShowDropMenu() {
-  RunMenu(NULL, CPoint(), GetWidget()->GetNativeView(), true);
+  RunMenu(NULL, gfx::Point(), GetWidget()->GetNativeView(), true);
 }

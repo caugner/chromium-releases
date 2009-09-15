@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,16 +7,19 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_
 
-#include <objidl.h>
-
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/task.h"
-#include "chrome/views/controls/menu/menu.h"
-#include "chrome/views/event.h"
-#include "chrome/views/view.h"
+
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
+#include "views/view.h"
+#endif
+
+namespace gfx {
+class Canvas;
+}
 
 class BaseDownloadItemModel;
 class DownloadItem;
@@ -97,26 +100,32 @@ enum PaintDownloadProgressSize {
 // require the containing View in addition to the canvas because if we are
 // drawing in a right-to-left locale, we need to mirror the position of the
 // progress animation within the containing View.
-void PaintDownloadProgress(ChromeCanvas* canvas,
+void PaintDownloadProgress(gfx::Canvas* canvas,
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
                            views::View* containing_view,
+#endif
                            int origin_x,
                            int origin_y,
                            int start_angle,
                            int percent,
                            PaintDownloadProgressSize size);
 
-void PaintDownloadComplete(ChromeCanvas* canvas,
+void PaintDownloadComplete(gfx::Canvas* canvas,
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
                            views::View* containing_view,
+#endif
                            int origin_x,
                            int origin_y,
                            double animation_progress,
                            PaintDownloadProgressSize size);
 
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 // Drag support ----------------------------------------------------------------
 
 // Helper function for download views to use when acting as a drag source for a
 // DownloadItem. If 'icon' is NULL, no image will be accompany the drag.
 void DragDownload(const DownloadItem* download, SkBitmap* icon);
+#endif
 
 // Executable file support -----------------------------------------------------
 
@@ -124,6 +133,5 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon);
 void InitializeExeTypes(std::set<std::string>* exe_extensions);
 
 }  // namespace download_util
-
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UTIL_H_

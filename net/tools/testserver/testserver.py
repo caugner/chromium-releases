@@ -107,6 +107,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.FileHandler,
       self.RealFileWithCommonHeaderHandler,
       self.RealBZ2FileWithCommonHeaderHandler,
+      self.SetCookieHandler,
       self.AuthBasicHandler,
       self.AuthDigestHandler,
       self.SlowServerHandler,
@@ -150,7 +151,8 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       # no extension.
       return self._default_mime_type
 
-    return self._mime_types.get(extension, self._default_mime_type)
+    # extension starts with a dot, so we need to remove it
+    return self._mime_types.get(extension[1:], self._default_mime_type)
 
   def KillHandler(self):
     """This request handler kills the server, for use when we're done"
@@ -262,7 +264,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     self.send_response(200)
     self.send_header('Content-type', 'text/html')
-    self.send_header('Cache-Control', 'max-age=5, private')
+    self.send_header('Cache-Control', 'max-age=3, private')
     self.end_headers()
 
     self.wfile.write('<html><head><title>%s</title></head></html>' %
@@ -279,7 +281,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     self.send_response(200)
     self.send_header('Content-type', 'text/html')
-    self.send_header('Cache-Control', 'max-age=5, public')
+    self.send_header('Cache-Control', 'max-age=3, public')
     self.end_headers()
 
     self.wfile.write('<html><head><title>%s</title></head></html>' %
@@ -565,13 +567,19 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """This handler sends the contents of the requested file.  Wow, it's like
     a real webserver!"""
 
-    prefix='/files/'
+    prefix = self.server.file_root_url
     if not self.path.startswith(prefix):
       return False
+
+    # Consume a request body if present.
+    if self.command == 'POST':
+      self.rfile.read(int(self.headers.getheader('content-length')))
 
     file = self.path[len(prefix):]
     entries = file.split('/');
     path = os.path.join(self.server.data_dir, *entries)
+    if os.path.isdir(path):
+      path = os.path.join(path, 'index.html')
 
     if not os.path.isfile(path):
       print "File not found " + file + " full path:" + path
@@ -682,6 +690,26 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     return True
 
+  def SetCookieHandler(self):
+    """This handler just sets a cookie, for testing cookie handling."""
+
+    if not self._ShouldHandleRequest("/set-cookie"):
+      return False
+
+    query_char = self.path.find('?')
+    if query_char != -1:
+      cookie_values = self.path[query_char + 1:].split('&')
+    else:
+      cookie_values = ("",)
+    self.send_response(200)
+    self.send_header('Content-type', 'text/html')
+    for cookie_value in cookie_values:
+      self.send_header('Set-Cookie', '%s' % cookie_value)
+    self.end_headers()
+    for cookie_value in cookie_values:
+      self.wfile.write('%s' % cookie_value)
+    return True
+
   def AuthBasicHandler(self):
     """This handler tests 'Basic' authentication.  It just sends a page with
     title 'user/pass' if you succeed."""
@@ -690,6 +718,8 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       return False
 
     username = userpass = password = b64str = ""
+
+    set_cookie_if_challenged = self.path.find('?set-cookie-if-challenged') > 0
 
     auth = self.headers.getheader('authorization')
     try:
@@ -705,6 +735,8 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.send_response(401)
       self.send_header('WWW-Authenticate', 'Basic realm="testrealm"')
       self.send_header('Content-type', 'text/html')
+      if set_cookie_if_challenged:
+        self.send_header('Set-Cookie', 'got_challenged=true')
       self.end_headers()
       self.wfile.write('<html><head>')
       self.wfile.write('<title>Denied: %s</title>' % e)
@@ -734,6 +766,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.wfile.write('<title>%s/%s</title>' % (username, password))
       self.wfile.write('</head><body>')
       self.wfile.write('auth=%s<p>' % auth)
+      self.wfile.write('You sent:<br>%s<p>' % self.headers)
       self.wfile.write('</body></html>')
 
     return True
@@ -1042,6 +1075,7 @@ def main(options, args):
       print 'HTTP server started on port %d...' % port
 
     server.data_dir = MakeDataDir()
+    server.file_root_url = options.file_root_url
     MakeDumpDir(server.data_dir)
 
   # means FTP Server
@@ -1097,6 +1131,8 @@ if __name__ == '__main__':
                            help='Specify that https should be used, specify '
                            'the path to the cert containing the private key '
                            'the server should use')
+  option_parser.add_option('', '--file-root-url', default='/files/',
+                           help='Specify a root URL for files served.')
   options, args = option_parser.parse_args()
 
   sys.exit(main(options, args))

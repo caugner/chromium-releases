@@ -5,18 +5,13 @@
 #ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__
 #define WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__
 
-#include <set>
-
-#include "base/compiler_specific.h"
-
-MSVC_PUSH_WARNING_LEVEL(0);
 #include "FrameLoaderClient.h"
-MSVC_POP_WARNING();
+#include <wtf/RefPtr.h>
 
-#include "build/build_config.h"
+#include "base/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/api/public/WebNavigationPolicy.h"
 #include "webkit/glue/webview_delegate.h"
-#include "webkit/glue/window_open_disposition.h"
 
 namespace WebCore {
 class Frame;
@@ -24,10 +19,13 @@ class HTMLFormElement;
 class Widget;
 }
 
-class Alt404PageResourceFetcher;
-class NetAgentImpl;
+namespace webkit_glue {
+class AltErrorPageResourceFetcher;
+}
+
 class WebFrameImpl;
 class WebPluginContainer;
+
 
 class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
  public:
@@ -45,6 +43,15 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   // parsing begins.
   virtual void windowObjectCleared();
   virtual void documentElementAvailable();
+
+  // A frame's V8 context was created or destroyed.
+  virtual void didCreateScriptContextForFrame();
+  virtual void didDestroyScriptContextForFrame();
+
+  // A context untied to a frame was created (through evaluateInNewContext).
+  // This context is not tied to the lifetime of its frame, and is destroyed
+  // in garbage collection.
+  virtual void didCreateIsolatedScriptContext();
 
   virtual bool hasWebView() const; // mainly for assertions
   virtual bool hasFrameView() const; // ditto
@@ -69,6 +76,7 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   virtual void dispatchDidFinishLoading(WebCore::DocumentLoader*, unsigned long identifier);
   virtual void dispatchDidFailLoading(WebCore::DocumentLoader*, unsigned long identifier, const WebCore::ResourceError&);
   virtual bool dispatchDidLoadResourceFromMemoryCache(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&, int length);
+  virtual void dispatchDidLoadResourceByXMLHttpRequest(unsigned long identifier, const WebCore::ScriptString&);
 
   virtual void dispatchDidHandleOnloadEvents();
   virtual void dispatchDidReceiveServerRedirectForProvisionalLoad();
@@ -171,7 +179,7 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
                                       const WebCore::String& referrer,
                                       bool allowsScrolling, int marginWidth,
                                       int marginHeight);
-  virtual WebCore::Widget* createPlugin(const WebCore::IntSize&,
+  virtual PassRefPtr<WebCore::Widget> createPlugin(const WebCore::IntSize&,
                                         WebCore::HTMLPlugInElement*,
                                         const WebCore::KURL&,
                                         const WTF::Vector<WebCore::String>&,
@@ -180,10 +188,10 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
                                         bool loadManually);
   virtual void redirectDataToPlugin(WebCore::Widget* pluginWidget);
 
-  virtual WebCore::Widget* createJavaAppletWidget(
+  virtual PassRefPtr<WebCore::Widget> createJavaAppletWidget(
       const WebCore::IntSize&,
       WebCore::HTMLAppletElement*,
-      const WebCore::KURL& baseURL,
+      const WebCore::KURL& /* base_url */,
       const WTF::Vector<WebCore::String>& paramNames,
       const WTF::Vector<WebCore::String>& paramValues);
 
@@ -195,20 +203,18 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
 
   virtual void registerForIconNotification(bool listen = true);
 
-  // Callback function for download of alternate 404 pages.  If the server is
-  // down or we take more than 1s to download the page, html will be an empty
-  // string.
-  void Alt404PageFinished(WebCore::DocumentLoader* loader,
-                          const std::string& html);
-
  private:
+  // Callback function for download of alternate 404 pages.  If the server is
+  // down or we take too long to download the page, |html| will be empty.
+  void Alt404PageFinished(const GURL& unreachable_url, const std::string& html);
+
   void makeDocumentView();
 
-  // Given a NavigationAction, determine the associated window opening
-  // disposition.  For example, a middle click means "open in background tab".
-  static bool ActionSpecifiesDisposition(
+  // Given a NavigationAction, determine the associated WebNavigationPolicy.
+  // For example, a middle click means "open in background tab".
+  static bool ActionSpecifiesNavigationPolicy(
       const WebCore::NavigationAction& action,
-      WindowOpenDisposition* disposition);
+      WebKit::WebNavigationPolicy* policy);
 
   // Returns a valid GURL if we have an alt 404 server URL.
   GURL GetAlt404PageUrl(WebCore::DocumentLoader* loader);
@@ -217,15 +223,15 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   // otherwise returns NavigationGestureUnknown.
   NavigationGesture NavigationGestureForLastLoad();
 
-  // Returns NetAgent instance if network tracking is enabled.
-  NetAgentImpl* GetNetAgentImpl();
+  // Called when a dummy back-forward navigation is intercepted.
+  void HandleBackForwardNavigation(const GURL&);
 
   // The WebFrame that owns this object and manages its lifetime. Therefore,
   // the web frame object is guaranteed to exist.
   WebFrameImpl* webframe_;
 
   // Resource fetcher for downloading an alternate 404 page.
-  scoped_ptr<Alt404PageResourceFetcher> alt_404_page_fetcher_;
+  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_404_page_fetcher_;
 
   bool postpone_loading_data_;
   std::string postponed_data_;
@@ -245,13 +251,14 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   GURL expected_client_redirect_dest_;
 
   // Contains a pointer to the plugin widget.
-  WebPluginContainer* plugin_widget_;
+  WTF::RefPtr<WebPluginContainer> plugin_widget_;
+
   // Indicates if we need to send over the initial notification to the plugin
   // which specifies that the plugin should be ready to accept data.
   bool sent_initial_response_to_plugin_;
 
-  // The disposition to use for the next call to dispatchCreatePage.
-  WindowOpenDisposition next_window_open_disposition_;
+  // The navigation policy to use for the next call to dispatchCreatePage.
+  WebKit::WebNavigationPolicy next_navigation_policy_;
 };
 
 #endif  // #ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__

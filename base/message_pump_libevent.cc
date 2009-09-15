@@ -7,10 +7,30 @@
 #include <errno.h>
 #include <fcntl.h>
 
+#include "eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "third_party/libevent/event.h"
+
+// Lifecycle of struct event
+// Libevent uses two main data structures:
+// struct event_base (of which there is one per message pump), and
+// struct event (of which there is roughly one per socket).
+// The socket's struct event is created in
+// MessagePumpLibevent::WatchFileDescriptor(),
+// is owned by the FileDescriptorWatcher, and is destroyed in
+// StopWatchingFileDescriptor().
+// It is moved into and out of lists in struct event_base by
+// the libevent functions event_add() and event_del().
+//
+// TODO(dkegel):
+// At the moment bad things happen if a FileDescriptorWatcher
+// is active after its MessagePumpLibevent has been destroyed.
+// See MessageLoopTest.FileDescriptorWatcherOutlivesMessageLoop
+// Not clear yet whether that situation occurs in practice,
+// but if it does, we need to fix it.
 
 namespace base {
 
@@ -29,7 +49,7 @@ MessagePumpLibevent::FileDescriptorWatcher::FileDescriptorWatcher()
 }
 
 MessagePumpLibevent::FileDescriptorWatcher::~FileDescriptorWatcher() {
-  if (event_.get()) {
+  if (event_) {
     StopWatchingFileDescriptor();
   }
 }
@@ -37,23 +57,27 @@ MessagePumpLibevent::FileDescriptorWatcher::~FileDescriptorWatcher() {
 void MessagePumpLibevent::FileDescriptorWatcher::Init(event *e,
                                                       bool is_persistent) {
   DCHECK(e);
-  DCHECK(event_.get() == NULL);
+  DCHECK(event_ == NULL);
 
   is_persistent_ = is_persistent;
-  event_.reset(e);
+  event_ = e;
 }
 
 event *MessagePumpLibevent::FileDescriptorWatcher::ReleaseEvent() {
-  return event_.release();
+  struct event *e = event_;
+  event_ = NULL;
+  return e;
 }
 
 bool MessagePumpLibevent::FileDescriptorWatcher::StopWatchingFileDescriptor() {
-  if (event_.get() == NULL) {
+  event* e = ReleaseEvent();
+  if (e == NULL)
     return true;
-  }
 
-  // event_del() is a no-op of the event isn't active.
-  return (event_del(event_.get()) == 0);
+  // event_del() is a no-op if the event isn't active.
+  int rv = event_del(e);
+  delete e;
+  return (rv == 0);
 }
 
 // Called if a byte is received on the wakeup pipe.
@@ -64,7 +88,7 @@ void MessagePumpLibevent::OnWakeup(int socket, short flags, void* context) {
 
   // Remove and discard the wakeup byte.
   char buf;
-  int nread = read(socket, &buf, 1);
+  int nread = HANDLE_EINTR(read(socket, &buf, 1));
   DCHECK_EQ(nread, 1);
   // Tell libevent to break out of inner loop.
   event_base_loopbreak(that->event_base_);
@@ -169,7 +193,7 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
     return false;
   }
 
-  // Transfer ownership of e to controller.
+  // Transfer ownership of evt to controller.
   controller->Init(evt.release(), persistent);
   return true;
 }
@@ -249,7 +273,7 @@ void MessagePumpLibevent::Quit() {
 void MessagePumpLibevent::ScheduleWork() {
   // Tell libevent (in a threadsafe way) that it should break out of its loop.
   char buf = 0;
-  int nwrite = write(wakeup_pipe_in_, &buf, 1);
+  int nwrite = HANDLE_EINTR(write(wakeup_pipe_in_, &buf, 1));
   DCHECK(nwrite == 1 || errno == EAGAIN)
       << "[nwrite:" << nwrite << "] [errno:" << errno << "]";
 }

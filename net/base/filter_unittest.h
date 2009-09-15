@@ -17,7 +17,9 @@ class MockFilterContext : public FilterContext {
   explicit MockFilterContext(int buffer_size)
     : buffer_size_(buffer_size),
       is_cached_content_(false),
-      is_sdch_response_(false) {
+      is_download_(false),
+      is_sdch_response_(false),
+      response_code_(-1) {
   }
 
   void SetBufferSize(int buffer_size) { buffer_size_ = buffer_size; }
@@ -25,6 +27,8 @@ class MockFilterContext : public FilterContext {
   void SetURL(const GURL& gurl) { gurl_ = gurl; }
   void SetRequestTime(const base::Time time) { request_time_ = time; }
   void SetCached(bool is_cached) { is_cached_content_ = is_cached; }
+  void SetDownload(bool is_download) { is_download_ = is_download; }
+  void SetResponseCode(int response_code) { response_code_ = response_code; }
   void SetSdchResponse(bool is_sdch_response) {
     is_sdch_response_ = is_sdch_response;
   }
@@ -49,15 +53,21 @@ class MockFilterContext : public FilterContext {
   // Is data supplied from cache, or fresh across the net?
   virtual bool IsCachedContent() const { return is_cached_content_; }
 
+  // Is this a download?
+  virtual bool IsDownload() const { return is_download_; }
+
   // Was this data flagged as a response to a request with an SDCH dictionary?
   virtual bool IsSdchResponse() const { return is_sdch_response_; }
 
   // How many bytes were fed to filter(s) so far?
   virtual int64 GetByteReadCount() const { return 0; }
 
+  virtual int GetResponseCode() const { return response_code_; }
+
   // What is the desirable input buffer size for these filters?
   virtual int GetInputStreamBufferSize() const { return buffer_size_; }
 
+  virtual void RecordPacketStats(StatisticSelector statistic) const {}
 
  private:
   int buffer_size_;
@@ -65,7 +75,9 @@ class MockFilterContext : public FilterContext {
   GURL gurl_;
   base::Time request_time_;
   bool is_cached_content_;
+  bool is_download_;
   bool is_sdch_response_;
+  int response_code_;
 
   DISALLOW_COPY_AND_ASSIGN(MockFilterContext);
 };

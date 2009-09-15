@@ -7,19 +7,18 @@
 // if we tried to create a service, and not try creating it over and over if
 // the creation failed.
 
-#ifndef CHROME_BROWSER_BROWSER_PROCESS_IMPL_H__
-#define CHROME_BROWSER_BROWSER_PROCESS_IMPL_H__
+#ifndef CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
+#define CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_
 
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/non_thread_safe.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
 
 #if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
@@ -73,6 +72,16 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return db_thread_.get();
   }
 
+#if defined(OS_LINUX)
+  virtual base::Thread* background_x11_thread() {
+    DCHECK(CalledOnValidThread());
+    // The BACKGROUND_X11 thread is created when the IO thread is created.
+    if (!created_io_thread_)
+      CreateIOThread();
+    return background_x11_thread_.get();
+  }
+#endif
+
   virtual ProfileManager* profile_manager() {
     DCHECK(CalledOnValidThread());
     if (!created_profile_manager_)
@@ -109,9 +118,9 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return devtools_manager_.get();
   }
 
-  virtual ClipboardService* clipboard_service() {
+  virtual Clipboard* clipboard() {
     DCHECK(CalledOnValidThread());
-    return clipboard_service_.get();
+    return clipboard_.get();
   }
 
   virtual IconManager* icon_manager() {
@@ -119,6 +128,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     if (!created_icon_manager_)
       CreateIconManager();
     return icon_manager_.get();
+  }
+
+  virtual ThumbnailGenerator* GetThumbnailGenerator() {
+    return &thumbnail_generator_;
   }
 
   virtual AutomationProviderList* InitAutomationProviderList() {
@@ -172,7 +185,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return google_url_tracker_.get();
   }
 
-  virtual const std::wstring& GetApplicationLocale();
+  virtual const std::string& GetApplicationLocale();
 
   virtual MemoryModel memory_model() {
     DCHECK(CalledOnValidThread());
@@ -190,7 +203,6 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void CreateIOThread();
   void CreateFileThread();
   void CreateDBThread();
-  void CreateSafeBrowsingThread();
   void CreateTemplateURLModel();
   void CreateProfileManager();
   void CreateWebDataService();
@@ -212,6 +224,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   bool created_io_thread_;
   scoped_ptr<base::Thread> io_thread_;
+#if defined(OS_LINUX)
+  // This shares a created flag with the IO thread.
+  scoped_ptr<base::Thread> background_x11_thread_;
+#endif
 
   bool created_file_thread_;
   scoped_ptr<base::Thread> file_thread_;
@@ -235,9 +251,9 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   scoped_refptr<DebuggerWrapper> debugger_wrapper_;
 
   bool created_devtools_manager_;
-  scoped_ptr<DevToolsManager> devtools_manager_;
+  scoped_refptr<DevToolsManager> devtools_manager_;
 
-  scoped_ptr<ClipboardService> clipboard_service_;
+  scoped_ptr<Clipboard> clipboard_;
 
   scoped_ptr<AutomationProviderList> automation_provider_list_;
 
@@ -252,17 +268,21 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   // Ensures that all the print jobs are finished before closing the browser.
   scoped_ptr<printing::PrintJobManager> print_job_manager_;
 
-  std::wstring locale_;
+  std::string locale_;
 
   MemoryModel memory_model_;
 
   bool checked_for_new_frames_;
   bool using_new_frames_;
 
+  // This service just sits around and makes thumanails for tabs. It does
+  // nothing in the cosntructor so we don't have to worry about lazy init.
+  ThumbnailGenerator thumbnail_generator_;
+
   // An event that notifies when we are shutting-down.
   scoped_ptr<base::WaitableEvent> shutdown_event_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(BrowserProcessImpl);
+  DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };
 
-#endif  // CHROME_BROWSER_BROWSER_PROCESS_IMPL_H__
+#endif  // CHROME_BROWSER_BROWSER_PROCESS_IMPL_H_

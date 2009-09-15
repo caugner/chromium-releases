@@ -5,9 +5,8 @@
 #include <windows.h>
 #include <psapi.h>
 
-#include "skia/ext/platform_canvas_win.h"
-
 #include "skia/ext/bitmap_platform_device_win.h"
+#include "skia/ext/platform_canvas.h"
 
 namespace skia {
 
@@ -19,17 +18,21 @@ namespace skia {
 // lines. This allows us to see in crash dumps the most likely reason for the
 // failure. It takes the size of the bitmap we were trying to allocate as its
 // arguments so we can check that as well.
-void CrashForBitmapAllocationFailure(int w, int h) {
-  // The maximum number of GDI objects per process is 10K. If we're very close
-  // to that, it's probably the problem.
-  const int kLotsOfGDIObjs = 9990;
-  CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) < kLotsOfGDIObjs);
-
+//
+// Note that in a sandboxed renderer this function crashes when trying to
+// call GetProcessMemoryInfo() because it tries to load psapi.dll, which
+// is fine but gives you a very hard to read crash dump.
+__declspec(noinline) void CrashForBitmapAllocationFailure(int w, int h) {
   // If the bitmap is ginormous, then we probably can't allocate it.
   // We use 64M pixels = 256MB @ 4 bytes per pixel.
   const __int64 kGinormousBitmapPxl = 64000000;
   CHECK(static_cast<__int64>(w) * static_cast<__int64>(h) <
         kGinormousBitmapPxl);
+
+  // The maximum number of GDI objects per process is 10K. If we're very close
+  // to that, it's probably the problem.
+  const int kLotsOfGDIObjs = 9990;
+  CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) < kLotsOfGDIObjs);
 
   // If we're using a crazy amount of virtual address space, then maybe there
   // isn't enough for our bitmap.
@@ -42,35 +45,45 @@ void CrashForBitmapAllocationFailure(int w, int h) {
   CHECK(0);
 }
 
-PlatformCanvasWin::PlatformCanvasWin() : SkCanvas() {
+// Crashes the process. This is called when a bitmap allocation fails but
+// unlike its cousin CrashForBitmapAllocationFailure() it tries to detect if
+// the issue was a non-valid shared bitmap handle. 
+__declspec(noinline) void CrashIfInvalidSection(HANDLE shared_section) {
+  DWORD handle_info = 0;
+  CHECK(::GetHandleInformation(shared_section, &handle_info) == TRUE);
 }
 
-PlatformCanvasWin::PlatformCanvasWin(int width, int height, bool is_opaque)
+PlatformCanvas::PlatformCanvas() : SkCanvas() {
+}
+
+PlatformCanvas::PlatformCanvas(int width, int height, bool is_opaque)
     : SkCanvas() {
   bool initialized = initialize(width, height, is_opaque, NULL);
   if (!initialized)
     CrashForBitmapAllocationFailure(width, height);
 }
 
-PlatformCanvasWin::PlatformCanvasWin(int width,
-                                     int height,
-                                     bool is_opaque,
-                                     HANDLE shared_section)
+PlatformCanvas::PlatformCanvas(int width,
+                               int height,
+                               bool is_opaque,
+                               HANDLE shared_section)
     : SkCanvas() {
   bool initialized = initialize(width, height, is_opaque, shared_section);
-  if (!initialized)
+  if (!initialized) {
+    CrashIfInvalidSection(shared_section);
     CrashForBitmapAllocationFailure(width, height);
+  }
 }
 
-PlatformCanvasWin::~PlatformCanvasWin() {
+PlatformCanvas::~PlatformCanvas() {
 }
 
-bool PlatformCanvasWin::initialize(int width,
-                                   int height,
-                                   bool is_opaque,
-                                   HANDLE shared_section) {
-  SkDevice* device =
-      createPlatformDevice(width, height, is_opaque, shared_section);
+bool PlatformCanvas::initialize(int width,
+                               int height,
+                               bool is_opaque,
+                               HANDLE shared_section) {
+  SkDevice* device = BitmapPlatformDevice::create(width, height,
+                                                  is_opaque, shared_section);
   if (!device)
     return false;
 
@@ -79,48 +92,21 @@ bool PlatformCanvasWin::initialize(int width,
   return true;
 }
 
-HDC PlatformCanvasWin::beginPlatformPaint() {
+HDC PlatformCanvas::beginPlatformPaint() {
   return getTopPlatformDevice().getBitmapDC();
 }
 
-void PlatformCanvasWin::endPlatformPaint() {
+void PlatformCanvas::endPlatformPaint() {
   // we don't clear the DC here since it will be likely to be used again
   // flushing will be done in onAccessBitmap
 }
 
-PlatformDeviceWin& PlatformCanvasWin::getTopPlatformDevice() const {
-  // All of our devices should be our special PlatformDevice.
-  SkCanvas::LayerIter iter(const_cast<PlatformCanvasWin*>(this), false);
-  return *static_cast<PlatformDeviceWin*>(iter.device());
-}
-
-SkDevice* PlatformCanvasWin::createDevice(SkBitmap::Config config,
-                                          int width,
-                                          int height,
-                                          bool is_opaque, bool isForLayer) {
+SkDevice* PlatformCanvas::createDevice(SkBitmap::Config config,
+                                       int width,
+                                       int height,
+                                       bool is_opaque, bool isForLayer) {
   SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  return createPlatformDevice(width, height, is_opaque, NULL);
-}
-
-SkDevice* PlatformCanvasWin::createPlatformDevice(int width,
-                                                  int height,
-                                                  bool is_opaque,
-                                                  HANDLE shared_section) {
-  HDC screen_dc = GetDC(NULL);
-  SkDevice* device = BitmapPlatformDeviceWin::create(screen_dc, width, height,
-                                                  is_opaque, shared_section);
-  ReleaseDC(NULL, screen_dc);
-  return device;
-}
-
-SkDevice* PlatformCanvasWin::setBitmapDevice(const SkBitmap&) {
-  SkASSERT(false);  // Should not be called.
-  return NULL;
-}
-
-// static
-size_t PlatformCanvasWin::StrideForWidth(unsigned width) {
-  return 4 * width;
+  return BitmapPlatformDevice::create(width, height, is_opaque, NULL);
 }
 
 }  // namespace skia

@@ -64,6 +64,21 @@ class VisitDatabase {
   void GetAllVisitsInRange(base::Time begin_time, base::Time end_time,
                            int max_results, VisitVector* visits);
 
+  // Fills all visits with specified transition in the time range [begin, end)
+  // to the given vector. Either time can be is_null(), in which case the times
+  // in that direction are unbounded.
+  //
+  // If |max_results| is non-zero, up to that many results will be returned. If
+  // there are more results than that, the oldest ones will be returned. (This
+  // is used for history expiration.)
+  //
+  // The results will be in increasing order of date.
+  void GetVisitsInRangeForTransition(base::Time begin_time,
+                                     base::Time end_time,
+                                     int max_results,
+                                     PageTransition::Type transition,
+                                     VisitVector* visits);
+
   // Fills all visits in the given time range into the given vector that should
   // be user-visible, which excludes things like redirects and subframes. The
   // begin time is inclusive, the end time is exclusive. Either time can be
@@ -110,6 +125,12 @@ class VisitDatabase {
   bool GetRedirectFromVisit(VisitID from_visit,
                             VisitID* to_visit,
                             GURL* to_url);
+
+  // Similar to the above function except finds a redirect going to a given
+  // |to_visit|.
+  bool GetRedirectToVisit(VisitID to_visit,
+                          VisitID* from_visit,
+                          GURL* from_url);
 
   // Returns the number of visits to all urls on the scheme/host/post
   // identified by url. This is only valid for http and https urls (all other

@@ -7,11 +7,11 @@
 
 #include "base/gfx/rect.h"
 #include "chrome/browser/views/info_bubble.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/link.h"
-#include "chrome/views/view.h"
 #include "googleurl/src/gurl.h"
+#include "views/controls/button/button.h"
+#include "views/controls/combobox/combobox.h"
+#include "views/controls/link.h"
+#include "views/view.h"
 
 class Profile;
 
@@ -19,8 +19,8 @@ class BookmarkModel;
 class BookmarkNode;
 
 namespace views {
-class CheckBox;
-class TextField;
+class NativeButton;
+class Textfield;
 }
 
 // BookmarkBubbleView is a view intended to be used as the content of an
@@ -29,11 +29,11 @@ class TextField;
 // instead use the static Show method.
 class BookmarkBubbleView : public views::View,
                            public views::LinkController,
-                           public views::NativeButton::Listener,
-                           public views::ComboBox::Listener,
+                           public views::ButtonListener,
+                           public views::Combobox::Listener,
                            public InfoBubbleDelegate {
  public:
-   static void Show(HWND parent,
+   static void Show(views::Window* window,
                     const gfx::Rect& bounds,
                     InfoBubbleDelegate* delegate,
                     Profile* profile,
@@ -60,25 +60,25 @@ class BookmarkBubbleView : public views::View,
   // Model for the combobox showing the list of folders to choose from. The
   // list always contains the bookmark bar, other node and parent. The list
   // also contains an extra item that shows the text 'Choose another folder...'.
-  class RecentlyUsedFoldersModel : public views::ComboBox::Model {
+  class RecentlyUsedFoldersModel : public views::Combobox::Model {
    public:
-    RecentlyUsedFoldersModel(BookmarkModel* bb_model, BookmarkNode* node);
+    RecentlyUsedFoldersModel(BookmarkModel* bb_model, const BookmarkNode* node);
 
-    // ComboBox::Model methods. Call through to nodes_.
-    virtual int GetItemCount(views::ComboBox* source);
-    virtual std::wstring GetItemAt(views::ComboBox* source, int index);
+    // Combobox::Model methods. Call through to nodes_.
+    virtual int GetItemCount(views::Combobox* source);
+    virtual std::wstring GetItemAt(views::Combobox* source, int index);
 
     // Returns the node at the specified index.
-    BookmarkNode* GetNodeAt(int index);
+    const BookmarkNode* GetNodeAt(int index);
 
     // Returns the index of the original parent folder.
     int node_parent_index() const { return node_parent_index_; }
 
    private:
     // Removes node from nodes_. Does nothing if node is not in nodes_.
-    void RemoveNode(BookmarkNode* node);
+    void RemoveNode(const BookmarkNode* node);
 
-    std::vector<BookmarkNode*> nodes_;
+    std::vector<const BookmarkNode*> nodes_;
     int node_parent_index_;
 
     DISALLOW_COPY_AND_ASSIGN(RecentlyUsedFoldersModel);
@@ -102,10 +102,10 @@ class BookmarkBubbleView : public views::View,
   virtual void LinkActivated(views::Link* source, int event_flags);
 
   // ButtonListener method, closes the bubble or opens the edit dialog.
-  virtual void ButtonPressed(views::NativeButton* sender);
+  virtual void ButtonPressed(views::Button* sender);
 
-  // ComboBox::Listener method. Changes the parent of the bookmark.
-  virtual void ItemChanged(views::ComboBox* combo_box,
+  // Combobox::Listener method. Changes the parent of the bookmark.
+  virtual void ItemChanged(views::Combobox* combobox,
                            int prev_index,
                            int new_index);
 
@@ -155,12 +155,12 @@ class BookmarkBubbleView : public views::View,
   // Button to close the window.
   views::NativeButton* close_button_;
 
-  // TextField showing the title of the bookmark.
-  views::TextField* title_tf_;
+  // Textfield showing the title of the bookmark.
+  views::Textfield* title_tf_;
 
-  // ComboBox showing a handful of folders the user can choose from, including
+  // Combobox showing a handful of folders the user can choose from, including
   // the current parent.
-  views::ComboBox* parent_combobox_;
+  views::Combobox* parent_combobox_;
 
   // When the destructor is invoked should the bookmark be removed?
   bool remove_bookmark_;

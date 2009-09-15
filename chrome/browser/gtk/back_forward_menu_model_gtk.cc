@@ -5,17 +5,13 @@
 #include "chrome/browser/gtk/back_forward_menu_model_gtk.h"
 
 #include "base/string_util.h"
-
-// static
-BackForwardMenuModel* BackForwardMenuModel::Create(Browser* browser,
-                                                   ModelType model_type) {
-  return new BackForwardMenuModelGtk(browser, model_type);
-}
+#include "chrome/browser/gtk/back_forward_button_gtk.h"
 
 BackForwardMenuModelGtk::BackForwardMenuModelGtk(Browser* browser,
-                                                 ModelType model_type) {
-  browser_ = browser;
-  model_type_ = model_type;
+                                                 ModelType model_type,
+                                                 BackForwardButtonGtk* button)
+    : BackForwardMenuModel(browser, model_type),
+      button_(button) {
 }
 
 int BackForwardMenuModelGtk::GetItemCount() const {
@@ -27,7 +23,7 @@ bool BackForwardMenuModelGtk::IsItemSeparator(int command_id) const {
 }
 
 std::string BackForwardMenuModelGtk::GetLabel(int command_id) const {
-  return WideToUTF8(GetItemLabel(command_id));
+  return UTF16ToUTF8(GetItemLabel(command_id));
 }
 
 bool BackForwardMenuModelGtk::HasIcon(int command_id) const {
@@ -44,4 +40,9 @@ bool BackForwardMenuModelGtk::IsCommandEnabled(int command_id) const {
 
 void BackForwardMenuModelGtk::ExecuteCommand(int command_id) {
   ExecuteCommandById(command_id);
+}
+
+void BackForwardMenuModelGtk::StoppedShowing() {
+  if (button_)
+    button_->StoppedShowingMenu();
 }

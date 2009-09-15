@@ -6,17 +6,19 @@
 #define CHROME_BROWSER_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_H_
 
 #include "chrome/browser/views/frame/browser_frame.h"
+#include "chrome/browser/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/views/tab_icon_view.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/window/non_client_view.h"
+#include "views/controls/button/button.h"
+#include "views/window/non_client_view.h"
 
 class BrowserView;
-class ChromeFont;
+namespace gfx {
+class Font;
+}
 class TabContents;
 class TabStrip;
 namespace views {
 class ImageButton;
-class WindowResources;
 }
 
 class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
@@ -30,8 +32,9 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual ~OpaqueBrowserFrameView();
 
   // Overridden from BrowserNonClientFrameView:
-  virtual gfx::Rect GetBoundsForTabStrip(TabStrip* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(TabStripWrapper* tabstrip) const;
   virtual void UpdateThrobber(bool running);
+  virtual gfx::Size GetMinimumSize();
 
  protected:
   // Overridden from views::NonClientFrameView:
@@ -45,13 +48,13 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual void ResetWindowControls();
 
   // Overridden from views::View:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual bool HitTest(const gfx::Point& l) const;
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);
-  virtual bool GetAccessibleRole(VARIANT* role);
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
   virtual bool GetAccessibleName(std::wstring* name);
   virtual void SetAccessibleName(const std::wstring& name);
 
@@ -87,19 +90,25 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // Calculates multiple values related to title layout.  Returns the height of
   // the entire titlebar including any connected client edge.
-  int TitleCoordinates(int* title_top_spacing,
-                       int* title_thickness) const;
+  int TitleCoordinates(int* title_top_spacing_ptr,
+                       int* title_thickness_ptr) const;
+
+  // Calculates multiple values related to icon layout.  Returns the size of the
+  // icon (along one edge).
+  int IconSize(int* title_top_spacing_ptr,
+               int* title_thickness_ptr,
+               int* available_height_ptr) const;
 
   // Paint various sub-components of this view.  The *FrameBorder() functions
   // also paint the background of the titlebar area, since the top frame border
   // and titlebar background are a contiguous component.
-  void PaintRestoredFrameBorder(ChromeCanvas* canvas);
-  void PaintMaximizedFrameBorder(ChromeCanvas* canvas);
-  void PaintDistributorLogo(ChromeCanvas* canvas);
-  void PaintTitleBar(ChromeCanvas* canvas);
-  void PaintToolbarBackground(ChromeCanvas* canvas);
-  void PaintOTRAvatar(ChromeCanvas* canvas);
-  void PaintRestoredClientEdge(ChromeCanvas* canvas);
+  void PaintRestoredFrameBorder(gfx::Canvas* canvas);
+  void PaintMaximizedFrameBorder(gfx::Canvas* canvas);
+  void PaintDistributorLogo(gfx::Canvas* canvas);
+  void PaintTitleBar(gfx::Canvas* canvas);
+  void PaintToolbarBackground(gfx::Canvas* canvas);
+  void PaintOTRAvatar(gfx::Canvas* canvas);
+  void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
   void LayoutWindowControls();
@@ -110,12 +119,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // Returns the bounds of the client area for the specified view size.
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
-
-  // Returns the set of resources to use to paint this view.
-  views::WindowResources* resources() const {
-    return frame_->IsActive() || paint_as_active() ?
-        current_active_resources_ : current_inactive_resources_;
-  }
 
   // The layout rect of the title, if visible.
   gfx::Rect title_bounds_;
@@ -144,21 +147,13 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
 
-  // The resources currently used to paint this view.
-  views::WindowResources* current_active_resources_;
-  views::WindowResources* current_inactive_resources_;
-
   // The accessible name of this view.
   std::wstring accessible_name_;
 
   static void InitClass();
   static void InitAppWindowResources();
   static SkBitmap* distributor_logo_;
-  static views::WindowResources* active_resources_;
-  static views::WindowResources* inactive_resources_;
-  static views::WindowResources* active_otr_resources_;
-  static views::WindowResources* inactive_otr_resources_;
-  static ChromeFont title_font_;
+  static gfx::Font* title_font_;
 
   DISALLOW_EVIL_CONSTRUCTORS(OpaqueBrowserFrameView);
 };

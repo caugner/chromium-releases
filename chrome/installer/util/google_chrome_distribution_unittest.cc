@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,6 +14,7 @@
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_chrome_distribution.h"
 #include "chrome/installer/util/master_preferences.h"
+#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/work_item_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +31,7 @@ class GoogleChromeDistributionTest : public testing::Test {
 
   // Creates "ap" key with the value given as parameter. Also adds work
   // items to work_item_list given so that they can be rolled back later.
-  bool CreateApKey(WorkItemList* work_item_list, std::wstring value) {
+  bool CreateApKey(WorkItemList* work_item_list, const std::wstring& value) {
     HKEY reg_root = HKEY_CURRENT_USER;
     std::wstring reg_key = GetApKeyPath();
     work_item_list->AddCreateRegKeyWorkItem(reg_root, reg_key);
@@ -193,7 +194,8 @@ TEST_F(GoogleChromeDistributionTest, TestExtractUninstallMetrics) {
       "    \"last_observed_running_time_sec\": \"1235341183\","
       "    \"launch_count\": \"11\","
       "    \"page_load_count\": \"68\","
-      "    \"uptime_sec\": \"809\"\n"
+      "    \"uptime_sec\": \"809\","
+      "    \"installation_date2\": \"1235341141\"\n"
       "  },\n"
       "  \"blah\": {\n"
       "    \"this_sentence_is_true\": false\n"
@@ -206,11 +208,11 @@ TEST_F(GoogleChromeDistributionTest, TestExtractUninstallMetrics) {
 
   // The URL string we expect to be generated from said make-believe file.
   std::wstring expected_url_string(
+      L"&installation_date2=1235341141"
       L"&last_launch_time_sec=1235341118"
       L"&last_observed_running_time_sec=1235341183"
-      L"&launch_count=11&page_load_count=68&uptime_sec=809&");
-  expected_url_string += installer_util::kUninstallInstallationDate;
-  expected_url_string += L"=1234567890";
+      L"&launch_count=11&page_load_count=68"
+      L"&uptime_sec=809");
 
   JSONStringValueSerializer json_deserializer(pref_string);
   std::string error_message;
@@ -226,12 +228,36 @@ TEST_F(GoogleChromeDistributionTest, TestExtractUninstallMetrics) {
                                     &uninstall_metrics_string));
   EXPECT_EQ(expected_url_string, uninstall_metrics_string);
 }
-
 #endif
 
+// The distribution strings should not be empty. The unit tests are not linking
+// with the chrome resources so we cannot test official build.
+TEST(BrowserDistribution, StringsTest) {
+  BrowserDistribution *dist = BrowserDistribution::GetDistribution();
+  ASSERT_TRUE(dist != NULL);
+  std::wstring name = dist->GetApplicationName();
+  EXPECT_FALSE(name.empty());
+  std::wstring desc = dist->GetAppDescription();
+  EXPECT_FALSE(desc.empty());
+  std::wstring alt_name = dist->GetAlternateApplicationName();
+  EXPECT_FALSE(alt_name.empty());
+}
+
+// The shortcut strings obtained by the shell utility functions should not
+// be empty or be the same.
+TEST(BrowserDistribution, AlternateAndNormalShortcutName) {
+  std::wstring normal_name;
+  std::wstring alternate_name;
+  EXPECT_TRUE(ShellUtil::GetChromeShortcutName(&normal_name, false));
+  EXPECT_TRUE(ShellUtil::GetChromeShortcutName(&alternate_name, true));
+  EXPECT_NE(normal_name, alternate_name);
+  EXPECT_FALSE(normal_name.empty());
+  EXPECT_FALSE(alternate_name.empty());
+}
+
 TEST(MasterPreferences, ParseDistroParams) {
-  std::wstring prefs;
-  ASSERT_TRUE(file_util::CreateTemporaryFileName(&prefs));
+  std::wstring prefs_file;
+  ASSERT_TRUE(file_util::CreateTemporaryFileName(&prefs_file));
   const char text[] =
     "{ \n"
     "  \"distribution\": { \n"
@@ -239,9 +265,12 @@ TEST(MasterPreferences, ParseDistroParams) {
     "     \"show_welcome_page\": true,\n"
     "     \"import_search_engine\": true,\n"
     "     \"import_history\": true,\n"
+    "     \"import_bookmarks\": true,\n"
+    "     \"import_home_page\": true,\n"
     "     \"create_all_shortcuts\": true,\n"
     "     \"do_not_launch_chrome\": true,\n"
     "     \"make_chrome_default\": true,\n"
+    "     \"make_chrome_default_for_user\": true,\n"
     "     \"system_level\": true,\n"
     "     \"verbose_logging\": true,\n"
     "     \"require_eula\": true,\n"
@@ -252,28 +281,87 @@ TEST(MasterPreferences, ParseDistroParams) {
     "  }\n"
     "} \n";
 
-  EXPECT_TRUE(file_util::WriteFile(prefs, text, sizeof(text)));
-  int result = installer_util::ParseDistributionPreferences(prefs);
-  EXPECT_FALSE(result & installer_util::MASTER_PROFILE_NOT_FOUND);
-  EXPECT_FALSE(result & installer_util::MASTER_PROFILE_ERROR);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_NO_FIRST_RUN_UI);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_SHOW_WELCOME);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_IMPORT_SEARCH_ENGINE);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_IMPORT_HISTORY);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_CREATE_ALL_SHORTCUTS);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_DO_NOT_LAUNCH_CHROME);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_MAKE_CHROME_DEFAULT);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_SYSTEM_LEVEL);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_VERBOSE_LOGGING);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_REQUIRE_EULA);
-  EXPECT_TRUE(result & installer_util::MASTER_PROFILE_ALT_SHORTCUT_TXT);
-  EXPECT_TRUE(file_util::Delete(prefs, false));
+  EXPECT_TRUE(file_util::WriteFile(prefs_file, text, sizeof(text)));
+  scoped_ptr<DictionaryValue> prefs(
+      installer_util::ParseDistributionPreferences(
+      FilePath::FromWStringHack(prefs_file)));
+  EXPECT_TRUE(prefs.get() != NULL);
+  bool value = true;
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroSkipFirstRunPref, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroShowWelcomePage, &value) &&
+      value);
+
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroImportSearchPref, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroImportHistoryPref, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroImportBookmarksPref, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDistroImportHomePagePref, &value) &&
+      value);
+
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kCreateAllShortcuts, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kDoNotLaunchChrome, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kMakeChromeDefault, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kMakeChromeDefaultForUser, &value) &&
+      value);
+
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kSystemLevel, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kVerboseLogging, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kRequireEula, &value) &&
+      value);
+  EXPECT_TRUE(installer_util::GetDistroBooleanPreference(prefs.get(),
+      installer_util::master_preferences::kAltShortcutText, &value) &&
+      value);
+
+  EXPECT_TRUE(file_util::Delete(prefs_file, false));
 }
 
-TEST(BrowserDistribution, StringsTest) {
-  BrowserDistribution *dist = BrowserDistribution::GetDistribution();
-  ASSERT_TRUE(dist != NULL);
-  std::wstring name = dist->GetApplicationName();
-  std::wstring desc = dist->GetAppDescription();
-  // TODO(cpu) finish the test when the translated strings arrive.
+TEST(MasterPreferences, FirstRunTabs) {
+  std::wstring prefs_file;
+  ASSERT_TRUE(file_util::CreateTemporaryFileName(&prefs_file));
+  const char text[] =
+    "{ \n"
+    "  \"distribution\": { \n"
+    "     \"something here\": true\n"
+    "  },\n"
+    "  \"first_run_tabs\": [\n"
+    "     \"http://google.com/f1\",\n"
+    "     \"https://google.com/f2\",\n"
+    "     \"new_tab_page\"\n"
+    "  ]\n"
+    "} \n";
+
+  EXPECT_TRUE(file_util::WriteFile(prefs_file, text, sizeof(text)));
+  scoped_ptr<DictionaryValue> prefs(
+      installer_util::ParseDistributionPreferences(
+      FilePath::FromWStringHack(prefs_file)));
+  EXPECT_TRUE(prefs.get() != NULL);
+
+  typedef std::vector<std::wstring> TabsVector;
+  TabsVector tabs = installer_util::GetFirstRunTabs(prefs.get());
+  ASSERT_EQ(3, tabs.size());
+  EXPECT_EQ(L"http://google.com/f1", tabs[0]);
+  EXPECT_EQ(L"https://google.com/f2", tabs[1]);
+  EXPECT_EQ(L"new_tab_page", tabs[2]);
+  EXPECT_TRUE(file_util::Delete(prefs_file, false));
 }

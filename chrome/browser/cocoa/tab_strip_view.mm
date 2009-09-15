@@ -18,9 +18,22 @@
   NSRect boundsRect = [self bounds];
   NSRect borderRect, contentRect;
   NSDivideRect(boundsRect, &borderRect, &contentRect, 1, NSMinYEdge);
-  [[NSColor colorWithCalibratedWhite:0.0 alpha:0.2] set];
+  [[NSColor colorWithCalibratedWhite:0.0 alpha:0.3] set];
 
   NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
+}
+
+// Called to determine where in our view hierarchy the click should go. We
+// want clicks to go to our children (tabs, new tab button, etc), but no click
+// should ever go to this view. In fact, returning this view breaks things
+// such as the window buttons and double-clicking the title bar since the
+// window manager believes there is a view that wants the mouse event. If the
+// superclass impl says the click should go here, just cheat and return nil.
+- (NSView*)hitTest:(NSPoint)point {
+  NSView* hit = [super hitTest:point];
+  if ([hit isEqual:self]) 
+      hit = nil;
+  return hit;
 }
 
 @end

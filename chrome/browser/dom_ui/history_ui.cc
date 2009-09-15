@@ -4,12 +4,15 @@
 
 #include "chrome/browser/dom_ui/history_ui.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/message_loop.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
 #include "base/time_format.h"
+#include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
@@ -17,9 +20,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/escape.h"
@@ -27,6 +28,7 @@
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 
 // Maximum number of search results to return in a given search. We should
 // eventually remove this.
@@ -45,6 +47,8 @@ HistoryUIHTMLSource::HistoryUIHTMLSource()
 void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
                                            int request_id) {
   DictionaryValue localized_strings;
+  localized_strings.SetString(L"loading",
+      l10n_util::GetString(IDS_HISTORY_LOADING));
   localized_strings.SetString(L"title",
       l10n_util::GetString(IDS_HISTORY_TITLE));
   localized_strings.SetString(L"loading",
@@ -72,15 +76,13 @@ void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
   localized_strings.SetString(L"deletedaywarning",
       l10n_util::GetString(IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING));
 
-  localized_strings.SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-       L"rtl" : L"ltr");
+  SetFontAndTextDirection(&localized_strings);
 
   static const StringPiece history_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_HISTORY_HTML));
-  const std::string full_html = jstemplate_builder::GetTemplateHtml(
-      history_html, &localized_strings, "t");
+  const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
+      history_html, &localized_strings);
 
   scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
   html_bytes->data.resize(full_html.size());
@@ -94,38 +96,37 @@ void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
 // HistoryHandler
 //
 ////////////////////////////////////////////////////////////////////////////////
-BrowsingHistoryHandler::BrowsingHistoryHandler(DOMUI* dom_ui)
-    : DOMMessageHandler(dom_ui),
-      search_text_(),
+BrowsingHistoryHandler::BrowsingHistoryHandler()
+    : search_text_(),
       remover_(NULL) {
+}
+
+BrowsingHistoryHandler::~BrowsingHistoryHandler() {
+  cancelable_consumer_.CancelAllRequests();
+  if (remover_.get())
+    remover_->RemoveObserver(this);
+}
+
+DOMMessageHandler* BrowsingHistoryHandler::Attach(DOMUI* dom_ui) {
+  // Create our favicon data source.
+  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(&chrome_url_data_manager,
+      &ChromeURLDataManager::AddDataSource,
+      new DOMUIFavIconSource(dom_ui->GetProfile())));
+
+  // Get notifications when history is cleared.
+  registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
+      Source<Profile>(dom_ui->GetProfile()->GetOriginalProfile()));
+  return DOMMessageHandler::Attach(dom_ui);
+}
+
+void BrowsingHistoryHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback("getHistory",
       NewCallback(this, &BrowsingHistoryHandler::HandleGetHistory));
   dom_ui_->RegisterMessageCallback("searchHistory",
       NewCallback(this, &BrowsingHistoryHandler::HandleSearchHistory));
   dom_ui_->RegisterMessageCallback("deleteDay",
       NewCallback(this, &BrowsingHistoryHandler::HandleDeleteDay));
-
-  // Create our favicon data source.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
-                        &ChromeURLDataManager::AddDataSource,
-                        new DOMUIFavIconSource(dom_ui_->GetProfile())));
-
-  // Get notifications when history is cleared.
-  NotificationService* service = NotificationService::current();
-  service->AddObserver(this, NotificationType::HISTORY_URLS_DELETED,
-                       Source<Profile>(dom_ui_->GetProfile()));
-}
-
-BrowsingHistoryHandler::~BrowsingHistoryHandler() {
-  cancelable_consumer_.CancelAllRequests();
-
-  NotificationService* service = NotificationService::current();
-  service->RemoveObserver(this, NotificationType::HISTORY_URLS_DELETED,
-                          Source<Profile>(dom_ui_->GetProfile()));
-
-  if (remover_.get())
-    remover_->RemoveObserver(this);
 }
 
 void BrowsingHistoryHandler::HandleGetHistory(const Value* value) {
@@ -359,12 +360,12 @@ void BrowsingHistoryHandler::Observe(NotificationType type,
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-HistoryUI::HistoryUI(WebContents* contents) : DOMUI(contents) {
-  AddMessageHandler(new BrowsingHistoryHandler(this));
+HistoryUI::HistoryUI(TabContents* contents) : DOMUI(contents) {
+  AddMessageHandler((new BrowsingHistoryHandler())->Attach(this));
 
   HistoryUIHTMLSource* html_source = new HistoryUIHTMLSource();
 
-  // Set up the chrome-ui://history/ source.
+  // Set up the chrome://history/ source.
   g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(&chrome_url_data_manager,
           &ChromeURLDataManager::AddDataSource,

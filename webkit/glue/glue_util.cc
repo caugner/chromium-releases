@@ -2,15 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(darin): This file will be deleted once we complete the move to
+// webkit/api
+
+// In this file, we pretend to be part of the WebKit implementation.
+// This is just a temporary hack while glue is still being moved into
+// webkit/api.
+#define WEBKIT_IMPLEMENTATION 1
+
 #include "config.h"
 #include "webkit/glue/glue_util.h"
 
 #include <string>
 
+#include "ChromiumDataObject.h"
 #include "CString.h"
+#include "HistoryItem.h"
+#include "HTMLFormElement.h"
+#include "IntPoint.h"
 #include "IntRect.h"
-#include "PlatformString.h"
 #include "KURL.h"
+#include "Node.h"
+#include "PlatformString.h"
+#include "ResourceError.h"
 
 #undef LOG
 #include "base/compiler_specific.h"
@@ -19,12 +33,19 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-
-
-// TODO(darin): This file will be deleted once we complete the move to
-// third_party/WebKit/WebKit/chromium
-
+#include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebDragData.h"
+#include "webkit/api/public/WebForm.h"
+#include "webkit/api/public/WebHistoryItem.h"
+#include "webkit/api/public/WebNode.h"
+#include "webkit/api/public/WebPoint.h"
+#include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebSize.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebURLError.h"
+#include "webkit/api/public/WebURLRequest.h"
+#include "webkit/api/public/WebURLResponse.h"
 
 namespace webkit_glue {
 
@@ -61,10 +82,9 @@ WebCore::String String16ToString(const string16& str) {
 }
 
 std::string StringToStdString(const WebCore::String& str) {
-  if (str.length() == 0)
-    return std::string();
   std::string ret;
-  UTF16ToUTF8(str.characters(), str.length(), &ret);
+  if (!str.isNull())
+    UTF16ToUTF8(str.characters(), str.length(), &ret);
   return ret;
 }
 
@@ -80,6 +100,43 @@ WebCore::String StdWStringToString(const std::wstring& str) {
 WebCore::String StdStringToString(const std::string& str) {
   return WebCore::String::fromUTF8(str.data(),
                                    static_cast<unsigned>(str.length()));
+}
+
+WebKit::WebString StringToWebString(const WebCore::String& str) {
+  return str;
+}
+
+WebCore::String WebStringToString(const WebKit::WebString& str) {
+  return str;
+}
+
+WebKit::WebCString CStringToWebCString(const WebCore::CString& str) {
+  return str;
+}
+
+WebCore::CString WebCStringToCString(const WebKit::WebCString& str) {
+  return str;
+}
+
+WebKit::WebString StdStringToWebString(const std::string& str) {
+  return WebKit::WebString::fromUTF8(str.data(), str.size());
+}
+
+std::string WebStringToStdString(const WebKit::WebString& str) {
+  std::string ret;
+  if (!str.isNull())
+    UTF16ToUTF8(str.data(), str.length(), &ret);
+  return ret;
+}
+
+WebKit::WebData SharedBufferToWebData(
+    const WTF::PassRefPtr<WebCore::SharedBuffer>& buf) {
+  return buf;
+}
+
+WTF::PassRefPtr<WebCore::SharedBuffer> WebDataToSharedBuffer(
+    const WebKit::WebData& data) {
+  return data;
 }
 
 FilePath::StringType StringToFilePathString(const WebCore::String& str) {
@@ -127,6 +184,14 @@ GURL StringToGURL(const WebCore::String& spec) {
   return GURL(WideToUTF8(StringToStdWString(spec)));
 }
 
+WebKit::WebURL KURLToWebURL(const WebCore::KURL& url) {
+  return url;
+}
+
+WebCore::KURL WebURLToKURL(const WebKit::WebURL& url) {
+  return url;
+}
+
 // Rect conversions ------------------------------------------------------------
 
 gfx::Rect FromIntRect(const WebCore::IntRect& r) {
@@ -136,6 +201,122 @@ gfx::Rect FromIntRect(const WebCore::IntRect& r) {
 
 WebCore::IntRect ToIntRect(const gfx::Rect& r) {
   return WebCore::IntRect(r.x(), r.y(), r.width(), r.height());
+}
+
+// Point conversions -----------------------------------------------------------
+
+WebCore::IntPoint WebPointToIntPoint(const WebKit::WebPoint& point) {
+  return point;
+}
+
+WebKit::WebPoint IntPointToWebPoint(const WebCore::IntPoint& point) {
+  return point;
+}
+
+// Rect conversions ------------------------------------------------------------
+
+WebCore::IntRect WebRectToIntRect(const WebKit::WebRect& rect) {
+  return rect;
+}
+
+WebKit::WebRect IntRectToWebRect(const WebCore::IntRect& rect) {
+  return rect;
+}
+
+// Size conversions ------------------------------------------------------------
+
+WebCore::IntSize WebSizeToIntSize(const WebKit::WebSize& size) {
+  return size;
+}
+
+WebKit::WebSize IntSizeToWebSize(const WebCore::IntSize& size) {
+  return size;
+}
+
+// Cursor conversions ----------------------------------------------------------
+
+WebKit::WebCursorInfo CursorToWebCursorInfo(const WebCore::Cursor& cursor) {
+  return WebKit::WebCursorInfo(cursor);
+}
+
+// DragData conversions --------------------------------------------------------
+
+WebKit::WebDragData ChromiumDataObjectToWebDragData(
+    const PassRefPtr<WebCore::ChromiumDataObject>& data) {
+  return data;
+}
+
+PassRefPtr<WebCore::ChromiumDataObject> WebDragDataToChromiumDataObject(
+    const WebKit::WebDragData& data) {
+  return data;
+}
+
+// WebForm conversions ---------------------------------------------------------
+
+WebKit::WebForm HTMLFormElementToWebForm(
+    const WTF::PassRefPtr<WebCore::HTMLFormElement>& form) {
+  return form;
+}
+
+WTF::PassRefPtr<WebCore::HTMLFormElement> WebFormToHTMLFormElement(
+    const WebKit::WebForm& form) {
+  return form;
+}
+
+// WebNode conversions ---------------------------------------------------------
+WebKit::WebNode NodeToWebNode(const WTF::PassRefPtr<WebCore::Node>& node) {
+  return node;
+}
+WTF::PassRefPtr<WebCore::Node> WebNodeToNode(const WebKit::WebNode& node) {
+  return node;
+}
+
+// WebHistoryItem conversions --------------------------------------------------
+
+WebKit::WebHistoryItem HistoryItemToWebHistoryItem(
+    const WTF::PassRefPtr<WebCore::HistoryItem>& item) {
+  return item;
+}
+
+WTF::PassRefPtr<WebCore::HistoryItem> WebHistoryItemToHistoryItem(
+    const WebKit::WebHistoryItem& item) {
+  return item;
+}
+
+// WebURLError conversions -----------------------------------------------------
+
+WebKit::WebURLError ResourceErrorToWebURLError(
+    const WebCore::ResourceError& error) {
+  return error;
+}
+
+WebCore::ResourceError WebURLErrorToResourceError(
+    const WebKit::WebURLError& error) {
+  return error;
+}
+
+// WebURLRequest conversions ---------------------------------------------------
+
+WebCore::ResourceRequest* WebURLRequestToMutableResourceRequest(
+    WebKit::WebURLRequest* request) {
+  return &request->toMutableResourceRequest();
+}
+
+const WebCore::ResourceRequest* WebURLRequestToResourceRequest(
+    const WebKit::WebURLRequest* request) {
+  return &request->toResourceRequest();
+}
+
+// WebURLResponse conversions --------------------------------------------------
+
+WebCore::ResourceResponse* WebURLResponseToMutableResourceResponse(
+    WebKit::WebURLResponse* response) {
+  return &response->toMutableResourceResponse();
+}
+
+const WebCore::ResourceResponse* WebURLResponseToResourceResponse(
+    const WebKit::WebURLResponse* response) {
+  return &response->toResourceResponse();
 }
 
 }  // namespace webkit_glue

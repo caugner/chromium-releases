@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
-
 #include "chrome/browser/net/url_fixer_upper.h"
+
+#include <algorithm>
 
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "chrome/common/gfx/text_elider.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_file.h"
@@ -19,7 +18,59 @@
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
 
-using namespace std;
+using std::string;
+using std::wstring;
+
+namespace {
+
+// TODO(estade): Remove these ugly, ugly functions. They are only used in
+// SegmentURL. A url_parse::Parsed object keeps track of a bunch of indices into
+// a url string, and these need to be updated when the URL is converted from
+// UTF8 to UTF16. Instead of this after-the-fact adjustment, we should parse it
+// in the correct string format to begin with.
+url_parse::Component UTF8ComponentToWideComponent(
+    const string& text_utf8,
+    const url_parse::Component& component_utf8) {
+  if (component_utf8.len == -1)
+    return url_parse::Component();
+
+  string before_component_string = text_utf8.substr(0, component_utf8.begin);
+  string component_string = text_utf8.substr(component_utf8.begin,
+                                             component_utf8.len);
+  wstring before_component_string_w = UTF8ToWide(before_component_string);
+  wstring component_string_w = UTF8ToWide(component_string);
+  url_parse::Component component_w(before_component_string_w.length(),
+                                   component_string_w.length());
+  return component_w;
+}
+
+void UTF8PartsToWideParts(const string& text_utf8,
+                          const url_parse::Parsed& parts_utf8,
+                          url_parse::Parsed* parts) {
+  if (IsStringASCII(text_utf8)) {
+    *parts = parts_utf8;
+    return;
+  }
+
+  parts->scheme =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.scheme);
+  parts ->username =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.username);
+  parts->password =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.password);
+  parts->host =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.host);
+  parts->port =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.port);
+  parts->path =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.path);
+  parts->query =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.query);
+  parts->ref =
+      UTF8ComponentToWideComponent(text_utf8, parts_utf8.ref);
+}
+
+}  // namespace
 
 // does some basic fixes for input that we want to test for file-ness
 static void PrepareStringForFileOps(const FilePath& text,
@@ -53,24 +104,26 @@ static bool ValidPathForFile(const FilePath::StringType& text,
 // file: URLs: these don't look like filenames), leaving fixed_up_url
 // unchanged.
 static string FixupPath(const string& text) {
-  DCHECK(text.length() >= 2);
+  DCHECK(!text.empty());
 
   FilePath::StringType filename;
 #if defined(OS_WIN)
   FilePath input_path(UTF8ToWide(text));
-#elif defined(OS_POSIX)
-  FilePath input_path(text);
-#endif
   PrepareStringForFileOps(input_path, &filename);
 
-  if (filename[1] == '|')
+  // Fixup Windows-style drive letters, where "C:" gets rewritten to "C|".
+  if (filename.length() > 1 && filename[1] == '|')
     filename[1] = ':';
+#elif defined(OS_POSIX)
+  FilePath input_path(text);
+  PrepareStringForFileOps(input_path, &filename);
+#endif
 
   // Here, we know the input looks like a file.
   GURL file_url = net::FilePathToFileURL(FilePath(filename));
   if (file_url.is_valid()) {
-    return WideToUTF8(gfx::GetCleanStringFromUrl(file_url, std::wstring(),
-                                                 NULL, NULL));
+    return WideToUTF8(net::FormatUrl(file_url, std::wstring(), true,
+        UnescapeRule::NORMAL, NULL, NULL));
   }
 
   // Invalid file URL, just return the input.
@@ -259,6 +312,47 @@ static bool HasPort(const std::string& original_text,
   return true;
 }
 
+// Try to extract a valid scheme from the beginning of |text|.
+// If successful, set |scheme_component| to the text range where the scheme
+// was located, and fill |canon_scheme| with its canonicalized form.
+// Otherwise, return false and leave the outputs in an indeterminate state.
+static bool GetValidScheme(const string &text,
+                           url_parse::Component *scheme_component,
+                           string *canon_scheme) {
+  // Locate everything up to (but not including) the first ':'
+  if (!url_parse::ExtractScheme(text.data(), static_cast<int>(text.length()),
+                                scheme_component))
+    return false;
+
+  // Make sure the scheme contains only valid characters, and convert
+  // to lowercase.  This also catches IPv6 literals like [::1], because
+  // brackets are not in the whitelist.
+  url_canon::StdStringCanonOutput canon_scheme_output(canon_scheme);
+  url_parse::Component canon_scheme_component;
+  if (!url_canon::CanonicalizeScheme(text.data(), *scheme_component,
+                                     &canon_scheme_output,
+                                     &canon_scheme_component))
+    return false;
+
+  // Strip the ':', and any trailing buffer space.
+  DCHECK_EQ(0, canon_scheme_component.begin);
+  canon_scheme->erase(canon_scheme_component.len);
+
+  // We need to fix up the segmentation for "www.example.com:/".  For this
+  // case, we guess that schemes with a "." are not actually schemes.
+  if (canon_scheme->find('.') != string::npos)
+    return false;
+
+  // We need to fix up the segmentation for "www:123/".  For this case, we
+  // will add an HTTP scheme later and make the URL parser happy.
+  // TODO(pkasting): Maybe we should try to use GURL's parser for this?
+  if (HasPort(text, *scheme_component))
+    return false;
+
+  // Everything checks out.
+  return true;
+}
+
 string URLFixerUpper::SegmentURL(const string& text,
                                  url_parse::Parsed* parts) {
   // Initialize the result.
@@ -281,36 +375,12 @@ string URLFixerUpper::SegmentURL(const string& text,
 
   // Otherwise, we need to look at things carefully.
   string scheme;
-  if (url_parse::ExtractScheme(text.data(),
-                               static_cast<int>(text.length()),
-                               &parts->scheme)) {
-    // We were able to extract a scheme.  Remember what we have, but we may
-    // decide to change our minds later.
-    scheme.assign(text.substr(parts->scheme.begin, parts->scheme.len));
-
-    if (parts->scheme.is_valid() &&
-        // Valid schemes are ASCII-only.
-        (!IsStringASCII(scheme) ||
-        // We need to fix up the segmentation for "www.example.com:/".  For this
-        // case, we guess that schemes with a "." are not actually schemes.
-        (scheme.find(".") != wstring::npos) ||
-        // We need to fix up the segmentation for "www:123/".  For this case, we
-        // will add an HTTP scheme later and make the URL parser happy.
-        // TODO(pkasting): Maybe we should try to use GURL's parser for this?
-        HasPort(text, parts->scheme)))
-      parts->scheme.reset();
-  }
-
-  // When we couldn't find a scheme in the input, we need to pick one.  Normally
-  // we choose http, but if the URL starts with "ftp.", we match other browsers
-  // and choose ftp.
-  if (!parts->scheme.is_valid()) {
+  if (!GetValidScheme(text, &parts->scheme, &scheme)) {
+    // Couldn't determine the scheme, so just pick one.
+    parts->scheme.reset();
     scheme.assign(StartsWithASCII(text, "ftp.", false) ?
         chrome::kFtpScheme : chrome::kHttpScheme);
   }
-
-  // Cannonicalize the scheme.
-  StringToLowerASCII(&scheme);
 
   // Not segmenting file schemes or nonstandard schemes.
   if ((scheme == chrome::kFileScheme) ||
@@ -452,8 +522,8 @@ string URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
   if (is_file) {
     GURL file_url = net::FilePathToFileURL(full_path);
     if (file_url.is_valid())
-      return WideToUTF8(gfx::GetCleanStringFromUrl(file_url, std::wstring(),
-                                                   NULL, NULL));
+      return WideToUTF8(net::FormatUrl(file_url, std::wstring(),
+          true, UnescapeRule::NORMAL, NULL, NULL));
     // Invalid files fall through to regular processing.
   }
 
@@ -469,14 +539,18 @@ string URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
 // Deprecated functions. To be removed when all callers are updated.
 wstring URLFixerUpper::SegmentURL(const wstring& text,
                                   url_parse::Parsed* parts) {
-  return UTF8ToWide(SegmentURL(WideToUTF8(text), parts));
+  string text_utf8 = WideToUTF8(text);
+  url_parse::Parsed parts_utf8;
+  string scheme_utf8 = SegmentURL(text_utf8, &parts_utf8);
+  UTF8PartsToWideParts(text_utf8, parts_utf8, parts);
+  return UTF8ToWide(scheme_utf8);
 }
 wstring URLFixerUpper::FixupURL(const wstring& text,
-                 const wstring& desired_tld) {
+                                const wstring& desired_tld) {
   return UTF8ToWide(FixupURL(WideToUTF8(text), WideToUTF8(desired_tld)));
 }
 wstring URLFixerUpper::FixupRelativeFile(const wstring& base_dir,
-                          const wstring& text) {
+                                         const wstring& text) {
   return UTF8ToWide(FixupRelativeFile(FilePath::FromWStringHack(base_dir),
                                       FilePath::FromWStringHack(text)));
 }

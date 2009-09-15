@@ -6,14 +6,14 @@
 
 #include <vector>
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/time_format.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/stl_util-inl.h"
 #include "grit/generated_resources.h"
 #include "unicode/datefmt.h"
 #include "unicode/locid.h"
@@ -24,101 +24,187 @@
 using base::Time;
 using base::TimeDelta;
 
-class TimeRemainingFormat {
-  public:
-    const std::vector<PluralFormat*>& formatter(bool short_version) {
-      return short_version ? short_formatter_ : long_formatter_;
-    }
-  private:
-    TimeRemainingFormat() {
-      BuildFormats(true, &short_formatter_);
-      BuildFormats(false, &long_formatter_);
-    }
-    ~TimeRemainingFormat() {
-      STLDeleteContainerPointers(short_formatter_.begin(),
-                                 short_formatter_.end());
-      STLDeleteContainerPointers(long_formatter_.begin(),
-                                 long_formatter_.end());
-    }
-    friend class Singleton<TimeRemainingFormat>;
-    friend struct DefaultSingletonTraits<TimeRemainingFormat>;
+namespace {
 
-    std::vector<PluralFormat*> long_formatter_;
-    std::vector<PluralFormat*> short_formatter_;
-    static void BuildFormats(bool short_version,
-                             std::vector<PluralFormat*>* time_formats);
-    static PluralFormat* createFallbackFormat(const PluralRules& rules,
-                                              int index,
-                                              bool short_version);
+static const char kFallbackFormatSuffixShort[] = "}";
+static const char kFallbackFormatSuffixLeft[] = " left}";
+static const char kFallbackFormatSuffixAgo[] = " ago}";
 
-    DISALLOW_EVIL_CONSTRUCTORS(TimeRemainingFormat);
+// Contains message IDs for various time units and pluralities.
+struct MessageIDs {
+  // There are 4 different time units and 6 different pluralities.
+  int ids[4][6];
 };
 
-void TimeRemainingFormat::BuildFormats(
-    bool short_version,
-    std::vector<PluralFormat*>* time_formats) {
-  const static int kInvalidMsgId = -1;
-  const static int kTimeMsgIds[][6] = {
-    {
-      IDS_TIME_SECS_DEFAULT, IDS_TIME_SEC_SINGULAR, IDS_TIME_SECS_ZERO,
-      IDS_TIME_SECS_TWO, IDS_TIME_SECS_FEW, IDS_TIME_SECS_MANY
-    },
-    {
-      IDS_TIME_MINS_DEFAULT, IDS_TIME_MIN_SINGULAR, kInvalidMsgId,
-      IDS_TIME_MINS_TWO, IDS_TIME_MINS_FEW, IDS_TIME_MINS_MANY
-    },
-    {
-      IDS_TIME_HOURS_DEFAULT, IDS_TIME_HOUR_SINGULAR, kInvalidMsgId,
-      IDS_TIME_HOURS_TWO, IDS_TIME_HOURS_FEW, IDS_TIME_HOURS_MANY
-    },
-    {
-      IDS_TIME_DAYS_DEFAULT, IDS_TIME_DAY_SINGULAR, kInvalidMsgId,
-      IDS_TIME_DAYS_TWO, IDS_TIME_DAYS_FEW, IDS_TIME_DAYS_MANY
-    }
-  };
+// Message IDs for different time formats.
+static const MessageIDs kTimeShortMessageIDs = { {
+  {
+    IDS_TIME_SECS_DEFAULT, IDS_TIME_SEC_SINGULAR, IDS_TIME_SECS_ZERO,
+    IDS_TIME_SECS_TWO, IDS_TIME_SECS_FEW, IDS_TIME_SECS_MANY
+  },
+  {
+    IDS_TIME_MINS_DEFAULT, IDS_TIME_MIN_SINGULAR, IDS_TIME_MINS_ZERO,
+    IDS_TIME_MINS_TWO, IDS_TIME_MINS_FEW, IDS_TIME_MINS_MANY
+  },
+  {
+    IDS_TIME_HOURS_DEFAULT, IDS_TIME_HOUR_SINGULAR, IDS_TIME_HOURS_ZERO,
+    IDS_TIME_HOURS_TWO, IDS_TIME_HOURS_FEW, IDS_TIME_HOURS_MANY
+  },
+  {
+    IDS_TIME_DAYS_DEFAULT, IDS_TIME_DAY_SINGULAR, IDS_TIME_DAYS_ZERO,
+    IDS_TIME_DAYS_TWO, IDS_TIME_DAYS_FEW, IDS_TIME_DAYS_MANY
+  }
+} };
 
-  const static int kTimeLeftMsgIds[][6] = {
-    {
-      IDS_TIME_REMAINING_SECS_DEFAULT, IDS_TIME_REMAINING_SEC_SINGULAR,
-      IDS_TIME_REMAINING_SECS_ZERO, IDS_TIME_REMAINING_SECS_TWO,
-      IDS_TIME_REMAINING_SECS_FEW, IDS_TIME_REMAINING_SECS_MANY
-    },
-    {
-      IDS_TIME_REMAINING_MINS_DEFAULT, IDS_TIME_REMAINING_MIN_SINGULAR,
-      kInvalidMsgId, IDS_TIME_REMAINING_MINS_TWO,
-      IDS_TIME_REMAINING_MINS_FEW, IDS_TIME_REMAINING_MINS_MANY
-    },
-    {
-      IDS_TIME_REMAINING_HOURS_DEFAULT, IDS_TIME_REMAINING_HOUR_SINGULAR,
-      kInvalidMsgId, IDS_TIME_REMAINING_HOURS_TWO,
-      IDS_TIME_REMAINING_HOURS_FEW, IDS_TIME_REMAINING_HOURS_MANY
-    },
-    {
-      IDS_TIME_REMAINING_DAYS_DEFAULT, IDS_TIME_REMAINING_DAY_SINGULAR,
-      kInvalidMsgId, IDS_TIME_REMAINING_DAYS_TWO,
-      IDS_TIME_REMAINING_DAYS_FEW, IDS_TIME_REMAINING_DAYS_MANY
-    }
-  };
+static const MessageIDs kTimeRemainingMessageIDs = { {
+  {
+    IDS_TIME_REMAINING_SECS_DEFAULT, IDS_TIME_REMAINING_SEC_SINGULAR,
+    IDS_TIME_REMAINING_SECS_ZERO, IDS_TIME_REMAINING_SECS_TWO,
+    IDS_TIME_REMAINING_SECS_FEW, IDS_TIME_REMAINING_SECS_MANY
+  },
+  {
+    IDS_TIME_REMAINING_MINS_DEFAULT, IDS_TIME_REMAINING_MIN_SINGULAR,
+    IDS_TIME_REMAINING_MINS_ZERO, IDS_TIME_REMAINING_MINS_TWO,
+    IDS_TIME_REMAINING_MINS_FEW, IDS_TIME_REMAINING_MINS_MANY
+  },
+  {
+    IDS_TIME_REMAINING_HOURS_DEFAULT, IDS_TIME_REMAINING_HOUR_SINGULAR,
+    IDS_TIME_REMAINING_HOURS_ZERO, IDS_TIME_REMAINING_HOURS_TWO,
+    IDS_TIME_REMAINING_HOURS_FEW, IDS_TIME_REMAINING_HOURS_MANY
+  },
+  {
+    IDS_TIME_REMAINING_DAYS_DEFAULT, IDS_TIME_REMAINING_DAY_SINGULAR,
+    IDS_TIME_REMAINING_DAYS_ZERO, IDS_TIME_REMAINING_DAYS_TWO,
+    IDS_TIME_REMAINING_DAYS_FEW, IDS_TIME_REMAINING_DAYS_MANY
+  }
+} };
 
-  const static UnicodeString kKeywords[] = {
+static const MessageIDs kTimeElapsedMessageIDs = { {
+  {
+    IDS_TIME_ELAPSED_SECS_DEFAULT, IDS_TIME_ELAPSED_SEC_SINGULAR,
+    IDS_TIME_ELAPSED_SECS_ZERO, IDS_TIME_ELAPSED_SECS_TWO,
+    IDS_TIME_ELAPSED_SECS_FEW, IDS_TIME_ELAPSED_SECS_MANY
+  },
+  {
+    IDS_TIME_ELAPSED_MINS_DEFAULT, IDS_TIME_ELAPSED_MIN_SINGULAR,
+    IDS_TIME_ELAPSED_MINS_ZERO, IDS_TIME_ELAPSED_MINS_TWO,
+    IDS_TIME_ELAPSED_MINS_FEW, IDS_TIME_ELAPSED_MINS_MANY
+  },
+  {
+    IDS_TIME_ELAPSED_HOURS_DEFAULT, IDS_TIME_ELAPSED_HOUR_SINGULAR,
+    IDS_TIME_ELAPSED_HOURS_ZERO, IDS_TIME_ELAPSED_HOURS_TWO,
+    IDS_TIME_ELAPSED_HOURS_FEW, IDS_TIME_ELAPSED_HOURS_MANY
+  },
+  {
+    IDS_TIME_ELAPSED_DAYS_DEFAULT, IDS_TIME_ELAPSED_DAY_SINGULAR,
+    IDS_TIME_ELAPSED_DAYS_ZERO, IDS_TIME_ELAPSED_DAYS_TWO,
+    IDS_TIME_ELAPSED_DAYS_FEW, IDS_TIME_ELAPSED_DAYS_MANY
+  }
+} };
+
+// Different format types.
+enum FormatType {
+  FORMAT_SHORT,
+  FORMAT_REMAINING,
+  FORMAT_ELAPSED,
+};
+
+}  // namespace
+
+class TimeFormatter {
+  public:
+    const std::vector<icu::PluralFormat*>& formatter(FormatType format_type) {
+      switch (format_type) {
+        case FORMAT_SHORT:
+          return short_formatter_;
+        case FORMAT_REMAINING:
+          return time_left_formatter_;
+        case FORMAT_ELAPSED:
+          return time_elapsed_formatter_;
+        default:
+          NOTREACHED();
+          return short_formatter_;
+      }
+    }
+  private:
+    static const MessageIDs& GetMessageIDs(FormatType format_type) {
+      switch (format_type) {
+        case FORMAT_SHORT:
+          return kTimeShortMessageIDs;
+        case FORMAT_REMAINING:
+          return kTimeRemainingMessageIDs;
+        case FORMAT_ELAPSED:
+          return kTimeElapsedMessageIDs;
+        default:
+          NOTREACHED();
+          return kTimeShortMessageIDs;
+      }
+    }
+
+    static const char* GetFallbackFormatSuffix(FormatType format_type) {
+      switch (format_type) {
+        case FORMAT_SHORT:
+          return kFallbackFormatSuffixShort;
+        case FORMAT_REMAINING:
+          return kFallbackFormatSuffixLeft;
+        case FORMAT_ELAPSED:
+          return kFallbackFormatSuffixAgo;
+        default:
+          NOTREACHED();
+          return kFallbackFormatSuffixShort;
+      }
+    }
+
+    TimeFormatter() {
+      BuildFormats(FORMAT_SHORT, &short_formatter_);
+      BuildFormats(FORMAT_REMAINING, &time_left_formatter_);
+      BuildFormats(FORMAT_ELAPSED, &time_elapsed_formatter_);
+    }
+    ~TimeFormatter() {
+      STLDeleteContainerPointers(short_formatter_.begin(),
+                                 short_formatter_.end());
+      STLDeleteContainerPointers(time_left_formatter_.begin(),
+                                 time_left_formatter_.end());
+      STLDeleteContainerPointers(time_elapsed_formatter_.begin(),
+                                 time_elapsed_formatter_.end());
+    }
+    friend class Singleton<TimeFormatter>;
+    friend struct DefaultSingletonTraits<TimeFormatter>;
+
+    std::vector<icu::PluralFormat*> short_formatter_;
+    std::vector<icu::PluralFormat*> time_left_formatter_;
+    std::vector<icu::PluralFormat*> time_elapsed_formatter_;
+    static void BuildFormats(FormatType format_type,
+                             std::vector<icu::PluralFormat*>* time_formats);
+    static icu::PluralFormat* createFallbackFormat(
+        const icu::PluralRules& rules, int index, FormatType format_type);
+
+    DISALLOW_EVIL_CONSTRUCTORS(TimeFormatter);
+};
+
+void TimeFormatter::BuildFormats(
+    FormatType format_type, std::vector<icu::PluralFormat*>* time_formats) {
+  static const icu::UnicodeString kKeywords[] = {
     UNICODE_STRING_SIMPLE("other"), UNICODE_STRING_SIMPLE("one"),
     UNICODE_STRING_SIMPLE("zero"), UNICODE_STRING_SIMPLE("two"),
     UNICODE_STRING_SIMPLE("few"), UNICODE_STRING_SIMPLE("many")
   };
   UErrorCode err = U_ZERO_ERROR;
-  scoped_ptr<PluralRules> rules(
-      PluralRules::forLocale(Locale::getDefault(), err));
+  scoped_ptr<icu::PluralRules> rules(
+      icu::PluralRules::forLocale(icu::Locale::getDefault(), err));
   if (U_FAILURE(err)) {
     err = U_ZERO_ERROR;
-    UnicodeString fallback_rules("one: n is 1", -1, US_INV);
-    rules.reset(PluralRules::createRules(fallback_rules, err));
+    icu::UnicodeString fallback_rules("one: n is 1", -1, US_INV);
+    rules.reset(icu::PluralRules::createRules(fallback_rules, err));
     DCHECK(U_SUCCESS(err));
   }
+
+  const MessageIDs& message_ids = GetMessageIDs(format_type);
+
   for (int i = 0; i < 4; ++i) {
-    UnicodeString pattern;
+    icu::UnicodeString pattern;
     for (size_t j = 0; j < arraysize(kKeywords); ++j) {
-      int msg_id = short_version ? kTimeMsgIds[i][j] : kTimeLeftMsgIds[i][j];
-      if (msg_id == kInvalidMsgId) continue;
+      int msg_id = message_ids.ids[i][j];
       std::string sub_pattern = WideToUTF8(l10n_util::GetString(msg_id));
       // NA means this keyword is not used in the current locale.
       // Even if a translator translated for this keyword, we do not
@@ -129,16 +215,16 @@ void TimeRemainingFormat::BuildFormats(
           (j == 0 || rules->isKeyword(kKeywords[j]))) {
           pattern += kKeywords[j];
           pattern += UNICODE_STRING_SIMPLE("{");
-          pattern += UnicodeString(sub_pattern.c_str(), "UTF-8");
+          pattern += icu::UnicodeString(sub_pattern.c_str(), "UTF-8");
           pattern += UNICODE_STRING_SIMPLE("}");
       }
     }
-    PluralFormat* format = new PluralFormat(*rules, pattern, err);
+    icu::PluralFormat* format = new icu::PluralFormat(*rules, pattern, err);
     if (U_SUCCESS(err)) {
       time_formats->push_back(format);
     } else {
       delete format;
-      time_formats->push_back(createFallbackFormat(*rules, i, short_version));
+      time_formats->push_back(createFallbackFormat(*rules, i, format_type));
       // Reset it so that next ICU call can proceed.
       err = U_ZERO_ERROR;
     }
@@ -147,32 +233,30 @@ void TimeRemainingFormat::BuildFormats(
 
 // Create a hard-coded fallback plural format. This will never be called
 // unless translators make a mistake.
-PluralFormat* TimeRemainingFormat::createFallbackFormat(
-    const PluralRules& rules,
-    int index,
-    bool short_version) {
-  const static UnicodeString kUnits[4][2] = {
+icu::PluralFormat* TimeFormatter::createFallbackFormat(
+    const icu::PluralRules& rules, int index, FormatType format_type) {
+  static const icu::UnicodeString kUnits[4][2] = {
     { UNICODE_STRING_SIMPLE("sec"), UNICODE_STRING_SIMPLE("secs") },
     { UNICODE_STRING_SIMPLE("min"), UNICODE_STRING_SIMPLE("mins") },
     { UNICODE_STRING_SIMPLE("hour"), UNICODE_STRING_SIMPLE("hours") },
     { UNICODE_STRING_SIMPLE("day"), UNICODE_STRING_SIMPLE("days") }
   };
-  UnicodeString suffix(short_version ? "}" : " left}", -1, US_INV);
-  UnicodeString pattern;
+  icu::UnicodeString suffix(GetFallbackFormatSuffix(format_type), -1, US_INV);
+  icu::UnicodeString pattern;
   if (rules.isKeyword(UNICODE_STRING_SIMPLE("one"))) {
     pattern += UNICODE_STRING_SIMPLE("one{# ") + kUnits[index][0] + suffix;
   }
   pattern += UNICODE_STRING_SIMPLE(" other{# ") + kUnits[index][1] + suffix;
   UErrorCode err = U_ZERO_ERROR;
-  PluralFormat* format = new PluralFormat(rules, pattern, err);
+  icu::PluralFormat* format = new icu::PluralFormat(rules, pattern, err);
   DCHECK(U_SUCCESS(err));
   return format;
 }
 
-Singleton<TimeRemainingFormat> time_remaining_format;
+Singleton<TimeFormatter> time_formatter;
 
-static std::wstring TimeRemainingImpl(const TimeDelta& delta,
-                                      bool short_version) {
+static std::wstring FormatTimeImpl(const TimeDelta& delta,
+                                   FormatType format_type) {
   if (delta.ToInternalValue() < 0) {
     NOTREACHED() << "Negative duration";
     return std::wstring();
@@ -180,11 +264,11 @@ static std::wstring TimeRemainingImpl(const TimeDelta& delta,
 
   int number;
 
-  const std::vector<PluralFormat*>& formatters =
-    time_remaining_format->formatter(short_version);
+  const std::vector<icu::PluralFormat*>& formatters =
+    time_formatter->formatter(format_type);
 
   UErrorCode error = U_ZERO_ERROR;
-  UnicodeString time_string;
+  icu::UnicodeString time_string;
   // Less than a minute gets "X seconds left"
   if (delta.ToInternalValue() < Time::kMicrosecondsPerMinute) {
     number = static_cast<int>(delta.ToInternalValue() /
@@ -222,13 +306,18 @@ static std::wstring TimeRemainingImpl(const TimeDelta& delta,
 }
 
 // static
+std::wstring TimeFormat::TimeElapsed(const TimeDelta& delta) {
+  return FormatTimeImpl(delta, FORMAT_ELAPSED);
+}
+
+// static
 std::wstring TimeFormat::TimeRemaining(const TimeDelta& delta) {
-  return TimeRemainingImpl(delta, false);
+  return FormatTimeImpl(delta, FORMAT_REMAINING);
 }
 
 // static
 std::wstring TimeFormat::TimeRemainingShort(const TimeDelta& delta) {
-  return TimeRemainingImpl(delta, true);
+  return FormatTimeImpl(delta, FORMAT_SHORT);
 }
 
 // static

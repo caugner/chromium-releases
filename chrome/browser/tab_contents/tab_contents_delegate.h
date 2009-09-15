@@ -6,30 +6,39 @@
 #define CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_
 
 #include "base/basictypes.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
-#include "chrome/browser/tab_contents/page_navigator.h"
-#include "chrome/common/navigation_types.h"
 
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/common/native_web_keyboard_event.h"
+#include "chrome/common/page_transition_types.h"
+#include "chrome/common/renderer_preferences.h"
+#include "webkit/glue/context_menu.h"
+#include "webkit/glue/window_open_disposition.h"
+
+class DownloadItem;
+class ExtensionFunctionDispatcher;
+class GURL;
+class HtmlDialogUIDelegate;
+class Profile;
+class RenderViewHost;
 class TabContents;
-class HtmlDialogContentsDelegate;
+class TemplateURL;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
-class TabContentsDelegate : public PageNavigator {
+class TabContentsDelegate {
  public:
   // Opens a new URL inside the passed in TabContents (if source is 0 open
   // in the current front-most tab), unless |disposition| indicates the url
   // should be opened in a new tab or window.
+  //
+  // A NULL source indicates the current tab (callers should probably use
+  // OpenURL() for these cases which does it for you).
   virtual void OpenURLFromTab(TabContents* source,
                               const GURL& url, const GURL& referrer,
                               WindowOpenDisposition disposition,
                               PageTransition::Type transition) = 0;
-
-  virtual void OpenURL(const GURL& url, const GURL& referrer,
-                       WindowOpenDisposition disposition,
-                       PageTransition::Type transition) {
-    OpenURLFromTab(NULL, url, referrer, disposition, transition);
-  }
 
   // Called to inform the delegate that the tab content's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
@@ -37,11 +46,6 @@ class TabContentsDelegate : public PageNavigator {
   // |TabContents::InvalidateTypes| bits.
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) = 0;
-
-  // Called to cause the delegate to replace the source contents with the new
-  // contents.
-  virtual void ReplaceContents(TabContents* source,
-                               TabContents* new_contents) = 0;
 
   // Creates a new tab with the already-created TabContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
@@ -69,13 +73,18 @@ class TabContentsDelegate : public PageNavigator {
   // in screen coordinates.
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos) = 0;
 
+  // Causes the delegate to detach |source| and clean up any internal data
+  // pointing to it.  After this call ownership of |source| passes to the
+  // caller, and it is safe to call "source->set_delegate(someone_else);".
+  virtual void DetachContents(TabContents* source) { }
+
   // Called to determine if the TabContents is contained in a popup window.
   virtual bool IsPopup(TabContents* source) = 0;
 
-  // Returns the tab which contains the specified tab content if it is
-  // constrained, NULL otherwise.
+  // If |source| is constrained, returns the tab containing it.  Otherwise
+  // returns |source|.
   virtual TabContents* GetConstrainingContents(TabContents* source) {
-    return NULL;
+    return source;
   }
 
   // Notification that some of our content has changed size as
@@ -96,15 +105,11 @@ class TabContentsDelegate : public PageNavigator {
 
   // Check whether this contents is inside a window dedicated to running a web
   // application.
-  virtual bool IsApplication() { return false; }
+  virtual bool IsApplication() const { return false; }
 
   // Detach the given tab and convert it to a "webapp" view.  The tab must be
-  // a WebContents with a valid WebApp set.
+  // a TabContents with a valid WebApp set.
   virtual void ConvertContentsToApplication(TabContents* source) { }
-
-  // Informs the TabContentsDelegate that some of our state has changed
-  // for this tab.
-  virtual void ContentsStateChanged(TabContents* source) {}
 
   // Return whether this tab contents should have a URL bar. Only web contents
   // opened with a minimal chrome and their popups can be displayed without a
@@ -123,8 +128,8 @@ class TabContentsDelegate : public PageNavigator {
   // delegate who knows how to display the dialog (which file URL and JSON
   // string input to use during initialization). |parent_window| is the window
   // that should be parent of the dialog, or NULL for the default.
-  virtual void ShowHtmlDialog(HtmlDialogContentsDelegate* delegate,
-                              void* parent_window) { }
+  virtual void ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
+                              gfx::NativeWindow parent_window) { }
 
   // Tells us that we've finished firing this tab's beforeunload event.
   // The proceed bool tells us whether the user chose to proceed closing the
@@ -155,6 +160,75 @@ class TabContentsDelegate : public PageNavigator {
   // this to disable inactive rendering for the frame in the window the select
   // is opened within if necessary.
   virtual void RenderWidgetShowing() {}
+
+  // This is used when the contents is an extension that needs to route
+  // api calls through to the Browser process.
+  virtual ExtensionFunctionDispatcher* CreateExtensionFunctionDispatcher(
+      RenderViewHost* render_view_host,
+      const std::string& extension_id) {
+    return NULL;
+  }
+
+  // This is called when webkit tells us that it is done tabbing through
+  // controls on the page. Provides a way for TabContentsDelegates to handle
+  // this. Returns true if the delegate successfully handled it.
+  virtual bool TakeFocus(bool reverse) {
+    return false;
+  }
+
+  // Notification that |tab_contents| has gained focus.
+  virtual void TabContentsFocused(TabContents* tab_content) { }
+
+  // Return much extra vertical space should be allotted to the
+  // render view widget during various animations (e.g. infobar closing).
+  // This is used to make painting look smoother.
+  virtual int GetExtraRenderViewHeight() const {
+    return 0;
+  }
+
+  virtual void OnStartDownload(DownloadItem* download) {
+  }
+
+  // Returns true if the context menu operation was handled by the delegate.
+  virtual bool HandleContextMenu(const ContextMenuParams& params) {
+    return false;
+  }
+
+  // Returns true if the context menu command was handled
+  virtual bool ExecuteContextMenuCommand(int command) {
+    return false;
+  }
+
+  // Returns the renderer's current preferences settings.
+  RendererPreferences GetRendererPrefs() const { return renderer_preferences_; }
+
+  // Shows a confirmation UI that the specified |template_url| is to be added as
+  // a search engine.
+  virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
+                                        Profile* profile) {
+  }
+
+  // Shows the page info using the specified information.
+  // |url| is the url of the page/frame the info applies to, |ssl| is the SSL
+  // information for that page/frame.  If |show_history| is true, a section
+  // showing how many times that URL has been visited is added to the page info.
+  virtual void ShowPageInfo(Profile* profile,
+                            const GURL& url,
+                            const NavigationEntry::SSLStatus& ssl,
+                            bool show_history) {
+  }
+
+  // Allows delegates to handle unhandled keyboard messages coming back from
+  // the renderer.
+  // Returns true if the keyboard message was handled.
+  virtual bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+    return false;
+  }
+
+ protected:
+  ~TabContentsDelegate() {}
+  RendererPreferences renderer_preferences_;
+
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_

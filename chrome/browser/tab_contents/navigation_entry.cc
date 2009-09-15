@@ -4,12 +4,14 @@
 
 #include "chrome/browser/tab_contents/navigation_entry.h"
 
+#include "app/resource_bundle.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/common/gfx/text_elider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/resource_bundle.h"
+#include "grit/app_resources.h"
+#include "net/base/net_util.h"
 
 // Use this to get a new unique ID for a NavigationEntry during construction.
 // The returned ID is guaranteed to be nonzero (which is the "no ID" indicator).
@@ -31,9 +33,9 @@ NavigationEntry::FaviconStatus::FaviconStatus() : valid_(false) {
   bitmap_ = *rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
 }
 
-NavigationEntry::NavigationEntry(TabContentsType type)
+
+NavigationEntry::NavigationEntry()
     : unique_id_(GetUniqueID()),
-      tab_type_(type),
       site_instance_(NULL),
       page_type_(NORMAL_PAGE),
       page_id_(-1),
@@ -42,15 +44,13 @@ NavigationEntry::NavigationEntry(TabContentsType type)
       restored_(false) {
 }
 
-NavigationEntry::NavigationEntry(TabContentsType type,
-                                 SiteInstance* instance,
+NavigationEntry::NavigationEntry(SiteInstance* instance,
                                  int page_id,
                                  const GURL& url,
                                  const GURL& referrer,
                                  const string16& title,
                                  PageTransition::Type transition_type)
     : unique_id_(GetUniqueID()),
-      tab_type_(type),
       site_instance_(instance),
       page_type_(NORMAL_PAGE),
       url_(url),
@@ -81,11 +81,10 @@ const string16& NavigationEntry::GetTitleForDisplay(
           prefs::kAcceptLanguages);
   }
   if (!display_url_.is_empty()) {
-    cached_display_title_ = WideToUTF16Hack(gfx::GetCleanStringFromUrl(
-        display_url_, languages, NULL, NULL));
+    cached_display_title_ = WideToUTF16Hack(net::FormatUrl(
+        display_url_, languages));
   } else if (!url_.is_empty()) {
-    cached_display_title_ = WideToUTF16Hack(gfx::GetCleanStringFromUrl(
-        url_, languages, NULL, NULL));
+    cached_display_title_ = WideToUTF16Hack(net::FormatUrl(url_, languages));
   }
   return cached_display_title_;
 }

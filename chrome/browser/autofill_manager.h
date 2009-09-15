@@ -1,45 +1,43 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_AUTOFILL_MANAGER_H_
 #define CHROME_BROWSER_AUTOFILL_MANAGER_H_
 
-#include <map>
 #include <string>
 
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/pref_member.h"
 
+namespace webkit_glue {
 class AutofillForm;
+}
+
 class Profile;
-class WebContents;
+class TabContents;
 
 // Per-tab autofill manager. Handles receiving form data from the renderer and
 // the storing and retrieving of form data through WebDataService.
-class AutofillManager : public WebDataServiceConsumer {
+class AutofillManager : public RenderViewHostDelegate::Autofill,
+                        public WebDataServiceConsumer {
  public:
-  explicit AutofillManager(WebContents* web_contents);
+  explicit AutofillManager(TabContents* tab_contents);
   virtual ~AutofillManager();
 
   void CancelPendingQuery();
 
   Profile* profile();
 
-  // Called when a form is submitted (i.e. when the user hits the submit button)
-  // to store the form entries in the profile's sql database.
-  void AutofillFormSubmitted(const AutofillForm& form);
-
-  // Starts a query into the database for the values corresponding to name.
-  // OnWebDataServiceRequestDone gets called when the query completes.
-  void FetchValuesForName(const std::wstring& name,
-                          const std::wstring& prefix,
-                          int limit,
-                          int64 node_id,
-                          int request_id);
-
-  // Removes the specified name/value pair from the database.
-  void RemoveValueForName(const std::wstring& name, const std::wstring& value);
+  // RenderViewHostDelegate::Autofill implementation.
+  virtual void AutofillFormSubmitted(const webkit_glue::AutofillForm& form);
+  virtual void GetAutofillSuggestions(const std::wstring& name,
+                                      const std::wstring& prefix,
+                                      int64 node_id,
+                                      int request_id);
+  virtual void RemoveAutofillEntry(const std::wstring& name,
+                                   const std::wstring& value);
 
   // WebDataServiceConsumer implementation.
   virtual void OnWebDataServiceRequestDone(WebDataService::Handle h,
@@ -48,9 +46,9 @@ class AutofillManager : public WebDataServiceConsumer {
   static void RegisterUserPrefs(PrefService* prefs);
 
  private:
-  void StoreFormEntriesInWebDatabase(const AutofillForm& form);
+  void StoreFormEntriesInWebDatabase(const webkit_glue::AutofillForm& form);
 
-  WebContents* web_contents_;
+  TabContents* tab_contents_;
 
   BooleanPrefMember form_autofill_enabled_;
 

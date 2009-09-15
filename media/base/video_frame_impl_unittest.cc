@@ -3,15 +3,40 @@
 // found in the LICENSE file.
 
 #include "media/base/buffers.h"
-#include "media/base/mock_media_filters.h"
+#include "media/base/mock_filters.h"
 #include "media/base/video_frame_impl.h"
 #include "media/base/yuv_convert.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using media::VideoFrameImpl;
-using media::VideoSurface;
+namespace media {
 
-namespace {
+// Helper function that initializes a YV12 frame with white and black scan
+// lines based on the |white_to_black| parameter.  If 0, then the entire
+// frame will be black, if 1 then the entire frame will be white.
+void InitializeYV12Frame(VideoFrame* frame, double white_to_black) {
+  VideoSurface surface;
+  if (!frame->Lock(&surface)) {
+    ADD_FAILURE();
+    return;
+  }
+  EXPECT_EQ(surface.format, VideoSurface::YV12);
+  size_t first_black_row = static_cast<size_t>(surface.height * white_to_black);
+  uint8* y_plane = surface.data[VideoSurface::kYPlane];
+  for (size_t row = 0; row < surface.height; ++row) {
+    int color = (row < first_black_row) ? 0xFF : 0x00;
+    memset(y_plane, color, surface.width);
+    y_plane += surface.strides[VideoSurface::kYPlane];
+  }
+  uint8* u_plane = surface.data[VideoSurface::kUPlane];
+  uint8* v_plane = surface.data[VideoSurface::kVPlane];
+  for (size_t row = 0; row < surface.height; row += 2) {
+    memset(u_plane, 0x80, surface.width / 2);
+    memset(v_plane, 0x80, surface.width / 2);
+    u_plane += surface.strides[VideoSurface::kUPlane];
+    v_plane += surface.strides[VideoSurface::kVPlane];
+  }
+  frame->Unlock();
+}
 
 // Given a |yv12_frame| this method converts the YV12 frame to RGBA and
 // makes sure that all the pixels of the RBG frame equal |expect_rgb_color|.
@@ -42,15 +67,16 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
   EXPECT_EQ(rgb_surface.height, yuv_surface.height);
   EXPECT_EQ(rgb_surface.planes, expect_rgb_planes);
 
-  media::ConvertYV12ToRGB32(yuv_surface.data[VideoSurface::kYPlane],
-                            yuv_surface.data[VideoSurface::kUPlane],
-                            yuv_surface.data[VideoSurface::kVPlane],
-                            rgb_surface.data[VideoSurface::kRGBPlane],
-                            rgb_surface.width,
-                            rgb_surface.height,
-                            yuv_surface.strides[VideoSurface::kYPlane],
-                            yuv_surface.strides[VideoSurface::kUPlane],
-                            rgb_surface.strides[VideoSurface::kRGBPlane]);
+  media::ConvertYUVToRGB32(yuv_surface.data[VideoSurface::kYPlane],
+                           yuv_surface.data[VideoSurface::kUPlane],
+                           yuv_surface.data[VideoSurface::kVPlane],
+                           rgb_surface.data[VideoSurface::kRGBPlane],
+                           rgb_surface.width,
+                           rgb_surface.height,
+                           yuv_surface.strides[VideoSurface::kYPlane],
+                           yuv_surface.strides[VideoSurface::kUPlane],
+                           rgb_surface.strides[VideoSurface::kRGBPlane],
+                           media::YV12);
 
   for (size_t row = 0; row < rgb_surface.height; ++row) {
     uint32* rgb_row_data = reinterpret_cast<uint32*>(
@@ -64,10 +90,7 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
   yv12_frame->Unlock();
 }
 
-}  // namespace
-
-
-TEST(VideoFrameImpl, Basic) {
+TEST(VideoFrameImpl, CreateFrame) {
   const size_t kWidth = 64;
   const size_t kHeight = 48;
   const base::TimeDelta kTimestampA = base::TimeDelta::FromMicroseconds(1337);
@@ -77,8 +100,8 @@ TEST(VideoFrameImpl, Basic) {
 
   // Create a YV12 Video Frame.
   scoped_refptr<media::VideoFrame> frame;
-  media::VideoFrameImpl::CreateFrame(media::VideoSurface::YV12, kWidth, kHeight,
-                                     kTimestampA, kDurationA, &frame);
+  VideoFrameImpl::CreateFrame(media::VideoSurface::YV12, kWidth, kHeight,
+                              kTimestampA, kDurationA, &frame);
   ASSERT_TRUE(frame);
 
   // Test StreamSample implementation.
@@ -90,9 +113,6 @@ TEST(VideoFrameImpl, Basic) {
   frame->SetDuration(kDurationB);
   EXPECT_TRUE(kTimestampB == frame->GetTimestamp());
   EXPECT_TRUE(kDurationB == frame->GetDuration());
-  frame->SetEndOfStream(true);
-  EXPECT_TRUE(frame->IsEndOfStream());
-  frame->SetEndOfStream(false);
   EXPECT_FALSE(frame->IsEndOfStream());
   frame->SetDiscontinuous(true);
   EXPECT_TRUE(frame->IsDiscontinuous());
@@ -100,8 +120,56 @@ TEST(VideoFrameImpl, Basic) {
   EXPECT_FALSE(frame->IsDiscontinuous());
 
   // Test VideoFrame implementation.
-  media::MockVideoDecoder::InitializeYV12Frame(frame, 0.0f);
+  InitializeYV12Frame(frame, 0.0f);
   ExpectFrameColor(frame, 0xFF000000);
-  media::MockVideoDecoder::InitializeYV12Frame(frame, 1.0f);
+  InitializeYV12Frame(frame, 1.0f);
   ExpectFrameColor(frame, 0xFFFFFFFF);
+
+  // Test an empty frame.
+  VideoFrameImpl::CreateEmptyFrame(&frame);
+  EXPECT_TRUE(frame->IsEndOfStream());
 }
+
+TEST(VideoFrameImpl, CreateBlackFrame) {
+  const size_t kWidth = 2;
+  const size_t kHeight = 2;
+  const uint8 kExpectedYRow[] = { 0, 0 };
+  const uint8 kExpectedUVRow[] = { 128 };
+
+  scoped_refptr<media::VideoFrame> frame;
+  VideoFrameImpl::CreateBlackFrame(kWidth, kHeight, &frame);
+  ASSERT_TRUE(frame);
+
+  // Test basic properties.
+  EXPECT_EQ(0, frame->GetTimestamp().InMicroseconds());
+  EXPECT_EQ(0, frame->GetDuration().InMicroseconds());
+  EXPECT_FALSE(frame->IsEndOfStream());
+
+  // Test surface properties.
+  VideoSurface surface;
+  EXPECT_TRUE(frame->Lock(&surface));
+  EXPECT_EQ(VideoSurface::YV12, surface.format);
+  EXPECT_EQ(kWidth, surface.width);
+  EXPECT_EQ(kHeight, surface.height);
+  EXPECT_EQ(3u, surface.planes);
+
+  // Test surfaces themselves.
+  for (size_t y = 0; y < surface.height; ++y) {
+    EXPECT_EQ(0, memcmp(kExpectedYRow, surface.data[VideoSurface::kYPlane],
+                        arraysize(kExpectedYRow)));
+    surface.data[VideoSurface::kYPlane] +=
+        surface.strides[VideoSurface::kYPlane];
+  }
+  for (size_t y = 0; y < surface.height / 2; ++y) {
+    EXPECT_EQ(0, memcmp(kExpectedUVRow, surface.data[VideoSurface::kUPlane],
+                        arraysize(kExpectedUVRow)));
+    EXPECT_EQ(0, memcmp(kExpectedUVRow, surface.data[VideoSurface::kVPlane],
+                        arraysize(kExpectedUVRow)));
+    surface.data[VideoSurface::kUPlane] +=
+        surface.strides[VideoSurface::kUPlane];
+    surface.data[VideoSurface::kVPlane] +=
+        surface.strides[VideoSurface::kVPlane];
+  }
+}
+
+}  // namespace media

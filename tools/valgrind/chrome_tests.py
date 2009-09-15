@@ -8,8 +8,7 @@
 ''' Runs various chrome tests through valgrind_test.py.
 
 This file is a copy of ../purify/chrome_tests.py. Eventually, it would be nice
-to merge these two files. For now, I'm leaving it here with sections that
-aren't supported commented out as this is more of a work in progress.
+to merge these two files.
 '''
 
 import glob
@@ -32,33 +31,64 @@ import google.path_utils
 import layout_package.platform_utils
 
 import common
-
+import valgrind_test
 
 class TestNotFound(Exception): pass
 
+def Dir2IsNewer(dir1, dir2):
+  if dir2 == None or not os.path.isdir(dir2):
+    return False
+  if dir1 == None or not os.path.isdir(dir1):
+    return True
+  return (os.stat(dir2)[stat.ST_MTIME] - os.stat(dir1)[stat.ST_MTIME]) > 0
+
+def FindNewestDir(dirs):
+  newest_dir = None
+  for dir in dirs:
+    if Dir2IsNewer(newest_dir, dir):
+      newest_dir = dir
+  return newest_dir
+
+def File2IsNewer(file1, file2):
+  if file2 == None or not os.path.isfile(file2):
+    return False
+  if file1 == None or not os.path.isfile(file1):
+    return True
+  return (os.stat(file2)[stat.ST_MTIME] - os.stat(file1)[stat.ST_MTIME]) > 0
+
+def FindDirContainingNewestFile(dirs, file):
+  newest_dir = None
+  newest_file = None
+  for dir in dirs:
+    the_file = os.path.join(dir, file)
+    if File2IsNewer(newest_file, the_file):
+      newest_dir = dir
+      newest_file = the_file
+  if newest_dir == None:
+    logging.error("cannot find file %s anywhere, have you built it?" % file)
+    sys.exit(-1)
+  return newest_dir
 
 class ChromeTests:
   '''This class is derived from the chrome_tests.py file in ../purify/.
-
-  TODO(erg): Finish implementing this. I've commented out all the parts that I
-  don't have working yet. We still need to deal with layout tests, and long
-  term, the UI tests.
   '''
 
   def __init__(self, options, args, test):
-    # the known list of tests
+    # The known list of tests.
+    # Recognise the original abbreviations as well as full executable names.
     self._test_list = {
-      "test_shell": self.TestTestShell,
-      "unit": self.TestUnit,
-      "net": self.TestNet,
-      "ipc": self.TestIpc,
-      "base": self.TestBase,
-      "googleurl": self.TestGoogleurl,
-      "media": self.TestMedia,
-      "printing": self.TestPrinting,
-#      "layout": self.TestLayout,
-#      "layout_all": self.TestLayoutAll,
-      "ui": self.TestUI
+      "base": self.TestBase,            "base_unittests": self.TestBase,
+      "googleurl": self.TestGURL,       "googleurl_unittests": self.TestGURL,
+      "ipc": self.TestIpc,              "ipc_tests": self.TestIpc,
+      "layout": self.TestLayout,        "layout_tests": self.TestLayout,
+      "media": self.TestMedia,          "media_unittests": self.TestMedia,
+      "net": self.TestNet,              "net_unittests": self.TestNet,
+      "printing": self.TestPrinting,    "printing_unittests": self.TestPrinting,
+      "startup": self.TestStartup,      "startup_tests": self.TestStartup,
+      "test_shell": self.TestTestShell, "test_shell_tests": self.TestTestShell,
+      "ui": self.TestUI,                "ui_tests": self.TestUI,
+      "unit": self.TestUnit,            "unit_tests": self.TestUnit,
+      "app": self.TestApp,               "app_unittests": self.TestApp,
     }
 
     if test not in self._test_list:
@@ -77,11 +107,11 @@ class ChromeTests:
     # since this path is used for string matching, make sure it's always
     # an absolute Windows-style path
     self._source_dir = utility.GetAbsolutePath(self._source_dir)
-    valgrind_test = os.path.join(script_dir, "valgrind_test.py")
-    self._command_preamble = ["python", valgrind_test,
+    valgrind_test_script = os.path.join(script_dir, "valgrind_test.py")
+    self._command_preamble = [valgrind_test_script,
                               "--source_dir=%s" % (self._source_dir)]
 
-  def _DefaultCommand(self, module, exe=None):
+  def _DefaultCommand(self, module, exe=None, valgrind_test_args=None):
     '''Generates the default command array that most tests will use.'''
     module_dir = os.path.join(self._source_dir, module)
 
@@ -98,49 +128,45 @@ class ChromeTests:
       self._data_dirs.append(os.path.join(module_dir, "data", "valgrind"))
 
     if not self._options.build_dir:
-      dir_chrome = os.path.join(self._source_dir, "chrome", "Hammer")
-      dir_module = os.path.join(module_dir, "Hammer")
+      dirs = [
+        os.path.join(self._source_dir, "xcodebuild", "Debug"),
+        os.path.join(self._source_dir, "sconsbuild", "Debug"),
+        os.path.join(self._source_dir, "out", "Debug"),
+      ]
       if exe:
-        exe_chrome = os.path.join(dir_chrome, exe)
-        exe_module = os.path.join(dir_module, exe)
-        if os.path.isfile(exe_chrome) and not os.path.isfile(exe_module):
-          self._options.build_dir = dir_chrome
-        elif os.path.isfile(exe_module) and not os.path.isfile(exe_chrome):
-          self._options.build_dir = dir_module
-        elif (os.stat(exe_module)[stat.ST_MTIME] >
-              os.stat(exe_chrome)[stat.ST_MTIME]):
-          self._options.build_dir = dir_module
-        else:
-          self._options.build_dir = dir_chrome
+        self._options.build_dir = FindDirContainingNewestFile(dirs, exe)
       else:
-        if os.path.isdir(dir_chrome) and not os.path.isdir(dir_module):
-          self._options.build_dir = dir_chrome
-        elif os.path.isdir(dir_module) and not os.path.isdir(dir_chrome):
-          self._options.build_dir = dir_module
-        elif (os.stat(dir_module)[stat.ST_MTIME] >
-              os.stat(dir_chrome)[stat.ST_MTIME]):
-          self._options.build_dir = dir_module
-        else:
-          self._options.build_dir = dir_chrome
+        self._options.build_dir = FindNewestDir(dirs)
 
     cmd = list(self._command_preamble)
     for directory in self._data_dirs:
-      suppression_file = os.path.join(directory, "suppressions.txt")
+      tool_name = self._options.valgrind_tool
+      suppression_file = os.path.join(directory,
+          "%s/suppressions.txt" % tool_name)
       if os.path.exists(suppression_file):
         cmd.append("--suppressions=%s" % suppression_file)
-    if self._options.baseline:
-      cmd.append("--baseline")
-    if self._options.verbose:
-      cmd.append("--verbose")
-    if self._options.show_all_leaks:
-      cmd.append("--show_all_leaks")
-    if self._options.generate_suppressions:
-      cmd.append("--generate_suppressions")
+      # Platform specific suppression
+      suppression_platform = {
+        'darwin': 'mac',
+        'linux2': 'linux'
+      }[sys.platform]
+      suppression_file_platform = \
+          os.path.join(directory,
+              '%s/suppressions_%s.txt' % (tool_name, suppression_platform))
+      if os.path.exists(suppression_file_platform):
+        cmd.append("--suppressions=%s" % suppression_file_platform)
+
+    cmd.append("--tool=%s" % self._options.valgrind_tool)
+    if self._options.valgrind_tool_flags:
+      cmd += self._options.valgrind_tool_flags.split(" ")
+    if valgrind_test_args != None:
+      for arg in valgrind_test_args:
+        cmd.append(arg)
     if exe:
       cmd.append(os.path.join(self._options.build_dir, exe))
-    # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
-    # so we can find the slowpokes.
-    cmd.append("--gtest_print_time");
+      # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
+      # so we can find the slowpokes.
+      cmd.append("--gtest_print_time")
     return cmd
 
   def Run(self):
@@ -154,14 +180,24 @@ class ChromeTests:
     '''
     filters = []
     for directory in self._data_dirs:
-      filename = os.path.join(directory, name + ".gtest.txt")
-      if os.path.exists(filename):
-        f = open(filename, 'r')
-        for line in f.readlines():
-          if line.startswith("#") or line.startswith("//") or line.isspace():
-            continue
-          line = line.rstrip()
-          filters.append(line)
+      platform_suffix = {'darwin': 'mac',
+                         'linux2': 'linux'}[sys.platform]
+      gtest_filter_files = [
+          os.path.join(directory, name + ".gtest.txt"),
+          os.path.join(directory, name + ".gtest-%s.txt" % \
+              self._options.valgrind_tool),
+          os.path.join(directory, name + ".gtest_%s.txt" % platform_suffix),
+          os.path.join(directory, name + ".gtest-%s_%s.txt" % \
+              (self._options.valgrind_tool, platform_suffix))]
+      for filename in gtest_filter_files:
+        if os.path.exists(filename):
+          logging.info("reading gtest filters from %s" % filename)
+          f = open(filename, 'r')
+          for line in f.readlines():
+            if line.startswith("#") or line.startswith("//") or line.isspace():
+              continue
+            line = line.rstrip()
+            filters.append(line)
     gtest_filter = self._options.gtest_filter
     if len(filters):
       if gtest_filter:
@@ -174,56 +210,18 @@ class ChromeTests:
     if gtest_filter:
       cmd.append("--gtest_filter=%s" % gtest_filter)
 
-  def SimpleTest(self, module, name):
-    cmd = self._DefaultCommand(module, name)
+  def SimpleTest(self, module, name, valgrind_test_args=None, cmd_args=None):
+    cmd = self._DefaultCommand(module, name, valgrind_test_args)
     self._ReadGtestFilterFile(name, cmd)
-    return common.RunSubprocess(cmd, 0)
-
-  def ScriptedTest(self, module, exe, name, script, multi=False, cmd_args=None,
-                   out_dir_extra=None):
-    '''Valgrind a target binary, which will be executed one or more times via a
-       script or driver program.
-    Args:
-      module - which top level component this test is from (webkit, base, etc.)
-      exe - the name of the exe (it's assumed to exist in build_dir)
-      name - the name of this test (used to name output files)
-      script - the driver program or script.  If it's python.exe, we use
-        search-path behavior to execute, otherwise we assume that it is in
-        build_dir.
-      multi - a boolean hint that the exe will be run multiple times, generating
-        multiple output files (without this option, only the last run will be
-        recorded and analyzed)
-      cmd_args - extra arguments to pass to the valgrind_test.py script
-    '''
-    cmd = self._DefaultCommand(module)
-    exe = os.path.join(self._options.build_dir, exe)
-    cmd.append("--exe=%s" % exe)
-    cmd.append("--name=%s" % name)
-    if multi:
-      out = os.path.join(google.path_utils.ScriptDir(),
-                         "latest")
-      if out_dir_extra:
-        out = os.path.join(out, out_dir_extra)
-        if os.path.exists(out):
-          old_files = glob.glob(os.path.join(out, "*.txt"))
-          for f in old_files:
-            os.remove(f)
-        else:
-          os.makedirs(out)
-      out = os.path.join(out, "%s%%5d.txt" % name)
-      cmd.append("--out_file=%s" % out)
     if cmd_args:
+      cmd.extend(["--"])
       cmd.extend(cmd_args)
-    if script[0] != "python.exe" and not os.path.exists(script[0]):
-      script[0] = os.path.join(self._options.build_dir, script[0])
-    cmd.extend(script)
-    self._ReadGtestFilterFile(name, cmd)
-    return common.RunSubprocess(cmd, 0)
+    return valgrind_test.RunTool(cmd)
 
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
 
-  def TestGoogleurl(self):
+  def TestGURL(self):
     return self.SimpleTest("chrome", "googleurl_unittests")
 
   def TestMedia(self):
@@ -233,10 +231,21 @@ class ChromeTests:
     return self.SimpleTest("chrome", "printing_unittests")
 
   def TestIpc(self):
-    return self.SimpleTest("chrome", "ipc_tests")
+    return self.SimpleTest("chrome", "ipc_tests",
+                           valgrind_test_args=["--trace_children"])
 
   def TestNet(self):
     return self.SimpleTest("net", "net_unittests")
+
+  def TestStartup(self):
+    # We don't need the performance results, we're just looking for pointer
+    # errors, so set number of iterations down to the minimum.
+    os.putenv("STARTUP_TESTS_NUMCYCLES", "1")
+    logging.info("export STARTUP_TESTS_NUMCYCLES=1");
+    return self.SimpleTest("chrome", "startup_tests",
+                           valgrind_test_args=[
+                            "--trace_children",
+                            "--indirect"])
 
   def TestTestShell(self):
     return self.SimpleTest("webkit", "test_shell_tests")
@@ -244,95 +253,119 @@ class ChromeTests:
   def TestUnit(self):
     return self.SimpleTest("chrome", "unit_tests")
 
+  def TestApp(self):
+    return self.SimpleTest("chrome", "app_unittests")
+
   def TestUI(self):
-    return self.SimpleTest("chrome", "ui_tests")
+    return self.SimpleTest("chrome", "ui_tests",
+                           valgrind_test_args=[
+                            "--timeout=120000",
+                            "--trace_children",
+                            "--indirect"],
+                           cmd_args=[
+                            "--ui-test-timeout=120000",
+                            "--ui-test-action-timeout=80000",
+                            "--ui-test-action-max-timeout=180000",
+                            "--ui-test-terminate-timeout=60000"])
 
-#   def TestLayoutAll(self):
-#     return self.TestLayout(run_all=True)
+  def TestLayoutChunk(self, chunk_num, chunk_size):
+    # Run tests [chunk_num*chunk_size .. (chunk_num+1)*chunk_size) from the
+    # list of tests.  Wrap around to beginning of list at end.
+    # If chunk_size is zero, run all tests in the list once.
+    # If a text file is given as argument, it is used as the list of tests.
+    #
+    # Build the ginormous commandline in 'cmd'.
+    # It's going to be roughly
+    #  python valgrind_test.py ... python run_webkit_tests.py ...
+    # but we'll use the --indirect flag to valgrind_test.py
+    # to avoid valgrinding python.
+    # Start by building the valgrind_test.py commandline.
+    cmd = self._DefaultCommand("webkit")
+    cmd.append("--trace_children")
+    cmd.append("--indirect")
+    # Now build script_cmd, the run_webkits_tests.py commandline
+    # Store each chunk in its own directory so that we can find the data later
+    chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
+    test_shell = os.path.join(self._options.build_dir, "test_shell")
+    out_dir = os.path.join(google.path_utils.ScriptDir(), "latest")
+    out_dir = os.path.join(out_dir, chunk_dir)
+    if os.path.exists(out_dir):
+      old_files = glob.glob(os.path.join(out_dir, "*.txt"))
+      for f in old_files:
+        os.remove(f)
+    else:
+      os.makedirs(out_dir)
+    script = os.path.join(self._source_dir, "webkit", "tools", "layout_tests",
+                          "run_webkit_tests.py")
+    script_cmd = ["python", script, "--run-singly", "-v",
+                  "--noshow-results", "--time-out-ms=200000",
+                  "--nocheck-sys-deps"]
+    # Pass build mode to run_webkit_tests.py.  We aren't passed it directly,
+    # so parse it out of build_dir.  run_webkit_tests.py can only handle
+    # the two values "Release" and "Debug".
+    # TODO(Hercules): unify how all our scripts pass around build mode
+    # (--mode / --target / --build_dir / --debug)
+    if self._options.build_dir.endswith("Debug"):
+      script_cmd.append("--debug");
+    if (chunk_size > 0):
+      script_cmd.append("--run-chunk=%d:%d" % (chunk_num, chunk_size))
+    if len(self._args):
+      # if the arg is a txt file, then treat it as a list of tests
+      if os.path.isfile(self._args[0]) and self._args[0][-4:] == ".txt":
+        script_cmd.append("--test-list=%s" % self._args[0])
+      else:
+        script_cmd.extend(self._args)
+    self._ReadGtestFilterFile("layout", script_cmd)
+    # Now run script_cmd with the wrapper in cmd
+    cmd.extend(["--"])
+    cmd.extend(script_cmd)
+    return valgrind_test.RunTool(cmd)
 
-#   def TestLayout(self, run_all=False):
-#     # A "chunk file" is maintained in the local directory so that each test
-#     # runs a slice of the layout tests of size chunk_size that increments with
-#     # each run.  Since tests can be added and removed from the layout tests at
-#     # any time, this is not going to give exact coverage, but it will allow us
-#     # to continuously run small slices of the layout tests under purify rather
-#     # than having to run all of them in one shot.
-#     chunk_num = 0
-#     # Tests currently seem to take about 20-30s each.
-#     chunk_size = 120  # so about 40-60 minutes per run
-#     chunk_file = os.path.join(os.environ["TEMP"], "purify_layout_chunk.txt")
-#     if not run_all:
-#       try:
-#         f = open(chunk_file)
-#         if f:
-#           str = f.read()
-#           if len(str):
-#             chunk_num = int(str)
-#           # This should be enough so that we have a couple of complete runs
-#           # of test data stored in the archive (although note that when we loop
-#           # that we almost guaranteed won't be at the end of the test list)
-#           if chunk_num > 10000:
-#             chunk_num = 0
-#           f.close()
-#       except IOError, (errno, strerror):
-#         logging.error("error reading from file %s (%d, %s)" % (chunk_file,
-#                       errno, strerror))
-
-#     script = os.path.join(self._source_dir, "webkit", "tools", "layout_tests",
-#                           "run_webkit_tests.py")
-#     script_cmd = ["python.exe", script, "--run-singly", "-v",
-#                   "--noshow-results", "--time-out-ms=200000",
-#                   "--nocheck-sys-deps"]
-#     if not run_all:
-#       script_cmd.append("--run-chunk=%d:%d" % (chunk_num, chunk_size))
-
-#     if len(self._args):
-#       # if the arg is a txt file, then treat it as a list of tests
-#       if os.path.isfile(self._args[0]) and self._args[0][-4:] == ".txt":
-#         script_cmd.append("--test-list=%s" % self._args[0])
-#       else:
-#         script_cmd.extend(self._args)
-
-#     if run_all:
-#       ret = self.ScriptedTest("webkit", "test_shell.exe", "layout",
-#                               script_cmd, multi=True, cmd_args=["--timeout=0"])
-#       return ret
-
-#     # store each chunk in its own directory so that we can find the data later
-#     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
-#     ret = self.ScriptedTest("webkit", "test_shell.exe", "layout",
-#                             script_cmd, multi=True, cmd_args=["--timeout=0"],
-#                             out_dir_extra=chunk_dir)
-
-#     # Wait until after the test runs to completion to write out the new chunk
-#     # number.  This way, if the bot is killed, we'll start running again from
-#     # the current chunk rather than skipping it.
-#     try:
-#       f = open(chunk_file, "w")
-#       chunk_num += 1
-#       f.write("%d" % chunk_num)
-#       f.close()
-#     except IOError, (errno, strerror):
-#       logging.error("error writing to file %s (%d, %s)" % (chunk_file, errno,
-#                     strerror))
-#     # Since we're running small chunks of the layout tests, it's important to
-#     # mark the ones that have errors in them.  These won't be visible in the
-#     # summary list for long, but will be useful for someone reviewing this bot.
-#     return ret
-
-#   def TestUI(self):
-#     if not self._options.no_reinstrument:
-#       instrumentation_error = self.InstrumentDll()
-#       if instrumentation_error:
-#         return instrumentation_error
-#     return self.ScriptedTest("chrome", "chrome.exe", "ui_tests",
-#                              ["ui_tests.exe",
-#                               "--single-process",
-#                               "--ui-test-timeout=120000",
-#                               "--ui-test-action-timeout=80000",
-#                               "--ui-test-action-max-timeout=180000"],
-#                              multi=True)
-
+  def TestLayout(self):
+    # A "chunk file" is maintained in the local directory so that each test
+    # runs a slice of the layout tests of size chunk_size that increments with
+    # each run.  Since tests can be added and removed from the layout tests at
+    # any time, this is not going to give exact coverage, but it will allow us
+    # to continuously run small slices of the layout tests under purify rather
+    # than having to run all of them in one shot.
+    chunk_size = self._options.num_tests
+    if (chunk_size == 0):
+      return self.TestLayoutChunk(0, 0)
+    chunk_num = 0
+    chunk_file = os.path.join("valgrind_layout_chunk.txt")
+    logging.info("Reading state from " + chunk_file)
+    try:
+      f = open(chunk_file)
+      if f:
+        str = f.read()
+        if len(str):
+          chunk_num = int(str)
+        # This should be enough so that we have a couple of complete runs
+        # of test data stored in the archive (although note that when we loop
+        # that we almost guaranteed won't be at the end of the test list)
+        if chunk_num > 10000:
+          chunk_num = 0
+        f.close()
+    except IOError, (errno, strerror):
+      logging.error("error reading from file %s (%d, %s)" % (chunk_file,
+                    errno, strerror))
+    ret = self.TestLayoutChunk(chunk_num, chunk_size)
+    # Wait until after the test runs to completion to write out the new chunk
+    # number.  This way, if the bot is killed, we'll start running again from
+    # the current chunk rather than skipping it.
+    logging.info("Saving state to " + chunk_file)
+    try:
+      f = open(chunk_file, "w")
+      chunk_num += 1
+      f.write("%d" % chunk_num)
+      f.close()
+    except IOError, (errno, strerror):
+      logging.error("error writing to file %s (%d, %s)" % (chunk_file, errno,
+                    strerror))
+    # Since we're running small chunks of the layout tests, it's important to
+    # mark the ones that have errors in them.  These won't be visible in the
+    # summary list for long, but will be useful for someone reviewing this bot.
+    return ret
 
 def _main(_):
   parser = optparse.OptionParser("usage: %prog -b <dir> -t <test> "
@@ -348,14 +381,16 @@ def _main(_):
                     help="additional arguments to --gtest_filter")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
-  parser.add_option("", "--show_all_leaks", action="store_true",
-                    default=False,
-                    help="also show even less blatant leaks")
-  parser.add_option("", "--no-reinstrument", action="store_true", default=False,
-                    help="Don't force a re-instrumentation for ui_tests")
-  parser.add_option("", "--generate_suppressions", action="store_true",
-                    default=False,
-                    help="Skip analysis and generate suppressions")
+  parser.add_option("", "--tool", dest="valgrind_tool", default="memcheck",
+                    help="specify a valgrind tool to run the tests under")
+  parser.add_option("", "--tool_flags", dest="valgrind_tool_flags", default="",
+                    help="specify custom flags for the selected valgrind tool")
+  # My machine can do about 120 layout tests/hour in release mode.
+  # Let's do 30 minutes worth per run.
+  # The CPU is mostly idle, so perhaps we can raise this when
+  # we figure out how to run them more efficiently.
+  parser.add_option("-n", "--num_tests", default=60, type="int",
+                    help="for layout tests: # of subtests per run.  0 for all.")
 
   options, args = parser.parse_args()
 

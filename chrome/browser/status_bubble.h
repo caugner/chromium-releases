@@ -16,6 +16,8 @@ class GURL;
 //
 class StatusBubble {
  public:
+  virtual ~StatusBubble() { };
+
   // Sets the bubble contents to a specific string and causes the bubble
   // to display immediately. Subsequent empty SetURL calls (typically called
   // when the cursor exits a link) will set the status bubble back to its
@@ -37,6 +39,11 @@ class StatusBubble {
   // mouse. This may be windows specific pain due to the way messages are
   // processed for child HWNDs.
   virtual void MouseMoved() = 0;
+
+  // Called when the download shelf becomes visible or invisible.
+  // This is used by to ensure that the status bubble does not obscure
+  // the download shelf, when it is visible.
+  virtual void UpdateDownloadShelfVisibility(bool visible) = 0;
 };
 
 #endif  // #ifndef CHROME_BROWSER_STATUS_BUBBLE_H_

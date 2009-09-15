@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/clipboard.h"
-#include "base/string_util.h"
 
 #include <gtk/gtk.h>
 #include <map>
@@ -11,11 +10,18 @@
 #include <string>
 #include <utility>
 
+#include "base/file_path.h"
+#include "base/gfx/size.h"
+#include "base/scoped_ptr.h"
+#include "base/linux_util.h"
+#include "base/string_util.h"
+
 namespace {
 
-static const char* kMimeHtml = "text/html";
-static const char* kMimeText = "text/plain";
-static const char* kMimeWebkitSmartPaste = "chrome-internal/webkit-paste";
+const char kMimeBmp[] = "image/bmp";
+const char kMimeHtml[] = "text/html";
+const char kMimeText[] = "text/plain";
+const char kMimeWebkitSmartPaste[] = "chromium-internal/webkit-paste";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
   gchar* name = gdk_atom_name(atom);
@@ -37,15 +43,20 @@ void GetData(GtkClipboard* clipboard,
   Clipboard::TargetMap* data_map =
       reinterpret_cast<Clipboard::TargetMap*>(user_data);
 
-  Clipboard::TargetMap::iterator iter =
-      data_map->find(GdkAtomToString(selection_data->target));
+  std::string target_string = GdkAtomToString(selection_data->target);
+  Clipboard::TargetMap::iterator iter = data_map->find(target_string);
 
   if (iter == data_map->end())
     return;
 
-  gtk_selection_data_set(selection_data, selection_data->target, 8,
-                         reinterpret_cast<guchar*>(iter->second.first),
-                         iter->second.second);
+  if (target_string == kMimeBmp) {
+    gtk_selection_data_set_pixbuf(selection_data,
+        reinterpret_cast<GdkPixbuf*>(iter->second.first));
+  } else {
+    gtk_selection_data_set(selection_data, selection_data->target, 8,
+                           reinterpret_cast<guchar*>(iter->second.first),
+                           iter->second.second);
+  }
 }
 
 // GtkClipboardClearFunc callback.
@@ -58,8 +69,12 @@ void ClearData(GtkClipboard* clipboard,
   std::set<char*> ptrs;
 
   for (Clipboard::TargetMap::iterator iter = map->begin();
-       iter != map->end(); ++iter)
-    ptrs.insert(iter->second.first);
+       iter != map->end(); ++iter) {
+    if (iter->first == kMimeBmp)
+      g_object_unref(reinterpret_cast<GdkPixbuf*>(iter->second.first));
+    else
+      ptrs.insert(iter->second.first);
+  }
 
   for (std::set<char*>::iterator iter = ptrs.begin();
        iter != ptrs.end(); ++iter)
@@ -82,6 +97,11 @@ void FreeTargetMap(Clipboard::TargetMap map) {
     delete[] *iter;
 
   map.clear();
+}
+
+// Called on GdkPixbuf destruction; see WriteBitmap().
+void GdkPixbufFree(guchar* pixels, gpointer data) {
+  free(pixels);
 }
 
 }  // namespace
@@ -109,7 +129,8 @@ void Clipboard::WriteObjects(const ObjectMap& objects) {
 
 // Take ownership of the GTK clipboard and inform it of the targets we support.
 void Clipboard::SetGtkClipboard() {
-  GtkTargetEntry targets[clipboard_data_->size()];
+  scoped_array<GtkTargetEntry> targets(
+      new GtkTargetEntry[clipboard_data_->size()]);
 
   int i = 0;
   for (Clipboard::TargetMap::iterator iter = clipboard_data_->begin();
@@ -121,7 +142,7 @@ void Clipboard::SetGtkClipboard() {
     targets[i].info = i;
   }
 
-  gtk_clipboard_set_with_data(clipboard_, targets,
+  gtk_clipboard_set_with_data(clipboard_, targets.get(),
                               clipboard_data_->size(),
                               GetData, ClearData,
                               clipboard_data_);
@@ -159,7 +180,19 @@ void Clipboard::WriteWebSmartPaste() {
 }
 
 void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
-  NOTIMPLEMENTED();
+  const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
+
+  guchar* data = base::BGRAToRGBA(reinterpret_cast<const uint8_t*>(pixel_data),
+                                  size->width(), size->height(), 0);
+
+  GdkPixbuf* pixbuf =
+      gdk_pixbuf_new_from_data(data, GDK_COLORSPACE_RGB, TRUE,
+                               8, size->width(), size->height(),
+                               size->width() * 4, GdkPixbufFree, NULL);
+  // We store the GdkPixbuf*, and the size_t half of the pair is meaningless.
+  // Note that this contrasts with the vast majority of entries in our target
+  // map, which directly store the data and its length.
+  InsertMapping(kMimeBmp, reinterpret_cast<char*>(pixbuf), 0);
 }
 
 void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
@@ -181,11 +214,14 @@ void Clipboard::WriteFiles(const char* file_data, size_t file_len) {
 // We do not use gtk_clipboard_wait_is_target_available because of
 // a bug with the gtk clipboard. It caches the available targets
 // and does not always refresh the cache when it is appropriate.
-// TODO(estade): When gnome bug 557315 is resolved, change this function
-// to use gtk_clipboard_wait_is_target_available. Also, catch requests
-// for plain text and change them to gtk_clipboard_wait_is_text_available
-// (which checks for several standard text targets).
 bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format) const {
+  bool format_is_plain_text = GetPlainTextFormatType() == format;
+  if (format_is_plain_text) {
+    // This tries a number of common text targets.
+    if (gtk_clipboard_wait_is_text_available(clipboard_))
+      return true;
+  }
+
   bool retval = false;
   GdkAtom* targets = NULL;
   GtkSelectionData* data =
@@ -198,6 +234,21 @@ bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format) const {
   int num = 0;
   gtk_selection_data_get_targets(data, &targets, &num);
 
+  // Some programs post data to the clipboard without any targets. If this is
+  // the case we attempt to make sense of the contents as text. This is pretty
+  // unfortunate since it means we have to actually copy the data to see if it
+  // is available, but at least this path shouldn't be hit for conforming
+  // programs.
+  if (num <= 0) {
+    if (format_is_plain_text) {
+      gchar* text = gtk_clipboard_wait_for_text(clipboard_);
+      if (text) {
+        g_free(text);
+        retval = true;
+      }
+    }
+  }
+
   GdkAtom format_atom = StringToGdkAtom(format);
 
   for (int i = 0; i < num; i++) {
@@ -207,8 +258,8 @@ bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format) const {
     }
   }
 
-  gtk_selection_data_free(data);
   g_free(targets);
+  gtk_selection_data_free(data);
 
   return retval;
 }
@@ -286,8 +337,12 @@ void Clipboard::InsertMapping(const char* key,
                               size_t data_len) {
   TargetMap::iterator iter = clipboard_data_->find(key);
 
-  if (iter != clipboard_data_->end())
-    delete[] iter->second.first;
+  if (iter != clipboard_data_->end()) {
+    if (strcmp(kMimeBmp, key) == 0)
+      g_object_unref(reinterpret_cast<GdkPixbuf*>(iter->second.first));
+    else
+      delete[] iter->second.first;
+  }
 
   (*clipboard_data_)[key] = std::make_pair(data, data_len);
 }

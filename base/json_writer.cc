@@ -9,16 +9,29 @@
 #include "base/values.h"
 #include "base/string_escape.h"
 
-const char kPrettyPrintLineEnding[] = "\r\n";
+#if defined(OS_WIN)
+static const char kPrettyPrintLineEnding[] = "\r\n";
+#else
+static const char kPrettyPrintLineEnding[] = "\n";
+#endif
 
 /* static */
-void JSONWriter::Write(const Value* const node, bool pretty_print,
+void JSONWriter::Write(const Value* const node,
+                       bool pretty_print,
                        std::string* json) {
+  WriteWithOptionalEscape(node, pretty_print, true, json);
+}
+
+/* static */
+void JSONWriter::WriteWithOptionalEscape(const Value* const node,
+                                         bool pretty_print,
+                                         bool escape,
+                                         std::string* json) {
   json->clear();
   // Is there a better way to estimate the size of the output?
   json->reserve(1024);
   JSONWriter writer(pretty_print, json);
-  writer.BuildJSONString(node, 0);
+  writer.BuildJSONString(node, 0, escape);
   if (pretty_print)
     json->append(kPrettyPrintLineEnding);
 }
@@ -29,7 +42,9 @@ JSONWriter::JSONWriter(bool pretty_print, std::string* json)
   DCHECK(json);
 }
 
-void JSONWriter::BuildJSONString(const Value* const node, int depth) {
+void JSONWriter::BuildJSONString(const Value* const node,
+                                 int depth,
+                                 bool escape) {
   switch(node->GetType()) {
     case Value::TYPE_NULL:
       json_string_->append("null");
@@ -67,16 +82,30 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
             real.find('E') == std::string::npos) {
           real.append(".0");
         }
+        // The JSON spec requires that non-integer values in the range (-1,1)
+        // have a zero before the decimal point - ".52" is not valid, "0.52" is.
+        if (real[0] == '.') {
+          real.insert(0, "0");
+        } else if (real.length() > 1 && real[0] == '-' && real[1] == '.') {
+          // "-.1" bad "-0.1" good
+          real.insert(1, "0");
+        }
         json_string_->append(real);
         break;
       }
 
     case Value::TYPE_STRING:
       {
-        std::wstring value;
+        std::string value;
         bool result = node->GetAsString(&value);
         DCHECK(result);
-        AppendQuotedString(value);
+        if (escape) {
+          string_escape::JsonDoubleQuote(UTF8ToUTF16(value),
+                                         true,
+                                         json_string_);
+        } else {
+          string_escape::JsonDoubleQuote(value, true, json_string_);
+        }
         break;
       }
 
@@ -97,7 +126,7 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
           Value* value = NULL;
           bool result = list->Get(i, &value);
           DCHECK(result);
-          BuildJSONString(value, depth);
+          BuildJSONString(value, depth, escape);
         }
 
         if (pretty_print_)
@@ -136,7 +165,7 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
           } else {
             json_string_->append(":");
           }
-          BuildJSONString(value, depth + 1);
+          BuildJSONString(value, depth + 1, escape);
         }
 
         if (pretty_print_) {
@@ -156,8 +185,9 @@ void JSONWriter::BuildJSONString(const Value* const node, int depth) {
 }
 
 void JSONWriter::AppendQuotedString(const std::wstring& str) {
-  string_escape::JavascriptDoubleQuote(WideToUTF16Hack(str), true,
-                                       json_string_);
+  string_escape::JsonDoubleQuote(WideToUTF16Hack(str),
+                                 true,
+                                 json_string_);
 }
 
 void JSONWriter::IndentLine(int depth) {

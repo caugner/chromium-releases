@@ -5,9 +5,12 @@
 #ifndef CHROME_BROWSER_GOOGLE_URL_TRACKER_H_
 #define CHROME_BROWSER_GOOGLE_URL_TRACKER_H_
 
+#include <string>
+
 #include "chrome/browser/net/url_fetcher.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class PrefService;
 
@@ -53,6 +56,8 @@ class GoogleURLTracker : public URLFetcher::Delegate,
 
   static void RegisterPrefs(PrefService* prefs);
 
+  static const char kDefaultGoogleHomepage[];
+
  private:
   FRIEND_TEST(GoogleURLTrackerTest, CheckAndConvertURL);
 
@@ -85,8 +90,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  static const char kDefaultGoogleHomepage[];
-
+  NotificationRegistrar registrar_;
   GURL google_url_;
   ScopedRunnableMethodFactory<GoogleURLTracker> fetcher_factory_;
   scoped_ptr<URLFetcher> fetcher_;

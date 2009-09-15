@@ -9,14 +9,12 @@
 
 #include "base/lock.h"
 #include "media/base/filters.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 namespace media {
 
 // Basic data source that treats the URL as a file path, and uses the file
 // system to read data for a media pipeline.
-// TODO(ralph):  We will add a pure virtual interface so that the chrome
-// media player delegate can give us the file handle, bytes downloaded so far,
-// and file size.
 class FileDataSource : public DataSource {
  public:
   // Public method to get a filter factory for the FileDataSource.
@@ -28,19 +26,26 @@ class FileDataSource : public DataSource {
   virtual void Stop();
 
   // Implementation of DataSource.
-  virtual bool Initialize(const std::string& url);
-  virtual const MediaFormat* GetMediaFormat();
-  virtual size_t Read(uint8* data, size_t size);
-  virtual bool GetPosition(int64* position_out);
-  virtual bool SetPosition(int64 position);
+  virtual void Initialize(const std::string& url, FilterCallback* callback);
+  virtual const MediaFormat& media_format();
+  virtual void Read(int64 position, size_t size, uint8* data,
+                    ReadCallback* read_callback);
   virtual bool GetSize(int64* size_out);
+  virtual bool IsStreaming();
 
  private:
+  // Only allow factories and tests to create this object.
+  //
+  // TODO(scherkus): I'm getting tired of these factories getting in the way
+  // of my tests!!!
+  FRIEND_TEST(FileDataSourceTest, OpenFile);
+  FRIEND_TEST(FileDataSourceTest, ReadData);
+  FRIEND_TEST(FileDataSourceTest, Seek);
   friend class FilterFactoryImpl0<FileDataSource>;
   FileDataSource();
   virtual ~FileDataSource();
 
-  // File handle.  Null if not initialized or an error occurs.
+  // File handle.  NULL if not initialized or an error occurs.
   FILE* file_;
 
   // Size of the file in bytes.
@@ -52,7 +57,7 @@ class FileDataSource : public DataSource {
   // Critical section that protects all of the DataSource methods to prevent
   // a Stop from happening while in the middle of a file I/O operation.
   // TODO(ralphl): Ideally this would use asynchronous I/O or we will know
-  // that we will block for a short period of time in reads.  Othewise, we can
+  // that we will block for a short period of time in reads.  Otherwise, we can
   // hang the pipeline Stop.
   Lock lock_;
 

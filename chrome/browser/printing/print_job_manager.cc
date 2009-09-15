@@ -4,47 +4,27 @@
 
 #include "chrome/browser/printing/print_job_manager.h"
 
-#include "base/file_util.h"
-#include "base/string_util.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/printer_query.h"
-#include "chrome/browser/printing/printed_document.h"
-#include "chrome/browser/printing/printed_page.h"
-#include "chrome/common/gfx/emf.h"
 #include "chrome/common/notification_service.h"
+#include "printing/printed_document.h"
+#include "printing/printed_page.h"
 
 namespace printing {
 
-PrintJobManager::PrintJobManager()
-    : debug_dump_path_() {
-  NotificationService::current()->AddObserver(
-      this,
-      NotificationType::PRINT_JOB_EVENT,
-      NotificationService::AllSources());
-  NotificationService::current()->AddObserver(
-      this,
-      NotificationType::PRINTED_DOCUMENT_UPDATED,
-      NotificationService::AllSources());
+PrintJobManager::PrintJobManager() {
+  registrar_.Add(this, NotificationType::PRINT_JOB_EVENT,
+                 NotificationService::AllSources());
 }
 
 PrintJobManager::~PrintJobManager() {
-  // When this object is destroyed, the shared NotificationService instance is
-  // already destroyed.
   AutoLock lock(lock_);
   queued_queries_.clear();
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::PRINT_JOB_EVENT,
-      NotificationService::AllSources());
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::PRINTED_DOCUMENT_UPDATED,
-      NotificationService::AllSources());
 }
 
 void PrintJobManager::OnQuit() {
   // Common case, no print job pending.
-  if (current_jobs_.size() == 0)
+  if (current_jobs_.empty())
     return;
   {
     // Don't take a chance and copy the array since it can be modified in
@@ -61,15 +41,7 @@ void PrintJobManager::OnQuit() {
     }
   }
   current_jobs_.clear();
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::PRINT_JOB_EVENT,
-      NotificationService::AllSources());
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::PRINTED_DOCUMENT_UPDATED,
-      NotificationService::AllSources());
-  DCHECK_EQ(current_jobs_.size(), 0);
+  registrar_.RemoveAll();
 }
 
 void PrintJobManager::QueuePrinterQuery(PrinterQuery* job) {
@@ -104,13 +76,6 @@ void PrintJobManager::Observe(NotificationType type,
     case NotificationType::PRINT_JOB_EVENT: {
       OnPrintJobEvent(Source<PrintJob>(source).ptr(),
                       *Details<JobEventDetails>(details).ptr());
-      break;
-    }
-    case NotificationType::PRINTED_DOCUMENT_UPDATED: {
-      PrintedPage* printed_page = Details<PrintedPage>(details).ptr();
-      if (printed_page)
-        OnPrintedDocumentUpdated(*Source<PrintedDocument>(source).ptr(),
-                                 *printed_page);
       break;
     }
     default: {
@@ -172,26 +137,6 @@ void PrintJobManager::OnPrintJobEvent(
       break;
     }
   }
-}
-
-void PrintJobManager::OnPrintedDocumentUpdated(const PrintedDocument& document,
-                                               const PrintedPage& page) {
-  if (debug_dump_path_.empty())
-    return;
-
-  std::wstring filename;
-  filename += document.date();
-  filename += L"_";
-  filename += document.time();
-  filename += L"_";
-  filename += document.name();
-  filename += L"_";
-  filename += StringPrintf(L"%02d", page.page_number());
-  filename += L"_.emf";
-  file_util::ReplaceIllegalCharacters(&filename, '_');
-  std::wstring path(debug_dump_path_);
-  file_util::AppendToPath(&path, filename);
-  page.emf()->SaveTo(path);
 }
 
 }  // namespace printing

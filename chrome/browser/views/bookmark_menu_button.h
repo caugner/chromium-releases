@@ -7,9 +7,9 @@
 
 #include "base/timer.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
-#include "chrome/browser/bookmarks/bookmark_menu_controller.h"
-#include "chrome/views/controls/button/menu_button.h"
-#include "chrome/views/controls/menu/view_menu_delegate.h"
+#include "chrome/browser/views/bookmark_menu_controller_views.h"
+#include "views/controls/button/menu_button.h"
+#include "views/controls/menu/view_menu_delegate.h"
 
 class BookmarkModel;
 class Browser;
@@ -36,13 +36,13 @@ class BookmarkMenuButton : public views::MenuButton,
 
   // ViewMenuDelegate.
   virtual void RunMenu(views::View* source,
-                       const CPoint& pt,
+                       const gfx::Point& pt,
                        gfx::NativeView hwnd);
 
  private:
   // Shows the menu.
   void RunMenu(views::View* source,
-               const CPoint& pt,
+               const gfx::Point& pt,
                gfx::NativeView hwnd,
                bool for_drop);
 

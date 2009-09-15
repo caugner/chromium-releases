@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_VIEWS_TABS_TAB_RENDERER_H__
 #define CHROME_BROWSER_VIEWS_TABS_TAB_RENDERER_H__
 
+#include "app/animation.h"
+#include "app/slide_animation.h"
+#include "app/throb_animation.h"
 #include "base/gfx/point.h"
-#include "chrome/common/animation.h"
-#include "chrome/common/slide_animation.h"
-#include "chrome/common/throb_animation.h"
-#include "chrome/views/controls/button/image_button.h"
-#include "chrome/views/controls/menu/menu.h"
-#include "chrome/views/view.h"
+#include "base/string16.h"
+#include "views/controls/button/image_button.h"
+#include "views/view.h"
 
 class TabContents;
 
@@ -36,9 +36,15 @@ class TabRenderer : public views::View,
   TabRenderer();
   virtual ~TabRenderer();
 
+  // Overridden from views:
+  void ViewHierarchyChanged(bool is_add, View* parent, View* child);
+  ThemeProvider* GetThemeProvider();
+
   // Updates the data the Tab uses to render itself from the specified
   // TabContents.
-  void UpdateData(TabContents* contents);
+  //
+  // See TabStripModel::TabChangedAt documentation for what loading_only means.
+  void UpdateData(TabContents* contents, bool loading_only);
 
   // Updates the display to reflect the contents of this TabRenderer's model.
   void UpdateFromModel();
@@ -54,6 +60,19 @@ class TabRenderer : public views::View,
   void StartPulse();
   void StopPulse();
 
+  // Set the background offset used to match the image in the inactive tab
+  // to the frame image.
+  void SetBackgroundOffset(gfx::Point offset) {
+    background_offset_ = offset;
+  }
+
+  // Set the theme provider - because we get detached, we are frequently
+  // outside of a hierarchy with a theme provider at the top. This should be
+  // called whenever we're detached or attached to a hierarchy.
+  void SetThemeProvider(ThemeProvider* provider) {
+    theme_provider_ = provider;
+  }
+
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
   // Returns the minimum possible size of a selected Tab. Selected tabs must
@@ -64,9 +83,8 @@ class TabRenderer : public views::View,
   // available.
   static gfx::Size GetStandardSize();
 
-  // Loads the images to be used for the tab background. Uses the images for
-  // Vista if |use_vista_images| is true.
-  static void LoadTabImages(bool use_vista_images);
+  // Loads the images to be used for the tab background.
+  static void LoadTabImages();
 
  protected:
   views::ImageButton* close_button() const { return close_button_; }
@@ -80,7 +98,7 @@ class TabRenderer : public views::View,
 
  private:
   // Overridden from views::View:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual void OnMouseEntered(const views::MouseEvent& event);
   virtual void OnMouseExited(const views::MouseEvent& event);
@@ -105,11 +123,11 @@ class TabRenderer : public views::View,
   void ResetCrashedFavIcon();
 
   // Paint various portions of the Tab
-  void PaintTabBackground(ChromeCanvas* canvas);
-  void PaintInactiveTabBackground(ChromeCanvas* canvas);
-  void PaintActiveTabBackground(ChromeCanvas* canvas);
-  void PaintHoverTabBackground(ChromeCanvas* canvas, double opacity);
-  void PaintLoadingAnimation(ChromeCanvas* canvas);
+  void PaintTabBackground(gfx::Canvas* canvas);
+  void PaintInactiveTabBackground(gfx::Canvas* canvas);
+  void PaintActiveTabBackground(gfx::Canvas* canvas);
+  void PaintHoverTabBackground(gfx::Canvas* canvas, double opacity);
+  void PaintLoadingAnimation(gfx::Canvas* canvas);
 
   // Returns the number of favicon-size elements that can fit in the tab's
   // current size.
@@ -123,8 +141,10 @@ class TabRenderer : public views::View,
 
   // The bounds of various sections of the display.
   gfx::Rect favicon_bounds_;
-  gfx::Rect download_icon_bounds_;
   gfx::Rect title_bounds_;
+
+  // The offset used to paint the inactive background image.
+  gfx::Point background_offset_;
 
   // Current state of the animation.
   AnimationState animation_state_;
@@ -146,12 +166,12 @@ class TabRenderer : public views::View,
   // corresponding objects in the underlying model.
   struct TabData {
     SkBitmap favicon;
-    std::wstring title;
+    string16 title;
     bool loading;
     bool crashed;
     bool off_the_record;
     bool show_icon;
-    bool show_download_icon;
+    int background_vertical_offset;
   };
   TabData data_;
 
@@ -164,15 +184,12 @@ class TabRenderer : public views::View,
   };
   static TabImage tab_active;
   static TabImage tab_inactive;
-  static TabImage tab_inactive_otr;
+  static TabImage tab_alpha;
   static TabImage tab_hover;
 
   // Whether we're showing the icon. It is cached so that we can detect when it
   // changes and layout appropriately.
   bool showing_icon_;
-
-  // Whether we are showing the download icon. Comes from the model.
-  bool showing_download_icon_;
 
   // Whether we are showing the close button. It is cached so that we can
   // detect when it changes and layout appropriately.
@@ -181,11 +198,16 @@ class TabRenderer : public views::View,
   // The offset used to animate the favicon location.
   int fav_icon_hiding_offset_;
 
+  // The current color of the close button.
+  SkColor close_button_color_;
+
   // The animation object used to swap the favicon with the sad tab icon.
   class FavIconCrashAnimation;
   FavIconCrashAnimation* crash_animation_;
 
   bool should_display_crashed_favicon_;
+
+  ThemeProvider* theme_provider_;
 
   static void InitClass();
   static bool initialized_;

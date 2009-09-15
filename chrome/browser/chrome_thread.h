@@ -38,8 +38,19 @@ class ChromeThread : public base::Thread {
     // This is the thread that interacts with the database.
     DB,
 
+    // This is the "main" thread for WebKit within the browser process when
+    // NOT in --single-process mode.
+    WEBKIT,
+
     // This is the thread that interacts with the history database.
     HISTORY,
+
+#if defined(OS_LINUX)
+    // This thread has a second connection to the X server and is used to
+    // process UI requests when routing the request to the UI thread would risk
+    // deadlock.
+    BACKGROUND_X11,
+#endif
 
     // This identifier does not represent a thread.  Instead it counts the
     // number of well-known threads.  Insert new well-known threads before this
@@ -61,6 +72,16 @@ class ChromeThread : public base::Thread {
   //
   static MessageLoop* GetMessageLoop(ID identifier);
 
+  // Callable on any thread.  Returns whether you're currently on a particular
+  // thread.
+  //
+  // WARNING:
+  //   When running under unit-tests, this will return true if you're on the
+  //   main thread and the thread ID you pass in isn't running.  This is
+  //   normally the correct behavior because you want to ignore these asserts
+  //   unless you've specifically spun up the threads, but be mindful of it.
+  static bool CurrentlyOn(ID identifier);
+
  private:
   // The identifier of this thread.  Only one thread can exist with a given
   // identifier at a given time.
@@ -72,7 +93,7 @@ class ChromeThread : public base::Thread {
 
   // An array of the ChromeThread objects.  This array is protected by |lock_|.
   // The threads are not owned by this array.  Typically, the threads are owned
-  // on the IU thread by the g_browser_process object.  ChromeThreads remove
+  // on the UI thread by the g_browser_process object.  ChromeThreads remove
   // themselves from this array upon destruction.
   static ChromeThread* chrome_threads_[ID_COUNT];
 };

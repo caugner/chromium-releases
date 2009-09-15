@@ -7,20 +7,18 @@
 
 #include <queue>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/hash_tables.h"
 #include "base/ref_counted.h"
-#include "chrome/common/pref_member.h"
-#include "chrome/browser/download/save_item.h"
-#include "chrome/browser/download/save_types.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/shell_dialogs.h"
+#include "googleurl/src/gurl.h"
 
 class SaveFileManager;
+class SaveItem;
 class SavePackage;
 class DownloadItem;
 class DownloadManager;
@@ -28,14 +26,17 @@ class GURL;
 class MessageLoop;
 class PrefService;
 class Profile;
-class WebContents;
+class TabContents;
 class URLRequestContext;
-class WebContents;
+class TabContents;
 
 namespace base {
 class Thread;
 class Time;
 }
+
+struct SaveFileCreateInfo;
+struct SavePackageParam;
 
 // The SavePackage object manages the process of saving a page as only-html or
 // complete-html and providing the information for displaying saving status.
@@ -50,7 +51,8 @@ class Time;
 // by the SavePackage. SaveItems are created when a user initiates a page
 // saving job, and exist for the duration of one tab's life time.
 class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
-                    public RenderViewHostDelegate::Save {
+                    public RenderViewHostDelegate::Save,
+                    public SelectFileDialog::Listener {
  public:
   enum SavePackageType {
     // User chose to save only the HTML of the page.
@@ -76,7 +78,15 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
     FAILED
   };
 
-  SavePackage(WebContents* web_content,
+  // Constructor for user initiated page saving. This constructor results in a
+  // SavePackage that will generate and sanitize a suggested name for the user
+  // in the "Save As" dialog box.
+  SavePackage(TabContents* web_content);
+
+  // This contructor is used only for testing. We can bypass the file and
+  // directory name generation / sanitization by providing well known paths
+  // better suited for tests.
+  SavePackage(TabContents* web_content,
               SavePackageType save_type,
               const FilePath& file_full_path,
               const FilePath& directory_full_path);
@@ -117,6 +127,11 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Now we actually use render_process_id as tab's unique id.
   int tab_id() const { return tab_id_; }
 
+  void GetSaveInfo();
+  void ContinueSave(SavePackageParam* param,
+                    const FilePath& final_name,
+                    int index);
+
   // RenderViewHostDelegate::Save ----------------------------------------------
 
   // Process all of the current page's savable links of subresources, resources
@@ -138,34 +153,6 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Used to disable prompting the user for a directory/filename of the saved
   // web page.  This is available for testing.
   static void SetShouldPromptUser(bool should_prompt);
-
-  // Helper function for preparing suggested name for the SaveAs Dialog. The
-  // suggested name is composed of the default save path and the web document's
-  // title.
-  static FilePath GetSuggestNameForSaveAs(PrefService* prefs,
-                                          const FilePath& name);
-
-  // This structure is for storing parameters which we will use to create
-  // a SavePackage object later.
-  struct SavePackageParam {
-    // MIME type of current tab contents.
-    const std::string& current_tab_mime_type;
-    // Pointer to preference service.
-    PrefService* prefs;
-    // Type about saving page as only-html or complete-html.
-    SavePackageType save_type;
-    // File path for main html file.
-    FilePath saved_main_file_path;
-    // Directory path for saving sub resources and sub html frames.
-    FilePath dir;
-
-    SavePackageParam(const std::string& mime_type)
-        : current_tab_mime_type(mime_type) { }
-  };
-  static bool GetSaveInfo(const FilePath& suggest_name,
-                          gfx::NativeView container_window,
-                          SavePackageParam* param,
-                          DownloadManager* download_manager);
 
   // Check whether we can do the saving page operation for the specified URL.
   static bool IsSavableURL(const GURL& url);
@@ -200,6 +187,10 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
                                   const FilePath::StringType& file_name_ext,
                                   uint32 max_file_path_len,
                                   FilePath::StringType* pure_file_name);
+
+  // SelectFileDialog::Listener interface.
+  virtual void FileSelected(const FilePath& path, int index, void* params);
+  virtual void FileSelectionCanceled(void* params);
 
  private:
   // For testing only.
@@ -245,6 +236,18 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
                             saved_failed_items_.size());
   }
 
+  // Retrieve the preference for the directory to save pages to.
+  static FilePath GetSaveDirPreference(PrefService* prefs);
+
+  // Helper function for preparing suggested name for the SaveAs Dialog. The
+  // suggested name is determined by the web document's title.
+  static FilePath GetSuggestedNameForSaveAs(const FilePath& name,
+                                            bool can_save_as_complete);
+
+  // Ensure that the file name has a proper extension for HTML by adding ".htm"
+  // if necessary.
+  static FilePath EnsureHtmlExtension(const FilePath& name);
+
   typedef std::queue<SaveItem*> SaveItemQueue;
   // A queue for items we are about to start saving.
   SaveItemQueue waiting_item_queue_;
@@ -260,7 +263,7 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Non-owning pointer for handling file writing on the file thread.
   SaveFileManager* file_manager_;
 
-  WebContents* web_contents_;
+  TabContents* tab_contents_;
 
   // We use a fake DownloadItem here in order to reuse the DownloadItemView.
   // This class owns the pointer.
@@ -301,7 +304,11 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Unique id for this SavePackage.
   const int tab_id_;
 
+  // For managing select file dialogs.
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
+
   friend class SavePackageTest;
+
   DISALLOW_COPY_AND_ASSIGN(SavePackage);
 };
 

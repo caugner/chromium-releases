@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,19 +54,18 @@ namespace skia {
 // shared memory between the renderer and the main process at least. In this
 // case we'll probably create the buffer from a precreated region of memory.
 // -----------------------------------------------------------------------------
-class BitmapPlatformDeviceLinux : public PlatformDeviceLinux {
+class BitmapPlatformDevice : public PlatformDevice {
   // A reference counted cairo surface
-  class BitmapPlatformDeviceLinuxData;
+  class BitmapPlatformDeviceData;
 
  public:
-  static BitmapPlatformDeviceLinux* Create(int width, int height,
-                                           bool is_opaque);
+  static BitmapPlatformDevice* Create(int width, int height, bool is_opaque);
+
   // This doesn't take ownership of |data|
-  static BitmapPlatformDeviceLinux* Create(int width, int height,
-                                           bool is_opaque, uint8_t* data);
-  static BitmapPlatformDeviceLinux* Create(int width, int height,
-                                           bool is_opaque,
-                                           cairo_surface_t* surface);
+  static BitmapPlatformDevice* Create(int width, int height,
+                                      bool is_opaque, uint8_t* data);
+  static BitmapPlatformDevice* Create(int width, int height,
+                                      bool is_opaque, cairo_surface_t* surface);
 
   // Create a BitmapPlatformDeviceLinux from an already constructed bitmap;
   // you should probably be using Create(). This may become private later if
@@ -74,25 +73,26 @@ class BitmapPlatformDeviceLinux : public PlatformDeviceLinux {
   // the Windows and Mac versions of this class do.
   //
   // This object takes ownership of @data.
-  BitmapPlatformDeviceLinux(const SkBitmap& other,
-                            BitmapPlatformDeviceLinuxData* data);
-  virtual ~BitmapPlatformDeviceLinux();
-  BitmapPlatformDeviceLinux& operator=(const BitmapPlatformDeviceLinux& other);
+  BitmapPlatformDevice(const SkBitmap& other, BitmapPlatformDeviceData* data);
+  virtual ~BitmapPlatformDevice();
+  BitmapPlatformDevice& operator=(const BitmapPlatformDevice& other);
 
   // A stub copy constructor.  Needs to be properly implemented.
-  BitmapPlatformDeviceLinux(const BitmapPlatformDeviceLinux& other);
+  BitmapPlatformDevice(const BitmapPlatformDevice& other);
 
   // Bitmaps aren't vector graphics.
   virtual bool IsVectorial() { return false; }
 
   // If someone wants to paint on a Cairo surface version of our
   // buffer, then give them the surface we're already using.
-  virtual cairo_surface_t* beginPlatformPaint() { return surface(); }
+  virtual cairo_t* beginPlatformPaint();
 
-  cairo_surface_t* surface() const;
+  // Loads the given transform and clipping region into the HDC. This is
+  // overridden from SkDevice.
+  virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region);
 
  private:
-  scoped_refptr<BitmapPlatformDeviceLinuxData> data_;
+  scoped_refptr<BitmapPlatformDeviceData> data_;
 };
 
 }  // namespace skia

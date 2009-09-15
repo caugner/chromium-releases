@@ -33,12 +33,17 @@ struct WebPreferences {
   bool plugins_enabled;
   bool dom_paste_enabled;
   bool developer_extras_enabled;
+  std::wstring inspector_settings;
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
   bool text_areas_are_resizable;
   bool java_enabled;
   bool allow_scripts_to_close_windows;
   bool uses_page_cache;
+  bool remote_fonts_enabled;
+  bool xss_auditor_enabled;
+  bool local_storage_enabled;
+  bool session_storage_enabled;
 
   // TODO(tc): User style sheets will not work in chrome because it tries to
   // load the style sheet using a request without a frame.
@@ -67,12 +72,17 @@ struct WebPreferences {
         plugins_enabled(true),
         dom_paste_enabled(false),  // enables execCommand("paste")
         developer_extras_enabled(false),  // Requires extra work by embedder
+        inspector_settings(L""),
         shrinks_standalone_images_to_fit(true),
         uses_universal_detector(false),  // Disabled: page cycler regression
         text_areas_are_resizable(true),
         java_enabled(true),
         allow_scripts_to_close_windows(false),
         uses_page_cache(false),
+        remote_fonts_enabled(false),
+        xss_auditor_enabled(false),
+        local_storage_enabled(false),
+        session_storage_enabled(false),
         user_style_sheet_enabled(false) {
   }
 };

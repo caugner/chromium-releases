@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
+#include "base/scoped_vector.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_list.h"
@@ -24,15 +25,9 @@
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/scoped_vector.h"
-
-// TODO(port): Get rid of this section and finish porting.
-#if defined(OS_WIN)
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/win_util.h"
-#endif
 
 using base::Time;
 
@@ -53,6 +48,7 @@ static const SessionCommand::id_type kCommandSetWindowType = 9;
 static const SessionCommand::id_type kCommandSetWindowBounds2 = 10;
 static const SessionCommand::id_type
     kCommandTabNavigationPathPrunedFromFront = 11;
+static const SessionCommand::id_type kCommandSetPinnedState = 12;
 
 // Every kWritesPerReset commands triggers recreating the file.
 static const int kWritesPerReset = 250;
@@ -111,6 +107,11 @@ typedef IDAndIndexPayload SelectedTabInIndexPayload;
 typedef IDAndIndexPayload WindowTypePayload;
 
 typedef IDAndIndexPayload TabNavigationPathPrunedFromFrontPayload;
+
+struct PinnedStatePayload {
+  SessionID::id_type tab_id;
+  bool pinned_state;
+};
 
 }  // namespace
 
@@ -178,6 +179,15 @@ void SessionService::SetTabIndexInWindow(const SessionID& window_id,
     return;
 
   ScheduleCommand(CreateSetTabIndexInWindowCommand(tab_id, new_index));
+}
+
+void SessionService::SetPinnedState(const SessionID& window_id,
+                                    const SessionID& tab_id,
+                                    bool is_pinned) {
+  if (!ShouldTrackChangesToWindow(window_id))
+    return;
+
+  ScheduleCommand(CreatePinnedStateCommand(tab_id, is_pinned));
 }
 
 void SessionService::TabClosed(const SessionID& window_id,
@@ -325,12 +335,13 @@ void SessionService::UpdateTabNavigation(const SessionID& window_id,
                                                    tab_id.id(), index, entry));
 }
 
-void SessionService::TabRestored(NavigationController* controller) {
+void SessionService::TabRestored(NavigationController* controller,
+                                 bool pinned) {
   if (!ShouldTrackChangesToWindow(controller->window_id()))
     return;
 
   BuildCommandsForTab(controller->window_id(), controller, -1,
-                      &pending_commands(), NULL);
+                      pinned, &pending_commands(), NULL);
   StartSaveTimer();
 }
 
@@ -441,7 +452,7 @@ void SessionService::Observe(NotificationType type,
       } else {
         TabNavigationPathPrunedFromBack(controller->window_id(),
                                         controller->session_id(),
-                                        controller->GetEntryCount());
+                                        controller->entry_count());
       }
       break;
     }
@@ -567,11 +578,23 @@ SessionCommand* SessionService::CreateSetSelectedNavigationIndexCommand(
 SessionCommand* SessionService::CreateSetWindowTypeCommand(
     const SessionID& window_id,
     Browser::Type type) {
-      WindowTypePayload payload = { 0 };
+  WindowTypePayload payload = { 0 };
   payload.id = window_id.id();
   payload.index = static_cast<int32>(type);
   SessionCommand* command = new SessionCommand(
       kCommandSetWindowType, sizeof(payload));
+  memcpy(command->contents(), &payload, sizeof(payload));
+  return command;
+}
+
+SessionCommand* SessionService::CreatePinnedStateCommand(
+    const SessionID& tab_id,
+    bool is_pinned) {
+  PinnedStatePayload payload = { 0 };
+  payload.tab_id = tab_id.id();
+  payload.pinned_state = is_pinned;
+  SessionCommand* command =
+      new SessionCommand(kCommandSetPinnedState, sizeof(payload));
   memcpy(command->contents(), &payload, sizeof(payload));
   return command;
 }
@@ -868,6 +891,14 @@ bool SessionService::CreateTabsAndWindows(
         break;
       }
 
+      case kCommandSetPinnedState: {
+        PinnedStatePayload payload;
+        if (!command->GetPayload(&payload, sizeof(payload)))
+          return true;
+        GetTab(payload.tab_id, tabs)->pinned = payload.pinned_state;
+        break;
+      }
+
       default:
         return true;
     }
@@ -879,6 +910,7 @@ void SessionService::BuildCommandsForTab(
     const SessionID& window_id,
     NavigationController* controller,
     int index_in_window,
+    bool is_pinned,
     std::vector<SessionCommand*>* commands,
     IdToRange* tab_to_available_range) {
   DCHECK(controller && commands && window_id.id());
@@ -888,15 +920,19 @@ void SessionService::BuildCommandsForTab(
   const int min_index = std::max(0,
                                  current_index - max_persist_navigation_count);
   const int max_index = std::min(current_index + max_persist_navigation_count,
-                                 controller->GetEntryCount());
-  const int pending_index = controller->GetPendingEntryIndex();
+                                 controller->entry_count());
+  const int pending_index = controller->pending_entry_index();
   if (tab_to_available_range) {
     (*tab_to_available_range)[controller->session_id().id()] =
         std::pair<int, int>(min_index, max_index);
   }
+  if (is_pinned) {
+    commands->push_back(
+        CreatePinnedStateCommand(controller->session_id(), true));
+  }
   for (int i = min_index; i < max_index; ++i) {
     const NavigationEntry* entry = (i == pending_index) ?
-        controller->GetPendingEntry() : controller->GetEntryAtIndex(i);
+        controller->pending_entry() : controller->GetEntryAtIndex(i);
     DCHECK(entry);
     if (ShouldTrackEntry(*entry)) {
       commands->push_back(
@@ -938,7 +974,8 @@ void SessionService::BuildCommandsForBrowser(
     TabContents* tab = browser->GetTabContentsAt(i);
     DCHECK(tab);
     if (tab->profile() == profile()) {
-      BuildCommandsForTab(browser->session_id(), tab->controller(), i,
+      BuildCommandsForTab(browser->session_id(), &tab->controller(), i,
+                          browser->tabstrip_model()->IsTabPinned(i),
                           commands, tab_to_available_range);
       if (windows_to_track && !added_to_windows_to_track) {
         windows_to_track->insert(browser->session_id().id());

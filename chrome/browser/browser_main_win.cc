@@ -2,27 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/win_util.h"
-
-#include <shellapi.h>
-#include <windows.h>
-
 #include "chrome/browser/browser_main_win.h"
 
+#include <windows.h>
+#include <shellapi.h>
+
+#include "app/l10n_util.h"
+#include "app/message_box_flags.h"
+#include "app/win_util.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/win_util.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/views/uninstall_dialog.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "views/controls/message_box_view.h"
+#include "views/widget/accelerator_handler.h"
+#include "views/window/window.h"
 
 // Displays a warning message if the user is running chrome on windows 2000.
 // Returns true if the OS is win2000, false otherwise.
@@ -37,11 +41,11 @@ bool CheckForWin2000() {
   return false;
 }
 
-bool AskForUninstallConfirmation() {
-  const std::wstring text = l10n_util::GetString(IDS_UNINSTALL_VERIFY);
-  const std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
-  const UINT flags = MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST;
-  return (IDOK == win_util::MessageBox(NULL, text, caption, flags));
+int AskForUninstallConfirmation() {
+  int ret = ResultCodes::NORMAL_EXIT;
+  UninstallDialog::ShowUninstallDialog(ret);
+  MessageLoopForUI::current()->Run(g_browser_process->accelerator_handler());
+  return ret;
 }
 
 void ShowCloseBrowserFirstMessageBox() {
@@ -56,18 +60,19 @@ int DoUninstallTasks(bool chrome_still_running) {
     ShowCloseBrowserFirstMessageBox();
     return ResultCodes::UNINSTALL_CHROME_ALIVE;
   }
-  if (!AskForUninstallConfirmation())
-    return ResultCodes::UNINSTALL_USER_CANCEL;
-  // The following actions are just best effort.
-  LOG(INFO) << "Executing uninstall actions";
-  ResultCodes::ExitCode ret = ResultCodes::NORMAL_EXIT;
-  if (!FirstRun::RemoveSentinel())
-    ret = ResultCodes::UNINSTALL_DELETE_FILE_ERROR;
-  // We only want to modify user level shortcuts so pass false for system_level.
-  if (!ShellUtil::RemoveChromeDesktopShortcut(ShellUtil::CURRENT_USER))
-    ret = ResultCodes::UNINSTALL_DELETE_FILE_ERROR;
-  if (!ShellUtil::RemoveChromeQuickLaunchShortcut(ShellUtil::CURRENT_USER))
-    ret = ResultCodes::UNINSTALL_DELETE_FILE_ERROR;
+  int ret = AskForUninstallConfirmation();
+  if (ret != ResultCodes::UNINSTALL_USER_CANCEL) {
+    // The following actions are just best effort.
+    LOG(INFO) << "Executing uninstall actions";
+    if (!FirstRun::RemoveSentinel())
+      LOG(INFO) << "Failed to delete sentinel file.";
+    // We want to remove user level shortcuts and we only care about the ones
+    // created by us and not by the installer so |alternate| is false.
+    if (!ShellUtil::RemoveChromeDesktopShortcut(ShellUtil::CURRENT_USER, false))
+      LOG(INFO) << "Failed to delete desktop shortcut.";
+    if (!ShellUtil::RemoveChromeQuickLaunchShortcut(ShellUtil::CURRENT_USER))
+      LOG(INFO) << "Failed to delete quick launch shortcut.";
+  }
   return ret;
 }
 

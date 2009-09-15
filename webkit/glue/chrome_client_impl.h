@@ -11,18 +11,24 @@ MSVC_PUSH_WARNING_LEVEL(0);
 #include "ChromeClientChromium.h"
 MSVC_POP_WARNING();
 
-class WebCursor;
 class WebViewImpl;
 
 namespace WebCore {
+class HTMLParserQuirks;
+class PopupContainer;
 class SecurityOrigin;
 struct WindowFeatures;
+}
+
+namespace WebKit {
+struct WebCursorInfo;
+struct WebPopupMenuInfo;
 }
 
 // Handles window-level notifications from WebCore on behalf of a WebView.
 class ChromeClientImpl : public WebCore::ChromeClientChromium {
  public:
-  ChromeClientImpl(WebViewImpl* webview);
+  explicit ChromeClientImpl(WebViewImpl* webview);
   virtual ~ChromeClientImpl();
 
   WebViewImpl* webview() const { return webview_; }
@@ -64,7 +70,10 @@ class ChromeClientImpl : public WebCore::ChromeClientChromium {
 
   virtual void setResizable(bool);
 
-  virtual void addMessageToConsole(const WebCore::String& message,
+  virtual void addMessageToConsole(WebCore::MessageSource source,
+                                   WebCore::MessageType type,
+                                   WebCore::MessageLevel level,
+                                   const WebCore::String& message,
                                    unsigned int lineNumber,
                                    const WebCore::String& sourceID);
 
@@ -101,33 +110,42 @@ class ChromeClientImpl : public WebCore::ChromeClientChromium {
   virtual WebCore::IntPoint screenToWindow(const WebCore::IntPoint&) const;
   virtual WebCore::IntRect windowToScreen(const WebCore::IntRect&) const;
   virtual PlatformWidget platformWindow() const;
-  virtual void contentsSizeChanged(WebCore::Frame*, const WebCore::IntSize&) const {}
+  virtual void contentsSizeChanged(WebCore::Frame*,
+                                   const WebCore::IntSize&) const;
+  virtual void scrollRectIntoView(const WebCore::IntRect&, const WebCore::ScrollView*) const { }
 
   virtual void mouseDidMoveOverElement(const WebCore::HitTestResult& result,
                                        unsigned modifierFlags);
 
-  virtual void setToolTip(const WebCore::String& tooltip_text);
+  virtual void setToolTip(const WebCore::String& tooltip_text,
+                          WebCore::TextDirection dir);
 
   virtual void print(WebCore::Frame*);
 
   virtual void exceededDatabaseQuota(WebCore::Frame*,
                                      const WebCore::String& databaseName);
 
+  virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*) { }
+
   virtual void runOpenPanel(WebCore::Frame*,
                             PassRefPtr<WebCore::FileChooser>);
-  virtual void popupOpened(WebCore::FramelessScrollView* popup_view,
+  virtual bool setCursor(WebCore::PlatformCursorHandle) { return false; }
+  virtual void popupOpened(WebCore::PopupContainer* popup_container,
                            const WebCore::IntRect& bounds,
-                           bool activatable);
+                           bool activatable,
+                           bool handle_externally);
 
-  void SetCursor(const WebCursor& cursor);
-  void SetCursorForPlugin(const WebCursor& cursor);
-
-  virtual void enableSuddenTermination();
-  virtual void disableSuddenTermination();
+  void SetCursor(const WebKit::WebCursorInfo& cursor);
+  void SetCursorForPlugin(const WebKit::WebCursorInfo& cursor);
 
   virtual void formStateDidChange(const WebCore::Node*);
 
+  virtual PassOwnPtr<WebCore::HTMLParserQuirks> createHTMLParserQuirks() { return 0; }
+
  private:
+  void GetPopupMenuInfo(WebCore::PopupContainer* popup_container,
+                        WebKit::WebPopupMenuInfo* info);
+
   WebViewImpl* webview_;  // weak pointer
   bool toolbars_visible_;
   bool statusbar_visible_;

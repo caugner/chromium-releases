@@ -26,6 +26,7 @@
 #include "base/gfx/jpeg_codec.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/scoped_vector.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "chrome/browser/browser_process.h"
@@ -39,10 +40,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/sqlite_utils.h"
-#include "chrome/common/scoped_vector.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -241,7 +242,7 @@ class HistoryTest : public testing::Test {
   void OnRedirectQueryComplete(HistoryService::Handle handle,
                                GURL url,
                                bool success,
-                               HistoryService::RedirectList* redirects) {
+                               history::RedirectList* redirects) {
     redirect_query_success_ = success;
     if (redirect_query_success_)
       saved_redirects_.swap(*redirects);
@@ -270,7 +271,7 @@ class HistoryTest : public testing::Test {
 
   // Set by the redirect callback when we get data. You should be sure to
   // clear this before issuing a redirect request.
-  HistoryService::RedirectList saved_redirects_;
+  history::RedirectList saved_redirects_;
   bool redirect_query_success_;
 
   // For history requests.
@@ -384,7 +385,7 @@ TEST_F(HistoryTest, AddPage) {
   const GURL test_url("http://www.google.com/");
   history->AddPage(test_url, NULL, 0, GURL(),
                    PageTransition::MANUAL_SUBFRAME,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_url));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(0, query_url_row_.typed_count());
@@ -392,7 +393,7 @@ TEST_F(HistoryTest, AddPage) {
 
   // Add the page once from the main frame (should unhide it).
   history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_url));
   EXPECT_EQ(2, query_url_row_.visit_count());  // Added twice.
   EXPECT_EQ(0, query_url_row_.typed_count());  // Never typed.
@@ -415,14 +416,14 @@ TEST_F(HistoryTest, AddPageSameTimes) {
   // additions have different timestamps.
   history->AddPage(test_urls[0], now, NULL, 0, GURL(),
                    PageTransition::LINK,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_urls[0]));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_TRUE(now == query_url_row_.last_visit());  // gtest doesn't like Time
 
   history->AddPage(test_urls[1], now, NULL, 0, GURL(),
                    PageTransition::LINK,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_urls[1]));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_TRUE(now + TimeDelta::FromMicroseconds(1) ==
@@ -432,7 +433,7 @@ TEST_F(HistoryTest, AddPageSameTimes) {
   history->AddPage(test_urls[2], now + TimeDelta::FromMinutes(1),
                    NULL, 0, GURL(),
                    PageTransition::LINK,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_urls[2]));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_TRUE(now + TimeDelta::FromMinutes(1) ==
@@ -448,14 +449,14 @@ TEST_F(HistoryTest, AddRedirect) {
     "http://first.page/",
     "http://second.page/"};
   int first_count = arraysize(first_sequence);
-  HistoryService::RedirectList first_redirects;
+  history::RedirectList first_redirects;
   for (int i = 0; i < first_count; i++)
     first_redirects.push_back(GURL(first_sequence[i]));
 
   // Add the sequence of pages as a server with no referrer. Note that we need
   // to have a non-NULL page ID scope.
   history->AddPage(first_redirects.back(), MakeFakeHost(1), 0, GURL(),
-                   PageTransition::LINK, first_redirects);
+                   PageTransition::LINK, first_redirects, true);
 
   // The first page should be added once with a link visit type (because we set
   // LINK when we added the original URL, and a referrer of nowhere (0).
@@ -486,14 +487,14 @@ TEST_F(HistoryTest, AddRedirect) {
   // Now add a client redirect from that second visit to a third, client
   // redirects are tracked by the RenderView prior to updating history,
   // so we pass in a CLIENT_REDIRECT qualifier to mock that behavior.
-  HistoryService::RedirectList second_redirects;
+  history::RedirectList second_redirects;
   second_redirects.push_back(first_redirects[1]);
   second_redirects.push_back(GURL("http://last.page/"));
   history->AddPage(second_redirects[1], MakeFakeHost(1), 1,
                    second_redirects[0],
                    static_cast<PageTransition::Type>(PageTransition::LINK |
                        PageTransition::CLIENT_REDIRECT),
-                   second_redirects);
+                   second_redirects, true);
 
   // The last page (source of the client redirect) should NOT have an
   // additional visit added, because it was a client redirect (normally it
@@ -518,7 +519,7 @@ TEST_F(HistoryTest, Typed) {
   // Add the page once as typed.
   const GURL test_url("http://www.google.com/");
   history->AddPage(test_url, NULL, 0, GURL(), PageTransition::TYPED,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
   // We should have the same typed & visit count.
@@ -527,7 +528,7 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page again not typed.
   history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
-                   HistoryService::RedirectList());
+                   history::RedirectList(), false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
   // The second time should not have updated the typed count.
@@ -536,7 +537,8 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page again as a generated URL.
   history->AddPage(test_url, NULL, 0, GURL(),
-                   PageTransition::GENERATED, HistoryService::RedirectList());
+                   PageTransition::GENERATED, history::RedirectList(),
+                   false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
   // This should have worked like a link click.
@@ -545,7 +547,8 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page again as a reload.
   history->AddPage(test_url, NULL, 0, GURL(),
-                   PageTransition::RELOAD, HistoryService::RedirectList());
+                   PageTransition::RELOAD, history::RedirectList(),
+                   false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
   // This should not have incremented any visit counts.
@@ -594,29 +597,31 @@ TEST_F(HistoryTest, Segments) {
   // Add a URL.
   const GURL existing_url("http://www.google.com/");
   history->AddPage(existing_url, scope, 0, GURL(),
-                   PageTransition::TYPED, HistoryService::RedirectList());
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
 
   // Make sure a segment was created.
   history->QuerySegmentUsageSince(
-      &consumer_, Time::Now() - TimeDelta::FromDays(1),
+      &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
       NewCallback(static_cast<HistoryTest*>(this),
                   &HistoryTest::OnSegmentUsageAvailable));
 
   // Wait for processing.
   MessageLoop::current()->Run();
 
-  EXPECT_EQ(page_usage_data_->size(), 1U);
+  ASSERT_EQ(1U, page_usage_data_->size());
   EXPECT_TRUE(page_usage_data_[0]->GetURL() == existing_url);
   EXPECT_DOUBLE_EQ(3.0, page_usage_data_[0]->GetScore());
 
   // Add a URL which doesn't create a segment.
   const GURL link_url("http://yahoo.com/");
   history->AddPage(link_url, scope, 0, GURL(),
-                   PageTransition::LINK, HistoryService::RedirectList());
+                   PageTransition::LINK, history::RedirectList(),
+                   false);
 
   // Query again
   history->QuerySegmentUsageSince(
-      &consumer_, Time::Now() - TimeDelta::FromDays(1),
+      &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
       NewCallback(static_cast<HistoryTest*>(this),
                   &HistoryTest::OnSegmentUsageAvailable));
 
@@ -624,16 +629,17 @@ TEST_F(HistoryTest, Segments) {
   MessageLoop::current()->Run();
 
   // Make sure we still have one segment.
-  EXPECT_EQ(page_usage_data_->size(), 1U);
+  ASSERT_EQ(1U, page_usage_data_->size());
   EXPECT_TRUE(page_usage_data_[0]->GetURL() == existing_url);
 
   // Add a page linked from existing_url.
   history->AddPage(GURL("http://www.google.com/foo"), scope, 3, existing_url,
-                   PageTransition::LINK, HistoryService::RedirectList());
+                   PageTransition::LINK, history::RedirectList(),
+                   false);
 
   // Query again
   history->QuerySegmentUsageSince(
-      &consumer_, Time::Now() - TimeDelta::FromDays(1),
+      &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
       NewCallback(static_cast<HistoryTest*>(this),
                   &HistoryTest::OnSegmentUsageAvailable));
 
@@ -641,7 +647,7 @@ TEST_F(HistoryTest, Segments) {
   MessageLoop::current()->Run();
 
   // Make sure we still have one segment.
-  EXPECT_EQ(page_usage_data_->size(), 1U);
+  ASSERT_EQ(1U, page_usage_data_->size());
   EXPECT_TRUE(page_usage_data_[0]->GetURL() == existing_url);
 
   // However, the score should have increased.
@@ -757,8 +763,8 @@ HistoryAddPageArgs* MakeAddArgs(const GURL& url) {
                                 kAddArgsScope,
                                 0,
                                 GURL(),
-                                HistoryService::RedirectList(),
-                                PageTransition::TYPED);
+                                history::RedirectList(),
+                                PageTransition::TYPED, false);
 }
 
 // Convenience version of the above to convert a char string.

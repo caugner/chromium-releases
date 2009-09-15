@@ -6,6 +6,7 @@
 #include "base/string_util.h"
 #include "base/path_service.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/proxy_resolver_v8.h"
 #include "net/proxy/proxy_info.h"
@@ -375,10 +376,27 @@ TEST(ProxyResolverV8Test, V8Bindings) {
   EXPECT_EQ(2, bindings->my_ip_address_count);
 }
 
+// Try loading a PAC script which ends with a trailing comment (no terminal
+// newline). This should not cause problems with the PAC utility functions
+// that we add to the script.
+// http://crbug.com/22864
+TEST(ProxyResolverV8Test, TrailingComment) {
+  ProxyResolverV8WithMockBindings resolver;
+  resolver.SetPacScriptFromDisk("ends_with_comment.js");
+
+  net::ProxyInfo proxy_info;
+  int result = resolver.GetProxyForURL(kQueryUrl, kPacUrl, &proxy_info);
+
+  EXPECT_EQ(net::OK, result);
+  EXPECT_FALSE(proxy_info.is_direct());
+  EXPECT_EQ("success:80", proxy_info.proxy_server().ToURI());
+}
+
 TEST(ProxyResolverV8DefaultBindingsTest, DnsResolve) {
   // Get a hold of a DefaultJSBindings* (it is a hidden impl class).
-  net::ProxyResolverV8 resolver;
-  net::ProxyResolverV8::JSBindings* bindings = resolver.js_bindings();
+  scoped_ptr<net::ProxyResolverV8::JSBindings> bindings(
+      net::ProxyResolverV8::CreateDefaultBindings(
+          new net::MockHostResolver, NULL));
 
   // Considered an error.
   EXPECT_EQ("", bindings->DnsResolve(""));
@@ -410,7 +428,7 @@ TEST(ProxyResolverV8DefaultBindingsTest, DnsResolve) {
     // THIS TEST IS CURRENTLY FLAWED.
     //
     // Since we are running in unit-test mode, the HostResolve is using a
-    // mock HostMapper, which will always return 127.0.0.1, without going
+    // mock HostResolverProc, which will always return 127.0.0.1, without going
     // through the real codepaths.
     //
     // It is important that these tests be run with the real thing, since we
@@ -428,11 +446,12 @@ TEST(ProxyResolverV8DefaultBindingsTest, DnsResolve) {
 
 TEST(ProxyResolverV8DefaultBindingsTest, MyIpAddress) {
   // Get a hold of a DefaultJSBindings* (it is a hidden impl class).
-  net::ProxyResolverV8 resolver;
-  net::ProxyResolverV8::JSBindings* bindings = resolver.js_bindings();
+  scoped_ptr<net::ProxyResolverV8::JSBindings> bindings(
+      net::ProxyResolverV8::CreateDefaultBindings(
+          new net::MockHostResolver, NULL));
 
-  // Our ip address is always going to be 127.0.0.1, since we are using a
-  // mock host mapper when running in unit-test mode.
+  // Our IP address is always going to be 127.0.0.1, since we are using a
+  // mock host resolver.
   std::string my_ip_address = bindings->MyIpAddress();
 
   EXPECT_EQ("127.0.0.1", my_ip_address);

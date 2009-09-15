@@ -1,4 +1,4 @@
-// Copyright 2008, Google Inc.
+// Copyright 2008-2009, Google Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -47,13 +47,17 @@
 #include <string.h>
 #include <memory.h>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/registry.h"
+#include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
+#include "third_party/npapi/bindings/npapi.h"
+#include "webkit/default_plugin/plugin_impl.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
@@ -91,29 +95,35 @@ class PluginTest : public UITest {
     UITest::SetUp();
   }
 
-  void TestPlugin(const std::wstring& test_case, int timeout) {
-    GURL url = GetTestUrl(test_case);
+  void TestPlugin(const std::wstring& test_case,
+                  int timeout,
+                  bool mock_http) {
+    GURL url = GetTestUrl(test_case, mock_http);
     NavigateToURL(url);
-    WaitForFinish(timeout);
+    WaitForFinish(timeout, mock_http);
   }
 
   // Generate the URL for testing a particular test.
   // HTML for the tests is all located in test_directory\plugin\<testcase>
-  GURL GetTestUrl(const std::wstring &test_case) {
-    std::wstring path;
+  // Set |mock_http| to true to use mock HTTP server.
+  GURL GetTestUrl(const std::wstring &test_case, bool mock_http) {
+    if (mock_http)
+      return URLRequestMockHTTPJob::GetMockUrl(L"plugin/" + test_case);
+
+    FilePath path;
     PathService::Get(chrome::DIR_TEST_DATA, &path);
-    file_util::AppendToPath(&path, L"plugin");
-    file_util::AppendToPath(&path, test_case);
+    path = path.AppendASCII("plugin");
+    path = path.Append(FilePath::FromWStringHack(test_case));
     return net::FilePathToFileURL(path);
   }
 
   // Waits for the test case to finish.
-  void WaitForFinish(const int wait_time) {
+  void WaitForFinish(const int wait_time, bool mock_http) {
     const int kSleepTime = 500;      // 2 times per second
     const int kMaxIntervals = wait_time / kSleepTime;
 
-    GURL url = GetTestUrl(L"done");
-    scoped_ptr<TabProxy> tab(GetActiveTab());
+    GURL url = GetTestUrl(L"done", mock_http);
+    scoped_refptr<TabProxy> tab(GetActiveTab());
 
     std::string done_str;
     for (int i = 0; i < kMaxIntervals; ++i) {
@@ -132,41 +142,46 @@ class PluginTest : public UITest {
 };
 
 TEST_F(PluginTest, Quicktime) {
-  TestPlugin(L"quicktime.html", kShortWaitTimeout);
+  TestPlugin(L"quicktime.html", kShortWaitTimeout, false);
 }
 
-TEST_F(PluginTest, MediaPlayerNew) {
-  TestPlugin(L"wmp_new.html", kShortWaitTimeout);
+TEST_F(PluginTest, DISABLED_MediaPlayerNew) {
+  TestPlugin(L"wmp_new.html", kShortWaitTimeout, false);
 }
 
 // http://crbug.com/4809
 TEST_F(PluginTest, DISABLED_MediaPlayerOld) {
-  TestPlugin(L"wmp_old.html", kLongWaitTimeout);
+  TestPlugin(L"wmp_old.html", kLongWaitTimeout, false);
 }
 
 TEST_F(PluginTest, Real) {
-  TestPlugin(L"real.html", kShortWaitTimeout);
+  TestPlugin(L"real.html", kShortWaitTimeout, false);
 }
 
 TEST_F(PluginTest, Flash) {
-  TestPlugin(L"flash.html", kShortWaitTimeout);
+  TestPlugin(L"flash.html", kShortWaitTimeout, false);
 }
 
 TEST_F(PluginTest, FlashOctetStream) {
-  TestPlugin(L"flash-octet-stream.html", kShortWaitTimeout);
+  TestPlugin(L"flash-octet-stream.html", kShortWaitTimeout, false);
 }
 
 TEST_F(PluginTest, FlashSecurity) {
-  TestPlugin(L"flash.html", kShortWaitTimeout);
+  TestPlugin(L"flash.html", kShortWaitTimeout, false);
+}
+
+// http://crbug.com/16114
+TEST_F(PluginTest, FlashLayoutWhilePainting) {
+  TestPlugin(L"flash-layout-while-painting.html", kShortWaitTimeout, true);
 }
 
 // http://crbug.com/8690
 TEST_F(PluginTest, DISABLED_Java) {
-  TestPlugin(L"Java.html", kShortWaitTimeout);
+  TestPlugin(L"Java.html", kShortWaitTimeout, false);
 }
 
 TEST_F(PluginTest, Silverlight) {
-  TestPlugin(L"silverlight.html", kShortWaitTimeout);
+  TestPlugin(L"silverlight.html", kShortWaitTimeout, false);
 }
 
 typedef HRESULT (__stdcall* DllRegUnregServerFunc)();
@@ -182,7 +197,7 @@ class ActiveXTest : public PluginTest {
       RegisterTestControl(true);
       dll_registered = true;
     }
-    TestPlugin(test_case, timeout);
+    TestPlugin(test_case, timeout, false);
   }
   virtual void TearDown() {
     PluginTest::TearDown();
@@ -190,7 +205,7 @@ class ActiveXTest : public PluginTest {
       RegisterTestControl(false);
   }
   void RegisterTestControl(bool register_server) {
-    std::wstring test_control_path = browser_directory_ +
+    std::wstring test_control_path = browser_directory_.ToWStringHack() +
         L"\\activex_test_control.dll";
     HMODULE h = LoadLibrary(test_control_path.c_str());
     ASSERT_TRUE(h != NULL) << "Failed to load activex_test_control.dll";
@@ -218,7 +233,101 @@ TEST_F(ActiveXTest, WMP) {
   TestActiveX(L"activex_wmp.html", kLongWaitTimeout, false);
 }
 
-TEST_F(ActiveXTest, CustomScripting) {
+TEST_F(ActiveXTest, WMPNoEmbedMimeType) {
+  TestActiveX(L"activex_wmp_no_embed_mime_type.html", kLongWaitTimeout, false);
+}
+
+TEST_F(ActiveXTest, DISABLED_CustomScripting) {
   TestActiveX(L"activex_custom_scripting.html", kShortWaitTimeout, true);
 }
 
+TEST_F(ActiveXTest, DISABLED_EmbeddedMP3) {
+  TestActiveX(L"mp3_test.html", kLongWaitTimeout, false);
+}
+
+TEST_F(ActiveXTest, DISABLED_EmbeddedMPE) {
+  TestActiveX(L"mpe_test.html", kLongWaitTimeout, false);
+}
+
+
+// The default plugin tests defined below rely on the following webkit
+// functions and the IsPluginProcess function which is defined in the global
+// namespace. Stubbed these out for now.
+namespace webkit_glue {
+
+bool DownloadUrl(const std::string& url, HWND caller_window) {
+  return false;
+}
+
+bool GetPluginFinderURL(std::string* plugin_finder_url) {
+  return true;
+}
+
+} // namespace webkit_glue
+
+bool IsPluginProcess() {
+  return false;
+}
+
+TEST_F(PluginTest, DefaultPluginParsingTest) {
+  PluginInstallerImpl plugin_installer(NP_EMBED);
+  NPP_t plugin_instance = {0};
+
+  char *arg_names[] = {
+    "classid",
+    "codebase"
+  };
+
+  char *arg_values[] = {
+    "clsid:D27CDB6E-AE6D-11cf-96B8-444553540000",
+    "http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab",
+  };
+
+  bool is_activex = false;
+  std::string raw_activex_clsid;
+  std::string activex_clsid;
+  std::string activex_codebase;
+  std::string plugin_download_url;
+  std::string plugin_finder_url;
+
+  ASSERT_TRUE(PluginInstallerImpl::ParseInstantiationArguments(
+      "application/x-shockwave-flash",
+      &plugin_instance,
+      arraysize(arg_names),
+      arg_names,
+      arg_values,
+      &raw_activex_clsid,
+      &is_activex,
+      &activex_clsid,
+      &activex_codebase,
+      &plugin_download_url,
+      &plugin_finder_url));
+
+  EXPECT_EQ(is_activex, false);
+
+
+  ASSERT_TRUE(PluginInstallerImpl::ParseInstantiationArguments(
+      "",
+      &plugin_instance,
+      arraysize(arg_names),
+      arg_names,
+      arg_values,
+      &raw_activex_clsid,
+      &is_activex,
+      &activex_clsid,
+      &activex_codebase,
+      &plugin_download_url,
+      &plugin_finder_url));
+
+  EXPECT_EQ(is_activex, true);
+  EXPECT_EQ(
+      activex_codebase,
+      "http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab");
+
+  EXPECT_EQ(activex_clsid, "{D27CDB6E-AE6D-11cf-96B8-444553540000}");
+  EXPECT_EQ(raw_activex_clsid, "D27CDB6E-AE6D-11cf-96B8-444553540000");
+
+  EXPECT_EQ(
+      activex_codebase,
+      "http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab");
+}

@@ -9,13 +9,14 @@
 #include "build/build_config.h"
 #include "base/string_util.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/url_request_about_job.h"
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_file_job.h"
 #if defined(OS_WIN)
 #include "net/url_request/url_request_ftp_job.h"
 #else
-// TODO(playmobil): Implement on non-windows platforms.
+#include "net/url_request/url_request_new_ftp_job.h"
 #endif
 #include "net/url_request/url_request_http_job.h"
 #include "net/url_request/url_request_view_cache_job.h"
@@ -37,7 +38,7 @@ static const SchemeToFactory kBuiltinFactories[] = {
 #if defined(OS_WIN)
   { "ftp", URLRequestFtpJob::Factory },
 #else
-// TODO(playmobil): Implement on non-windows platforms.
+  { "ftp", URLRequestNewFtpJob::Factory },
 #endif
   { "about", URLRequestAboutJob::Factory },
   { "view-cache", URLRequestViewCacheJob::Factory },
@@ -59,9 +60,8 @@ URLRequestJob* URLRequestJobManager::CreateJob(URLRequest* request) const {
   if (!request->url().is_valid())
     return new URLRequestErrorJob(request, net::ERR_INVALID_URL);
 
-  const std::string& scheme = request->url().scheme();  // already lowercase
-
   // We do this here to avoid asking interceptors about unsupported schemes.
+  const std::string& scheme = request->url().scheme();  // already lowercase
   if (!SupportsScheme(scheme))
     return new URLRequestErrorJob(request, net::ERR_UNKNOWN_URL_SCHEME);
 
@@ -102,6 +102,47 @@ URLRequestJob* URLRequestJobManager::CreateJob(URLRequest* request) const {
   // wasn't interested in handling the URL.  That is fairly unexpected, and we
   // don't know have a specific error to report here :-(
   return new URLRequestErrorJob(request, net::ERR_FAILED);
+}
+
+URLRequestJob* URLRequestJobManager::MaybeInterceptRedirect(
+                                         URLRequest* request,
+                                         const GURL& location) const {
+#ifndef NDEBUG
+  DCHECK(IsAllowedThread());
+#endif
+  if ((request->load_flags() & net::LOAD_DISABLE_INTERCEPT) ||
+      (request->status().status() == URLRequestStatus::CANCELED) ||
+      !request->url().is_valid() ||
+      !SupportsScheme(request->url().scheme()))
+    return NULL;
+
+  InterceptorList::const_iterator i;
+  for (i = interceptors_.begin(); i != interceptors_.end(); ++i) {
+    URLRequestJob* job = (*i)->MaybeInterceptRedirect(request, location);
+    if (job)
+      return job;
+  }
+  return NULL;
+}
+
+URLRequestJob* URLRequestJobManager::MaybeInterceptResponse(
+                                         URLRequest* request) const {
+#ifndef NDEBUG
+  DCHECK(IsAllowedThread());
+#endif
+  if ((request->load_flags() & net::LOAD_DISABLE_INTERCEPT) ||
+      (request->status().status() == URLRequestStatus::CANCELED) ||
+      !request->url().is_valid() ||
+      !SupportsScheme(request->url().scheme()))
+    return NULL;
+
+  InterceptorList::const_iterator i;
+  for (i = interceptors_.begin(); i != interceptors_.end(); ++i) {
+    URLRequestJob* job = (*i)->MaybeInterceptResponse(request);
+    if (job)
+      return job;
+  }
+  return NULL;
 }
 
 bool URLRequestJobManager::SupportsScheme(const std::string& scheme) const {

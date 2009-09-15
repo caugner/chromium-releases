@@ -13,11 +13,15 @@
 #include <string>
 #include <vector>
 
+#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/basictypes.h"
-#include "chrome/common/ipc_message_utils.h"
+#include "chrome/common/common_param_traits.h"
+#include "chrome/common/webkit_param_traits.h"
 #include "googleurl/src/gurl.h"
+#include "ipc/ipc_message_utils.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "webkit/api/public/WebInputEvent.h"
 #include "webkit/glue/npruntime_util.h"
 
 // Name prefix of the event handle when a message box is displayed.
@@ -27,12 +31,15 @@
 // predefined IPC message.
 
 struct PluginMsg_Init_Params {
-  HWND containing_window;
+  gfx::NativeViewId containing_window;
   GURL url;
+  GURL page_url;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_values;
-  bool load_manually;
+#if defined(OS_WIN)
   HANDLE modal_dialog_event;
+#endif
+  bool load_manually;
 };
 
 struct PluginHostMsg_URLRequest_Params {
@@ -43,7 +50,7 @@ struct PluginHostMsg_URLRequest_Params {
   bool is_file_data;
   bool notify;
   std::string url;
-  HANDLE notify_data;
+  intptr_t notify_data;
   bool popups_allowed;
 };
 
@@ -51,13 +58,8 @@ struct PluginMsg_URLRequestReply_Params {
   int resource_id;
   std::string url;
   bool notify_needed;
-  HANDLE notify_data;
-  HANDLE stream;
-};
-
-struct PluginMsg_PrintResponse_Params {
-  HANDLE shared_memory;
-  size_t size;
+  intptr_t notify_data;
+  intptr_t stream;
 };
 
 struct PluginMsg_DidReceiveResponseParams {
@@ -96,7 +98,7 @@ struct NPVariant_Param {
   double double_value;
   std::string string_value;
   int npobject_routing_id;
-  void* npobject_pointer;
+  intptr_t npobject_pointer;
 };
 
 
@@ -109,19 +111,25 @@ struct ParamTraits<PluginMsg_Init_Params> {
   static void Write(Message* m, const param_type& p) {
     WriteParam(m, p.containing_window);
     WriteParam(m, p.url);
+    WriteParam(m, p.page_url);
     DCHECK(p.arg_names.size() == p.arg_values.size());
     WriteParam(m, p.arg_names);
     WriteParam(m, p.arg_values);
-    WriteParam(m, p.load_manually);
+#if defined(OS_WIN)
     WriteParam(m, p.modal_dialog_event);
+#endif
+    WriteParam(m, p.load_manually);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->containing_window) &&
            ReadParam(m, iter, &p->url) &&
+           ReadParam(m, iter, &p->page_url) &&
            ReadParam(m, iter, &p->arg_names) &&
            ReadParam(m, iter, &p->arg_values) &&
-           ReadParam(m, iter, &p->load_manually) &&
-           ReadParam(m, iter, &p->modal_dialog_event);
+#if defined(OS_WIN)
+           ReadParam(m, iter, &p->modal_dialog_event) &&
+#endif
+           ReadParam(m, iter, &p->load_manually);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -129,13 +137,17 @@ struct ParamTraits<PluginMsg_Init_Params> {
     l->append(L", ");
     LogParam(p.url, l);
     l->append(L", ");
+    LogParam(p.page_url, l);
+    l->append(L", ");
     LogParam(p.arg_names, l);
     l->append(L", ");
     LogParam(p.arg_values, l);
     l->append(L", ");
-    LogParam(p.load_manually, l);
-    l->append(L", ");
+#if defined(OS_WIN)
     LogParam(p.modal_dialog_event, l);
+    l->append(L", ");
+#endif
+    LogParam(p.load_manually, l);
     l->append(L")");
   }
 };
@@ -223,22 +235,6 @@ struct ParamTraits<PluginMsg_URLRequestReply_Params> {
 };
 
 template <>
-struct ParamTraits<PluginMsg_PrintResponse_Params> {
-  typedef PluginMsg_PrintResponse_Params param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.shared_memory);
-    WriteParam(m, p.size);
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    return
-      ReadParam(m, iter, &r->shared_memory) &&
-      ReadParam(m, iter, &r->size);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-  }
-};
-
-template <>
 struct ParamTraits<PluginMsg_DidReceiveResponseParams> {
   typedef PluginMsg_DidReceiveResponseParams param_type;
   static void Write(Message* m, const param_type& p) {
@@ -275,86 +271,42 @@ struct ParamTraits<PluginMsg_DidReceiveResponseParams> {
   }
 };
 
+typedef const WebKit::WebInputEvent* WebInputEventPointer;
 template <>
-struct ParamTraits<NPEvent> {
-  typedef NPEvent param_type;
+struct ParamTraits<WebInputEventPointer> {
+  typedef WebInputEventPointer param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(NPEvent));
+    m->WriteData(reinterpret_cast<const char*>(p), p->size);
   }
+  // Note: upon read, the event has the lifetime of the message.
   static bool Read(const Message* m, void** iter, param_type* r) {
-    const char *data;
-    int data_size = 0;
-    bool result = m->ReadData(iter, &data, &data_size);
-    if (!result || data_size != sizeof(NPEvent)) {
+    const char* data;
+    int data_length;
+    if (!m->ReadData(iter, &data, &data_length)) {
       NOTREACHED();
       return false;
     }
-
-    memcpy(r, data, sizeof(NPEvent));
+    if (data_length < static_cast<int>(sizeof(WebKit::WebInputEvent))) {
+      NOTREACHED();
+      return false;
+    }
+    param_type event = reinterpret_cast<param_type>(data);
+    // Check that the data size matches that of the event (we check the latter
+    // in the delegate).
+    if (data_length != static_cast<int>(event->size)) {
+      NOTREACHED();
+      return false;
+    }
+    *r = event;
     return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
-    std::wstring event, wparam, lparam;
-    lparam = StringPrintf(L"(%d, %d)", LOWORD(p.lParam), HIWORD(p.lParam));
-    switch(p.event) {
-     case WM_KEYDOWN:
-      event = L"WM_KEYDOWN";
-      wparam = StringPrintf(L"%d", p.wParam);
-      lparam = StringPrintf(L"%d", p.lParam);
-      break;
-     case WM_KEYUP:
-      event = L"WM_KEYDOWN";
-      wparam = StringPrintf(L"%d", p.wParam);
-      lparam = StringPrintf(L"%x", p.lParam);
-      break;
-     case WM_MOUSEMOVE:
-      event = L"WM_MOUSEMOVE";
-      if (p.wParam & MK_LBUTTON) {
-        wparam = L"MK_LBUTTON";
-      } else if (p.wParam & MK_MBUTTON) {
-        wparam = L"MK_MBUTTON";
-      } else if (p.wParam & MK_RBUTTON) {
-        wparam = L"MK_RBUTTON";
-      }
-      break;
-     case WM_LBUTTONDOWN:
-      event = L"WM_LBUTTONDOWN";
-      break;
-     case WM_MBUTTONDOWN:
-      event = L"WM_MBUTTONDOWN";
-      break;
-     case WM_RBUTTONDOWN:
-      event = L"WM_RBUTTONDOWN";
-      break;
-     case WM_LBUTTONUP:
-      event = L"WM_LBUTTONUP";
-      break;
-     case WM_MBUTTONUP:
-      event = L"WM_MBUTTONUP";
-      break;
-     case WM_RBUTTONUP:
-      event = L"WM_RBUTTONUP";
-      break;
-    }
-
-    if (p.wParam & MK_CONTROL) {
-      if (!wparam.empty())
-        wparam += L" ";
-      wparam += L"MK_CONTROL";
-    }
-
-    if (p.wParam & MK_SHIFT) {
-      if (!wparam.empty())
-        wparam += L" ";
-      wparam += L"MK_SHIFT";
-    }
-
     l->append(L"(");
-    LogParam(event, l);
+    LogParam(p->size, l);
     l->append(L", ");
-    LogParam(wparam, l);
+    LogParam(p->type, l);
     l->append(L", ");
-    LogParam(lparam, l);
+    LogParam(p->timeStampSeconds, l);
     l->append(L")");
   }
 };
@@ -457,6 +409,6 @@ struct ParamTraits<NPVariant_Param> {
 
 
 #define MESSAGES_INTERNAL_FILE "chrome/common/plugin_messages_internal.h"
-#include "chrome/common/ipc_message_macros.h"
+#include "ipc/ipc_message_macros.h"
 
 #endif  // CHROME_COMMON_PLUGIN_MESSAGES_H__

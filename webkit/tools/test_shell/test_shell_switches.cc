@@ -45,6 +45,9 @@ const wchar_t kDumpStatsTable[] = L"stats";
 // Use a specified cache directory.
 const wchar_t kCacheDir[] = L"cache-dir";
 
+// Temparary option for new ftp implemetation.
+const wchar_t kNewFtp[] = L"new-ftp";
+
 // When being run through a memory profiler, trigger memory in use dumps at
 // startup and just prior to shutdown.
 const wchar_t kDebugMemoryInUse[] = L"debug-memory-in-use";
@@ -63,9 +66,6 @@ const wchar_t kAllowScriptsToCloseWindows[] = L"allow-scripts-to-close-windows";
 // 1 (failure). Combining with other flags has no effect.
 extern const wchar_t kCheckLayoutTestSystemDeps[] =
     L"check-layout-test-sys-deps";
-
-// Enable the media player by having this switch.
-extern const wchar_t kEnableVideo[] = L"enable-video";
 
 // If set, we are running under GDB so allow a certain class of errors
 // to happen even if in layout test mode.

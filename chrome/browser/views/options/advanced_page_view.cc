@@ -4,23 +4,23 @@
 
 #include "chrome/browser/views/options/advanced_page_view.h"
 
+#include "app/l10n_util.h"
+#include "app/message_box_flags.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/options_util.h"
 #include "chrome/browser/views/options/advanced_contents_view.h"
-#include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
-#include "chrome/views/controls/message_box_view.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/scroll_view.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "views/controls/message_box_view.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/scroll_view.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
 
 namespace {
 
@@ -35,14 +35,12 @@ class ResetDefaultsConfirmBox : public views::DialogDelegate {
 
  protected:
   // views::DialogDelegate
-  virtual int GetDialogButtons() const {
-    return DIALOGBUTTON_OK | DIALOGBUTTON_CANCEL;
-  }
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const {
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const {
     switch (button) {
-      case DIALOGBUTTON_OK:
+      case MessageBoxFlags::DIALOGBUTTON_OK:
         return l10n_util::GetString(IDS_OPTIONS_RESET_OKLABEL);
-      case DIALOGBUTTON_CANCEL:
+      case MessageBoxFlags::DIALOGBUTTON_CANCEL:
         return l10n_util::GetString(IDS_OPTIONS_RESET_CANCELLABEL);
       default:
         break;
@@ -65,13 +63,14 @@ class ResetDefaultsConfirmBox : public views::DialogDelegate {
  private:
   ResetDefaultsConfirmBox(HWND parent_hwnd, AdvancedPageView* page_view)
       : advanced_page_view_(page_view) {
-    const int kDialogWidth = 400;
+    int dialog_width = views::Window::GetLocalizedContentsWidth(
+        IDS_OPTIONS_RESET_CONFIRM_BOX_WIDTH_CHARS);
     // Also deleted when the window closes.
     message_box_view_ = new MessageBoxView(
-        MessageBoxView::kFlagHasMessage | MessageBoxView::kFlagHasOKButton,
+        MessageBoxFlags::kFlagHasMessage | MessageBoxFlags::kFlagHasOKButton,
         l10n_util::GetString(IDS_OPTIONS_RESET_MESSAGE).c_str(),
         std::wstring(),
-        kDialogWidth);
+        dialog_width);
     views::Window::CreateChromeWindow(parent_hwnd, gfx::Rect(), this)->Show();
   }
   virtual ~ResetDefaultsConfirmBox() { }
@@ -97,67 +96,17 @@ AdvancedPageView::~AdvancedPageView() {
 }
 
 void AdvancedPageView::ResetToDefaults() {
-  // TODO(tc): It would be nice if we could generate this list automatically so
-  // changes to any of the options pages doesn't require updating this list
-  // manually.
-  PrefService* prefs = profile()->GetPrefs();
-  const wchar_t* kUserPrefs[] = {
-    prefs::kAcceptLanguages,
-    prefs::kAlternateErrorPagesEnabled,
-    prefs::kBlockPopups,
-    prefs::kCookieBehavior,
-    prefs::kDefaultCharset,
-    prefs::kDnsPrefetchingEnabled,
-    prefs::kDownloadDefaultDirectory,
-    prefs::kDownloadExtensionsToOpen,
-    prefs::kFormAutofillEnabled,
-    prefs::kHomePage,
-    prefs::kHomePageIsNewTabPage,
-    prefs::kMixedContentFiltering,
-    prefs::kPromptForDownload,
-    prefs::kPasswordManagerEnabled,
-    prefs::kRestoreOnStartup,
-    prefs::kSafeBrowsingEnabled,
-    prefs::kSearchSuggestEnabled,
-    prefs::kShowHomeButton,
-    prefs::kSpellCheckDictionary,
-    prefs::kURLsToRestoreOnStartup,
-    prefs::kWebKitDefaultFixedFontSize,
-    prefs::kWebKitDefaultFontSize,
-    prefs::kWebKitFixedFontFamily,
-    prefs::kWebKitJavaEnabled,
-    prefs::kWebKitJavascriptEnabled,
-    prefs::kWebKitLoadsImagesAutomatically,
-    prefs::kWebKitPluginsEnabled,
-    prefs::kWebKitSansSerifFontFamily,
-    prefs::kWebKitSerifFontFamily,
-  };
-  for (int i = 0; i < arraysize(kUserPrefs); ++i)
-    prefs->ClearPref(kUserPrefs[i]);
-
-  PrefService* local_state = g_browser_process->local_state();
-  // Note that we don't reset the kMetricsReportingEnabled preference here
-  // because the reset will reset it to the default setting specified in Chrome
-  // source, not the default setting selected by the user on the web page where
-  // they downloaded Chrome. This means that if the user ever resets their
-  // settings they'll either inadvertedly enable this logging or disable it.
-  // One is undesirable for them, one is undesirable for us. For now, we just
-  // don't reset it.
-  const wchar_t* kLocalStatePrefs[] = {
-    prefs::kApplicationLocale,
-    prefs::kOptionsWindowLastTabIndex,
-  };
-  for (int i = 0; i < arraysize(kLocalStatePrefs); ++i)
-    local_state->ClearPref(kLocalStatePrefs[i]);
+  OptionsUtil::ResetToDefaults(profile());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// AdvancedPageView, views::NativeButton::Listener implementation:
+// AdvancedPageView, views::ButtonListener implementation:
 
-void AdvancedPageView::ButtonPressed(views::NativeButton* sender) {
+void AdvancedPageView::ButtonPressed(views::Button* sender) {
   if (sender == reset_to_default_button_) {
     UserMetricsRecordAction(L"Options_ResetToDefaults", NULL);
-    ResetDefaultsConfirmBox::ShowConfirmBox(GetRootWindow(), this);
+    ResetDefaultsConfirmBox::ShowConfirmBox(
+        GetWindow()->GetNativeWindow(), this);
   }
 }
 
@@ -166,8 +115,7 @@ void AdvancedPageView::ButtonPressed(views::NativeButton* sender) {
 
 void AdvancedPageView::InitControlLayout() {
   reset_to_default_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_RESET));
-  reset_to_default_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_RESET));
   advanced_scroll_view_ = new AdvancedScrollViewContainer(profile());
 
   using views::GridLayout;

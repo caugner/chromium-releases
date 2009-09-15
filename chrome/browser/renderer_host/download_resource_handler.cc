@@ -8,6 +8,7 @@
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "net/base/io_buffer.h"
+#include "net/url_request/url_request_context.h"
 
 DownloadResourceHandler::DownloadResourceHandler(ResourceDispatcherHost* rdh,
                                                  int render_process_host_id,
@@ -33,7 +34,9 @@ DownloadResourceHandler::DownloadResourceHandler(ResourceDispatcherHost* rdh,
 
 // Not needed, as this event handler ought to be the final resource.
 bool DownloadResourceHandler::OnRequestRedirected(int request_id,
-                                                  const GURL& url) {
+                                                  const GURL& url,
+                                                  ResourceResponse* response,
+                                                  bool* defer) {
   url_ = url;
   return true;
 }
@@ -51,6 +54,7 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   // |download_manager_| consumes (deletes):
   DownloadCreateInfo* info = new DownloadCreateInfo;
   info->url = url_;
+  info->referrer_url = GURL(request_->referrer());
   info->start_time = base::Time::Now();
   info->received_bytes = 0;
   info->total_bytes = content_length_;
@@ -63,6 +67,7 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   info->mime_type = response->response_head.mime_type;
   info->save_as = save_as_;
   info->is_dangerous = false;
+  info->referrer_charset = request_->context()->referrer_charset();
   download_manager_->file_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(download_manager_,
                         &DownloadFileManager::StartDownload,

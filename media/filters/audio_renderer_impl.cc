@@ -9,11 +9,12 @@ namespace media {
 
 // We'll try to fill 4096 samples per buffer, which is roughly ~92ms of audio
 // data for a 44.1kHz audio source.
-static const size_t kSamplesPerBuffer = 4096;
+static const size_t kSamplesPerBuffer = 8*1024;
 
 AudioRendererImpl::AudioRendererImpl()
-    : AudioRendererBase(kDefaultMaxQueueSize),
-      stream_(NULL) {
+    : AudioRendererBase(),
+      stream_(NULL),
+      bytes_per_second_(0) {
 }
 
 AudioRendererImpl::~AudioRendererImpl() {
@@ -25,34 +26,41 @@ AudioRendererImpl::~AudioRendererImpl() {
 }
 
 bool AudioRendererImpl::IsMediaFormatSupported(
-    const MediaFormat* media_format) {
+    const MediaFormat& media_format) {
   int channels;
   int sample_rate;
   int sample_bits;
-  return ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
+  return AudioManager::GetAudioManager()->HasAudioDevices() &&
+      ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
 }
 
-void AudioRendererImpl::SetPlaybackRate(float playback_rate) {
-  DCHECK(stream_);
-  // TODO(scherkus): handle playback rates not equal to 1.0.
-  if (playback_rate == 1.0f) {
+void AudioRendererImpl::SetPlaybackRate(float rate) {
+  // TODO(fbarchard): limit rate to reasonable values
+  AudioRendererBase::SetPlaybackRate(rate);
+
+  static bool started = false;
+  if (rate > 0.0f && !started && stream_)
     stream_->Start(this);
-  } else {
-    NOTIMPLEMENTED();
-  }
 }
 
 void AudioRendererImpl::SetVolume(float volume) {
-  stream_->SetVolume(volume, volume);
+  if (stream_)
+    stream_->SetVolume(volume, volume);
 }
 
 size_t AudioRendererImpl::OnMoreData(AudioOutputStream* stream, void* dest_void,
-                                     size_t len) {
+                                     size_t len, int pending_bytes) {
   // TODO(scherkus): handle end of stream.
-  DCHECK(stream_ == stream);
+  if (!stream_)
+    return 0;
 
-  // TODO(scherkus): maybe change OnMoreData to pass in char/uint8 or similar.
-  return FillBuffer(reinterpret_cast<uint8*>(dest_void), len);
+  // TODO(scherkus): Maybe change OnMoreData to pass in char/uint8 or similar.
+  // TODO(fbarchard): Waveout_output_win.h should handle zero length buffers
+  //                  without clicking.
+  pending_bytes = static_cast<int>(ceil(pending_bytes * GetPlaybackRate()));
+  base::TimeDelta delay =  base::TimeDelta::FromMicroseconds(
+      base::Time::kMicrosecondsPerSecond * pending_bytes / bytes_per_second_);
+  return FillBuffer(static_cast<uint8*>(dest_void), len, delay);
 }
 
 void AudioRendererImpl::OnClose(AudioOutputStream* stream) {
@@ -65,7 +73,7 @@ void AudioRendererImpl::OnError(AudioOutputStream* stream, int code) {
   NOTIMPLEMENTED();
 }
 
-bool AudioRendererImpl::OnInitialize(const MediaFormat* media_format) {
+bool AudioRendererImpl::OnInitialize(const MediaFormat& media_format) {
   // Parse out audio parameters.
   int channels;
   int sample_rate;
@@ -74,10 +82,11 @@ bool AudioRendererImpl::OnInitialize(const MediaFormat* media_format) {
     return false;
   }
 
+  bytes_per_second_ = sample_rate * channels * sample_bits / 8;
+
   // Create our audio stream.
   stream_ = AudioManager::GetAudioManager()->MakeAudioStream(
       AudioManager::AUDIO_PCM_LINEAR, channels, sample_rate, sample_bits);
-  DCHECK(stream_);
   if (!stream_)
     return false;
 
@@ -86,14 +95,13 @@ bool AudioRendererImpl::OnInitialize(const MediaFormat* media_format) {
   if (!stream_->Open(size)) {
     stream_->Close();
     stream_ = NULL;
-    return false;
   }
   return true;
 }
 
 void AudioRendererImpl::OnStop() {
-  DCHECK(stream_);
-  stream_->Stop();
+  if (stream_)
+    stream_->Stop();
 }
 
 }  // namespace media

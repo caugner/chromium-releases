@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <limits>
+
 #include "base/file_util.h"
 #include "base/string_util.h"
 #include "media/base/filter_host.h"
@@ -20,8 +22,10 @@ FileDataSource::~FileDataSource() {
   Stop();
 }
 
-bool FileDataSource::Initialize(const std::string& url) {
+void FileDataSource::Initialize(const std::string& url,
+                                FilterCallback* callback) {
   DCHECK(!file_);
+  scoped_ptr<FilterCallback> c(callback);
 #if defined(OS_WIN)
   FilePath file_path(UTF8ToWide(url));
 #else
@@ -32,16 +36,16 @@ bool FileDataSource::Initialize(const std::string& url) {
   }
   if (!file_) {
     file_size_ = 0;
-    host_->Error(PIPELINE_ERROR_URL_NOT_FOUND);
-    return false;
+    host()->SetError(PIPELINE_ERROR_URL_NOT_FOUND);
+    callback->Run();
+    return;
   }
   media_format_.SetAsString(MediaFormat::kMimeType,
                             mime_type::kApplicationOctetStream);
   media_format_.SetAsString(MediaFormat::kURL, url);
-  host_->SetTotalBytes(file_size_);
-  host_->SetBufferedBytes(file_size_);
-  host_->InitializationComplete();
-  return true;
+  host()->SetTotalBytes(file_size_);
+  host()->SetBufferedBytes(file_size_);
+  callback->Run();
 }
 
 void FileDataSource::Stop() {
@@ -53,54 +57,39 @@ void FileDataSource::Stop() {
   }
 }
 
-const MediaFormat* FileDataSource::GetMediaFormat() {
-  return &media_format_;
+const MediaFormat& FileDataSource::media_format() {
+  return media_format_;
 }
 
-size_t FileDataSource::Read(uint8* data, size_t size) {
+void FileDataSource::Read(int64 position, size_t size, uint8* data,
+                          ReadCallback* read_callback) {
   DCHECK(file_);
   AutoLock l(lock_);
   if (file_) {
+#if defined(OS_WIN)
+    if (_fseeki64(file_, position, SEEK_SET)) {
+      read_callback->RunWithParams(
+          Tuple1<size_t>(static_cast<size_t>(DataSource::kReadError)));
+      return;
+    }
+#else
+    CHECK(position <= std::numeric_limits<int32>::max());
+    // TODO(hclam): Change fseek() to support 64-bit position.
+    if (fseek(file_, static_cast<int32>(position), SEEK_SET)) {
+      read_callback->RunWithParams(
+          Tuple1<size_t>(static_cast<size_t>(DataSource::kReadError)));
+      return;
+    }
+#endif
     size_t size_read = fread(data, 1, size, file_);
     if (size_read == size || !ferror(file_)) {
-      return size_read;
+      read_callback->RunWithParams(
+          Tuple1<size_t>(static_cast<size_t>(size_read)));
+      return;
     }
   }
-  return kReadError;
-}
 
-bool FileDataSource::GetPosition(int64* position_out) {
-  DCHECK(position_out);
-  DCHECK(file_);
-  AutoLock l(lock_);
-  if (!file_) {
-    *position_out = 0;
-    return false;
-  }
-// Linux and mac libraries don't seem to support 64 versions of seek and
-// ftell.  TODO(ralph): Try to figure out how to enable int64 versions on
-// these platforms.
-#if defined(OS_WIN)
-  *position_out = _ftelli64(file_);
-#else
-  *position_out = ftell(file_);
-#endif
-  return true;
-}
-
-bool FileDataSource::SetPosition(int64 position) {
-  DCHECK(file_);
-  AutoLock l(lock_);
-#if defined(OS_WIN)
-  if (file_ && 0 == _fseeki64(file_, position, SEEK_SET)) {
-    return true;
-  }
-#else
-  if (file_ && 0 == fseek(file_, static_cast<int32>(position), SEEK_SET)) {
-    return true;
-  }
-#endif
-  return false;
+  read_callback->RunWithParams(Tuple1<size_t>(static_cast<size_t>(kReadError)));
 }
 
 bool FileDataSource::GetSize(int64* size_out) {
@@ -109,6 +98,10 @@ bool FileDataSource::GetSize(int64* size_out) {
   AutoLock l(lock_);
   *size_out = file_size_;
   return (NULL != file_);
+}
+
+bool FileDataSource::IsStreaming() {
+  return false;
 }
 
 }  // namespace media

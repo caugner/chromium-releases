@@ -5,6 +5,9 @@
 #include "chrome/browser/renderer_host/safe_browsing_resource_handler.h"
 
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_message_filter.h"
+#include "chrome/common/notification_service.h"
+#include "net/base/net_errors.h"
 
 // Maximum time to wait for a gethash response from the Safe Browsing servers.
 static const int kMaxGetHashMs = 1000;
@@ -16,7 +19,8 @@ SafeBrowsingResourceHandler::SafeBrowsingResourceHandler(
     const GURL& url,
     ResourceType::Type resource_type,
     SafeBrowsingService* safe_browsing,
-    ResourceDispatcherHost* resource_dispatcher_host)
+    ResourceDispatcherHost* resource_dispatcher_host,
+    ResourceDispatcherHost::Receiver* receiver)
     : next_handler_(handler),
       render_process_host_id_(render_process_host_id),
       render_view_id_(render_view_id),
@@ -35,6 +39,13 @@ SafeBrowsingResourceHandler::SafeBrowsingResourceHandler(
     in_safe_browsing_check_ = true;
     // Can't pause now because it's too early, so we'll do it in OnWillRead.
   }
+
+  registrar_.Add(this, NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN,
+                 Source<ResourceMessageFilter>(
+                     static_cast<ResourceMessageFilter*>(receiver)));
+}
+
+SafeBrowsingResourceHandler::~SafeBrowsingResourceHandler() {
 }
 
 bool SafeBrowsingResourceHandler::OnUploadProgress(int request_id,
@@ -43,8 +54,11 @@ bool SafeBrowsingResourceHandler::OnUploadProgress(int request_id,
   return next_handler_->OnUploadProgress(request_id, position, size);
 }
 
-bool SafeBrowsingResourceHandler::OnRequestRedirected(int request_id,
-                                                      const GURL& new_url) {
+bool SafeBrowsingResourceHandler::OnRequestRedirected(
+    int request_id,
+    const GURL& new_url,
+    ResourceResponse* response,
+    bool* defer) {
   if (in_safe_browsing_check_) {
     Release();
     in_safe_browsing_check_ = false;
@@ -60,7 +74,8 @@ bool SafeBrowsingResourceHandler::OnRequestRedirected(int request_id,
     // Can't pause now because it's too early, so we'll do it in OnWillRead.
   }
 
-  return next_handler_->OnRequestRedirected(request_id, new_url);
+  return next_handler_->OnRequestRedirected(
+      request_id, new_url, response, defer);
 }
 
 bool SafeBrowsingResourceHandler::OnResponseStarted(
@@ -183,3 +198,15 @@ void SafeBrowsingResourceHandler::OnBlockingPageComplete(bool proceed) {
 
   Release();
 }
+
+void SafeBrowsingResourceHandler::Observe(NotificationType type,
+                                          const NotificationSource& source,
+                                          const NotificationDetails& details) {
+  DCHECK(type.value == NotificationType::RESOURCE_MESSAGE_FILTER_SHUTDOWN);
+  if (in_safe_browsing_check_) {
+    safe_browsing_->CancelCheck(this);
+    in_safe_browsing_check_ = false;
+    Release();
+  }
+}
+

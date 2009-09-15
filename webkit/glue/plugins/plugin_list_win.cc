@@ -26,7 +26,6 @@ const TCHAR kRegistryAcrobatReader[] = _T("AcroRd32.exe");
 const TCHAR kRegistryWindowsMedia[] = _T("wmplayer.exe");
 const TCHAR kRegistryQuickTime[] = _T("QuickTimePlayer.exe");
 const TCHAR kRegistryPath[] = _T("Path");
-const TCHAR kRegistryMozillaPlugins[] = _T("SOFTWARE\\MozillaPlugins");
 const TCHAR kRegistryFirefoxInstalled[] =
     _T("SOFTWARE\\Mozilla\\Mozilla Firefox");
 const TCHAR kMozillaActiveXPlugin[] = _T("npmozax.dll");
@@ -211,28 +210,15 @@ void PluginList::PlatformInit() {
 
   const PluginVersionInfo builtin_plugins[] = {
   {
-    FilePath(kActiveXShimFileName),
-    L"ActiveX Plug-in",
-    L"ActiveX Plug-in provides a shim to support ActiveX controls",
-    L"1, 0, 0, 1",
-    L"application/x-oleobject|application/oleobject",
-    L"*|*",
-    L"",
-    {
-      activex_shim::ActiveX_Shim_NP_GetEntryPoints,
-      activex_shim::ActiveX_Shim_NP_Initialize,
-      activex_shim::ActiveX_Shim_NP_Shutdown
-    }
-  },
-  {
     FilePath(kActiveXShimFileNameForMediaPlayer),
     kActiveXShimFileNameForMediaPlayer,
     L"Windows Media Player",
     L"1, 0, 0, 1",
     L"application/x-ms-wmp|application/asx|video/x-ms-asf-plugin|"
         L"application/x-mplayer2|video/x-ms-asf|video/x-ms-wm|audio/x-ms-wma|"
-        L"audio/x-ms-wax|video/x-ms-wmv|video/x-ms-wvx",
-    L"*|*|*|*|asf,asx,*|wm,*|wma,*|wax,*|wmv,*|wvx,*",
+        L"audio/x-ms-wax|video/x-ms-wmv|video/x-ms-wvx|audio/mpeg|video/mpeg",
+    L"*|*|*|*|asf,asx,*|wm,*|wma,*|wax,*|wmv,*|wvx,*|mp2,mp3,mpa,mpeg,mpg|"
+        L"mpeg,mpg,m1v,mpe",
     L"",
     {
       activex_shim::ActiveX_Shim_NP_GetEntryPoints,

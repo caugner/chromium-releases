@@ -9,10 +9,9 @@
 
 #include "base/scoped_ptr.h"
 #include "net/url_request/url_request_job.h"
-#include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/common/chrome_plugin_api.h"
 #include "chrome/common/chrome_plugin_util.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class ChromePluginLib;
 class URLRequest;
@@ -36,22 +35,27 @@ class URLRequestInterceptJob
   // URLRequestJob
   virtual void Start();
   virtual void Kill();
-  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
   virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetCharset(std::string* charset);
   virtual void GetResponseInfo(net::HttpResponseInfo* info);
-  virtual int GetResponseCode();
-  virtual bool GetContentEncoding(std::string* encoding_type);
+  virtual int GetResponseCode() const;
+  virtual bool GetContentEncodings(
+      std::vector<Filter::FilterType>* encoding_types);
   virtual bool IsRedirectResponse(GURL* location, int* http_status_code);
 
   // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+ protected:
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
+
  private:
   void StartAsync();
   void DetachPlugin();
 
+  NotificationRegistrar registrar_;
   scoped_ptr<ScopableCPRequest> cprequest_;
   ChromePluginLib* plugin_;
   bool got_headers_;

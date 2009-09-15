@@ -12,6 +12,7 @@
 #include <wininet.h>  // For INTERNET_MAX_URL_LENGTH
 
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -24,10 +25,8 @@
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "grit/webkit_resources.h"
 #include "net/base/net_module.h"
-#include "net/http/http_network_layer.h"
 #include "net/url_request/url_request_file_job.h"
 #include "skia/ext/bitmap_platform_device.h"
-#include "webkit/glue/webdatasource.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -36,6 +35,8 @@
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
+
+using WebKit::WebWidget;
 
 #define MAX_LOADSTRING 100
 
@@ -208,14 +209,14 @@ ATOM TestShell::RegisterWindowClass() {
   return RegisterClassEx(&wcex);
 }
 
-void TestShell::DumpBackForwardList(std::wstring* result) {
+void TestShell::DumpAllBackForwardLists(std::wstring* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
      iter != TestShell::windowList()->end(); iter++) {
     HWND hwnd = *iter;
     TestShell* shell =
         static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
-    webkit_glue::DumpBackForwardList(shell->webView(), NULL, result);
+    shell->DumpBackForwardList(result);
   }
 }
 
@@ -288,9 +289,8 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
     PathService::Get(base::DIR_EXE, &replace_url);
     file_util::UpOneDirectory(&replace_url);
     file_util::UpOneDirectory(&replace_url);
-    file_util::AppendToPath(&replace_url, L"webkit");
-    file_util::AppendToPath(&replace_url, L"data");
-    file_util::AppendToPath(&replace_url, L"layout_tests");
+    file_util::AppendToPath(&replace_url, L"third_party");
+    file_util::AppendToPath(&replace_url, L"WebKit");
     file_util::AppendToPath(&replace_url, L"LayoutTests");
     replace_url.push_back(FilePath::kSeparators[0]);
     new_url = std::string("file:///") +
@@ -459,7 +459,7 @@ void TestShell::InteractiveSetFocus(WebWidgetHost* host, bool enable) {
 
 WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
   DCHECK(!m_popupHost);
-  m_popupHost = WebWidgetHost::Create(NULL, delegate_.get());
+  m_popupHost = WebWidgetHost::Create(NULL, popup_delegate_.get());
   ShowWindow(popupWnd(), SW_SHOW);
 
   return m_popupHost->webwidget();
@@ -697,7 +697,7 @@ string16 GetLocalizedString(int message_id) {
 }
 
 // TODO(tc): Convert this to using resources from test_shell.rc.
-std::string GetDataResource(int resource_id) {
+StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -718,7 +718,7 @@ std::string GetDataResource(int resource_id) {
     // a {{URL}} substring where the feed URL should go; see the code
     // that computes feed previews in feed_preview.cc:MakeFeedPreview.
     // This fixes issue #932714.
-    return std::string("Feed preview for {{URL}}");
+    return "Feed preview for {{URL}}";
   case IDR_TEXTAREA_RESIZER: {
     // Use webkit's text area resizer image.
     static std::string resize_corner_data;
@@ -734,11 +734,24 @@ std::string GetDataResource(int resource_id) {
     return resize_corner_data;
   }
 
+  case IDR_SEARCH_CANCEL:
+  case IDR_SEARCH_CANCEL_PRESSED:
+  case IDR_SEARCH_MAGNIFIER:
+  case IDR_SEARCH_MAGNIFIER_RESULTS:
+  case IDR_MEDIA_PAUSE_BUTTON:
+  case IDR_MEDIA_PLAY_BUTTON:
+  case IDR_MEDIA_PLAY_BUTTON_DISABLED:
+  case IDR_MEDIA_SOUND_FULL_BUTTON:
+  case IDR_MEDIA_SOUND_NONE_BUTTON:
+  case IDR_MEDIA_SOUND_DISABLED:
+  case IDR_MEDIA_SLIDER_THUMB:
+    return NetResourceProvider(resource_id);
+
   default:
     break;
   }
 
-  return std::string();
+  return StringPiece();
 }
 
 HCURSOR LoadCursor(int cursor_id) {

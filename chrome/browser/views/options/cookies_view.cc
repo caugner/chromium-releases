@@ -1,30 +1,32 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
-
 #include "chrome/browser/views/options/cookies_view.h"
 
+#include <algorithm>
+
+#include "app/gfx/canvas.h"
+#include "app/gfx/color_utils.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "app/table_model.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/time_format.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/color_utils.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/win_util.h"
-#include "chrome/views/border.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/controls/table/table_view.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
+#include "views/border.h"
+#include "views/grid_layout.h"
+#include "views/controls/label.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/table/table_view.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/standard_layout.h"
 
 // static
 views::Window* CookiesView::instance_ = NULL;
@@ -35,7 +37,7 @@ static const int kSearchFilterDelayMs = 500;
 ///////////////////////////////////////////////////////////////////////////////
 // CookiesTableModel
 
-class CookiesTableModel : public views::TableModel {
+class CookiesTableModel : public TableModel {
  public:
   explicit CookiesTableModel(Profile* profile);
   virtual ~CookiesTableModel() {}
@@ -48,12 +50,12 @@ class CookiesTableModel : public views::TableModel {
   void RemoveCookies(int start_index, int remove_count);
   void RemoveAllShownCookies();
 
-  // views::TableModel implementation:
+  // TableModel methods.
   virtual int RowCount();
   virtual std::wstring GetText(int row, int column_id);
   virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(views::TableModelObserver* observer);
   virtual int CompareValues(int row1, int row2, int column_id);
+  virtual void SetObserver(TableModelObserver* observer);
 
   // Filter the cookies to only display matched results.
   void UpdateSearchResults(const std::wstring& filter);
@@ -72,9 +74,9 @@ class CookiesTableModel : public views::TableModel {
   CookieList all_cookies_;
   CookiePtrList shown_cookies_;
 
-  views::TableModelObserver* observer_;
+  TableModelObserver* observer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CookiesTableModel);
+  DISALLOW_COPY_AND_ASSIGN(CookiesTableModel);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -128,7 +130,8 @@ void CookiesTableModel::RemoveCookies(int start_index, int remove_count) {
   // We could do this all better if there was a way to mark elements of
   // all_cookies as dead instead of deleting, but this should be fine for now.
   DoFilter();
-  observer_->OnItemsRemoved(start_index, remove_count);
+  if (observer_)
+    observer_->OnItemsRemoved(start_index, remove_count);
 }
 
 void CookiesTableModel::RemoveAllShownCookies() {
@@ -136,7 +139,7 @@ void CookiesTableModel::RemoveAllShownCookies() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// CookiesTableModel, views::TableModel implementation:
+// CookiesTableModel, TableModel implementation:
 
 int CookiesTableModel::RowCount() {
   return static_cast<int>(shown_cookies_.size());
@@ -178,7 +181,7 @@ SkBitmap CookiesTableModel::GetIcon(int row) {
   return *icon;
 }
 
-void CookiesTableModel::SetObserver(views::TableModelObserver* observer) {
+void CookiesTableModel::SetObserver(TableModelObserver* observer) {
   observer_ = observer;
 }
 
@@ -253,7 +256,7 @@ void CookiesTableModel::UpdateSearchResults(const std::wstring& filter) {
 class CookiesTableView : public views::TableView {
  public:
   CookiesTableView(CookiesTableModel* cookies_model,
-                   std::vector<views::TableColumn> columns);
+                   std::vector<TableColumn> columns);
   virtual ~CookiesTableView() {}
 
   // Removes the cookies associated with the selected rows in the TableView.
@@ -263,12 +266,12 @@ class CookiesTableView : public views::TableView {
   // Our model, as a CookiesTableModel.
   CookiesTableModel* cookies_model_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CookiesTableView);
+  DISALLOW_COPY_AND_ASSIGN(CookiesTableView);
 };
 
 CookiesTableView::CookiesTableView(
     CookiesTableModel* cookies_model,
-    std::vector<views::TableColumn> columns)
+    std::vector<TableColumn> columns)
     : views::TableView(cookies_model, columns, views::ICON_AND_TEXT, false,
                        true, true),
       cookies_model_(cookies_model) {
@@ -338,21 +341,21 @@ class CookieInfoView : public views::View {
 
   // Individual property labels
   views::Label* name_label_;
-  views::TextField* name_value_field_;
+  views::Textfield* name_value_field_;
   views::Label* content_label_;
-  views::TextField* content_value_field_;
+  views::Textfield* content_value_field_;
   views::Label* domain_label_;
-  views::TextField* domain_value_field_;
+  views::Textfield* domain_value_field_;
   views::Label* path_label_;
-  views::TextField* path_value_field_;
+  views::Textfield* path_value_field_;
   views::Label* send_for_label_;
-  views::TextField* send_for_value_field_;
+  views::Textfield* send_for_value_field_;
   views::Label* created_label_;
-  views::TextField* created_value_field_;
+  views::Textfield* created_value_field_;
   views::Label* expires_label_;
-  views::TextField* expires_value_field_;
+  views::Textfield* expires_value_field_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CookieInfoView);
+  DISALLOW_COPY_AND_ASSIGN(CookieInfoView);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -452,25 +455,25 @@ void CookieInfoView::Init() {
 
   name_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_NAME_LABEL));
-  name_value_field_ = new views::TextField;
+  name_value_field_ = new views::Textfield;
   content_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_CONTENT_LABEL));
-  content_value_field_ = new views::TextField;
+  content_value_field_ = new views::Textfield;
   domain_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_DOMAIN_LABEL));
-  domain_value_field_ = new views::TextField;
+  domain_value_field_ = new views::Textfield;
   path_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_PATH_LABEL));
-  path_value_field_ = new views::TextField;
+  path_value_field_ = new views::Textfield;
   send_for_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_SENDFOR_LABEL));
-  send_for_value_field_ = new views::TextField;
+  send_for_value_field_ = new views::Textfield;
   created_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_CREATED_LABEL));
-  created_value_field_ = new views::TextField;
+  created_value_field_ = new views::Textfield;
   expires_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_COOKIE_EXPIRES_LABEL));
-  expires_value_field_ = new views::TextField;
+  expires_value_field_ = new views::Textfield;
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -520,7 +523,7 @@ void CookieInfoView::Init() {
 
   // Color these borderless text areas the same as the containing dialog.
   SkColor text_area_background = color_utils::GetSysSkColor(COLOR_3DFACE);
-  // Now that the TextFields are in the view hierarchy, we can initialize them.
+  // Now that the Textfields are in the view hierarchy, we can initialize them.
   name_value_field_->SetReadOnly(true);
   name_value_field_->RemoveBorder();
   name_value_field_->SetBackgroundColor(text_area_background);
@@ -566,14 +569,14 @@ CookiesView::~CookiesView() {
 }
 
 void CookiesView::UpdateSearchResults() {
-  cookies_table_model_->UpdateSearchResults(search_field_->GetText());
+  cookies_table_model_->UpdateSearchResults(search_field_->text());
   remove_all_button_->SetEnabled(cookies_table_model_->RowCount() > 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// CookiesView, views::NativeButton::listener implementation:
+// CookiesView, views::Buttonlistener implementation:
 
-void CookiesView::ButtonPressed(views::NativeButton* sender) {
+void CookiesView::ButtonPressed(views::Button* sender) {
   if (sender == remove_button_) {
     cookies_table_->RemoveSelectedCookies();
   } else if (sender == remove_all_button_) {
@@ -609,27 +612,26 @@ void CookiesView::OnTableViewDelete(views::TableView* table_view) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// CookiesView, views::TextField::Controller implementation:
+// CookiesView, views::Textfield::Controller implementation:
 
-void CookiesView::ContentsChanged(views::TextField* sender,
+void CookiesView::ContentsChanged(views::Textfield* sender,
                                   const std::wstring& new_contents) {
+  clear_search_button_->SetEnabled(!search_field_->text().empty());
   search_update_factory_.RevokeAll();
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       search_update_factory_.NewRunnableMethod(
           &CookiesView::UpdateSearchResults), kSearchFilterDelayMs);
 }
 
-void CookiesView::HandleKeystroke(views::TextField* sender, UINT message,
-                                  TCHAR key, UINT repeat_count, UINT flags) {
-  switch (key) {
-    case VK_ESCAPE:
-      ResetSearchQuery();
-      break;
-    case VK_RETURN:
-      search_update_factory_.RevokeAll();
-      UpdateSearchResults();
-      break;
+bool CookiesView::HandleKeystroke(views::Textfield* sender,
+                                  const views::Textfield::Keystroke& key) {
+  if (views::Textfield::IsKeystrokeEscape(key)) {
+    ResetSearchQuery();
+  } else if (views::Textfield::IsKeystrokeEnter(key)) {
+    search_update_factory_.RevokeAll();
+    UpdateSearchResults();
   }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -695,29 +697,29 @@ CookiesView::CookiesView(Profile* profile)
       remove_button_(NULL),
       remove_all_button_(NULL),
       profile_(profile),
-      search_update_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(search_update_factory_(this)) {
 }
 
 void CookiesView::Init() {
   search_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_SEARCH_LABEL));
-  search_field_ = new views::TextField;
+  search_field_ = new views::Textfield;
   search_field_->SetController(this);
   clear_search_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_COOKIES_CLEAR_SEARCH_LABEL));
-  clear_search_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_COOKIES_CLEAR_SEARCH_LABEL));
+  clear_search_button_->SetEnabled(false);
   description_label_ = new views::Label(
       l10n_util::GetString(IDS_COOKIES_INFO_LABEL));
   description_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
   cookies_table_model_.reset(new CookiesTableModel(profile_));
   info_view_ = new CookieInfoView;
-  std::vector<views::TableColumn> columns;
-  columns.push_back(views::TableColumn(IDS_COOKIES_DOMAIN_COLUMN_HEADER,
-                                       views::TableColumn::LEFT, 200, 0.5f));
+  std::vector<TableColumn> columns;
+  columns.push_back(TableColumn(IDS_COOKIES_DOMAIN_COLUMN_HEADER,
+                                TableColumn::LEFT, 200, 0.5f));
   columns.back().sortable = true;
-  columns.push_back(views::TableColumn(IDS_COOKIES_NAME_COLUMN_HEADER,
-                                       views::TableColumn::LEFT, 150, 0.5f));
+  columns.push_back(TableColumn(IDS_COOKIES_NAME_COLUMN_HEADER,
+                                TableColumn::LEFT, 150, 0.5f));
   columns.back().sortable = true;
   cookies_table_ = new CookiesTableView(cookies_table_model_.get(), columns);
   cookies_table_->SetObserver(this);
@@ -728,11 +730,9 @@ void CookiesView::Init() {
                                        true));
   cookies_table_->SetSortDescriptors(sort);
   remove_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_COOKIES_REMOVE_LABEL));
-  remove_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_COOKIES_REMOVE_LABEL));
   remove_all_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_COOKIES_REMOVE_ALL_LABEL));
-  remove_all_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_COOKIES_REMOVE_ALL_LABEL));
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -784,6 +784,7 @@ void CookiesView::Init() {
 
 void CookiesView::ResetSearchQuery() {
   search_field_->SetText(EmptyWString());
+  clear_search_button_->SetEnabled(false);
   UpdateSearchResults();
 }
 

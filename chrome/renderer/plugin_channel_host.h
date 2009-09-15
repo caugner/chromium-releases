@@ -15,7 +15,7 @@ class IsListeningFilter;
 class PluginChannelHost : public PluginChannelBase {
  public:
   static PluginChannelHost* GetPluginChannelHost(
-      const std::wstring& channel_name, MessageLoop* ipc_message_loop);
+      const std::string& channel_name, MessageLoop* ipc_message_loop);
 
   ~PluginChannelHost();
 
@@ -30,6 +30,8 @@ class PluginChannelHost : public PluginChannelBase {
   void OnChannelError();
 
   static void SetListening(bool flag);
+
+  static bool IsListening();
 
  private:
   // Called on the render thread

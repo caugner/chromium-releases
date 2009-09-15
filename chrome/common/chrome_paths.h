@@ -18,10 +18,7 @@ enum {
   DIR_USER_DATA,         // directory where user data can be written
   DIR_CRASH_DUMPS,       // directory where crash dumps are written
   DIR_USER_DESKTOP,      // directory that correspond to the desktop
-  DIR_RESOURCES,         // directory where application resources are stored
   DIR_INSPECTOR,         // directory where web inspector is located
-  DIR_THEMES,            // directory where theme dll files are stored
-  DIR_LOCALES,           // directory where locale resources are stored
   DIR_APP_DICTIONARIES,  // directory where the global dictionaries are
   DIR_USER_DOCUMENTS,    // directory for a user's "My Documents"
   DIR_DEFAULT_DOWNLOADS, // directory for a user's "My Documents/Downloads"
@@ -39,8 +36,6 @@ enum {
   // Valid only in development environment; TODO(darin): move these
   DIR_TEST_DATA,         // directory where unit test data resides
   DIR_TEST_TOOLS,        // directory where unit test tools reside
-  FILE_TEST_SERVER,      // simple HTTP server for testing the network stack
-  FILE_PYTHON_RUNTIME,   // Python runtime, used for running the test server
 
   PATH_END
 };

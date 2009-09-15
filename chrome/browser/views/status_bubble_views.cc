@@ -6,32 +6,33 @@
 
 #include <algorithm>
 
+#include "app/gfx/canvas.h"
+#include "app/gfx/text_elider.h"
+#include "app/l10n_util.h"
+#if defined(OS_WIN)
+#include "app/l10n_util_win.h"
+#endif
+#include "app/animation.h"
+#include "app/resource_bundle.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
-#include "chrome/common/animation.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/text_elider.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/l10n_util_win.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/widget/widget_win.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
-#include "SkPaint.h"
-#include "SkPath.h"
-#include "SkRect.h"
-
-// The color of the background bubble.
-static const SkColor kBubbleColor = SkColorSetRGB(222, 234, 248);
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkRect.h"
+#include "views/controls/label.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#if defined(OS_WIN)
+#include "views/widget/widget_win.h"
+#endif
 
 // The alpha and color of the bubble's shadow.
 static const SkColor kShadowColor = SkColorSetARGB(30, 0, 0, 0);
-
-// How wide the bubble's shadow is.
-static const int kShadowSize = 1;
 
 // The roundedness of the edges of our bubble.
 static const int kBubbleCornerRadius = 4;
@@ -40,15 +41,13 @@ static const int kBubbleCornerRadius = 4;
 // off-screen.
 static const int kMousePadding = 20;
 
-// The color of the text
-static const SkColor kTextColor = SkColorSetRGB(100, 100, 100);
+// The horizontal offset of the text within the status bubble, not including the
+// outer shadow ring.
+static const int kTextPositionX = 3;
 
-// The color of the highlight text
-static const SkColor kTextHighlightColor = SkColorSetRGB(242, 250, 255);
-
-static const int kTextPadding = 3;
-static const int kTextPositionX = 4;
-static const int kTextPositionY = 1;
+// The minimum horizontal space between the (right) end of the text and the edge
+// of the status bubble, not including the outer shadow ring.
+static const int kTextHorizPadding = 1;
 
 // Delays before we start hiding or showing the bubble after we receive a
 // show or hide request.
@@ -67,27 +66,29 @@ class StatusBubbleViews::StatusView : public views::Label,
                                       public Animation,
                                       public AnimationDelegate {
  public:
-  StatusView(StatusBubble* status_bubble, views::WidgetWin* popup)
+  StatusView(StatusBubble* status_bubble, views::Widget* popup,
+             ThemeProvider* theme_provider)
       : Animation(kFramerate, this),
-        status_bubble_(status_bubble),
-        popup_(popup),
         stage_(BUBBLE_HIDDEN),
         style_(STYLE_STANDARD),
         timer_factory_(this),
+        status_bubble_(status_bubble),
+        popup_(popup),
         opacity_start_(0),
-        opacity_end_(0) {
+        opacity_end_(0),
+        theme_provider_(theme_provider) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    ChromeFont font(rb.GetFont(ResourceBundle::BaseFont));
+    gfx::Font font(rb.GetFont(ResourceBundle::BaseFont));
     SetFont(font);
   }
 
-  ~StatusView() {
+  virtual ~StatusView() {
     Stop();
     CancelTimer();
   }
 
   // The bubble can be in one of many stages:
-  typedef enum BubbleStage {
+  enum BubbleStage {
     BUBBLE_HIDDEN,         // Entirely BUBBLE_HIDDEN.
     BUBBLE_HIDING_FADE,    // In a fade-out transition.
     BUBBLE_HIDING_TIMER,   // Waiting before a fade-out.
@@ -96,10 +97,11 @@ class StatusBubbleViews::StatusView : public views::Label,
     BUBBLE_SHOWN           // Fully visible.
   };
 
-  typedef enum BubbleStyle {
+  enum BubbleStyle {
     STYLE_BOTTOM,
     STYLE_FLOATING,
-    STYLE_STANDARD
+    STYLE_STANDARD,
+    STYLE_STANDARD_RIGHT
   };
 
   // Set the bubble text to a certain value, hides the bubble if text is
@@ -109,6 +111,8 @@ class StatusBubbleViews::StatusView : public views::Label,
   BubbleStage GetState() const { return stage_; }
 
   void SetStyle(BubbleStyle style);
+
+  BubbleStyle GetStyle() const { return style_; }
 
   // Show the bubble instantly.
   void Show();
@@ -140,7 +144,7 @@ class StatusBubbleViews::StatusView : public views::Label,
   void AnimateToState(double state);
   void AnimationEnded(const Animation* animation);
 
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
 
   BubbleStage stage_;
   BubbleStyle style_;
@@ -150,8 +154,8 @@ class StatusBubbleViews::StatusView : public views::Label,
   // Manager, owns us.
   StatusBubble* status_bubble_;
 
-  // Handle to the HWND that contains us.
-  views::WidgetWin* popup_;
+  // Handle to the widget that contains us.
+  views::Widget* popup_;
 
   // The currently-displayed text.
   std::wstring text_;
@@ -161,6 +165,9 @@ class StatusBubbleViews::StatusView : public views::Label,
   // a value between 0 and 1.
   double opacity_start_;
   double opacity_end_;
+
+  // Holds the theme provider of the frame that created us.
+  ThemeProvider* theme_provider_;
 };
 
 void StatusBubbleViews::StatusView::SetText(const std::wstring& text) {
@@ -180,6 +187,7 @@ void StatusBubbleViews::StatusView::Show() {
   Stop();
   CancelTimer();
   SetOpacity(1.0);
+  popup_->Show();
   stage_ = BUBBLE_SHOWN;
   PaintNow();
 }
@@ -189,6 +197,7 @@ void StatusBubbleViews::StatusView::Hide() {
   CancelTimer();
   SetOpacity(0.0);
   text_.clear();
+  popup_->Hide();
   stage_ = BUBBLE_HIDDEN;
 }
 
@@ -212,9 +221,8 @@ void StatusBubbleViews::StatusView::OnTimer() {
 }
 
 void StatusBubbleViews::StatusView::CancelTimer() {
-  if (!timer_factory_.empty()) {
+  if (!timer_factory_.empty())
     timer_factory_.RevokeAll();
-  }
 }
 
 void StatusBubbleViews::StatusView::RestartTimer(int delay) {
@@ -261,6 +269,7 @@ void StatusBubbleViews::StatusView::StartHiding() {
 
 void StatusBubbleViews::StatusView::StartShowing() {
   if (stage_ == BUBBLE_HIDDEN) {
+    popup_->Show();
     stage_ = BUBBLE_SHOWING_TIMER;
     StartTimer(kShowDelay);
   } else if (stage_ == BUBBLE_HIDING_TIMER) {
@@ -290,7 +299,7 @@ double StatusBubbleViews::StatusView::GetCurrentOpacity() {
 }
 
 void StatusBubbleViews::StatusView::SetOpacity(double opacity) {
-  popup_->SetLayeredAlpha(static_cast<BYTE>(opacity * 255));
+  popup_->SetOpacity(static_cast<unsigned char>(opacity * 255));
   SchedulePaint();
 }
 
@@ -304,6 +313,7 @@ void StatusBubbleViews::StatusView::AnimationEnded(
 
   if (stage_ == BUBBLE_HIDING_FADE) {
     stage_ = BUBBLE_HIDDEN;
+    popup_->Hide();
   } else if (stage_ == BUBBLE_SHOWING_FADE) {
     stage_ = BUBBLE_SHOWN;
   }
@@ -316,19 +326,16 @@ void StatusBubbleViews::StatusView::SetStyle(BubbleStyle style) {
   }
 }
 
-void StatusBubbleViews::StatusView::Paint(ChromeCanvas* canvas) {
+void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setStyle(SkPaint::kFill_Style);
   paint.setFlags(SkPaint::kAntiAlias_Flag);
-  paint.setColor(kBubbleColor);
+  SkColor toolbar_color =
+      theme_provider_->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
+  paint.setColor(toolbar_color);
 
-  RECT parent_rect;
-  ::GetWindowRect(popup_->GetNativeView(), &parent_rect);
-
-  // Draw our background.
-  SkRect rect;
-  int width = parent_rect.right - parent_rect.left;
-  int height = parent_rect.bottom - parent_rect.top;
+  gfx::Rect popup_bounds;
+  popup_->GetBounds(&popup_bounds, true);
 
   // Figure out how to round the bubble's four corners.
   SkScalar rad[8];
@@ -346,7 +353,9 @@ void StatusBubbleViews::StatusView::Paint(ChromeCanvas* canvas) {
     rad[2] = 0;
     rad[3] = 0;
   } else {
-    if (UILayoutIsRightToLeft()) {
+    if (UILayoutIsRightToLeft() ^ (style_ == STYLE_STANDARD_RIGHT)) {
+      // The text is RtL or the bubble is on the right side (but not both).
+
       // Top Left corner.
       rad[0] = SkIntToScalar(kBubbleCornerRadius);
       rad[1] = SkIntToScalar(kBubbleCornerRadius);
@@ -367,7 +376,7 @@ void StatusBubbleViews::StatusView::Paint(ChromeCanvas* canvas) {
 
   // Bottom edges - square these off if the bubble is in its standard position
   // (sticking upward).
-  if (style_ == STYLE_STANDARD) {
+  if (style_ == STYLE_STANDARD || style_ == STYLE_STANDARD_RIGHT) {
     // Bottom Right Corner.
     rad[4] = 0;
     rad[5] = 0;
@@ -386,54 +395,51 @@ void StatusBubbleViews::StatusView::Paint(ChromeCanvas* canvas) {
   }
 
   // Draw the bubble's shadow.
-  SkPaint shadow_paint;
-  shadow_paint.setFlags(SkPaint::kAntiAlias_Flag);
-  shadow_paint.setColor(kShadowColor);
-
+  int width = popup_bounds.width();
+  int height = popup_bounds.height();
+  SkRect rect;
   rect.set(0, 0,
            SkIntToScalar(width),
            SkIntToScalar(height));
-
   SkPath shadow_path;
   shadow_path.addRoundRect(rect, rad, SkPath::kCW_Direction);
+  SkPaint shadow_paint;
+  shadow_paint.setFlags(SkPaint::kAntiAlias_Flag);
+  shadow_paint.setColor(kShadowColor);
   canvas->drawPath(shadow_path, shadow_paint);
 
   // Draw the bubble.
+  rect.set(SkIntToScalar(kShadowThickness),
+           SkIntToScalar(kShadowThickness),
+           SkIntToScalar(width - kShadowThickness),
+           SkIntToScalar(height - kShadowThickness));
   SkPath path;
-  rect.set(SkIntToScalar(kShadowSize),
-           SkIntToScalar(kShadowSize),
-           SkIntToScalar(width - kShadowSize),
-           SkIntToScalar(height - kShadowSize));
-
   path.addRoundRect(rect, rad, SkPath::kCW_Direction);
   canvas->drawPath(path, paint);
-
-
-  int text_width = std::min(static_cast<int>(parent_rect.right -
-                                parent_rect.left - kTextPositionX -
-                                kTextPadding),
-                            static_cast<int>(views::Label::GetFont()
-                                .GetStringWidth(text_)));
 
   // Draw highlight text and then the text body. In order to make sure the text
   // is aligned to the right on RTL UIs, we mirror the text bounds if the
   // locale is RTL.
-  gfx::Rect body_bounds(kTextPositionX,
-                        kTextPositionY,
-                        text_width,
-                        parent_rect.bottom - parent_rect.top);
+  int text_width = std::min(views::Label::GetFont().GetStringWidth(text_),
+      width - (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding);
+  int text_height = height - (kShadowThickness * 2);
+  gfx::Rect body_bounds(kShadowThickness + kTextPositionX,
+                        kShadowThickness,
+                        std::max(0, text_width),
+                        std::max(0, text_height));
   body_bounds.set_x(MirroredLeftPointForRect(body_bounds));
-  canvas->DrawStringInt(text_,
-                        views::Label::GetFont(),
-                        kTextHighlightColor,
-                        body_bounds.x() + 1,
-                        body_bounds.y() + 1,
-                        body_bounds.width(),
-                        body_bounds.height());
+  SkColor text_color =
+      theme_provider_->GetColor(BrowserThemeProvider::COLOR_TAB_TEXT);
 
+  // DrawStringInt doesn't handle alpha, so we'll do the blending ourselves.
+  text_color = SkColorSetARGB(
+      SkColorGetA(text_color),
+      (SkColorGetR(text_color) + SkColorGetR(toolbar_color)) / 2,
+      (SkColorGetG(text_color) + SkColorGetR(toolbar_color)) / 2,
+      (SkColorGetB(text_color) + SkColorGetR(toolbar_color)) / 2);
   canvas->DrawStringInt(text_,
                         views::Label::GetFont(),
-                        kTextColor,
+                        text_color,
                         body_bounds.x(),
                         body_bounds.y(),
                         body_bounds.width(),
@@ -442,44 +448,77 @@ void StatusBubbleViews::StatusView::Paint(ChromeCanvas* canvas) {
 
 // StatusBubble ---------------------------------------------------------------
 
+const int StatusBubbleViews::kShadowThickness = 1;
+
 StatusBubbleViews::StatusBubbleViews(views::Widget* frame)
-    : popup_(NULL),
+    : offset_(0),
+      popup_(NULL),
+      opacity_(0),
       frame_(frame),
       view_(NULL),
-      opacity_(0),
-      position_(0, 0),
-      size_(0, 0),
-      offset_(0) {
+      download_shelf_is_visible_(false) {
 }
 
 StatusBubbleViews::~StatusBubbleViews() {
   if (popup_.get())
     popup_->CloseNow();
-
-  position_ = NULL;
-  size_ = NULL;
 }
 
 void StatusBubbleViews::Init() {
   if (!popup_.get()) {
-    popup_.reset(new views::WidgetWin());
-    popup_->set_delete_on_destroy(false);
+#if defined(OS_WIN)
+    views::WidgetWin* popup = new views::WidgetWin;
+    popup->set_delete_on_destroy(false);
 
     if (!view_)
-      view_ = new StatusView(this, popup_.get());
+      view_ = new StatusView(this, popup, frame_->GetThemeProvider());
 
-    gfx::Rect rc(0, 0, 0, 0);
-
-    popup_->set_window_style(WS_POPUP);
-    popup_->set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW |
-                                WS_EX_TRANSPARENT |
-                                l10n_util::GetExtendedTooltipStyles());
-    popup_->SetLayeredAlpha(0x00);
-    popup_->Init(frame_->GetNativeView(), rc, false);
-    popup_->SetContentsView(view_);
+    popup->set_window_style(WS_POPUP);
+    popup->set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW |
+                               WS_EX_TRANSPARENT |
+                               l10n_util::GetExtendedTooltipStyles());
+    popup->SetOpacity(0x00);
+    popup->Init(frame_->GetNativeView(), gfx::Rect());
+    popup->SetContentsView(view_);
     Reposition();
-    popup_->Show();
+    popup->Show();
+    popup_.reset(popup);
+#else
+    NOTIMPLEMENTED();
+#endif
   }
+}
+
+void StatusBubbleViews::Reposition() {
+  if (popup_.get()) {
+    gfx::Point top_left;
+    views::View::ConvertPointToScreen(frame_->GetRootView(), &top_left);
+
+    popup_->SetBounds(gfx::Rect(top_left.x() + position_.x(),
+                                top_left.y() + position_.y(),
+                                size_.width(), size_.height()));
+  }
+}
+
+gfx::Size StatusBubbleViews::GetPreferredSize() {
+  return gfx::Size(0, ResourceBundle::GetSharedInstance().GetFont(
+      ResourceBundle::BaseFont).height() + kTotalVerticalPadding);
+}
+
+void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
+  // If the UI layout is RTL, we need to mirror the position of the bubble
+  // relative to the parent.
+  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+    gfx::Rect frame_bounds;
+    frame_->GetBounds(&frame_bounds, false);
+    int mirrored_x = frame_bounds.width() - x - w;
+    position_.SetPoint(mirrored_x, y);
+  } else {
+    position_.SetPoint(x, y);
+  }
+
+  size_.SetSize(w, h);
+  Reposition();
 }
 
 void StatusBubbleViews::SetStatus(const std::wstring& status_text) {
@@ -510,11 +549,10 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::wstring& languages) {
   }
 
   // Set Elided Text corresponding to the GURL object.
-  RECT parent_rect;
-  ::GetWindowRect(popup_->GetNativeView(), &parent_rect);
-  int text_width = static_cast<int>(parent_rect.right -
-                                    parent_rect.left - kTextPositionX -
-                                    kTextPadding);
+  gfx::Rect popup_bounds;
+  popup_->GetBounds(&popup_bounds, true);
+  int text_width = static_cast<int>(popup_bounds.width() -
+      (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1);
   url_text_ = gfx::ElideUrl(url, view_->Label::GetFont(), text_width,
                             languages);
 
@@ -546,90 +584,108 @@ void StatusBubbleViews::MouseMoved() {
   }
 }
 
+void StatusBubbleViews::UpdateDownloadShelfVisibility(bool visible) {
+  download_shelf_is_visible_ = visible;
+}
+
 void StatusBubbleViews::AvoidMouse() {
   // Our status bubble is located in screen coordinates, so we should get
   // those rather than attempting to reverse decode the web contents
   // coordinates.
-  CPoint cursor_location;
-  GetCursorPos(&cursor_location);
+  gfx::Point cursor_location;
+#if defined(OS_WIN)
+  POINT tmp = { 0, 0 };
+  GetCursorPos(&tmp);
+  cursor_location = tmp;
+#else
+  NOTIMPLEMENTED();
+#endif
 
   // Get the position of the frame.
   gfx::Point top_left;
-  views::View::ConvertPointToScreen(frame_->GetRootView(), &top_left);
+  views::RootView* root = frame_->GetRootView();
+  views::View::ConvertPointToScreen(root, &top_left);
+  int window_width = root->GetLocalBounds(true).width();  // border included.
 
   // Get the cursor position relative to the popup.
-  cursor_location.x -= (top_left.x() + position_.x);
-  cursor_location.y -= (top_left.y() + position_.y);
+  if (view_->UILayoutIsRightToLeft()) {
+    int top_right_x = top_left.x() + window_width;
+    cursor_location.set_x(top_right_x - cursor_location.x());
+  } else {
+    cursor_location.set_x(cursor_location.x() - (top_left.x() + position_.x()));
+  }
+  cursor_location.set_y(cursor_location.y() - (top_left.y() + position_.y()));
 
   // If the mouse is in a position where we think it would move the
   // status bubble, figure out where and how the bubble should be moved.
-  if (cursor_location.y > -kMousePadding &&
-      cursor_location.x < size_.cx + kMousePadding) {
-    int offset = kMousePadding + cursor_location.y;
+  if (cursor_location.y() > -kMousePadding &&
+      cursor_location.x() < size_.width() + kMousePadding) {
+    int offset = kMousePadding + cursor_location.y();
 
     // Make the movement non-linear.
     offset = offset * offset / kMousePadding;
 
     // When the mouse is entering from the right, we want the offset to be
     // scaled by how horizontally far away the cursor is from the bubble.
-    if (cursor_location.x > size_.cx) {
+    if (cursor_location.x() > size_.width()) {
       offset = static_cast<int>(static_cast<float>(offset) * (
           static_cast<float>(kMousePadding -
-              (cursor_location.x - size_.cx)) /
+              (cursor_location.x() - size_.width())) /
           static_cast<float>(kMousePadding)));
     }
 
     // Cap the offset and change the visual presentation of the bubble
     // depending on where it ends up (so that rounded corners square off
     // and mate to the edges of the tab content).
-    if (offset >= size_.cy - kShadowSize * 2) {
-      offset = size_.cy - kShadowSize * 2;
+    if (offset >= size_.height() - kShadowThickness * 2) {
+      offset = size_.height() - kShadowThickness * 2;
       view_->SetStyle(StatusView::STYLE_BOTTOM);
-    } else if (offset > kBubbleCornerRadius / 2 - kShadowSize) {
+    } else if (offset > kBubbleCornerRadius / 2 - kShadowThickness) {
       view_->SetStyle(StatusView::STYLE_FLOATING);
     } else {
       view_->SetStyle(StatusView::STYLE_STANDARD);
     }
 
-    offset_ = offset;
-    popup_->MoveWindow(top_left.x() + position_.x,
-                       top_left.y() + position_.y + offset_,
-                       size_.cx,
-                       size_.cy);
-  } else if (offset_ != 0) {
+    // Check if the bubble sticks out from the monitor or will obscure
+    // download shelf.
+#if defined(OS_WIN)
+    MONITORINFO monitor_info;
+    monitor_info.cbSize = sizeof(monitor_info);
+    GetMonitorInfo(MonitorFromWindow(frame_->GetNativeView(),
+                                     MONITOR_DEFAULTTONEAREST), &monitor_info);
+    gfx::Rect monitor_rect(monitor_info.rcWork);
+#else
+    gfx::Rect monitor_rect;
+    NOTIMPLEMENTED();
+#endif
+    const int bubble_bottom_y = top_left.y() + position_.y() + size_.height();
+
+    if (bubble_bottom_y + offset > monitor_rect.height() ||
+        (download_shelf_is_visible_ &&
+         (view_->GetStyle() == StatusView::STYLE_FLOATING ||
+          view_->GetStyle() == StatusView::STYLE_BOTTOM))) {
+      // The offset is still too large. Move the bubble to the right and reset
+      // Y offset_ to zero.
+      view_->SetStyle(StatusView::STYLE_STANDARD_RIGHT);
+      offset_ = 0;
+
+      // Substract border width + bubble width.
+      int right_position_x = window_width - (position_.x() + size_.width());
+      popup_->SetBounds(gfx::Rect(top_left.x() + right_position_x,
+                                  top_left.y() + position_.y(),
+                                  size_.width(), size_.height()));
+    } else {
+      offset_ = offset;
+      popup_->SetBounds(gfx::Rect(top_left.x() + position_.x(),
+                                  top_left.y() + position_.y() + offset_,
+                                  size_.width(), size_.height()));
+    }
+  } else if (offset_ != 0 ||
+      view_->GetStyle() == StatusView::STYLE_STANDARD_RIGHT) {
     offset_ = 0;
     view_->SetStyle(StatusView::STYLE_STANDARD);
-    popup_->MoveWindow(top_left.x() + position_.x,
-                       top_left.y() + position_.y,
-                       size_.cx,
-                       size_.cy);
+    popup_->SetBounds(gfx::Rect(top_left.x() + position_.x(),
+                                top_left.y() + position_.y(),
+                                size_.width(), size_.height()));
   }
-}
-
-void StatusBubbleViews::Reposition() {
-  if (popup_.get()) {
-    gfx::Point top_left;
-    views::View::ConvertPointToScreen(frame_->GetRootView(), &top_left);
-
-    popup_->MoveWindow(top_left.x() + position_.x,
-                       top_left.y() + position_.y,
-                       size_.cx,
-                       size_.cy);
-  }
-}
-
-void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
-  // If the UI layout is RTL, we need to mirror the position of the bubble
-  // relative to the parent.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
-    gfx::Rect frame_bounds;
-    frame_->GetBounds(&frame_bounds, false);
-    int mirrored_x = frame_bounds.width() - x - w;
-    position_.SetPoint(mirrored_x, y);
-  } else {
-    position_.SetPoint(x, y);
-  }
-
-  size_.SetSize(w, h);
-  Reposition();
 }

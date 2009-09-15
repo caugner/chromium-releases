@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/bug_report_view.h"
 
-#include <iostream>
-#include <fstream>
-
+#include "app/l10n_util.h"
+#include "app/win_util.h"
+#include "base/file_version_info.h"
 #include "base/string_util.h"
 #include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/profile.h"
@@ -14,25 +14,25 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/window/client_view.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
 #include "unicode/locid.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/label.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/widget/widget.h"
+#include "views/window/client_view.h"
+#include "views/window/window.h"
 
 using views::ColumnSet;
 using views::GridLayout;
 
-// Report a bug data version
+// Report a bug data version.
 static const int kBugReportVersion = 1;
 
 // Number of lines description field can display at one time.
@@ -42,7 +42,7 @@ static const int kDescriptionLines = 5;
 static const char kReportPhishingUrl[] =
     "http://www.google.com/safebrowsing/report_phish/";
 
-class BugReportComboBoxModel : public views::ComboBox::Model {
+class BugReportComboBoxModel : public views::Combobox::Model {
  public:
   BugReportComboBoxModel() {}
 
@@ -57,12 +57,12 @@ class BugReportComboBoxModel : public views::ComboBox::Model {
     OTHER_PROBLEM
   };
 
-  // views::ComboBox::Model interface.
-  virtual int GetItemCount(views::ComboBox* source) {
+  // views::Combobox::Model interface.
+  virtual int GetItemCount(views::Combobox* source) {
     return OTHER_PROBLEM + 1;
   }
 
-  virtual std::wstring GetItemAt(views::ComboBox* source, int index) {
+  virtual std::wstring GetItemAt(views::Combobox* source, int index) {
     return GetItemAtIndex(index);
   }
 
@@ -91,15 +91,15 @@ class BugReportComboBoxModel : public views::ComboBox::Model {
   }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(BugReportComboBoxModel);
+  DISALLOW_COPY_AND_ASSIGN(BugReportComboBoxModel);
 };
 
 // Simple URLFetcher::Delegate to clean up URLFetcher on completion
-// (since the BugReportView will be gone by then)
+// (since the BugReportView will be gone by then).
 class BugReportView::PostCleanup : public URLFetcher::Delegate {
  public:
   PostCleanup();
-  // Overridden from URLFetcher::Delegate
+  // Overridden from URLFetcher::Delegate.
   virtual void OnURLFetchComplete(const URLFetcher* source,
                                   const GURL& url,
                                   const URLRequestStatus& status,
@@ -107,8 +107,31 @@ class BugReportView::PostCleanup : public URLFetcher::Delegate {
                                   const ResponseCookies& cookies,
                                   const std::string& data);
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(PostCleanup);
+  DISALLOW_COPY_AND_ASSIGN(PostCleanup);
 };
+
+namespace browser {
+
+// Global "display this dialog" function declared in browser_dialogs.h.
+void ShowBugReportView(views::Widget* parent,
+                       Profile* profile,
+                       TabContents* tab) {
+  BugReportView* view = new BugReportView(profile, tab);
+
+  // Grab an exact snapshot of the window that the user is seeing (i.e. as
+  // rendered--do not re-render, and include windowed plugins).
+  std::vector<unsigned char> *screenshot_png = new std::vector<unsigned char>;
+  win_util::GrabWindowSnapshot(parent->GetNativeView(), screenshot_png);
+  // The BugReportView takes ownership of the png data, and will dispose of
+  // it in its destructor.
+  view->set_png_data(screenshot_png);
+
+  // Create and show the dialog.
+  views::Window::CreateChromeWindow(parent->GetNativeView(), gfx::Rect(),
+                                    view)->Show();
+}
+
+}  // namespace browser
 
 BugReportView::PostCleanup::PostCleanup() {
 }
@@ -120,9 +143,9 @@ void BugReportView::PostCleanup::OnURLFetchComplete(
     int response_code,
     const ResponseCookies& cookies,
     const std::string& data) {
-  // delete the URLFetcher
+  // Delete the URLFetcher.
   delete source;
-  // and then delete ourselves
+  // And then delete ourselves.
   delete this;
 }
 
@@ -138,6 +161,22 @@ BugReportView::BugReportView(Profile* profile, TabContents* tab)
       problem_type_(0) {
   DCHECK(profile);
   SetupControl();
+
+  // We want to use the URL of the current committed entry (the current URL may
+  // actually be the pending one).
+  if (tab->controller().GetActiveEntry()) {
+    page_url_text_->SetText(UTF8ToWide(
+        tab->controller().GetActiveEntry()->url().spec()));
+  }
+
+  // Retrieve the application version info.
+  scoped_ptr<FileVersionInfo> version_info(
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+  if (version_info.get()) {
+    version_ = version_info->product_name() + L" - " +
+        version_info->file_version() +
+        L" (" + version_info->last_change() + L")";
+  }
 }
 
 BugReportView::~BugReportView() {
@@ -149,30 +188,30 @@ void BugReportView::SetupControl() {
   // Adds all controls.
   bug_type_label_ = new views::Label(
       l10n_util::GetString(IDS_BUGREPORT_BUG_TYPE));
-  bug_type_combo_ = new views::ComboBox(bug_type_model_.get());
-  bug_type_combo_->SetListener(this);
+  bug_type_combo_ = new views::Combobox(bug_type_model_.get());
+  bug_type_combo_->set_listener(this);
 
   page_title_label_ = new views::Label(
       l10n_util::GetString(IDS_BUGREPORT_REPORT_PAGE_TITLE));
   page_title_text_ = new views::Label(UTF16ToWideHack(tab_->GetTitle()));
   page_url_label_ = new views::Label(
       l10n_util::GetString(IDS_BUGREPORT_REPORT_URL_LABEL));
-  // page_url_text_'s text (if any) is filled in after dialog creation
-  page_url_text_ = new views::TextField;
+  // page_url_text_'s text (if any) is filled in after dialog creation.
+  page_url_text_ = new views::Textfield;
   page_url_text_->SetController(this);
 
   description_label_ = new views::Label(
       l10n_util::GetString(IDS_BUGREPORT_DESCRIPTION_LABEL));
   description_text_ =
-      new views::TextField(views::TextField::STYLE_MULTILINE);
+      new views::Textfield(views::Textfield::STYLE_MULTILINE);
   description_text_->SetHeightInLines(kDescriptionLines);
 
-  include_page_source_checkbox_ = new views::CheckBox(
+  include_page_source_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_BUGREPORT_INCLUDE_PAGE_SOURCE_CHKBOX));
-  include_page_source_checkbox_->SetIsSelected(true);
-  include_page_image_checkbox_ = new views::CheckBox(
+  include_page_source_checkbox_->SetChecked(true);
+  include_page_image_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_BUGREPORT_INCLUDE_PAGE_IMAGE_CHKBOX));
-  include_page_image_checkbox_->SetIsSelected(true);
+  include_page_image_checkbox_->SetChecked(true);
 
   // Arranges controls by using GridLayout.
   const int column_set_id = 0;
@@ -230,7 +269,7 @@ gfx::Size BugReportView::GetPreferredSize() {
       IDS_BUGREPORT_DIALOG_HEIGHT_LINES));
 }
 
-void BugReportView::ItemChanged(views::ComboBox* combo_box,
+void BugReportView::ItemChanged(views::Combobox* combobox,
                                 int prev_index,
                                 int new_index) {
   if (new_index == prev_index)
@@ -242,31 +281,32 @@ void BugReportView::ItemChanged(views::ComboBox* combo_box,
   description_text_->SetEnabled(!is_phishing_report);
   description_text_->SetReadOnly(is_phishing_report);
   if (is_phishing_report) {
-    old_report_text_ = description_text_->GetText();
+    old_report_text_ = description_text_->text();
     description_text_->SetText(std::wstring());
   } else if (!old_report_text_.empty()) {
     description_text_->SetText(old_report_text_);
     old_report_text_.clear();
   }
   include_page_source_checkbox_->SetEnabled(!is_phishing_report);
-  include_page_source_checkbox_->SetIsSelected(!is_phishing_report);
+  include_page_source_checkbox_->SetChecked(!is_phishing_report);
   include_page_image_checkbox_->SetEnabled(!is_phishing_report);
-  include_page_image_checkbox_->SetIsSelected(!is_phishing_report);
+  include_page_image_checkbox_->SetChecked(!is_phishing_report);
 
   GetDialogClientView()->UpdateDialogButtons();
 }
 
-void BugReportView::ContentsChanged(views::TextField* sender,
+void BugReportView::ContentsChanged(views::Textfield* sender,
                                     const std::wstring& new_contents) {
 }
 
-void BugReportView::HandleKeystroke(views::TextField* sender,
-                                    UINT message, TCHAR key,
-                                    UINT repeat_count, UINT flags) {
+bool BugReportView::HandleKeystroke(views::Textfield* sender,
+                                    const views::Textfield::Keystroke& key) {
+  return false;
 }
 
-std::wstring BugReportView::GetDialogButtonLabel(DialogButton button) const {
-  if (button == DIALOGBUTTON_OK) {
+std::wstring BugReportView::GetDialogButtonLabel(
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
     if (problem_type_ == BugReportComboBoxModel::PHISHING_PAGE)
       return l10n_util::GetString(IDS_BUGREPORT_SEND_PHISHING_REPORT);
     else
@@ -277,7 +317,7 @@ std::wstring BugReportView::GetDialogButtonLabel(DialogButton button) const {
 }
 
 int BugReportView::GetDefaultDialogButton() const {
-  return DIALOGBUTTON_NONE;
+  return MessageBoxFlags::DIALOGBUTTON_NONE;
 }
 
 bool BugReportView::CanResize() const {
@@ -305,7 +345,7 @@ std::wstring BugReportView::GetWindowTitle() const {
 }
 
 bool BugReportView::Accept() {
-  if (IsDialogButtonEnabled(DIALOGBUTTON_OK)) {
+  if (IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
     if (problem_type_ == BugReportComboBoxModel::PHISHING_PAGE)
       ReportPhishing();
     else
@@ -318,16 +358,12 @@ views::View* BugReportView::GetContentsView() {
   return this;
 }
 
-void BugReportView::SetUrl(const GURL& url) {
-  page_url_text_->SetText(UTF8ToWide(url.spec()));
-}
-
 // SetOSVersion copies the maj.minor.build + servicePack_string
 // into a string (for Windows only). This should probably be
-// in a util somewhere. We currently have
+// in a util somewhere. We currently have:
 //   win_util::GetWinVersion returns WinVersion, which is just
 //     an enum of 2000, XP, 2003, or VISTA. Not enough detail for
-//     bug reports
+//     bug reports.
 //   base::SysInfo::OperatingSystemVersion returns an std::string
 //     but doesn't include the build or service pack. That function
 //     is probably the right one to extend, but will require changing
@@ -348,7 +384,7 @@ void BugReportView::SetOSVersion(std::string *os_version) {
   }
 }
 
-// Create a MIME boundary marker (27 '-' characters followed by 16 hex digits)
+// Create a MIME boundary marker (27 '-' characters followed by 16 hex digits).
 void BugReportView::CreateMimeBoundary(std::string *out) {
   int r1 = rand();
   int r2 = rand();
@@ -360,19 +396,8 @@ void BugReportView::SendReport() {
   std::string mime_boundary;
   CreateMimeBoundary(&mime_boundary);
 
-  // create a request body and add the mandatory parameters
+  // Create a request body and add the mandatory parameters.
   std::string post_body;
-
-  // If this is an internal Google user, include user name for followup
-  // TODO: revisit for public release
-
-  if (!strcmp(getenv("USERDOMAIN"), "GOOGLE") && getenv("USERNAME")) {
-    std::string user_name(getenv("USERNAME"));
-    post_body.append("--" + mime_boundary + "\r\n");
-    post_body.append("Content-Disposition: form-data; "
-                     "name=\"username\"\r\n\r\n");
-    post_body.append(user_name + "\r\n");
-  }
 
   // Add the protocol version:
   post_body.append("--" + mime_boundary + "\r\n");
@@ -380,33 +405,33 @@ void BugReportView::SendReport() {
                    "name=\"data_version\"\r\n\r\n");
   post_body.append(StringPrintf("%d\r\n", kBugReportVersion));
 
-  // Add the page title
+  // Add the page title.
   post_body.append("--" + mime_boundary + "\r\n");
   std::string page_title = WideToUTF8(page_title_text_->GetText());
   post_body.append("Content-Disposition: form-data; "
                    "name=\"title\"\r\n\r\n");
   post_body.append(page_title + "\r\n");
 
-  // Add the problem type
+  // Add the problem type.
   post_body.append("--" + mime_boundary + "\r\n");
   post_body.append("Content-Disposition: form-data; "
                    "name=\"problem\"\r\n\r\n");
   post_body.append(StringPrintf("%d\r\n", problem_type_));
 
-  // Add in the URL, if we have one
+  // Add in the URL, if we have one.
   post_body.append("--" + mime_boundary + "\r\n");
   post_body.append("Content-Disposition: form-data; "
                    "name=\"url\"\r\n\r\n");
 
-  // convert URL to UTF8
-  std::string report_url = WideToUTF8(page_url_text_->GetText());
+  // Convert URL to UTF8.
+  std::string report_url = WideToUTF8(page_url_text_->text());
   if (report_url.empty()) {
     post_body.append("n/a\r\n");
   } else {
     post_body.append(report_url + "\r\n");
   }
 
-  // Add Chrome version
+  // Add Chrome version.
   post_body.append("--" + mime_boundary + "\r\n");
   post_body.append("Content-Disposition: form-data; "
                    "name=\"chrome_version\"\r\n\r\n");
@@ -418,7 +443,7 @@ void BugReportView::SendReport() {
     post_body.append(version + "\r\n");
   }
 
-  // Add OS version (eg, for WinXP SP2: "5.1.2600 Service Pack 2")
+  // Add OS version (eg, for WinXP SP2: "5.1.2600 Service Pack 2").
   std::string os_version = "";
   post_body.append("--" + mime_boundary + "\r\n");
   post_body.append("Content-Disposition: form-data; "
@@ -426,8 +451,8 @@ void BugReportView::SendReport() {
   SetOSVersion(&os_version);
   post_body.append(os_version + "\r\n");
 
-  // Add locale
-  Locale locale = Locale::getDefault();
+  // Add locale.
+  icu::Locale locale = icu::Locale::getDefault();
   const char *lang = locale.getLanguage();
   std::string chrome_locale = (lang)? lang:"en";
   post_body.append("--" + mime_boundary + "\r\n");
@@ -435,42 +460,41 @@ void BugReportView::SendReport() {
                    "name=\"chrome_locale\"\r\n\r\n");
   post_body.append(chrome_locale + "\r\n");
 
-  // Add a description if we have one
+  // Add a description if we have one.
   post_body.append("--" + mime_boundary + "\r\n");
   post_body.append("Content-Disposition: form-data; "
                    "name=\"description\"\r\n\r\n");
 
-  std::string description = WideToUTF8(description_text_->GetText());
+  std::string description = WideToUTF8(description_text_->text());
   if (description.empty()) {
     post_body.append("n/a\r\n");
   } else {
     post_body.append(description + "\r\n");
   }
 
-  // include the page image if we have one
-  if (include_page_image_checkbox_->IsSelected() && png_data_.get()) {
+  // Include the page image if we have one.
+  if (include_page_image_checkbox_->checked() && png_data_.get()) {
     post_body.append("--" + mime_boundary + "\r\n");
     post_body.append("Content-Disposition: form-data; name=\"screenshot\"; "
                       "filename=\"screenshot.png\"\r\n");
     post_body.append("Content-Type: application/octet-stream\r\n");
     post_body.append(StringPrintf("Content-Length: %lu\r\n\r\n",
                      png_data_->size()));
-    // the following relies on the fact that STL vectors are guaranteed to
+    // The following relies on the fact that STL vectors are guaranteed to
     // be stored contiguously.
     post_body.append(reinterpret_cast<const char *>(&((*png_data_)[0])),
                      png_data_->size());
     post_body.append("\r\n");
   }
 
-  // TODO(awalker): include the page source if we can get it
-  if (include_page_source_checkbox_->IsSelected()) {
+  // TODO(awalker): include the page source if we can get it.
+  if (include_page_source_checkbox_->checked()) {
   }
 
-  // terminate the body
+  // Terminate the body.
   post_body.append("--" + mime_boundary + "--\r\n");
 
-  // We have the body of our POST, so send it off to the server
-
+  // We have the body of our POST, so send it off to the server.
   URLFetcher* fetcher = new URLFetcher(post_url_, URLFetcher::POST,
                                        new BugReportView::PostCleanup);
   fetcher->set_request_context(profile_->GetRequestContext());
@@ -481,9 +505,9 @@ void BugReportView::SendReport() {
 }
 
 void BugReportView::ReportPhishing() {
-  tab_->controller()->LoadURL(
+  tab_->controller().LoadURL(
       safe_browsing_util::GeneratePhishingReportUrl(
-          kReportPhishingUrl, WideToUTF8(page_url_text_->GetText())),
+          kReportPhishingUrl, WideToUTF8(page_url_text_->text())),
       GURL(),
       PageTransition::LINK);
 }

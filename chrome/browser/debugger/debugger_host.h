@@ -7,8 +7,10 @@
 #ifndef CHROME_BROWSER_DEBUGGER_DEBUGGER_HOST_H_
 #define CHROME_BROWSER_DEBUGGER_DEBUGGER_HOST_H_
 
+#include <string>
+
 #include "base/basictypes.h"
-#include "base/thread.h"
+#include "base/ref_counted.h"
 
 class ListValue;
 
@@ -34,6 +36,10 @@ class DebuggerHost : public base::RefCountedThreadSafe<DebuggerHost> {
 
   // Handles messages from debugger UI.
   virtual void OnDebuggerHostMsg(const ListValue* args) {}
+
+  // Shows the debugger UI and returns true if it has any.
+  virtual bool ShowWindow() { return false; }
+
  private:
 
   DISALLOW_COPY_AND_ASSIGN(DebuggerHost);

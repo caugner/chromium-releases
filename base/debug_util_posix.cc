@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "build/build_config.h"
 #include "base/debug_util.h"
 
+#include <errno.h>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -14,7 +15,9 @@
 #include <unistd.h>
 
 #include "base/basictypes.h"
+#include "base/eintr_wrapper.h"
 #include "base/logging.h"
+#include "base/scoped_ptr.h"
 #include "base/string_piece.h"
 
 // static
@@ -83,8 +86,8 @@ bool DebugUtil::BeingDebugged() {
   // This simplifies and speeds up things considerably.
   char buf[1024];
 
-  ssize_t num_read = read(status_fd, buf, sizeof(buf));
-  close(status_fd);
+  ssize_t num_read = HANDLE_EINTR(read(status_fd, buf, sizeof(buf)));
+  HANDLE_EINTR(close(status_fd));
 
   if (num_read <= 0)
     return false;
@@ -105,19 +108,51 @@ bool DebugUtil::BeingDebugged() {
 
 // static
 void DebugUtil::BreakDebugger() {
-  asm ("int3");
+#if defined(ARCH_CPU_ARM_FAMILY)
+  asm("bkpt 0");
+#else
+  asm("int3");
+#endif
 }
 
 StackTrace::StackTrace() {
-  static const int kMaxCallers = 256;
+  const int kMaxCallers = 256;
 
   void* callers[kMaxCallers];
   int count = backtrace(callers, kMaxCallers);
-  trace_.resize(count);
-  memcpy(&trace_[0], callers, sizeof(void*) * count);
+
+  // Though the backtrace API man page does not list any possible negative
+  // return values, we still still exclude them because they would break the
+  // memcpy code below.
+  if (count > 0) {
+    trace_.resize(count);
+    memcpy(&trace_[0], callers, sizeof(callers[0]) * count);
+  } else {
+    trace_.resize(0);
+  }
 }
 
 void StackTrace::PrintBacktrace() {
   fflush(stderr);
   backtrace_symbols_fd(&trace_[0], trace_.size(), STDERR_FILENO);
+}
+
+void StackTrace::OutputToStream(std::ostream* os) {
+  scoped_ptr_malloc<char*> trace_symbols(
+      backtrace_symbols(&trace_[0], trace_.size()));
+
+  // If we can't retrieve the symbols, print an error and just dump the raw
+  // addresses.
+  if (trace_symbols.get() == NULL) {
+    (*os) << "Unable get symbols for backtrace (" << strerror(errno)
+          << "). Dumping raw addresses in trace:\n";
+    for (size_t i = 0; i < trace_.size(); ++i) {
+      (*os) << "\t" << trace_[i] << "\n";
+    }
+  } else {
+    (*os) << "Backtrace:\n";
+    for (size_t i = 0; i < trace_.size(); ++i) {
+      (*os) << "\t" << trace_symbols.get()[i] << "\n";
+    }
+  }
 }

@@ -12,6 +12,7 @@
 #include "chrome/browser/status_bubble.h"
 
 class GURL;
+class StatusBubbleMacTest;
 
 class StatusBubbleMac : public StatusBubble {
  public:
@@ -23,8 +24,11 @@ class StatusBubbleMac : public StatusBubble {
   virtual void SetURL(const GURL& url, const std::wstring& languages);
   virtual void Hide();
   virtual void MouseMoved();
+  virtual void UpdateDownloadShelfVisibility(bool visible);
 
  private:
+  friend class StatusBubbleMacTest;
+
   void SetStatus(NSString* status, bool is_url);
 
   // Construct the window/widget if it does not already exist. (Safe to call if

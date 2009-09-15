@@ -9,165 +9,50 @@
 // during the porting effort. It is not meant to be permanent, and classes will
 // be removed from here as they are fleshed out more completely.
 
-#include <list>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/clipboard.h"
-#include "base/file_path.h"
+#include "base/gfx/native_widget_types.h"
+#include "base/gfx/size.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/string16.h"
-#include "base/gfx/native_widget_types.h"
-#include "base/gfx/rect.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/cancelable_request.h"
-#include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/download/save_types.h"
-#include "chrome/browser/history/download_types.h"
-#include "chrome/browser/history/history.h"
-#include "chrome/browser/renderer_host/resource_handler.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/ssl/ssl_error_info.h"
-#include "chrome/browser/ssl/ssl_manager.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/page_navigator.h"
-#include "chrome/browser/tab_contents/tab_contents_type.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host.h"
+#include "build/build_config.h"
+#include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/common/child_process_info.h"
-#include "chrome/common/navigation_types.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/page_transition_types.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/load_states.h"
-#include "skia/include/SkBitmap.h"
-#include "webkit/glue/password_form.h"
-#include "webkit/glue/webplugin.h"
-#include "webkit/glue/window_open_disposition.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+
 
 class BookmarkContextMenu;
+class BookmarkNode;
 class Browser;
 class CommandLine;
-class ConstrainedWindow;
-class CPCommandInterface;
-class DOMUIHost;
 class DownloadItem;
-class DownloadManager;
-class HistoryService;
-class LoginHandler;
-class MetricsService;
-class MixedContentHandler;
-class ModalHtmlDialogDelegate;
+class MessageLoop;
 class NavigationController;
-class NavigationEntry;
-class NotificationService;
-class PluginService;
-class ProfileManager;
+class ProcessSingleton;
 class Profile;
-class RenderProcessHost;
-class RenderWidgetHelper;
 class RenderViewHostDelegate;
-class ResourceMessageFilter;
-class SessionBackend;
-class SessionCommand;
-class SessionID;
 class SiteInstance;
-class SpellChecker;
-class TabContentsDelegate;
-class TabContentsFactory;
-class TabNavigation;
-struct ThumbnailScore;
-class Task;
-class TemplateURL;
-class TemplateURLRef;
 class URLRequest;
-class URLRequestContext;
-class UserScriptMaster;
-class VisitedLinkMaster;
-class WebContents;
-class WebContentsView;
-struct WebPluginGeometry;
-class WebPreferences;
+class TabContents;
+struct ViewHostMsg_DidPrintPage_Params;
 
-namespace base {
-class Thread;
+namespace gfx {
+class Rect;
+class Widget;
 }
 
 namespace IPC {
 class Message;
 }
 
-namespace net {
-class AuthChallengeInfo;
-class IOBuffer;
-class X509Certificate;
-}
-
 //---------------------------------------------------------------------------
 // These stubs are for Browser_main()
 
-#if defined(OS_MACOSX)
-// TODO(port): needs an implementation of ProcessSingleton.
-class ProcessSingleton {
- public:
-  explicit ProcessSingleton(const FilePath& user_data_dir) { }
-  ~ProcessSingleton() { }
-  bool NotifyOtherProcess() {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  void HuntForZombieChromeProcesses() { NOTIMPLEMENTED(); }
-  void Create() { NOTIMPLEMENTED(); }
-  void Lock() { NOTIMPLEMENTED(); }
-  void Unlock() { NOTIMPLEMENTED(); }
-};
-#endif  // defined(OS_MACOSX)
-
-class GoogleUpdateSettings {
- public:
-  static bool GetCollectStatsConsent() {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool SetCollectStatsConsent(bool consented) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool GetBrowser(std::wstring* browser) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool GetLanguage(std::wstring* language) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool GetBrand(std::wstring* brand) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool GetReferral(std::wstring* referral) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  static bool ClearReferral() {
-    NOTIMPLEMENTED();
-    return false;
-  }
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);
-};
-
-void OpenFirstRunDialog(Profile* profile);
+bool OpenFirstRunDialog(Profile* profile, ProcessSingleton* process_singleton);
 
 void InstallJankometer(const CommandLine&);
 
@@ -177,7 +62,28 @@ void InstallJankometer(const CommandLine&);
 class CancelableTask;
 class ViewMsg_Print_Params;
 
+// Printing is all (obviously) not implemented.
+// http://code.google.com/p/chromium/issues/detail?id=9847
 namespace printing {
+
+class PrintViewManager : public RenderViewHostDelegate::Printing {
+ public:
+  PrintViewManager(TabContents&) { }
+  void Stop() { NOTIMPLEMENTED(); }
+  void Destroy() { }
+  bool OnRenderViewGone(RenderViewHost*) {
+    NOTIMPLEMENTED();
+    return true;  // Assume for now that all renderer crashes are important.
+  }
+
+  // RenderViewHostDelegate::Printing implementation.
+  virtual void DidGetPrintedPagesCount(int cookie, int number_pages) {
+    NOTIMPLEMENTED();
+  }
+  virtual void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params) {
+    NOTIMPLEMENTED();
+  }
+};
 
 class PrintingContext {
  public:
@@ -200,6 +106,7 @@ class PrinterQuery : public base::RefCountedThreadSafe<PrinterQuery> {
   void GetSettings(GetSettingsAskParam ask_user_for_settings,
                    int parent_window,
                    int expected_page_count,
+                   bool has_selection,
                    CancelableTask* callback) { NOTIMPLEMENTED(); }
   PrintingContext::Result last_status() { return PrintingContext::FAILED; }
   const PrintSettings& settings() { NOTIMPLEMENTED(); return settings_; }
@@ -212,7 +119,7 @@ class PrinterQuery : public base::RefCountedThreadSafe<PrinterQuery> {
 
 class PrintJobManager {
  public:
-  void OnQuit() { NOTIMPLEMENTED(); }
+  void OnQuit() { }
   void PopPrinterQuery(int document_cookie, scoped_refptr<PrinterQuery>* job) {
     NOTIMPLEMENTED();
   }
@@ -252,23 +159,7 @@ namespace views {
 class AcceleratorHandler {
 };
 
-class TableModelObserver {
- public:
-  virtual void OnModelChanged() = 0;
-  virtual void OnItemsChanged(int, int) = 0;
-  virtual void OnItemsAdded(int, int) = 0;
-  virtual void OnItemsRemoved(int, int) = 0;
-};
-
-class TableModel {
- public:
-  int CompareValues(int row1, int row2, int column_id) {
-    NOTIMPLEMENTED();
-    return 0;
-  }
-  virtual int RowCount() = 0;
-};
-
+#if !defined(TOOLKIT_VIEWS)
 class MenuItemView {
  public:
   enum Type {
@@ -299,17 +190,23 @@ class MenuItemView {
 
 class MenuDelegate {
 };
+#endif
 
+#if !defined(OS_LINUX)
 class Window {
  public:
   void Show() { NOTIMPLEMENTED(); }
   virtual void Close() { NOTIMPLEMENTED(); }
 };
+#endif
 
 }  // namespace views
 
 class InputWindowDelegate {
 };
+
+#if !defined(TOOLKIT_VIEWS)
+namespace views {
 
 class Menu {
  public:
@@ -343,8 +240,8 @@ class Menu {
   void AppendDelegateMenuItem(int item_id) { NOTIMPLEMENTED(); }
 };
 
-views::Window* CreateInputWindow(gfx::NativeWindow parent_hwnd,
-                                 InputWindowDelegate* delegate);
+}  // namespace view
+#endif
 
 class BookmarkManagerView {
  public:
@@ -378,29 +275,11 @@ class BookmarkEditorView {
 //---------------------------------------------------------------------------
 // These stubs are for Browser
 
+#if !defined(TOOLKIT_VIEWS)
 namespace download_util {
 void DragDownload(const DownloadItem* download, SkBitmap* icon);
 }  // namespace download_util
-
-class IconLoader {
- public:
-  enum IconSize {
-    SMALL = 0,  // 16x16
-    NORMAL,     // 32x32
-    LARGE
-  };
-};
-
-class IconManager : public CancelableRequestProvider {
- public:
-  typedef CancelableRequestProvider::Handle Handle;
-  typedef Callback2<Handle, SkBitmap*>::Type IconRequestCallback;
-  SkBitmap* LookupIcon(const std::wstring&, IconLoader::IconSize)
-      { NOTIMPLEMENTED(); return NULL; }
-  Handle LoadIcon(const std::wstring&, IconLoader::IconSize,
-                  CancelableRequestConsumerBase*, IconRequestCallback*)
-      { NOTIMPLEMENTED(); return NULL; }
-};
+#endif
 
 class DebuggerWindow : public base::RefCountedThreadSafe<DebuggerWindow> {
  public:
@@ -414,77 +293,17 @@ class FaviconStatus {
 };
 
 #if defined(OS_MACOSX)
-class SelectFileDialog : public base::RefCountedThreadSafe<SelectFileDialog> {
- public:
-  enum Type {
-    SELECT_FOLDER,
-    SELECT_SAVEAS_FILE,
-    SELECT_OPEN_FILE,
-    SELECT_OPEN_MULTI_FILE
-  };
-  class Listener {
-   public:
-  };
-  void ListenerDestroyed() { NOTIMPLEMENTED(); }
-  void SelectFile(Type, const std::wstring&, const std::wstring&,
-                  const std::wstring&, const std::wstring&, gfx::NativeWindow,
-                  void*) { NOTIMPLEMENTED(); }
-  static SelectFileDialog* Create(WebContents*) {
-    NOTIMPLEMENTED();
-    return new SelectFileDialog;
-  }
-};
-#endif
-
 class DockInfo {
  public:
-  bool GetNewWindowBounds(gfx::Rect*, bool*) const {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  void AdjustOtherWindowBounds() const { NOTIMPLEMENTED(); }
+  bool GetNewWindowBounds(gfx::Rect*, bool*) const;
+  void AdjustOtherWindowBounds() const;
 };
+#else
 
-class WindowSizer {
- public:
-  static void GetBrowserWindowBounds(const std::wstring& app_name,
-                                     const gfx::Rect& specified_bounds,
-                                     gfx::Rect* window_bounds,
-                                     bool* maximized) { NOTIMPLEMENTED(); }
-};
+#endif
 
 //---------------------------------------------------------------------------
 // These stubs are for Profile
-
-class TemplateURLFetcher {
- public:
-  explicit TemplateURLFetcher(Profile* profile) { }
-  bool Init(Profile* profile) {
-    NOTIMPLEMENTED();
-    return true;
-  }
-  void ScheduleDownload(const std::wstring&, const GURL&, const GURL&,
-                        const gfx::NativeView, bool) { NOTIMPLEMENTED(); }
-};
-
-namespace base {
-class SharedMemory;
-}
-
-class Encryptor {
- public:
-  static bool EncryptString16(const string16& plaintext,
-                              std::string* ciphertext) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-
-  static bool DecryptString16(const std::string& ciphertext,
-                              string16* plaintext) {
-    NOTIMPLEMENTED();
-    return false;
-  }
-};
 
 class WebAppLauncher {
  public:
@@ -494,7 +313,7 @@ class WebAppLauncher {
 };
 
 //---------------------------------------------------------------------------
-// These stubs are for WebContents
+// These stubs are for TabContents
 
 class WebApp : public base::RefCountedThreadSafe<WebApp> {
  public:
@@ -503,54 +322,26 @@ class WebApp : public base::RefCountedThreadSafe<WebApp> {
   };
   void AddObserver(Observer* obs) { NOTIMPLEMENTED(); }
   void RemoveObserver(Observer* obs) { NOTIMPLEMENTED(); }
-  void SetWebContents(WebContents*) { NOTIMPLEMENTED(); }
+  void SetTabContents(TabContents*) { NOTIMPLEMENTED(); }
   SkBitmap GetFavIcon() {
     NOTIMPLEMENTED();
     return SkBitmap();
   }
 };
 
-namespace printing {
-class PrintViewManager {
- public:
-  PrintViewManager(WebContents&) { }
-  void Stop() { NOTIMPLEMENTED(); }
-  void Destroy() { NOTIMPLEMENTED(); }
-  bool OnRenderViewGone(RenderViewHost*) {
-    NOTIMPLEMENTED();
-    return true;  // Assume for now that all renderer crashes are important.
-  }
-  void DidGetPrintedPagesCount(int, int) { NOTIMPLEMENTED(); }
-  void DidPrintPage(const ViewHostMsg_DidPrintPage_Params&) {
-    NOTIMPLEMENTED();
-  }
-};
-}
-
-class HungRendererWarning {
- public:
-  static void HideForWebContents(WebContents*) { NOTIMPLEMENTED(); }
-  static void ShowForWebContents(WebContents*) { NOTIMPLEMENTED(); }
-};
-
-class ConstrainedWindow {
- public:
-  bool WasHidden() {
-    NOTIMPLEMENTED();
-    return false;
-  }
-  void DidBecomeSelected() { NOTIMPLEMENTED(); }
-  void CloseConstrainedWindow() { NOTIMPLEMENTED(); }
-};
-
-class HtmlDialogContentsDelegate {
- public:
-};
-
-class ModalHtmlDialogDelegate : public HtmlDialogContentsDelegate {
+class ModalHtmlDialogDelegate : public HtmlDialogUIDelegate {
  public:
   ModalHtmlDialogDelegate(const GURL&, int, int, const std::string&,
-                          IPC::Message*, WebContents*) { }
+                          IPC::Message*, TabContents*) { }
+
+   virtual bool IsDialogModal() const { return true; }
+   virtual std::wstring GetDialogTitle() const { return std::wstring(); }
+   virtual GURL GetDialogContentURL() const { return GURL(); }
+   virtual void GetDOMMessageHandlers(
+       std::vector<DOMMessageHandler*>* handlers) const {}
+   virtual void GetDialogSize(gfx::Size* size) const {}
+   virtual std::string GetDialogArgs() const { return std::string(); }
+   virtual void OnDialogClosed(const std::string& json_retval) {}
 };
 
 class HtmlDialogContents {
@@ -564,22 +355,6 @@ class HtmlDialogContents {
 };
 
 #if defined(OS_MACOSX)
-class FindBarMac {
- public:
-  FindBarMac(WebContentsView*, gfx::NativeWindow) { }
-  void Show() { }
-  void Close() { }
-  void StartFinding(bool&) { }
-  void EndFindSession() { }
-  void DidBecomeUnselected() { }
-  bool IsVisible() { return false; }
-  bool IsAnimating() { return false; }
-  gfx::NativeView GetView() { return nil; }
-  std::string find_string() { return ""; }
-  void OnFindReply(int, int, const gfx::Rect&, int, bool) { }
-};
-#endif
-
 class LoginHandler {
  public:
   void SetAuth(const std::wstring& username,
@@ -589,32 +364,22 @@ class LoginHandler {
   void CancelAuth() { NOTIMPLEMENTED(); }
   void OnRequestCancelled() { NOTIMPLEMENTED(); }
 };
+#endif
 
+namespace net {
+class AuthChallengeInfo;
+}
+
+#if defined(OS_MACOSX)
 LoginHandler* CreateLoginPrompt(net::AuthChallengeInfo* auth_info,
                                 URLRequest* request,
                                 MessageLoop* ui_loop);
+#endif
 
 class RepostFormWarningDialog {
  public:
   static void RunRepostFormWarningDialog(NavigationController*) { }
   virtual ~RepostFormWarningDialog() { }
-};
-
-class PageInfoWindow {
- public:
-  enum TabID {
-    GENERAL = 0,
-    SECURITY,
-  };
-  static void CreatePageInfo(Profile* profile, NavigationEntry* nav_entry,
-                             gfx::NativeView parent_hwnd, TabID tab) {
-    NOTIMPLEMENTED();
-  }
-  static void CreateFrameInfo(Profile* profile, const GURL& url,
-                              const NavigationEntry::SSLStatus& ssl,
-                              gfx::NativeView parent_hwnd, TabID tab) {
-    NOTIMPLEMENTED();
-  }
 };
 
 class FontsLanguagesWindowView {
@@ -623,11 +388,13 @@ class FontsLanguagesWindowView {
   void SelectLanguagesTab() { NOTIMPLEMENTED(); }
 };
 
+#if !defined(TOOLKIT_VIEWS)
 class OSExchangeData {
  public:
   void SetString(const std::wstring& data) { NOTIMPLEMENTED(); }
   void SetURL(const GURL& url, const std::wstring& title) { NOTIMPLEMENTED(); }
 };
+#endif
 
 class BaseDragSource {
 };
@@ -635,17 +402,25 @@ class BaseDragSource {
 //---------------------------------------------------------------------------
 // These stubs are for extensions
 
-class HWNDHtmlView {
+namespace views {
+class HWNDView {
  public:
-  HWNDHtmlView(const GURL& content_url, RenderViewHostDelegate* delegate,
-               bool allow_dom_ui_bindings) {
-    NOTIMPLEMENTED();
-  }
-  virtual ~HWNDHtmlView() {}
-
-  RenderViewHost* render_view_host() { NOTIMPLEMENTED(); return NULL; }
+  int width() { NOTIMPLEMENTED(); return 0; }
+  int height() { NOTIMPLEMENTED(); return 0; }
   void InitHidden() { NOTIMPLEMENTED(); }
-  void set_preferred_size(const gfx::Size& size) { NOTIMPLEMENTED(); }
+  void SetPreferredSize(const gfx::Size& size) { NOTIMPLEMENTED(); }
+  virtual void SetBackground(const SkBitmap&) { NOTIMPLEMENTED(); }
+  virtual void SetVisible(bool flag) { NOTIMPLEMENTED(); }
+  void SizeToPreferredSize() { NOTIMPLEMENTED(); }
+  bool IsVisible() const { NOTIMPLEMENTED(); return false; }
+  void Layout() { NOTIMPLEMENTED(); }
+  void SchedulePaint() { NOTIMPLEMENTED(); }
+  HWNDView* GetParent() const { NOTIMPLEMENTED(); return NULL; }
+  virtual gfx::Size GetPreferredSize() { NOTIMPLEMENTED(); return gfx::Size(); }
+  gfx::NativeWindow GetHWND() { NOTIMPLEMENTED(); return 0; }
+  void Detach() { NOTIMPLEMENTED(); }
+  gfx::Widget* GetWidget() { NOTIMPLEMENTED(); return NULL; }
 };
+}  // namespace views
 
 #endif  // CHROME_COMMON_TEMP_SCAFFOLDING_STUBS_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -11,8 +11,8 @@
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/window/dialog_delegate.h"
 
 class MessageBoxView;
 namespace views {
@@ -22,7 +22,7 @@ class Window;
 
 // Dialog that prompts the user to create a new profile.
 class NewProfileDialog : public views::DialogDelegate,
-                         public views::TextField::Controller {
+                         public views::Textfield::Controller {
  public:
   // Creates and runs the dialog.
   static void RunDialog();
@@ -30,18 +30,19 @@ class NewProfileDialog : public views::DialogDelegate,
 
   // views::DialogDelegate methods.
   virtual bool Accept();
-  virtual int GetDialogButtons() const;
   virtual views::View* GetInitiallyFocusedView();
-  virtual bool IsDialogButtonEnabled(DialogButton button) const;
+  virtual bool IsDialogButtonEnabled(
+      MessageBoxFlags::DialogButton button) const;
   virtual std::wstring GetWindowTitle() const;
   virtual void DeleteDelegate();
 
-  // views::TextField::Controller methods.
-  virtual void ContentsChanged(views::TextField* sender,
+  // views::Textfield::Controller methods.
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender,
-                               UINT message, TCHAR key, UINT repeat_count,
-                               UINT flags) {}
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key) {
+    return false;
+  }
 
   // views::WindowDelegate methods.
   virtual views::View* GetContentsView();

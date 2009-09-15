@@ -4,12 +4,12 @@
 
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/l10n_util.h"
 #include "grit/generated_resources.h"
 
 // InfoBarDelegate: ------------------------------------------------------------
@@ -29,7 +29,7 @@ InfoBarDelegate::InfoBarDelegate(TabContents* contents)
 }
 
 void InfoBarDelegate::StoreActiveEntryUniqueID(TabContents* contents) {
-  NavigationEntry* active_entry = contents->controller()->GetActiveEntry();
+  NavigationEntry* active_entry = contents->controller().GetActiveEntry();
   contents_unique_id_ = active_entry ? active_entry->unique_id() : 0;
 }
 

@@ -5,10 +5,8 @@
 #ifndef BASE_MESSAGE_LOOP_H_
 #define BASE_MESSAGE_LOOP_H_
 
-#include <deque>
 #include <queue>
 #include <string>
-#include <vector>
 
 #include "base/histogram.h"
 #include "base/message_pump.h"
@@ -16,7 +14,6 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "base/timer.h"
 
 #if defined(OS_WIN)
 // We need this to declare base::MessagePumpWin::Dispatcher, which we should
@@ -24,6 +21,9 @@
 #include "base/message_pump_win.h"
 #elif defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
+#endif
+#if defined(OS_LINUX)
+#include "base/message_pump_glib.h"
 #endif
 
 // A MessageLoop is used to process events for a particular thread.  There is
@@ -103,13 +103,13 @@ class MessageLoop : public base::MessagePump::Delegate {
       const tracked_objects::Location& from_here, Task* task);
 
   void PostDelayedTask(
-      const tracked_objects::Location& from_here, Task* task, int delay_ms);
+      const tracked_objects::Location& from_here, Task* task, int64 delay_ms);
 
   void PostNonNestableTask(
       const tracked_objects::Location& from_here, Task* task);
 
   void PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here, Task* task, int delay_ms);
+      const tracked_objects::Location& from_here, Task* task, int64 delay_ms);
 
   // A variant on PostTask that deletes the given object.  This is useful
   // if the object needs to live until the next run of the MessageLoop (for
@@ -231,6 +231,9 @@ class MessageLoop : public base::MessagePump::Delegate {
     exception_restoration_ = restore;
   }
 
+  // Returns true if we are currently running a nested message loop.
+  bool IsNested();
+
   //----------------------------------------------------------------------------
  protected:
   struct RunState {
@@ -331,7 +334,7 @@ class MessageLoop : public base::MessagePump::Delegate {
 
   // Post a task to our incomming queue.
   void PostTask_Helper(const tracked_objects::Location& from_here, Task* task,
-                       int delay_ms, bool nestable);
+                       int64 delay_ms, bool nestable);
 
   // base::MessagePump::Delegate methods:
   virtual bool DoWork();
@@ -413,18 +416,28 @@ class MessageLoopForUI : public MessageLoop {
     return static_cast<MessageLoopForUI*>(loop);
   }
 
+#if defined(OS_LINUX)
+  typedef base::MessagePumpForUI::Observer Observer;
+
+  // See message_pump_glib for definitions of these methods.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+#endif
+
 #if defined(OS_WIN)
   typedef base::MessagePumpWin::Dispatcher Dispatcher;
   typedef base::MessagePumpWin::Observer Observer;
 
   // Please see MessagePumpWin for definitions of these methods.
-  void Run(Dispatcher* dispatcher);
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
+  void Run(Dispatcher* dispatcher);
   void WillProcessMessage(const MSG& message);
   void DidProcessMessage(const MSG& message);
   void PumpOutPendingPaintMessages();
+#endif
 
+#if defined(OS_WIN) || defined(OS_LINUX)
  protected:
   // TODO(rvargas): Make this platform independent.
   base::MessagePumpForUI* pump_ui() {

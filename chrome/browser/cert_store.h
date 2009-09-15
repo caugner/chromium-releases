@@ -5,12 +5,11 @@
 #ifndef CHROME_BROWSER_CERT_STORE_H_
 #define CHROME_BROWSER_CERT_STORE_H_
 
-#include <vector>
 #include <map>
 
 #include "base/lock.h"
 #include "base/singleton.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "net/base/x509_certificate.h"
 
 // The purpose of the cert store is to provide an easy way to store/retrieve
@@ -63,6 +62,8 @@ class CertStore : public NotificationObserver {
   typedef std::map<net::X509Certificate*, int, net::X509Certificate::LessThan>
       ReverseCertMap;
 
+  NotificationRegistrar registrar_;
+
   IDMap process_id_to_cert_id_;
   IDMap cert_id_to_process_id_;
 
@@ -75,7 +76,7 @@ class CertStore : public NotificationObserver {
   //                     cert_to_id_.
   Lock cert_lock_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CertStore);
+  DISALLOW_COPY_AND_ASSIGN(CertStore);
 };
 
 #endif  // CHROME_BROWSER_CERT_STORE_H_

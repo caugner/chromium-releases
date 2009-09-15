@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,6 +166,7 @@
 #include "base/histogram.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -181,6 +182,8 @@
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/libxml_utils.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -194,6 +197,7 @@
 // TODO(port): Move these headers above as they are ported.
 #include "chrome/common/temp_scaffolding_stubs.h"
 #else
+#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_settings.h"
 #endif
 
@@ -203,13 +207,14 @@ using base::TimeDelta;
 // Check to see that we're being called on only one thread.
 static bool IsSingleThreaded();
 
-static const char kMetricsURL[] =
-    "https://clients4.google.com/firefox/metrics/collect";
-
 static const char kMetricsType[] = "application/vnd.mozilla.metrics.bz2";
 
 // The delay, in seconds, after startup before sending the first log message.
 static const int kInitialInterlogDuration = 60;  // one minute
+
+// This specifies the amount of time to wait for all renderers to send their
+// data.
+static const int kMaxHistogramGatheringWaitDuration = 60000;  // 60 seconds.
 
 // The default maximum number of events in a log uploaded to the UMA server.
 static const int kInitialEventLimit = 2400;
@@ -339,6 +344,7 @@ void MetricsService::RegisterPrefs(PrefService* local_state) {
 
   local_state->RegisterInt64Pref(prefs::kUninstallMetricsPageLoadCount, 0);
   local_state->RegisterInt64Pref(prefs::kUninstallLaunchCount, 0);
+  local_state->RegisterInt64Pref(prefs::kUninstallMetricsInstallDate, 0);
   local_state->RegisterInt64Pref(prefs::kUninstallMetricsUptimeSec, 0);
   local_state->RegisterInt64Pref(prefs::kUninstallLastLaunchTimeSec, 0);
   local_state->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
@@ -347,6 +353,7 @@ void MetricsService::RegisterPrefs(PrefService* local_state) {
 // static
 void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
   local_state->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  local_state->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
 
   local_state->SetInteger(prefs::kStabilityIncompleteSessionEndCount, 0);
   local_state->SetInteger(prefs::kStabilityBreakpadRegistrationSuccess, 0);
@@ -364,9 +371,19 @@ void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
   local_state->SetInteger(prefs::kSecurityRendererOnSboxDesktop, 0);
   local_state->SetInteger(prefs::kSecurityRendererOnDefaultDesktop, 0);
 
+  local_state->SetString(prefs::kStabilityLaunchTimeSec, L"0");
+  local_state->SetString(prefs::kStabilityLastTimestampSec, L"0");
   local_state->SetString(prefs::kStabilityUptimeSec, L"0");
 
   local_state->ClearPref(prefs::kStabilityPluginStats);
+
+  ListValue* unsent_initial_logs = local_state->GetMutableList(
+      prefs::kMetricsInitialLogs);
+  unsent_initial_logs->Clear();
+
+  ListValue* unsent_ongoing_logs = local_state->GetMutableList(
+      prefs::kMetricsOngoingLogs);
+  unsent_ongoing_logs->Clear();
 }
 
 MetricsService::MetricsService()
@@ -444,10 +461,41 @@ void MetricsService::SetRecording(bool enabled) {
       }
     }
     StartRecording();
-    ListenerRegistration(true);
+
+    registrar_.Add(this, NotificationType::BROWSER_OPENED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::BROWSER_CLOSED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::USER_ACTION,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::TAB_PARENTED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::TAB_CLOSING,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::LOAD_START,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::LOAD_STOP,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::RENDERER_PROCESS_IN_SBOX,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::RENDERER_PROCESS_HANG,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::CHILD_INSTANCE_CREATED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::CHILD_PROCESS_CRASHED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::OMNIBOX_OPENED_URL,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::BOOKMARK_MODEL_LOADED,
+                   NotificationService::AllSources());
   } else {
-    // Turn off all observers.
-    ListenerRegistration(false);
+    registrar_.RemoveAll();
     PushPendingLogsToUnsentLists();
     DCHECK(!pending_log());
     if (state_ > INITIAL_LOG_READY && unsent_logs())
@@ -506,8 +554,8 @@ void MetricsService::Observe(NotificationType type,
       LogLoadStarted();
       break;
 
-    case NotificationType::RENDERER_PROCESS_TERMINATED:
-      if (!*Details<bool>(details).ptr())
+    case NotificationType::RENDERER_PROCESS_CLOSED:
+      if (*Details<bool>(details).ptr())
         LogRendererCrash();
       break;
 
@@ -534,10 +582,12 @@ void MetricsService::Observe(NotificationType type,
           *Details<AutocompleteLog>(details).ptr());
       break;
 
-    case NotificationType::BOOKMARK_MODEL_LOADED:
-      LogBookmarks(Source<Profile>(source)->GetBookmarkModel());
+    case NotificationType::BOOKMARK_MODEL_LOADED: {
+      Profile* p = Source<Profile>(source).ptr();
+      if (p)
+        LogBookmarks(p->GetBookmarkModel());
       break;
-
+    }
     default:
       NOTREACHED();
       break;
@@ -593,6 +643,13 @@ void MetricsService::RecordBreakpadHasDebugger(bool has_debugger) {
 // Initialization methods
 
 void MetricsService::InitializeMetricsState() {
+#if defined(OS_POSIX)
+  server_url_ = L"https://clients4.google.com/firefox/metrics/collect";
+#else
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  server_url_ = dist->GetStatsServerURL();
+#endif
+
   PrefService* pref = g_browser_process->local_state();
   DCHECK(pref);
 
@@ -622,9 +679,9 @@ void MetricsService::InitializeMetricsState() {
 
   if (!pref->GetBoolean(prefs::kStabilitySessionEndCompleted)) {
     IncrementPrefValue(prefs::kStabilityIncompleteSessionEndCount);
+    // This is marked false when we get a WM_ENDSESSION.
+    pref->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
   }
-  // This is marked false when we get a WM_ENDSESSION.
-  pref->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
 
   int64 last_start_time = pref->GetInt64(prefs::kStabilityLaunchTimeSec);
   int64 last_end_time = pref->GetInt64(prefs::kStabilityLastTimestampSec);
@@ -666,6 +723,24 @@ void MetricsService::InitializeMetricsState() {
     }
   }
 
+  // Get stats on use of command line.
+  const CommandLine* command_line(CommandLine::ForCurrentProcess());
+  size_t common_commands = 0;
+  if (command_line->HasSwitch(switches::kUserDataDir)) {
+    ++common_commands;
+    UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineDatDirCount", 1);
+  }
+
+  if (command_line->HasSwitch(switches::kApp)) {
+    ++common_commands;
+    UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineAppModeCount", 1);
+  }
+
+  UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineFlagCount",
+                           command_line->GetSwitchCount());
+  UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineUncommonFlagCount",
+                           command_line->GetSwitchCount() - common_commands);
+
   // Kick off the process of saving the state (so the uptime numbers keep
   // getting updated) every n minutes.
   ScheduleNextStateSave();
@@ -691,16 +766,29 @@ std::string MetricsService::GenerateClientID() {
   DCHECK(result == kGUIDSize);
 
   return WideToUTF8(guid_string.substr(1, guid_string.length() - 2));
+#elif defined(LINUX2)
+  uint64 sixteen_bytes[2] = { base::RandUint64(), base::RandUint64() };
+  return RandomBytesToGUIDString(sixteen_bytes);
 #else
-  // TODO(port): Implement for Mac and linux.
-  // Rather than actually implementing a random source, might this be a good
-  // time to implement http://code.google.com/p/chromium/issues/detail?id=2278
-  // ?  I think so!
+  // TODO(cmasone): enable the above for all OS_POSIX platforms once the
+  // first-run dialog text is all up to date.
   NOTIMPLEMENTED();
   return std::string();
 #endif
 }
 
+#if defined(OS_POSIX)
+// TODO(cmasone): Once we're comfortable this works, migrate Windows code to
+// use this as well.
+std::string MetricsService::RandomBytesToGUIDString(const uint64 bytes[2]) {
+  return StringPrintf("%08llX-%04llX-%04llX-%04llX-%012llX",
+                      bytes[0] >> 32,
+                      (bytes[0] >> 16) & 0x0000ffff,
+                      bytes[0] & 0x0000ffff,
+                      bytes[1] >> 48,
+                      bytes[1] & 0x0000ffffffffffffULL);
+}
+#endif
 
 //------------------------------------------------------------------------------
 // State save methods
@@ -721,7 +809,7 @@ void MetricsService::SaveLocalState() {
   }
 
   RecordCurrentState(pref);
-  pref->ScheduleSavePersistentPrefs(g_browser_process->file_thread());
+  pref->ScheduleSavePersistentPrefs();
 
   // TODO(jar): Does this run down the batteries????
   ScheduleNextStateSave();
@@ -777,46 +865,6 @@ void MetricsService::StopRecording(MetricsLog** log) {
   else
     delete current_log_;
   current_log_ = NULL;
-}
-
-void MetricsService::ListenerRegistration(bool start_listening) {
-  AddOrRemoveObserver(this, NotificationType::BROWSER_OPENED, start_listening);
-  AddOrRemoveObserver(this, NotificationType::BROWSER_CLOSED, start_listening);
-  AddOrRemoveObserver(this, NotificationType::USER_ACTION, start_listening);
-  AddOrRemoveObserver(this, NotificationType::TAB_PARENTED, start_listening);
-  AddOrRemoveObserver(this, NotificationType::TAB_CLOSING, start_listening);
-  AddOrRemoveObserver(this, NotificationType::LOAD_START, start_listening);
-  AddOrRemoveObserver(this, NotificationType::LOAD_STOP, start_listening);
-  AddOrRemoveObserver(this, NotificationType::RENDERER_PROCESS_IN_SBOX,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::RENDERER_PROCESS_TERMINATED,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::RENDERER_PROCESS_HANG,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::CHILD_INSTANCE_CREATED,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::CHILD_PROCESS_CRASHED,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::OMNIBOX_OPENED_URL,
-                      start_listening);
-  AddOrRemoveObserver(this, NotificationType::BOOKMARK_MODEL_LOADED,
-                      start_listening);
-}
-
-// static
-void MetricsService::AddOrRemoveObserver(NotificationObserver* observer,
-                                         NotificationType type,
-                                         bool is_add) {
-  NotificationService* service = NotificationService::current();
-
-  if (is_add)
-    service->AddObserver(observer, type, NotificationService::AllSources());
-  else
-    service->RemoveObserver(observer, type, NotificationService::AllSources());
 }
 
 void MetricsService::PushPendingLogsToUnsentLists() {
@@ -882,15 +930,51 @@ void MetricsService::StartLogTransmissionTimer() {
 
   // Right before the UMA transmission gets started, there's one more thing we'd
   // like to record: the histogram of memory usage, so we spawn a task to
-  // collect the memory details and when that task is finished, we arrange for
-  // TryToStartTransmission to take over.
+  // collect the memory details and when that task is finished, it will call
+  // OnMemoryDetailCollectionDone, which will call HistogramSynchronization to
+  // collect histograms from all renderers and then we will call
+  // OnHistogramSynchronizationDone to continue processing.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       log_sender_factory_.
-          NewRunnableMethod(&MetricsService::CollectMemoryDetails),
-      static_cast<int>(interlog_duration_.InMilliseconds()));
+          NewRunnableMethod(&MetricsService::LogTransmissionTimerDone),
+      interlog_duration_.InMilliseconds());
 }
 
-void MetricsService::TryToStartTransmission() {
+void MetricsService::LogTransmissionTimerDone() {
+  Task* task = log_sender_factory_.
+      NewRunnableMethod(&MetricsService::OnMemoryDetailCollectionDone);
+
+  MetricsMemoryDetails* details = new MetricsMemoryDetails(task);
+  details->StartFetch();
+
+  // Collect WebCore cache information to put into a histogram.
+  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
+       it != RenderProcessHost::end(); ++it) {
+    it->second->Send(new ViewMsg_GetCacheResourceStats());
+  }
+}
+
+void MetricsService::OnMemoryDetailCollectionDone() {
+  DCHECK(IsSingleThreaded());
+
+  // HistogramSynchronizer will Collect histograms from all renderers and it
+  // will call OnHistogramSynchronizationDone (if wait time elapses before it
+  // heard from all renderers, then also it will call
+  // OnHistogramSynchronizationDone).
+
+  // Create a callback_task for OnHistogramSynchronizationDone.
+  Task* callback_task = log_sender_factory_.NewRunnableMethod(
+      &MetricsService::OnHistogramSynchronizationDone);
+
+  // Set up the callback to task to call after we receive histograms from all
+  // renderer processes. Wait time specifies how long to wait before absolutely
+  // calling us back on the task.
+  HistogramSynchronizer::FetchRendererHistogramsAsynchronously(
+      MessageLoop::current(), callback_task,
+      kMaxHistogramGatheringWaitDuration);
+}
+
+void MetricsService::OnHistogramSynchronizationDone() {
   DCHECK(IsSingleThreaded());
 
   // This function should only be called via timer, so timer_pending_
@@ -1036,19 +1120,6 @@ bool MetricsService::TransmissionPermitted() const {
   }
 }
 
-void MetricsService::CollectMemoryDetails() {
-  Task* task = log_sender_factory_.
-      NewRunnableMethod(&MetricsService::TryToStartTransmission);
-  MetricsMemoryDetails* details = new MetricsMemoryDetails(task);
-  details->StartFetch();
-
-  // Collect WebCore cache information to put into a histogram.
-  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
-       it != RenderProcessHost::end(); ++it) {
-    it->second->Send(new ViewMsg_GetCacheResourceStats());
-  }
-}
-
 void MetricsService::PrepareInitialLog() {
   DCHECK(state_ == PLUGIN_LIST_ARRIVED);
   std::vector<WebPluginInfo> plugins;
@@ -1148,7 +1219,8 @@ void MetricsService::PrepareFetchWithPendingLog() {
     return;
   }
 
-  current_fetch_.reset(new URLFetcher(GURL(kMetricsURL), URLFetcher::POST,
+  current_fetch_.reset(new URLFetcher(GURL(WideToUTF16(server_url_)),
+                                      URLFetcher::POST,
                                       this));
   current_fetch_->set_request_context(Profile::GetDefaultRequestContext());
   current_fetch_->set_upload_data(kMetricsType, compressed_log);
@@ -1290,8 +1362,7 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
     PrefService* local_state = g_browser_process->local_state();
     DCHECK(local_state);
     if (local_state)
-      local_state->ScheduleSavePersistentPrefs(
-          g_browser_process->file_thread());
+      local_state->ScheduleSavePersistentPrefs();
 
     // Provide a default (free of exponetial backoff, other varances) in case
     // the server does not specify a value.
@@ -1311,7 +1382,7 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
 
 void MetricsService::HandleBadResponseCode() {
   LOG(INFO) << "Verify your metrics logs are formatted correctly.  "
-      "Verify server is active at " << kMetricsURL;
+               "Verify server is active at " << server_url_;
   if (!pending_log()) {
     LOG(INFO) << "METRICS: Recorder shutdown during log transmission.";
   } else {
@@ -1531,7 +1602,7 @@ void MetricsService::LogWindowChange(NotificationType type,
   } else {
     controller_id = window_map_[window_or_tab];
   }
-  DCHECK(controller_id != -1);
+  DCHECK_NE(controller_id, -1);
 
   switch (type.value) {
     case NotificationType::TAB_PARENTED:
@@ -1645,8 +1716,10 @@ void MetricsService::LogChildProcessChange(
 }
 
 // Recursively counts the number of bookmarks and folders in node.
-static void CountBookmarks(BookmarkNode* node, int* bookmarks, int* folders) {
-  if (node->GetType() == history::StarredEntry::URL)
+static void CountBookmarks(const BookmarkNode* node,
+                           int* bookmarks,
+                           int* folders) {
+  if (node->GetType() == BookmarkNode::URL)
     (*bookmarks)++;
   else
     (*folders)++;
@@ -1654,7 +1727,7 @@ static void CountBookmarks(BookmarkNode* node, int* bookmarks, int* folders) {
     CountBookmarks(node->GetChild(i), bookmarks, folders);
 }
 
-void MetricsService::LogBookmarks(BookmarkNode* node,
+void MetricsService::LogBookmarks(const BookmarkNode* node,
                                   const wchar_t* num_bookmarks_key,
                                   const wchar_t* num_folders_key) {
   DCHECK(node);
@@ -1782,20 +1855,8 @@ void MetricsService::RecordCurrentState(PrefService* pref) {
   RecordPluginChanges(pref);
 }
 
-void MetricsService::CollectRendererHistograms() {
-  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
-       it != RenderProcessHost::end(); ++it) {
-    it->second->Send(new ViewMsg_GetRendererHistograms());
-  }
-}
-
 void MetricsService::RecordCurrentHistograms() {
   DCHECK(current_log_);
-
-  CollectRendererHistograms();
-
-  // TODO(raman): Delay the metrics collection activities until we get all the
-  // updates from the renderers, or we time out (1 second?  3 seconds?).
 
   StatisticsRecorder::Histograms histograms;
   StatisticsRecorder::GetHistograms(&histograms);

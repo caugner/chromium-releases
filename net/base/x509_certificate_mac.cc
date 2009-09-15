@@ -82,41 +82,51 @@ void ParsePrincipal(const CSSM_X509_NAME* name,
   }
 }
 
-OSStatus GetCertFieldsForOID(X509Certificate::OSCertHandle cert_handle,
-                             CSSM_OID oid, uint32* num_of_fields,
-                             CSSM_FIELD_PTR* fields) {
-  *num_of_fields = 0;
-  *fields = NULL;
+struct CSSMFields {
+  CSSMFields() : cl_handle(NULL), num_of_fields(0), fields(NULL) {}
+  ~CSSMFields() {
+    if (cl_handle)
+      CSSM_CL_FreeFields(cl_handle, num_of_fields, &fields);
+  }
+
+  CSSM_CL_HANDLE cl_handle;
+  uint32 num_of_fields;
+  CSSM_FIELD_PTR fields;
+};
+
+OSStatus GetCertFields(X509Certificate::OSCertHandle cert_handle,
+                       CSSMFields* fields) {
+  DCHECK(cert_handle);
+  DCHECK(fields);
 
   CSSM_DATA cert_data;
   OSStatus status = SecCertificateGetData(cert_handle, &cert_data);
   if (status)
     return status;
 
-  CSSM_CL_HANDLE cl_handle;
-  status = SecCertificateGetCLHandle(cert_handle, &cl_handle);
-  if (status)
+  status = SecCertificateGetCLHandle(cert_handle, &fields->cl_handle);
+  if (status) {
+    DCHECK(!fields->cl_handle);
     return status;
+  }
 
-  status = CSSM_CL_CertGetAllFields(cl_handle, &cert_data, num_of_fields,
-                                    fields);
+  status = CSSM_CL_CertGetAllFields(fields->cl_handle, &cert_data,
+                                    &fields->num_of_fields, &fields->fields);
   return status;
 }
 
 void GetCertGeneralNamesForOID(X509Certificate::OSCertHandle cert_handle,
                                CSSM_OID oid, CE_GeneralNameType name_type,
                                std::vector<std::string>* result) {
-  uint32 num_of_fields;
-  CSSM_FIELD_PTR fields;
-  OSStatus status = GetCertFieldsForOID(cert_handle, oid, &num_of_fields,
-                                        &fields);
+  CSSMFields fields;
+  OSStatus status = GetCertFields(cert_handle, &fields);
   if (status)
     return;
 
-  for (size_t field = 0; field < num_of_fields; ++field) {
-    if (CSSMOIDEqual(&fields[field].FieldOid, &oid)) {
+  for (size_t field = 0; field < fields.num_of_fields; ++field) {
+    if (CSSMOIDEqual(&fields.fields[field].FieldOid, &oid)) {
       CSSM_X509_EXTENSION_PTR cssm_ext =
-          (CSSM_X509_EXTENSION_PTR)fields[field].FieldValue.Data;
+          (CSSM_X509_EXTENSION_PTR)fields.fields[field].FieldValue.Data;
       CE_GeneralNames* alt_name =
           (CE_GeneralNames*) cssm_ext->value.parsedValue;
 
@@ -148,17 +158,16 @@ void GetCertDateForOID(X509Certificate::OSCertHandle cert_handle,
                        CSSM_OID oid, Time* result) {
   *result = Time::Time();
 
-  uint32 num_of_fields;
-  CSSM_FIELD_PTR fields;
-  OSStatus status = GetCertFieldsForOID(cert_handle, oid, &num_of_fields,
-                                        &fields);
+  CSSMFields fields;
+  OSStatus status = GetCertFields(cert_handle, &fields);
   if (status)
     return;
 
-  for (size_t field = 0; field < num_of_fields; ++field) {
-    if (CSSMOIDEqual(&fields[field].FieldOid, &oid)) {
+  for (size_t field = 0; field < fields.num_of_fields; ++field) {
+    if (CSSMOIDEqual(&fields.fields[field].FieldOid, &oid)) {
       CSSM_X509_TIME* x509_time =
-          reinterpret_cast<CSSM_X509_TIME *>(fields[field].FieldValue.Data);
+          reinterpret_cast<CSSM_X509_TIME *>
+            (fields.fields[field].FieldValue.Data);
       std::string time_string =
           std::string(reinterpret_cast<std::string::value_type*>
                       (x509_time->time.Data),
@@ -243,11 +252,6 @@ void X509Certificate::Persist(Pickle* pickle) {
   pickle->WriteData(reinterpret_cast<char*>(cert_data.Data), cert_data.Length);
 }
 
-bool X509Certificate::HasExpired() const {
-  NOTIMPLEMENTED();
-  return false;
-}
-
 void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
   dns_names->clear();
 
@@ -259,8 +263,7 @@ void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
 }
 
 int X509Certificate::Verify(const std::string& hostname,
-                            bool rev_checking_enabled,
-                            CertVerifyResult* verify_result) const {
+                            int flags, CertVerifyResult* verify_result) const {
   NOTIMPLEMENTED();
   return ERR_NOT_IMPLEMENTED;
 }
@@ -273,7 +276,7 @@ int X509Certificate::Verify(const std::string& hostname,
 // in the certificate chain according to Section 7 (pp. 11-12) of the EV
 // Certificate Guidelines Version 1.0 at
 // http://cabforum.org/EV_Certificate_Guidelines.pdf.
-bool X509Certificate::IsEV(int cert_status) const {
+bool X509Certificate::VerifyEV() const {
   // TODO(avi): implement this
   NOTIMPLEMENTED();
   return false;

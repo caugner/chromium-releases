@@ -10,21 +10,37 @@
 
 #include "Frame.h"
 #include "FrameLoaderClient.h"
+#include "GenericWorkerTask.h"
+#include "MessagePort.h"
+#include "MessagePortChannel.h"
 #include "ScriptExecutionContext.h"
+#include "WorkerContextExecutionProxy.h"
 #include "WorkerMessagingProxy.h"
 #include "Worker.h"
+#include "WorkerContext.h"
+#include "WorkerThread.h"
+#include <wtf/Threading.h>
 
 #undef LOG
 
 #include "webkit/glue/webworkerclient_impl.h"
 
+#include "base/command_line.h"
+#include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebKitClient.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebWorker.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webframeloaderclient_impl.h"
 #include "webkit/glue/webframe_impl.h"
 #include "webkit/glue/webview_delegate.h"
 #include "webkit/glue/webview_impl.h"
-#include "webkit/glue/webworker.h"
+#include "webkit/glue/webworker_impl.h"
 
+using WebKit::WebString;
+using WebKit::WebWorker;
+using WebKit::WebWorkerClient;
 
 // When WebKit creates a WorkerContextProxy object, we check if we're in the
 // renderer or worker process.  If the latter, then we just use
@@ -34,22 +50,45 @@
 // WebWorker object to talk to the worker process over IPC.  The worker process
 // talks to WebCore::Worker* using WorkerObjectProxy, which we implement on
 // WebWorkerClientImpl.
+//
+// Note that if we're running each worker in a separate process, then nested
+// workers end up using the same codepath as the renderer process.
 WebCore::WorkerContextProxy* WebCore::WorkerContextProxy::create(
     WebCore::Worker* worker) {
-  if (!worker->scriptExecutionContext()->isDocument())
+  if (!worker->scriptExecutionContext()->isDocument() &&
+      CommandLine::ForCurrentProcess()->HasSwitch(
+            L"web-worker-share-processes")) {
     return new WebCore::WorkerMessagingProxy(worker);
+  }
 
+  WebWorker* webworker = NULL;
   WebWorkerClientImpl* proxy = new WebWorkerClientImpl(worker);
 
-  // Get to the RenderView, so that we can tell the browser to create a
-  // worker process if necessary.
-  WebCore::Document* document = static_cast<WebCore::Document*>(
-      worker->scriptExecutionContext());
-  WebFrameLoaderClient* frame_loader_client =
-      static_cast<WebFrameLoaderClient*>(document->frame()->loader()->client());
-  WebViewDelegate* webview_delegate =
-      frame_loader_client->webframe()->webview_impl()->delegate();
-  WebWorker* webworker = webview_delegate->CreateWebWorker(proxy);
+  if (worker->scriptExecutionContext()->isDocument()) {
+    // Get to the RenderView, so that we can tell the browser to create a
+    // worker process if necessary.
+    WebCore::Document* document = static_cast<WebCore::Document*>(
+        worker->scriptExecutionContext());
+    WebFrameLoaderClient* frame_loader_client =
+        static_cast<WebFrameLoaderClient*>(
+            document->frame()->loader()->client());
+    WebViewDelegate* webview_delegate =
+        frame_loader_client->webframe()->GetWebViewImpl()->delegate();
+    webworker = webview_delegate->CreateWebWorker(proxy);
+  } else {
+    WebCore::WorkerContextExecutionProxy* current_context =
+        WebCore::WorkerContextExecutionProxy::retrieve();
+    if (!current_context) {
+      NOTREACHED();
+      return NULL;
+    }
+
+    WebCore::WorkerObjectProxy* worker_object_proxy =
+        &current_context->workerContext()->thread()->workerObjectProxy();
+    WebWorkerImpl* impl = reinterpret_cast<WebWorkerImpl*>(worker_object_proxy);
+    webworker = impl->client()->createWorker(proxy);
+  }
+
   proxy->set_webworker(webworker);
   return proxy;
 }
@@ -60,93 +99,267 @@ WebWorkerClientImpl::WebWorkerClientImpl(WebCore::Worker* worker)
       worker_(worker),
       asked_to_terminate_(false),
       unconfirmed_message_count_(0),
-      worker_context_had_pending_activity_(false) {
+      worker_context_had_pending_activity_(false),
+      worker_thread_id_(WTF::currentThread()) {
 }
 
 WebWorkerClientImpl::~WebWorkerClientImpl() {
 }
 
 void WebWorkerClientImpl::set_webworker(WebWorker* webworker) {
-  webworker_.reset(webworker);
+  webworker_ = webworker;
 }
 
 void WebWorkerClientImpl::startWorkerContext(
-    const WebCore::KURL& scriptURL,
-    const WebCore::String& userAgent,
-    const WebCore::String& encoding,
-    const WebCore::String& sourceCode) {
-  webworker_->StartWorkerContext(webkit_glue::KURLToGURL(scriptURL),
-                                 webkit_glue::StringToString16(userAgent),
-                                 webkit_glue::StringToString16(encoding),
-                                 webkit_glue::StringToString16(sourceCode));
+    const WebCore::KURL& script_url,
+    const WebCore::String& user_agent,
+    const WebCore::String& source_code) {
+  // Worker.terminate() could be called from JS before the context is started.
+  if (asked_to_terminate_)
+    return;
+
+  if (!WTF::isMainThread()) {
+    WebWorkerImpl::DispatchTaskToMainThread(
+        WebCore::createCallbackTask(&StartWorkerContextTask, this,
+            script_url.string(), user_agent, source_code));
+    return;
+  }
+
+  webworker_->startWorkerContext(
+      webkit_glue::KURLToWebURL(script_url),
+      webkit_glue::StringToWebString(user_agent),
+      webkit_glue::StringToWebString(source_code));
 }
 
 void WebWorkerClientImpl::terminateWorkerContext() {
   if (asked_to_terminate_)
-      return;
+    return;
+
   asked_to_terminate_ = true;
 
-  webworker_->TerminateWorkerContext();
+  if (!WTF::isMainThread()) {
+    WebWorkerImpl::DispatchTaskToMainThread(
+        WebCore::createCallbackTask(&TerminateWorkerContextTask, this));
+    return;
+  }
+
+  webworker_->terminateWorkerContext();
 }
 
 void WebWorkerClientImpl::postMessageToWorkerContext(
-    const WebCore::String& message) {
+    const WebCore::String& message,
+    WTF::PassOwnPtr<WebCore::MessagePortChannel> port) {
+  // Worker.terminate() could be called from JS before the context is started.
+  if (asked_to_terminate_)
+    return;
+
   ++unconfirmed_message_count_;
-  webworker_->PostMessageToWorkerContext(
-      webkit_glue::StringToString16(message));
+
+  if (!WTF::isMainThread()) {
+    WebWorkerImpl::DispatchTaskToMainThread(
+        WebCore::createCallbackTask(
+            &PostMessageToWorkerContextTask, this, message, port));
+    return;
+  }
+
+  // TODO(jam): Update to pass a MessagePortChannel or
+  // PlatformMessagePortChannel when we add MessagePort support to Chrome.
+  webworker_->postMessageToWorkerContext(
+      webkit_glue::StringToWebString(message));
 }
 
 bool WebWorkerClientImpl::hasPendingActivity() const {
   return !asked_to_terminate_ &&
-         (unconfirmed_message_count_ || worker_context_had_pending_activity_);
+      (unconfirmed_message_count_ || worker_context_had_pending_activity_);
 }
 
 void WebWorkerClientImpl::workerObjectDestroyed() {
-  webworker_->WorkerObjectDestroyed();
+  if (WTF::isMainThread()) {
+    webworker_->workerObjectDestroyed();
+    worker_ = NULL;
+  }
 
-  // The lifetime of this proxy is controlled by the worker.
-  delete this;
+  // Even if this is called on the main thread, there could be a queued task for
+  // this object, so don't delete it right away.
+  WebWorkerImpl::DispatchTaskToMainThread(
+      WebCore::createCallbackTask(&WorkerObjectDestroyedTask, this));
 }
 
-void WebWorkerClientImpl::PostMessageToWorkerObject(const string16& message) {
-  worker_->dispatchMessage(webkit_glue::String16ToString(message));
+void WebWorkerClientImpl::postMessageToWorkerObject(const WebString& message) {
+  // TODO(jam): Add support for passing MessagePorts when they are supported
+  // in Chrome.
+  if (WTF::currentThread() != worker_thread_id_) {
+    script_execution_context_->postTask(
+        WebCore::createCallbackTask(&PostMessageToWorkerObjectTask, this,
+            webkit_glue::WebStringToString(message),
+            WTF::PassOwnPtr<WebCore::MessagePortChannel>(0)));
+    return;
+  }
+
+  worker_->dispatchMessage(webkit_glue::WebStringToString(message), 0);
 }
 
-void WebWorkerClientImpl::PostExceptionToWorkerObject(
-    const string16& error_message,
+void WebWorkerClientImpl::postExceptionToWorkerObject(
+    const WebString& error_message,
     int line_number,
-    const string16& source_url) {
+    const WebString& source_url) {
+  if (WTF::currentThread() != worker_thread_id_) {
+    script_execution_context_->postTask(
+        WebCore::createCallbackTask(&PostExceptionToWorkerObjectTask, this,
+            webkit_glue::WebStringToString(error_message),
+            line_number,
+            webkit_glue::WebStringToString(source_url)));
+    return;
+  }
+
   script_execution_context_->reportException(
-      webkit_glue::String16ToString(error_message),
+      webkit_glue::WebStringToString(error_message),
       line_number,
-      webkit_glue::String16ToString(source_url));
+      webkit_glue::WebStringToString(source_url));
 }
 
-void WebWorkerClientImpl::PostConsoleMessageToWorkerObject(
-    int destination,
-    int source,
-    int level,
-    const string16& message,
+void WebWorkerClientImpl::postConsoleMessageToWorkerObject(
+    int destination_id,
+    int source_id,
+    int message_type,
+    int message_level,
+    const WebString& message,
     int line_number,
-    const string16& source_url) {
+    const WebString& source_url) {
+  if (WTF::currentThread() != worker_thread_id_) {
+    script_execution_context_->postTask(
+        WebCore::createCallbackTask(&PostConsoleMessageToWorkerObjectTask, this,
+            destination_id, source_id, message_type, message_level,
+            webkit_glue::WebStringToString(message),
+            line_number,
+            webkit_glue::WebStringToString(source_url)));
+    return;
+  }
+
   script_execution_context_->addMessage(
-      static_cast<WebCore::MessageDestination>(destination),
-      static_cast<WebCore::MessageSource>(source),
-      static_cast<WebCore::MessageLevel>(level),
-      webkit_glue::String16ToString(message),
+      static_cast<WebCore::MessageDestination>(destination_id),
+      static_cast<WebCore::MessageSource>(source_id),
+      static_cast<WebCore::MessageType>(message_type),
+      static_cast<WebCore::MessageLevel>(message_level),
+      webkit_glue::WebStringToString(message),
       line_number,
-      webkit_glue::String16ToString(source_url));
+      webkit_glue::WebStringToString(source_url));
 }
 
-void WebWorkerClientImpl::ConfirmMessageFromWorkerObject(bool has_pending_activity) {
-  --unconfirmed_message_count_;
+void WebWorkerClientImpl::confirmMessageFromWorkerObject(
+    bool has_pending_activity) {
+  // unconfirmed_message_count_ can only be updated on the thread where it's
+  // accessed.  Otherwise there are race conditions with v8's garbage
+  // collection.
+  script_execution_context_->postTask(
+      WebCore::createCallbackTask(&ConfirmMessageFromWorkerObjectTask, this));
 }
 
-void WebWorkerClientImpl::ReportPendingActivity(bool has_pending_activity) {
-  worker_context_had_pending_activity_ = has_pending_activity;
+void WebWorkerClientImpl::reportPendingActivity(bool has_pending_activity) {
+  // See above comment in confirmMessageFromWorkerObject.
+  script_execution_context_->postTask(
+      WebCore::createCallbackTask(&ReportPendingActivityTask, this,
+          has_pending_activity));
 }
 
-void WebWorkerClientImpl::WorkerContextDestroyed() {
+void WebWorkerClientImpl::workerContextDestroyed() {
+}
+
+void WebWorkerClientImpl::StartWorkerContextTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    const WebCore::String& script_url,
+    const WebCore::String& user_agent,
+    const WebCore::String& source_code) {
+  this_ptr->webworker_->startWorkerContext(
+      webkit_glue::KURLToWebURL(WebCore::KURL(script_url)),
+      webkit_glue::StringToWebString(user_agent),
+      webkit_glue::StringToWebString(source_code));
+}
+
+void WebWorkerClientImpl::TerminateWorkerContextTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr) {
+  this_ptr->webworker_->terminateWorkerContext();
+}
+
+void WebWorkerClientImpl::PostMessageToWorkerContextTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    const WebCore::String& message,
+    WTF::PassOwnPtr<WebCore::MessagePortChannel> channel) {
+  // TODO(jam): Update to pass a MessagePortChannel or
+  // PlatformMessagePortChannel when we add MessagePort support to Chrome.
+  this_ptr->webworker_->postMessageToWorkerContext(
+      webkit_glue::StringToWebString(message));
+}
+
+void WebWorkerClientImpl::WorkerObjectDestroyedTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr) {
+  if (this_ptr->worker_)  // Check we haven't alread called this.
+    this_ptr->webworker_->workerObjectDestroyed();
+  delete this_ptr;
+}
+
+void WebWorkerClientImpl::PostMessageToWorkerObjectTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    const WebCore::String& message,
+    WTF::PassOwnPtr<WebCore::MessagePortChannel> channel) {
+
+  if (this_ptr->worker_) {
+    WTF::RefPtr<WebCore::MessagePort> port;
+    if (channel) {
+      port = WebCore::MessagePort::create(*context);
+      port->entangle(channel.release());
+    }
+
+    this_ptr->worker_->dispatchMessage(message, port.release());
+  }
+}
+
+void WebWorkerClientImpl::PostExceptionToWorkerObjectTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    const WebCore::String& error_message,
+    int line_number,
+    const WebCore::String& source_url) {
+  this_ptr->script_execution_context_->reportException(
+      error_message, line_number, source_url);
+}
+
+void WebWorkerClientImpl::PostConsoleMessageToWorkerObjectTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    int destination_id,
+    int source_id,
+    int message_type,
+    int message_level,
+    const WebCore::String& message,
+    int line_number,
+    const WebCore::String& source_url) {
+  this_ptr->script_execution_context_->addMessage(
+      static_cast<WebCore::MessageDestination>(destination_id),
+      static_cast<WebCore::MessageSource>(source_id),
+      static_cast<WebCore::MessageType>(message_type),
+      static_cast<WebCore::MessageLevel>(message_level),
+      message,
+      line_number,
+      source_url);
+}
+
+void WebWorkerClientImpl::ConfirmMessageFromWorkerObjectTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr) {
+  this_ptr->unconfirmed_message_count_--;
+}
+
+void WebWorkerClientImpl::ReportPendingActivityTask(
+    WebCore::ScriptExecutionContext* context,
+    WebWorkerClientImpl* this_ptr,
+    bool has_pending_activity) {
+  this_ptr->worker_context_had_pending_activity_ = has_pending_activity;
 }
 
 #endif

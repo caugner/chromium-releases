@@ -12,13 +12,14 @@
 #include <atlmisc.h>
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl.
 
+#include "app/gfx/font.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/toolbar_model.h"
-#include "chrome/common/gfx/chrome_font.h"
+#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/common/page_transition_types.h"
-#include "chrome/views/controls/menu/menu.h"
+#include "views/controls/menu/simple_menu_model.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompletePopupModel;
@@ -32,7 +33,7 @@ class View;
 class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompleteEditView;
-class AutocompletePopupViewWin;
+class AutocompletePopupView;
 
 // Provides the implementation of an edit control with a drop-down
 // autocomplete box. The box itself is implemented in autocomplete_popup.cc
@@ -43,7 +44,7 @@ class AutocompleteEditViewWin
                          CWinTraits<WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL |
                                     ES_NOHIDESEL> >,
       public CRichEditCommands<AutocompleteEditViewWin>,
-      public Menu::Delegate,
+      public views::SimpleMenuModel::Delegate,
       public AutocompleteEditView {
  public:
   struct State {
@@ -59,14 +60,15 @@ class AutocompleteEditViewWin
 
   DECLARE_WND_CLASS(L"Chrome_AutocompleteEditView");
 
-  AutocompleteEditViewWin(const ChromeFont& font,
+  AutocompleteEditViewWin(const gfx::Font& font,
                           AutocompleteEditController* controller,
                           ToolbarModel* toolbar_model,
                           views::View* parent_view,
                           HWND hwnd,
                           Profile* profile,
                           CommandUpdater* command_updater,
-                          bool popup_window_mode);
+                          bool popup_window_mode,
+                          AutocompletePopupPositioner* popup_positioner);
   ~AutocompleteEditViewWin();
 
   views::View* parent_view() const { return parent_view_; }
@@ -97,6 +99,8 @@ class AutocompleteEditViewWin
 
   virtual void SetWindowTextAndCaretPos(const std::wstring& text,
                                         size_t caret_pos);
+
+  virtual void SetForcedQuery();
 
   virtual bool IsSelectAll();
   virtual void SelectAll(bool reversed);
@@ -137,7 +141,7 @@ class AutocompleteEditViewWin
 
   // Called before an accelerator is processed to give us a chance to override
   // it.
-  bool OverrideAccelerator(const views::Accelerator& accelerator);
+  bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e);
 
   // Handler for external events passed in to us.  The View that owns us may
   // send us events that we should treat as if they were events on us.
@@ -162,6 +166,7 @@ class AutocompleteEditViewWin
     MSG_WM_MBUTTONUP(OnNonLButtonUp)
     MSG_WM_MOUSEACTIVATE(OnMouseActivate)
     MSG_WM_MOUSEMOVE(OnMouseMove)
+    MSG_WM_MOUSEWHEEL(OnMouseWheel)
     MSG_WM_PAINT(OnPaint)
     MSG_WM_PASTE(OnPaste)
     MSG_WM_RBUTTONDOWN(OnNonLButtonDown)
@@ -174,10 +179,14 @@ class AutocompleteEditViewWin
     DEFAULT_REFLECTION_HANDLER()  // avoids black margin area
   END_MSG_MAP()
 
-  // Menu::Delegate
-  virtual bool IsCommandEnabled(int id) const;
-  virtual bool GetContextualLabel(int id, std::wstring* out) const;
-  virtual void ExecuteCommand(int id);
+  // SimpleMenuModel::Delegate
+  virtual bool IsCommandIdChecked(int command_id) const;
+  virtual bool IsCommandIdEnabled(int command_id) const;
+  virtual bool GetAcceleratorForCommandId(int command_id,
+                                          views::Accelerator* accelerator);
+  virtual bool IsLabelForCommandIdDynamic(int command_id) const;
+  virtual std::wstring GetLabelForCommandId(int command_id) const;
+  virtual void ExecuteCommand(int command_id);
 
  private:
   // This object freezes repainting of the edit until the object is destroyed.
@@ -240,6 +249,7 @@ class AutocompleteEditViewWin
   void OnLButtonUp(UINT keys, const CPoint& point);
   LRESULT OnMouseActivate(HWND window, UINT hit_test, UINT mouse_message);
   void OnMouseMove(UINT keys, const CPoint& point);
+  BOOL OnMouseWheel(UINT flags, short delta, CPoint point);
   void OnNonLButtonDown(UINT keys, const CPoint& point);
   void OnNonLButtonUp(UINT keys, const CPoint& point);
   void OnPaint(HDC bogus_hdc);
@@ -351,9 +361,12 @@ class AutocompleteEditViewWin
   // text.
   void RepaintDropHighlight(int position);
 
+  // Generates the context menu for the edit field.
+  void BuildContextMenu();
+
   scoped_ptr<AutocompleteEditModel> model_;
 
-  scoped_ptr<AutocompletePopupViewWin> popup_view_;
+  scoped_ptr<AutocompletePopupView> popup_view_;
 
   AutocompleteEditController* controller_;
 
@@ -407,6 +420,10 @@ class AutocompleteEditViewWin
   // unnecessary event.  See detailed comments in OnMouseMove().
   bool can_discard_mousemove_;
 
+  // Used to prevent IME message handling in the midst of updating the edit
+  // text.  See comments where this is used.
+  bool ignore_ime_messages_;
+
   // Variables for tracking state before and after a possible change.
   std::wstring text_before_change_;
   CHARRANGE sel_before_change_;
@@ -420,11 +437,12 @@ class AutocompleteEditViewWin
   CHARRANGE saved_selection_for_focus_change_;
 
   // The context menu for the edit.
-  scoped_ptr<Menu> context_menu_;
+  scoped_ptr<views::SimpleMenuModel> context_menu_contents_;
+  scoped_ptr<views::Menu2> context_menu_;
 
   // Font we're using.  We keep a reference to make sure the font supplied to
   // the constructor doesn't go away before we do.
-  ChromeFont font_;
+  gfx::Font font_;
 
   // Metrics about the font, which we keep so we don't need to recalculate them
   // every time we paint.  |font_y_adjustment_| is the number of pixels we need

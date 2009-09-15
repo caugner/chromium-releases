@@ -6,24 +6,32 @@
 
 #include <string>
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/user_data_manager.h"
 #include "chrome/browser/views/new_profile_dialog.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/message_box_view.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/controls/label.h"
+#include "views/controls/message_box_view.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
+#include "views/view.h"
+#include "views/window/window.h"
 
 using views::ColumnSet;
 using views::GridLayout;
+
+namespace browser {
+
+// Defined in browser_dialogs so callers don't have to depend on our header.
+void ShowSelectProfileDialog() {
+  SelectProfileDialog::RunDialog();
+}
+
+}  // namespace browser
 
 // static
 void SelectProfileDialog::RunDialog() {
@@ -33,7 +41,7 @@ void SelectProfileDialog::RunDialog() {
 }
 
 SelectProfileDialog::SelectProfileDialog()
-    : helper_(new GetProfilesHelper(this)) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(helper_(new GetProfilesHelper(this))) {
   // We first create an instance of the helper and then setup controls. This
   // doesn't lead to race condition because once the helper is done with
   // enumerating profiles by examining the file system, it posts a task on the
@@ -66,10 +74,6 @@ void SelectProfileDialog::Layout() {
   GetLayoutManager()->Layout(this);
 }
 
-int SelectProfileDialog::GetDialogButtons() const {
-  return DIALOGBUTTON_OK | DIALOGBUTTON_CANCEL;
-}
-
 views::View* SelectProfileDialog::GetInitiallyFocusedView() {
   return profile_combobox_;
 }
@@ -79,7 +83,7 @@ std::wstring SelectProfileDialog::GetWindowTitle() const {
 }
 
 bool SelectProfileDialog::Accept() {
-  int index = profile_combobox_->GetSelectedItem();
+  int index = profile_combobox_->selected_item();
   if (index < 0) {
     NOTREACHED();
     return true;
@@ -105,13 +109,13 @@ views::View* SelectProfileDialog::GetContentsView() {
   return this;
 }
 
-int SelectProfileDialog::GetItemCount(views::ComboBox* source) {
+int SelectProfileDialog::GetItemCount(views::Combobox* source) {
   // Always show one more item in the combo box that allows the user to select
   // <New Profile>.
   return profiles_.size() + 1;
 }
 
-std::wstring SelectProfileDialog::GetItemAt(views::ComboBox* source,
+std::wstring SelectProfileDialog::GetItemAt(views::Combobox* source,
                                             int index) {
   DCHECK(source == profile_combobox_);
   DCHECK(index >= 0 && index <= static_cast<int>(profiles_.size()));
@@ -131,7 +135,7 @@ void SelectProfileDialog::SetupControls() {
   // Adds all controls.
   select_profile_label_ = new views::Label(
       l10n_util::GetString(IDS_SELECT_PROFILE_DIALOG_LABEL_TEXT));
-  profile_combobox_ = new views::ComboBox(this);
+  profile_combobox_ = new views::Combobox(this);
 
   // Arranges controls by using GridLayout.
   const int column_set_id = 0;

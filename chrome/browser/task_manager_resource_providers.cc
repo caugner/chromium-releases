@@ -4,51 +4,60 @@
 
 #include "chrome/browser/task_manager_resource_providers.h"
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include <atlbase.h>
+#endif  // defined(OS_WIN)
+
+#if defined(OS_WIN)
+#include "app/gfx/icon_util.h"
+#endif  // defined(OS_WIN)
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/basictypes.h"
 #include "base/file_version_info.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/child_process_host.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/stl_util-inl.h"
-#include "chrome/common/gfx/icon_util.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
 ////////////////////////////////////////////////////////////////////////////////
-// TaskManagerWebContentsResource class
+// TaskManagerTabContentsResource class
 ////////////////////////////////////////////////////////////////////////////////
 
-TaskManagerWebContentsResource::TaskManagerWebContentsResource(
-    WebContents* web_contents)
-    : web_contents_(web_contents) {
-  // We cache the process as when the WebContents is closed the process
+TaskManagerTabContentsResource::TaskManagerTabContentsResource(
+    TabContents* tab_contents)
+    : tab_contents_(tab_contents) {
+  // We cache the process as when the TabContents is closed the process
   // becomes NULL and the TaskManager still needs it.
-  process_ = web_contents_->process()->process().handle();
+  process_ = tab_contents_->process()->process().handle();
   pid_ = base::GetProcId(process_);
 }
 
-TaskManagerWebContentsResource::~TaskManagerWebContentsResource() {
+TaskManagerTabContentsResource::~TaskManagerTabContentsResource() {
 }
 
-std::wstring TaskManagerWebContentsResource::GetTitle() const {
-  // GetTitle() and GetURL() can only be invoked when the WebContents has a
-  // controller.
-  if (!web_contents_->controller())
-    return std::wstring();
-
+std::wstring TaskManagerTabContentsResource::GetTitle() const {
   // Fall back on the URL if there's no title.
-  std::wstring tab_title(UTF16ToWideHack(web_contents_->GetTitle()));
+  std::wstring tab_title(UTF16ToWideHack(tab_contents_->GetTitle()));
   if (tab_title.empty()) {
-    tab_title = UTF8ToWide(web_contents_->GetURL().spec());
+    tab_title = UTF8ToWide(tab_contents_->GetURL().spec());
     // Force URL to be LTR.
     if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
       l10n_util::WrapStringWithLTRFormatting(&tab_title);
@@ -68,55 +77,55 @@ std::wstring TaskManagerWebContentsResource::GetTitle() const {
   return l10n_util::GetStringF(IDS_TASK_MANAGER_TAB_PREFIX, tab_title);
 }
 
-SkBitmap TaskManagerWebContentsResource::GetIcon() const {
-  return web_contents_->GetFavIcon();
+SkBitmap TaskManagerTabContentsResource::GetIcon() const {
+  return tab_contents_->GetFavIcon();
 }
 
-HANDLE TaskManagerWebContentsResource::GetProcess() const {
+base::ProcessHandle TaskManagerTabContentsResource::GetProcess() const {
   return process_;
 }
 
-TabContents* TaskManagerWebContentsResource::GetTabContents() const {
-  return dynamic_cast<TabContents*>(web_contents_);
+TabContents* TaskManagerTabContentsResource::GetTabContents() const {
+  return static_cast<TabContents*>(tab_contents_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// TaskManagerWebContentsResourceProvider class
+// TaskManagerTabContentsResourceProvider class
 ////////////////////////////////////////////////////////////////////////////////
 
-TaskManagerWebContentsResourceProvider::
-    TaskManagerWebContentsResourceProvider(TaskManager* task_manager)
-    : task_manager_(task_manager),
-      updating_(false) {
+TaskManagerTabContentsResourceProvider::
+    TaskManagerTabContentsResourceProvider(TaskManager* task_manager)
+    :  updating_(false),
+       task_manager_(task_manager) {
 }
 
-TaskManagerWebContentsResourceProvider::
-    ~TaskManagerWebContentsResourceProvider() {
+TaskManagerTabContentsResourceProvider::
+    ~TaskManagerTabContentsResourceProvider() {
 }
 
-TaskManager::Resource* TaskManagerWebContentsResourceProvider::GetResource(
+TaskManager::Resource* TaskManagerTabContentsResourceProvider::GetResource(
     int origin_pid,
     int render_process_host_id,
     int routing_id) {
 
-  WebContents* web_contents =
-      tab_util::GetWebContentsByID(render_process_host_id, routing_id);
-  if (!web_contents)  // Not one of our resource.
+  TabContents* tab_contents =
+      tab_util::GetTabContentsByID(render_process_host_id, routing_id);
+  if (!tab_contents)  // Not one of our resource.
     return NULL;
 
-  if (!web_contents->process()->process().handle()) {
+  if (!tab_contents->process()->process().handle()) {
     // We should not be holding on to a dead tab (it should have been removed
-    // through the NOTIFY_WEB_CONTENTS_DISCONNECTED notification.
+    // through the NOTIFY_TAB_CONTENTS_DISCONNECTED notification.
     NOTREACHED();
     return NULL;
   }
 
-  int pid = web_contents->process()->process().pid();
+  int pid = tab_contents->process()->process().pid();
   if (pid != origin_pid)
     return NULL;
 
-  std::map<WebContents*, TaskManagerWebContentsResource*>::iterator
-      res_iter = resources_.find(web_contents);
+  std::map<TabContents*, TaskManagerTabContentsResource*>::iterator
+      res_iter = resources_.find(tab_contents);
   if (res_iter == resources_.end())
     // Can happen if the tab was closed while a network request was being
     // performed.
@@ -125,48 +134,42 @@ TaskManager::Resource* TaskManagerWebContentsResourceProvider::GetResource(
   return res_iter->second;
 }
 
-void TaskManagerWebContentsResourceProvider::StartUpdating() {
+void TaskManagerTabContentsResourceProvider::StartUpdating() {
   DCHECK(!updating_);
   updating_ = true;
-  // Add all the existing WebContents.
-  for (WebContentsIterator iterator; !iterator.done(); iterator++) {
-    WebContents* web_contents = *iterator;
-    // Don't add dead tabs or tabs that haven't yet connected.
-    if (web_contents->process()->process().handle() &&
-        web_contents->notify_disconnection())
-      AddToTaskManager(web_contents);
-  }
-  // Then we register for notifications to get new tabs.
-  NotificationService* service = NotificationService::current();
-  service->AddObserver(this, NotificationType::WEB_CONTENTS_CONNECTED,
-                       NotificationService::AllSources());
-  service->AddObserver(this, NotificationType::WEB_CONTENTS_SWAPPED,
-                       NotificationService::AllSources());
-  service->AddObserver(this, NotificationType::WEB_CONTENTS_DISCONNECTED,
-                       NotificationService::AllSources());
-  // WEB_CONTENTS_DISCONNECTED should be enough to know when to remove a
-  // resource.  This is an attempt at mitigating a crasher that seem to
-  // indicate a resource is still referencing a deleted WebContents
-  // (http://crbug.com/7321).
-  service->AddObserver(this, NotificationType::TAB_CONTENTS_DESTROYED,
-                       NotificationService::AllSources());
 
+  // Add all the existing TabContents.
+  for (TabContentsIterator iterator; !iterator.done(); iterator++)
+    Add(*iterator);
+
+  // Then we register for notifications to get new tabs.
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_SWAPPED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
+                 NotificationService::AllSources());
+  // TAB_CONTENTS_DISCONNECTED should be enough to know when to remove a
+  // resource.  This is an attempt at mitigating a crasher that seem to
+  // indicate a resource is still referencing a deleted TabContents
+  // (http://crbug.com/7321).
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+                 NotificationService::AllSources());
 }
 
-void TaskManagerWebContentsResourceProvider::StopUpdating() {
+void TaskManagerTabContentsResourceProvider::StopUpdating() {
   DCHECK(updating_);
   updating_ = false;
 
   // Then we unregister for notifications to get new tabs.
-  NotificationService* service = NotificationService::current();
-  service->RemoveObserver(this, NotificationType::WEB_CONTENTS_CONNECTED,
-                          NotificationService::AllSources());
-  service->RemoveObserver(this, NotificationType::WEB_CONTENTS_SWAPPED,
-                          NotificationService::AllSources());
-  service->RemoveObserver(this, NotificationType::WEB_CONTENTS_DISCONNECTED,
-                          NotificationService::AllSources());
-  service->RemoveObserver(this, NotificationType::TAB_CONTENTS_DESTROYED,
-                          NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::TAB_CONTENTS_CONNECTED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::TAB_CONTENTS_SWAPPED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+                    NotificationService::AllSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -174,41 +177,44 @@ void TaskManagerWebContentsResourceProvider::StopUpdating() {
   resources_.clear();
 }
 
-void TaskManagerWebContentsResourceProvider::AddToTaskManager(
-    WebContents* web_contents) {
-  TaskManagerWebContentsResource* resource =
-      new TaskManagerWebContentsResource(web_contents);
-  resources_[web_contents] = resource;
+void TaskManagerTabContentsResourceProvider::AddToTaskManager(
+    TabContents* tab_contents) {
+  TaskManagerTabContentsResource* resource =
+      new TaskManagerTabContentsResource(tab_contents);
+  resources_[tab_contents] = resource;
   task_manager_->AddResource(resource);
 }
 
-void TaskManagerWebContentsResourceProvider::Add(WebContents* web_contents) {
+void TaskManagerTabContentsResourceProvider::Add(TabContents* tab_contents) {
   if (!updating_)
     return;
 
-  if (!web_contents->process()->process().handle()) {
-    // Don't add sad tabs, we would have no information to show for them since
-    // they have no associated process.
+  // Don't add dead tabs or tabs that haven't yet connected.
+  // Also ignore tabs which display extension content. We collapse
+  // all of these into one extension row.
+  if (!tab_contents->process()->process().handle() ||
+      !tab_contents->notify_disconnection() ||
+      tab_contents->HostsExtension()) {
     return;
   }
 
-  std::map<WebContents*, TaskManagerWebContentsResource*>::const_iterator
-      iter = resources_.find(web_contents);
+  std::map<TabContents*, TaskManagerTabContentsResource*>::const_iterator
+      iter = resources_.find(tab_contents);
   if (iter != resources_.end()) {
-    // The case may happen that we have added a WebContents as part of the
+    // The case may happen that we have added a TabContents as part of the
     // iteration performed during StartUpdating() call but the notification that
     // it has connected was not fired yet. So when the notification happens, we
     // already know about this tab and just ignore it.
     return;
   }
-  AddToTaskManager(web_contents);
+  AddToTaskManager(tab_contents);
 }
 
-void TaskManagerWebContentsResourceProvider::Remove(WebContents* web_contents) {
+void TaskManagerTabContentsResourceProvider::Remove(TabContents* tab_contents) {
   if (!updating_)
     return;
-  std::map<WebContents*, TaskManagerWebContentsResource*>::iterator
-      iter = resources_.find(web_contents);
+  std::map<TabContents*, TaskManagerTabContentsResource*>::iterator
+      iter = resources_.find(tab_contents);
   if (iter == resources_.end()) {
     // Since TabContents are destroyed asynchronously (see TabContentsCollector
     // in navigation_controller.cc), we can be notified of a tab being removed
@@ -218,7 +224,7 @@ void TaskManagerWebContentsResourceProvider::Remove(WebContents* web_contents) {
   }
 
   // Remove the resource from the Task Manager.
-  TaskManagerWebContentsResource* resource = iter->second;
+  TaskManagerTabContentsResource* resource = iter->second;
   task_manager_->RemoveResource(resource);
   // And from the provider.
   resources_.erase(iter);
@@ -226,25 +232,25 @@ void TaskManagerWebContentsResourceProvider::Remove(WebContents* web_contents) {
   delete resource;
 }
 
-void TaskManagerWebContentsResourceProvider::Observe(NotificationType type,
+void TaskManagerTabContentsResourceProvider::Observe(NotificationType type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   switch (type.value) {
-    case NotificationType::WEB_CONTENTS_CONNECTED:
-      Add(Source<WebContents>(source).ptr());
+    case NotificationType::TAB_CONTENTS_CONNECTED:
+      Add(Source<TabContents>(source).ptr());
       break;
-    case NotificationType::WEB_CONTENTS_SWAPPED:
-      Remove(Source<WebContents>(source).ptr());
-      Add(Source<WebContents>(source).ptr());
+    case NotificationType::TAB_CONTENTS_SWAPPED:
+      Remove(Source<TabContents>(source).ptr());
+      Add(Source<TabContents>(source).ptr());
       break;
     case NotificationType::TAB_CONTENTS_DESTROYED:
       // If this DCHECK is triggered, it could explain http://crbug.com/7321.
-      DCHECK(resources_.find(Source<WebContents>(source).ptr()) ==
+      DCHECK(resources_.find(Source<TabContents>(source).ptr()) ==
              resources_.end()) << "TAB_CONTENTS_DESTROYED with no associated "
-                                  "WEB_CONTENTS_DISCONNECTED";
+                                  "TAB_CONTENTS_DISCONNECTED";
       // Fall through.
-    case NotificationType::WEB_CONTENTS_DISCONNECTED:
-      Remove(Source<WebContents>(source).ptr());
+    case NotificationType::TAB_CONTENTS_DISCONNECTED:
+      Remove(Source<TabContents>(source).ptr());
       break;
     default:
       NOTREACHED() << "Unexpected notification.";
@@ -287,7 +293,7 @@ SkBitmap TaskManagerChildProcessResource::GetIcon() const {
   return *default_icon_;
 }
 
-HANDLE TaskManagerChildProcessResource::GetProcess() const {
+base::ProcessHandle TaskManagerChildProcessResource::GetProcess() const {
   return child_process_.handle();
 }
 
@@ -297,8 +303,8 @@ HANDLE TaskManagerChildProcessResource::GetProcess() const {
 
 TaskManagerChildProcessResourceProvider::
     TaskManagerChildProcessResourceProvider(TaskManager* task_manager)
-    : task_manager_(task_manager),
-      updating_(false),
+    : updating_(false),
+      task_manager_(task_manager),
       ui_loop_(MessageLoop::current()) {
 }
 
@@ -323,11 +329,10 @@ void TaskManagerChildProcessResourceProvider::StartUpdating() {
   updating_ = true;
 
   // Register for notifications to get new plugin processes.
-  NotificationService* service = NotificationService::current();
-  service->AddObserver(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
-                       NotificationService::AllSources());
-  service->AddObserver(this, NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
-                       NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
+                 NotificationService::AllSources());
 
   // Get the existing plugins
   MessageLoop* io_loop_ = g_browser_process->io_thread()->message_loop();
@@ -340,12 +345,11 @@ void TaskManagerChildProcessResourceProvider::StopUpdating() {
   updating_ = false;
 
   // Unregister for notifications to get new plugin processes.
-  NotificationService* service = NotificationService::current();
-  service->RemoveObserver(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
-                          NotificationService::AllSources());
-  service->RemoveObserver(this,
-                          NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
-                          NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this,
+                    NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
+                    NotificationService::AllSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -447,19 +451,189 @@ void TaskManagerChildProcessResourceProvider::ChildProcessInfoRetreived() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// TaskManagerExtensionProcessResource class
+////////////////////////////////////////////////////////////////////////////////
+
+SkBitmap* TaskManagerExtensionProcessResource::default_icon_ = NULL;
+
+TaskManagerExtensionProcessResource::TaskManagerExtensionProcessResource(
+    ExtensionHost* extension_host)
+    : extension_host_(extension_host) {
+  if (!default_icon_) {
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
+  }
+  base::Process process(extension_host_->render_process_host()->process());
+  process_handle_ = process.handle();
+  pid_ = process.pid();
+  std::wstring extension_name(UTF8ToWide(extension()->name()));
+  DCHECK(!extension_name.empty());
+  // Since the extension_name will be concatenated with a prefix, we need
+  // to explicitly set the extension_name to be LTR format if there is no
+  // strong RTL charater in it. Otherwise, if the prefix is an RTL word,
+  // the concatenated result might be wrong. For extension named
+  // "Great Extension!" the concatenated result would be something like
+  // "!Great Extension :NOISNETXE", in which capital letters "NOISNETXE"
+  // stand for the Hebrew word for "extension".
+  l10n_util::AdjustStringForLocaleDirection(extension_name, &extension_name);
+  title_ = l10n_util::GetStringF(IDS_TASK_MANAGER_EXTENSION_PREFIX,
+                                 extension_name);
+}
+
+TaskManagerExtensionProcessResource::~TaskManagerExtensionProcessResource() {
+}
+
+std::wstring TaskManagerExtensionProcessResource::GetTitle() const {
+  return title_;
+}
+
+SkBitmap TaskManagerExtensionProcessResource::GetIcon() const {
+  return *default_icon_;
+}
+
+base::ProcessHandle TaskManagerExtensionProcessResource::GetProcess() const {
+  return process_handle_;
+}
+
+Extension* TaskManagerExtensionProcessResource::extension() const {
+  return extension_host_->extension();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// TaskManagerExtensionProcessResourceProvider class
+////////////////////////////////////////////////////////////////////////////////
+
+TaskManagerExtensionProcessResourceProvider::
+    TaskManagerExtensionProcessResourceProvider(TaskManager* task_manager)
+    : task_manager_(task_manager),
+      updating_(false) {
+}
+
+TaskManagerExtensionProcessResourceProvider::
+    ~TaskManagerExtensionProcessResourceProvider() {
+}
+
+TaskManager::Resource* TaskManagerExtensionProcessResourceProvider::GetResource(
+    int origin_pid,
+    int render_process_host_id,
+    int routing_id) {
+  std::map<int, TaskManagerExtensionProcessResource*>::iterator iter =
+      pid_to_resources_.find(origin_pid);
+  if (iter != pid_to_resources_.end())
+    return iter->second;
+  else
+    return NULL;
+}
+
+void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
+  DCHECK(!updating_);
+  updating_ = true;
+
+  // Add all the existing ExtensionHosts.
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  for (ProfileManager::const_iterator it = profile_manager->begin();
+       it != profile_manager->end(); ++it) {
+      ExtensionProcessManager* process_manager =
+          (*it)->GetExtensionProcessManager();
+      ExtensionProcessManager::const_iterator jt;
+      for (jt = process_manager->begin(); jt != process_manager->end(); ++jt)
+        AddToTaskManager(*jt);
+  }
+
+  // Register for notifications about extension process changes.
+  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CREATED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CRASHED,
+                 NotificationService::AllSources());
+}
+
+void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
+  DCHECK(updating_);
+  updating_ = false;
+
+  // Unregister for notifications about extension process changes.
+  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_CREATED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_CRASHED,
+                    NotificationService::AllSources());
+
+  // Delete all the resources.
+  STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
+
+  resources_.clear();
+  pid_to_resources_.clear();
+}
+
+void TaskManagerExtensionProcessResourceProvider::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  switch (type.value) {
+    case NotificationType::EXTENSION_PROCESS_CREATED:
+      AddToTaskManager(Details<ExtensionHost>(details).ptr());
+      break;
+    case NotificationType::EXTENSION_PROCESS_CRASHED:
+      RemoveFromTaskManager(Details<ExtensionHost>(details).ptr());
+      break;
+    default:
+      NOTREACHED() << "Unexpected notification.";
+      return;
+  }
+}
+
+void TaskManagerExtensionProcessResourceProvider::AddToTaskManager(
+    ExtensionHost* extension_host) {
+  // Don't add dead extension processes.
+  if (!extension_host->IsRenderViewLive())
+    return;
+
+  TaskManagerExtensionProcessResource* resource =
+      new TaskManagerExtensionProcessResource(extension_host);
+  DCHECK(resources_.find(extension_host) == resources_.end());
+  resources_[extension_host] = resource;
+  pid_to_resources_[resource->process_id()] = resource;
+  task_manager_->AddResource(resource);
+}
+
+void TaskManagerExtensionProcessResourceProvider::RemoveFromTaskManager(
+    ExtensionHost* extension_host) {
+  if (!updating_)
+    return;
+  std::map<ExtensionHost*, TaskManagerExtensionProcessResource*>
+      ::iterator iter = resources_.find(extension_host);
+  if (iter == resources_.end())
+    return;
+
+  // Remove the resource from the Task Manager.
+  TaskManagerExtensionProcessResource* resource = iter->second;
+  task_manager_->RemoveResource(resource);
+
+  // Remove it from the provider.
+  resources_.erase(iter);
+
+  // Remove it from our pid map.
+  std::map<int, TaskManagerExtensionProcessResource*>::iterator pid_iter =
+      pid_to_resources_.find(resource->process_id());
+  DCHECK(pid_iter != pid_to_resources_.end());
+  if (pid_iter != pid_to_resources_.end())
+    pid_to_resources_.erase(pid_iter);
+
+  // Finally, delete the resource.
+  delete resource;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // TaskManagerBrowserProcessResource class
 ////////////////////////////////////////////////////////////////////////////////
 
 SkBitmap* TaskManagerBrowserProcessResource::default_icon_ = NULL;
 
 TaskManagerBrowserProcessResource::TaskManagerBrowserProcessResource()
-:   title_(),
-     network_usage_support_(false) {
-  pid_ = GetCurrentProcessId();
-  process_ = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                         FALSE,
-                         pid_);
-  DCHECK(process_);
+    : title_() {
+  pid_ = base::GetCurrentProcId();
+  bool success = base::OpenPrivilegedProcessHandle(pid_, &process_);
+  DCHECK(success);
+#if defined(OS_WIN)
   if (!default_icon_) {
     HICON icon = LoadIcon(_AtlBaseModule.GetResourceInstance(),
                           MAKEINTRESOURCE(IDR_MAINFRAME));
@@ -474,10 +648,19 @@ TaskManagerBrowserProcessResource::TaskManagerBrowserProcessResource()
       default_icon_ = IconUtil::CreateSkBitmapFromHICON(icon, icon_size);
     }
   }
+#elif defined(OS_LINUX)
+  if (!default_icon_) {
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    default_icon_ = rb.GetBitmapNamed(IDR_PRODUCT_LOGO_16);
+  }
+#else
+  // TODO(port): Port icon code.
+  NOTIMPLEMENTED();
+#endif  // defined(OS_WIN)
 }
 
 TaskManagerBrowserProcessResource::~TaskManagerBrowserProcessResource() {
-  CloseHandle(process_);
+  base::CloseProcessHandle(process_);
 }
 
 // TaskManagerResource methods:
@@ -492,8 +675,8 @@ SkBitmap TaskManagerBrowserProcessResource::GetIcon() const {
   return *default_icon_;
 }
 
-HANDLE TaskManagerBrowserProcessResource::GetProcess() const {
-  return GetCurrentProcess();  // process_;
+base::ProcessHandle TaskManagerBrowserProcessResource::GetProcess() const {
+  return base::GetCurrentProcessHandle();  // process_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,27 +1,35 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H__
-#define CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H_
+#define CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H_
 
 #include <string>
+#include <vector>
 
+#include "app/gfx/font.h"
 #include "base/gfx/rect.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/browser/views/info_bubble.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/views/controls/hwnd_view.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/painter.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/native/native_view_host.h"
+#include "views/painter.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
+#else
+#include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
+#endif
+
+class AutocompletePopupPositioner;
 class CommandUpdater;
 class GURL;
+class PageAction;
 class Profile;
 
 /////////////////////////////////////////////////////////////////////////////
@@ -33,6 +41,7 @@ class Profile;
 //
 /////////////////////////////////////////////////////////////////////////////
 class LocationBarView : public LocationBar,
+                        public LocationBarTesting,
                         public views::View,
                         public AutocompleteEditController {
  public:
@@ -47,18 +56,34 @@ class LocationBarView : public LocationBar,
     virtual void OnInputInProgress(bool in_progress) = 0;
   };
 
+  enum ColorKind {
+    BACKGROUND = 0,
+    TEXT,
+    SELECTED_TEXT,
+    DEEMPHASIZED_TEXT,
+    SECURITY_TEXT,
+    SECURITY_INFO_BUBBLE_TEXT,
+    SCHEME_STRIKEOUT,
+    NUM_KINDS
+  };
+
   LocationBarView(Profile* profile,
                   CommandUpdater* command_updater,
-                  ToolbarModel* model_,
+                  ToolbarModel* model,
                   Delegate* delegate,
-                  bool popup_window_mode);
-  virtual ~LocationBarView() { }
+                  bool popup_window_mode,
+                  AutocompletePopupPositioner* popup_positioner);
+  virtual ~LocationBarView();
 
   void Init();
 
   // Returns whether this instance has been initialized by callin Init. Init can
   // only be called when the receiving instance is attached to a view container.
   bool IsInitialized() const;
+
+  // Returns the appropriate color for the desired kind, based on the user's
+  // system theme.
+  static SkColor GetColor(bool is_secure, ColorKind kind);
 
   // Updates the location bar.  We also reset the bar's permanent text and
   // security style, and, if |tab_for_state_restoring| is non-NULL, also restore
@@ -73,22 +98,22 @@ class LocationBarView : public LocationBar,
 
   // Layout and Painting functions
   virtual void Layout();
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
 
   // No focus border for the location bar, the caret is enough.
-  virtual void PaintFocusBorder(ChromeCanvas* canvas) { }
-
-  // Overridden from View so we can use <tab> to go into keyword search mode.
-  virtual bool CanProcessTabKeyEvents();
+  virtual void PaintFocusBorder(gfx::Canvas* canvas) { }
 
   // Called when any ancestor changes its size, asks the AutocompleteEditModel
   // to close its popup.
   virtual void VisibleBoundsInRootChanged();
 
+
+#if defined(OS_WIN)
   // Event Handlers
   virtual bool OnMousePressed(const views::MouseEvent& event);
   virtual bool OnMouseDragged(const views::MouseEvent& event);
   virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);
+#endif
 
   // AutocompleteEditController
   virtual void OnAutocompleteAccept(const GURL& url,
@@ -102,35 +127,36 @@ class LocationBarView : public LocationBar,
   virtual SkBitmap GetFavIcon() const;
   virtual std::wstring GetTitle() const;
 
-  // Returns the MSAA role
-  bool GetAccessibleRole(VARIANT* role);
-
-  AutocompleteEditView* location_entry() {
-    return location_entry_.get();
-  }
+  // Returns the accessibility role.
+  bool GetAccessibleRole(AccessibilityTypes::Role* role);
 
   // Overridden from views::View:
-  virtual bool OverrideAccelerator(const views::Accelerator& accelerator);
+  virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e);
 
   // Overridden from LocationBar:
-  virtual void ShowFirstRunBubble();
+  virtual void ShowFirstRunBubble(bool use_OEM_bubble);
   virtual std::wstring GetInputString() const;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const;
   virtual PageTransition::Type GetPageTransition() const;
   virtual void AcceptInput();
+  virtual void AcceptInputWithDisposition(WindowOpenDisposition);
   virtual void FocusLocation();
   virtual void FocusSearch();
-  virtual void UpdateFeedIcon();
+  virtual void UpdatePageActions();
   virtual void SaveStateToContents(TabContents* contents);
+  virtual void Revert();
+  virtual AutocompleteEditView* location_entry() {
+    return location_entry_.get();
+  }
+  virtual LocationBarTesting* GetLocationBarForTesting() { return this; }
+
+  // Overridden from LocationBarTesting:
+  virtual int PageActionVisibleCount();
 
   static const int kVertMargin;
-  static const COLORREF kBackgroundColorByLevel[];
 
  protected:
   void Focus();
-
-  // Overridden from Chrome::View.
-  virtual bool ShouldLookupAccelerators(const views::KeyEvent& e);
 
  private:
   // View used when the user has selected a keyword.
@@ -144,9 +170,9 @@ class LocationBarView : public LocationBar,
     explicit SelectedKeywordView(Profile* profile);
     virtual ~SelectedKeywordView();
 
-    void SetFont(const ChromeFont& font);
+    void SetFont(const gfx::Font& font);
 
-    virtual void Paint(ChromeCanvas* canvas);
+    virtual void Paint(gfx::Canvas* canvas);
 
     virtual gfx::Size GetPreferredSize();
     virtual gfx::Size GetMinimumSize();
@@ -178,7 +204,7 @@ class LocationBarView : public LocationBar,
 
     Profile* profile_;
 
-    DISALLOW_EVIL_CONSTRUCTORS(SelectedKeywordView);
+    DISALLOW_COPY_AND_ASSIGN(SelectedKeywordView);
   };
 
   // KeywordHintView is used to display a hint to the user when the selected
@@ -194,14 +220,14 @@ class LocationBarView : public LocationBar,
     explicit KeywordHintView(Profile* profile);
     virtual ~KeywordHintView();
 
-    void SetFont(const ChromeFont& font);
+    void SetFont(const gfx::Font& font);
 
     void SetColor(const SkColor& color);
 
     void SetKeyword(const std::wstring& keyword);
     std::wstring keyword() const { return keyword_; }
 
-    virtual void Paint(ChromeCanvas* canvas);
+    virtual void Paint(gfx::Canvas* canvas);
     virtual gfx::Size GetPreferredSize();
     // The minimum size is just big enough to show the tab.
     virtual gfx::Size GetMinimumSize();
@@ -218,7 +244,7 @@ class LocationBarView : public LocationBar,
 
     Profile* profile_;
 
-    DISALLOW_EVIL_CONSTRUCTORS(KeywordHintView);
+    DISALLOW_COPY_AND_ASSIGN(KeywordHintView);
   };
 
 
@@ -301,31 +327,65 @@ class LocationBarView : public LocationBar,
 
     ToolbarModel* model_;
 
-    DISALLOW_EVIL_CONSTRUCTORS(SecurityImageView);
+    DISALLOW_COPY_AND_ASSIGN(SecurityImageView);
   };
 
-  // RssImageView is used to display the RSS icon when the page has a feed that
-  // you can subscribe to.
-  //
-  // If a message has been set with SetInfoBubbleText, it displays an info
-  // bubble when the mouse hovers on the image.
-  class RssImageView : public LocationBarImageView {
+  // PageActionImageView is used to display the icon for a given PageAction
+  // and notify the extension when the icon is clicked.
+  class PageActionImageView : public LocationBarImageView {
   public:
-    explicit RssImageView(ToolbarModel* model);
-    virtual ~RssImageView();
+    PageActionImageView(
+        LocationBarView* owner, Profile* profile,
+        const PageAction* page_action);
+    virtual ~PageActionImageView();
 
     // Overridden from view for the mouse hovering.
     virtual bool OnMousePressed(const views::MouseEvent& event);
 
+    // Overridden from LocationBarImageView.
     virtual void ShowInfoBubble();
 
+    // Called to notify the PageAction that it should determine whether to be
+    // visible or hidden. |contents| is the TabContents that is active, |url|
+    // is the current page URL.
+    void UpdateVisibility(TabContents* contents, GURL url);
+
+    // A callback for when the image has loaded.
+    void OnImageLoaded(SkBitmap* image, size_t index);
+
   private:
-    // The RSS icon shown when page has a feed.
-    static SkBitmap* rss_icon_;
+    // We load the images for the PageActions on the file thread. These tasks
+    // help with that.
+    class LoadImageTask;
+    class ImageLoadingTracker;
 
-    ToolbarModel* model_;
+    // The location bar view that owns us.
+    LocationBarView* owner_;
 
-    DISALLOW_COPY_AND_ASSIGN(RssImageView);
+    // The current profile (not owned by us).
+    Profile* profile_;
+
+    // The PageAction that this view represents. The PageAction is not owned by
+    // us, it resides in the extension of this particular profile.
+    const PageAction* page_action_;
+
+    // The icons representing different states for the page action.
+    std::vector<SkBitmap> page_action_icons_;
+
+    // The object that is waiting for the image loading to complete
+    // asynchronously.
+    ImageLoadingTracker* tracker_;
+
+    // The tab id we are currently showing the icon for.
+    int current_tab_id_;
+
+    // The URL we are currently showing the icon for.
+    GURL current_url_;
+
+    // The string to show for a tooltip;
+    std::string tooltip_;
+
+    DISALLOW_COPY_AND_ASSIGN(PageActionImageView);
   };
 
   // Both Layout and OnChanged call into this. This updates the contents
@@ -337,59 +397,75 @@ class LocationBarView : public LocationBar,
   // Returns the height in pixels of the margin at the top of the bar.
   int TopMargin() const;
 
-  // Returns the width in pixels of the contents of the edit.
-  int TextDisplayWidth();
+  // Returns the amount of horizontal space (in pixels) out of
+  // |location_bar_width| that is not taken up by the actual text in
+  // location_entry_.
+  int AvailableWidth(int location_bar_width);
 
-  // Returns true if the preferred size should be used for a view whose width
-  // is pref_width, the width of the text in the edit is text_width, and
-  // max_width is the maximum width of the edit. If this returns false, the
+  // Returns whether the |available_width| is large enough to contain a view
+  // with preferred width |pref_width| at its preferred size. If this returns
+  // true, the preferred size should be used. If this returns false, the
   // minimum size of the view should be used.
-  bool UsePref(int pref_width, int text_width, int max_width);
+  bool UsePref(int pref_width, int available_width);
 
   // Returns true if the view needs to be resized. This determines whether the
   // min or pref should be used, and returns true if the view is not at that
   // size.
-  bool NeedsResize(View* view, int text_width, int max_width);
+  bool NeedsResize(View* view, int available_width);
 
   // Adjusts the keyword hint, selected keyword and type to search views
   // based on the contents of the edit. Returns true if something changed that
   // necessitates a layout.
-  bool AdjustHints(int text_width, int max_width);
+  bool AdjustHints(int available_width);
 
   // If View fits in the specified region, it is made visible and the
   // bounds are adjusted appropriately. If the View does not fit, it is
   // made invisible.
-  void LayoutView(bool leading, views::View* view, int text_width,
-                  int max_width, gfx::Rect* bounds);
+  void LayoutView(bool leading, views::View* view, int available_width,
+                  gfx::Rect* bounds);
 
   // Sets the security icon to display.  Note that no repaint is done.
   void SetSecurityIcon(ToolbarModel::Icon icon);
 
-  // Sets the RSS icon visibility.
-  void SetRssIconVisibility(FeedList* feeds);
+  // Delete all page action views that we have created.
+  void DeletePageActionViews();
+
+  // Retrieves a vector of all page actions, irrespective of which
+  // extension they belong to.
+  std::vector<PageAction*> GetPageActions();
+
+  // Update the views for the Page Actions, to reflect state changes for
+  // PageActions.
+  void RefreshPageActionViews();
 
   // Sets the text that should be displayed in the info label and its associated
   // tooltip text.  Call with an empty string if the info label should be
   // hidden.
   void SetInfoText(const std::wstring& text,
-                   SkColor text_color,
+                   ToolbarModel::InfoTextType text_type,
                    const std::wstring& tooltip_text);
 
   // Sets the visibility of view to new_vis. Returns whether the visibility
   // changed.
   bool ToggleVisibility(bool new_vis, views::View* view);
 
+#if defined(OS_WIN)
   // Helper for the Mouse event handlers that does all the real work.
   void OnMouseEvent(const views::MouseEvent& event, UINT msg);
+#endif
 
   // Helper to show the first run info bubble.
-  void ShowFirstRunBubbleInternal();
+  void ShowFirstRunBubbleInternal(bool use_OEM_bubble);
 
   // Current profile. Not owned by us.
   Profile* profile_;
 
   // The Autocomplete Edit field.
+#if defined(OS_WIN)
   scoped_ptr<AutocompleteEditViewWin> location_entry_;
+#else
+  scoped_ptr<AutocompleteEditViewGtk> location_entry_;
+#endif
 
   // The CommandUpdater for the Browser object that corresponds to this View.
   CommandUpdater* command_updater_;
@@ -411,10 +487,10 @@ class LocationBarView : public LocationBar,
   PageTransition::Type transition_;
 
   // Font used by edit and some of the hints.
-  ChromeFont font_;
+  gfx::Font font_;
 
   // Location_entry view wrapper
-  views::HWNDView* location_entry_view_;
+  views::NativeViewHost* location_entry_view_;
 
   // The following views are used to provide hints and remind the user as to
   // what is going in the edit. They are all added a children of the
@@ -433,8 +509,8 @@ class LocationBarView : public LocationBar,
   // The view that shows the lock/warning when in HTTPS mode.
   SecurityImageView security_image_view_;
 
-  // The view that shows the RSS icon when the page has an RSS feed.
-  RssImageView rss_image_view_;
+  // The page action icon views.
+  std::vector<PageActionImageView*> page_action_image_views_;
 
   // A label displayed after the lock icon to show some extra information.
   views::Label info_label_;
@@ -445,6 +521,9 @@ class LocationBarView : public LocationBar,
 
   // Used schedule a task for the first run info bubble.
   ScopedRunnableMethodFactory<LocationBarView> first_run_bubble_;
+
+  // The positioner that places the autocomplete popup.
+  AutocompletePopupPositioner* popup_positioner_;
 };
 
-#endif // CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H__
+#endif  // CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H_

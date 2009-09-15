@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sandbox_policy.h"
 
+#include "app/win_util.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
 #include "base/file_util.h"
@@ -19,15 +20,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/debug_flags.h"
-#include "chrome/common/ipc_logging.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/win_util.h"
+#include "ipc/ipc_logging.h"
 #include "sandbox/src/sandbox.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
 namespace {
-
-const wchar_t* const kDesktopName = L"ChromeRendererDesktop";
 
 // The DLLs listed here are known (or under strong suspicion) of causing crashes
 // when they are loaded in the renderer.
@@ -59,6 +57,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"pavhook.dll",                 // Panda Internet Security.
   L"pavshook.dll",                // Panda Antivirus.
   L"pctavhook.dll",               // PC Tools Antivirus.
+  L"pctgmhk.dll",                 // PC Tools Spyware Doctor.
   L"prntrack.dll",                // Pharos Systems.
   L"radhslib.dll",                // Radiant Naomi Internet Filter.
   L"radprlib.dll",                // Radiant Naomi Internet Filter.
@@ -68,7 +67,8 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"sbrige.dll",                  // Unknown.
   L"sc2hook.dll",                 // Supercopier 2.
   L"sguard.dll",                  // Iolo (System Guard).
-  L"smumhook.dll",                // Spyware Doctor version 5 and above.
+  L"smum32.dll",                  // Spyware Doctor version 6.
+  L"smumhook.dll",                // Spyware Doctor version 5.
   L"ssldivx.dll",                 // DivX.
   L"syncor11.dll",                // SynthCore Midi interface.
   L"systools.dll",                // Panda Antivirus.
@@ -244,7 +244,6 @@ bool ApplyPolicyForUntrustedPlugin(sandbox::TargetPolicy* policy) {
                                sandbox::TargetPolicy::FILES_ALLOW_ANY, policy))
     return false;
 
-
   if (!AddDirectoryAndChildren(base::DIR_APP_DATA, NULL,
                                sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                                policy))
@@ -316,7 +315,8 @@ bool AddPolicyForPlugin(const CommandLine* cmd_line,
   return false;
 }
 
-void AddPolicyForRenderer(HDESK desktop, sandbox::TargetPolicy* policy) {
+void AddPolicyForRenderer(sandbox::TargetPolicy* policy,
+                          bool* on_sandbox_desktop) {
   policy->SetJobLevel(sandbox::JOB_LOCKDOWN, 0);
 
   sandbox::TokenLevel initial_token = sandbox::USER_UNPROTECTED;
@@ -329,9 +329,13 @@ void AddPolicyForRenderer(HDESK desktop, sandbox::TargetPolicy* policy) {
   policy->SetTokenLevel(initial_token, sandbox::USER_LOCKDOWN);
   policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
 
-  if (desktop) {
-    policy->SetDesktop(kDesktopName);
+  bool use_winsta = !CommandLine::ForCurrentProcess()->HasSwitch(
+                        switches::kDisableAltWinstation);
+
+  if (sandbox::SBOX_ALL_OK ==  policy->SetAlternateDesktop(use_winsta)) {
+    *on_sandbox_desktop = true;
   } else {
+    *on_sandbox_desktop = false;
     DLOG(WARNING) << "Failed to apply desktop security to the renderer";
   }
 
@@ -343,6 +347,11 @@ void AddPolicyForRenderer(HDESK desktop, sandbox::TargetPolicy* policy) {
 namespace sandbox {
 
 base::ProcessHandle StartProcess(CommandLine* cmd_line) {
+  return StartProcessWithAccess(cmd_line, FilePath());
+}
+
+base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
+                                           const FilePath& exposed_dir) {
   base::ProcessHandle process = 0;
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   ChildProcessInfo::ProcessType type;
@@ -353,6 +362,8 @@ base::ProcessHandle StartProcess(CommandLine* cmd_line) {
     type = ChildProcessInfo::PLUGIN_PROCESS;
   } else if (type_str == switches::kWorkerProcess) {
     type = ChildProcessInfo::WORKER_PROCESS;
+  } else if (type_str == switches::kUtilityProcess) {
+    type = ChildProcessInfo::UTILITY_PROCESS;
   } else {
     NOTREACHED();
     return 0;
@@ -385,20 +396,31 @@ base::ProcessHandle StartProcess(CommandLine* cmd_line) {
   PROCESS_INFORMATION target = {0};
   sandbox::TargetPolicy* policy = broker_service->CreatePolicy();
 
-  HDESK desktop = NULL;
+  bool on_sandbox_desktop = false;
   if (type == ChildProcessInfo::PLUGIN_PROCESS) {
     if (!AddPolicyForPlugin(cmd_line, policy))
       return 0;
   } else {
-    desktop = CreateDesktop(
-      kDesktopName, NULL, NULL, 0, DESKTOP_CREATEWINDOW, NULL);
-    AddPolicyForRenderer(desktop, policy);
+    AddPolicyForRenderer(policy, &on_sandbox_desktop);
+  }
+
+  if (!exposed_dir.empty()) {
+    result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                             exposed_dir.ToWStringHack().c_str());
+    if (result != sandbox::SBOX_ALL_OK)
+      return 0;
+
+    FilePath exposed_files = exposed_dir.AppendASCII("*");
+    result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                             exposed_files.ToWStringHack().c_str());
+    if (result != sandbox::SBOX_ALL_OK)
+      return 0;
   }
 
   if (!AddGenericPolicy(policy)) {
     NOTREACHED();
-    if (desktop)
-      CloseDesktop(desktop);
     return 0;
   }
 
@@ -408,14 +430,10 @@ base::ProcessHandle StartProcess(CommandLine* cmd_line) {
       policy, &target);
   policy->Release();
 
-  if (desktop)
-    CloseDesktop(desktop);
-
   if (sandbox::SBOX_ALL_OK != result)
     return 0;
 
   if (type == ChildProcessInfo::RENDER_PROCESS) {
-    bool on_sandbox_desktop = (desktop != NULL);
     NotificationService::current()->Notify(
         NotificationType::RENDERER_PROCESS_IN_SBOX,
         NotificationService::AllSources(),

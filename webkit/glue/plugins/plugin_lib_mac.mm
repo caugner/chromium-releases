@@ -8,7 +8,9 @@
 
 #include "webkit/glue/plugins/plugin_lib.h"
 
+#include "base/native_library.h"
 #include "base/scoped_cftyperef.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -19,32 +21,6 @@ static const short kSTRPluginDescriptionResourceID = 126;
 
 namespace NPAPI
 {
-
-/* static */
-PluginLib::NativeLibrary PluginLib::LoadNativeLibrary(
-    const FilePath& library_path) {
-  scoped_cftyperef<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(
-      kCFAllocatorDefault,
-      (const UInt8*)library_path.value().c_str(),
-      library_path.value().length(),
-      true));
-  if (!url)
-    return NULL;
-
-  return CFBundleCreate(kCFAllocatorDefault, url.get());
-}
-
-/* static */
-void PluginLib::UnloadNativeLibrary(NativeLibrary library) {
-  CFRelease(library);
-}
-
-/* static */
-void* PluginLib::GetFunctionPointerFromNativeLibrary(
-    NativeLibrary library,
-    NativeLibraryFunctionNameType name) {
-  return CFBundleGetFunctionPointerForName(library, name);
-}
 
 namespace {
 
@@ -322,7 +298,14 @@ bool PluginLib::ReadWebPluginInfo(const FilePath &filename,
   //
   // Strictly speaking, only STR# 128 is required.
 
-  scoped_cftyperef<CFBundleRef> bundle(LoadNativeLibrary(filename));
+  // We are accessing the bundle contained in the NativeLibrary but not
+  // unloading it.  We use a scoped_ptr to make sure the NativeLibraryStruct is
+  // not leaked.
+  scoped_ptr<base::NativeLibraryStruct> native_library(
+      base::LoadNativeLibrary(filename));
+  if (native_library->type != base::BUNDLE)
+    return false;
+  scoped_cftyperef<CFBundleRef> bundle(native_library->bundle);
   if (!bundle)
     return false;
 

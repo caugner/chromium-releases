@@ -1,7 +1,8 @@
-<html id="t" jsvalues="dir:textdirection">
+<!DOCTYPE html>
+<html i18n-values="dir:textdirection;bookmarkbarattached:bookmarkbarattached">
 <head>
-<title jscontent="title"></title>
-<style type="text/css">
+<title i18n-content="title"></title>
+<style>
 body {
   margin:10px 8px 10px 8px;
 }
@@ -14,18 +15,36 @@ body {
   background-color:#eee;
   color:black;
   padding:10px 10px 10px 10px;
-  font-family:arial;
-  font-size:84%;
   max-width:600px;
   margin-left:auto;
   margin-right:auto;
 }
 </style>
+<script>
+// Until themes can clear the cache, force-reload the theme stylesheet.
+document.write('<link id="incognitothemecss" rel="stylesheet" ' +
+               'href="chrome://theme/css/newincognitotab.css?' +
+               Date.now() + '">');
+</script>
 </head>
 <body>
-<div class="content">
+<div class="content" i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
   <img src="../../app/theme/otr_icon_standalone.png" class="icon" />
-  <span jseval="this.innerHTML = $this.content;"></span>
+  <span i18n-values=".innerHTML:content"></span>
 </div>
 </body>
+<script>
+function themeChanged() {
+  document.getElementById('incognitothemecss').href =
+      'chrome://theme/css/newincognitotab.css?' + Date.now();
+}
+
+function bookmarkBarAttached() {
+  document.documentElement.setAttribute("bookmarkbarattached", "true");
+}
+
+function bookmarkBarDetached() {
+  document.documentElement.setAttribute("bookmarkbarattached", "false");
+}
+</script>
 </html>

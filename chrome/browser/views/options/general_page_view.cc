@@ -1,9 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/options/general_page_view.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/gfx/png_decoder.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -19,26 +21,25 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/keyword_editor_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
-#include "chrome/browser/views/standard_layout.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/button/radio_button.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/grid_layout.h"
+#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
-#include "skia/include/SkBitmap.h"
+#include "net/base/net_util.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "views/controls/button/radio_button.h"
+#include "views/controls/label.h"
+#include "views/controls/table/table_view.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/grid_layout.h"
+#include "views/standard_layout.h"
 
 namespace {
 
@@ -97,7 +98,7 @@ class GeneralPageView::DefaultBrowserWorker
   MessageLoop* ui_loop_;
   MessageLoop* file_loop_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(GeneralPageView::DefaultBrowserWorker);
+  DISALLOW_COPY_AND_ASSIGN(GeneralPageView::DefaultBrowserWorker);
 };
 
 GeneralPageView::DefaultBrowserWorker::DefaultBrowserWorker(
@@ -170,7 +171,7 @@ void GeneralPageView::DefaultBrowserWorker::UpdateUI(bool is_default) {
 // CustomHomePagesTableModel is the model for the TableView showing the list
 // of pages the user wants opened on startup.
 
-class CustomHomePagesTableModel : public views::TableModel {
+class CustomHomePagesTableModel : public TableModel {
  public:
   explicit CustomHomePagesTableModel(Profile* profile);
   virtual ~CustomHomePagesTableModel() {}
@@ -187,11 +188,11 @@ class CustomHomePagesTableModel : public views::TableModel {
   // Returns the set of urls this model contains.
   std::vector<GURL> GetURLs();
 
-  // views::TableModel overrides:
+  // TableModel overrides:
   virtual int RowCount();
   virtual std::wstring GetText(int row, int column_id);
   virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(views::TableModelObserver* observer);
+  virtual void SetObserver(TableModelObserver* observer);
 
  private:
   // Each item in the model is represented as an Entry. Entry stores the URL
@@ -235,12 +236,12 @@ class CustomHomePagesTableModel : public views::TableModel {
   // Profile used to load icons.
   Profile* profile_;
 
-  views::TableModelObserver* observer_;
+  TableModelObserver* observer_;
 
   // Used in loading favicons.
   CancelableRequestConsumer fav_icon_consumer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CustomHomePagesTableModel);
+  DISALLOW_COPY_AND_ASSIGN(CustomHomePagesTableModel);
 };
 
 // static
@@ -302,9 +303,11 @@ int CustomHomePagesTableModel::RowCount() {
 std::wstring CustomHomePagesTableModel::GetText(int row, int column_id) {
   DCHECK(column_id == 0);
   DCHECK(row >= 0 && row < RowCount());
+  std::wstring languages =
+      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
   // No need to force URL to have LTR directionality because the custom home
   // pages control is created using LTR directionality.
-  return UTF8ToWide(entries_[row].url.spec());
+  return net::FormatUrl(entries_[row].url, languages);
 }
 
 SkBitmap CustomHomePagesTableModel::GetIcon(int row) {
@@ -314,8 +317,7 @@ SkBitmap CustomHomePagesTableModel::GetIcon(int row) {
   return default_favicon_;
 }
 
-void CustomHomePagesTableModel::SetObserver(
-    views::TableModelObserver* observer) {
+void CustomHomePagesTableModel::SetObserver(TableModelObserver* observer) {
   observer_ = observer;
 }
 
@@ -380,19 +382,19 @@ CustomHomePagesTableModel::Entry*
 ///////////////////////////////////////////////////////////////////////////////
 // SearchEngineListModel
 
-class SearchEngineListModel : public views::ComboBox::Model,
+class SearchEngineListModel : public views::Combobox::Model,
                               public TemplateURLModelObserver {
  public:
   explicit SearchEngineListModel(Profile* profile);
   virtual ~SearchEngineListModel();
 
-  // Sets the ComboBox. SearchEngineListModel needs a handle to the ComboBox
+  // Sets the Combobox. SearchEngineListModel needs a handle to the Combobox
   // so that when the TemplateURLModel changes the combobox can be updated.
-  void SetComboBox(views::ComboBox* combo_box);
+  void SetCombobox(views::Combobox* combobox);
 
-  // views::ComboBox::Model overrides:
-  virtual int GetItemCount(views::ComboBox* source);
-  virtual std::wstring GetItemAt(views::ComboBox* source, int index);
+  // views::Combobox::Model overrides:
+  virtual int GetItemCount(views::Combobox* source);
+  virtual std::wstring GetItemAt(views::Combobox* source, int index);
 
   // Returns the TemplateURL at the specified index.
   const TemplateURL* GetTemplateURLAt(int index);
@@ -408,23 +410,23 @@ class SearchEngineListModel : public views::ComboBox::Model,
 
   // Resets the selection of the combobox based on the users selected search
   // engine.
-  void ChangeComboBoxSelection();
+  void ChangeComboboxSelection();
 
   TemplateURLModel* template_url_model_;
 
   // The combobox hosting us.
-  views::ComboBox* combo_box_;
+  views::Combobox* combobox_;
 
   // The TemplateURLs we're showing.
   typedef std::vector<const TemplateURL*> TemplateURLs;
   TemplateURLs template_urls_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SearchEngineListModel);
+  DISALLOW_COPY_AND_ASSIGN(SearchEngineListModel);
 };
 
 SearchEngineListModel::SearchEngineListModel(Profile* profile)
     : template_url_model_(profile->GetTemplateURLModel()),
-      combo_box_(NULL) {
+      combobox_(NULL) {
   if (template_url_model_) {
     template_url_model_->Load();
     template_url_model_->AddObserver(this);
@@ -437,21 +439,21 @@ SearchEngineListModel::~SearchEngineListModel() {
     template_url_model_->RemoveObserver(this);
 }
 
-void SearchEngineListModel::SetComboBox(views::ComboBox* combo_box) {
-  combo_box_ = combo_box;
+void SearchEngineListModel::SetCombobox(views::Combobox* combobox) {
+  combobox_ = combobox;
   if (template_url_model_ && template_url_model_->loaded())
-    ChangeComboBoxSelection();
+    ChangeComboboxSelection();
   else
-    combo_box_->SetEnabled(false);
+    combobox_->SetEnabled(false);
 }
 
-int SearchEngineListModel::GetItemCount(views::ComboBox* source) {
+int SearchEngineListModel::GetItemCount(views::Combobox* source) {
   return static_cast<int>(template_urls_.size());
 }
 
-std::wstring SearchEngineListModel::GetItemAt(views::ComboBox* source,
+std::wstring SearchEngineListModel::GetItemAt(views::Combobox* source,
                                               int index) {
-  DCHECK(index < GetItemCount(combo_box_));
+  DCHECK(index < GetItemCount(combobox_));
   return template_urls_[index]->short_name();
 }
 
@@ -474,15 +476,15 @@ void SearchEngineListModel::ResetContents() {
       template_urls_.push_back(model_urls[i]);
   }
 
-  if (combo_box_) {
-    combo_box_->ModelChanged();
-    ChangeComboBoxSelection();
+  if (combobox_) {
+    combobox_->ModelChanged();
+    ChangeComboboxSelection();
   }
 }
 
-void SearchEngineListModel::ChangeComboBoxSelection() {
+void SearchEngineListModel::ChangeComboboxSelection() {
   if (template_urls_.size()) {
-    combo_box_->SetEnabled(true);
+    combobox_->SetEnabled(true);
 
     const TemplateURL* default_search_provider =
         template_url_model_->GetDefaultSearchProvider();
@@ -491,12 +493,12 @@ void SearchEngineListModel::ChangeComboBoxSelection() {
           find(template_urls_.begin(), template_urls_.end(),
                default_search_provider);
       if (i != template_urls_.end()) {
-        combo_box_->SetSelectedItem(
+        combobox_->SetSelectedItem(
             static_cast<int>(i - template_urls_.begin()));
       }
     }
   } else {
-    combo_box_->SetEnabled(false);
+    combobox_->SetEnabled(false);
   }
 }
 
@@ -522,7 +524,8 @@ GeneralPageView::GeneralPageView(Profile* profile)
       default_browser_group_(NULL),
       default_browser_status_label_(NULL),
       default_browser_use_as_default_button_(NULL),
-      default_browser_worker_(new DefaultBrowserWorker(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          default_browser_worker_(new DefaultBrowserWorker(this))),
       OptionsPageView(profile) {
 }
 
@@ -536,9 +539,9 @@ GeneralPageView::~GeneralPageView() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// GeneralPageView, views::NativeButton::Listener implementation:
+// GeneralPageView, views::ButtonListener implementation:
 
-void GeneralPageView::ButtonPressed(views::NativeButton* sender) {
+void GeneralPageView::ButtonPressed(views::Button* sender) {
   if (sender == startup_homepage_radio_ ||
       sender == startup_last_session_radio_ ||
       sender == startup_custom_radio_) {
@@ -567,10 +570,10 @@ void GeneralPageView::ButtonPressed(views::NativeButton* sender) {
   } else if (sender == homepage_use_url_radio_) {
     UserMetricsRecordAction(L"Options_Homepage_UseURL",
                             profile()->GetPrefs());
-    SetHomepage(homepage_use_url_textfield_->GetText());
+    SetHomepage(homepage_use_url_textfield_->text());
     EnableHomepageURLField(true);
   } else if (sender == homepage_show_home_button_checkbox_) {
-    bool show_button = homepage_show_home_button_checkbox_->IsSelected();
+    bool show_button = homepage_show_home_button_checkbox_->checked();
     if (show_button) {
       UserMetricsRecordAction(L"Options_Homepage_ShowHomeButton",
                               profile()->GetPrefs());
@@ -582,6 +585,9 @@ void GeneralPageView::ButtonPressed(views::NativeButton* sender) {
   } else if (sender == default_browser_use_as_default_button_) {
     default_browser_worker_->StartSetAsDefaultBrowser();
     UserMetricsRecordAction(L"Options_SetAsDefaultBrowser", NULL);
+    // If the user made Chrome the default browser, then he/she arguably wants
+    // to be notified when that changes.
+    profile()->GetPrefs()->SetBoolean(prefs::kCheckDefaultBrowser, true);
   } else if (sender == default_search_manage_engines_button_) {
     UserMetricsRecordAction(L"Options_ManageSearchEngines", NULL);
     KeywordEditorView::Show(profile());
@@ -589,36 +595,35 @@ void GeneralPageView::ButtonPressed(views::NativeButton* sender) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// GeneralPageView, views::ComboBox::Listener implementation:
+// GeneralPageView, views::Combobox::Listener implementation:
 
-void GeneralPageView::ItemChanged(views::ComboBox* combo_box,
+void GeneralPageView::ItemChanged(views::Combobox* combobox,
                                   int prev_index, int new_index) {
-  if (combo_box == default_search_engine_combobox_) {
+  if (combobox == default_search_engine_combobox_) {
     SetDefaultSearchProvider();
     UserMetricsRecordAction(L"Options_SearchEngineChanged", NULL);
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// GeneralPageView, views::TextField::Controller implementation:
+// GeneralPageView, views::Textfield::Controller implementation:
 
-void GeneralPageView::ContentsChanged(views::TextField* sender,
+void GeneralPageView::ContentsChanged(views::Textfield* sender,
                                       const std::wstring& new_contents) {
   if (sender == homepage_use_url_textfield_) {
     // If the text field contains a valid URL, sync it to prefs. We run it
     // through the fixer upper to allow input like "google.com" to be converted
     // to something valid ("http://google.com").
     std::wstring url_string = URLFixerUpper::FixupURL(
-        homepage_use_url_textfield_->GetText(), std::wstring());
+        homepage_use_url_textfield_->text(), std::wstring());
     if (GURL(url_string).is_valid())
       SetHomepage(url_string);
   }
 }
 
-void GeneralPageView::HandleKeystroke(views::TextField* sender,
-                                      UINT message, TCHAR key,
-                                      UINT repeat_count, UINT flags) {
-  // Not necessary.
+bool GeneralPageView::HandleKeystroke(views::Textfield* sender,
+                                      const views::Textfield::Keystroke&) {
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -673,17 +678,17 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
         SessionStartupPref::GetStartupPref(prefs);
     switch (startup_pref.type) {
     case SessionStartupPref::DEFAULT:
-      startup_homepage_radio_->SetIsSelected(true);
+      startup_homepage_radio_->SetChecked(true);
       EnableCustomHomepagesControls(false);
       break;
 
     case SessionStartupPref::LAST:
-      startup_last_session_radio_->SetIsSelected(true);
+      startup_last_session_radio_->SetChecked(true);
       EnableCustomHomepagesControls(false);
       break;
 
     case SessionStartupPref::URLS:
-      startup_custom_radio_->SetIsSelected(true);
+      startup_custom_radio_->SetChecked(true);
       EnableCustomHomepagesControls(true);
       break;
     }
@@ -704,10 +709,10 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
 
   if (!pref_name || *pref_name == prefs::kHomePageIsNewTabPage) {
     if (new_tab_page_is_home_page_.GetValue()) {
-      homepage_use_newtab_radio_->SetIsSelected(true);
+      homepage_use_newtab_radio_->SetChecked(true);
       EnableHomepageURLField(false);
     } else {
-      homepage_use_url_radio_->SetIsSelected(true);
+      homepage_use_url_radio_->SetChecked(true);
       EnableHomepageURLField(true);
     }
   }
@@ -719,7 +724,7 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
   }
 
   if (!pref_name || *pref_name == prefs::kShowHomeButton) {
-    homepage_show_home_button_checkbox_->SetIsSelected(
+    homepage_show_home_button_checkbox_->SetChecked(
         show_home_button_.GetValue());
   }
 }
@@ -772,31 +777,28 @@ void GeneralPageView::InitStartupGroup() {
   startup_homepage_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_STARTUP_SHOW_DEFAULT_AND_NEWTAB),
       kStartupRadioGroup);
-  startup_homepage_radio_->SetListener(this);
+  startup_homepage_radio_->set_listener(this);
   startup_last_session_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_STARTUP_SHOW_LAST_SESSION),
       kStartupRadioGroup);
-  startup_last_session_radio_->SetListener(this);
+  startup_last_session_radio_->set_listener(this);
   startup_last_session_radio_->SetMultiLine(true);
   startup_custom_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_STARTUP_SHOW_PAGES),
       kStartupRadioGroup);
-  startup_custom_radio_->SetListener(this);
+  startup_custom_radio_->set_listener(this);
   startup_add_custom_page_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_STARTUP_ADD_BUTTON));
-  startup_add_custom_page_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_STARTUP_ADD_BUTTON));
   startup_remove_custom_page_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_STARTUP_REMOVE_BUTTON));
+      this, l10n_util::GetString(IDS_OPTIONS_STARTUP_REMOVE_BUTTON));
   startup_remove_custom_page_button_->SetEnabled(false);
-  startup_remove_custom_page_button_->SetListener(this);
   startup_use_current_page_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_OPTIONS_STARTUP_USE_CURRENT));
-  startup_use_current_page_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_OPTIONS_STARTUP_USE_CURRENT));
 
   startup_custom_pages_table_model_.reset(
       new CustomHomePagesTableModel(profile()));
-  std::vector<views::TableColumn> columns;
-  columns.push_back(views::TableColumn());
+  std::vector<TableColumn> columns;
+  columns.push_back(TableColumn());
   startup_custom_pages_table_ = new views::TableView(
       startup_custom_pages_table_model_.get(), columns,
       views::ICON_AND_TEXT, true, false, true);
@@ -866,17 +868,17 @@ void GeneralPageView::InitHomepageGroup() {
   homepage_use_newtab_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_USE_NEWTAB),
       kHomePageRadioGroup);
-  homepage_use_newtab_radio_->SetListener(this);
+  homepage_use_newtab_radio_->set_listener(this);
   homepage_use_newtab_radio_->SetMultiLine(true);
   homepage_use_url_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_USE_URL),
       kHomePageRadioGroup);
-  homepage_use_url_radio_->SetListener(this);
-  homepage_use_url_textfield_ = new views::TextField;
+  homepage_use_url_radio_->set_listener(this);
+  homepage_use_url_textfield_ = new views::Textfield;
   homepage_use_url_textfield_->SetController(this);
-  homepage_show_home_button_checkbox_ = new views::CheckBox(
+  homepage_show_home_button_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_SHOW_BUTTON));
-  homepage_show_home_button_checkbox_->SetListener(this);
+  homepage_show_home_button_checkbox_->set_listener(this);
   homepage_show_home_button_checkbox_->SetMultiLine(true);
 
   using views::GridLayout;
@@ -893,7 +895,7 @@ void GeneralPageView::InitHomepageGroup() {
 
   const int double_column_view_set_id = 1;
   column_set = layout->AddColumnSet(double_column_view_set_id);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
+  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
@@ -918,13 +920,13 @@ void GeneralPageView::InitHomepageGroup() {
 void GeneralPageView::InitDefaultSearchGroup() {
   default_search_engines_model_.reset(new SearchEngineListModel(profile()));
   default_search_engine_combobox_ =
-      new views::ComboBox(default_search_engines_model_.get());
-  default_search_engines_model_->SetComboBox(default_search_engine_combobox_);
-  default_search_engine_combobox_->SetListener(this);
+      new views::Combobox(default_search_engines_model_.get());
+  default_search_engines_model_->SetCombobox(default_search_engine_combobox_);
+  default_search_engine_combobox_->set_listener(this);
 
   default_search_manage_engines_button_ = new views::NativeButton(
+      this,
       l10n_util::GetString(IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES_LINK));
-  default_search_manage_engines_button_->SetListener(this);
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -956,9 +958,9 @@ void GeneralPageView::InitDefaultBrowserGroup() {
   default_browser_status_label_->SetHorizontalAlignment(
       views::Label::ALIGN_LEFT);
   default_browser_use_as_default_button_ = new views::NativeButton(
+      this,
       l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_USEASDEFAULT,
                             l10n_util::GetString(IDS_PRODUCT_NAME)));
-  default_browser_use_as_default_button_->SetListener(this);
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -988,9 +990,9 @@ void GeneralPageView::InitDefaultBrowserGroup() {
 void GeneralPageView::SaveStartupPref() {
   SessionStartupPref pref;
 
-  if (startup_last_session_radio_->IsSelected()) {
+  if (startup_last_session_radio_->checked()) {
     pref.type = SessionStartupPref::LAST;
-  } else if (startup_custom_radio_->IsSelected()) {
+  } else if (startup_custom_radio_->checked()) {
     pref.type = SessionStartupPref::URLS;
   }
 
@@ -1001,7 +1003,7 @@ void GeneralPageView::SaveStartupPref() {
 
 void GeneralPageView::AddURLToStartupURLs() {
   ShelfItemDialog* dialog = new ShelfItemDialog(this, profile(), false);
-  dialog->Show(GetRootWindow());
+  dialog->Show(GetWindow()->GetNativeWindow());
 }
 
 void GeneralPageView::RemoveURLsFromStartupURLs() {
@@ -1085,7 +1087,7 @@ void GeneralPageView::EnableHomepageURLField(bool enabled) {
 }
 
 void GeneralPageView::SetDefaultSearchProvider() {
-  const int index = default_search_engine_combobox_->GetSelectedItem();
+  const int index = default_search_engine_combobox_->selected_item();
   default_search_engines_model_->model()->SetDefaultSearchProvider(
       default_search_engines_model_->GetTemplateURLAt(index));
 }

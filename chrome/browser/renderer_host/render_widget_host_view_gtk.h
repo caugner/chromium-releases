@@ -5,14 +5,21 @@
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_GTK_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_GTK_H_
 
+#include <gdk/gdk.h>
 #include <vector>
 
 #include "base/gfx/native_widget_types.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "chrome/common/render_messages.h"
+#include "webkit/glue/plugins/gtk_plugin_container_manager.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderWidgetHost;
+
+typedef struct _GtkClipboard GtkClipboard;
+typedef struct _GtkSelectionData GtkSelectionData;
+typedef struct _GtkIMContext GtkIMContext;
 
 // -----------------------------------------------------------------------------
 // See comments in render_widget_host_view.h about this class and its members.
@@ -25,70 +32,124 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // Initialize this object for use as a drawing area.
   void InitAsChild();
 
-  // Initialize this object for use as a popup (e.g. HTML dropdown menu).
-  void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                   const gfx::Rect& pos);
-
-  // TODO(estade): unfork this with RenderWidgetHostViewWin function of same
-  // name.
-  void set_activatable(bool activatable) { activatable_ = activatable; }
-
-  // ---------------------------------------------------------------------------
-  // Implementation of RenderWidgetHostView...
-
-  RenderWidgetHost* GetRenderWidgetHost() const { return host_; }
-  void DidBecomeSelected();
-  void WasHidden();
-  void SetSize(const gfx::Size& size);
-  gfx::NativeView GetPluginNativeView();
-  void MovePluginWindows(
+  // RenderWidgetHostView implementation.
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos);
+  virtual RenderWidgetHost* GetRenderWidgetHost() const { return host_; }
+  virtual void DidBecomeSelected();
+  virtual void WasHidden();
+  virtual void SetSize(const gfx::Size& size);
+  virtual gfx::NativeView GetNativeView();
+  virtual void MovePluginWindows(
       const std::vector<WebPluginGeometry>& plugin_window_moves);
-  void Focus();
-  void Blur();
-  bool HasFocus();
-  void Show();
-  void Hide();
-  gfx::Rect GetViewBounds() const;
-  void UpdateCursor(const WebCursor& cursor);
-  void UpdateCursorIfOverSelf();
-  void SetIsLoading(bool is_loading);
-  void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
-  void DidPaintRect(const gfx::Rect& rect);
-  void DidScrollRect(
-      const gfx::Rect& rect, int dx, int dy);
-  void RenderViewGone();
-  void Destroy();
-  void SetTooltipText(const std::wstring& tooltip_text);
-  BackingStore* AllocBackingStore(const gfx::Size& size);
-  // ---------------------------------------------------------------------------
+  virtual void Focus();
+  virtual void Blur();
+  virtual bool HasFocus();
+  virtual void Show();
+  virtual void Hide();
+  virtual gfx::Rect GetViewBounds() const;
+  virtual void UpdateCursor(const WebCursor& cursor);
+  virtual void SetIsLoading(bool is_loading);
+  virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
+  virtual void DidPaintRect(const gfx::Rect& rect);
+  virtual void DidScrollRect(const gfx::Rect& rect, int dx, int dy);
+  virtual void RenderViewGone();
+  virtual void Destroy();
+  virtual void SetTooltipText(const std::wstring& tooltip_text);
+  virtual void SelectionChanged(const std::string& text);
+  virtual void PasteFromSelectionClipboard();
+  virtual void ShowingContextMenu(bool showing);
+  virtual BackingStore* AllocBackingStore(const gfx::Size& size);
+  virtual gfx::PluginWindowHandle CreatePluginContainer(
+      base::ProcessId plugin_process_id);
+  virtual void DestroyPluginContainer(gfx::PluginWindowHandle container);
+  virtual void PluginProcessCrashed(base::ProcessId pid);
 
   gfx::NativeView native_view() const { return view_.get(); }
 
   void Paint(const gfx::Rect&);
 
  private:
+  friend class RenderWidgetHostViewGtkWidget;
+
+  // Update the display cursor for the render view.
+  void ShowCurrentCursor();
+
+  // When we've requested the text from the X clipboard, GTK returns it to us
+  // through this callback.
+  static void ReceivedSelectionText(GtkClipboard* clipboard,
+                                    const gchar* text,
+                                    gpointer userdata);
+
   // The model object.
-  RenderWidgetHost *const host_;
+  RenderWidgetHost* const host_;
+
   // The native UI widget.
   OwnedWidgetGtk view_;
+
+  // This is true when we are currently painting and thus should handle extra
+  // paint requests by expanding the invalid rect rather than actually
+  // painting.
+  bool about_to_validate_and_paint_;
+
+  // This is the rectangle which we'll paint.
+  gfx::Rect invalid_rect_;
+
+  // Whether or not this widget is hidden.
+  bool is_hidden_;
+
+  // Whether we are currently loading.
+  bool is_loading_;
+  // The cursor for the page. This is passed up from the renderer.
+  WebCursor current_cursor_;
+
+  // Whether we are showing a context menu.
+  bool is_showing_context_menu_;
+
   // Variables used only for popups --------------------------------------------
   // Our parent widget.
   RenderWidgetHostView* parent_host_view_;
   // The native view of our parent, equivalent to
-  // parent_host_view_->GetPluginNativeView().
+  // parent_host_view_->GetNativeView().
   GtkWidget* parent_;
-  // We connect to the parent's focus out event. When we are destroyed, we need
-  // to remove this handler, so we must keep track of its id.
-  gulong popup_signal_id_;
-  // This variable determines our degree of control over user input. If we are
-  // activatable, we must grab and handle all user input. If we are not
-  // activatable, then our parent render view retains more control. Example of
-  // activatable popup: <select> dropdown. Example of non-activatable popup:
-  // form autocomplete.
-  bool activatable_;
+  // We ignore the first mouse release on popups.  This allows the popup to
+  // stay open.
+  bool is_popup_first_mouse_release_;
 
-  // The cursor for the page. This is passed up from the renderer.
-  WebCursor current_cursor_;
+  // The GtkIMContext object.
+  // In terms of the DOM event specification Appendix A
+  //   <http://www.w3.org/TR/DOM-Level-3-Events/keyset.html>,
+  // GTK uses a GtkIMContext object for the following two purposes:
+  //  1. Composing Latin characters (A.1.2), and;
+  //  2. Composing CJK characters with an IME (A.1.3).
+  // Many JavaScript pages assume composed Latin characters are dispatched to
+  // their onkeypress() handlers but not dispatched CJK characters composed
+  // with an IME. To emulate this behavior, we should monitor the status of
+  // this GtkIMContext object and prevent sending Char events when a
+  // GtkIMContext object sends a "commit" signal with the CJK characters
+  // composed by an IME.
+  GtkIMContext* im_context_;
+
+  // Whether or not the above GtkIMContext is composing a CJK text with an IME.
+  // The GtkIMContext object sends a "preedit_start" before it starts composing
+  // a CJK text and a "preedit_end" signal after it finishes composing it.
+  // On the other hand, the GtkIMContext object doesn't send them when
+  // composing Latin texts. So, we monitor the above signals to check whether
+  // or not the GtkIMContext object is composing a CJK text.
+  bool im_is_composing_cjk_text_;
+
+  // Represents the current modifier-key state.
+  // This state is used when GtkIMContext signal handlers create Char events
+  // because they don't use the GdkEventKey objects and cannot get the state.
+  int im_modifier_state_;
+
+  // Helper class that lets us allocate plugin containers and move them.
+  GtkPluginContainerManager plugin_container_manager_;
+
+  // A map of plugin process id -> windows related to that process.
+  // Lets us clean up immediately when a plugin process crashes.
+  typedef std::multimap<base::ProcessId, gfx::PluginWindowHandle> PluginPidMap;
+  PluginPidMap plugin_pid_map_;
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_GTK_H_

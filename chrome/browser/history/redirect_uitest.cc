@@ -26,8 +26,6 @@ class RedirectTest : public UITest {
   }
 };
 
-}  // namespace
-
 // Tests a single server redirect
 TEST_F(RedirectTest, Server) {
   scoped_refptr<HTTPTestServer> server =
@@ -40,7 +38,7 @@ TEST_F(RedirectTest, Server) {
 
   NavigateToURL(first_url);
 
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
 
   std::vector<GURL> redirects;
@@ -65,7 +63,7 @@ TEST_F(RedirectTest, Client) {
   NavigateToURL(first_url);
   PlatformThread::Sleep(action_timeout_ms());
 
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
 
   std::vector<GURL> redirects;
@@ -73,6 +71,19 @@ TEST_F(RedirectTest, Client) {
 
   ASSERT_EQ(1U, redirects.size());
   EXPECT_EQ(final_url.spec(), redirects[0].spec());
+
+  // The address bar should display the final URL.
+  GURL tab_url;
+  EXPECT_TRUE(tab_proxy->GetCurrentURL(&tab_url));
+  EXPECT_TRUE(final_url == tab_url);
+
+  // Navigate one more time.
+  NavigateToURL(first_url);
+  PlatformThread::Sleep(action_timeout_ms());
+
+  // The address bar should still display the final URL.
+  EXPECT_TRUE(tab_proxy->GetCurrentURL(&tab_url));
+  EXPECT_TRUE(final_url == tab_url);
 }
 
 TEST_F(RedirectTest, ClientEmptyReferer) {
@@ -81,8 +92,8 @@ TEST_F(RedirectTest, ClientEmptyReferer) {
   ASSERT_TRUE(NULL != server.get());
 
   GURL final_url = server->TestServerPageW(std::wstring());
-  std::wstring test_file = test_data_directory_;
-  file_util::AppendToPath(&test_file, L"file_client_redirect.html");
+  FilePath test_file(test_data_directory_);
+  test_file = test_file.AppendASCII("file_client_redirect.html");
   GURL first_url = net::FilePathToFileURL(test_file);
 
   NavigateToURL(first_url);
@@ -93,29 +104,29 @@ TEST_F(RedirectTest, ClientEmptyReferer) {
   // the TestServer.
   for (int i = 0; i < 10; ++i) {
     PlatformThread::Sleep(sleep_timeout_ms());
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     ASSERT_TRUE(tab_proxy->GetRedirectsFrom(first_url, &redirects));
     if (!redirects.empty())
       break;
   }
 
-  EXPECT_EQ(1U, redirects.size());
+  ASSERT_EQ(1U, redirects.size());
   EXPECT_EQ(final_url.spec(), redirects[0].spec());
 }
 
 // Tests to make sure a location change when a pending redirect exists isn't
 // flagged as a redirect.
 TEST_F(RedirectTest, ClientCancelled) {
-  std::wstring first_path = test_data_directory_;
-  file_util::AppendToPath(&first_path, L"cancelled_redirect_test.html");
+  FilePath first_path(test_data_directory_);
+  first_path = first_path.AppendASCII("cancelled_redirect_test.html");
   ASSERT_TRUE(file_util::AbsolutePath(&first_path));
   GURL first_url = net::FilePathToFileURL(first_path);
 
   NavigateToURL(first_url);
   PlatformThread::Sleep(action_timeout_ms());
 
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
 
   std::vector<GURL> redirects;
@@ -132,11 +143,12 @@ TEST_F(RedirectTest, ClientCancelled) {
   // containing an anchor using FilePathToFileURL will escape the anchor as
   // %23, but in current_url the anchor will be '#'.
   std::string final_ref = "myanchor";
-  std::wstring current_path;
+  FilePath current_path;
   ASSERT_TRUE(net::FileURLToFilePath(current_url, &current_path));
   ASSERT_TRUE(file_util::AbsolutePath(&current_path));
   // Path should remain unchanged.
-  EXPECT_EQ(StringToLowerASCII(first_path), StringToLowerASCII(current_path));
+  EXPECT_EQ(StringToLowerASCII(first_path.value()),
+            StringToLowerASCII(current_path.value()));
   EXPECT_EQ(final_ref, current_url.ref());
 }
 
@@ -163,7 +175,7 @@ TEST_F(RedirectTest, DISABLED_ClientServerServer) {
 
   for (int i = 0; i < 10; ++i) {
     PlatformThread::Sleep(sleep_timeout_ms());
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     ASSERT_TRUE(tab_proxy->GetRedirectsFrom(first_url, &redirects));
     if (!redirects.empty())
@@ -202,8 +214,8 @@ TEST_F(RedirectTest, NoHttpToFile) {
   scoped_refptr<HTTPTestServer> server =
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
-  std::wstring test_file = test_data_directory_;
-  file_util::AppendToPath(&test_file, L"http_to_file.html");
+  FilePath test_file(test_data_directory_);
+  test_file = test_file.AppendASCII("http_to_file.html");
   GURL file_url = net::FilePathToFileURL(test_file);
 
   GURL initial_url = server->TestServerPageW(
@@ -212,7 +224,7 @@ TEST_F(RedirectTest, NoHttpToFile) {
   NavigateToURL(initial_url);
   // UITest will check for crashes. We make sure the title doesn't match the
   // title from the file, because the nav should not have taken place.
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
   std::wstring actual_title;
   tab_proxy->GetTabTitle(&actual_title);
@@ -226,15 +238,15 @@ TEST_F(RedirectTest, ClientFragments) {
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  std::wstring test_file = test_data_directory_;
-  file_util::AppendToPath(&test_file, L"ref_redirect.html");
+  FilePath test_file(test_data_directory_);
+  test_file = test_file.AppendASCII("ref_redirect.html");
   GURL first_url = net::FilePathToFileURL(test_file);
   std::vector<GURL> redirects;
 
   NavigateToURL(first_url);
   for (int i = 0; i < 10; ++i) {
     PlatformThread::Sleep(sleep_timeout_ms());
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     ASSERT_TRUE(tab_proxy->GetRedirectsFrom(first_url, &redirects));
     if (!redirects.empty())
@@ -282,7 +294,7 @@ TEST_F(RedirectTest,
   // Wait till the final page has been loaded.
   for (int i = 0; i < 10; ++i) {
     PlatformThread::Sleep(sleep_timeout_ms());
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     ASSERT_TRUE(tab_proxy->GetTabTitle(&tab_title));
     if (tab_title == final_url_title) {
@@ -307,3 +319,5 @@ TEST_F(RedirectTest,
   }
   EXPECT_TRUE(final_navigation_not_redirect);
 }
+
+}  // namespace

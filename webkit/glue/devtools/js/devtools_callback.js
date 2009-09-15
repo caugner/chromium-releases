@@ -13,7 +13,7 @@ goog.provide('devtools.Callback');
  * @constructor
  */
 devtools.Callback = function() {
-  this.lastCallbackId_ = 0;
+  this.lastCallbackId_ = 1;
   this.callbacks_ = {};
 };
 
@@ -25,7 +25,7 @@ devtools.Callback = function() {
  */
 devtools.Callback.prototype.wrap = function(callback) {
   var callbackId = this.lastCallbackId_++;
-  this.callbacks_[callbackId] = callback;
+  this.callbacks_[callbackId] = callback || function() {};
   return callbackId;
 };
 

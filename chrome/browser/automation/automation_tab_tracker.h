@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_TAB_TRACKER_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_TAB_TRACKER_H_
 
+#include <map>
+
+#include "base/time.h"
 #include "chrome/browser/automation/automation_resource_tracker.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
@@ -19,7 +20,6 @@ public:
       : AutomationResourceTracker<NavigationController*>(automation) {}
 
   virtual ~AutomationTabTracker() {
-    ClearAllMappings();
   }
 
   virtual void AddObserver(NavigationController* resource) {
@@ -83,8 +83,6 @@ public:
   }
 
  private:
-  NotificationRegistrar registrar_;
-
   // Last time a navigation occurred.
   std::map<NavigationController*, base::Time> last_navigation_times_;
 

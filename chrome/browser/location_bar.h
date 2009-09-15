@@ -16,12 +16,14 @@
 #include "chrome/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
+class AutocompleteEditView;
+class LocationBarTesting;
 class TabContents;
 
 class LocationBar {
  public:
   // Shows the first run information bubble anchored to the location bar.
-  virtual void ShowFirstRunBubble() = 0;
+  virtual void ShowFirstRunBubble(bool use_OEM_bubble) = 0;
 
   // Returns the string of text entered in the location bar.
   virtual std::wstring GetInputString() const = 0;
@@ -37,6 +39,9 @@ class LocationBar {
   // Accepts the current string of text entered in the location bar.
   virtual void AcceptInput() = 0;
 
+  // Accept the current input, overriding the disposition.
+  virtual void AcceptInputWithDisposition(WindowOpenDisposition) = 0;
+
   // Focuses and selects the contents of the location bar.
   virtual void FocusLocation() = 0;
 
@@ -44,12 +49,27 @@ class LocationBar {
   // focus to it.
   virtual void FocusSearch() = 0;
 
-  // Update the state of the feed icon.
-  virtual void UpdateFeedIcon() = 0;
+  // Update the state of the page actions.
+  virtual void UpdatePageActions() = 0;
 
   // Saves the state of the location bar to the specified TabContents, so that
   // it can be restored later. (Done when switching tabs).
   virtual void SaveStateToContents(TabContents* contents) = 0;
+
+  // Reverts the location bar.  The bar's permanent text will be shown.
+  virtual void Revert() = 0;
+
+  // Returns a pointer to the text entry view.
+  virtual AutocompleteEditView* location_entry() = 0;
+
+  // Returns a pointer to the testing interface.
+  virtual LocationBarTesting* GetLocationBarForTesting() = 0;
+};
+
+class LocationBarTesting {
+ public:
+  // Returns the number of visible page actions in the Omnibox.
+  virtual int PageActionVisibleCount() = 0;
 };
 
 #endif  // CHROME_BROWSER_LOCATION_BAR_H_

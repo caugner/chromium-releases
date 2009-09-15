@@ -5,10 +5,11 @@
 #ifndef CHROME_BROWSER_VIEWS_GO_BUTTON_H__
 #define CHROME_BROWSER_VIEWS_GO_BUTTON_H__
 
-#include "chrome/views/controls/button/image_button.h"
+#include "base/basictypes.h"
 #include "base/task.h"
+#include "views/controls/button/image_button.h"
 
-class CommandUpdater;
+class Browser;
 class LocationBarView;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -26,23 +27,18 @@ class LocationBarView;
 class GoButton : public views::ToggleImageButton,
                  public views::ButtonListener {
  public:
-  // TODO(beng): get rid of the command updater param and instead have a
-  //             delegate.
-  GoButton(LocationBarView* location_bar, CommandUpdater* command_updater);
+  enum Mode { MODE_GO = 0, MODE_STOP };
+
+  GoButton(LocationBarView* location_bar, Browser* Browser);
   virtual ~GoButton();
 
-  typedef enum Mode { MODE_GO = 0, MODE_STOP };
-
-  // Force the button state
-  void ChangeMode(Mode mode);
-
-  // Ask for a specified button state. This is commonly called by the Browser
-  // when page load state changes.
-  void ScheduleChangeMode(Mode mode);
+  // Ask for a specified button state.  If |force| is true this will be applied
+  // immediately.
+  void ChangeMode(Mode mode, bool force);
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* button);
-  
+
   // Overridden from views::View:
   virtual void OnMouseExited(const views::MouseEvent& e);
   virtual bool GetTooltipText(int x, int y, std::wstring* tooltip);
@@ -54,7 +50,7 @@ class GoButton : public views::ToggleImageButton,
   ScopedRunnableMethodFactory<GoButton> stop_timer_;
 
   LocationBarView* location_bar_;
-  CommandUpdater* command_updater_;
+  Browser* browser_;
 
   // The mode we should be in
   Mode intended_mode_;
@@ -62,7 +58,7 @@ class GoButton : public views::ToggleImageButton,
   // The currently-visible mode - this may different from the intended mode
   Mode visible_mode_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(GoButton);
+  DISALLOW_COPY_AND_ASSIGN(GoButton);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_GO_BUTTON_H__

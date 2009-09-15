@@ -4,21 +4,25 @@
 
 #include "chrome/browser/dom_ui/dom_ui.h"
 
+#include "app/l10n_util.h"
 #include "base/json_reader.h"
 #include "base/json_writer.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/common/bindings_policy.h"
 
-DOMUI::DOMUI(WebContents* contents)
+DOMUI::DOMUI(TabContents* contents)
     : hide_favicon_(false),
       force_bookmark_bar_visible_(false),
       focus_location_bar_by_default_(false),
       should_hide_url_(false),
       link_transition_type_(PageTransition::LINK),
-      web_contents_(contents) {
+      bindings_(BindingsPolicy::DOM_UI),
+      tab_contents_(contents) {
 }
 
 DOMUI::~DOMUI() {
@@ -30,7 +34,9 @@ DOMUI::~DOMUI() {
 // DOMUI, public: -------------------------------------------------------------
 
 void DOMUI::ProcessDOMUIMessage(const std::string& message,
-                                const std::string& content) {
+                                const std::string& content,
+                                int request_id,
+                                bool has_callback) {
   // Look up the callback for this message.
   MessageCallbackMap::const_iterator callback =
       message_callbacks_.find(message);
@@ -79,13 +85,17 @@ void DOMUI::CallJavascriptFunction(
   ExecuteJavascript(javascript);
 }
 
+ThemeProvider* DOMUI::GetThemeProvider() const {
+  return tab_contents_->profile()->GetThemeProvider();
+}
+
 void DOMUI::RegisterMessageCallback(const std::string &message,
                                     MessageCallback *callback) {
   message_callbacks_.insert(std::make_pair(message, callback));
 }
 
 Profile* DOMUI::GetProfile() {
-  return web_contents()->profile();
+  return tab_contents()->profile();
 }
 
 // DOMUI, protected: ----------------------------------------------------------
@@ -97,14 +107,17 @@ void DOMUI::AddMessageHandler(DOMMessageHandler* handler) {
 // DOMUI, private: ------------------------------------------------------------
 
 void DOMUI::ExecuteJavascript(const std::wstring& javascript) {
-  web_contents()->render_view_host()->ExecuteJavascriptInWebFrame(
+  tab_contents()->render_view_host()->ExecuteJavascriptInWebFrame(
       std::wstring(), javascript);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // DOMMessageHandler
 
-DOMMessageHandler::DOMMessageHandler(DOMUI *dom_ui) : dom_ui_(dom_ui) {
+DOMMessageHandler* DOMMessageHandler::Attach(DOMUI* dom_ui) {
+  dom_ui_ = dom_ui;
+  RegisterMessages();
+  return this;
 }
 
 // DOMMessageHandler, protected: ----------------------------------------------

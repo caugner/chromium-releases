@@ -6,18 +6,25 @@
 for layout tests.
 """
 
+import logging
 import os
 import re
 import sys
+import time
 import path_utils
 import compare_failures
 
 
 # Test expectation and modifier constants.
-(PASS, FAIL, TIMEOUT, CRASH, SKIP, WONTFIX, DEFER, NONE) = range(8)
+(PASS, FAIL, TIMEOUT, CRASH, SKIP, WONTFIX, DEFER, SLOW, REBASELINE, NONE) = \
+    range(10)
+
+# Test expectation file update action constants
+(NO_CHANGE, REMOVE_TEST, REMOVE_PLATFORM, ADD_PLATFORMS_EXCEPT_THIS) = range(4)
+
 
 class TestExpectations:
-  TEST_LIST = "tests_fixable.txt"
+  TEST_LIST = "test_expectations.txt"
 
   def __init__(self, tests, directory, platform, is_debug_mode):
     """Reads the test expectations files from the given directory."""
@@ -94,6 +101,9 @@ class TestExpectations:
             self._expected_failures.GetTestSet(WONTFIX, CRASH,
                 include_skips=False))
 
+  def GetRebaseliningFailures(self):
+    return self._expected_failures.GetTestSet(REBASELINE, FAIL)
+
   def GetExpectations(self, test):
     if self._expected_failures.Contains(test):
       return self._expected_failures.GetExpectations(test)
@@ -110,6 +120,17 @@ class TestExpectations:
 
   def IsIgnored(self, test):
     return self._expected_failures.HasModifier(test, WONTFIX)
+
+  def IsRebaselining(self, test):
+    return self._expected_failures.HasModifier(test, REBASELINE)
+
+  def HasModifier(self, test, modifier):
+    return self._expected_failures.HasModifier(test, modifier)
+
+  def RemovePlatformFromFile(self, tests, platform, backup=False):
+    return self._expected_failures.RemovePlatformFromFile(tests,
+                                                          platform,
+                                                          backup)
 
 def StripComments(line):
   """Strips comments from a line and return None if the line is empty
@@ -144,14 +165,19 @@ class TestExpectationsFile:
     DEFER LINUX WIN : LayoutTests/fast/js/no-good.js = TIMEOUT PASS
 
   SKIP: Doesn't run the test.
+  SLOW: The test takes a long time to run, but does not timeout indefinitely.
   WONTFIX: For tests that we never intend to pass on a given platform.
   DEFER: Test does not count in our statistics for the current release.
   DEBUG: Expectations apply only to the debug build.
   RELEASE: Expectations apply only to release build.
   LINUX/WIN/MAC: Expectations apply only to these platforms.
 
-  A test can be included twice, but not via the same path. If a test is included
-  twice, then the more precise path wins.
+  Notes:
+    -A test cannot be both SLOW and TIMEOUT
+    -A test cannot be both DEFER and WONTFIX
+    -A test can be included twice, but not via the same path.
+    -If a test is included twice, then the more precise path wins.
+    -CRASH tests cannot be DEFER or WONTFIX
   """
 
   EXPECTATIONS = { 'pass': PASS,
@@ -160,10 +186,14 @@ class TestExpectationsFile:
                    'crash': CRASH }
 
   PLATFORMS = [ 'mac', 'linux', 'win' ]
-  
+
+  BUILD_TYPES = [ 'debug', 'release' ]
+
   MODIFIERS = { 'skip': SKIP,
                 'wontfix': WONTFIX,
                 'defer': DEFER,
+                'slow': SLOW,
+                'rebaseline': REBASELINE,
                 'none': NONE }
 
   def __init__(self, path, full_test_list, platform, is_debug_mode):
@@ -176,11 +206,13 @@ class TestExpectationsFile:
     is_debug_mode: Whether we testing a test_shell built debug mode.
     """
 
+    self._path = path
     self._full_test_list = full_test_list
     self._errors = []
+    self._non_fatal_errors = []
     self._platform = platform
     self._is_debug_mode = is_debug_mode
-    
+
     # Maps a test to its list of expectations.
     self._test_to_expectations = {}
 
@@ -205,10 +237,10 @@ class TestExpectationsFile:
     else:
       tests = (self._expectation_to_tests[expectation] &
           self._modifier_to_tests[modifier])
-    
+
     if not include_skips:
       tests = tests - self.GetTestSet(SKIP, expectation)
-    
+
     return tests
 
   def HasModifier(self, test, modifier):
@@ -220,27 +252,178 @@ class TestExpectationsFile:
   def Contains(self, test):
     return test in self._test_to_expectations
 
-  def _HasCurrentPlatform(self, options):
-    """ Returns true if the current platform is in the options list or if no
-    platforms are listed.
+  def RemovePlatformFromFile(self, tests, platform, backup=False):
+    """Remove the platform option from test expectations file.
+
+    If a test is in the test list and has an option that matches the given
+    platform, remove the matching platform and save the updated test back
+    to the file. If no other platforms remaining after removal, delete the
+    test from the file.
+
+    Args:
+      tests: list of tests that need to update..
+      platform: which platform option to remove.
+      backup: if true, the original test expectations file is saved as
+              [self.TEST_LIST].orig.YYYYMMDDHHMMSS
+
+    Returns:
+      no
     """
-    has_any_platforms = False
 
-    for platform in self.PLATFORMS:
-      if platform in options:
-        has_any_platforms = True
-        break
+    new_file = self._path + '.new'
+    logging.debug('Original file: "%s"', self._path)
+    logging.debug('New file: "%s"', new_file)
+    f_orig = open(self._path)
+    f_new = open(new_file, 'w')
 
-    if not has_any_platforms:
-      return True
+    tests_removed = 0
+    tests_updated = 0
+    for line in f_orig:
+      action = self._GetPlatformUpdateAction(line, tests, platform)
+      if action == NO_CHANGE:
+        # Save the original line back to the file
+        logging.debug('No change to test: %s', line)
+        f_new.write(line)
+      elif action == REMOVE_TEST:
+        tests_removed += 1
+        logging.info('Test removed: %s', line)
+      elif action == REMOVE_PLATFORM:
+        parts = line.split(':')
+        new_options = parts[0].replace(platform.upper() + ' ', '', 1)
+        new_line = ('%s:%s' % (new_options, parts[1]))
+        f_new.write(new_line)
+        tests_updated += 1
+        logging.info('Test updated: ')
+        logging.info('  old: %s', line)
+        logging.info('  new: %s', new_line)
+      elif action == ADD_PLATFORMS_EXCEPT_THIS:
+        parts = line.split(':')
+        new_options = parts[0]
+        for p in self.PLATFORMS:
+          if not p == platform:
+            new_options += p.upper() + ' '
+        new_line = ('%s:%s' % (new_options, parts[1]))
+        f_new.write(new_line)
+        tests_updated += 1
+        logging.info('Test updated: ')
+        logging.info('  old: %s', line)
+        logging.info('  new: %s', new_line)
+      else:
+        logging.error('Unknown update action: %d; line: %s', action, line)
 
-    return self._platform in options
+    logging.info('Total tests removed: %d', tests_removed)
+    logging.info('Total tests updated: %d', tests_updated)
+
+    f_orig.close()
+    f_new.close()
+
+    if backup:
+      date_suffix = time.strftime('%Y%m%d%H%M%S', time.localtime(time.time()))
+      backup_file = ('%s.orig.%s' % (self._path, date_suffix))
+      if os.path.exists(backup_file):
+        os.remove(backup_file)
+      logging.info('Saving original file to "%s"', backup_file)
+      os.rename(self._path, backup_file)
+    else:
+      os.remove(self._path)
+
+    logging.debug('Saving new file to "%s"', self._path)
+    os.rename(new_file, self._path)
+    return True
+
+  def _GetPlatformUpdateAction(self, line, tests, platform):
+    """Check the platform option and return the action needs to be taken.
+
+    Args:
+      line: current line in test expectations file.
+      tests: list of tests that need to update..
+      platform: which platform option to remove.
+
+    Returns:
+      NO_CHANGE: no change to the line (comments, test not in the list etc)
+      REMOVE_TEST: remove the test from file.
+      REMOVE_PLATFORM: remove this platform option from the test.
+      ADD_PLATFORMS_EXCEPT_THIS: add all the platforms except this one.
+    """
+
+    line = StripComments(line)
+    if not line:
+      return NO_CHANGE
+
+    options = []
+    if line.find(':') is -1:
+      test_and_expecation = line.split('=')
+    else:
+      parts = line.split(':')
+      options = self._GetOptionsList(parts[0])
+      test_and_expecation = parts[1].split('=')
+
+    test = test_and_expecation[0].strip()
+    if not test in tests:
+      return NO_CHANGE
+
+    has_any_platform = False
+    for option in options:
+      if option in self.PLATFORMS:
+        has_any_platform = True
+        if not option == platform:
+          return REMOVE_PLATFORM
+
+    # If there is no platform specified, then it means apply to all platforms.
+    # Return the action to add all the platforms except this one.
+    if not has_any_platform:
+      return ADD_PLATFORMS_EXCEPT_THIS
+
+    return REMOVE_TEST
+
+  def _HasValidModifiersForCurrentPlatform(self, options, lineno,
+      test_and_expectations, modifiers):
+    """Returns true if the current platform is in the options list or if no
+    platforms are listed and if there are no fatal errors in the options list.
+
+    Args:
+      options: List of lowercase options.
+      lineno: The line in the file where the test is listed.
+      test_and_expectations: The path and expectations for the test.
+      modifiers: The set to populate with modifiers.
+    """
+    has_any_platform = False
+    has_bug_id = False
+    for option in options:
+      if option in self.MODIFIERS:
+        modifiers.add(option)
+      elif option in self.PLATFORMS:
+        has_any_platform = True
+      elif option.startswith('bug'):
+        has_bug_id = True
+      elif option not in self.BUILD_TYPES:
+        self._AddError(lineno, 'Invalid modifier for test: %s' % option,
+            test_and_expectations)
+
+    if has_any_platform and not self._platform in options:
+      return False
+
+    if not has_bug_id and 'wontfix' not in options:
+      # TODO(ojan): Turn this into an AddError call once all the tests have
+      # BUG identifiers.
+      self._LogNonFatalError(lineno, 'Test lacks BUG modifier.',
+          test_and_expectations)
+
+    if 'release' in options or 'debug' in options:
+      if self._is_debug_mode and 'debug' not in options:
+        return False
+      if not self._is_debug_mode and 'release' not in options:
+        return False
+
+    if 'wontfix' in options and 'defer' in options:
+      self._AddError(lineno, 'Test cannot be both DEFER and WONTFIX.',
+          test_and_expectations)
+
+    return True
 
   def _Read(self, path):
     """For each test in an expectations file, generate the expectations for it.
-
     """
-
     lineno = 0
     for line in open(path):
       lineno += 1
@@ -254,23 +437,9 @@ class TestExpectationsFile:
         parts = line.split(':')
         test_and_expectations = parts[1]
         options = self._GetOptionsList(parts[0])
-
-        if not self._HasCurrentPlatform(options):
+        if not self._HasValidModifiersForCurrentPlatform(options, lineno,
+            test_and_expectations, modifiers):
           continue
-
-        if 'release' in options or 'debug' in options:
-          if self._is_debug_mode and 'debug' not in options:
-            continue
-          if not self._is_debug_mode and 'release' not in options:
-            continue
-
-        if 'wontfix' in options and 'defer' in options:
-          self._AddError(lineno, 'Test cannot be both DEFER and WONTFIX.',
-              test_and_expectations)
-
-        for option in options:
-          if option in self.MODIFIERS:
-            modifiers.add(option)
 
       tests_and_expecation_parts = test_and_expectations.split('=')
       if (len(tests_and_expecation_parts) is not 2):
@@ -278,20 +447,26 @@ class TestExpectationsFile:
         continue
 
       test_list_path = tests_and_expecation_parts[0].strip()
-      try:
-        expectations = self._ParseExpectations(tests_and_expecation_parts[1])
-      except SyntaxError, err:
-        self._AddError(lineno, err[0], test_list_path)
-        continue
+      expectations = self._ParseExpectations(tests_and_expecation_parts[1],
+          lineno, test_list_path)
 
-      full_path = os.path.join(path_utils.LayoutDataDir(), test_list_path)
+      if 'slow' in options and TIMEOUT in expectations:
+        self._AddError(lineno, 'A test cannot be both slow and timeout. If the '
+            'test times out indefinitely, the it should be listed as timeout.',
+            test_and_expectations)
+
+      full_path = os.path.join(path_utils.LayoutTestsDir(test_list_path),
+                               test_list_path)
       full_path = os.path.normpath(full_path)
       # WebKit's way of skipping tests is to add a -disabled suffix.
       # So we should consider the path existing if the path or the -disabled
       # version exists.
       if not os.path.exists(full_path) and not \
         os.path.exists(full_path + '-disabled'):
-        self._AddError(lineno, 'Path does not exist.', test_list_path)
+        # Log a non fatal error here since you hit this case any time you
+        # update test_expectations.txt without syncing the LayoutTests
+        # directory
+        self._LogNonFatalError(lineno, 'Path does not exist.', test_list_path)
         continue
 
       if not self._full_test_list:
@@ -301,21 +476,28 @@ class TestExpectationsFile:
 
       self._AddTests(tests, expectations, test_list_path, lineno, modifiers)
 
-    if len(self._errors) is not 0:
-      print "\nFAILURES FOR PLATFORM: %s, IS_DEBUG_MODE: %s" \
-          % (self._platform.upper(), self._is_debug_mode)
-      raise SyntaxError('\n'.join(map(str, self._errors)))
+    if len(self._errors) or len(self._non_fatal_errors):
+      if self._is_debug_mode:
+        build_type = 'DEBUG'
+      else:
+        build_type = 'RELEASE'
+      print "\nFAILURES FOR PLATFORM: %s, BUILD_TYPE: %s" \
+          % (self._platform.upper(), build_type)
+      for error in self._non_fatal_errors:
+        logging.error(error)
+      if len(self._errors):
+        raise SyntaxError('\n'.join(map(str, self._errors)))
 
   def _GetOptionsList(self, listString):
-    # TODO(ojan): Add a check that all the options are either in self.MODIFIERS
-    # or self.PLATFORMS or starts with BUGxxxx
     return [part.strip().lower() for part in listString.strip().split(' ')]
 
-  def _ParseExpectations(self, string):
+  def _ParseExpectations(self, string, lineno, test_list_path):
     result = set()
     for part in self._GetOptionsList(string):
       if not part in self.EXPECTATIONS:
-        raise SyntaxError('Unsupported expectation: ' + part)
+        self._AddError(lineno, 'Unsupported expectation: %s' % part,
+            test_list_path)
+        continue
       expectation = self.EXPECTATIONS[part]
       result.add(expectation)
     return result
@@ -323,7 +505,8 @@ class TestExpectationsFile:
   def _ExpandTests(self, test_list_path):
     # Convert the test specification to an absolute, normalized
     # path and make sure directories end with the OS path separator.
-    path = os.path.join(path_utils.LayoutDataDir(), test_list_path)
+    path = os.path.join(path_utils.LayoutTestsDir(test_list_path),
+                        test_list_path)
     path = os.path.normpath(path)
     if os.path.isdir(path): path = os.path.join(path, '')
     # This is kind of slow - O(n*m) - since this is called for all
@@ -334,7 +517,7 @@ class TestExpectationsFile:
     for test in self._full_test_list:
       if test.startswith(path): result.append(test)
     return result
-    
+
   def _AddTests(self, tests, expectations, test_list_path, lineno, modifiers):
     for test in tests:
       if self._AlreadySeenTest(test, test_list_path, lineno):
@@ -383,7 +566,15 @@ class TestExpectationsFile:
       return True
 
     # Check if we've already seen a more precise path.
-    return prev_base_path.startswith(test_list_path)
+    return prev_base_path.startswith(os.path.normpath(test_list_path))
 
   def _AddError(self, lineno, msg, path):
-    self._errors.append('\nLine:%s %s\n%s' % (lineno, msg, path))
+    """Reports an error that will prevent running the tests. Does not
+    immediately raise an exception because we'd like to aggregate all the
+    errors so they can all be printed out."""
+    self._errors.append('\nLine:%s %s %s' % (lineno, msg, path))
+
+  def _LogNonFatalError(self, lineno, msg, path):
+    """Reports an error that will not prevent running the tests. These are
+    still errors, but not bad enough to warrant breaking test running."""
+    self._non_fatal_errors.append('Line:%s %s %s' % (lineno, msg, path))

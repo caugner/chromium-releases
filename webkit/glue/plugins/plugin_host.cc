@@ -2,17 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// HACK: we need this #define in place before npapi.h is included for
-// plugins to work. However, all sorts of headers include npapi.h, so
-// the only way to be certain the define is in place is to put it
-// here.  You might ask, "Why not set it in npapi.h directly, or in
-// this directory's SConscript, then?"  but it turns out this define
-// makes npapi.h include Xlib.h, which in turn defines a ton of symbols
-// like None and Status, causing conflicts with the aforementioned
-// many headers that include npapi.h.  Ugh.
-// See also webplugin_delegate_impl.cc.
-#define MOZ_X11 1
-
 #include "config.h"
 
 #include "webkit/glue/plugins/plugin_host.h"
@@ -26,7 +15,7 @@
 #include "net/base/net_util.h"
 #include "webkit/default_plugin/default_plugin_shared.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/webplugin.h"
+#include "webkit/glue/webplugininfo.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -340,16 +329,10 @@ static NPError GetURLNotify(NPP id,
 
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin.get()) {
-    plugin->webplugin()->HandleURLRequest("GET",
-                                          is_javascript_url,
-                                          target,
-                                          0,
-                                          0,
-                                          false,
-                                          notify,
-                                          url,
-                                          notify_data,
-                                          plugin->popups_allowed());
+    plugin->webplugin()->HandleURLRequest(
+        "GET", is_javascript_url, target, 0, 0, false,
+        notify, url, reinterpret_cast<intptr_t>(notify_data),
+        plugin->popups_allowed());
   } else {
     NOTREACHED();
     return NPERR_GENERIC_ERROR;
@@ -456,7 +439,9 @@ static NPError PostURLNotify(NPP id,
     if (StartsWithASCII(file_path_ascii, kFileUrlPrefix, false)) {
       GURL file_url(file_path_ascii);
       DCHECK(file_url.SchemeIsFile());
-      net::FileURLToFilePath(file_url, &file_path);
+      FilePath path;
+      net::FileURLToFilePath(file_url, &path);
+      file_path = path.ToWStringHack();
     } else {
       file_path = base::SysNativeMBToWide(file_path_ascii);
     }
@@ -485,16 +470,9 @@ static NPError PostURLNotify(NPP id,
   // Unfortunately, our stream needs these broken apart,
   // so we need to parse the data and set headers and data
   // separately.
-  plugin->webplugin()->HandleURLRequest("POST",
-                                        is_javascript_url,
-                                        target,
-                                        len,
-                                        buf,
-                                        false,
-                                        notify,
-                                        url,
-                                        notify_data,
-                                        plugin->popups_allowed());
+  plugin->webplugin()->HandleURLRequest(
+      "POST", is_javascript_url, target, len, buf, false, notify, url,
+      reinterpret_cast<intptr_t>(notify_data), plugin->popups_allowed());
   return NPERR_NO_ERROR;
 }
 
@@ -622,22 +600,19 @@ void NPN_InvalidateRect(NPP id, NPRect *invalidRect) {
   DCHECK(plugin.get() != NULL);
   if (plugin.get() && plugin->webplugin()) {
     if (invalidRect) {
-      if (!plugin->windowless()) {
 #if defined(OS_WIN)
+      if (!plugin->windowless()) {
         RECT rect = {0};
         rect.left = invalidRect->left;
         rect.right = invalidRect->right;
         rect.top = invalidRect->top;
         rect.bottom = invalidRect->bottom;
         ::InvalidateRect(plugin->window_handle(), &rect, FALSE);
-#elif defined(OS_MACOSX)
-        NOTIMPLEMENTED();
-#else
-        NOTIMPLEMENTED();
-#endif
         return;
       }
-
+#elif defined(OS_LINUX)
+      NOTIMPLEMENTED();
+#endif
       gfx::Rect rect(invalidRect->left,
                      invalidRect->top,
                      invalidRect->right - invalidRect->left,
@@ -655,8 +630,13 @@ void NPN_InvalidateRegion(NPP id, NPRegion invalidRegion) {
   //
   // Similar to NPN_InvalidateRect.
 
-  // TODO: implement me
-  DLOG(INFO) << "NPN_InvalidateRegion is not implemented yet.";
+  // TODO: this is overkill--add platform-specific region handling (at the
+  // very least, fetch the region's bounding box and pass it to InvalidateRect).
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  DCHECK(plugin.get() != NULL);
+  if (plugin.get() && plugin->webplugin()) {
+    plugin->webplugin()->Invalidate();
+  }
 }
 
 void NPN_ForceRedraw(NPP id) {
@@ -674,10 +654,8 @@ void NPN_ForceRedraw(NPP id) {
   // settings.  The HDC settings must be restored whenever control returns
   // back to the browser, either before returning from NPP_HandleEvent or
   // before calling a drawing-related netscape method.
-  //
 
-  // TODO: implement me
-  DLOG(INFO) << "NPN_ForceRedraw is not implemented yet.";
+  NOTIMPLEMENTED();
 }
 
 NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
@@ -731,9 +709,9 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
   }
   case NPNVnetscapeWindow:
   {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
     scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
-    HWND handle = plugin->window_handle();
+    gfx::PluginWindowHandle handle = plugin->window_handle();
     *((void**)value) = (void*)handle;
     rv = NPERR_NO_ERROR;
 #else
@@ -778,6 +756,14 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void *value) {
   {
     NPBool* supports_windowless = reinterpret_cast<NPBool*>(value);
     *supports_windowless = TRUE;
+    rv = NPERR_NO_ERROR;
+    break;
+  }
+  case NPNVprivateModeBool:
+  {
+    NPBool* private_mode = reinterpret_cast<NPBool*>(value);
+    scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+    *private_mode = plugin->webplugin()->IsOffTheRecord();
     rv = NPERR_NO_ERROR;
     break;
   }

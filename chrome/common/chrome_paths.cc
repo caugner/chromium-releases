@@ -8,6 +8,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/mac_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
@@ -31,28 +32,34 @@ bool GetGearsPluginPathFromCommandLine(FilePath* path) {
 #endif
 }
 
-// Attempts to find the given FFmpeg library and stores the result in |path|.
-// Returns true if the library was found and exists, false otherwise.
-static bool GetFFmpegLibraryPath(FilePath* path,
-                                 const FilePath::StringType& library) {
-  // Assume FFmpeg DLLs are kept alongside chrome.dll.
-  if (!PathService::Get(base::DIR_MODULE, path))
-    return false;
-  *path = path->Append(library);
-  return file_util::PathExists(*path);
-}
-
 bool PathProvider(int key, FilePath* result) {
   // Some keys are just aliases...
   switch (key) {
     case chrome::DIR_APP:
       return PathService::Get(base::DIR_MODULE, result);
     case chrome::DIR_LOGS:
-#ifndef NDEBUG
+#ifdef NDEBUG
+      // Release builds write to the data dir
       return PathService::Get(chrome::DIR_USER_DATA, result);
 #else
+      // Debug builds write next to the binary (in the build tree)
+#if defined(OS_MACOSX)
+      if (!PathService::Get(base::DIR_EXE, result))
+        return false;
+      if (mac_util::AmIBundled()) {
+        // If we're called from chrome, dump it beside the app (outside the
+        // app bundle), if we're called from a unittest, we'll already
+        // outside the bundle so use the exe dir.
+        // exe_dir gave us .../Chromium.app/Contents/MacOS/Chromium.
+        *result = result->DirName();
+        *result = result->DirName();
+        *result = result->DirName();
+      }
+      return true;
+#else
       return PathService::Get(base::DIR_EXE, result);
-#endif
+#endif // defined(OS_MACOSX)
+#endif // NDEBUG
     case chrome::FILE_RESOURCE_MODULE:
       return PathService::Get(base::FILE_MODULE, result);
   }
@@ -91,40 +98,30 @@ bool PathProvider(int key, FilePath* result) {
       if (!GetUserDesktop(&cur))
         return false;
       break;
-    case chrome::DIR_RESOURCES:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
-      create_dir = true;
-      break;
     case chrome::DIR_INSPECTOR:
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
-      cur = cur.Append(FILE_PATH_LITERAL("Inspector"));
-      break;
-    case chrome::DIR_THEMES:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("themes"));
-      create_dir = true;
-      break;
-    case chrome::DIR_LOCALES:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
-        return false;
 #if defined(OS_MACOSX)
-      // On Mac, locale files are in Contents/Resources, a sibling of the
-      // App dir.
       cur = cur.DirName();
       cur = cur.Append(FILE_PATH_LITERAL("Resources"));
+      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
 #else
-      cur = cur.Append(FILE_PATH_LITERAL("locales"));
+      cur = cur.Append(FILE_PATH_LITERAL("resources"));
+      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
 #endif
-      create_dir = true;
       break;
     case chrome::DIR_APP_DICTIONARIES:
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+      // We can't write into the EXE dir on Linux, so keep dictionaries
+      // alongside the safe browsing database in the user data dir.
+      // And we don't want to write into the bundle on the Mac, so push
+      // it to the user data dir there also.
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+#else
       if (!PathService::Get(base::DIR_EXE, &cur))
         return false;
+#endif
       cur = cur.Append(FILE_PATH_LITERAL("Dictionaries"));
       create_dir = true;
       break;
@@ -140,6 +137,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     case chrome::FILE_GEARS_PLUGIN:
       if (!GetGearsPluginPathFromCommandLine(&cur)) {
+#if defined(OS_WIN)
         // Search for gears.dll alongside chrome.dll first.  This new model
         // allows us to package gears.dll with the Chrome installer and update
         // it while Chrome is running.
@@ -154,19 +152,11 @@ bool PathProvider(int key, FilePath* result) {
           cur = cur.Append(FILE_PATH_LITERAL("gears"));
           cur = cur.Append(FILE_PATH_LITERAL("gears.dll"));
         }
+#else
+        // No gears.dll on non-Windows systems.
+        return false;
+#endif
       }
-      break;
-    case chrome::FILE_LIBAVCODEC:
-      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avcodec-52.dll")))
-        return false;
-      break;
-    case chrome::FILE_LIBAVFORMAT:
-      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avformat-52.dll")))
-        return false;
-      break;
-    case chrome::FILE_LIBAVUTIL:
-      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avutil-49.dll")))
-        return false;
       break;
     // The following are only valid in the development environment, and
     // will fail if executed from an installed executable (because the
@@ -186,26 +176,6 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("chrome"));
       cur = cur.Append(FILE_PATH_LITERAL("tools"));
       cur = cur.Append(FILE_PATH_LITERAL("test"));
-      if (!file_util::PathExists(cur))  // we don't want to create this
-        return false;
-      break;
-    case chrome::FILE_PYTHON_RUNTIME:
-      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("third_party"));
-      cur = cur.Append(FILE_PATH_LITERAL("python_24"));
-      cur = cur.Append(FILE_PATH_LITERAL("python.exe"));
-      if (!file_util::PathExists(cur))  // we don't want to create this
-        return false;
-      break;
-    case chrome::FILE_TEST_SERVER:
-      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("net"));
-      cur = cur.Append(FILE_PATH_LITERAL("tools"));
-      cur = cur.Append(FILE_PATH_LITERAL("test"));
-      cur = cur.Append(FILE_PATH_LITERAL("testserver"));
-      cur = cur.Append(FILE_PATH_LITERAL("testserver.py"));
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
       break;

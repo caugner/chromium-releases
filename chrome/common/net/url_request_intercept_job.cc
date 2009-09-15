@@ -12,6 +12,7 @@
 #include "base/string_util.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/notification_service.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
@@ -33,23 +34,19 @@ URLRequestInterceptJob::URLRequestInterceptJob(URLRequest* request,
       read_buffer_(NULL) {
   cprequest_->data = this;  // see FromCPRequest().
 
-  NotificationService::current()->AddObserver(
-      this, NotificationType::CHROME_PLUGIN_UNLOADED,
-      Source<ChromePluginLib>(plugin_));
+  registrar_.Add(this, NotificationType::CHROME_PLUGIN_UNLOADED,
+                 Source<ChromePluginLib>(plugin_));
 }
 
 URLRequestInterceptJob::~URLRequestInterceptJob() {
   if (plugin_) {
     plugin_->functions().request_funcs->end_request(cprequest_.get(),
                                                     CPERR_SUCCESS);
-    DetachPlugin();
   }
 }
 
 void URLRequestInterceptJob::DetachPlugin() {
-  NotificationService::current()->RemoveObserver(
-      this, NotificationType::CHROME_PLUGIN_UNLOADED,
-      Source<ChromePluginLib>(plugin_));
+  registrar_.RemoveAll();
   plugin_ = NULL;
 }
 
@@ -104,10 +101,25 @@ bool URLRequestInterceptJob::GetCharset(std::string* charset) {
   return request_->response_headers()->GetCharset(charset);
 }
 
-bool URLRequestInterceptJob::GetContentEncoding(std::string* encoding_type) {
-  // TODO(darin): what if there are multiple content encodings?
-  return request_->response_headers()->EnumerateHeader(NULL, "Content-Encoding",
-                                                       encoding_type);
+bool URLRequestInterceptJob::GetContentEncodings(
+    std::vector<Filter::FilterType>* encoding_types) {
+  DCHECK(encoding_types->empty());
+  if (!request_->response_headers())
+    return false;
+
+  std::string encoding_type;
+  void* iter = NULL;
+  while (request_->response_headers()->EnumerateHeader(
+      &iter, "Content-Encoding", &encoding_type)) {
+    encoding_types->push_back(Filter::ConvertEncodingToType(encoding_type));
+  }
+
+  // Even if encoding types are empty, there is a chance that we need to add
+  // some decoding, as some proxies strip encoding completely. In such cases,
+  // we may need to add (for example) SDCH filtering (when the context suggests
+  // it is appropriate).
+  Filter::FixupEncodingTypes(*this, encoding_types);
+  return !encoding_types->empty();
 }
 
 void URLRequestInterceptJob::GetResponseInfo(net::HttpResponseInfo* info) {
@@ -151,7 +163,7 @@ void URLRequestInterceptJob::GetResponseInfo(net::HttpResponseInfo* info) {
   }
 }
 
-int URLRequestInterceptJob::GetResponseCode() {
+int URLRequestInterceptJob::GetResponseCode() const {
   if (!plugin_)
     return -1;
 
@@ -211,6 +223,5 @@ void URLRequestInterceptJob::Observe(NotificationType type,
                                      const NotificationDetails& details) {
   DCHECK(type == NotificationType::CHROME_PLUGIN_UNLOADED);
   DCHECK(plugin_ == Source<ChromePluginLib>(source).ptr());
-
   DetachPlugin();
 }

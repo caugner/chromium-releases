@@ -6,6 +6,7 @@
 
 #include "base/histogram.h"
 #include "base/logging.h"
+#include "base/time.h"
 
 namespace net {
 
@@ -192,12 +193,8 @@ X509Certificate::~X509Certificate() {
     FreeOSCertHandle(cert_handle_);
 }
 
-#if defined(OS_LINUX)
-// TODO(port): Implement properly on Linux.
-bool X509Certificate::IsEV(int status) const {
-  NOTIMPLEMENTED();
-  return true;
+bool X509Certificate::HasExpired() const {
+  return base::Time::Now() > valid_expiry();
 }
-#endif
 
 }  // namespace net

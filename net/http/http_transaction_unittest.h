@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -234,10 +234,19 @@ class MockNetworkTransaction : public net::HttpTransaction {
     return net::ERR_FAILED;
   }
 
+  virtual int RestartWithCertificate(net::X509Certificate* client_cert,
+                                     net::CompletionCallback* callback) {
+    return net::ERR_FAILED;
+  }
+
   virtual int RestartWithAuth(const std::wstring& username,
                               const std::wstring& password,
                               net::CompletionCallback* callback) {
     return net::ERR_FAILED;
+  }
+
+  virtual bool IsReadyToRestartForAuth() {
+    return false;
   }
 
   virtual int Read(net::IOBuffer* buf, int buf_len,

@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H_
 #define CHROME_BROWSER_VIEWS_DOWNLOAD_SHELF_VIEW_H_
 
+#include "app/slide_animation.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/common/slide_animation.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/controls/link.h"
+#include "views/controls/button/button.h"
+#include "views/controls/link.h"
 
 namespace views {
 class ImageButton;
@@ -16,7 +16,8 @@ class ImageView;
 }
 
 class BaseDownloadItemModel;
-class TabContents;
+class Browser;
+class BrowserView;
 
 class DownloadAnimation;
 
@@ -33,12 +34,13 @@ class DownloadShelfView : public DownloadShelf,
                           public views::LinkController,
                           public AnimationDelegate {
  public:
-  explicit DownloadShelfView(TabContents* tab_contents);
+  explicit DownloadShelfView(Browser* browser, BrowserView* parent);
+  virtual ~DownloadShelfView();
 
   // Implementation of View.
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
 
   // Implementation of AnimationDelegate.
   virtual void AnimationProgressed(const Animation* animation);
@@ -56,6 +58,10 @@ class DownloadShelfView : public DownloadShelf,
   // Implementation of DownloadShelf.
   virtual void AddDownload(BaseDownloadItemModel* download_model);
   virtual bool IsShowing() const;
+  virtual bool IsClosing() const;
+  virtual void Show();
+  virtual void Close();
+  virtual Browser* browser() const { return browser_; }
 
   // Removes a specified download view. The supplied view is deleted after
   // it's removed.
@@ -70,7 +76,19 @@ class DownloadShelfView : public DownloadShelf,
   void AddDownloadView(views::View* view);
 
   // Paints the border.
-  void PaintBorder(ChromeCanvas* canvas);
+  void PaintBorder(gfx::Canvas* canvas);
+
+  // Returns true if the shelf is wide enough to show the first download item.
+  bool CanFitFirstDownloadItem();
+
+  // Called on theme change.
+  void UpdateButtonColors();
+
+  // Overridden from views::View.
+  virtual void ThemeChanged();
+
+  // The browser for this shelf.
+  Browser* browser_;
 
   // The animation for adding new items to the shelf.
   scoped_ptr<SlideAnimation> new_item_animation_;
@@ -92,6 +110,9 @@ class DownloadShelfView : public DownloadShelf,
   // Button for closing the downloads. This is contained as a child, and
   // deleted by View.
   views::ImageButton* close_button_;
+
+  // The window this shelf belongs to.
+  BrowserView* parent_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfView);
 };

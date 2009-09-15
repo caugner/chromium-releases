@@ -6,10 +6,14 @@
 
 MockRenderProcessHost::MockRenderProcessHost(Profile* profile)
     : RenderProcessHost(profile),
-      transport_dib_(NULL) {
+      transport_dib_(NULL),
+      bad_msg_count_(0) {
+  static int prev_pid = 0;
+  SetProcessID(++prev_pid);
 }
 
 MockRenderProcessHost::~MockRenderProcessHost() {
+  RemoveFromList();
   delete transport_dib_;
 }
 
@@ -26,8 +30,7 @@ void MockRenderProcessHost::CancelResourceRequests(int render_widget_id) {
 }
 
 void MockRenderProcessHost::CrossSiteClosePageACK(
-    int new_render_process_host_id,
-    int new_request_id) {
+    const ViewMsg_ClosePage_Params& params) {
 }
 
 bool MockRenderProcessHost::WaitForPaintMsg(int render_widget_id,
@@ -37,6 +40,7 @@ bool MockRenderProcessHost::WaitForPaintMsg(int render_widget_id,
 }
 
 void MockRenderProcessHost::ReceivedBadMessage(uint16 msg_type) {
+  ++bad_msg_count_;
 }
 
 void MockRenderProcessHost::WidgetRestored() {
@@ -48,8 +52,22 @@ void MockRenderProcessHost::WidgetHidden() {
 void MockRenderProcessHost::AddWord(const std::wstring& word) {
 }
 
+void MockRenderProcessHost::AddVisitedLinks(
+    const VisitedLinkCommon::Fingerprints& links) {
+}
+
+void MockRenderProcessHost::ResetVisitedLinks() {
+}
+
 bool MockRenderProcessHost::FastShutdownIfPossible() {
   return false;
+}
+
+bool MockRenderProcessHost::SendWithTimeout(IPC::Message* msg, int timeout_ms) {
+  // Save the message in the sink. Just ignore timeout_ms.
+  sink_.OnMessageReceived(*msg);
+  delete msg;
+  return true;
 }
 
 bool MockRenderProcessHost::Send(IPC::Message* msg) {

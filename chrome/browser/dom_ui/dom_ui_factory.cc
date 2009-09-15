@@ -5,12 +5,20 @@
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 
 #include "chrome/browser/dom_ui/downloads_ui.h"
-#include "chrome/browser/dom_ui/debugger_ui.h"
 #include "chrome/browser/dom_ui/devtools_ui.h"
 #include "chrome/browser/dom_ui/history_ui.h"
+#include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "chrome/browser/dom_ui/print_ui.h"
+#include "chrome/browser/extensions/extension_dom_ui.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extensions_ui.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
+#ifdef CHROME_PERSONALIZATION
+#include "chrome/personalization/personalization.h"
+#endif
 #include "googleurl/src/gurl.h"
 
 // Backend for both querying for and creating new DOMUI objects. If you're just
@@ -18,14 +26,57 @@
 // web contents and the new_ui. The return value will indiacate whether a DOM UI
 // exists for the given URL.
 //
-// If you want to create a DOM UI, pass non-NULL pointers for both web_contents
+// If you want to create a DOM UI, pass non-NULL pointers for both tab_contents
 // and new_ui. The *new_ui pointer will be filled with the created UI if it
 // succeeds (indicated by a return value of true). The caller owns the *new_ui
 // pointer.
-static bool CreateDOMUI(const GURL& url, WebContents* web_contents,
+static bool CreateDOMUI(const GURL& url, TabContents* tab_contents,
                         DOMUI** new_ui) {
-  // This will get called a lot to check all URLs, so do a quick check of the
-  // scheme to filter out most URLs.
+  // Currently, any gears: URL means an HTML dialog.
+  if (url.SchemeIs(chrome::kGearsScheme)) {
+    if (new_ui)
+      *new_ui = new HtmlDialogUI(tab_contents);
+    return true;
+  }
+
+  if (url.SchemeIs(chrome::kExtensionScheme)) {
+    // We assume we have a valid extension unless we have a TabContents which
+    // can prove us wrong. This can can happen if the user types in a URL
+    // manually.
+    bool valid_extension = true;
+    if (tab_contents) {
+      // TabContents can be NULL if we're doing a quick UseDOMUIForURL check.
+      ExtensionsService* service =
+          tab_contents->profile()->GetExtensionsService();
+      valid_extension = (service && service->GetExtensionById(url.host()));
+    }
+    if (valid_extension) {
+      if (new_ui)
+        *new_ui = new ExtensionDOMUI(tab_contents);
+      return true;
+    }
+    return false;
+  }
+
+// TODO(mhm) Make sure this ifdef is removed once print is complete.
+#if !defined(GOOGLE_CHROME_BUILD)
+  if (url.SchemeIs(chrome::kPrintScheme)) {
+    if (new_ui)
+      *new_ui = new PrintUI(tab_contents);
+    return true;
+  }
+#endif
+
+#ifdef CHROME_PERSONALIZATION
+  if (Personalization::NeedsDOMUI(url)) {
+    if (new_ui)
+      *new_ui = new HtmlDialogUI(tab_contents);
+    return true;
+  }
+#endif
+
+  // This will get called a lot to check all URLs, so do a quick check of other
+  // schemes (gears was handled above) to filter out most URLs.
   if (!url.SchemeIs(chrome::kChromeInternalScheme) &&
       !url.SchemeIs(chrome::kChromeUIScheme))
     return false;
@@ -37,7 +88,7 @@ static bool CreateDOMUI(const GURL& url, WebContents* web_contents,
   if (url.host() == chrome::kChromeUINewTabHost ||
       url.SchemeIs(chrome::kChromeInternalScheme)) {
     if (new_ui)
-      *new_ui = new NewTabUI(web_contents);
+      *new_ui = new NewTabUI(tab_contents);
     return true;
   }
 
@@ -45,38 +96,27 @@ static bool CreateDOMUI(const GURL& url, WebContents* web_contents,
   // after the host name.
   if (url.host() == chrome::kChromeUIHistoryHost) {
     if (new_ui)
-      *new_ui = new HistoryUI(web_contents);
+      *new_ui = new HistoryUI(tab_contents);
     return true;
   }
 
   if (url.host() == chrome::kChromeUIDownloadsHost) {
     if (new_ui)
-      *new_ui = new DownloadsUI(web_contents);
+      *new_ui = new DownloadsUI(tab_contents);
     return true;
   }
 
-#if defined(OS_WIN)
-
-  // TODO(port): it should be possible to include these now.
   if (url.host() == chrome::kChromeUIExtensionsHost) {
     if (new_ui)
-      *new_ui = new ExtensionsUI(web_contents);
-    return true;
-  }
-
-  if (url.host() == chrome::kChromeUIInspectorHost) {
-    if (new_ui)
-      *new_ui = new DebuggerUI(web_contents);
+      *new_ui = new ExtensionsUI(tab_contents);
     return true;
   }
 
   if (url.host() == chrome::kChromeUIDevToolsHost) {
     if (new_ui)
-      *new_ui = new DevToolsUI(web_contents);
+      *new_ui = new DevToolsUI(tab_contents);
     return true;
   }
-
-#endif
 
   return false;
 }
@@ -84,7 +124,9 @@ static bool CreateDOMUI(const GURL& url, WebContents* web_contents,
 // static
 bool DOMUIFactory::HasDOMUIScheme(const GURL& url) {
   return url.SchemeIs(chrome::kChromeInternalScheme) ||
-         url.SchemeIs(chrome::kChromeUIScheme);
+         url.SchemeIs(chrome::kChromeUIScheme) ||
+         url.SchemeIs(chrome::kExtensionScheme) ||
+         url.SchemeIs(chrome::kPrintScheme);
 }
 
 // static
@@ -93,10 +135,10 @@ bool DOMUIFactory::UseDOMUIForURL(const GURL& url) {
 }
 
 // static
-DOMUI* DOMUIFactory::CreateDOMUIForURL(WebContents* web_contents,
+DOMUI* DOMUIFactory::CreateDOMUIForURL(TabContents* tab_contents,
                                        const GURL& url) {
   DOMUI* dom_ui;
-  if (!CreateDOMUI(url, web_contents, &dom_ui))
+  if (!CreateDOMUI(url, tab_contents, &dom_ui))
     return NULL;
   return dom_ui;
 }

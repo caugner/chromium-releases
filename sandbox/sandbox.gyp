@@ -7,11 +7,35 @@
     '../build/common.gypi',
   ],
   'conditions': [
+    [ 'OS=="linux"', {
+      'targets': [
+        {
+          'target_name': 'chrome_sandbox',
+          'type': 'executable',
+          'conditions': [
+            ['linux_suid_sandbox_restrictions=="User"',
+              {
+                'defines': [ 'CHROME_DEVEL_SANDBOX' ],
+              },
+            ],
+          ],
+          'defines': [
+            'LINUX_SANDBOX_CHROME_PATH="<(linux_sandbox_chrome_path)"',
+          ],
+          'sources': [
+            'linux/suid/sandbox.cc',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+        }
+      ],
+    }],
     [ 'OS=="win"', {
       'targets': [
         {
           'target_name': 'sandbox',
-          'type': 'static_library',
+          'type': '<(library)',
           'dependencies': [
             '../testing/gtest.gyp:gtest',
             '../base/base.gyp:base',
@@ -134,6 +158,8 @@
             'src/win2k_threadpool.h',
             'src/win_utils.cc',
             'src/win_utils.h',
+            'src/window.h',
+            'src/window.cc',
 
             # Precompiled headers.
             'src/stdafx.cc',
@@ -225,7 +251,7 @@
           },
         },
         {
-          'target_name': 'sbox_unit_tests',
+          'target_name': 'sbox_unittests',
           'type': 'executable',
           'dependencies': [
             'sandbox',
@@ -280,6 +306,11 @@
             'libraries': [
               '-lcomctl32.lib',
             ],
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
+            },
           },
           'configurations': {
             'Debug': {

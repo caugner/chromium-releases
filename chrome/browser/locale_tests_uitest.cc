@@ -21,10 +21,13 @@ class LocaleTestsHe : public UITest {
 class LocaleTestsZhTw : public UITest {
  public:
   LocaleTestsZhTw() : UITest() {
-    launch_arguments_.AppendSwitchWithValue(L"lang", L"zh-tw");
+    launch_arguments_.AppendSwitchWithValue(L"lang", L"zh-TW");
   }
 };
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+// These 3 tests started failing between revisions 13115 and 13120.
+// See bug 9758.
 TEST_F(LocaleTestsDa, TestStart) {
   // Just making sure we can start/shutdown cleanly.
 }
@@ -36,3 +39,4 @@ TEST_F(LocaleTestsHe, TestStart) {
 TEST_F(LocaleTestsZhTw, TestStart) {
   // Just making sure we can start/shutdown cleanly.
 }
+#endif

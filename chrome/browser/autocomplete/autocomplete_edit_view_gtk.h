@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "base/string_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/common/owned_widget_gtk.h"
@@ -18,24 +18,37 @@
 
 class AutocompleteEditController;
 class AutocompleteEditModel;
+class AutocompletePopupPositioner;
 class AutocompletePopupViewGtk;
 class CommandUpdater;
 class Profile;
 class TabContents;
-class ToolbarModel;
 
 class AutocompleteEditViewGtk : public AutocompleteEditView {
  public:
+  // Modeled like the Windows CHARRANGE.  Represent a pair of cursor position
+  // offsets.  Since GtkTextIters are invalid after the buffer is changed, we
+  // work in character offsets (not bytes).
+  struct CharRange {
+    CharRange() : cp_min(0), cp_max(0) { }
+    CharRange(int n, int x) : cp_min(n), cp_max(x) { }
+
+    // Work in integers to match the gint GTK APIs.
+    int cp_min;  // For a selection: Represents the start.
+    int cp_max;  // For a selection: Represents the end (insert position).
+  };
+
   AutocompleteEditViewGtk(AutocompleteEditController* controller,
                           ToolbarModel* toolbar_model,
                           Profile* profile,
-                          CommandUpdater* command_updater);
+                          CommandUpdater* command_updater,
+                          AutocompletePopupPositioner* popup_positioner);
   ~AutocompleteEditViewGtk();
 
   // Initialize, create the underlying widgets, etc.
   void Init();
 
-  GtkWidget* widget() { return text_view_.get(); }
+  GtkWidget* widget() { return alignment_.get(); }
 
   // Grab keyboard input focus, putting focus on the location widget.
   void SetFocus();
@@ -67,6 +80,8 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
   virtual void SetWindowTextAndCaretPos(const std::wstring& text,
                                         size_t caret_pos);
 
+  virtual void SetForcedQuery();
+
   virtual bool IsSelectAll();
   virtual void SelectAll(bool reversed);
   virtual void RevertAll();
@@ -82,23 +97,7 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
 
-  // Return the position (root coordinates) of the bottom left corner and width
-  // of the location input box.  Used by the popup view to position itself.
-  void BottomLeftPosWidth(int* x, int* y, int* width);
-
  private:
-  // Modeled like the Windows CHARRANGE.  Represent a pair of cursor position
-  // offsets.  Since GtkTextIters are invalid after the buffer is changed, we
-  // work in character offsets (not bytes).
-  struct CharRange {
-    CharRange() : cp_min(0), cp_max(0) { }
-    CharRange(int n, int x) : cp_min(n), cp_max(x) { }
-
-    // Work in integers to match the gint GTK APIs.
-    int cp_min;  // For a selection: Represents the start.
-    int cp_max;  // For a selection: Represents the end (insert position).
-  };
-
   // TODO(deanm): Would be nice to insulate the thunkers better, etc.
   static void HandleBeginUserActionThunk(GtkTextBuffer* unused, gpointer self) {
     reinterpret_cast<AutocompleteEditViewGtk*>(self)->HandleBeginUserAction();
@@ -125,9 +124,6 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
         widget, event);
   }
   gboolean HandleKeyRelease(GtkWidget* widget, GdkEventKey* event);
-
-  static void HandleViewSizeRequest(GtkWidget* view, GtkRequisition* req,
-                                    gpointer unused);
 
   static gboolean HandleViewButtonPressThunk(GtkWidget* view,
                                              GdkEventButton* event,
@@ -165,6 +161,57 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
                             gint count,
                             gboolean extendion_selection);
 
+  static void HandleViewSizeRequestThunk(GtkWidget* view,
+                                         GtkRequisition* req,
+                                         gpointer self) {
+    reinterpret_cast<AutocompleteEditViewGtk*>(self)->
+        HandleViewSizeRequest(req);
+  }
+  void HandleViewSizeRequest(GtkRequisition* req);
+
+  static void HandlePopulatePopupThunk(GtkEntry* entry,
+                                       GtkMenu* menu,
+                                       gpointer self) {
+    reinterpret_cast<AutocompleteEditViewGtk*>(self)->
+        HandlePopulatePopup(menu);
+  }
+  void HandlePopulatePopup(GtkMenu* menu);
+
+  static void HandleEditSearchEnginesThunk(GtkMenuItem* menuitem,
+                                           gpointer self) {
+    reinterpret_cast<AutocompleteEditViewGtk*>(self)->
+        HandleEditSearchEngines();
+  }
+  void HandleEditSearchEngines();
+
+  static void HandlePasteAndGoThunk(GtkMenuItem* menuitem,
+                                    AutocompleteEditViewGtk* self) {
+    self->HandlePasteAndGo();
+  }
+  void HandlePasteAndGo();
+
+  static void HandlePasteAndGoReceivedTextThunk(GtkClipboard* clipboard,
+                                                const gchar* text,
+                                                gpointer self) {
+    // If there is nothing to paste (|text| is NULL), do nothing.
+    if (!text)
+      return;
+    reinterpret_cast<AutocompleteEditViewGtk*>(self)->
+        HandlePasteAndGoReceivedText(UTF8ToWide(text));
+  }
+  void HandlePasteAndGoReceivedText(const std::wstring& text);
+
+  static void HandleMarkSetThunk(GtkTextBuffer* buffer,
+                                 GtkTextIter* location,
+                                 GtkTextMark* mark,
+                                 gpointer self) {
+    reinterpret_cast<AutocompleteEditViewGtk*>(self)->
+        HandleMarkSet(buffer, location, mark);
+  }
+  void HandleMarkSet(GtkTextBuffer* buffer,
+                     GtkTextIter* location,
+                     GtkTextMark* mark);
+
   // Get the character indices of the current selection.  This honors
   // direction, cp_max is the insertion point, and cp_min is the bound.
   CharRange GetSelection();
@@ -183,14 +230,22 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
   // Internally invoked whenever the text changes in some way.
   void TextChanged();
 
-  OwnedWidgetGtk text_view_;
+  // Save 'selected_text' as the PRIMARY X selection.
+  void SavePrimarySelection(const std::string& selected_text);
+
+  // The widget we expose, used for vertically centering the real text edit,
+  // since the height will change based on the font / font size, etc.
+  OwnedWidgetGtk alignment_;
+
+  // The actual text entry which will be owned by the alignment_.
+  GtkWidget* text_view_;
 
   GtkTextTagTable* tag_table_;
   GtkTextBuffer* text_buffer_;
-
   GtkTextTag* base_tag_;
   GtkTextTag* secure_scheme_tag_;
   GtkTextTag* insecure_scheme_tag_;
+  GtkTextTag* black_text_tag_;
 
   scoped_ptr<AutocompleteEditModel> model_;
   scoped_ptr<AutocompletePopupViewGtk> popup_view_;
@@ -211,6 +266,17 @@ class AutocompleteEditViewGtk : public AutocompleteEditView {
   // Tracking state before and after a possible change.
   std::wstring text_before_change_;
   CharRange sel_before_change_;
+
+  // The most-recently-selected text from the entry.  This is updated on-the-fly
+  // as the user selects text.  It is used in cases where we need to make the
+  // PRIMARY selection persist even after the user has unhighlighted the text in
+  // the view (e.g. when they highlight some text and then click to unhighlight
+  // it, we pass this string to SavePrimarySelection()).
+  std::string selected_text_;
+
+  // Has the current value of 'selected_text_' been saved as the PRIMARY
+  // selection?
+  bool selection_saved_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditViewGtk);
 };

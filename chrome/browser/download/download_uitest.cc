@@ -2,31 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <shlwapi.h>
 #include <sstream>
 #include <string>
+
+#include "build/build_config.h"
+#if defined(OS_WIN)
+#include <shlwapi.h>
+#endif
 
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
-#include "chrome/browser/automation/url_request_mock_http_job.h"
-#include "chrome/browser/automation/url_request_slow_download_job.h"
+#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/net/url_request_mock_http_job.h"
+#include "chrome/browser/net/url_request_slow_download_job.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/ui/ui_test.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "net/base/net_util.h"
 #include "net/url_request/url_request_unittest.h"
-
-using std::wstring;
 
 namespace {
 
 const wchar_t kDocRoot[] = L"chrome/test/data";
 
+#if defined(OS_WIN)
 // Checks if the volume supports Alternate Data Streams. This is required for
 // the Zone Identifier implementation.
 bool VolumeSupportsADS(const std::wstring path) {
@@ -64,100 +69,98 @@ void CheckZoneIdentifier(const std::wstring full_path) {
 
   ASSERT_EQ(0, strcmp(kIdentifier, buffer));
 }
+#endif  // defined(OS_WIN)
 
 class DownloadTest : public UITest {
  protected:
   DownloadTest() : UITest() {}
 
-  void CleanUpDownload(const std::wstring& client_filename,
-                       const std::wstring& server_filename) {
+  void CleanUpDownload(const FilePath& client_filename,
+                       const FilePath& server_filename) {
     // Find the path on the client.
-    std::wstring file_on_client(download_prefix_);
-    file_on_client.append(client_filename);
+    FilePath file_on_client = download_prefix_.Append(client_filename);
     EXPECT_TRUE(file_util::PathExists(file_on_client));
 
     // Find the path on the server.
-    std::wstring file_on_server;
+    FilePath file_on_server;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA,
                                  &file_on_server));
-    file_on_server.append(L"\\");
-    file_on_server.append(server_filename);
+    file_on_server = file_on_server.Append(server_filename);
     ASSERT_TRUE(file_util::PathExists(file_on_server));
 
     // Check that we downloaded the file correctly.
     EXPECT_TRUE(file_util::ContentsEqual(file_on_server,
                                          file_on_client));
 
-    // Check if the Zone Identifier is correclty set.
-    if (VolumeSupportsADS(file_on_client))
-      CheckZoneIdentifier(file_on_client);
+#if defined(OS_WIN)
+    // Check if the Zone Identifier is correctly set.
+    if (VolumeSupportsADS(file_on_client.value()))
+      CheckZoneIdentifier(file_on_client.value());
+#endif
 
     // Delete the client copy of the file.
     EXPECT_TRUE(file_util::Delete(file_on_client, false));
   }
 
-  void CleanUpDownload(const std::wstring& file) {
+  void CleanUpDownload(const FilePath& file) {
     CleanUpDownload(file, file);
   }
 
   virtual void SetUp() {
     UITest::SetUp();
-    download_prefix_ = GetDownloadDirectory();
-    download_prefix_ += FilePath::kSeparators[0];
+    download_prefix_ = FilePath::FromWStringHack(GetDownloadDirectory());
   }
 
  protected:
-  void RunSizeTest(const wstring& url,
-                   const wstring& expected_title_in_progress,
-                   const wstring& expected_title_finished) {
+  void RunSizeTest(const GURL& url,
+                   const std::wstring& expected_title_in_progress,
+                   const std::wstring& expected_title_finished) {
     {
       EXPECT_EQ(1, GetTabCount());
 
-      NavigateToURL(GURL(url));
+      NavigateToURL(url);
       // Downloads appear in the shelf
       WaitUntilTabCount(1);
       // TODO(tc): check download status text
 
       // Complete sending the request.  We do this by loading a second URL in a
       // separate tab.
-      scoped_ptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+      scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
       EXPECT_TRUE(window->AppendTab(GURL(
           URLRequestSlowDownloadJob::kFinishDownloadUrl)));
       EXPECT_EQ(2, GetTabCount());
       // TODO(tc): check download status text
 
       // Make sure the download shelf is showing.
-      scoped_ptr<TabProxy> dl_tab(window->GetTab(0));
-      ASSERT_TRUE(dl_tab.get());
-      EXPECT_TRUE(WaitForDownloadShelfVisible(dl_tab.get()));
+      EXPECT_TRUE(WaitForDownloadShelfVisible(window.get()));
     }
 
-    std::wstring filename = file_util::GetFilenameFromPath(url);
-    EXPECT_TRUE(file_util::PathExists(download_prefix_ + filename));
+    FilePath filename;
+    net::FileURLToFilePath(url, &filename);
+    filename = filename.BaseName();
+    FilePath download_path = download_prefix_.Append(filename);
+    EXPECT_TRUE(file_util::PathExists(download_path));
 
     // Delete the file we just downloaded.
     for (int i = 0; i < 10; ++i) {
-      if (file_util::Delete(download_prefix_ + filename, false))
+      if (file_util::Delete(download_path, false))
         break;
       PlatformThread::Sleep(action_max_timeout_ms() / 10);
     }
-    EXPECT_FALSE(file_util::PathExists(download_prefix_ + filename));
+    EXPECT_FALSE(file_util::PathExists(download_path));
   }
 
-  wstring download_prefix_;
+  FilePath download_prefix_;
 };
-
-}  // namespace
 
 // Download a file with non-viewable content, verify that the
 // download tab opened and the file exists.
 TEST_F(DownloadTest, DownloadMimeType) {
-  wstring file = L"download-test1.lib";
-  wstring expected_title = L"100% - " + file;
+  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
   // No new tabs created, downloads appear in the current tab's download shelf.
   WaitUntilTabCount(1);
 
@@ -166,24 +169,23 @@ TEST_F(DownloadTest, DownloadMimeType) {
 
   CleanUpDownload(file);
 
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
-  ASSERT_TRUE(tab_proxy.get());
-  EXPECT_TRUE(WaitForDownloadShelfVisible(tab_proxy.get()));
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
 }
 
 // Access a file with a viewable mime-type, verify that a download
 // did not initiate.
 TEST_F(DownloadTest, NoDownload) {
-  wstring file = L"download-test2.html";
-  wstring file_path = download_prefix_;
-  file_util::AppendToPath(&file_path, file);
+  FilePath file(FILE_PATH_LITERAL("download-test2.html"));
+  FilePath file_path = download_prefix_.Append(file);
 
   if (file_util::PathExists(file_path))
     ASSERT_TRUE(file_util::Delete(file_path, false));
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
   WaitUntilTabCount(1);
 
   // Wait to see if the file will be downloaded.
@@ -193,22 +195,21 @@ TEST_F(DownloadTest, NoDownload) {
   if (file_util::PathExists(file_path))
     ASSERT_TRUE(file_util::Delete(file_path, false));
 
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
-  ASSERT_TRUE(tab_proxy.get());
-  EXPECT_FALSE(WaitForDownloadShelfVisible(tab_proxy.get()));
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  EXPECT_FALSE(WaitForDownloadShelfVisible(browser.get()));
 }
 
 // Download a 0-size file with a content-disposition header, verify that the
 // download tab opened and the file exists as the filename specified in the
 // header.  This also ensures we properly handle empty file downloads.
 TEST_F(DownloadTest, ContentDisposition) {
-  wstring file = L"download-test3.gif";
-  wstring download_file = L"download-test3-attachment.gif";
-  wstring expected_title = L"100% - " + download_file;
+  FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
+  FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
 
   EXPECT_EQ(1, GetTabCount());
 
-  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
   WaitUntilTabCount(1);
 
   // Wait until the file is downloaded.
@@ -216,10 +217,51 @@ TEST_F(DownloadTest, ContentDisposition) {
 
   CleanUpDownload(download_file, file);
 
-  // Ensure the download shelf is visible on the current tab.
-  scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
-  ASSERT_TRUE(tab_proxy.get());
-  EXPECT_TRUE(WaitForDownloadShelfVisible(tab_proxy.get()));
+  // Ensure the download shelf is visible on the window.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
+}
+
+// Test that the download shelf is per-window by starting a download in one
+// tab, opening a second tab, closing the shelf, going back to the first tab,
+// and checking that the shelf is closed.
+TEST_F(DownloadTest, PerWindowShelf) {
+  FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
+  FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
+
+  EXPECT_EQ(1, GetTabCount());
+
+  NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack()));
+  WaitUntilTabCount(1);
+
+  // Wait until the file is downloaded.
+  PlatformThread::Sleep(action_timeout_ms());
+
+  CleanUpDownload(download_file, file);
+
+  // Ensure the download shelf is visible on the window.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  EXPECT_TRUE(WaitForDownloadShelfVisible(browser.get()));
+
+  // Open a second tab
+  browser->AppendTab(GURL(""));
+  WaitUntilTabCount(2);
+
+  // Hide shelf
+  browser->SetShelfVisible(false);
+  EXPECT_TRUE(WaitForDownloadShelfInvisible(browser.get()));
+
+  // Go to first tab
+  EXPECT_TRUE(browser->ActivateTab(0));
+  int tab_count;
+  EXPECT_TRUE(browser->GetTabCount(&tab_count));
+  ASSERT_EQ(2, tab_count);
+
+  bool shelf_visible;
+  EXPECT_TRUE(browser->IsShelfVisible(&shelf_visible));
+  ASSERT_FALSE(shelf_visible);
 }
 
 // UnknownSize and KnownSize are tests which depend on
@@ -228,15 +270,67 @@ TEST_F(DownloadTest, ContentDisposition) {
 // The test will first attempt to download a file; but the server will "pause"
 // in the middle until the server receives a second request for
 // "download-finish.  At that time, the download will finish.
+// Flaky on Linux: http://code.google.com/p/chromium/issues/detail?id=14746
 TEST_F(DownloadTest, UnknownSize) {
-  std::wstring url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
-  std::wstring filename = file_util::GetFilenameFromPath(url);
-  RunSizeTest(url, L"32.0 KB - " + filename, L"100% - " + filename);
+  GURL url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
+  FilePath filename;
+  net::FileURLToFilePath(url, &filename);
+  filename = filename.BaseName();
+  RunSizeTest(url, L"32.0 KB - " + filename.ToWStringHack(),
+              L"100% - " + filename.ToWStringHack());
 }
 
 // http://b/1158253
 TEST_F(DownloadTest, DISABLED_KnownSize) {
-  std::wstring url(URLRequestSlowDownloadJob::kKnownSizeUrl);
-  std::wstring filename = file_util::GetFilenameFromPath(url);
-  RunSizeTest(url, L"71% - " + filename, L"100% - " + filename);
+  GURL url(URLRequestSlowDownloadJob::kKnownSizeUrl);
+  FilePath filename;
+  net::FileURLToFilePath(url, &filename);
+  filename = filename.BaseName();
+  RunSizeTest(url, L"71% - " + filename.ToWStringHack(),
+              L"100% - " + filename.ToWStringHack());
 }
+
+// Test that when downloading an item in Incognito mode, we don't crash when
+// closing the last Incognito window (http://crbug.com/13983).
+TEST_F(DownloadTest, IncognitoDownload) {
+  // Open a regular window and sanity check default values for window / tab
+  // count and shelf visibility.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  int window_count = 0;
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(1, window_count);
+  EXPECT_EQ(1, GetTabCount());
+  bool is_shelf_visible;
+  browser->IsShelfVisible(&is_shelf_visible);
+  EXPECT_FALSE(is_shelf_visible);
+
+  // Open an Incognito window.
+  ASSERT_TRUE(browser->RunCommand(IDC_NEW_INCOGNITO_WINDOW));
+  scoped_refptr<BrowserProxy> incognito(automation()->GetBrowserWindow(1));
+  scoped_refptr<TabProxy> tab(incognito->GetTab(0));
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(2, window_count);
+
+  // Download something.
+  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  //PlatformThread::Sleep(1000);
+  ASSERT_TRUE(tab->NavigateToURL(
+      URLRequestMockHTTPJob::GetMockUrl(file.ToWStringHack())));
+  PlatformThread::Sleep(action_timeout_ms());
+
+  // Verify that the download shelf is showing for the Incognito window.
+  EXPECT_TRUE(WaitForDownloadShelfVisible(incognito.get()));
+
+  // Close the Incognito window and don't crash.
+  ASSERT_TRUE(incognito->RunCommand(IDC_CLOSE_WINDOW));
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(1, window_count);
+
+  // Verify that the regular window does not have a download shelf.
+  browser->IsShelfVisible(&is_shelf_visible);
+  EXPECT_FALSE(is_shelf_visible);
+
+  CleanUpDownload(file);
+}
+
+}  // namespace

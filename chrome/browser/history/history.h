@@ -5,13 +5,10 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_H__
 #define CHROME_BROWSER_HISTORY_HISTORY_H__
 
-#include <map>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
-#include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
@@ -19,12 +16,11 @@
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/ref_counted_util.h"
 
 class BookmarkService;
-class ChromeThread;
 struct DownloadCreateInfo;
 class FilePath;
 class GURL;
@@ -39,7 +35,8 @@ class SkBitmap;
 struct ThumbnailScore;
 
 namespace base {
-  class Time;
+class Thread;
+class Time;
 }
 
 namespace history {
@@ -86,7 +83,6 @@ class HistoryService : public CancelableRequestProvider,
                        public base::RefCountedThreadSafe<HistoryService> {
  public:
   // Miscellaneous commonly-used types.
-  typedef std::vector<GURL> RedirectList;
   typedef std::vector<PageUsageData*> PageUsageDataList;
 
   // ID (both star_id and group_id) of the bookmark bar.
@@ -143,8 +139,8 @@ class HistoryService : public CancelableRequestProvider,
   // IDs are only unique inside a given render process, so we need that to
   // differentiate them. This pointer should not be dereferenced by the history
   // system. Since render view host pointers may be reused (if one gets deleted
-  // and a new one created at the same address), WebContents should notify
-  // us when they are being destroyed through NotifyWebContentsDestruction.
+  // and a new one created at the same address), TabContents should notify
+  // us when they are being destroyed through NotifyTabContentsDestruction.
   //
   // The scope/ids can be NULL if there is no meaningful tracking information
   // that can be performed on the given URL. The 'page_id' should be the ID of
@@ -155,13 +151,18 @@ class HistoryService : public CancelableRequestProvider,
   // one entry). If there are no redirects, this array may also be empty for
   // the convenience of callers.
   //
+  // 'did_replace_entry' is true when the navigation entry for this page has
+  // replaced the existing entry. A non-user initiated redirect causes such
+  // replacement.
+  //
   // All "Add Page" functions will update the visited link database.
   void AddPage(const GURL& url,
                const void* id_scope,
                int32 page_id,
                const GURL& referrer,
                PageTransition::Type transition,
-               const RedirectList& redirects);
+               const history::RedirectList& redirects,
+               bool did_replace_entry);
 
   // For adding pages to history with a specific time. This is for testing
   // purposes. Call the previous one to use the current time.
@@ -171,12 +172,13 @@ class HistoryService : public CancelableRequestProvider,
                int32 page_id,
                const GURL& referrer,
                PageTransition::Type transition,
-               const RedirectList& redirects);
+               const history::RedirectList& redirects,
+               bool did_replace_entry);
 
   // For adding pages to history where no tracking information can be done.
   void AddPage(const GURL& url) {
     AddPage(url, NULL, 0, GURL::EmptyGURL(), PageTransition::LINK,
-            RedirectList());
+            history::RedirectList(), false);
   }
 
   // Sets the title for the given page. The page should be in history. If it
@@ -270,7 +272,7 @@ class HistoryService : public CancelableRequestProvider,
   typedef Callback4<Handle,
                     GURL,  // from_url
                     bool,  // success
-                    RedirectList*>::Type
+                    history::RedirectList*>::Type
       QueryRedirectsCallback;
 
   // Schedules a query for the most recent redirect coming out of the given
@@ -279,6 +281,12 @@ class HistoryService : public CancelableRequestProvider,
   Handle QueryRedirectsFrom(const GURL& from_url,
                             CancelableRequestConsumerBase* consumer,
                             QueryRedirectsCallback* callback);
+
+  // Schedules a query to get the most recent redirects ending at the given
+  // URL.
+  Handle QueryRedirectsTo(const GURL& to_url,
+                          CancelableRequestConsumerBase* consumer,
+                          QueryRedirectsCallback* callback);
 
   typedef Callback4<Handle,
                     bool,        // Were we able to determine the # of visits?
@@ -292,6 +300,20 @@ class HistoryService : public CancelableRequestProvider,
   Handle GetVisitCountToHost(const GURL& url,
                              CancelableRequestConsumerBase* consumer,
                              GetVisitCountToHostCallback* callback);
+
+  // Called when QueryTopURLsAndRedirects completes. The vector contains a list
+  // of the top |result_count| URLs.  For each of these URLs, there is an entry
+  // in the map containing redirects from the URL.  For example, if we have the
+  // redirect chain A -> B -> C and A is a top visited URL, then A will be in
+  // the vector and "A => {B -> C}" will be in the map.
+  typedef Callback2<std::vector<GURL>*, history::RedirectMap*>::Type
+      QueryTopURLsAndRedirectsCallback;
+
+  // Request the top |result_count| most visited URLs and the chain of redirects
+  // leading to each of these URLs.
+  Handle QueryTopURLsAndRedirects(int result_count,
+                                  CancelableRequestConsumerBase* consumer,
+                                  QueryTopURLsAndRedirectsCallback* callback);
 
   // Thumbnails ----------------------------------------------------------------
 
@@ -468,6 +490,7 @@ class HistoryService : public CancelableRequestProvider,
   // representing the segment.
   Handle QuerySegmentUsageSince(CancelableRequestConsumerBase* consumer,
                                 const base::Time from_time,
+                                int max_result_count,
                                 SegmentQueryCallback* callback);
 
   // Set the presentation index for the segment identified by |segment_id|.
@@ -736,12 +759,14 @@ class HistoryService : public CancelableRequestProvider,
                                              a, b, c, d));
   }
 
+  NotificationRegistrar registrar_;
+
   // Some void primitives require some internal processing in the main thread
   // when done. We use this internal consumer for this purpose.
   CancelableRequestConsumer internal_consumer_;
 
   // The thread used by the history service to run complicated operations
-  ChromeThread* thread_;
+  base::Thread* thread_;
 
   // This class has most of the implementation and runs on the 'thread_'.
   // You MUST communicate with this class ONLY through the thread_'s

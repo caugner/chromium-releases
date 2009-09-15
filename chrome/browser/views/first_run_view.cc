@@ -1,26 +1,27 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/first_run_view.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/win_util.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/views/first_run_customize_view.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/throbber.h"
-#include "chrome/views/controls/separator.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/throbber.h"
+#include "views/controls/separator.h"
+#include "views/standard_layout.h"
+#include "views/window/window.h"
 
 namespace {
 
@@ -32,30 +33,29 @@ std::wstring AddBullet(const std::wstring& text) {
 
 }  // namespace
 
-FirstRunView::FirstRunView(Profile* profile)
-    : FirstRunViewBase(profile),
+FirstRunView::FirstRunView(Profile* profile,
+                           int import_items,
+                           int dont_import_items)
+    : FirstRunViewBase(profile, import_items, dont_import_items),
       welcome_label_(NULL),
       actions_label_(NULL),
       actions_import_(NULL),
       actions_shorcuts_(NULL),
       customize_link_(NULL),
-      customize_selected_(false) {
+      customize_selected_(false),
+      accepted_(false) {
   importer_host_ = new ImporterHost();
   SetupControls();
 }
 
 FirstRunView::~FirstRunView() {
-  FirstRunComplete();
-
-  // Exit the message loop we were started with so that startup can continue.
-  MessageLoop::current()->Quit();
 }
 
 void FirstRunView::SetupControls() {
   using views::Label;
   using views::Link;
 
-  default_browser_->SetIsSelected(true);
+  default_browser_->SetChecked(true);
 
   welcome_label_ = new Label(l10n_util::GetString(IDS_FIRSTRUN_DLG_TEXT));
   welcome_label_->SetMultiLine(true);
@@ -155,7 +155,9 @@ void FirstRunView::OpenCustomizeDialog() {
       new FirstRunCustomizeView(profile_,
                                 importer_host_,
                                 this,
-                                default_browser_->IsSelected()))->Show();
+                                default_browser_->checked(),
+                                import_items_,
+                                dont_import_items_))->Show();
 }
 
 void FirstRunView::LinkActivated(views::Link* source, int event_flags) {
@@ -171,31 +173,39 @@ views::View* FirstRunView::GetContentsView() {
 }
 
 bool FirstRunView::Accept() {
-  if (!IsDialogButtonEnabled(DIALOGBUTTON_OK))
+  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK))
     return false;
 
   DisableButtons();
   customize_link_->SetEnabled(false);
   CreateDesktopShortcut();
-  CreateQuickLaunchShortcut();
-  if (default_browser_->IsSelected())
-    SetDefaultBrowser();
+  // Windows 7 has deprecated the quick launch bar.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+    CreateQuickLaunchShortcut();
   // Index 0 is the default browser.
-  FirstRun::ImportSettings(profile_, 0, GetDefaultImportItems(),
-                           window()->GetNativeWindow());
+  FirstRun::ImportSettings(profile_,
+      importer_host_->GetSourceProfileInfoAt(0).browser_type,
+      GetImportItems(), window()->GetNativeWindow());
   UserMetrics::RecordAction(L"FirstRunDef_Accept", profile_);
+  if (default_browser_->checked())
+    SetDefaultBrowser();
 
+  accepted_ = true;
+  FirstRunComplete();
+  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   return true;
 }
 
 bool FirstRunView::Cancel() {
   UserMetrics::RecordAction(L"FirstRunDef_Cancel", profile_);
+  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   return true;
 }
 
 // Notification from the customize dialog that the user accepted. Since all
 // the work is done there we got nothing else to do.
 void FirstRunView::CustomizeAccepted() {
+  accepted_ = true;
   window()->Close();
 }
 

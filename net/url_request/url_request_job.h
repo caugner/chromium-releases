@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/filter.h"
 #include "net/base/load_states.h"
 
@@ -18,9 +20,9 @@ class AuthChallengeInfo;
 class HttpResponseInfo;
 class IOBuffer;
 class UploadData;
+class X509Certificate;
 }
 
-class GURL;
 class URLRequest;
 class URLRequestStatus;
 class URLRequestJobMetrics;
@@ -31,6 +33,13 @@ class URLRequestJobMetrics;
 class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
                       public FilterContext {
  public:
+  // When histogramming results related to SDCH and/or an SDCH latency test, the
+  // number of packets for which we need to record arrival times so as to
+  // calculate interpacket latencies.  We currently are only looking at the
+  // first few packets, as we're monitoring the impact of the initial TCP
+  // congestion window on stalling of transmissions.
+  static const size_t kSdchPacketHistogramCount = 5;
+
   explicit URLRequestJob(URLRequest* request);
   virtual ~URLRequestJob();
 
@@ -104,9 +113,6 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
     return false;
   }
 
-  // Returns the HTTP response code for the request.
-  virtual int GetResponseCode() { return -1; }
-
   // Called to fetch the encoding types for this request. Only makes sense for
   // some types of requests. Returns true on success. Calling this on a request
   // that doesn't have or specify an encoding type will return false.
@@ -121,6 +127,9 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
       std::vector<Filter::FilterType>* encoding_types) {
     return false;
   }
+
+  // Find out if this is a download.
+  virtual bool IsDownload() const;
 
   // Find out if this is a response to a request that advertised an SDCH
   // dictionary.  Only makes sense for some types of requests.
@@ -139,10 +148,9 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // The caller is responsible for following the redirect by setting up an
   // appropriate replacement Job. Note that the redirected location may be
   // invalid, the caller should be sure it can handle this.
-  virtual bool IsRedirectResponse(GURL* location,
-                                  int* http_status_code) {
-    return false;
-  }
+  //
+  // The default implementation inspects the response_info_.
+  virtual bool IsRedirectResponse(GURL* location, int* http_status_code);
 
   // Called to determine if it is okay to redirect this job to the specified
   // location.  This may be used to implement protocol-specific restrictions.
@@ -168,8 +176,12 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // Display the error page without asking for credentials again.
   virtual void CancelAuth();
 
+  virtual void ContinueWithCertificate(net::X509Certificate* client_cert);
+
   // Continue processing the request ignoring the last error.
   virtual void ContinueDespiteLastError();
+
+  void FollowDeferredRedirect();
 
   // Returns true if the Job is done producing response data and has called
   // NotifyDone on the request.
@@ -195,11 +207,13 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // FilterContext methods:
   // These methods are not applicable to all connections.
   virtual bool GetMimeType(std::string* mime_type) const { return false; }
-  virtual int64 GetByteReadCount() const;
   virtual bool GetURL(GURL* gurl) const;
   virtual base::Time GetRequestTime() const;
-  virtual bool IsCachedContent() const;
+  virtual bool IsCachedContent() const { return false; }
+  virtual int64 GetByteReadCount() const;
+  virtual int GetResponseCode() const { return -1; }
   virtual int GetInputStreamBufferSize() const { return kFilterBufSize; }
+  virtual void RecordPacketStats(StatisticSelector statistic) const;
 
  protected:
   // Notifies the job that headers have been received.
@@ -226,6 +240,10 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // we were canceled.
   void NotifyCanceled();
 
+  // Notifies the job the request should be restarted.
+  // Should only be called if the job has not started a resposne.
+  void NotifyRestartRequired();
+
   // Called to get more data from the request response. Returns true if there
   // is data immediately available to read. Return false otherwise.
   // Internally this function may initiate I/O operations to get more data.
@@ -250,6 +268,16 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // return data, this call can issue a new async IO request under
   // the hood.
   bool ReadFilteredData(int *bytes_read);
+
+  // Facilitate histogramming by turning on packet counting.
+  // If called more than once, the largest value will be used.
+  void EnablePacketCounting(size_t max_packets_timed);
+
+  // At or near destruction time, a derived class may request that the filters
+  // be destroyed so that statistics can be gathered while the derived class is
+  // still present to assist in calculations.  This is used by URLRequestHttpJob
+  // to get SDCH to emit stats.
+  void DestroyFilters() { filter_.reset(); }
 
   // The request that initiated this job. This value MAY BE NULL if the
   // request was released by DetachRequest().
@@ -285,15 +313,20 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // have been read.
   void RecordBytesRead(int bytes_read);
 
- private:
   // Called to query whether there is data available in the filter to be read
   // out.
   bool FilterHasData();
+
+  // Record packet arrival times for possible use in histograms.
+  void UpdatePacketReadTimes();
 
   // Indicates that the job is done producing data, either it has completed
   // all the data or an error has been encountered. Set exclusively by
   // NotifyDone so that it is kept in sync with the request.
   bool done_;
+
+  // Cache the load flags from request_ because it might go away.
+  int load_flags_;
 
   // The data stream filter which is enabled on demand.
   scoped_ptr<Filter> filter_;
@@ -316,10 +349,51 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // Expected content size
   int64 expected_content_size_;
 
+  // Set when a redirect is deferred.
+  GURL deferred_redirect_url_;
+  int deferred_redirect_status_code_;
+
+  //----------------------------------------------------------------------------
+  // Data used for statistics gathering in some instances.  This data is only
+  // used for histograms etc., and is not required.  It is optionally gathered
+  // based on the settings of several control variables.
+
+  // Enable recording of packet arrival times for histogramming.
+  bool packet_timing_enabled_;
+
+  // TODO(jar): improve the quality of the gathered info by gathering most times
+  // at a lower point in the network stack, assuring we have actual packet
+  // boundaries, rather than approximations.  Also note that input byte count
+  // as gathered here is post-SSL, and post-cache-fetch, and does not reflect
+  // true packet arrival times in such cases.
+
   // Total number of bytes read from network (or cache) and and typically handed
   // to filter to process.  Used to histogram compression ratios, and error
   // recovery scenarios in filters.
   int64 filter_input_byte_count_;
+
+  // The number of bytes that have been accounted for in packets (where some of
+  // those packets may possibly have had their time of arrival recorded).
+  int64 bytes_observed_in_packets_;
+
+  // Limit on the size of the array packet_times_.  This can be set to
+  // zero, and then no packet times will be gathered.
+  size_t max_packets_timed_;
+
+  // Arrival times for some of the first few packets.
+  std::vector<base::Time> packet_times_;
+
+  // The request time may not be available when we are being destroyed, so we
+  // snapshot it early on.
+  base::Time request_time_snapshot_;
+
+  // Since we don't save all packet times in packet_times_, we save the
+  // last time for use in histograms.
+  base::Time final_packet_time_;
+
+  // The count of the number of packets, some of which may not have been timed.
+  // We're ignoring overflow, as 1430 x 2^31 is a LOT of bytes.
+  int observed_packet_count_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestJob);
 };

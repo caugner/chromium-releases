@@ -1,11 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Defines all the command-line switches used by Chrome.
 
-#ifndef CHROME_COMMON_CHROME_SWITCHES_H__
-#define CHROME_COMMON_CHROME_SWITCHES_H__
+#ifndef CHROME_COMMON_CHROME_SWITCHES_H_
+#define CHROME_COMMON_CHROME_SWITCHES_H_
 
 #include "base/base_switches.h"
 
@@ -20,38 +20,38 @@ extern const wchar_t kBrowserCrashTest[];
 extern const wchar_t kRendererCrashTest[];
 extern const wchar_t kRendererStartupDialog[];
 extern const wchar_t kPluginStartupDialog[];
-extern const wchar_t kTestShellStartupDialog[];
 extern const wchar_t kPluginLauncher[];
 
-extern const wchar_t kProcessChannelID[];
 extern const wchar_t kTestingChannelID[];
 extern const wchar_t kHomePage[];
 extern const wchar_t kRendererProcess[];
-extern const wchar_t kRendererPath[];
+extern const wchar_t kZygoteProcess[];
+extern const wchar_t kBrowserSubprocessPath[];
 extern const wchar_t kPluginProcess[];
 extern const wchar_t kWorkerProcess[];
+extern const wchar_t kUtilityProcess[];
 extern const wchar_t kSingleProcess[];
 extern const wchar_t kProcessPerTab[];
 extern const wchar_t kProcessPerSite[];
 extern const wchar_t kInProcessPlugins[];
 extern const wchar_t kNoSandbox[];
+extern const wchar_t kDisableAltWinstation[];
 extern const wchar_t kSafePlugins[];
 extern const wchar_t kTrustedPlugins[];
 extern const wchar_t kTestSandbox[];
 extern const wchar_t kUserDataDir[];
 extern const wchar_t kPluginDataDir[];
 extern const wchar_t kDiskCacheDir[];
+extern const wchar_t kDiskCacheSize[];
+extern const wchar_t kMediaCacheSize[];
 extern const wchar_t kEnableUserDataDirProfiles[];
 extern const wchar_t kParentProfile[];
 extern const wchar_t kApp[];
-extern const wchar_t kAppUploadFile[];
 extern const wchar_t kDomAutomationController[];
 extern const wchar_t kPluginPath[];
 extern const wchar_t kUserAgent[];
 extern const wchar_t kJavaScriptFlags[];
 extern const wchar_t kCountry[];
-extern const wchar_t kLang[];
-extern const wchar_t kDebugChildren[];
 extern const wchar_t kWaitForDebuggerChildren[];
 
 extern const wchar_t kLogFilterPrefix[];
@@ -72,14 +72,20 @@ extern const wchar_t kRestoreLastSession[];
 extern const wchar_t kRecordMode[];
 extern const wchar_t kPlaybackMode[];
 extern const wchar_t kNoEvents[];
+extern const wchar_t kNoJsRandomness[];
 
 extern const wchar_t kHideIcons[];
 extern const wchar_t kShowIcons[];
 extern const wchar_t kMakeDefaultBrowser[];
 
 extern const wchar_t kProxyServer[];
-extern const wchar_t kV8ProxyResolver[];
+extern const wchar_t kNoProxyServer[];
+extern const wchar_t kProxyBypassList[];
+extern const wchar_t kProxyAutoDetect[];
+extern const wchar_t kProxyPacUrl[];
+extern const wchar_t kWinHttpProxyResolver[];
 extern const wchar_t kDebugPrint[];
+extern const wchar_t kPrint[];
 
 extern const wchar_t kDnsLogDetails[];
 extern const wchar_t kDnsPrefetchDisable[];
@@ -102,6 +108,8 @@ extern const wchar_t kEnableWatchdog[];
 
 extern const wchar_t kFirstRun[];
 
+extern const wchar_t kNoFirstRun[];
+
 extern const wchar_t kMessageLoopHistogrammer[];
 
 extern const wchar_t kImport[];
@@ -114,8 +122,10 @@ extern const wchar_t kDisablePopupBlocking[];
 extern const wchar_t kDisableJavaScript[];
 extern const wchar_t kDisableJava[];
 extern const wchar_t kDisablePlugins[];
+extern const wchar_t kEnablePlugins[];
 extern const wchar_t kDisableImages[];
 extern const wchar_t kDisableWebSecurity[];
+extern const wchar_t kEnableRemoteFonts[];
 
 extern const wchar_t kUseLowFragHeapCrt[];
 
@@ -125,16 +135,17 @@ extern const wchar_t kGearsPluginPathOverride[];
 
 extern const wchar_t kEnableFastback[];
 
-extern const wchar_t kJavaScriptDebuggerPath[];
-
 extern const wchar_t kDisableP13n[];
 
 extern const wchar_t kSdchFilter[];
 
 extern const wchar_t kEnableUserScripts[];
 extern const wchar_t kEnableExtensions[];
+extern const wchar_t kExtensionsUpdateFrequency[];
 extern const wchar_t kInstallExtension[];
 extern const wchar_t kLoadExtension[];
+extern const wchar_t kPackExtension[];
+extern const wchar_t kPackExtensionKey[];
 extern const wchar_t kLoadPlugin[];
 extern const wchar_t kUserScriptsDir[];
 
@@ -142,24 +153,67 @@ extern const wchar_t kIncognito[];
 
 extern const wchar_t kEnableRendererAccessibility[];
 
-extern const wchar_t kEnableVideo[];
-
 extern const wchar_t kTestName[];
 
 extern const wchar_t kRendererCmdPrefix[];
 
+extern const wchar_t kUtilityCmdPrefix[];
+
 extern const wchar_t kNewFtp[];
 
-extern const wchar_t kIPCUseFIFO[];
-
-extern const wchar_t kEnableOutOfProcessDevTools[];
-
-extern const wchar_t kEnableWebWorkers[];
-
-extern const wchar_t kViewsGtk[];
+extern const wchar_t kEnableNativeWebWorkers[];
+extern const wchar_t kWebWorkerProcessPerCore[];
+extern const wchar_t kWebWorkerShareProcesses[];
 
 extern const wchar_t kBookmarkMenu[];
 
+extern const wchar_t kEnableStatsTable[];
+
+extern const wchar_t kAutoSpellCorrect[];
+
+extern const wchar_t kDisableOmnibox2[];
+
+extern const wchar_t kDisableAudio[];
+extern const wchar_t kSimpleDataSource[];
+
+extern const wchar_t kForceFieldTestNameAndValue[];
+
+extern const wchar_t kNewTabPage[];
+extern const wchar_t kOldNewTabPage[];
+extern const wchar_t kDisableNewTabFirstRun[];
+
+extern const wchar_t kDisableWebResources[];
+
+extern const wchar_t kEnableBenchmarking[];
+
+extern const wchar_t kNoDefaultBrowserCheck[];
+
+extern const wchar_t kPrivacyBlacklist[];
+
+extern const wchar_t kZygoteCmdPrefix[];
+
+extern const wchar_t kThumbnailStore[];
+
+extern const wchar_t kTryChromeAgain[];
+
+extern const wchar_t kFileDescriptorLimit[];
+
+extern const wchar_t kEnableMonitorProfile[];
+
+extern const wchar_t kEnableXSSAuditor[];
+
+extern const wchar_t kRendererCrashDump[];
+
+extern const wchar_t kEnableTabtastic2[];
+
+extern const wchar_t kPinnedTabCount[];
+
+extern const wchar_t kEnableLocalStorage[];
+
+extern const wchar_t kEnableSessionStorage[];
+
+extern const wchar_t kDisableCustomJumpList[];
+
 }  // namespace switches
 
-#endif  // CHROME_COMMON_CHROME_SWITCHES_H__
+#endif  // CHROME_COMMON_CHROME_SWITCHES_H_

@@ -5,7 +5,6 @@
 #include "chrome/test/ui/ui_test.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "net/base/net_util.h"
 
@@ -19,9 +18,15 @@ TEST_F(ChromeMainTest, AppLaunch) {
   if (UITest::in_process_renderer()) {
     EXPECT_EQ(1, UITest::GetBrowserProcessCount());
   } else {
+#if defined(OS_LINUX)
+    // On Linux we'll have four processes: browser, renderer, zygote and
+    // sandbox helper.
+    EXPECT_EQ(4, UITest::GetBrowserProcessCount());
+#else
     // We should have two instances of the browser process alive -
     // one is the Browser and the other is the Renderer.
     EXPECT_EQ(2, UITest::GetBrowserProcessCount());
+#endif
   }
 }
 
@@ -48,16 +53,13 @@ TEST_F(ChromeMainTest, ReuseBrowserInstanceWhenOpeningFile) {
   include_testing_id_ = false;
   use_existing_browser_ = true;
 
-  std::wstring test_file = test_data_directory_;
-  file_util::AppendToPath(&test_file, L"empty.html");
+  FilePath test_file = test_data_directory_.AppendASCII("empty.html");
 
   CommandLine command_line(L"");
-  command_line.AppendLooseValue(test_file);
+  command_line.AppendLooseValue(test_file.ToWStringHack());
 
   LaunchBrowser(command_line, false);
 
-  FilePath test_file_path(FilePath::FromWStringHack(test_file));
-
   ASSERT_TRUE(automation()->WaitForURLDisplayed(
-      net::FilePathToFileURL(test_file_path), action_timeout_ms()));
+      net::FilePathToFileURL(test_file), action_timeout_ms()));
 }

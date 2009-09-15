@@ -8,6 +8,8 @@
 #if defined(OS_WIN)
 #include <objidl.h>
 #include <mlang.h>
+#elif defined(OS_LINUX)
+#include <sys/utsname.h>
 #endif
 
 #include "BackForwardList.h"
@@ -32,15 +34,24 @@
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
-#include "skia/include/SkBitmap.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/api/public/WebHistoryItem.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebVector.h"
+#if defined(OS_WIN)
+#include "webkit/api/public/win/WebInputEventFactory.h"
+#endif
 #include "webkit/glue/event_conversion.h"
+#include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/weburlrequest_impl.h"
 #include "webkit/glue/webframe_impl.h"
 #include "webkit/glue/webview_impl.h"
 
 #include "webkit_version.h"  // Generated
+
+using WebKit::WebHistoryItem;
+using WebKit::WebString;
+using WebKit::WebVector;
 
 //------------------------------------------------------------------------------
 // webkit_glue impl:
@@ -135,72 +146,55 @@ std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive) {
 }
 
 // Returns True if item1 < item2.
-static bool HistoryItemCompareLess(PassRefPtr<WebCore::HistoryItem> item1,
-                                   PassRefPtr<WebCore::HistoryItem> item2) {
-  std::wstring target1 = StringToStdWString(item1->target());
-  std::wstring target2 = StringToStdWString(item2->target());
+static bool HistoryItemCompareLess(const WebHistoryItem& item1,
+                                   const WebHistoryItem& item2) {
+  string16 target1 = item1.target();
+  string16 target2 = item2.target();
   std::transform(target1.begin(), target1.end(), target1.begin(), tolower);
   std::transform(target2.begin(), target2.end(), target2.begin(), tolower);
   return target1 < target2;
 }
 
 // Writes out a HistoryItem into a string in a readable format.
-static void DumpHistoryItem(WebCore::HistoryItem* item, int indent,
-                            bool is_current, std::wstring* result) {
+static std::wstring DumpHistoryItem(const WebHistoryItem& item,
+                                    int indent, bool is_current) {
+  std::wstring result;
+
   if (is_current) {
-    result->append(L"curr->");
-    result->append(indent - 6, L' ');  // 6 == L"curr->".length()
+    result.append(L"curr->");
+    result.append(indent - 6, L' ');  // 6 == L"curr->".length()
   } else {
-    result->append(indent, L' ');
+    result.append(indent, L' ');
   }
 
-  result->append(StringToStdWString(item->urlString()));
-  if (!item->target().isEmpty()) {
-    result->append(L" (in frame \"" + StringToStdWString(item->target()) +
-                   L"\")");
-  }
-  if (item->isTargetItem())
-    result->append(L"  **nav target**");
-  result->append(L"\n");
+  result.append(UTF16ToWideHack(item.urlString()));
+  if (!item.target().isEmpty())
+    result.append(L" (in frame \"" + UTF16ToWide(item.target()) + L"\")");
+  if (item.isTargetItem())
+    result.append(L"  **nav target**");
+  result.append(L"\n");
 
-  if (item->hasChildren()) {
-    WebCore::HistoryItemVector children = item->children();
+  const WebVector<WebHistoryItem>& children = item.children();
+  if (!children.isEmpty()) {
     // Must sort to eliminate arbitrary result ordering which defeats
     // reproducible testing.
-    std::sort(children.begin(), children.end(), HistoryItemCompareLess);
-    for (unsigned i = 0; i < children.size(); i++) {
-      DumpHistoryItem(children[i].get(), indent+4, false, result);
-    }
+    // TODO(darin): WebVector should probably just be a std::vector!!
+    std::vector<WebHistoryItem> sorted_children;
+    for (size_t i = 0; i < children.size(); ++i)
+      sorted_children.push_back(children[i]);
+    std::sort(sorted_children.begin(), sorted_children.end(),
+              HistoryItemCompareLess);
+    for (size_t i = 0; i < sorted_children.size(); i++)
+      result += DumpHistoryItem(sorted_children[i], indent+4, false);
   }
+
+  return result;
 }
 
-void DumpBackForwardList(WebView* view, void* previous_history_item,
-                         std::wstring* result) {
-  result->append(L"\n============== Back Forward List ==============\n");
-
-  WebCore::Frame* frame =
-      static_cast<WebFrameImpl*>(view->GetMainFrame())->frame();
-  WebCore::BackForwardList* list = frame->page()->backForwardList();
-
-  // Skip everything before the previous_history_item, if it's in the back list.
-  // If it isn't found, assume it fell off the end, and include everything.
-  int start_index = -list->backListCount();
-  WebCore::HistoryItem* prev_item =
-      static_cast<WebCore::HistoryItem*>(previous_history_item);
-  for (int i = -list->backListCount(); i < 0; ++i) {
-    if (prev_item == list->itemAtIndex(i))
-      start_index = i+1;
-  }
-
-  for (int i = start_index; i < 0; ++i)
-    DumpHistoryItem(list->itemAtIndex(i), 8, false, result);
-
-  DumpHistoryItem(list->currentItem(), 8, true, result);
-
-  for (int i = 1; i <= list->forwardListCount(); ++i)
-    DumpHistoryItem(list->itemAtIndex(i), 8, false, result);
-
-  result->append(L"===============================================\n");
+std::wstring DumpHistoryState(const std::string& history_state, int indent,
+                              bool is_current) {
+  return DumpHistoryItem(HistoryItemFromString(history_state), indent,
+                         is_current);
 }
 
 void ResetBeforeTestRun(WebView* view) {
@@ -215,11 +209,13 @@ void ResetBeforeTestRun(WebView* view) {
   // This is papering over b/850700.  But it passes a few more tests, so we'll
   // keep it for now.
   if (frame && frame->script())
-    frame->script()->setEventHandlerLineno(0);
+    frame->script()->setEventHandlerLineNumber(0);
 
+#if defined(OS_WIN)
   // Reset the last click information so the clicks generated from previous
   // test aren't inherited (otherwise can mistake single/double/triple clicks)
-  MakePlatformMouseEvent::ResetLastClick();
+  WebKit::WebInputEventFactory::resetLastClickState();
+#endif
 }
 
 #ifndef NDEBUG
@@ -254,7 +250,12 @@ bool DecodeImage(const std::string& image_data, SkBitmap* image) {
   return false;
 }
 
-FilePath::StringType WebStringToFilePathString(const WebKit::WebString& str) {
+// NOTE: This pair of conversion functions are here instead of in glue_util.cc
+// since that file will eventually die.  This pair of functions will need to
+// remain as the concept of a file-path specific character encoding string type
+// will most likely not make its way into WebKit.
+
+FilePath::StringType WebStringToFilePathString(const WebString& str) {
 #if defined(OS_POSIX)
   return base::SysWideToNativeMB(UTF16ToWideHack(str));
 #elif defined(OS_WIN)
@@ -262,33 +263,12 @@ FilePath::StringType WebStringToFilePathString(const WebKit::WebString& str) {
 #endif
 }
 
-WebKit::WebString FilePathStringToWebString(const FilePath::StringType& str) {
+WebString FilePathStringToWebString(const FilePath::StringType& str) {
 #if defined(OS_POSIX)
   return WideToUTF16Hack(base::SysNativeMBToWide(str));
 #elif defined(OS_WIN)
   return WideToUTF16Hack(str);
 #endif
-}
-
-// Convert from WebKit types to Glue types and notify the embedder. This should
-// not perform complex processing since it may be called a lot.
-void NotifyFormStateChanged(const WebCore::Document* document) {
-  if (!document)
-    return;
-
-  WebCore::Frame* frame = document->frame();
-  if (!frame)
-    return;
-
-  // Dispatch to the delegate of the view that owns the frame.
-  WebFrame* webframe = WebFrameImpl::FromFrame(document->frame());
-  WebView* webview = webframe->GetView();
-  if (!webview)
-    return;
-  WebViewDelegate* delegate = webview->GetDelegate();
-  if (!delegate)
-    return;
-  delegate->OnNavStateChanged(webview);
 }
 
 std::string GetWebKitVersion() {
@@ -311,7 +291,9 @@ struct UserAgentState {
 
 Singleton<UserAgentState> g_user_agent;
 
-void BuildUserAgent(bool mimic_safari, std::string* result) {
+std::string BuildOSCpuInfo() {
+  std::string os_cpu;
+
 #if defined(OS_WIN) || defined(OS_MACOSX)
   int32 os_major_version = 0;
   int32 os_minor_version = 0;
@@ -319,6 +301,58 @@ void BuildUserAgent(bool mimic_safari, std::string* result) {
   base::SysInfo::OperatingSystemVersionNumbers(&os_major_version,
                                                &os_minor_version,
                                                &os_bugfix_version);
+#else
+  // Should work on any Posix system.
+  struct utsname unixinfo;
+  uname(&unixinfo);
+
+  std::string cputype;
+  // special case for biarch systems
+  if (strcmp(unixinfo.machine, "x86_64") == 0 &&
+      sizeof(void*) == sizeof(int32)) {
+    cputype.assign("i686 (x86_64)");
+  } else {
+    cputype.assign(unixinfo.machine);
+  }
+#endif
+
+  StringAppendF(
+      &os_cpu,
+#if defined(OS_WIN)
+      "Windows NT %d.%d",
+      os_major_version,
+      os_minor_version
+#elif defined(OS_MACOSX)
+      "Intel Mac OS X %d_%d_%d",
+      os_major_version,
+      os_minor_version,
+      os_bugfix_version
+#else
+      "%s %s",
+      unixinfo.sysname, // e.g. Linux
+      cputype.c_str()   // e.g. i686
+#endif
+  );
+
+  return os_cpu;
+}
+
+void BuildUserAgent(bool mimic_safari, std::string* result) {
+  const char kUserAgentPlatform[] =
+#if defined(OS_WIN)
+      "Windows";
+#elif defined(OS_MACOSX)
+      "Macintosh";
+#elif defined(OS_LINUX)
+      "X11";              // strange, but that's what Firefox uses
+#else
+      "?";
+#endif
+
+  const char kUserAgentSecurity = 'U'; // "US" strength encryption
+
+  // TODO(port): figure out correct locale
+  const char kUserAgentLocale[] = "en-US";
 
   // Get the product name and version, and replace Safari's Version/X string
   // with it.  This is done to expose our product name in a manner that is
@@ -338,37 +372,18 @@ void BuildUserAgent(bool mimic_safari, std::string* result) {
   // Derived from Safari's UA string.
   StringAppendF(
       result,
-#if defined(OS_WIN)
-      "Mozilla/5.0 (Windows; U; Windows NT %d.%d; en-US) AppleWebKit/%d.%d"
-#elif defined(OS_MACOSX)
-      "Mozilla/5.0 (Macintosh; U; Intel Mac OS X %d_%d_%d; en-US) "
-      "AppleWebKit/%d.%d"
-#endif
+      "Mozilla/5.0 (%s; %c; %s; %s) AppleWebKit/%d.%d"
       " (KHTML, like Gecko) %s Safari/%d.%d",
-      os_major_version,
-      os_minor_version,
-#if defined(OS_MACOSX)
-      os_bugfix_version,
-#endif
+      kUserAgentPlatform,
+      kUserAgentSecurity,
+      BuildOSCpuInfo().c_str(),
+      kUserAgentLocale,
       WEBKIT_VERSION_MAJOR,
       WEBKIT_VERSION_MINOR,
       product.c_str(),
       WEBKIT_VERSION_MAJOR,
       WEBKIT_VERSION_MINOR
       );
-#elif defined(OS_LINUX)
-  // TODO(agl): We don't have version information embedded in files under Linux
-  // so we use the following string which is based off the UA string for
-  // Windows. Some solution for embedding the Chrome version number needs to be
-  // found here.
-  StringAppendF(
-      result,
-      "Mozilla/5.0 (Linux; U; en-US) AppleWebKit/525.13 "
-      "(KHTML, like Gecko) Chrome/0.2.149.27 Safari/525.13");
-#else
-  // TODO(port): we need something like FileVersionInfo for our UA string.
-  NOTIMPLEMENTED();
-#endif
 }
 
 void SetUserAgentToDefault() {

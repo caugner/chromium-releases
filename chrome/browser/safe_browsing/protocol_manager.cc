@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/task.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/common/stl_util-inl.h"
 #include "net/base/base64.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -27,6 +27,9 @@ using base::TimeDelta;
 
 // Maximum time, in seconds, from start up before we must issue an update query.
 static const int kSbTimerStartIntervalSec = 5 * 60;
+
+// The maximum time, in seconds, to wait for a response to an update request.
+static const int kSbMaxUpdateWaitSec = 10;
 
 // Update URL for querying about the latest set of chunk updates.
 static const char* const kSbUpdateUrl =
@@ -196,6 +199,12 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
     std::vector<SBFullHashResult> full_hashes;
     bool can_cache = false;
     if (response_code == 200 || response_code == 204) {
+      // For tracking our GetHash false positive (204) rate, compared to real
+      // (200) responses.
+      if (response_code == 200)
+        UMA_HISTOGRAM_COUNTS("SB2.GetHash200", 1);
+      else
+        UMA_HISTOGRAM_COUNTS("SB2.GetHash204", 1);
       can_cache = true;
       gethash_error_count_ = 0;
       gethash_back_off_mult_ = 1;
@@ -229,8 +238,18 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
     hash_requests_.erase(it);
   } else {
     // Update, chunk or key response.
-    DCHECK(source == request_.get());
     fetcher.reset(request_.release());
+
+    if (request_type_ == UPDATE_REQUEST) {
+      if (!fetcher.get()) {
+        // We've timed out waiting for an update response, so we've cancelled
+        // the update request and scheduled a new one. Ignore this response.
+        return;
+      }
+
+      // Cancel the update response timeout now that we have the response.
+      update_timer_.Stop();
+    }
 
     if (response_code == 200) {
       // We have data from the SafeBrowsing service.
@@ -518,6 +537,7 @@ void SafeBrowsingProtocolManager::OnGetChunksComplete(
 
   if (database_error) {
     ScheduleNextUpdate(false);
+    UpdateFinished(false);
     return;
   }
 
@@ -560,6 +580,19 @@ void SafeBrowsingProtocolManager::OnGetChunksComplete(
   request_->set_request_context(Profile::GetDefaultRequestContext());
   request_->set_upload_data("text/plain", list_data);
   request_->Start();
+
+  // Begin the update request timeout.
+  update_timer_.Start(TimeDelta::FromSeconds(kSbMaxUpdateWaitSec), this,
+                      &SafeBrowsingProtocolManager::UpdateResponseTimeout);
+}
+
+// If we haven't heard back from the server with an update response, this method
+// will run. Close the current update session and schedule another update.
+void SafeBrowsingProtocolManager::UpdateResponseTimeout() {
+  DCHECK(request_type_ == UPDATE_REQUEST);
+  request_.reset();
+  ScheduleNextUpdate(false);
+  UpdateFinished(false);
 }
 
 void SafeBrowsingProtocolManager::OnChunkInserted() {

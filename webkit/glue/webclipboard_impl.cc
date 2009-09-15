@@ -7,14 +7,19 @@
 #include "base/clipboard.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebImage.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/api/public/WebImage.h"
+#include "webkit/api/public/WebSize.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebURL.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
+
+#if WEBKIT_USING_CG
+#include "skia/ext/skia_utils_mac.h"
+#endif
 
 using WebKit::WebClipboard;
 using WebKit::WebImage;
@@ -23,7 +28,9 @@ using WebKit::WebURL;
 
 namespace webkit_glue {
 
-static std::string URLToMarkup(const WebURL& url, const WebString& title) {
+// Static
+std::string WebClipboardImpl::URLToMarkup(const WebURL& url,
+    const WebString& title) {
   std::string markup("<a href=\"");
   markup.append(url.spec());
   markup.append("\">");
@@ -33,8 +40,9 @@ static std::string URLToMarkup(const WebURL& url, const WebString& title) {
   return markup;
 }
 
-static std::string URLToImageMarkup(const WebURL& url,
-                                    const WebString& title) {
+// Static
+std::string WebClipboardImpl::URLToImageMarkup(const WebURL& url,
+    const WebString& title) {
   std::string markup("<img src=\"");
   markup.append(url.spec());
   markup.append("\"");
@@ -119,10 +127,15 @@ void WebClipboardImpl::writeImage(
     const WebImage& image, const WebURL& url, const WebString& title) {
   ScopedClipboardWriterGlue scw(ClipboardGetClipboard());
 
-#if defined(OS_WIN)
-  if (!image.isNull())
-    scw.WriteBitmapFromPixels(image.pixels(), image.size());
+  if (!image.isNull()) {
+#if WEBKIT_USING_SKIA
+    const SkBitmap& bitmap = image.getSkBitmap();
+#elif WEBKIT_USING_CG
+    const SkBitmap& bitmap = gfx::CGImageToSkBitmap(image.getCGImageRef());
 #endif
+    SkAutoLockPixels locked(bitmap);
+    scw.WriteBitmapFromPixels(bitmap.getPixels(), image.size());
+  }
 
   if (!url.isEmpty()) {
     scw.WriteBookmark(title, url.spec());

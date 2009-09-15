@@ -4,10 +4,12 @@
 
 #include "chrome/test/interactive_ui/view_event_test_base.h"
 
+#include <ole2.h>
+
 #include "base/message_loop.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/window.h"
+#include "views/view.h"
+#include "views/window/window.h"
 
 namespace {
 
@@ -16,7 +18,11 @@ class TestView : public views::View {
  public:
   TestView() {}
 
-  void set_preferred_size(const gfx::Size& size) { preferred_size_ = size; }
+  void SetPreferredSize(const gfx::Size& size) {
+    preferred_size_ = size;
+    PreferredSizeChanged();
+  }
+
   gfx::Size GetPreferredSize() {
     if (!preferred_size_.IsEmpty())
       return preferred_size_;
@@ -39,16 +45,20 @@ const int kMouseMoveDelayMS = 200;
 
 }  // namespace
 
-// static
+ViewEventTestBase::ViewEventTestBase() : window_(NULL), content_view_(NULL) { }
+
 void ViewEventTestBase::Done() {
   MessageLoop::current()->Quit();
+
+  // We need to post a message to tickle the Dispatcher getting called and
+  // exiting out of the nested loop. Without this the quit never runs.
+  PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
+
   // If we're in a nested message loop, as is the case with menus, we need
   // to quit twice. The second quit does that for us.
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE, new MessageLoop::QuitTask(), 0);
 }
-
-ViewEventTestBase::ViewEventTestBase() : window_(NULL), content_view_(NULL) { }
 
 void ViewEventTestBase::SetUp() {
   OleInitialize(NULL);
@@ -68,7 +78,7 @@ views::View* ViewEventTestBase::GetContentsView() {
     // Wrap the real view (as returned by CreateContentsView) in a View so
     // that we can customize the preferred size.
     TestView* test_view = new TestView();
-    test_view->set_preferred_size(GetPreferredSize());
+    test_view->SetPreferredSize(GetPreferredSize());
     test_view->AddChildView(CreateContentsView());
     content_view_ = test_view;
   }

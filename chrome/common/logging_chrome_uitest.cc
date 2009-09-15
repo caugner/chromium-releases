@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -107,8 +108,8 @@ TEST_F(RendererCrashTest, Crash) {
     // in process mode doesn't do the crashing.
     expected_crashes_ = 0;
   } else {
-    // Wait while the process is writing the crash dump.
-    Sleep(5000);
+    scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_max_timeout_ms()));
     expected_crashes_ = 1;
   }
 }
@@ -126,9 +127,9 @@ class BrowserCrashTest : public UITest {
 };
 
 // Launch the app in browser crash test mode.
-// This test is disabled. See bug 1198934.
+// This test is disabled. See bug 6910.
 TEST_F(BrowserCrashTest, DISABLED_Crash) {
   // Wait while the process is writing the crash dump.
-  Sleep(5000);
+  PlatformThread::Sleep(5000);
   expected_crashes_ = 1;
 }

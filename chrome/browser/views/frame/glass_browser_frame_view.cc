@@ -4,68 +4,18 @@
 
 #include "chrome/browser/views/frame/glass_browser_frame_view.h"
 
+#include "app/gfx/canvas.h"
+#include "app/resource_bundle.h"
+#include "app/theme_provider.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/views/frame/browser_view.h"
-#include "chrome/browser/views/tabs/tab_strip.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/window/client_view.h"
-#include "chrome/views/window/window_resources.h"
+#include "chrome/browser/views/tabs/tab_strip_wrapper.h"
+#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
-
-// An enumeration of bitmap resources used by this window.
-enum {
-  // Client Edge Border.
-  FRAME_CLIENT_EDGE_TOP_LEFT,
-  FRAME_CLIENT_EDGE_TOP,
-  FRAME_CLIENT_EDGE_TOP_RIGHT,
-  FRAME_CLIENT_EDGE_RIGHT,
-  FRAME_CLIENT_EDGE_BOTTOM_RIGHT,
-  FRAME_CLIENT_EDGE_BOTTOM,
-  FRAME_CLIENT_EDGE_BOTTOM_LEFT,
-  FRAME_CLIENT_EDGE_LEFT,
-
-  FRAME_PART_BITMAP_COUNT  // Must be last.
-};
-
-class GlassBrowserWindowResources {
- public:
-  GlassBrowserWindowResources() {
-    InitClass();
-  }
-  virtual ~GlassBrowserWindowResources() { }
-
-  virtual SkBitmap* GetPartBitmap(views::FramePartBitmap part) const {
-    return standard_frame_bitmaps_[part];
-  }
-
- private:
-  static void InitClass() {
-    static bool initialized = false;
-    if (!initialized) {
-      static const int kFramePartBitmapIds[] = {
-        IDR_CONTENT_TOP_LEFT_CORNER, IDR_CONTENT_TOP_CENTER,
-            IDR_CONTENT_TOP_RIGHT_CORNER, IDR_CONTENT_RIGHT_SIDE,
-            IDR_CONTENT_BOTTOM_RIGHT_CORNER, IDR_CONTENT_BOTTOM_CENTER,
-            IDR_CONTENT_BOTTOM_LEFT_CORNER, IDR_CONTENT_LEFT_SIDE,
-      };
-
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-      for (int i = 0; i < FRAME_PART_BITMAP_COUNT; ++i)
-        standard_frame_bitmaps_[i] = rb.GetBitmapNamed(kFramePartBitmapIds[i]);
-
-      initialized = true;
-    }
-  }
-
-  static SkBitmap* standard_frame_bitmaps_[FRAME_PART_BITMAP_COUNT];
-
-  DISALLOW_EVIL_CONSTRUCTORS(GlassBrowserWindowResources);
-};
+#include "views/window/client_view.h"
+#include "views/window/window_resources.h"
 
 // static
-SkBitmap* GlassBrowserWindowResources::standard_frame_bitmaps_[];
-
-GlassBrowserWindowResources* GlassBrowserFrameView::resources_ = NULL;
 SkBitmap* GlassBrowserFrameView::distributor_logo_ = NULL;
 HICON GlassBrowserFrameView::throbber_icons_[
     GlassBrowserFrameView::kThrobberIconCount];
@@ -91,6 +41,9 @@ const int kOTRBottomSpacing = 2;
 // There are 2 px on each side of the OTR avatar (between the frame border and
 // it on the left, and between it and the tabstrip on the right).
 const int kOTRSideSpacing = 2;
+// The top 1 px of the tabstrip is shadow; in maximized mode we push this off
+// the top of the screen so the tabs appear flush against the screen edge.
+const int kTabstripTopShadowThickness = 1;
 // In restored mode, the New Tab button isn't at the same height as the caption
 // buttons, but the space will look cluttered if it actually slides under them,
 // so we stop it when the gap between the two is down to 5 px.
@@ -115,7 +68,7 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
       throbber_running_(false),
       throbber_frame_(0) {
   InitClass();
-  if (frame_->GetDelegate()->ShouldShowWindowIcon())
+  if (frame_->GetWindow()->GetDelegate()->ShouldShowWindowIcon())
     InitThrobberIcons();
 }
 
@@ -126,15 +79,24 @@ GlassBrowserFrameView::~GlassBrowserFrameView() {
 // GlassBrowserFrameView, BrowserNonClientFrameView implementation:
 
 gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
-    TabStrip* tabstrip) const {
+    TabStripWrapper* tabstrip) const {
+  int minimize_button_offset = frame_->GetMinimizeButtonOffset();
   int tabstrip_x = browser_view_->ShouldShowOffTheRecordAvatar() ?
       (otr_avatar_bounds_.right() + kOTRSideSpacing) :
       NonClientBorderThickness();
-  int tabstrip_width = frame_->GetMinimizeButtonOffset() - tabstrip_x -
-      (frame_->IsMaximized() ?
-      kNewTabCaptionMaximizedSpacing : kNewTabCaptionRestoredSpacing);
+  // minimize_button_offset assumes LTR layout since the window controls
+  // themselves are not flipped, so we need to adjust the tabstrip's x
+  // position for them in RTL languages.
+  if (UILayoutIsRightToLeft())
+    tabstrip_x += (width() - minimize_button_offset);
+  int tabstrip_width = minimize_button_offset - tabstrip_x -
+      (frame_->GetWindow()->IsMaximized() ? kNewTabCaptionMaximizedSpacing
+                                          : kNewTabCaptionRestoredSpacing);
+  if (UILayoutIsRightToLeft())
+    tabstrip_width += tabstrip_x;
   return gfx::Rect(tabstrip_x, NonClientTopBorderHeight(),
-                   std::max(0, tabstrip_width), tabstrip->GetPreferredHeight());
+                   std::max(0, tabstrip_width),
+                   tabstrip->GetPreferredHeight());
 }
 
 void GlassBrowserFrameView::UpdateThrobber(bool running) {
@@ -158,13 +120,15 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForClientView() const {
 
 gfx::Rect GlassBrowserFrameView::GetWindowBoundsForClientBounds(
     const gfx::Rect& client_bounds) const {
-  if (!browser_view_->IsTabStripVisible()) {
+  HWND hwnd = frame_->GetWindow()->GetNativeWindow();
+  if (!browser_view_->IsTabStripVisible() && hwnd) {
     // If we don't have a tabstrip, we're either a popup or an app window, in
     // which case we have a standard size non-client area and can just use
-    // AdjustWindowRectEx to obtain it.
+    // AdjustWindowRectEx to obtain it. We check for a non-NULL window handle in
+    // case this gets called before the window is actually created.
     RECT rect = client_bounds.ToRECT();
-    AdjustWindowRectEx(&rect, frame_->window_style(), FALSE,
-                       frame_->window_ex_style());
+    AdjustWindowRectEx(&rect, GetWindowLong(hwnd, GWL_STYLE), FALSE,
+                       GetWindowLong(hwnd, GWL_EXSTYLE));
     return gfx::Rect(rect);
   }
 
@@ -177,6 +141,7 @@ gfx::Rect GlassBrowserFrameView::GetWindowBoundsForClientBounds(
 }
 
 gfx::Point GlassBrowserFrameView::GetSystemMenuPoint() const {
+  views::Window* window = frame_->GetWindow();
   gfx::Point system_menu_point;
   if (browser_view_->IsBrowserTypeNormal()) {
     // The X coordinate conditional is because in maximized mode the frame edge
@@ -184,9 +149,10 @@ gfx::Point GlassBrowserFrameView::GetSystemMenuPoint() const {
     // (where we don't do this trick) maximized windows have no client edge and
     // only the frame edge is offscreen.
     system_menu_point.SetPoint(NonClientBorderThickness() -
-        (browser_view_->CanCurrentlyResize() ? kClientEdgeThickness : 0),
+        ((window->IsMaximized() || window->IsFullscreen()) ?
+         0 : kClientEdgeThickness),
         NonClientTopBorderHeight() + browser_view_->GetTabStripHeight() -
-        (browser_view_->IsFullscreen() ? 0 : kClientEdgeThickness));
+        (frame_->GetWindow()->IsFullscreen() ? 0 : kClientEdgeThickness));
   } else {
     system_menu_point.SetPoint(0, -kFrameShadowThickness);
   }
@@ -202,7 +168,8 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!browser_view_->IsBrowserTypeNormal() || !bounds().Contains(point))
     return HTNOWHERE;
 
-  int frame_component = frame_->GetClientView()->NonClientHitTest(point);
+  int frame_component =
+      frame_->GetWindow()->GetClientView()->NonClientHitTest(point);
   if (frame_component != HTNOWHERE)
     return frame_component;
 
@@ -210,7 +177,7 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   int window_component = GetHTComponentForFrame(point, border_thickness,
       NonClientBorderThickness(), border_thickness,
       kResizeAreaCornerSize - border_thickness,
-      frame_->GetDelegate()->CanResize());
+      frame_->GetWindow()->GetDelegate()->CanResize());
   // Fall back to the caption if no other component matches.
   return (window_component == HTNOWHERE) ? HTCAPTION : window_component;
 }
@@ -218,14 +185,14 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
 ///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, views::View overrides:
 
-void GlassBrowserFrameView::Paint(ChromeCanvas* canvas) {
+void GlassBrowserFrameView::Paint(gfx::Canvas* canvas) {
   if (!browser_view_->IsTabStripVisible())
     return;  // Nothing is visible, so don't bother to paint.
 
   PaintDistributorLogo(canvas);
   PaintToolbarBackground(canvas);
   PaintOTRAvatar(canvas);
-  if (!frame_->IsMaximized())
+  if (!frame_->GetWindow()->IsMaximized())
     PaintRestoredClientEdge(canvas);
 }
 
@@ -239,28 +206,32 @@ void GlassBrowserFrameView::Layout() {
 // GlassBrowserFrameView, private:
 
 int GlassBrowserFrameView::FrameBorderThickness() const {
-  return browser_view_->CanCurrentlyResize() ?
-      GetSystemMetrics(SM_CXSIZEFRAME) : 0;
+  views::Window* window = frame_->GetWindow();
+  return (window->IsMaximized() || window->IsFullscreen()) ?
+      0 : GetSystemMetrics(SM_CXSIZEFRAME);
 }
 
 int GlassBrowserFrameView::NonClientBorderThickness() const {
-  return browser_view_->CanCurrentlyResize() ? kNonClientBorderThickness : 0;
+  views::Window* window = frame_->GetWindow();
+  return (window->IsMaximized() || window->IsFullscreen()) ?
+      0 : kNonClientBorderThickness;
 }
 
 int GlassBrowserFrameView::NonClientTopBorderHeight() const {
-  if (browser_view_->IsFullscreen())
+  if (frame_->GetWindow()->IsFullscreen())
     return 0;
   // We'd like to use FrameBorderThickness() here, but the maximized Aero glass
   // frame has a 0 frame border around most edges and a CXSIZEFRAME-thick border
   // at the top (see AeroGlassFrame::OnGetMinMaxInfo()).
-  return GetSystemMetrics(SM_CXSIZEFRAME) +
-      (browser_view_->IsMaximized() ? 0 : kNonClientRestoredExtraThickness);
+  return GetSystemMetrics(SM_CXSIZEFRAME) + (browser_view_->IsMaximized() ?
+      -kTabstripTopShadowThickness : kNonClientRestoredExtraThickness);
 }
 
-void GlassBrowserFrameView::PaintDistributorLogo(ChromeCanvas* canvas) {
+void GlassBrowserFrameView::PaintDistributorLogo(gfx::Canvas* canvas) {
   // The distributor logo is only painted when the frame is not maximized and
   // when we actually have a logo.
-  if (!frame_->IsMaximized() && distributor_logo_) {
+  if (!frame_->GetWindow()->IsMaximized() && distributor_logo_ &&
+      browser_view_->ShouldShowDistributorLogo()) {
     // NOTE: We don't mirror the logo placement here because the outer frame
     // itself isn't mirrored in RTL.  This is a bug; if it is fixed, this should
     // be mirrored as in opaque_non_client_view.cc.
@@ -269,28 +240,45 @@ void GlassBrowserFrameView::PaintDistributorLogo(ChromeCanvas* canvas) {
   }
 }
 
-void GlassBrowserFrameView::PaintToolbarBackground(ChromeCanvas* canvas) {
+void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
+  ThemeProvider* tp = GetThemeProvider();
+
   gfx::Rect toolbar_bounds(browser_view_->GetToolbarBounds());
   gfx::Point toolbar_origin(toolbar_bounds.origin());
-  View::ConvertPointToView(frame_->GetClientView(), this, &toolbar_origin);
+  View::ConvertPointToView(frame_->GetWindow()->GetClientView(),
+                           this, &toolbar_origin);
   toolbar_bounds.set_origin(toolbar_origin);
 
+  SkBitmap* theme_toolbar = tp->GetBitmapNamed(IDR_THEME_TOOLBAR);
+
+  // Draw the toolbar background, setting src_y of the paint to the tab
+  // strip height as the toolbar background begins at the top of the tabs.
+  canvas->TileImageInt(*theme_toolbar,
+      0, browser_view_->GetTabStripHeight() - 1,
+      toolbar_bounds.x() - 1, toolbar_bounds.y() + 2,
+      toolbar_bounds.width() + 2, theme_toolbar->height());
+
   SkBitmap* toolbar_left =
-      resources_->GetPartBitmap(FRAME_CLIENT_EDGE_TOP_LEFT);
+      tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER);
   canvas->DrawBitmapInt(*toolbar_left,
                         toolbar_bounds.x() - toolbar_left->width(),
                         toolbar_bounds.y());
 
   SkBitmap* toolbar_center =
-      resources_->GetPartBitmap(FRAME_CLIENT_EDGE_TOP);
+      tp->GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
   canvas->TileImageInt(*toolbar_center, toolbar_bounds.x(), toolbar_bounds.y(),
                        toolbar_bounds.width(), toolbar_center->height());
 
-  canvas->DrawBitmapInt(*resources_->GetPartBitmap(FRAME_CLIENT_EDGE_TOP_RIGHT),
+  canvas->DrawBitmapInt(*tp->GetBitmapNamed(IDR_CONTENT_TOP_RIGHT_CORNER),
       toolbar_bounds.right(), toolbar_bounds.y());
+
+  // Draw the content/toolbar separator.
+  canvas->DrawLineInt(ResourceBundle::toolbar_separator_color,
+      toolbar_bounds.x(), toolbar_bounds.bottom() - 1,
+      toolbar_bounds.right() - 1, toolbar_bounds.bottom() - 1);
 }
 
-void GlassBrowserFrameView::PaintOTRAvatar(ChromeCanvas* canvas) {
+void GlassBrowserFrameView::PaintOTRAvatar(gfx::Canvas* canvas) {
   if (!browser_view_->ShouldShowOffTheRecordAvatar())
     return;
 
@@ -302,42 +290,64 @@ void GlassBrowserFrameView::PaintOTRAvatar(ChromeCanvas* canvas) {
       otr_avatar_bounds_.width(), otr_avatar_bounds_.height(), false);
 }
 
-void GlassBrowserFrameView::PaintRestoredClientEdge(ChromeCanvas* canvas) {
+void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
+  ThemeProvider* tp = GetThemeProvider();
+
   // The client edges start below the toolbar upper corner images regardless
   // of how tall the toolbar itself is.
   int client_area_top =
-      frame_->GetClientView()->y() + browser_view_->GetToolbarBounds().y() +
-      resources_->GetPartBitmap(FRAME_CLIENT_EDGE_TOP_LEFT)->height();
+      frame_->GetWindow()->GetClientView()->y() +
+      browser_view_->GetToolbarBounds().y() +
+      tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER)->height();
 
   gfx::Rect client_area_bounds = CalculateClientAreaBounds(width(), height());
   int client_area_bottom =
       std::max(client_area_top, height() - NonClientBorderThickness());
   int client_area_height = client_area_bottom - client_area_top;
-  SkBitmap* right = resources_->GetPartBitmap(FRAME_CLIENT_EDGE_RIGHT);
+  SkBitmap* right = tp->GetBitmapNamed(IDR_CONTENT_RIGHT_SIDE);
   canvas->TileImageInt(*right, client_area_bounds.right(), client_area_top,
                        right->width(), client_area_height);
 
+  // Draw the toolbar color so that the one pixel areas down the sides
+  // show the right color even if not covered by the toolbar image.
+  SkColor toolbar_color = tp->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
+  canvas->DrawLineInt(toolbar_color,
+      client_area_bounds.x() - kClientEdgeThickness,
+      client_area_top,
+      client_area_bounds.x() - kClientEdgeThickness,
+      client_area_bottom - 1 + kClientEdgeThickness);
+  canvas->DrawLineInt(toolbar_color,
+      client_area_bounds.x() - kClientEdgeThickness,
+      client_area_bottom - 1 + kClientEdgeThickness,
+      client_area_bounds.right() + kClientEdgeThickness,
+      client_area_bottom - 1 + kClientEdgeThickness);
+  canvas->DrawLineInt(toolbar_color,
+      client_area_bounds.right() - 1 + kClientEdgeThickness,
+      client_area_bottom - 1 + kClientEdgeThickness,
+      client_area_bounds.right() - 1 + kClientEdgeThickness,
+      client_area_top);
+
   canvas->DrawBitmapInt(
-      *resources_->GetPartBitmap(FRAME_CLIENT_EDGE_BOTTOM_RIGHT),
+      *tp->GetBitmapNamed(IDR_CONTENT_BOTTOM_RIGHT_CORNER),
       client_area_bounds.right(), client_area_bottom);
 
-  SkBitmap* bottom = resources_->GetPartBitmap(FRAME_CLIENT_EDGE_BOTTOM);
+  SkBitmap* bottom = tp->GetBitmapNamed(IDR_CONTENT_BOTTOM_CENTER);
   canvas->TileImageInt(*bottom, client_area_bounds.x(),
       client_area_bottom, client_area_bounds.width(),
       bottom->height());
 
   SkBitmap* bottom_left =
-      resources_->GetPartBitmap(FRAME_CLIENT_EDGE_BOTTOM_LEFT);
+      tp->GetBitmapNamed(IDR_CONTENT_BOTTOM_LEFT_CORNER);
   canvas->DrawBitmapInt(*bottom_left,
       client_area_bounds.x() - bottom_left->width(), client_area_bottom);
 
-  SkBitmap* left = resources_->GetPartBitmap(FRAME_CLIENT_EDGE_LEFT);
+  SkBitmap* left = tp->GetBitmapNamed(IDR_CONTENT_LEFT_SIDE);
   canvas->TileImageInt(*left, client_area_bounds.x() - left->width(),
       client_area_top, left->width(), client_area_height);
 }
 
 void GlassBrowserFrameView::LayoutDistributorLogo() {
-  if (distributor_logo_) {
+  if (distributor_logo_ && browser_view_->ShouldShowDistributorLogo()) {
     logo_bounds_.SetRect(frame_->GetMinimizeButtonOffset() -
         distributor_logo_->width() - kLogoCaptionSpacing, kLogoTopSpacing,
         distributor_logo_->width(), distributor_logo_->height());
@@ -353,7 +363,7 @@ void GlassBrowserFrameView::LayoutOTRAvatar() {
   int tabstrip_height, otr_height;
   if (browser_view_->IsTabStripVisible()) {
     tabstrip_height = browser_view_->GetTabStripHeight() - kOTRBottomSpacing;
-    otr_height = frame_->IsMaximized() ?
+    otr_height = frame_->GetWindow()->IsMaximized() ?
         (tabstrip_height - kOTRMaximizedTopSpacing) :
         otr_avatar_icon.height();
   } else {
@@ -385,20 +395,26 @@ void GlassBrowserFrameView::StartThrobber() {
     throbber_running_ = true;
     throbber_frame_ = 0;
     InitThrobberIcons();
-    SendMessage(frame_->GetNativeView(), WM_SETICON,
+    SendMessage(frame_->GetWindow()->GetNativeWindow(), WM_SETICON,
                 static_cast<WPARAM>(ICON_SMALL),
                 reinterpret_cast<LPARAM>(throbber_icons_[throbber_frame_]));
   }
 }
 
 void GlassBrowserFrameView::StopThrobber() {
-  if (throbber_running_)
+  if (throbber_running_) {
     throbber_running_ = false;
+
+    // This will reset the small icon which we set in the throbber code.
+    // Windows will then pick up the default icon from the window class.
+    SendMessage(frame_->GetWindow()->GetNativeWindow(), WM_SETICON,
+                static_cast<WPARAM>(ICON_SMALL), NULL);
+  }
 }
 
 void GlassBrowserFrameView::DisplayNextThrobberFrame() {
   throbber_frame_ = (throbber_frame_ + 1) % kThrobberIconCount;
-  SendMessage(frame_->GetNativeView(), WM_SETICON,
+  SendMessage(frame_->GetWindow()->GetNativeWindow(), WM_SETICON,
               static_cast<WPARAM>(ICON_SMALL),
               reinterpret_cast<LPARAM>(throbber_icons_[throbber_frame_]));
 }
@@ -420,8 +436,6 @@ void GlassBrowserFrameView::InitThrobberIcons() {
 void GlassBrowserFrameView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
-    resources_ = new GlassBrowserWindowResources;
-
 #if defined(GOOGLE_CHROME_BUILD)
     distributor_logo_ = ResourceBundle::GetSharedInstance().
         GetBitmapNamed(IDR_DISTRIBUTOR_LOGO);

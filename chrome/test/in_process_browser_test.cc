@@ -5,27 +5,40 @@
 #include "chrome/test/in_process_browser_test.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#if defined(OS_WIN)
 #include "chrome/browser/views/frame/browser_view.h"
+#endif
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/ui_test_utils.h"
-#include "sandbox/src/sandbox_factory.h"
+#include "net/base/mock_host_resolver.h"
 #include "sandbox/src/dep.h"
 
 extern int BrowserMain(const MainFunctionParams&);
 
 const wchar_t kUnitTestShowWindows[] = L"show-windows";
+
+// Default delay for the time-out at which we stop the
+// inner-message loop the first time.
+const int kInitialTimeoutInMS = 30000;
+
+// Delay for sub-sequent time-outs once the initial time-out happened.
+const int kSubsequentTimeoutInMS = 5000;
 
 namespace {
 
@@ -49,7 +62,8 @@ InProcessBrowserTest::InProcessBrowserTest()
       show_window_(false),
       dom_automation_enabled_(false),
       single_process_(false),
-      original_single_process_(false) {
+      original_single_process_(false),
+      initial_timeout_(kInitialTimeoutInMS) {
 }
 
 void InProcessBrowserTest::SetUp() {
@@ -74,9 +88,13 @@ void InProcessBrowserTest::SetUp() {
   CommandLine* command_line = CommandLine::ForCurrentProcessMutable();
   original_command_line_.reset(new CommandLine(*command_line));
 
+  SetUpCommandLine(command_line);
+
+#if defined(OS_WIN)
   // Hide windows on show.
   if (!command_line->HasSwitch(kUnitTestShowWindows) && !show_window_)
     BrowserView::SetShowState(SW_HIDE);
+#endif
 
   if (dom_automation_enabled_)
     command_line->AppendSwitch(switches::kDomAutomationController);
@@ -84,11 +102,17 @@ void InProcessBrowserTest::SetUp() {
   if (single_process_)
     command_line->AppendSwitch(switches::kSingleProcess);
 
+  // Turn off tip loading for tests; see http://crbug.com/17725
+  command_line->AppendSwitch(switches::kDisableWebResources);
+
   command_line->AppendSwitchWithValue(switches::kUserDataDir, user_data_dir);
 
   // For some reason the sandbox wasn't happy running in test mode. These
   // tests aren't intended to test the sandbox, so we turn it off.
   command_line->AppendSwitch(switches::kNoSandbox);
+
+  // Don't show the first run ui.
+  command_line->AppendSwitch(switches::kNoFirstRun);
 
   // Single-process mode is not set in BrowserMain so it needs to be processed
   // explicitlty.
@@ -96,20 +120,32 @@ void InProcessBrowserTest::SetUp() {
   if (command_line->HasSwitch(switches::kSingleProcess))
     RenderProcessHost::set_run_renderer_in_process(true);
 
-  // Explicitly set the path of the exe used for the renderer, otherwise it'll
-  // try to use unit_test.exe.
-  std::wstring renderer_path;
-  PathService::Get(base::FILE_EXE, &renderer_path);
-  file_util::TrimFilename(&renderer_path);
-  file_util::AppendToPath(&renderer_path,
-                          chrome::kBrowserProcessExecutableName);
-  command_line->AppendSwitchWithValue(switches::kRendererPath, renderer_path);
+  // Explicitly set the path of the exe used for the renderer and plugin,
+  // otherwise they'll try to use unit_test.exe.
+  std::wstring subprocess_path;
+  PathService::Get(base::FILE_EXE, &subprocess_path);
+  FilePath fp_subprocess_path = FilePath::FromWStringHack(subprocess_path);
+  subprocess_path = fp_subprocess_path.DirName().ToWStringHack();
+  file_util::AppendToPath(&subprocess_path,
+                          chrome::kBrowserProcessExecutablePath);
+  command_line->AppendSwitchWithValue(switches::kBrowserSubprocessPath,
+                                      subprocess_path);
 
-  sandbox::SandboxInterfaceInfo sandbox_info = {0};
+  // Enable warning level logging so that we can see when bad stuff happens.
+  command_line->AppendSwitch(switches::kEnableLogging);
+  command_line->AppendSwitchWithValue(switches::kLoggingLevel,
+                                      IntToWString(1));  // warning
+
   SandboxInitWrapper sandbox_wrapper;
   MainFunctionParams params(*command_line, sandbox_wrapper, NULL);
   params.ui_task =
       NewRunnableMethod(this, &InProcessBrowserTest::RunTestOnMainThreadLoop);
+
+  scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_proc(
+      new net::RuleBasedHostResolverProc(NULL));
+  ConfigureHostResolverProc(host_resolver_proc);
+  net::ScopedDefaultHostResolverProc scoped_host_resolver_proc(
+      host_resolver_proc);
   BrowserMain(params);
 }
 
@@ -120,21 +156,12 @@ void InProcessBrowserTest::TearDown() {
 
   browser_shutdown::delete_resources_on_shutdown = true;
 
+#if defined(WIN)
   BrowserView::SetShowState(-1);
+#endif
 
   *CommandLine::ForCurrentProcessMutable() = *original_command_line_;
   RenderProcessHost::set_run_renderer_in_process(original_single_process_);
-}
-
-void InProcessBrowserTest::Observe(NotificationType type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
-  if (type == NotificationType::BROWSER_CLOSED) {
-    DCHECK(Source<Browser>(source).ptr() == browser_);
-    browser_ = NULL;
-  } else {
-    NOTREACHED();
-  }
 }
 
 HTTPTestServer* InProcessBrowserTest::StartHTTPServer() {
@@ -152,11 +179,12 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
   Browser* browser = Browser::Create(profile);
 
   browser->AddTabWithURL(
-      GURL("about:blank"), GURL(), PageTransition::START_PAGE, true, NULL);
+      GURL("about:blank"), GURL(), PageTransition::START_PAGE, true, -1, false,
+           NULL);
 
   // Wait for the page to finish loading.
   ui_test_utils::WaitForNavigation(
-      browser->GetSelectedTabContents()->controller());
+      &browser->GetSelectedTabContents()->controller());
 
   browser->window()->Show();
 
@@ -179,25 +207,64 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
     return;
   }
 
-  profile->InitExtensions();
+
+  // Before we run the browser, we have to hack the path to the exe to match
+  // what it would be if Chrome was running, because it is used to fork renderer
+  // processes, on Linux at least (failure to do so will cause a browser_test to
+  // be run instead of a renderer).
+  FilePath chrome_path;
+  CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
+  chrome_path = chrome_path.DirName();
+#if defined(OS_WIN)
+  chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
+#elif defined(OS_POSIX)
+  chrome_path = chrome_path.Append(
+      WideToASCII(chrome::kBrowserProcessExecutablePath));
+#endif
+  CHECK(PathService::Override(base::FILE_EXE, chrome_path));
 
   browser_ = CreateBrowser(profile);
 
-  registrar_.Add(this,
-                 NotificationType::BROWSER_CLOSED,
-                 Source<Browser>(browser_));
+  // Start the timeout timer to prevent hangs.
+  MessageLoopForUI::current()->PostDelayedTask(FROM_HERE,
+      NewRunnableMethod(this, &InProcessBrowserTest::TimedOut),
+      initial_timeout_);
 
   RunTestOnMainThread();
+  CleanUpOnMainThread();
 
-  if (browser_)
-    browser_->CloseAllTabs();
-
-  // Remove all registered notifications, otherwise by the time the
-  // destructor is run the NotificationService is dead.
-  registrar_.RemoveAll();
+  BrowserList::const_iterator browser = BrowserList::begin();
+  for (; browser != BrowserList::end(); ++browser)
+    (*browser)->CloseAllTabs();
 
   // Stop the HTTP server.
   http_server_ = NULL;
 
   MessageLoopForUI::current()->Quit();
+}
+
+void InProcessBrowserTest::ConfigureHostResolverProc(
+    net::RuleBasedHostResolverProc* host_resolver_proc) {
+  host_resolver_proc->AllowDirectLookup("*.google.com");
+  // See http://en.wikipedia.org/wiki/Web_Proxy_Autodiscovery_Protocol
+  // We don't want the test code to use it.
+  host_resolver_proc->AddSimulatedFailure("wpad");
+}
+
+void InProcessBrowserTest::TimedOut() {
+  DCHECK(MessageLoopForUI::current()->IsNested());
+
+  GTEST_NONFATAL_FAILURE_("Timed-out");
+
+  // Start the timeout timer to prevent hangs.
+  MessageLoopForUI::current()->PostDelayedTask(FROM_HERE,
+      NewRunnableMethod(this, &InProcessBrowserTest::TimedOut),
+      kSubsequentTimeoutInMS);
+
+  MessageLoopForUI::current()->Quit();
+}
+
+void InProcessBrowserTest::SetInitialTimeoutInMS(int timeout_value) {
+  DCHECK_GT(timeout_value, 0);
+  initial_timeout_ = timeout_value;
 }

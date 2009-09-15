@@ -4,11 +4,15 @@
 
 #include "base/file_path.h"
 #include "chrome/common/net/cookie_monster_sqlite.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/pref_service.h"
 #include "net/url_request/url_request_context.h"
 
 class Profile;
+class CommandLine;
+namespace net {
+class ProxyConfig;
+}
 
 // A URLRequestContext subclass used by the browser. This can be used to store
 // extra information about requests, beyond what is supported by the base
@@ -26,21 +30,26 @@ class ChromeURLRequestContext : public URLRequestContext,
   // expected to get called on the UI thread.
   static ChromeURLRequestContext* CreateOriginal(
       Profile* profile, const FilePath& cookie_store_path,
-      const FilePath& disk_cache_path);
+      const FilePath& disk_cache_path, int cache_size);
 
   // Create an instance for an original profile for media. This is expected to
   // get called on UI thread. This method takes a profile and reuses the
   // 'original' URLRequestContext for common files.
   static ChromeURLRequestContext* CreateOriginalForMedia(Profile *profile,
-      const FilePath& disk_cache_path);
+      const FilePath& disk_cache_path, int cache_size);
+
+  // Create an instance for an original profile for extensions. This is expected
+  // to get called on UI thread.
+  static ChromeURLRequestContext* CreateOriginalForExtensions(Profile *profile,
+      const FilePath& cookie_store_path);
 
   // Create an instance for use with an OTR profile. This is expected to get
   // called on the UI thread.
   static ChromeURLRequestContext* CreateOffTheRecord(Profile* profile);
 
-  // Create an instance of request context for OTR profile for media resources.
-  static ChromeURLRequestContext* CreateOffTheRecordForMedia(Profile* profile,
-      const FilePath& disk_cache_path);
+  // Create an instance of request context for OTR profile for extensions.
+  static ChromeURLRequestContext* CreateOffTheRecordForExtensions(
+      Profile* profile);
 
   // Clean up UI thread resources. This is expected to get called on the UI
   // thread before the instance is deleted on the IO thread.
@@ -56,7 +65,11 @@ class ChromeURLRequestContext : public URLRequestContext,
 
   virtual const std::string& GetUserAgent(const GURL& url) const;
 
- private:
+  virtual bool interceptCookie(const URLRequest* request, std::string* cookie);
+
+  virtual bool allowSendingCookies(const URLRequest* request) const;
+
+private:
   // Private constructor, use the static factory methods instead. This is
   // expected to be called on the UI thread.
   ChromeURLRequestContext(Profile* profile);
@@ -65,7 +78,7 @@ class ChromeURLRequestContext : public URLRequestContext,
   // context. This helper method is called from CreateOriginalForMedia and
   // CreateOffTheRecordForMedia.
   static ChromeURLRequestContext* CreateRequestContextForMedia(Profile* profile,
-      const FilePath& disk_cache_path);
+      const FilePath& disk_cache_path, int cache_size, bool off_the_record);
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -73,16 +86,24 @@ class ChromeURLRequestContext : public URLRequestContext,
                        const NotificationDetails& details);
 
   // Callback for when the accept language changes.
-  void OnAcceptLanguageChange(std::string accept_language);
+  void OnAcceptLanguageChange(const std::string& accept_language);
 
   // Callback for when the cookie policy changes.
   void OnCookiePolicyChange(net::CookiePolicy::Type type);
 
+  // Callback for when the default charset changes.
+  void OnDefaultCharsetChange(const std::string& default_charset);
+
   // Callback for when new extensions are loaded.
   void OnNewExtensions(ExtensionPaths* new_paths);
 
+  // Callback for when an extension is unloaded.
+  void OnUnloadedExtension(const std::string& id);
+
   // Destructor.
   virtual ~ChromeURLRequestContext();
+
+  NotificationRegistrar registrar_;
 
   // Maps extension IDs to paths on disk. This is initialized in the
   // construtor and updated when extensions changed.
@@ -93,5 +114,10 @@ class ChromeURLRequestContext : public URLRequestContext,
 
   scoped_ptr<SQLitePersistentCookieStore> cookie_db_;
   PrefService* prefs_;
+  bool is_media_;
   bool is_off_the_record_;
 };
+
+// Creates a proxy configuration using the overrides specified on the command
+// line. Returns NULL if the system defaults should be used instead.
+net::ProxyConfig* CreateProxyConfig(const CommandLine& command_line);

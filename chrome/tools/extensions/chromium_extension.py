@@ -10,6 +10,7 @@ import hashlib
 import logging
 import optparse
 import os
+import random
 import re
 import shutil
 import sys
@@ -53,9 +54,22 @@ class ExtensionDir:
     if not self.validate():
       return False
     try:
-      f = open(os.path.join(self._root, MANIFEST_FILENAME))
+      f = open(os.path.join(self._root, MANIFEST_FILENAME), "r")
       manifest = json.load(f)
       f.close()
+
+      # Temporary hack: If the manifest doesn't have an ID, generate a random
+      # one. This is to make it easier for people to play with the extension
+      # system while we don't have the real ID mechanism in place.
+      if not "id" in manifest:
+        random_id = ""
+        for i in range(0, 40):
+          random_id += "0123456789ABCDEF"[random.randrange(0, 15)]
+        logging.info("Generated extension ID: %s" % random_id)
+        manifest["id"] = random_id;
+        f = open(os.path.join(self._root, MANIFEST_FILENAME), "w")
+        f.write(json.dumps(manifest, sort_keys=True, indent=2));
+        f.close();
 
       zip_path = path + ".zip"
       if os.path.exists(zip_path):
@@ -90,7 +104,7 @@ class ExtensionDir:
       out.write("Cr24")  # Extension file magic number
       # The rest of the header is currently made up of three ints:
       # version, header size, manifest size
-      header = array.array("l")
+      header = array.array("i")
       header.append(1)  # version
       header.append(16)  # header size
       manifest_json = json.dumps(manifest);

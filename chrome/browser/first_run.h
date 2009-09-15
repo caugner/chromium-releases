@@ -1,17 +1,21 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_FIRST_RUN_H_
 #define CHROME_BROWSER_FIRST_RUN_H_
 
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
-#include "base/command_line.h"
 #include "base/gfx/native_widget_types.h"
 #include "chrome/browser/browser_process_impl.h"
 
+class CommandLine;
 class FilePath;
 class Profile;
+class ProcessSingleton;
 
 // This class contains the chrome first-run installation actions needed to
 // fully test the custom installer. It also contains the opposite actions to
@@ -39,7 +43,7 @@ class FirstRun {
   static bool RemoveSentinel();
   // Imports settings in a separate process. It spawns a second dedicated
   // browser process that just does the import with the import progress UI.
-  static bool ImportSettings(Profile* profile, int browser,
+  static bool ImportSettings(Profile* profile, int browser_type,
                              int items_to_import,
                              gfx::NativeView parent_window);
   // Import browser items in this process. The browser and the items to
@@ -65,12 +69,20 @@ class FirstRun {
   // 'master_preferences' file.
   static bool ProcessMasterPreferences(const FilePath& user_data_dir,
                                        const FilePath& master_prefs_path,
-                                       int* preference_details);
+                                       std::vector<std::wstring>* new_tabs,
+                                       int* ping_delay,
+                                       int* import_items,
+                                       int* dont_import_items);
 
   // Sets the kShouldShowFirstRunBubble local state pref so that the browser
   // shows the bubble once the main message loop gets going. Returns false if
   // the pref could not be set.
   static bool SetShowFirstRunBubblePref();
+
+  // Sets the kShouldUseOEMFirstRunBubble local state pref so that the
+  // browser shows the OEM first run bubble once the main message loop
+  // gets going. Returns false if the pref could not be set.
+  static bool SetOEMFirstRunBubblePref();
 
   // Sets the kShouldShowWelcomePage local state pref so that the browser
   // loads the welcome tab once the message loop gets going. Returns false
@@ -79,7 +91,7 @@ class FirstRun {
 
  private:
   // This class is for scoping purposes.
-  DISALLOW_COPY_AND_ASSIGN(FirstRun);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(FirstRun);
 };
 
 // This class contains the actions that need to be performed when an upgrade
@@ -87,6 +99,15 @@ class FirstRun {
 // the new browser.
 class Upgrade {
  public:
+  // Possible results of ShowTryChromeDialog().
+  enum TryResult {
+    TD_TRY_CHROME,          // Launch chrome right now.
+    TD_NOT_NOW,             // Don't launch chrome. Exit now.
+    TD_UNINSTALL_CHROME,    // Initiate chrome uninstall and exit.
+    TD_DIALOG_ERROR,        // An error occurred creating the dialog.
+    TD_LAST_ENUM
+  };
+
   // Check if current chrome.exe is already running as a browser process by
   // trying to create a Global event with name same as full path of chrome.exe.
   // This method caches the handle to this event so on subsequent calls also
@@ -102,6 +123,12 @@ class Upgrade {
   // to chrome.exe and the old chrome is renamed to old_chrome.exe. If there
   // is no new_chrome.exe or the swap fails the return is false;
   static bool SwapNewChromeExeIfPresent();
+
+  // Shows a modal dialog asking the user to give chrome another try. See
+  // above for the possible outcomes of the function. This is an experimental,
+  // non-localized dialog.
+  // |version| can be 0, 1 or 2 and selects what strings to present.
+  static TryResult ShowTryChromeDialog(size_t version);
 };
 
 // A subclass of BrowserProcessImpl that does not have a GoogleURLTracker
@@ -122,6 +149,13 @@ class FirstRunBrowserProcess : public BrowserProcessImpl {
 // Show the First Run UI to the user, allowing them to create shortcuts for
 // the app, import their bookmarks and other data from another browser into
 // |profile| and perhaps some other tasks.
-void OpenFirstRunDialog(Profile* profile);
+// |process_singleton| is used to lock the handling of CopyData messages
+// while the First Run UI is visible.
+// Returns true if the user clicked "Start", false if the user pressed "Cancel"
+// or closed the dialog.
+bool OpenFirstRunDialog(Profile* profile,
+                        int import_items,
+                        int dont_import_items,
+                        ProcessSingleton* process_singleton);
 
 #endif  // CHROME_BROWSER_FIRST_RUN_H_

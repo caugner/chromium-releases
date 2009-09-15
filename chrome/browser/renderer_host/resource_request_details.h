@@ -11,18 +11,12 @@
 
 #include <string>
 
+#include "chrome/browser/cert_store.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
 
 class URLRequest;
-
-#if defined(OS_WIN)
-// TODO(port): Move header to the above section when CertStore has been ported.
-#include "chrome/browser/cert_store.h"
-#elif defined(OS_POSIX)
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 // Details about a resource request notification.
 class ResourceRequestDetails {
@@ -47,7 +41,7 @@ class ResourceRequestDetails {
     filter_policy_ = info->filter_policy;
   }
 
-  ~ResourceRequestDetails() { }
+  virtual ~ResourceRequestDetails() { }
 
   const GURL& url() const { return url_; }
   const GURL& original_url() const { return original_url_; }

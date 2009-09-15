@@ -5,16 +5,16 @@
 #ifndef NET_BASE_UPLOAD_DATA_H_
 #define NET_BASE_UPLOAD_DATA_H_
 
-#include <string>
 #include <vector>
 
+#include "base/file_path.h"
 #include "base/ref_counted.h"
 
 namespace net {
 
 class UploadData : public base::RefCounted<UploadData> {
  public:
-  UploadData() {}
+  UploadData() : identifier_(0) {}
 
   enum Type {
     TYPE_BYTES,
@@ -29,7 +29,7 @@ class UploadData : public base::RefCounted<UploadData> {
 
     Type type() const { return type_; }
     const std::vector<char>& bytes() const { return bytes_; }
-    const std::wstring& file_path() const { return file_path_; }
+    const FilePath& file_path() const { return file_path_; }
     uint64 file_range_offset() const { return file_range_offset_; }
     uint64 file_range_length() const { return file_range_length_; }
 
@@ -38,11 +38,11 @@ class UploadData : public base::RefCounted<UploadData> {
       bytes_.assign(bytes, bytes + bytes_len);
     }
 
-    void SetToFilePath(const std::wstring& path) {
+    void SetToFilePath(const FilePath& path) {
       SetToFilePathRange(path, 0, kuint64max);
     }
 
-    void SetToFilePathRange(const std::wstring& path,
+    void SetToFilePathRange(const FilePath& path,
                             uint64 offset, uint64 length) {
       type_ = TYPE_FILE;
       file_path_ = path;
@@ -57,7 +57,7 @@ class UploadData : public base::RefCounted<UploadData> {
    private:
     Type type_;
     std::vector<char> bytes_;
-    std::wstring file_path_;
+    FilePath file_path_;
     uint64 file_range_offset_;
     uint64 file_range_length_;
   };
@@ -69,12 +69,12 @@ class UploadData : public base::RefCounted<UploadData> {
     }
   }
 
-  void AppendFile(const std::wstring& file_path) {
+  void AppendFile(const FilePath& file_path) {
     elements_.push_back(Element());
     elements_.back().SetToFilePath(file_path);
   }
 
-  void AppendFileRange(const std::wstring& file_path,
+  void AppendFileRange(const FilePath& file_path,
                        uint64 offset, uint64 length) {
     elements_.push_back(Element());
     elements_.back().SetToFilePathRange(file_path, offset, length);
@@ -91,8 +91,19 @@ class UploadData : public base::RefCounted<UploadData> {
     elements_ = elements;
   }
 
+  void swap_elements(std::vector<Element>* elements) {
+    elements_.swap(*elements);
+  }
+
+  // Identifies a particular upload instance, which is used by the cache to
+  // formulate a cache key.  This value should be unique across browser
+  // sessions.  A value of 0 is used to indicate an unspecified identifier.
+  void set_identifier(int64 id) { identifier_ = id; }
+  int64 identifier() const { return identifier_; }
+
  private:
-   std::vector<Element> elements_;
+  std::vector<Element> elements_;
+  int64 identifier_;
 };
 
 }  // namespace net

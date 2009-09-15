@@ -184,7 +184,14 @@ bool HttpChunkedDecoder::ParseChunkSize(const char* start, int len, int* out) {
   if (StringPiece(start, len).find_first_not_of("0123456789abcdefABCDEF")!=
       StringPiece::npos)
     return false;
-  return HexStringToInt(std::string(start, len), out);
+
+  int parsed_number;
+  bool ok = HexStringToInt(std::string(start, len), &parsed_number);
+  if (ok && parsed_number >= 0) {
+    *out = parsed_number;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace net

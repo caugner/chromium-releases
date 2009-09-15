@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_VIEWS_IMPORTER_LOCK_VIEW_H__
 #define CHROME_BROWSER_VIEWS_IMPORTER_LOCK_VIEW_H__
 
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
@@ -28,7 +28,8 @@ class ImporterLockView : public views::View,
   virtual void Layout();
 
   // Overridden from views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
   virtual bool Accept();

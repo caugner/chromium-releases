@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,6 +52,7 @@ class HttpResponseHeaders :
   static const PersistOptions PERSIST_SANS_CHALLENGES = 1 << 1;
   static const PersistOptions PERSIST_SANS_HOP_BY_HOP = 1 << 2;
   static const PersistOptions PERSIST_SANS_NON_CACHEABLE = 1 << 3;
+  static const PersistOptions PERSIST_SANS_RANGES = 1 << 4;
 
   // Appends a representation of this object to the given pickle.
   // The options argument can be a combination of PersistOptions.
@@ -59,6 +60,16 @@ class HttpResponseHeaders :
 
   // Performs header merging as described in 13.5.3 of RFC 2616.
   void Update(const HttpResponseHeaders& new_headers);
+
+  // Removes all instances of a particular header.
+  void RemoveHeader(const std::string& name);
+
+  // Adds a particular header.  |header| has to be a single header without any
+  // EOL termination, just [<header-name>: <header-values>]
+  // If a header with the same name is already stored, the two headers are not
+  // merged together by this method; the one provided is simply put at the
+  // end of the list.
+  void AddHeader(const std::string& header);
 
   // Creates a normalized header string.  The output will be formatted exactly
   // like so:
@@ -196,6 +207,17 @@ class HttpResponseHeaders :
   // no such header in the response.
   int64 GetContentLength() const;
 
+  // Extracts the values in Content-Range header, if the header exists and is
+  // well formatted returns true, else returns false.
+  // The following values will be outputted:
+  // |*first_byte_position| = inclusive position of the first byte of the range
+  // |*last_byte_position| = inclusive position of the last byte of the range
+  // |*instance_length| = size in bytes of the object requested
+  // If any of the above values is unknown, its value will be -1.
+  bool GetContentRange(int64* first_byte_position,
+                       int64* last_byte_position,
+                       int64* instance_length) const;
+
   // Returns the HTTP response code.  This is 0 if the response code text seems
   // to exist but could not be parsed.  Otherwise, it defaults to 200 if the
   // response code is not found in the raw headers.
@@ -206,6 +228,8 @@ class HttpResponseHeaders :
 
  private:
   friend class base::RefCountedThreadSafe<HttpResponseHeaders>;
+
+  typedef base::hash_set<std::string> HeaderSet;
 
   HttpResponseHeaders() {}
   ~HttpResponseHeaders() {}
@@ -248,7 +272,12 @@ class HttpResponseHeaders :
                    std::string::const_iterator value_begin,
                    std::string::const_iterator value_end);
 
-  typedef base::hash_set<std::string> HeaderSet;
+  // Replaces the current headers with the merged version of |raw_headers| and
+  // the current headers without the headers in |headers_to_remove|. Note that
+  // |headers_to_remove| are removed from the current headers (before the
+  // merge), not after the merge.
+  void MergeWithHeaders(const std::string& raw_headers,
+                        const HeaderSet& headers_to_remove);
 
   // Adds the values from any 'cache-control: no-cache="foo,bar"' headers.
   void AddNonCacheableHeaders(HeaderSet* header_names) const;
@@ -264,6 +293,9 @@ class HttpResponseHeaders :
 
   // Adds the set of cookie response headers.
   static void AddCookieHeaders(HeaderSet* header_names);
+
+  // Adds the set of content range response headers.
+  static void AddHopContentRangeHeaders(HeaderSet* header_names);
 
   // The members of this structure point into raw_headers_.
   struct ParsedHeader {

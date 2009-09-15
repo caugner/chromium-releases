@@ -5,21 +5,18 @@
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_
 
-#include <map>
 #include <vector>
 #include <deque>
 
 #include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/history/history_types.h"
 
 class HistoryService;
 class MessageLoop;
+class Profile;
 
 namespace history {
-
 class HistoryBackend;
-
 }  // namespace history
 
 
@@ -86,7 +83,6 @@ class HistoryBackend;
 struct HistoryURLProviderParams {
   HistoryURLProviderParams(const AutocompleteInput& input,
                            bool trim_http,
-                           const ACMatches& matches,
                            const std::wstring& languages);
 
   MessageLoop* message_loop;
@@ -254,11 +250,7 @@ class HistoryURLProvider : public AutocompleteProvider {
   // Note that we don't do this in AutocompleteInput's constructor, because if
   // e.g. we convert a Unicode hostname to punycode, other providers will show
   // output that surprises the user ("Search Google for xn--6ca.com").
-  static std::wstring FixupUserInput(const std::wstring& input);
-
-  // Trims "http:" and up to two subsequent slashes from |url|.  Returns the
-  // number of characters that were trimmed.
-  static size_t TrimHttpPrefix(std::wstring* url);
+  static std::wstring FixupUserInput(const AutocompleteInput& input);
 
   // Returns true if |url| is just a host (e.g. "http://www.google.com/") and
   // not some other subpage (e.g. "http://www.google.com/foo.html").
@@ -295,6 +287,8 @@ class HistoryURLProvider : public AutocompleteProvider {
   static void PromoteOrCreateShorterSuggestion(
       history::URLDatabase* db,
       const HistoryURLProviderParams& params,
+      bool have_what_you_typed_match,
+      const AutocompleteMatch& what_you_typed_match,
       HistoryMatches* matches);
 
   // Ensures that |matches| contains an entry for |info|, which may mean adding
@@ -323,18 +317,19 @@ class HistoryURLProvider : public AutocompleteProvider {
   const Prefix* BestPrefix(const GURL& text,
                            const std::wstring& prefix_suffix) const;
 
-  // Adds the exact input for what the user has typed as input. This is
-  // called on the main thread to generate the first match synchronously.
-  void SuggestExactInput(const AutocompleteInput& input, bool trim_http);
+  // Returns a match corresponding to exactly what the user has typed.
+  AutocompleteMatch SuggestExactInput(const AutocompleteInput& input,
+                                      bool trim_http);
 
-  // Assumes |params| contains the "what you typed" suggestion created by
-  // SuggestExactInput().  Looks up its info in the DB.  If found, fills in the
+  // Given a |match| containing the "what you typed" suggestion created by
+  // SuggestExactInput(), looks up its info in the DB.  If found, fills in the
   // title from the DB, promotes the match's priority to that of an inline
   // autocomplete match (maybe it should be slightly better?), and places it on
-  // the front of |params|->matches (so we pick the right matches to throw away
+  // the front of |matches| (so we pick the right matches to throw away
   // when culling redirects to/from it).  Returns whether a match was promoted.
   bool FixupExactSuggestion(history::URLDatabase* db,
-                            HistoryURLProviderParams* params,
+                            const AutocompleteInput& input,
+                            AutocompleteMatch* match,
                             HistoryMatches* matches) const;
 
   // Determines if |match| is suitable for inline autocomplete, and promotes it

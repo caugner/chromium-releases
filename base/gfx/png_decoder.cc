@@ -5,7 +5,7 @@
 #include "base/gfx/png_decoder.h"
 
 #include "base/logging.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 extern "C" {
 #include "third_party/libpng/png.h"
@@ -50,9 +50,6 @@ namespace {
 const double kMaxGamma = 21474.83;  // Maximum gamma accepted by png library.
 const double kDefaultGamma = 2.2;
 const double kInverseGamma = 1.0 / kDefaultGamma;
-
-// Maximum pixel dimension we'll try to decode.
-const png_uint_32 kMaxSize = 4096;
 
 class PngDecoderState {
  public:
@@ -123,8 +120,13 @@ void DecodeInfoCallback(png_struct* png_ptr, png_info* info_ptr) {
                &interlace_type, &compression_type, &filter_type);
 
   // Bounds check. When the image is unreasonably big, we'll error out and
-  // end up back at the setjmp call when we set up decoding.
-  if (w > kMaxSize || h > kMaxSize)
+  // end up back at the setjmp call when we set up decoding.  "Unreasonably big"
+  // means "big enough that w * h * 32bpp might overflow an int"; we choose this
+  // threshold to match WebKit and because a number of places in code assume
+  // that an image's size (in bytes) fits in a (signed) int.
+  unsigned long long total_size =
+      static_cast<unsigned long long>(w) * static_cast<unsigned long long>(h);
+  if (total_size > ((1 << 29) - 1))
     longjmp(png_ptr->jmpbuf, 1);
   state->width = static_cast<int>(w);
   state->height = static_cast<int>(h);
@@ -259,8 +261,8 @@ class PngReadStructDestroyer {
 
 // static
 bool PNGDecoder::Decode(const unsigned char* input, size_t input_size,
-                      ColorFormat format, std::vector<unsigned char>* output,
-                      int* w, int* h) {
+                        ColorFormat format, std::vector<unsigned char>* output,
+                        int* w, int* h) {
   if (input_size < 8)
     return false;  // Input data too small to be a png
 
@@ -322,7 +324,24 @@ bool PNGDecoder::Decode(const std::vector<unsigned char>* data,
                          &decoded_data, &width, &height)) {
     bitmap->setConfig(SkBitmap::kARGB_8888_Config, width, height);
     bitmap->allocPixels();
-    memcpy(bitmap->getPixels(), &decoded_data.front(), width * height * 4);
+    unsigned char* bitmap_data =
+        reinterpret_cast<unsigned char*>(bitmap->getAddr32(0, 0));
+    for (int i = width * height * 4 - 4; i >= 0; i -= 4) {
+      unsigned char alpha = decoded_data[i + 3];
+      if (alpha != 0 && alpha != 255) {
+        SkColor premultiplied = SkPreMultiplyARGB(alpha,
+            decoded_data[i], decoded_data[i + 1], decoded_data[i + 2]);
+        bitmap_data[i + 3] = alpha;
+        bitmap_data[i] = SkColorGetR(premultiplied);
+        bitmap_data[i + 1] = SkColorGetG(premultiplied);
+        bitmap_data[i + 2] = SkColorGetB(premultiplied);
+      } else {
+        bitmap_data[i + 3] = alpha;
+        bitmap_data[i] = decoded_data[i];
+        bitmap_data[i + 1] = decoded_data[i + 1];
+        bitmap_data[i + 2] = decoded_data[i + 2];
+      }
+    }
     return true;
   }
   return false;

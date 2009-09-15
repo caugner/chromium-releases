@@ -5,60 +5,58 @@
 #ifndef CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_H_
 #define CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_H_
 
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlcrack.h>
-#include <atlmisc.h>
-#include <string>
+#include <vector>
 
-#include "base/basictypes.h"
+#include "chrome/browser/automation/automation_resource_message_filter.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/views/focus/focus_manager.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/widget/widget.h"
+#include "views/widget/widget_win.h"
 
 class AutomationProvider;
-class TabContents;
 class Profile;
-class TabContentsContainerView;
+class TabContentsContainer;
+class RenderViewContextMenuExternalWin;
+
 // This class serves as the container window for an external tab.
 // An external tab is a Chrome tab that is meant to displayed in an
 // external process. This class provides the FocusManger needed by the
 // TabContents as well as an implementation of TabContentsDelagate.
-// It also implements Container
+// TODO(beng): Should override WidgetWin instead of Widget.
 class ExternalTabContainer : public TabContentsDelegate,
                              public NotificationObserver,
-                             public views::Widget,
-                             public views::KeystrokeListener,
-                             public CWindowImpl<ExternalTabContainer,
-                                                CWindow,
-                                                CWinTraits<WS_POPUP |
-                                                    WS_CLIPCHILDREN>> {
+                             public views::WidgetWin {
  public:
-  BEGIN_MSG_MAP(ExternalTabContainer)
-    MESSAGE_HANDLER(WM_SIZE, OnSize)
-    MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
-  END_MSG_MAP()
-
-  DECLARE_WND_CLASS(chrome::kExternalTabWindowClass)
-
-  ExternalTabContainer(AutomationProvider* automation);
+  ExternalTabContainer(AutomationProvider* automation,
+      AutomationResourceMessageFilter* filter);
   ~ExternalTabContainer();
 
-  TabContents* tab_contents() const {
-    return tab_contents_;
-  }
+  TabContents* tab_contents() const { return tab_contents_; }
 
-  bool Init(Profile* profile, HWND parent, const gfx::Rect& dimensions,
-            unsigned int style);
+  // Temporary hack so we can send notifications back
+  void set_tab_handle(int handle) { tab_handle_ = handle; }
 
-  // This function gets called from two places, which is fine.
-  // 1. OnFinalMessage
-  // 2. In the destructor.
-  bool Uninitialize(HWND window);
+  bool Init(Profile* profile,
+            HWND parent,
+            const gfx::Rect& bounds,
+            DWORD style,
+            bool load_requests_via_automation);
+
+  // This is invoked when the external host reflects back to us a keyboard
+  // message it did not process
+  void ProcessUnhandledAccelerator(const MSG& msg);
+
+  // See TabContents::FocusThroughTabTraversal.  Called from AutomationProvider.
+  void FocusThroughTabTraversal(bool reverse);
+
+  // A helper method that tests whether the given window is an
+  // ExternalTabContainer window
+  static bool IsExternalTabContainer(HWND window);
+
+  // A helper method that retrieves the ExternalTabContainer object that
+  // hosts the given tab window.
+  static ExternalTabContainer* GetContainerForTab(HWND tab_window);
 
   // Overridden from TabContentsDelegate:
   virtual void OpenURLFromTab(TabContents* source,
@@ -68,7 +66,6 @@ class ExternalTabContainer : public TabContentsDelegate,
                               PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags);
-  virtual void ReplaceContents(TabContents* source, TabContents* new_contents);
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -90,77 +87,77 @@ class ExternalTabContainer : public TabContentsDelegate,
     return true;
   };
 
-  // Notification service callback.
+  virtual bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+
+  virtual bool TakeFocus(bool reverse);
+
+  // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  /////////////////////////////////////////////////////////////////////////////
-  // views::Widget
-  /////////////////////////////////////////////////////////////////////////////
-  virtual void GetBounds(gfx::Rect* out, bool including_frame) const;
-  virtual void MoveToFront(bool should_activate);
-  virtual gfx::NativeView GetNativeView() const;
-  virtual void PaintNow(const gfx::Rect& update_rect);
-  virtual views::RootView* GetRootView();
-  virtual bool IsVisible();
-  virtual bool IsActive();
-  virtual bool GetAccelerator(int cmd_id,
-                              views::Accelerator* accelerator) {
-    return false;
-  }
+  // Handles the context menu display operation. This allows external
+  // hosts to customize the menu.
+  virtual bool HandleContextMenu(const ContextMenuParams& params);
 
-  // views::KeystrokeListener implementation
-  // This method checks whether this keydown message is needed by the
-  // external host. If so, it sends it over to the external host
-  virtual bool ProcessKeyDown(HWND window, UINT message, WPARAM wparam,
-                                LPARAM lparam);
+  // Executes the context menu command identified by the command
+  // parameter.
+  virtual bool ExecuteContextMenuCommand(int command);
 
-  // Sets the keyboard accelerators needed by the external host
-  void SetAccelerators(HACCEL accel_table, int accel_table_entry_count);
+  // Show a dialog with HTML content. |delegate| contains a pointer to the
+  // delegate who knows how to display the dialog (which file URL and JSON
+  // string input to use during initialization). |parent_window| is the window
+  // that should be parent of the dialog, or NULL for the default.
+  virtual void ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
+                              gfx::NativeWindow parent_window);
 
-  // This is invoked when the external host reflects back to us a keyboard
-  // message it did not process
-  void ProcessUnhandledAccelerator(const MSG& msg);
-
-  // See TabContents::SetInitialFocus
-  void SetInitialFocus(bool reverse);
-
-  // A helper method that tests whether the given window is an
-  // ExternalTabContainer window
-  static bool IsExternalTabContainer(HWND window);
-
-  // A helper method that retrieves the ExternalTabContainer object that
-  // hosts the given tab window.
-  static ExternalTabContainer* GetContainerForTab(HWND tab_window);
 
  protected:
-  LRESULT OnSize(UINT, WPARAM, LPARAM, BOOL& handled);
-  LRESULT OnSetFocus(UINT msg, WPARAM wp, LPARAM lp, BOOL& handled);
-  void OnDestroy();
-  void OnFinalMessage(HWND window);
+  // Overridden from views::WidgetWin:
+  virtual void OnDestroy();
 
- protected:
-  TabContents *tab_contents_;
+ private:
+  // Unhook the keystroke listener and notify about the closing TabContents.
+  // This function gets called from two places, which is fine.
+  // 1. OnFinalMessage
+  // 2. In the destructor.
+  void Uninitialize(HWND window);
+
+  // Helper function for processing keystokes coming back from the renderer
+  // process.
+  bool ProcessUnhandledKeyStroke(HWND window, UINT message, WPARAM wparam,
+                                 LPARAM lparam);
+
+  TabContents* tab_contents_;
   scoped_refptr<AutomationProvider> automation_;
 
   NotificationRegistrar registrar_;
 
-  // Root view
-  views::RootView root_view_;
-  // The accelerator table of the external host.
-  HACCEL external_accel_table_;
-  unsigned int external_accel_entry_count_;
   // A view to handle focus cycling
-  TabContentsContainerView* tab_contents_container_;
- private:
+  TabContentsContainer* tab_contents_container_;
+
+  int tab_handle_;
   // A failed navigation like a 404 is followed in chrome with a success
   // navigation for the 404 page. We need to ignore the next navigation
   // to avoid confusing the clients of the external tab. This member variable
   // is set when we need to ignore the next load notification.
   bool ignore_next_load_notification_;
 
+  // Contains the list of disabled context menu identifiers.
+  std::vector<int> disabled_context_menu_ids_;
+
+  scoped_ptr<RenderViewContextMenuExternalWin> external_context_menu_;
+
+  // A message filter to load resources via automation
+  AutomationResourceMessageFilter* automation_resource_message_filter_;
+
+  // If all the url requests for this tab are to be loaded via automation.
+  bool load_requests_via_automation_;
+
+  // Scoped browser object for this ExternalTabContainer instance.
+  scoped_ptr<Browser> browser_;
+
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainer);
 };
 
-#endif  // CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_H__
+#endif  // CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_H_

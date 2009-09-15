@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_VIEWS_STAR_TOGGLE_H_
 #define CHROME_BROWSER_VIEWS_STAR_TOGGLE_H_
 
-#include "chrome/views/view.h"
-#include "chrome/views/event.h"
+#include "views/view.h"
+#include "views/event.h"
 
 class SkBitmap;
 
@@ -42,7 +42,7 @@ class StarToggle : public views::View {
   void SwitchState();
 
   // Overriden from view.
-  void Paint(ChromeCanvas* canvas);
+  void Paint(gfx::Canvas* canvas);
   gfx::Size GetPreferredSize();
   virtual bool OnMousePressed(const views::MouseEvent& e);
   virtual bool OnMouseDragged(const views::MouseEvent& event);

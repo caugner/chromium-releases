@@ -6,43 +6,30 @@
 
 #include "chrome/browser/browser_list.h"
 
-// static
-std::queue<views::AppModalDialogDelegate*>*
-    AppModalDialogQueue::app_modal_dialog_queue_ = NULL;
-views::AppModalDialogDelegate* AppModalDialogQueue::active_dialog_ = NULL;
-
-// static
-void AppModalDialogQueue::AddDialog(views::AppModalDialogDelegate* dialog) {
-  DCHECK(dialog->IsModal());
-  if (!app_modal_dialog_queue_) {
-    app_modal_dialog_queue_ = new std::queue<views::AppModalDialogDelegate*>;
+void AppModalDialogQueue::AddDialog(AppModalDialog* dialog) {
+  if (!active_dialog_) {
     ShowModalDialog(dialog);
+    return;
   }
-
-  app_modal_dialog_queue_->push(dialog);
+  app_modal_dialog_queue_.push(dialog);
 }
 
-// static
 void AppModalDialogQueue::ShowNextDialog() {
-  app_modal_dialog_queue_->pop();
-  active_dialog_ = NULL;
-  if (!app_modal_dialog_queue_->empty()) {
-    ShowModalDialog(app_modal_dialog_queue_->front());
+  if (!app_modal_dialog_queue_.empty()) {
+    AppModalDialog* dialog = app_modal_dialog_queue_.front();
+    app_modal_dialog_queue_.pop();
+    ShowModalDialog(dialog);
   } else {
-    delete app_modal_dialog_queue_;
-    app_modal_dialog_queue_ = NULL;
+    active_dialog_ = NULL;
   }
 }
 
-// static
 void AppModalDialogQueue::ActivateModalDialog() {
-  if (!app_modal_dialog_queue_->empty())
-    app_modal_dialog_queue_->front()->ActivateModalDialog();
+  if (active_dialog_)
+    active_dialog_->ActivateModalDialog();
 }
 
-// static
-void AppModalDialogQueue::ShowModalDialog(
-    views::AppModalDialogDelegate* dialog) {
+void AppModalDialogQueue::ShowModalDialog(AppModalDialog* dialog) {
   dialog->ShowModalDialog();
   active_dialog_ = dialog;
 }

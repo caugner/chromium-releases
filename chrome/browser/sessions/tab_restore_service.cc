@@ -2,19 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/sessions/tab_restore_service.h"
+
 #include <algorithm>
 #include <iterator>
 
-#include "chrome/browser/sessions/tab_restore_service.h"
-
+#include "base/scoped_vector.h"
+#include "base/stl_util-inl.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_command.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/common/scoped_vector.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 
 using base::Time;
 
@@ -36,8 +38,9 @@ const size_t TabRestoreService::kMaxEntries = 10;
 // The ordering in the file is as follows:
 // . When the user closes a tab a command of type
 //   kCommandSelectedNavigationInTab is written identifying the tab and
-//   the selected index. This is followed by any number of
-//   kCommandUpdateTabNavigation commands (1 per navigation entry).
+//   the selected index, then a kCommandPinnedState command if the tab was
+//   pinned. This is followed by any number of kCommandUpdateTabNavigation
+//   commands (1 per navigation entry).
 // . When the user closes a window a kCommandSelectedNavigationInTab command
 //   is written out and followed by n tab closed sequences (as previoulsy
 //   described).
@@ -47,6 +50,7 @@ static const SessionCommand::id_type kCommandUpdateTabNavigation = 1;
 static const SessionCommand::id_type kCommandRestoredEntry = 2;
 static const SessionCommand::id_type kCommandWindow = 3;
 static const SessionCommand::id_type kCommandSelectedNavigationInTab = 4;
+static const SessionCommand::id_type kCommandPinnedState = 5;
 
 // Number of entries (not commands) before we clobber the file and write
 // everything.
@@ -58,18 +62,33 @@ namespace {
 
 typedef int32 RestoredEntryPayload;
 
-// Payload used for the start of a window close.
+// Payload used for the start of a window close. This is the old struct that is
+// used for backwards compat when it comes to reading the session files.
 struct WindowPayload {
   SessionID::id_type window_id;
   int32 selected_tab_index;
   int32 num_tabs;
 };
 
-// Payload used for the start of a tab close.
+// Payload used for the start of a tab close. This is the old struct that is
+// used for backwards compat when it comes to reading the session files.
 struct SelectedNavigationInTabPayload {
   SessionID::id_type id;
   int32 index;
 };
+
+// Payload used for the start of a window close.
+struct WindowPayload2 : WindowPayload {
+  int64 timestamp;
+};
+
+// Payload used for the start of a tab close.
+struct SelectedNavigationInTabPayload2 : SelectedNavigationInTabPayload {
+  int64 timestamp;
+};
+
+// Only written if the tab is pinned.
+typedef bool PinnedStatePayload;
 
 typedef std::map<SessionID::id_type, TabRestoreService::Entry*> IDToEntry;
 
@@ -90,14 +109,16 @@ void RemoveEntryByID(SessionID::id_type id,
 
 }  // namespace
 
-TabRestoreService::TabRestoreService(Profile* profile)
+TabRestoreService::TabRestoreService(Profile* profile,
+    TabRestoreService::TimeFactory* time_factory)
     : BaseSessionService(BaseSessionService::TAB_RESTORE, profile,
                          FilePath()),
       load_state_(NOT_LOADED),
       restoring_(false),
       reached_max_(false),
       entries_to_write_(0),
-      entries_written_(0) {
+      entries_written_(0),
+      time_factory_(time_factory) {
 }
 
 TabRestoreService::~TabRestoreService() {
@@ -107,6 +128,7 @@ TabRestoreService::~TabRestoreService() {
   FOR_EACH_OBSERVER(Observer, observer_list_, TabRestoreServiceDestroyed(this));
   STLDeleteElements(&entries_);
   STLDeleteElements(&staging_entries_);
+  time_factory_ = NULL;
 }
 
 void TabRestoreService::AddObserver(Observer* observer) {
@@ -126,7 +148,7 @@ void TabRestoreService::CreateHistoricalTab(NavigationController* tab) {
     return;
 
   scoped_ptr<Tab> local_tab(new Tab());
-  PopulateTabFromController(tab, local_tab.get());
+  PopulateTab(local_tab.get(), browser, tab);
   if (local_tab->navigations.empty())
     return;
 
@@ -142,16 +164,19 @@ void TabRestoreService::BrowserClosing(Browser* browser) {
 
   Window* window = new Window();
   window->selected_tab_index = browser->selected_index();
+  window->timestamp = TimeNow();
   window->tabs.resize(browser->tab_count());
   size_t entry_index = 0;
   for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-    PopulateTabFromController(
-        browser->GetTabContentsAt(tab_index)->controller(),
-        &(window->tabs[entry_index]));
-    if (window->tabs[entry_index].navigations.empty())
+    PopulateTab(&(window->tabs[entry_index]),
+                browser,
+                &browser->GetTabContentsAt(tab_index)->controller());
+    if (window->tabs[entry_index].navigations.empty()) {
       window->tabs.erase(window->tabs.begin() + entry_index);
-    else
+    } else {
+      window->tabs[entry_index].browser_id = browser->session_id().id();
       entry_index++;
+    }
   }
   if (window->tabs.empty()) {
     delete window;
@@ -214,34 +239,63 @@ void TabRestoreService::RestoreEntryById(Browser* browser,
   Entry* entry = *i;
   entries_.erase(i);
   i = entries_.end();
-  if (browser) {  // Browser is null during testing.
-    if (entry->type == TAB) {
-      Tab* tab = static_cast<Tab*>(entry);
-      if (replace_existing_tab) {
-        browser->ReplaceRestoredTab(tab->navigations,
-                                    tab->current_navigation_index);
-      } else {
-        browser->AddRestoredTab(tab->navigations, browser->tab_count(),
-                                tab->current_navigation_index, true);
-      }
-    } else if (entry->type == WINDOW) {
-      const Window* window = static_cast<Window*>(entry);
-      Browser* browser = Browser::Create(profile());
-      for (size_t tab_i = 0; tab_i < window->tabs.size(); ++tab_i) {
-        const Tab& tab = window->tabs[tab_i];
-        NavigationController* restored_controller =
-            browser->AddRestoredTab(tab.navigations, browser->tab_count(),
-                                    tab.current_navigation_index,
-                                    (static_cast<int>(tab_i) ==
-                                     window->selected_tab_index));
-        if (restored_controller)
-          restored_controller->LoadIfNecessary();
-      }
-      browser->window()->Show();
+
+  // |browser| will be NULL in cases where one isn't already available (eg,
+  // when invoked on Mac OS X with no windows open). In this case, create a
+  // new browser into which we restore the tabs.
+  if (entry->type == TAB) {
+    Tab* tab = static_cast<Tab*>(entry);
+    if (replace_existing_tab && browser) {
+      browser->ReplaceRestoredTab(tab->navigations,
+                                  tab->current_navigation_index);
     } else {
-      NOTREACHED();
+      // Use the tab's former browser and index, if available.
+      Browser* tab_browser = NULL;
+      int tab_index = -1;
+      if (tab->has_browser())
+        tab_browser = BrowserList::FindBrowserWithID(tab->browser_id);
+
+      if (tab_browser) {
+        tab_index = tab->tabstrip_index;
+      } else {
+        tab_browser = Browser::Create(profile());
+        if (tab->has_browser()) {
+          UpdateTabBrowserIDs(tab->browser_id,
+                              tab_browser->session_id().id());
+        }
+        tab_browser->window()->Show();
+      }
+
+      if (tab_index < 0 || tab_index > tab_browser->tab_count())
+        tab_index = tab_browser->tab_count();
+      tab_browser->AddRestoredTab(tab->navigations, tab_index,
+                                  tab->current_navigation_index, true,
+                                  tab->pinned);
     }
+  } else if (entry->type == WINDOW) {
+    const Window* window = static_cast<Window*>(entry);
+    browser = Browser::Create(profile());
+    for (size_t tab_i = 0; tab_i < window->tabs.size(); ++tab_i) {
+      const Tab& tab = window->tabs[tab_i];
+      TabContents* restored_tab =
+          browser->AddRestoredTab(tab.navigations, browser->tab_count(),
+                                  tab.current_navigation_index,
+                                  (static_cast<int>(tab_i) ==
+                                   window->selected_tab_index),
+                                  tab.pinned);
+      if (restored_tab)
+        restored_tab->controller().LoadIfNecessary();
+    }
+    // All the window's tabs had the same former browser_id.
+    if (window->tabs[0].has_browser()) {
+      UpdateTabBrowserIDs(window->tabs[0].browser_id,
+                          browser->session_id().id());
+    }
+    browser->window()->Show();
+  } else {
+    NOTREACHED();
   }
+
   delete entry;
   restoring_ = false;
   NotifyTabsChanged();
@@ -307,22 +361,31 @@ void TabRestoreService::Save() {
   BaseSessionService::Save();
 }
 
-void TabRestoreService::PopulateTabFromController(
-    NavigationController* controller,
-    Tab* tab) {
-  const int pending_index = controller->GetPendingEntryIndex();
-  int entry_count = controller->GetEntryCount();
+void TabRestoreService::PopulateTab(Tab* tab,
+                                    Browser* browser,
+                                    NavigationController* controller) {
+  const int pending_index = controller->pending_entry_index();
+  int entry_count = controller->entry_count();
   if (entry_count == 0 && pending_index == 0)
     entry_count++;
   tab->navigations.resize(static_cast<int>(entry_count));
   for (int i = 0; i < entry_count; ++i) {
     NavigationEntry* entry = (i == pending_index) ?
-        controller->GetPendingEntry() : controller->GetEntryAtIndex(i);
+        controller->pending_entry() : controller->GetEntryAtIndex(i);
     tab->navigations[i].SetFromNavigationEntry(*entry);
   }
+  tab->timestamp = TimeNow();
   tab->current_navigation_index = controller->GetCurrentEntryIndex();
   if (tab->current_navigation_index == -1 && entry_count > 0)
     tab->current_navigation_index = 0;
+
+  // Browser may be NULL during unit tests.
+  if (browser) {
+    tab->browser_id = browser->session_id().id();
+    tab->tabstrip_index =
+        browser->tabstrip_model()->GetIndexOfController(controller);
+    tab->pinned = browser->tabstrip_model()->IsTabPinned(tab->tabstrip_index);
+  }
 }
 
 void TabRestoreService::NotifyTabsChanged() {
@@ -378,7 +441,8 @@ void TabRestoreService::ScheduleCommandsForWindow(const Window& window) {
   ScheduleCommand(
       CreateWindowCommand(window.id,
                           std::min(real_selected_tab, valid_tab_count - 1),
-                          valid_tab_count));
+                          valid_tab_count,
+                          window.timestamp));
 
   for (size_t i = 0; i < window.tabs.size(); ++i) {
     int selected_index = GetSelectedNavigationIndexToPersist(window.tabs[i]);
@@ -406,7 +470,16 @@ void TabRestoreService::ScheduleCommandsForTab(const Tab& tab,
   // Write the command that identifies the selected tab.
   ScheduleCommand(
       CreateSelectedNavigationInTabCommand(tab.id,
-                                           valid_count_before_selected));
+                                           valid_count_before_selected,
+                                           tab.timestamp));
+
+  if (tab.pinned) {
+    PinnedStatePayload payload = true;
+    SessionCommand* command =
+        new SessionCommand(kCommandPinnedState, sizeof(payload));
+    memcpy(command->contents(), &payload, sizeof(payload));
+    ScheduleCommand(command);
+  }
 
   // Then write the navigations.
   for (int i = first_index_to_persist, wrote_count = 0;
@@ -426,11 +499,13 @@ void TabRestoreService::ScheduleCommandsForTab(const Tab& tab,
 
 SessionCommand* TabRestoreService::CreateWindowCommand(SessionID::id_type id,
                                                        int selected_tab_index,
-                                                       int num_tabs) {
-  WindowPayload payload = { 0 };
+                                                       int num_tabs,
+                                                       Time timestamp) {
+  WindowPayload2 payload;
   payload.window_id = id;
   payload.selected_tab_index = selected_tab_index;
   payload.num_tabs = num_tabs;
+  payload.timestamp = timestamp.ToInternalValue();
 
   SessionCommand* command =
       new SessionCommand(kCommandWindow, sizeof(payload));
@@ -440,10 +515,12 @@ SessionCommand* TabRestoreService::CreateWindowCommand(SessionID::id_type id,
 
 SessionCommand* TabRestoreService::CreateSelectedNavigationInTabCommand(
     SessionID::id_type tab_id,
-    int32 index) {
-  SelectedNavigationInTabPayload payload = { 0 };
+    int32 index,
+    Time timestamp) {
+  SelectedNavigationInTabPayload2 payload;
   payload.id = tab_id;
   payload.index = index;
+  payload.timestamp = timestamp.ToInternalValue();
   SessionCommand* command =
       new SessionCommand(kCommandSelectedNavigationInTab, sizeof(payload));
   memcpy(command->contents(), &payload, sizeof(payload));
@@ -534,15 +611,28 @@ void TabRestoreService::CreateEntriesFromCommands(
       }
 
       case kCommandWindow: {
-        WindowPayload payload;
+        WindowPayload2 payload;
         if (pending_window_tabs > 0) {
           // Should never receive a window command while waiting for all the
           // tabs in a window.
           return;
         }
 
-        if (!command.GetPayload(&payload, sizeof(payload)))
-          return;
+        // Try the new payload first
+        if (!command.GetPayload(&payload, sizeof(payload))) {
+          // then the old payload
+          WindowPayload old_payload;
+          if (!command.GetPayload(&old_payload, sizeof(old_payload)))
+            return;
+
+          // Copy the old payload data to the new payload.
+          payload.window_id = old_payload.window_id;
+          payload.selected_tab_index = old_payload.selected_tab_index;
+          payload.num_tabs = old_payload.num_tabs;
+          // Since we don't have a time use time 0 which is used to mark as an
+          // unknown timestamp.
+          payload.timestamp = 0;
+        }
 
         pending_window_tabs = payload.num_tabs;
         if (pending_window_tabs <= 0) {
@@ -554,15 +644,24 @@ void TabRestoreService::CreateEntriesFromCommands(
 
         current_window = new Window();
         current_window->selected_tab_index = payload.selected_tab_index;
+        current_window->timestamp = Time::FromInternalValue(payload.timestamp);
         entries->push_back(current_window);
         id_to_entry[payload.window_id] = current_window;
         break;
       }
 
       case kCommandSelectedNavigationInTab: {
-        SelectedNavigationInTabPayload payload;
-        if (!command.GetPayload(&payload, sizeof(payload)))
-          return;
+        SelectedNavigationInTabPayload2 payload;
+        if (!command.GetPayload(&payload, sizeof(payload))) {
+          SelectedNavigationInTabPayload old_payload;
+          if (!command.GetPayload(&old_payload, sizeof(old_payload)))
+            return;
+          payload.id = old_payload.id;
+          payload.index = old_payload.index;
+          // Since we don't have a time use time 0 which is used to mark as an
+          // unknown timestamp.
+          payload.timestamp = 0;
+        }
 
         if (pending_window_tabs > 0) {
           if (!current_window) {
@@ -578,6 +677,7 @@ void TabRestoreService::CreateEntriesFromCommands(
           RemoveEntryByID(payload.id, &id_to_entry, &(entries.get()));
           current_tab = new Tab();
           id_to_entry[payload.id] = current_tab;
+          current_tab->timestamp = Time::FromInternalValue(payload.timestamp);
           entries->push_back(current_tab);
         }
         current_tab->current_navigation_index = payload.index;
@@ -595,6 +695,17 @@ void TabRestoreService::CreateEntriesFromCommands(
             command, &current_tab->navigations.back(), &tab_id)) {
           return;
         }
+        break;
+      }
+
+      case kCommandPinnedState: {
+        if (!current_tab) {
+          // Should be in a tab when we get this.
+          return;
+        }
+        // NOTE: payload doesn't matter. kCommandPinnedState is only written if
+        // tab is pinned.
+        current_tab->pinned = true;
         break;
       }
 
@@ -665,6 +776,18 @@ void TabRestoreService::ValidateAndDeleteEmptyEntries(
   STLDeleteElements(&invalid_entries);
 }
 
+void TabRestoreService::UpdateTabBrowserIDs(SessionID::id_type old_id,
+                                            SessionID::id_type new_id) {
+  for (Entries::iterator i = entries_.begin(); i != entries_.end(); ++i) {
+    Entry* entry = *i;
+    if (entry->type == TAB) {
+      Tab* tab = static_cast<Tab*>(entry);
+      if (tab->browser_id == old_id)
+        tab->browser_id = new_id;
+    }
+  }
+}
+
 void TabRestoreService::OnGotPreviousSession(
     Handle handle,
     std::vector<SessionWindow*>* windows) {
@@ -694,9 +817,11 @@ bool TabRestoreService::ConvertSessionWindowToWindow(
     if (!session_window->tabs[i]->navigations.empty()) {
       window->tabs.resize(window->tabs.size() + 1);
       Tab& tab = window->tabs.back();
+      tab.pinned = session_window->tabs[i]->pinned;
       tab.navigations.swap(session_window->tabs[i]->navigations);
       tab.current_navigation_index =
           session_window->tabs[i]->current_navigation_index;
+      tab.timestamp = Time();
     }
   }
   if (window->tabs.empty())
@@ -705,6 +830,7 @@ bool TabRestoreService::ConvertSessionWindowToWindow(
   window->selected_tab_index =
       std::min(session_window->selected_tab_index,
                static_cast<int>(window->tabs.size() - 1));
+  window->timestamp = Time();
   return true;
 }
 
@@ -751,3 +877,8 @@ void TabRestoreService::LoadStateChanged() {
 
   PruneAndNotify();
 }
+
+Time TabRestoreService::TimeNow() const {
+  return time_factory_ ? time_factory_->TimeNow() : Time::Now();
+}
+

@@ -2,30 +2,37 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/hung_renderer_view.h"
+#include "chrome/browser/hung_renderer_dialog.h"
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/path.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/result_codes.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/table/group_table_view.h"
-#include "chrome/views/window/client_view.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/grid_layout.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/table/group_table_view.h"
+#include "views/standard_layout.h"
+#include "views/window/client_view.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
+
+class HungRendererDialogView;
+
+namespace {
+// We only support showing one of these at a time per app.
+HungRendererDialogView* g_instance = NULL;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // HungPagesTableModel
@@ -35,20 +42,20 @@ class HungPagesTableModel : public views::GroupTableModel {
   HungPagesTableModel();
   virtual ~HungPagesTableModel();
 
-  void InitForWebContents(WebContents* hung_contents);
+  void InitForTabContents(TabContents* hung_contents);
 
   // Overridden from views::GroupTableModel:
   virtual int RowCount();
   virtual std::wstring GetText(int row, int column_id);
   virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(views::TableModelObserver* observer);
+  virtual void SetObserver(TableModelObserver* observer);
   virtual void GetGroupRangeForItem(int item, views::GroupRange* range);
 
  private:
-  typedef std::vector<WebContents*> WebContentsVector;
-  WebContentsVector webcontentses_;
+  typedef std::vector<TabContents*> TabContentsVector;
+  TabContentsVector tab_contentses_;
 
-  views::TableModelObserver* observer_;
+  TableModelObserver* observer_;
 
   DISALLOW_EVIL_CONSTRUCTORS(HungPagesTableModel);
 };
@@ -62,11 +69,11 @@ HungPagesTableModel::HungPagesTableModel() : observer_(NULL) {
 HungPagesTableModel::~HungPagesTableModel() {
 }
 
-void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
-  webcontentses_.clear();
-  for (WebContentsIterator it; !it.done(); ++it) {
+void HungPagesTableModel::InitForTabContents(TabContents* hung_contents) {
+  tab_contentses_.clear();
+  for (TabContentsIterator it; !it.done(); ++it) {
     if (it->process() == hung_contents->process())
-      webcontentses_.push_back(*it);
+      tab_contentses_.push_back(*it);
   }
   // The world is different.
   if (observer_)
@@ -77,12 +84,12 @@ void HungPagesTableModel::InitForWebContents(WebContents* hung_contents) {
 // HungPagesTableModel, views::GroupTableModel implementation:
 
 int HungPagesTableModel::RowCount() {
-  return static_cast<int>(webcontentses_.size());
+  return static_cast<int>(tab_contentses_.size());
 }
 
 std::wstring HungPagesTableModel::GetText(int row, int column_id) {
   DCHECK(row >= 0 && row < RowCount());
-  std::wstring title = UTF16ToWideHack(webcontentses_.at(row)->GetTitle());
+  std::wstring title = UTF16ToWideHack(tab_contentses_.at(row)->GetTitle());
   if (title.empty())
     title = l10n_util::GetString(IDS_TAB_UNTITLED_TITLE);
   // TODO(xji): Consider adding a special case if the title text is a URL,
@@ -94,10 +101,10 @@ std::wstring HungPagesTableModel::GetText(int row, int column_id) {
 
 SkBitmap HungPagesTableModel::GetIcon(int row) {
   DCHECK(row >= 0 && row < RowCount());
-  return webcontentses_.at(row)->GetFavIcon();
+  return tab_contentses_.at(row)->GetFavIcon();
 }
 
-void HungPagesTableModel::SetObserver(views::TableModelObserver* observer) {
+void HungPagesTableModel::SetObserver(TableModelObserver* observer) {
   observer_ = observer;
 }
 
@@ -109,30 +116,30 @@ void HungPagesTableModel::GetGroupRangeForItem(int item,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView
+// HungRendererDialogView
 
-class HungRendererWarningView : public views::View,
-                                public views::DialogDelegate,
-                                public views::NativeButton::Listener {
+class HungRendererDialogView : public views::View,
+                               public views::DialogDelegate,
+                               public views::ButtonListener {
  public:
-  HungRendererWarningView();
-  ~HungRendererWarningView();
+  HungRendererDialogView();
+  ~HungRendererDialogView();
 
-  void ShowForWebContents(WebContents* contents);
-  void EndForWebContents(WebContents* contents);
+  void ShowForTabContents(TabContents* contents);
+  void EndForTabContents(TabContents* contents);
 
   // views::WindowDelegate overrides:
   virtual std::wstring GetWindowTitle() const;
   virtual void WindowClosing();
   virtual int GetDialogButtons() const;
   virtual std::wstring GetDialogButtonLabel(
-      views::DialogDelegate::DialogButton button) const;
+      MessageBoxFlags::DialogButton button) const;
   virtual views::View* GetExtraView();
   virtual bool Accept(bool window_closing);
   virtual views::View* GetContentsView();
 
-  // views::NativeButton::Listener overrides:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // views::ButtonListener overrides:
+  virtual void ButtonPressed(views::Button* sender);
 
  protected:
   // views::View overrides:
@@ -146,8 +153,8 @@ class HungRendererWarningView : public views::View,
   void CreateKillButtonView();
 
   // Returns the bounds the dialog should be displayed at to be meaningfully
-  // associated with the specified WebContents.
-  gfx::Rect GetDisplayBounds(WebContents* contents);
+  // associated with the specified TabContents.
+  gfx::Rect GetDisplayBounds(TabContents* contents);
 
   static void InitClass();
 
@@ -173,9 +180,9 @@ class HungRendererWarningView : public views::View,
   // pages affected by the hang.
   scoped_ptr<HungPagesTableModel> hung_pages_table_model_;
 
-  // The WebContents that we detected had hung in the first place resulting in
+  // The TabContents that we detected had hung in the first place resulting in
   // the display of this view.
-  WebContents* contents_;
+  TabContents* contents_;
 
   // Whether or not we've created controls for ourself.
   bool initialized_;
@@ -183,11 +190,11 @@ class HungRendererWarningView : public views::View,
   // An amusing icon image.
   static SkBitmap* frozen_icon_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(HungRendererWarningView);
+  DISALLOW_EVIL_CONSTRUCTORS(HungRendererDialogView);
 };
 
 // static
-SkBitmap* HungRendererWarningView::frozen_icon_ = NULL;
+SkBitmap* HungRendererDialogView::frozen_icon_ = NULL;
 
 // The distance in pixels from the top of the relevant contents to place the
 // warning window.
@@ -198,9 +205,9 @@ static const int kTableViewWidth = 300;
 static const int kTableViewHeight = 100;
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView, public:
+// HungRendererDialogView, public:
 
-HungRendererWarningView::HungRendererWarningView()
+HungRendererDialogView::HungRendererDialogView()
     : frozen_icon_view_(NULL),
       info_label_(NULL),
       hung_pages_table_(NULL),
@@ -211,11 +218,11 @@ HungRendererWarningView::HungRendererWarningView()
   InitClass();
 }
 
-HungRendererWarningView::~HungRendererWarningView() {
+HungRendererDialogView::~HungRendererDialogView() {
   hung_pages_table_->SetModel(NULL);
 }
 
-void HungRendererWarningView::ShowForWebContents(WebContents* contents) {
+void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
   DCHECK(contents && window());
   contents_ = contents;
 
@@ -234,59 +241,59 @@ void HungRendererWarningView::ShowForWebContents(WebContents* contents) {
     window()->SetBounds(bounds, frame_hwnd);
 
     // We only do this if the window isn't active (i.e. hasn't been shown yet,
-    // or is currently shown but deactivated for another WebContents). This is
+    // or is currently shown but deactivated for another TabContents). This is
     // because this window is a singleton, and it's possible another active
     // renderer may hang while this one is showing, and we don't want to reset
     // the list of hung pages for a potentially unrelated renderer while this
     // one is showing.
-    hung_pages_table_model_->InitForWebContents(contents);
+    hung_pages_table_model_->InitForTabContents(contents);
     window()->Show();
   }
 }
 
-void HungRendererWarningView::EndForWebContents(WebContents* contents) {
+void HungRendererDialogView::EndForTabContents(TabContents* contents) {
   DCHECK(contents);
   if (contents_ && contents_->process() == contents->process()) {
     window()->Close();
-    // Since we're closing, we no longer need this WebContents.
+    // Since we're closing, we no longer need this TabContents.
     contents_ = NULL;
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView, views::DialogDelegate implementation:
+// HungRendererDialogView, views::DialogDelegate implementation:
 
-std::wstring HungRendererWarningView::GetWindowTitle() const {
+std::wstring HungRendererDialogView::GetWindowTitle() const {
   return l10n_util::GetString(IDS_PRODUCT_NAME);
 }
 
-void HungRendererWarningView::WindowClosing() {
+void HungRendererDialogView::WindowClosing() {
   // We are going to be deleted soon, so make sure our instance is destroyed.
-  HungRendererWarning::instance_ = NULL;
+  g_instance = NULL;
 }
 
-int HungRendererWarningView::GetDialogButtons() const {
+int HungRendererDialogView::GetDialogButtons() const {
   // We specifically don't want a CANCEL button here because that code path is
   // also called when the window is closed by the user clicking the X button in
   // the window's titlebar, and also if we call Window::Close. Rather, we want
   // the OK button to wait for responsiveness (and close the dialog) and our
   // additional button (which we create) to kill the process (which will result
   // in the dialog being destroyed).
-  return DIALOGBUTTON_OK;
+  return MessageBoxFlags::DIALOGBUTTON_OK;
 }
 
-std::wstring HungRendererWarningView::GetDialogButtonLabel(
-    views::DialogDelegate::DialogButton button) const {
-  if (button == DIALOGBUTTON_OK)
+std::wstring HungRendererDialogView::GetDialogButtonLabel(
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
     return l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
   return std::wstring();
 }
 
-views::View* HungRendererWarningView::GetExtraView() {
+views::View* HungRendererDialogView::GetExtraView() {
   return kill_button_container_;
 }
 
-bool HungRendererWarningView::Accept(bool window_closing) {
+bool HungRendererDialogView::Accept(bool window_closing) {
   // Don't do anything if we're being called only because the dialog is being
   // destroyed and we don't supply a Cancel function...
   if (window_closing)
@@ -298,14 +305,14 @@ bool HungRendererWarningView::Accept(bool window_closing) {
   return true;
 }
 
-views::View* HungRendererWarningView::GetContentsView() {
+views::View* HungRendererDialogView::GetContentsView() {
   return this;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView, views::NativeButton::Listener implementation:
+// HungRendererDialogView, views::ButtonListener implementation:
 
-void HungRendererWarningView::ButtonPressed(views::NativeButton* sender) {
+void HungRendererDialogView::ButtonPressed(views::Button* sender) {
   if (sender == kill_button_) {
     // Kill the process.
     HANDLE process = contents_->process()->process().handle();
@@ -314,19 +321,19 @@ void HungRendererWarningView::ButtonPressed(views::NativeButton* sender) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView, views::View overrides:
+// HungRendererDialogView, views::View overrides:
 
-void HungRendererWarningView::ViewHierarchyChanged(bool is_add,
-                                                   views::View* parent,
-                                                   views::View* child) {
+void HungRendererDialogView::ViewHierarchyChanged(bool is_add,
+                                                  views::View* parent,
+                                                  views::View* child) {
   if (!initialized_ && is_add && child == this && GetWidget())
     Init();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarningView, private:
+// HungRendererDialogView, private:
 
-void HungRendererWarningView::Init() {
+void HungRendererDialogView::Init() {
   frozen_icon_view_ = new views::ImageView;
   frozen_icon_view_->SetImage(frozen_icon_);
 
@@ -336,12 +343,12 @@ void HungRendererWarningView::Init() {
   info_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
   hung_pages_table_model_.reset(new HungPagesTableModel);
-  std::vector<views::TableColumn> columns;
-  columns.push_back(views::TableColumn());
+  std::vector<TableColumn> columns;
+  columns.push_back(TableColumn());
   hung_pages_table_ = new views::GroupTableView(
       hung_pages_table_model_.get(), columns, views::ICON_AND_TEXT, true,
       false, true);
-  hung_pages_table_->set_preferred_size(
+  hung_pages_table_->SetPreferredSize(
     gfx::Size(kTableViewWidth, kTableViewHeight));
 
   CreateKillButtonView();
@@ -373,10 +380,9 @@ void HungRendererWarningView::Init() {
   initialized_ = true;
 }
 
-void HungRendererWarningView::CreateKillButtonView() {
+void HungRendererDialogView::CreateKillButtonView() {
   kill_button_ = new views::NativeButton(
-      l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_END));
-  kill_button_->SetListener(this);
+      this, l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_END));
 
   kill_button_container_ = new ButtonContainer;
 
@@ -397,23 +403,23 @@ void HungRendererWarningView::CreateKillButtonView() {
   layout->AddView(kill_button_);
 }
 
-gfx::Rect HungRendererWarningView::GetDisplayBounds(
-    WebContents* contents) {
+gfx::Rect HungRendererDialogView::GetDisplayBounds(
+    TabContents* contents) {
   HWND contents_hwnd = contents->GetNativeView();
-  CRect contents_bounds;
-  GetWindowRect(contents_hwnd, &contents_bounds);
-
+  RECT contents_bounds_rect;
+  GetWindowRect(contents_hwnd, &contents_bounds_rect);
+  gfx::Rect contents_bounds(contents_bounds_rect);
   gfx::Rect window_bounds = window()->GetBounds();
 
-  int window_x = contents_bounds.left +
-      (contents_bounds.Width() - window_bounds.width()) / 2;
-  int window_y = contents_bounds.top + kOverlayContentsOffsetY;
+  int window_x = contents_bounds.x() +
+      (contents_bounds.width() - window_bounds.width()) / 2;
+  int window_y = contents_bounds.y() + kOverlayContentsOffsetY;
   return gfx::Rect(window_x, window_y, window_bounds.width(),
                    window_bounds.height());
 }
 
 // static
-void HungRendererWarningView::InitClass() {
+void HungRendererDialogView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -423,28 +429,26 @@ void HungRendererWarningView::InitClass() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HungRendererWarning
+// HungRendererDialog
 
-// static
-HungRendererWarningView* HungRendererWarning::instance_ = NULL;
 
-static HungRendererWarningView* CreateHungRendererWarningView() {
-  HungRendererWarningView* cv = new HungRendererWarningView;
+static HungRendererDialogView* CreateHungRendererDialogView() {
+  HungRendererDialogView* cv = new HungRendererDialogView;
   views::Window::CreateChromeWindow(NULL, gfx::Rect(), cv);
   return cv;
 }
 
 // static
-void HungRendererWarning::ShowForWebContents(WebContents* contents) {
+void HungRendererDialog::ShowForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
-    if (!instance_)
-      instance_ = CreateHungRendererWarningView();
-    instance_->ShowForWebContents(contents);
+    if (!g_instance)
+      g_instance = CreateHungRendererDialogView();
+    g_instance->ShowForTabContents(contents);
   }
 }
 
 // static
-void HungRendererWarning::HideForWebContents(WebContents* contents) {
-  if (!logging::DialogsAreSuppressed() && instance_)
-    instance_->EndForWebContents(contents);
+void HungRendererDialog::HideForTabContents(TabContents* contents) {
+  if (!logging::DialogsAreSuppressed() && g_instance)
+    g_instance->EndForTabContents(contents);
 }

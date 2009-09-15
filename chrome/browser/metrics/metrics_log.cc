@@ -108,12 +108,22 @@ std::string MetricsLog::CreateHash(const std::string& value) {
   MD5Digest digest;
   MD5Final(&digest, &ctx);
 
-  unsigned char reverse[8];  // UMA only uses first 8 chars of hash.
-  DCHECK(arraysize(digest.a) >= arraysize(reverse));
-  for (size_t i = 0; i < arraysize(reverse); ++i)
-    reverse[i] = digest.a[arraysize(reverse) - i - 1];
+  uint64 reverse_uint64;
+  // UMA only uses first 8 chars of hash. We use the above uint64 instead
+  // of a unsigned char[8] so that we don't run into strict aliasing issues
+  // in the LOG statement below when trying to interpret reverse as a uint64.
+  unsigned char* reverse = reinterpret_cast<unsigned char *>(&reverse_uint64);
+  DCHECK(arraysize(digest.a) >= sizeof(reverse_uint64));
+  for (size_t i = 0; i < sizeof(reverse_uint64); ++i)
+    reverse[i] = digest.a[sizeof(reverse_uint64) - i - 1];
+  // The following log is VERY helpful when folks add some named histogram into
+  // the code, but forgot to update the descriptive list of histograms.  When
+  // that happens, all we get to see (server side) is a hash of the histogram
+  // name.  We can then use this logging to find out what histogram name was
+  // being hashed to a given MD5 value by just running the version of Chromium
+  // in question with --enable-logging.
   LOG(INFO) << "Metrics: Hash numeric [" << value << "]=["
-    << *reinterpret_cast<const uint64*>(&reverse[0]) << "]";
+      << reverse_uint64 << "]";
   return std::string(reinterpret_cast<char*>(digest.a), arraysize(digest.a));
 }
 
@@ -183,6 +193,7 @@ void MetricsLog::RecordLoadEvent(int window_id,
       break;
 
     case PageTransition::GENERATED:
+    case PageTransition::KEYWORD:
       origin_string = "global-history";
       break;
 

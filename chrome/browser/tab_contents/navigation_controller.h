@@ -11,10 +11,10 @@
 
 #include "base/linked_ptr.h"
 #include "base/string16.h"
+#include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ssl/ssl_manager.h"
-#include "chrome/browser/tab_contents/tab_contents_type.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/page_transition_types.h"
 
@@ -24,7 +24,7 @@ class Profile;
 class TabContents;
 class SiteInstance;
 class SkBitmap;
-class WebContents;
+class TabContents;
 class TabContentsCollector;
 class TabNavigation;
 struct ViewHostMsg_FrameNavigate_Params;
@@ -56,6 +56,7 @@ class NavigationController {
     LoadCommittedDetails()
         : entry(NULL),
           is_auto(false),
+          did_replace_entry(false),
           is_in_page(false),
           is_main_frame(true) {
     }
@@ -81,6 +82,11 @@ class NavigationController {
     // fact that WebKit doesn't always set the user gesture properly in these
     // cases (see bug 1051891).
     bool is_auto;
+
+    // True if the committed entry has replaced the exisiting one.
+    // A non-user initiated redierct causes such replacement.
+    // This is somewhat similiar to is_auto, but not exactly the same.
+    bool did_replace_entry;
 
     // True if the navigation was in-page. This means that the active entry's
     // URL and the |previous_url| are the same except for reference fragments.
@@ -124,33 +130,20 @@ class NavigationController {
 
   // ---------------------------------------------------------------------------
 
-  NavigationController(TabContents* initial_contents, Profile* profile);
-
-  // Creates a NavigationController from the specified history. Processing
-  // for this is asynchronous and handled via the RestoreHelper (in
-  // navigation_controller.cc).
-  NavigationController(
-      Profile* profile,
-      const std::vector<TabNavigation>& navigations,
-      int selected_navigation);
+  NavigationController(TabContents* tab_contents, Profile* profile);
   ~NavigationController();
-
-  // Begin the destruction sequence for this NavigationController and all its
-  // registered tabs.  The sequence is as follows:
-  // 1. All tabs are asked to Destroy themselves.
-  // 2. When each tab is finished Destroying, it will notify the controller.
-  // 3. Once all tabs are Destroyed, the NavigationController deletes itself.
-  // This ensures that all the TabContents outlive the NavigationController.
-  void Destroy();
-
-  // Clone the receiving navigation controller. Only the active tab contents is
-  // duplicated.
-  NavigationController* Clone();
 
   // Returns the profile for this controller. It can never be NULL.
   Profile* profile() const {
     return profile_;
   }
+
+  // Initializes this NavigationController with the given saved navigations,
+  // using selected_navigation as the currently loaded entry. Before this call
+  // the controller should be unused (there should be no current entry). This is
+  // used for session restore.
+  void RestoreFromState(const std::vector<TabNavigation>& navigations,
+                        int selected_navigation);
 
   // Active entry --------------------------------------------------------------
 
@@ -172,7 +165,7 @@ class NavigationController {
   NavigationEntry* GetLastCommittedEntry() const;
 
   // Returns the index of the last committed entry.
-  int GetLastCommittedEntryIndex() const {
+  int last_committed_entry_index() const {
     return last_committed_entry_index_;
   }
 
@@ -181,7 +174,7 @@ class NavigationController {
   // Returns the number of entries in the NavigationController, excluding
   // the pending entry if there is one, but including the transient entry if
   // any.
-  int GetEntryCount() const {
+  int entry_count() const {
     return static_cast<int>(entries_.size());
   }
 
@@ -197,18 +190,14 @@ class NavigationController {
   // in this NavigationController.
   int GetIndexOfEntry(const NavigationEntry* entry) const;
 
-  // Return the index of the entry with the corresponding type, instance, and
-  // page_id, or -1 if not found.  Use a NULL instance if the type is not
-  // TAB_CONTENTS_WEB.
-  int GetEntryIndexWithPageID(TabContentsType type,
-                              SiteInstance* instance,
+  // Return the index of the entry with the corresponding instance and page_id,
+  // or -1 if not found.
+  int GetEntryIndexWithPageID(SiteInstance* instance,
                               int32 page_id) const;
 
-  // Return the entry with the corresponding type, instance, and page_id, or
-  // NULL if not found.  Use a NULL instance if the type is not
-  // TAB_CONTENTS_WEB.
-  NavigationEntry* GetEntryWithPageID(TabContentsType type,
-                                      SiteInstance* instance,
+  // Return the entry with the corresponding instance and page_id, or NULL if
+  // not found.
+  NavigationEntry* GetEntryWithPageID(SiteInstance* instance,
                                       int32 page_id) const;
 
   // Pending entry -------------------------------------------------------------
@@ -223,20 +212,18 @@ class NavigationController {
   // new page ID for you and update the TabContents with that ID.
   void CommitPendingEntry();
 
-  // Discards the pending and transient entries if any.  Calling this may cause
-  // the active tab contents to switch if the current entry corresponds to a
-  // different tab contents type.
+  // Discards the pending and transient entries if any.
   void DiscardNonCommittedEntries();
 
   // Returns the pending entry corresponding to the navigation that is
   // currently in progress, or null if there is none.
-  NavigationEntry* GetPendingEntry() const {
+  NavigationEntry* pending_entry() const {
     return pending_entry_;
   }
 
   // Returns the index of the pending entry or -1 if the pending entry
   // corresponds to a new navigation (created via LoadURL).
-  int GetPendingEntryIndex() const {
+  int pending_entry_index() const {
     return pending_entry_index_;
   }
 
@@ -300,24 +287,24 @@ class NavigationController {
 
   // TabContents ---------------------------------------------------------------
 
-  // Notifies the controller that a TabContents that it owns has been destroyed.
-  // This is part of the NavigationController's Destroy sequence.
-  void TabContentsWasDestroyed(TabContentsType type);
-
-  // Returns the TabContents cached on this controller for the given type or
-  // NULL if there is none.
-  TabContents* GetTabContents(TabContentsType type);
-
-  // Returns the currently-active TabContents associated with this controller.
-  // You should use GetActiveEntry instead of this in most cases.
-  TabContents* active_contents() const {
-    return active_contents_;
+  // Returns the tab contents associated with this controller. Non-NULL except
+  // during set-up of the tab.
+  TabContents* tab_contents() const {
+    // This currently returns the active tab contents which should be renamed to
+    // tab_contents.
+    return tab_contents_;
   }
+
+  // Called when a document has been loaded in a frame.
+  void DocumentLoadedInFrame();
+
+  // Called when the user presses the mouse, enter key or space bar.
+  void OnUserGesture();
 
   // For use by TabContents ----------------------------------------------------
 
   // Handles updating the navigation state after the renderer has navigated.
-  // This is used by the WebContents. Simpler tab contents types can use
+  // This is used by the TabContents. Simpler tab contents types can use
   // CommitPendingEntry below.
   //
   // If a new entry is created, it will return true and will have filled the
@@ -353,13 +340,17 @@ class NavigationController {
   // refs without reload, only change to "#" which we don't count as empty).
   bool IsURLInPageNavigation(const GURL& url) const;
 
+  // Copies the navigation state from the given controller to this one. This
+  // one should be empty (just created).
+  void CopyStateFrom(const NavigationController& source);
+
   // Random data ---------------------------------------------------------------
 
   // Returns true if this NavigationController is is configured to load a URL
   // lazily. If true, use GetLazyTitle() and GetLazyFavIcon() to discover the
   // titles and favicons. Since no request was made, this is the only info
   // we have about this page. This feature is used by web application clusters.
-  bool LoadingURLLazily();
+  bool LoadingURLLazily() const;
   const string16& GetLazyTitle() const;
   const SkBitmap& GetLazyFavIcon() const;
 
@@ -412,14 +403,18 @@ class NavigationController {
   // RendererDidNavigateAutoSubframe is special, it may not actually change
   // anything if some random subframe is loaded. It will return true if anything
   // changed, or false if not.
+  //
+  // The functions taking |did_replace_entry| will fill into the given variable
+  // whether the last entry has been replaced or not.
+  // See LoadCommittedDetails.did_replace_entry.
   void RendererDidNavigateToNewPage(
-      const ViewHostMsg_FrameNavigate_Params& params);
+      const ViewHostMsg_FrameNavigate_Params& params, bool* did_replace_entry);
   void RendererDidNavigateToExistingPage(
       const ViewHostMsg_FrameNavigate_Params& params);
   void RendererDidNavigateToSamePage(
       const ViewHostMsg_FrameNavigate_Params& params);
   void RendererDidNavigateInPage(
-      const ViewHostMsg_FrameNavigate_Params& params);
+      const ViewHostMsg_FrameNavigate_Params& params, bool* did_replace_entry);
   void RendererDidNavigateNewSubframe(
       const ViewHostMsg_FrameNavigate_Params& params);
   bool RendererDidNavigateAutoSubframe(
@@ -432,15 +427,6 @@ class NavigationController {
   // committed. This will fill in the active entry to the details structure.
   void NotifyNavigationEntryCommitted(LoadCommittedDetails* details);
 
-  // Returns the TabContents for the |entry|'s type. If the TabContents
-  // doesn't yet exist, it is created. If a new TabContents is created, its
-  // parent is |parent|.  Becomes part of |entry|'s SiteInstance.
-  TabContents* GetTabContentsCreateIfNecessary(const NavigationEntry& entry);
-
-  // Register the provided tab contents. This tab contents will be owned
-  // and deleted by this navigation controller
-  void RegisterTabContents(TabContents* some_contents);
-
   // Sets the max restored page ID this NavigationController has seen, if it
   // was restored from a previous session.
   void set_max_restored_page_id(int max_id) { max_restored_page_id_ = max_id; }
@@ -448,33 +434,27 @@ class NavigationController {
   NavigationEntry* CreateNavigationEntry(const GURL& url, const GURL& referrer,
                                          PageTransition::Type transition);
 
-  // Invokes ScheduleTabContentsCollection for all TabContents but the active
-  // one.
-  void ScheduleTabContentsCollectionForInactiveTabs();
-
-  // Schedule the TabContents currently allocated for |tc| for collection.
-  // The TabContents will be destroyed later from a different event.
-  void ScheduleTabContentsCollection(TabContentsType t);
-
-  // Cancel the collection of the TabContents allocated for |tc|. This method
-  // is used when we keep using a TabContents because a provisional load failed.
-  void CancelTabContentsCollection(TabContentsType t);
-
   // Invoked after session/tab restore or cloning a tab. Resets the transition
   // type of the entries, updates the max page id and creates the active
   // contents.
   void FinishRestore(int selected_index);
 
-  // Inserts an entry after the current position, removing all entries after it.
-  // The new entry will become the active one.
-  void InsertEntry(NavigationEntry* entry);
+  // Inserts a new entry or replaces the current entry with a new one, removing
+  // all entries after it. The new entry will become the active one.
+  void InsertOrReplaceEntry(NavigationEntry* entry, bool replace);
 
-  // Discards the pending and transient entries without updating
-  // active_contents_.
+  // Discards the pending and transient entries.
   void DiscardNonCommittedEntriesInternal();
 
-  // Discards the transient entry without updating active_contents_.
+  // Discards the transient entry.
   void DiscardTransientEntry();
+
+  // Returns true if the navigation is redirect.
+  bool IsRedirect(const ViewHostMsg_FrameNavigate_Params& params);
+
+  // Returns true if the navigation is likley to be automatic rather than
+  // user-initiated.
+  bool IsLikelyAutoNavigation(base::TimeTicks now);
 
   // ---------------------------------------------------------------------------
 
@@ -508,22 +488,12 @@ class NavigationController {
   // after the transient entry will become invalid if you navigate forward.
   int transient_entry_index_;
 
-  // Tab contents. One entry per type used. The tab controller owns
-  // every tab contents used.
-  typedef std::map<TabContentsType, TabContents*> TabContentsMap;
-  TabContentsMap tab_contents_map_;
-
-  // A map of TabContentsType -> TabContentsCollector containing all the
-  // pending collectors.
-  typedef std::map<TabContentsType, TabContentsCollector*>
-      TabContentsCollectorMap;
-  TabContentsCollectorMap tab_contents_collector_map_;
-
-  // The tab contents that is currently active.
-  TabContents* active_contents_;
+  // The tab contents associated with the controller. Possibly NULL during
+  // setup.
+  TabContents* tab_contents_;
 
   // The max restored page ID in this controller, if it was restored.  We must
-  // store this so that WebContents can tell any renderer in charge of one of
+  // store this so that TabContents can tell any renderer in charge of one of
   // the restored entries to update its max page ID.
   int max_restored_page_id_;
 
@@ -544,6 +514,12 @@ class NavigationController {
 
   // Unique identifier of the window we're in. Used by session restore.
   SessionID window_id_;
+
+  // The time ticks at which the last document was loaded.
+  base::TimeTicks last_document_loaded_;
+
+  // Whether a user gesture has been observed since the last navigation.
+  bool user_gesture_observed_;
 
   // Should Reload check for post data? The default is true, but is set to false
   // when testing.

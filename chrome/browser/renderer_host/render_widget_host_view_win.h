@@ -19,13 +19,13 @@ namespace gfx {
 class Size;
 class Rect;
 }
+
 namespace IPC {
 class Message;
 }
 
 class BackingStore;
 class RenderWidgetHost;
-class WebMouseEvent;
 
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
@@ -57,17 +57,6 @@ class RenderWidgetHostViewWin :
   // The view will associate itself with the given widget.
   explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewWin();
-
-  void set_close_on_deactivate(bool close_on_deactivate) {
-    close_on_deactivate_ = close_on_deactivate;
-  }
-
-  void set_activatable(bool activatable) {
-    activatable_ = activatable;
-  }
-  bool activatable() const { return activatable_; }
-
-  void set_parent_hwnd(HWND parent) { parent_hwnd_ = parent; }
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -117,11 +106,13 @@ class RenderWidgetHostViewWin :
   END_MSG_MAP()
 
   // Implementation of RenderWidgetHostView:
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos);
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
   virtual void SetSize(const gfx::Size& size);
-  virtual gfx::NativeView GetPluginNativeView();
+  virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
       const std::vector<WebPluginGeometry>& plugin_window_moves);
   virtual void Focus();
@@ -131,7 +122,6 @@ class RenderWidgetHostViewWin :
   virtual void Hide();
   virtual gfx::Rect GetViewBounds() const;
   virtual void UpdateCursor(const WebCursor& cursor);
-  virtual void UpdateCursorIfOverSelf();
   virtual void SetIsLoading(bool is_loading);
   virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
   virtual void DidPaintRect(const gfx::Rect& rect);
@@ -140,6 +130,7 @@ class RenderWidgetHostViewWin :
   virtual void Destroy();
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
+  virtual void SetBackground(const SkBitmap& background);
 
  protected:
   // Windows Message Handlers
@@ -183,6 +174,10 @@ class RenderWidgetHostViewWin :
   void OnFinalMessage(HWND window);
 
  private:
+  // Updates the display cursor to the current cursor if the cursor is over this
+  // render view.
+  void UpdateCursorIfOverSelf();
+
   // Tells Windows that we want to hear about mouse exit messages.
   void TrackMouseLeave(bool start_tracking);
 
@@ -216,6 +211,14 @@ class RenderWidgetHostViewWin :
   // given paint rect.
   void DrawResizeCorner(const gfx::Rect& paint_rect, HDC dc);
 
+  // Draw our background over the given HDC in the given |rect|. The background
+  // will be tiled such that it lines up with existing tiles starting from the
+  // origin of |dc|.
+  void DrawBackground(const RECT& rect, CPaintDC* dc);
+
+  // Create an intermediate window between the given HWND and its parent.
+  HWND ReparentWindow(HWND window);
+
   // The associated Model.
   RenderWidgetHost* render_widget_host_;
 
@@ -238,6 +241,11 @@ class RenderWidgetHostViewWin :
 
   // true if the View is not visible.
   bool is_hidden_;
+
+  // True if we're in the midst of a paint operation and should respond to
+  // DidPaintRect() notifications by merely invalidating.  See comments on
+  // render_widget_host_view.h:DidPaintRect().
+  bool about_to_validate_and_paint_;
 
   // true if the View should be closed when its HWND is deactivated (used to
   // support SELECT popups which are closed when they are deactivated).
@@ -269,10 +277,6 @@ class RenderWidgetHostViewWin :
   // not having anything to paint (empty backing store from renderer). This
   // value returns true for is_null() if we are not recording whiteout times.
   base::TimeTicks whiteout_start_time_;
-
-  // Whether the window can be activated. Autocomplete popup windows for example
-  // cannot be activated.  Default is true.
-  bool activatable_;
 
   // Whether the renderer is made accessible.
   // TODO(jcampan): http://b/issue?id=1432077 This is a temporary work-around

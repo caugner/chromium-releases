@@ -39,6 +39,7 @@
 class AutomationProxy;
 class BrowserProxy;
 class DictionaryValue;
+class FilePath;
 class GURL;
 class TabProxy;
 
@@ -63,10 +64,13 @@ class UITest : public testing::Test {
 
   // ********* Utility functions *********
 
-  // Tries to delete the specified file/directory returning true on success.
-  // This differs from file_util::Delete in that it repeatedly invokes Delete
-  // until successful, or a timeout is reached. Returns true on success.
-  bool DieFileDie(const std::wstring& file, bool recurse);
+  // Tries to delete the specified file/directory returning true on
+  // success.  This differs from file_util::Delete in that it
+  // repeatedly invokes Delete until successful, or a timeout is
+  // reached.  (This retrying is to work around Windows file locks
+  // and shouldn't be necessary on POSIX, but it can't hurt.)
+  // Returns true on success.
+  bool DieFileDie(const FilePath& file, bool recurse);
 
   // Launches the browser and IPC testing server.
   void LaunchBrowserAndServer();
@@ -93,12 +97,28 @@ class UITest : public testing::Test {
   // This method doesn't return until the navigation is complete.
   void NavigateToURL(const GURL& url);
 
-  // Returns the URL of the currently active tab. If there is no active tab,
-  // or some other error, the returned URL will be empty.
-  GURL GetActiveTabURL();
+  // Returns the URL of the currently active tab. Only looks in the first
+  // window, for backward compatibility. If there is no active tab, or some
+  // other error, the returned URL will be empty.
+  GURL GetActiveTabURL() { return GetActiveTabURL(0); }
 
-  // Returns the title of the currently active tab.
-  std::wstring GetActiveTabTitle();
+  // Like above, but looks at the window at the given index.
+  GURL GetActiveTabURL(int window_index);
+
+  // Returns the title of the currently active tab. Only looks in the first
+  // window, for backward compatibility.
+  std::wstring GetActiveTabTitle() { return GetActiveTabTitle(0); }
+
+  // Like above, but looks at the window at the given index.
+  std::wstring GetActiveTabTitle(int window_index);
+
+  // Returns the tabstrip index of the currently active tab in the window at
+  // the given index, or -1 on error. Only looks in the first window, for
+  // backward compatibility.
+  int GetActiveTabIndex() { return GetActiveTabIndex(0); }
+
+  // Like above, but looks at the window at the given index.
+  int GetActiveTabIndex(int window_index);
 
   // Returns true when the browser process is running, independent if any
   // renderer process exists or not. It will returns false if an user closed the
@@ -152,10 +172,22 @@ class UITest : public testing::Test {
   // assert that the tab count is valid at the end of the wait.
   void WaitUntilTabCount(int tab_count);
 
-  // Checks whether the download shelf is visible in the current tab, giving it
-  // a chance to appear (we don't know the exact timing) while finishing as soon
-  // as possible.
-  bool WaitForDownloadShelfVisible(TabProxy* tab);
+  // Checks whether the download shelf is visible in the current browser, giving
+  // it a chance to appear (we don't know the exact timing) while finishing as
+  // soon as possible.
+  bool WaitForDownloadShelfVisible(BrowserProxy* browser);
+
+  // Checks whether the download shelf is invisible in the current browser,
+  // giving it a chance to appear (we don't know the exact timing) while
+  // finishing as soon as possible.
+  bool WaitForDownloadShelfInvisible(BrowserProxy* browser);
+
+ private:
+  // Waits for download shelf visibility or invisibility.
+  bool WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
+                                            bool wait_for_open);
+
+ public:
 
   // Waits until the Find window has become fully visible (if |wait_for_open| is
   // true) or fully hidden (if |wait_for_open| is false). This function can time
@@ -198,6 +230,15 @@ class UITest : public testing::Test {
                    const std::string& modifier,
                    const std::string& trace,
                    size_t value,
+                   const std::string& units,
+                   bool important);
+
+  // Like the above version of PrintResult(), but takes a std::string value
+  // instead of a size_t.
+  void PrintResult(const std::string& measurement,
+                   const std::string& modifier,
+                   const std::string& trace,
+                   const std::string& value,
                    const std::string& units,
                    bool important);
 
@@ -305,6 +346,13 @@ class UITest : public testing::Test {
     log_level_ = value;
   }
 
+  // Returns the directory name where the "typical" user data is that we use
+  // for testing.
+  static FilePath ComputeTypicalUserDataSource(int profile_type);
+
+  // Rewrite the preferences file to point to the proper image directory.
+  static void RewritePreferencesFile(const FilePath& user_data_dir);
+
   // Called by some tests that wish to have a base profile to start from. This
   // "user data directory" (containing one or more profiles) will be recursively
   // copied into the user data directory for the test and the files will be
@@ -317,7 +365,7 @@ class UITest : public testing::Test {
 
   // Return the user data directory being used by the browser instance in
   // UITest::SetUp().
-  std::wstring user_data_dir() const { return user_data_dir_; }
+  FilePath user_data_dir() const { return user_data_dir_; }
 
   // Timeout accessors.
   int command_execution_timeout_ms() const {
@@ -367,6 +415,16 @@ class UITest : public testing::Test {
   // TODO(phajdan.jr): Move to test_file_util if we need it in more places.
   bool EvictFileFromSystemCacheWrapper(const FilePath& path);
 
+  // Synchronously launches local http server normally used to run LayoutTests.
+  void StartHttpServer(const FilePath& root_directory);
+  void StopHttpServer();
+
+  // Profile theme type choices.
+  enum {
+    DEFAULT_THEME = 0,
+    COMPLEX_THEME = 1
+  } ProfileType;
+
  private:
   // Check that no processes related to Chrome exist, displaying
   // the given message if any do.
@@ -395,16 +453,18 @@ class UITest : public testing::Test {
   void CleanupAppProcesses();
 
   // Returns the proxy for the currently active tab, or NULL if there is no
-  // tab or there was some kind of error. The returned pointer MUST be
-  // deleted by the caller if non-NULL.
-  TabProxy* GetActiveTab();
+  // tab or there was some kind of error. Only looks at the first window, for
+  // backward compatibility. The returned pointer MUST be deleted by the
+  // caller if non-NULL.
+  scoped_refptr<TabProxy> GetActiveTab();
+
+  // Like above, but looks at the window at the given index.
+  scoped_refptr<TabProxy> GetActiveTab(int window_index);
 
   // ********* Member variables *********
 
-  std::wstring browser_directory_;      // Path to the browser executable,
-                                        // with no trailing slash
-  std::wstring test_data_directory_;    // Path to the unit test data,
-                                        // with no trailing slash
+  FilePath browser_directory_;          // Path to the browser executable.
+  FilePath test_data_directory_;        // Path to the unit test data.
   CommandLine launch_arguments_;        // Command to launch the browser
   size_t expected_errors_;              // The number of errors expected during
                                         // the run (generally 0).
@@ -418,7 +478,7 @@ class UITest : public testing::Test {
                                         // test run the dom automation case.
   std::wstring template_user_data_;     // See set_template_user_data().
   base::ProcessHandle process_;         // Handle to the first Chrome process.
-  std::wstring user_data_dir_;          // User data directory used for the test
+  FilePath user_data_dir_;              // User data directory used for the test
   static bool in_process_renderer_;     // true if we're in single process mode
   bool show_window_;                    // Determines if the window is shown or
                                         // hidden. Defaults to hidden.
@@ -430,15 +490,12 @@ class UITest : public testing::Test {
   bool use_existing_browser_;           // Duplicate of the static version.
                                         // Default value comes from static.
   bool enable_file_cookies_;            // Enable file cookies, default is true.
+  int profile_type_;                    // Are we using a profile with a
+                                        // complex theme?
 
  private:
-#if defined(OS_WIN)
-  // TODO(port): make this use base::Time instead.  It would seem easy, but
-  // the code also depends on file_util::CountFilesCreatedAfter which hasn't
-  // yet been made portable.
-  FILETIME test_start_time_;            // Time the test was started
+  base::Time test_start_time_;          // Time the test was started
                                         // (so we can check for new crash dumps)
-#endif
   static bool no_sandbox_;
   static bool safe_plugins_;
   static bool full_memory_dump_;        // If true, write full memory dump
@@ -465,6 +522,7 @@ class UITest : public testing::Test {
   int action_timeout_ms_;
   int action_max_timeout_ms_;
   int sleep_timeout_ms_;
+  int terminate_timeout_ms_;
 
   std::wstring ui_test_name_;
 };

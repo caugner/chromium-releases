@@ -4,30 +4,38 @@
 
 #include "chrome/browser/views/clear_browsing_data.h"
 
+#include "app/l10n_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/background.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/throbber.h"
-#include "chrome/views/window/window.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/url_request/url_request_context.h"
-
-using base::Time;
-using base::TimeDelta;
+#include "views/background.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/label.h"
+#include "views/controls/throbber.h"
+#include "views/standard_layout.h"
+#include "views/widget/widget.h"
+#include "views/window/window.h"
 
 // The combo box is vertically aligned to the 'time-period' label, which makes
 // the combo box look a little too close to the check box above it when we use
 // standard layout to separate them. We therefore add a little extra margin to
 // the label, giving it a little breathing space.
 static const int kExtraMarginForTimePeriodLabel = 3;
+
+namespace browser {
+
+// Defined in browser_dialogs.h for creation of the view.
+void ShowClearBrowsingDataView(gfx::NativeWindow parent,
+                               Profile* profile) {
+  views::Window::CreateChromeWindow(parent, gfx::Rect(),
+                                    new ClearBrowsingDataView(profile))->Show();
+}
+
+}  // namespace browser
 
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, public:
@@ -104,10 +112,10 @@ void ClearBrowsingDataView::Init() {
   AddChildView(time_period_label_);
 
   // Add the combo box showing how far back in time we want to delete.
-  time_period_combobox_ = new views::ComboBox(this);
+  time_period_combobox_ = new views::Combobox(this);
   time_period_combobox_->SetSelectedItem(profile_->GetPrefs()->GetInteger(
                                          prefs::kDeleteTimePeriod));
-  time_period_combobox_->SetListener(this);
+  time_period_combobox_->set_listener(this);
   AddChildView(time_period_combobox_);
 }
 
@@ -237,27 +245,28 @@ void ClearBrowsingDataView::ViewHierarchyChanged(bool is_add,
 // ClearBrowsingDataView, views::DialogDelegate implementation:
 
 std::wstring ClearBrowsingDataView::GetDialogButtonLabel(
-    DialogButton button) const {
-  if (button == DIALOGBUTTON_OK) {
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
     return l10n_util::GetString(IDS_CLEAR_BROWSING_DATA_COMMIT);
-  } else if (button == DIALOGBUTTON_CANCEL) {
+  } else if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL) {
     return l10n_util::GetString(IDS_CLOSE);
   } else {
     return std::wstring();
   }
 }
 
-bool ClearBrowsingDataView::IsDialogButtonEnabled(DialogButton button) const {
+bool ClearBrowsingDataView::IsDialogButtonEnabled(
+    MessageBoxFlags::DialogButton button) const {
   if (delete_in_progress_)
     return false;
 
-  if (button == DIALOGBUTTON_OK) {
-    return del_history_checkbox_->IsSelected() ||
-           del_downloads_checkbox_->IsSelected() ||
-           del_cache_checkbox_->IsSelected() ||
-           del_cookies_checkbox_->IsSelected() ||
-           del_passwords_checkbox_->IsSelected() ||
-           del_form_data_checkbox_->IsSelected();
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
+    return del_history_checkbox_->checked() ||
+           del_downloads_checkbox_->checked() ||
+           del_cache_checkbox_->checked() ||
+           del_cookies_checkbox_->checked() ||
+           del_passwords_checkbox_->checked() ||
+           del_form_data_checkbox_->checked();
   }
 
   return true;
@@ -288,7 +297,7 @@ std::wstring ClearBrowsingDataView::GetWindowTitle() const {
 }
 
 bool ClearBrowsingDataView::Accept() {
-  if (!IsDialogButtonEnabled(DIALOGBUTTON_OK)) {
+  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
     return false;
   }
 
@@ -301,14 +310,14 @@ views::View* ClearBrowsingDataView::GetContentsView() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ClearBrowsingDataView, views::ComboBox::Model implementation:
+// ClearBrowsingDataView, views::Combobox::Model implementation:
 
-int ClearBrowsingDataView::GetItemCount(views::ComboBox* source) {
+int ClearBrowsingDataView::GetItemCount(views::Combobox* source) {
   DCHECK(source == time_period_combobox_);
   return 4;
 }
 
-std::wstring ClearBrowsingDataView::GetItemAt(views::ComboBox* source,
+std::wstring ClearBrowsingDataView::GetItemAt(views::Combobox* source,
                                               int index) {
   DCHECK(source == time_period_combobox_);
   switch (index) {
@@ -324,7 +333,7 @@ std::wstring ClearBrowsingDataView::GetItemAt(views::ComboBox* source,
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, views::ComboBoxListener implementation:
 
-void ClearBrowsingDataView::ItemChanged(views::ComboBox* sender,
+void ClearBrowsingDataView::ItemChanged(views::Combobox* sender,
                                         int prev_index, int new_index) {
   if (sender == time_period_combobox_ && prev_index != new_index)
     profile_->GetPrefs()->SetInteger(prefs::kDeleteTimePeriod, new_index);
@@ -333,25 +342,25 @@ void ClearBrowsingDataView::ItemChanged(views::ComboBox* sender,
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, views::ButtonListener implementation:
 
-void ClearBrowsingDataView::ButtonPressed(views::NativeButton* sender) {
+void ClearBrowsingDataView::ButtonPressed(views::Button* sender) {
   if (sender == del_history_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteBrowsingHistory,
-        del_history_checkbox_->IsSelected() ? true : false);
+        del_history_checkbox_->checked() ? true : false);
   else if (sender == del_downloads_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteDownloadHistory,
-        del_downloads_checkbox_->IsSelected() ? true : false);
+        del_downloads_checkbox_->checked() ? true : false);
   else if (sender == del_cache_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteCache,
-        del_cache_checkbox_->IsSelected() ? true : false);
+        del_cache_checkbox_->checked() ? true : false);
   else if (sender == del_cookies_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteCookies,
-        del_cookies_checkbox_->IsSelected() ? true : false);
+        del_cookies_checkbox_->checked() ? true : false);
   else if (sender == del_passwords_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeletePasswords,
-        del_passwords_checkbox_->IsSelected() ? true : false);
+        del_passwords_checkbox_->checked() ? true : false);
   else if (sender == del_form_data_checkbox_)
     profile_->GetPrefs()->SetBoolean(prefs::kDeleteFormData,
-        del_form_data_checkbox_->IsSelected() ? true : false);
+        del_form_data_checkbox_->checked() ? true : false);
 
   // When no checkbox is checked we should not have the action button enabled.
   // This forces the button to evaluate what state they should be in.
@@ -361,11 +370,11 @@ void ClearBrowsingDataView::ButtonPressed(views::NativeButton* sender) {
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, private:
 
-views::CheckBox* ClearBrowsingDataView::AddCheckbox(const std::wstring& text,
+views::Checkbox* ClearBrowsingDataView::AddCheckbox(const std::wstring& text,
                                                     bool checked) {
-  views::CheckBox* checkbox = new views::CheckBox(text);
-  checkbox->SetIsSelected(checked);
-  checkbox->SetListener(this);
+  views::Checkbox* checkbox = new views::Checkbox(text);
+  checkbox->SetChecked(checked);
+  checkbox->set_listener(this);
   AddChildView(checkbox);
   return checkbox;
 }
@@ -394,24 +403,12 @@ void ClearBrowsingDataView::UpdateControlEnabledState() {
 
 // Convenience method that returns true if the supplied checkbox is selected
 // and enabled.
-static bool IsCheckBoxEnabledAndSelected(views::CheckBox* cb) {
-  return (cb->IsEnabled() && cb->IsSelected());
+static bool IsCheckBoxEnabledAndSelected(views::Checkbox* cb) {
+  return (cb->IsEnabled() && cb->checked());
 }
 
 void ClearBrowsingDataView::OnDelete() {
-  TimeDelta diff;
-  Time delete_begin = Time::Now();
-
-  int period_selected = time_period_combobox_->GetSelectedItem();
-  switch (period_selected) {
-    case 0: diff = TimeDelta::FromHours(24); break;        // Last day.
-    case 1: diff = TimeDelta::FromHours(7*24); break;      // Last week.
-    case 2: diff = TimeDelta::FromHours(4*7*24); break;    // Four weeks.
-    case 3: delete_begin = Time(); break;                  // Everything.
-    default: NOTREACHED() << L"Missing item"; break;
-  }
-
-  delete_begin = delete_begin - diff;
+  int period_selected = time_period_combobox_->selected_item();
 
   int remove_mask = 0;
   if (IsCheckBoxEnabledAndSelected(del_history_checkbox_))
@@ -431,8 +428,9 @@ void ClearBrowsingDataView::OnDelete() {
   UpdateControlEnabledState();
 
   // BrowsingDataRemover deletes itself when done.
-  remover_ =
-      new BrowsingDataRemover(profile_, delete_begin, Time());
+  remover_ = new BrowsingDataRemover(profile_,
+      static_cast<BrowsingDataRemover::TimePeriod>(period_selected),
+      base::Time());
   remover_->AddObserver(this);
   remover_->Remove(remove_mask);
 }

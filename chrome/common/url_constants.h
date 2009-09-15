@@ -17,10 +17,12 @@ extern const char kDataScheme[];
 extern const char kExtensionScheme[];
 extern const char kFileScheme[];
 extern const char kFtpScheme[];
+extern const char kGearsScheme[];
 extern const char kHttpScheme[];
 extern const char kHttpsScheme[];
 extern const char kJavaScriptScheme[];
 extern const char kMailToScheme[];
+extern const char kPrintScheme[];
 extern const char kUserScriptScheme[];
 extern const char kViewCacheScheme[];
 extern const char kViewSourceScheme[];
@@ -30,23 +32,27 @@ extern const char kStandardSchemeSeparator[];
 
 // About URLs (including schmes).
 extern const char kAboutBlankURL[];
+extern const char kAboutBrowserCrash[];
 extern const char kAboutCacheURL[];
+extern const char kAboutCrashURL[];
+extern const char kAboutHangURL[];
 extern const char kAboutMemoryURL[];
+extern const char kAboutShorthangURL[];
 
-// chrome-ui: URLs (including schemes). Should be kept in sync with the
+// chrome: URLs (including schemes). Should be kept in sync with the
 // components below.
 extern const char kChromeUIDevToolsURL[];
 extern const char kChromeUIDownloadsURL[];
 extern const char kChromeUIExtensionsURL[];
 extern const char kChromeUIHistoryURL[];
 extern const char kChromeUIIPCURL[];
-extern const char kChromeUIInspectorURL[];
 extern const char kChromeUINetworkURL[];
 extern const char kChromeUINewTabURL[];
 
-// chrome-ui components of URLs. Should be kept in sync with the full URLs
+// chrome components of URLs. Should be kept in sync with the full URLs
 // above.
 extern const char kChromeUIDevToolsHost[];
+extern const char kChromeUIDialogHost[];
 extern const char kChromeUIDownloadsHost[];
 extern const char kChromeUIExtensionsHost[];
 extern const char kChromeUIFavIconPath[];
@@ -54,6 +60,7 @@ extern const char kChromeUIHistoryHost[];
 extern const char kChromeUIInspectorHost[];
 extern const char kChromeUINewTabHost[];
 extern const char kChromeUIThumbnailPath[];
+extern const char kChromeUIThemePath[];
 
 }  // namespace chrome
 

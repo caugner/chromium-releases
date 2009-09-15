@@ -11,6 +11,7 @@
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/common/notification_registrar.h"
 
 class GURL;
 
@@ -34,8 +35,12 @@ class BrowsingHistoryHandler : public DOMMessageHandler,
                                public NotificationObserver,
                                public BrowsingDataRemover::Observer {
  public:
-  explicit BrowsingHistoryHandler(DOMUI* dom_ui_);
+  BrowsingHistoryHandler();
   virtual ~BrowsingHistoryHandler();
+
+  // DOMMessageHandler implementation.
+  virtual DOMMessageHandler* Attach(DOMUI* dom_ui);
+  virtual void RegisterMessages();
 
   // Callback for the "getHistory" message.
   void HandleGetHistory(const Value* value);
@@ -67,6 +72,8 @@ class BrowsingHistoryHandler : public DOMMessageHandler,
   // Figure out the query options for a month-wide query.
   history::QueryOptions CreateMonthQueryOptions(int month);
 
+  NotificationRegistrar registrar_;
+
   // Current search text.
   std::wstring search_text_;
 
@@ -81,7 +88,7 @@ class BrowsingHistoryHandler : public DOMMessageHandler,
 
 class HistoryUI : public DOMUI {
  public:
-  explicit HistoryUI(WebContents* contents);
+  explicit HistoryUI(TabContents* contents);
 
   // Return the URL for a given search term.
   static const GURL GetHistoryURLWithSearchText(const std::wstring& text);

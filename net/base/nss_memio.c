@@ -68,23 +68,11 @@ static void memio_buffer_new(struct memio_buffer *mb, int size);
 /* Deallocate a memio_buffer allocated by memio_buffer_new. */
 static void memio_buffer_destroy(struct memio_buffer *mb);
 
-/* How many bytes have been put into the buffer */
-static int memio_buffer_used(const struct memio_buffer *mb);
-
 /* How many bytes can be read out of the buffer without wrapping */
 static int memio_buffer_used_contiguous(const struct memio_buffer *mb);
 
-/* How many bytes can still be put into the buffer */
-static int memio_buffer_unused(const struct memio_buffer *mb);
-
 /* How many bytes can be written into the buffer without wrapping */
 static int memio_buffer_unused_contiguous(const struct memio_buffer *mb);
-
-/* Is buffer completely empty? */
-static int memio_buffer_empty(const struct memio_buffer *mb);
-
-/* Is buffer completely full? */
-static int memio_buffer_full(const struct memio_buffer *mb);
 
 /* Write n bytes into the buffer.  Returns number of bytes written. */
 static int memio_buffer_put(struct memio_buffer *mb, const char *buf, int n);
@@ -110,24 +98,10 @@ static void memio_buffer_destroy(struct memio_buffer *mb)
     mb->tail = 0;
 }
 
-/* How many bytes have been put into the buffer */
-static int memio_buffer_used(const struct memio_buffer *mb)
-{
-    int n = mb->tail - mb->head;
-    if (n < 0) n += mb->bufsize;
-    return n;
-}
-
 /* How many bytes can be read out of the buffer without wrapping */
 static int memio_buffer_used_contiguous(const struct memio_buffer *mb)
 {
     return (((mb->tail >= mb->head) ? mb->tail : mb->bufsize) - mb->head);
-}
-
-/* How many bytes can still be put into the buffer */
-static int memio_buffer_unused(const struct memio_buffer *mb)
-{
-    return mb->bufsize - memio_buffer_used(mb) - 1;
 }
 
 /* How many bytes can be written into the buffer without wrapping */
@@ -135,18 +109,6 @@ static int memio_buffer_unused_contiguous(const struct memio_buffer *mb)
 {
     if (mb->head > mb->tail) return mb->head - mb->tail - 1;
     return mb->bufsize - mb->tail - (mb->head == 0);
-}
-
-/* Is buffer completely empty? */
-static int memio_buffer_empty(const struct memio_buffer *mb)
-{
-    return mb->head == mb->tail;
-}
-
-/* Is buffer completely full? */
-static int memio_buffer_full(const struct memio_buffer *mb)
-{
-    return memio_buffer_unused(mb) == 0;
 }
 
 /* Write n bytes into the buffer.  Returns number of bytes written. */
@@ -485,58 +447,34 @@ int main()
 
     memio_buffer_new(&mb, TEST_BUFLEN);
 
-    CHECKEQ(memio_buffer_empty(&mb), TRUE);
-    CHECKEQ(memio_buffer_full(&mb), FALSE);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), TEST_BUFLEN-1);
-    CHECKEQ(memio_buffer_unused(&mb), TEST_BUFLEN-1);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 0);
-    CHECKEQ(memio_buffer_used(&mb), 0);
 
     CHECKEQ(memio_buffer_put(&mb, "howdy", 5), 5);
 
-    CHECKEQ(memio_buffer_empty(&mb), FALSE);
-    CHECKEQ(memio_buffer_full(&mb), FALSE);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), TEST_BUFLEN-1-5);
-    CHECKEQ(memio_buffer_unused(&mb), TEST_BUFLEN-1-5);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 5);
-    CHECKEQ(memio_buffer_used(&mb), 5);
 
     CHECKEQ(memio_buffer_put(&mb, "!", 1), 1);
 
-    CHECKEQ(memio_buffer_empty(&mb), FALSE);
-    CHECKEQ(memio_buffer_full(&mb), TRUE);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), 0);
-    CHECKEQ(memio_buffer_unused(&mb), 0);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 6);
-    CHECKEQ(memio_buffer_used(&mb), 6);
 
     CHECKEQ(memio_buffer_get(&mb, buf, 6), 6);
     CHECKEQ(memcmp(buf, "howdy!", 6), 0);
 
-    CHECKEQ(memio_buffer_empty(&mb), TRUE);
-    CHECKEQ(memio_buffer_full(&mb), FALSE);
-    CHECKEQ(memio_buffer_unused(&mb), TEST_BUFLEN-1);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), 1);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 0);
-    CHECKEQ(memio_buffer_used(&mb), 0);
 
     CHECKEQ(memio_buffer_put(&mb, "01234", 5), 5);
 
-    CHECKEQ(memio_buffer_empty(&mb), FALSE);
-    CHECKEQ(memio_buffer_full(&mb), FALSE);
-    CHECKEQ(memio_buffer_used(&mb), 5);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 1);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), TEST_BUFLEN-1-5);
-    CHECKEQ(memio_buffer_unused(&mb), TEST_BUFLEN-1-5);
 
     CHECKEQ(memio_buffer_put(&mb, "5", 1), 1);
 
-    CHECKEQ(memio_buffer_empty(&mb), FALSE);
-    CHECKEQ(memio_buffer_full(&mb), TRUE);
     CHECKEQ(memio_buffer_unused_contiguous(&mb), 0);
-    CHECKEQ(memio_buffer_unused(&mb), 0);
     CHECKEQ(memio_buffer_used_contiguous(&mb), 1);
-    CHECKEQ(memio_buffer_used(&mb), 6);
 
     /* TODO: add more cases */
 

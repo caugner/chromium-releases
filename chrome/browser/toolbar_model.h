@@ -8,8 +8,6 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "skia/include/SkColor.h"
-#include "webkit/glue/feed.h"
 
 class NavigationController;
 class NavigationEntry;
@@ -32,8 +30,13 @@ class ToolbarModel {
     WARNING_ICON
   };
 
+  enum InfoTextType {
+    INFO_NO_INFO = 0,
+    INFO_EV_TEXT,
+  };
+
   ToolbarModel();
-  ~ToolbarModel();
+  virtual ~ToolbarModel();
 
   // Returns the text that should be displayed in the location bar.
   // Default value: empty string.
@@ -53,21 +56,17 @@ class ToolbarModel {
   // Default value: NO_ICON.
   virtual Icon GetIcon();
 
-  // Returns an array of available feeds.
-  virtual scoped_refptr<FeedList> GetFeedList();
-
-  // Sets the text and color of the text displayed in the info bubble that
-  // appears when the user hovers the mouse over the icon.
+  // Sets the text displayed in the info bubble that appears when the user
+  // hovers the mouse over the icon.
   // Default value: empty string.
-  virtual void GetIconHoverText(std::wstring* text, SkColor* text_color);
+  virtual void GetIconHoverText(std::wstring* text);
 
   // Sets |text| to contain the text that should be displayed on the right of
   // the location bar, and |tooltip| to the tooltip text that should be shown
   // when the mouse hover over that info label.
-  // Default value: empty string.
-  virtual void GetInfoText(std::wstring* text,
-                           SkColor* text_color,
-                           std::wstring* tooltip);
+  // Default value: NO_INFO and empty string for |text| and |tooltip|.
+  virtual InfoTextType GetInfoText(std::wstring* text,
+                                   std::wstring* tooltip);
 
   // Getter/setter of whether the text in location bar is currently being
   // edited.

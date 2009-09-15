@@ -9,6 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/history_database.h"
@@ -23,6 +24,62 @@ using base::TimeDelta;
 namespace history {
 
 namespace {
+
+// The number of days by which the expiration threshold is advanced for items
+// that we want to expire early, such as those of AUTO_SUBFRAME transition type.
+const int kEarlyExpirationAdvanceDays = 30;
+
+// Reads all types of visits starting from beginning of time to the given end
+// time. This is the most general reader.
+class AllVisitsReader : public ExpiringVisitsReader {
+ public:
+  virtual bool Read(Time end_time, HistoryDatabase* db,
+                    VisitVector* visits, int max_visits) const {
+    DCHECK(db) << "must have a database to operate upon";
+    DCHECK(visits) << "visit vector has to exist in order to populate it";
+
+    db->GetAllVisitsInRange(Time(), end_time, max_visits, visits);
+    // When we got the maximum number of visits we asked for, we say there could
+    // be additional things to expire now.
+    return static_cast<int>(visits->size()) == max_visits;
+  }
+};
+
+// Reads only AUTO_SUBFRAME visits, within a computed range. The range is
+// computed as follows:
+// * |begin_time| is read from the meta table. This value is updated whenever
+//   there are no more additional visits to expire by this reader.
+// * |end_time| is advanced forward by a constant (kEarlyExpirationAdvanceDay),
+//   but not past the current time.
+class AutoSubframeVisitsReader : public ExpiringVisitsReader {
+ public:
+  virtual bool Read(Time end_time, HistoryDatabase* db,
+                    VisitVector* visits, int max_visits) const {
+    DCHECK(db) << "must have a database to operate upon";
+    DCHECK(visits) << "visit vector has to exist in order to populate it";
+
+    Time begin_time = db->GetEarlyExpirationThreshold();
+    // Advance |end_time| to expire early.
+    Time early_end_time = end_time +
+        TimeDelta::FromDays(kEarlyExpirationAdvanceDays);
+
+    // We don't want to set the early expiration threshold to a time in the
+    // future.
+    Time now = Time::Now();
+    if (early_end_time > now)
+      early_end_time = now;
+
+    db->GetVisitsInRangeForTransition(begin_time, early_end_time,
+                                      max_visits,
+                                      PageTransition::AUTO_SUBFRAME,
+                                      visits);
+    bool more = static_cast<int>(visits->size()) == max_visits;
+    if (!more)
+      db->UpdateEarlyExpirationThreshold(early_end_time);
+
+    return more;
+  }
+};
 
 // Returns true if this visit is worth archiving. Otherwise, this visit is not
 // worth saving (for example, subframe navigations and redirects) and we can
@@ -41,6 +98,7 @@ bool ShouldArchiveVisit(const VisitRow& visit) {
   // navigation and not part of a redirect chain.
   if ((no_qualifier == PageTransition::LINK ||
        no_qualifier == PageTransition::FORM_SUBMIT ||
+       no_qualifier == PageTransition::KEYWORD ||
        no_qualifier == PageTransition::GENERATED) &&
       visit.transition & PageTransition::CHAIN_END)
     return true;
@@ -57,7 +115,7 @@ const int kNumExpirePerIteration = 10;
 // we think there might be more items to expire. This timeout is used when the
 // last expiration found at least kNumExpirePerIteration and we want to check
 // again "soon."
-const int kExpirationDelaySec = 60;
+const int kExpirationDelaySec = 30;
 
 // The number of minutes between checking, as with kExpirationDelaySec, but
 // when we didn't find enough things to expire last time. If there was no
@@ -66,6 +124,32 @@ const int kExpirationDelaySec = 60;
 const int kExpirationEmptyDelayMin = 5;
 
 }  // namespace
+
+struct ExpireHistoryBackend::DeleteDependencies {
+  // The time range affected. These can be is_null() to be unbounded in one
+  // or both directions.
+  base::Time begin_time, end_time;
+
+  // ----- Filled by DeleteVisitRelatedInfo or manually if a function doesn't
+  //       call that function. -----
+
+  // The unique URL rows affected by this delete.
+  std::map<URLID, URLRow> affected_urls;
+
+  // ----- Filled by DeleteOneURL -----
+
+  // The URLs deleted during this operation.
+  std::vector<URLRow> deleted_urls;
+
+  // The list of all favicon IDs that the affected URLs had. Favicons will be
+  // shared between all URLs with the same favicon, so this is the set of IDs
+  // that we will need to check when the delete operations are complete.
+  std::set<FavIconID> affected_favicons;
+
+  // Tracks the set of databases that have changed so we can optimize when
+  // when we're done.
+  TextDatabaseManager::ChangeSet text_db_changes;
+};
 
 ExpireHistoryBackend::ExpireHistoryBackend(
     BroadcastNotificationDelegate* delegate,
@@ -165,14 +249,47 @@ void ExpireHistoryBackend::ArchiveHistoryBefore(Time end_time) {
     return;
 
   // Archive as much history as possible before the given date.
-  ArchiveSomeOldHistory(end_time, std::numeric_limits<size_t>::max());
+  ArchiveSomeOldHistory(end_time, GetAllVisitsReader(),
+                        std::numeric_limits<size_t>::max());
   ParanoidExpireHistory();
+}
+
+void ExpireHistoryBackend::InitWorkQueue() {
+  DCHECK(work_queue_.empty()) << "queue has to be empty prior to init";
+
+  for (size_t i = 0; i < readers_.size(); i++)
+    work_queue_.push(readers_[i]);
+}
+
+const ExpiringVisitsReader* ExpireHistoryBackend::GetAllVisitsReader() {
+  if (!all_visits_reader_.get())
+    all_visits_reader_.reset(new AllVisitsReader());
+  return all_visits_reader_.get();
+}
+
+const ExpiringVisitsReader*
+    ExpireHistoryBackend::GetAutoSubframeVisitsReader() {
+  if (!auto_subframe_visits_reader_.get())
+    auto_subframe_visits_reader_.reset(new AutoSubframeVisitsReader());
+  return auto_subframe_visits_reader_.get();
 }
 
 void ExpireHistoryBackend::StartArchivingOldStuff(
     TimeDelta expiration_threshold) {
   expiration_threshold_ = expiration_threshold;
-  ScheduleArchive(TimeDelta::FromSeconds(kExpirationDelaySec));
+
+  // Remove all readers, just in case this was method was called before.
+  readers_.clear();
+  // For now, we explicitly add all known readers. If we come up with more
+  // reader types (in case we want to expire different types of visits in
+  // different ways), we can make it be populated by creator/owner of
+  // ExpireHistoryBackend.
+  readers_.push_back(GetAllVisitsReader());
+  readers_.push_back(GetAutoSubframeVisitsReader());
+
+  // Initialize the queue with all tasks for the first set of iterations.
+  InitWorkQueue();
+  ScheduleArchive();
 }
 
 void ExpireHistoryBackend::DeleteFaviconsIfPossible(
@@ -320,9 +437,11 @@ void ExpireHistoryBackend::ExpireURLsForVisits(
     // NOTE: This code must stay in sync with HistoryBackend::AddPageVisit().
     // TODO(pkasting): http://b/1148304 We shouldn't be marking so many URLs as
     // typed, which would eliminate the need for this code.
-    const PageTransition::Type transition = visits[i].transition;
-    if (PageTransition::StripQualifier(transition) == PageTransition::TYPED &&
-        !PageTransition::IsRedirect(transition))
+    PageTransition::Type transition =
+        PageTransition::StripQualifier(visits[i].transition);
+    if ((transition == PageTransition::TYPED &&
+         !PageTransition::IsRedirect(visits[i].transition)) ||
+        transition == PageTransition::KEYWORD_GENERATED)
       cur.typed_count++;
   }
 
@@ -367,6 +486,9 @@ void ExpireHistoryBackend::ExpireURLsForVisits(
 void ExpireHistoryBackend::ArchiveURLsAndVisits(
     const VisitVector& visits,
     DeleteDependencies* dependencies) {
+  if (!archived_db_)
+    return;
+
   // Make sure all unique URL rows are added to the dependency list and the
   // archived database. We will also keep the mapping between the main DB URLID
   // and the archived one.
@@ -407,41 +529,53 @@ void ExpireHistoryBackend::ArchiveURLsAndVisits(
   }
 }
 
-void ExpireHistoryBackend::ScheduleArchive(TimeDelta delay) {
+void ExpireHistoryBackend::ScheduleArchive() {
+  TimeDelta delay;
+  if (work_queue_.empty()) {
+    // If work queue is empty, reset the work queue to contain all tasks and
+    // schedule next iteration after a longer delay.
+    InitWorkQueue();
+    delay = TimeDelta::FromMinutes(kExpirationEmptyDelayMin);
+  } else {
+    delay = TimeDelta::FromSeconds(kExpirationDelaySec);
+  }
+
   factory_.RevokeAll();
   MessageLoop::current()->PostDelayedTask(FROM_HERE, factory_.NewRunnableMethod(
-          &ExpireHistoryBackend::DoArchiveIteration),
-      static_cast<int>(delay.InMilliseconds()));
+          &ExpireHistoryBackend::DoArchiveIteration), delay.InMilliseconds());
 }
 
 void ExpireHistoryBackend::DoArchiveIteration() {
-  DCHECK(expiration_threshold_ != TimeDelta()) << "threshold should be set";
-  Time threshold = Time::Now() - expiration_threshold_;
+  DCHECK(!work_queue_.empty()) << "queue has to be non-empty";
 
-  if (ArchiveSomeOldHistory(threshold, kNumExpirePerIteration)) {
-    // Possibly more items to delete now, schedule it sooner to happen again.
-    ScheduleArchive(TimeDelta::FromSeconds(kExpirationDelaySec));
-  } else {
-    // If we didn't find the maximum number of items to delete, wait longer
-    // before trying to delete more later.
-    ScheduleArchive(TimeDelta::FromMinutes(kExpirationEmptyDelayMin));
-  }
+  const ExpiringVisitsReader* reader = work_queue_.front();
+  bool more_to_expire = ArchiveSomeOldHistory(GetCurrentArchiveTime(), reader,
+                                              kNumExpirePerIteration);
+
+  work_queue_.pop();
+  // If there are more items to expire, add the reader back to the queue, thus
+  // creating a new task for future iterations.
+  if (more_to_expire)
+    work_queue_.push(reader);
+
+  ScheduleArchive();
 }
 
-bool ExpireHistoryBackend::ArchiveSomeOldHistory(Time time_threshold,
-                                                 int max_visits) {
+bool ExpireHistoryBackend::ArchiveSomeOldHistory(
+    base::Time end_time,
+    const ExpiringVisitsReader* reader,
+    int max_visits) {
   if (!main_db_)
     return false;
 
-  // Get all visits up to and including the threshold. This is a little tricky
-  // because GetAllVisitsInRange's end value is non-inclusive, so we have to
-  // increment the time by one unit to get the input value to be inclusive.
-  DCHECK(!time_threshold.is_null());
-  Time effective_threshold =
-      Time::FromInternalValue(time_threshold.ToInternalValue() + 1);
+  // Add an extra time unit to given end time, because
+  // GetAllVisitsInRange, et al. queries' end value is non-inclusive.
+  Time effective_end_time =
+      Time::FromInternalValue(end_time.ToInternalValue() + 1);
+
   VisitVector affected_visits;
-  main_db_->GetAllVisitsInRange(Time(), effective_threshold, max_visits,
-                                &affected_visits);
+  bool more_to_expire = reader->Read(effective_end_time, main_db_,
+                                     &affected_visits, max_visits);
 
   // Some visits we'll delete while others we'll archive.
   VisitVector deleted_visits, archived_visits;
@@ -484,9 +618,7 @@ bool ExpireHistoryBackend::ArchiveSomeOldHistory(Time time_threshold,
   // to not do anything if nothing was deleted.
   BroadcastDeleteNotifications(&deleted_dependencies);
 
-  // When we got the maximum number of visits we asked for, we say there could
-  // be additional things to expire now.
-  return static_cast<int>(affected_visits.size()) == max_visits;
+  return more_to_expire;
 }
 
 void ExpireHistoryBackend::ParanoidExpireHistory() {

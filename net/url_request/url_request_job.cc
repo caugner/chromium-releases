@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job_metrics.h"
 #include "net/url_request/url_request_job_tracker.h"
@@ -29,7 +30,13 @@ URLRequestJob::URLRequestJob(URLRequest* request)
       read_buffer_len_(0),
       has_handled_response_(false),
       expected_content_size_(-1),
-      filter_input_byte_count_(0) {
+      deferred_redirect_status_code_(-1),
+      packet_timing_enabled_(false),
+      filter_input_byte_count_(0),
+      bytes_observed_in_packets_(0),
+      max_packets_timed_(0),
+      observed_packet_count_(0) {
+  load_flags_ = request_->load_flags();
   is_profiling_ = request->enable_profiling();
   if (is_profiling()) {
     metrics_.reset(new URLRequestJobMetrics());
@@ -53,11 +60,31 @@ void URLRequestJob::DetachRequest() {
   request_ = NULL;
 }
 
+bool URLRequestJob::IsDownload() const {
+  return (load_flags_ & net::LOAD_IS_DOWNLOAD) != 0;
+}
+
 void URLRequestJob::SetupFilter() {
   std::vector<Filter::FilterType> encoding_types;
   if (GetContentEncodings(&encoding_types)) {
     filter_.reset(Filter::Factory(encoding_types, *this));
   }
+}
+
+bool URLRequestJob::IsRedirectResponse(GURL* location,
+                                       int* http_status_code) {
+  // For non-HTTP jobs, headers will be null.
+  net::HttpResponseHeaders* headers = request_->response_headers();
+  if (!headers)
+    return false;
+
+  std::string value;
+  if (!headers->IsRedirect(&value))
+    return false;
+
+  *location = request_->url().Resolve(value);
+  *http_status_code = headers->response_code();
+  return true;
 }
 
 void URLRequestJob::GetAuthChallengeInfo(
@@ -80,6 +107,12 @@ void URLRequestJob::CancelAuth() {
   NOTREACHED();
 }
 
+void URLRequestJob::ContinueWithCertificate(
+    net::X509Certificate* client_cert) {
+  // The derived class should implement this!
+  NOTREACHED();
+}
+
 void URLRequestJob::ContinueDespiteLastError() {
   // Implementations should know how to recover from errors they generate.
   // If this code was reached, we are trying to recover from an error that
@@ -87,8 +120,19 @@ void URLRequestJob::ContinueDespiteLastError() {
   NOTREACHED();
 }
 
+void URLRequestJob::FollowDeferredRedirect() {
+  DCHECK(deferred_redirect_status_code_ != -1);
+  // NOTE: deferred_redirect_url_ may be invalid, and attempting to redirect to
+  // such an URL will fail inside FollowRedirect.  The DCHECK above asserts
+  // that we called OnReceivedRedirect.
+
+  FollowRedirect(deferred_redirect_url_, deferred_redirect_status_code_);
+  deferred_redirect_url_ = GURL();
+  deferred_redirect_status_code_ = -1;
+}
+
 int64 URLRequestJob::GetByteReadCount() const {
-  return filter_input_byte_count_ ;
+  return filter_input_byte_count_;
 }
 
 bool URLRequestJob::GetURL(GURL* gurl) const {
@@ -102,12 +146,6 @@ base::Time URLRequestJob::GetRequestTime() const {
   if (!request_)
     return base::Time();
   return request_->request_time();
-};
-
-bool URLRequestJob::IsCachedContent() const {
-  if (!request_)
-    return false;
-  return request_->was_cached();
 };
 
 // This function calls ReadData to get stream data. If a filter exists, passes
@@ -165,6 +203,14 @@ bool URLRequestJob::ReadRawDataForFilter(int *bytes_read) {
   return rv;
 }
 
+void URLRequestJob::FollowRedirect(const GURL& location, int http_status_code) {
+  g_url_request_job_tracker.OnJobRedirect(this, location, http_status_code);
+
+  int rv = request_->Redirect(location, http_status_code);
+  if (rv != net::OK)
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, rv));
+}
+
 void URLRequestJob::FilteredDataRead(int bytes_read) {
   DCHECK(filter_.get());  // don't add data if there is no filter
   filter_->FlushStreamBuffer(bytes_read);
@@ -173,8 +219,8 @@ void URLRequestJob::FilteredDataRead(int bytes_read) {
 bool URLRequestJob::ReadFilteredData(int *bytes_read) {
   DCHECK(filter_.get());  // don't add data if there is no filter
   DCHECK(read_buffer_ != NULL);  // we need to have a buffer to fill
-  DCHECK(read_buffer_len_ > 0);  // sanity check
-  DCHECK(read_buffer_len_ < 1000000);  // sanity check
+  DCHECK_GT(read_buffer_len_, 0);  // sanity check
+  DCHECK_LT(read_buffer_len_, 1000000);  // sanity check
 
   bool rv = false;
   *bytes_read = 0;
@@ -248,7 +294,7 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
       }
       case Filter::FILTER_ERROR: {
         filter_needs_more_output_space_ = false;
-        // TODO: Figure out a better error code.
+        // TODO(jar): Figure out a better error code.
         NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
         rv = false;
         break;
@@ -312,8 +358,8 @@ void URLRequestJob::NotifyHeadersComplete() {
   // survival until we can get out of this method.
   scoped_refptr<URLRequestJob> self_preservation = this;
 
-  int http_status_code;
   GURL new_location;
+  int http_status_code;
   if (IsRedirectResponse(&new_location, &http_status_code)) {
     const GURL& url = request_->url();
 
@@ -328,19 +374,21 @@ void URLRequestJob::NotifyHeadersComplete() {
       new_location = new_location.ReplaceComponents(replacements);
     }
 
-    // Toggle this flag to true so the consumer can access response headers.
-    // Then toggle it back if we choose to follow the redirect.
-    has_handled_response_ = true;
-    request_->delegate()->OnReceivedRedirect(request_, new_location);
+    bool defer_redirect = false;
+    request_->ReceivedRedirect(new_location, &defer_redirect);
 
-    // Ensure that the request wasn't destroyed in OnReceivedRedirect
+    // Ensure that the request wasn't detached or destroyed in ReceivedRedirect
     if (!request_ || !request_->delegate())
       return;
 
-    // If we were not cancelled, then follow the redirect.
+    // If we were not cancelled, then maybe follow the redirect.
     if (request_->status().is_success()) {
-      has_handled_response_ = false;
-      FollowRedirect(new_location, http_status_code);
+      if (defer_redirect) {
+        deferred_redirect_url_ = new_location;
+        deferred_redirect_status_code_ = http_status_code;
+      } else {
+        FollowRedirect(new_location, http_status_code);
+      }
       return;
     }
   } else if (NeedsAuth()) {
@@ -366,7 +414,7 @@ void URLRequestJob::NotifyHeadersComplete() {
       expected_content_size_ = StringToInt64(content_length);
   }
 
-  request_->delegate()->OnResponseStarted(request_);
+  request_->ResponseStarted();
 }
 
 void URLRequestJob::NotifyStartError(const URLRequestStatus &status) {
@@ -374,8 +422,7 @@ void URLRequestJob::NotifyStartError(const URLRequestStatus &status) {
   has_handled_response_ = true;
   if (request_) {
     request_->set_status(status);
-    if (request_->delegate())
-      request_->delegate()->OnResponseStarted(request_);
+    request_->ResponseStarted();
   }
 }
 
@@ -476,7 +523,7 @@ void URLRequestJob::CompleteNotifyDone() {
       request_->delegate()->OnReadCompleted(request_, -1);
     } else {
       has_handled_response_ = true;
-      request_->delegate()->OnResponseStarted(request_);
+      request_->ResponseStarted();
     }
   }
 }
@@ -488,21 +535,14 @@ void URLRequestJob::NotifyCanceled() {
   }
 }
 
-bool URLRequestJob::FilterHasData() {
-    return filter_.get() && filter_->stream_data_len();
+void URLRequestJob::NotifyRestartRequired() {
+  DCHECK(!has_handled_response_);
+  if (GetStatus().status() != URLRequestStatus::CANCELED)
+    request_->Restart();
 }
 
-void URLRequestJob::FollowRedirect(const GURL& location,
-                                   int http_status_code) {
-  g_url_request_job_tracker.OnJobRedirect(this, location, http_status_code);
-  Kill();
-  // Kill could have notified the Delegate and destroyed the request.
-  if (!request_)
-    return;
-
-  int rv = request_->Redirect(location, http_status_code);
-  if (rv != net::OK)
-    NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, rv));
+bool URLRequestJob::FilterHasData() {
+    return filter_.get() && filter_->stream_data_len();
 }
 
 void URLRequestJob::RecordBytesRead(int bytes_read) {
@@ -511,6 +551,7 @@ void URLRequestJob::RecordBytesRead(int bytes_read) {
     metrics_->total_bytes_read_ += bytes_read;
   }
   filter_input_byte_count_ += bytes_read;
+  UpdatePacketReadTimes();  // Facilitate stats recording if it is active.
   g_url_request_job_tracker.OnBytesRead(this, bytes_read);
 }
 
@@ -525,4 +566,172 @@ const URLRequestStatus URLRequestJob::GetStatus() {
 void URLRequestJob::SetStatus(const URLRequestStatus &status) {
   if (request_)
     request_->set_status(status);
+}
+
+void URLRequestJob::UpdatePacketReadTimes() {
+  if (!packet_timing_enabled_)
+    return;
+
+  if (filter_input_byte_count_ <= bytes_observed_in_packets_) {
+    DCHECK(filter_input_byte_count_ == bytes_observed_in_packets_);
+    return;  // No new bytes have arrived.
+  }
+
+  if (!bytes_observed_in_packets_)
+    request_time_snapshot_ = GetRequestTime();
+
+  final_packet_time_ = base::Time::Now();
+  const size_t kTypicalPacketSize = 1430;
+  while (filter_input_byte_count_ > bytes_observed_in_packets_) {
+    ++observed_packet_count_;
+    if (max_packets_timed_ > packet_times_.size()) {
+      packet_times_.push_back(final_packet_time_);
+      DCHECK(static_cast<size_t>(observed_packet_count_) ==
+             packet_times_.size());
+    }
+    bytes_observed_in_packets_ += kTypicalPacketSize;
+  }
+  // Since packets may not be full, we'll remember the number of bytes we've
+  // accounted for in packets thus far.
+  bytes_observed_in_packets_ = filter_input_byte_count_;
+}
+
+void URLRequestJob::EnablePacketCounting(size_t max_packets_timed) {
+  if (max_packets_timed_ < max_packets_timed)
+    max_packets_timed_ = max_packets_timed;
+  packet_timing_enabled_ = true;
+}
+
+void URLRequestJob::RecordPacketStats(StatisticSelector statistic) const {
+  if (!packet_timing_enabled_ || (final_packet_time_ == base::Time()))
+    return;
+
+  // Caller should verify that we're not cached content, but we can't always
+  // really check for it here because we may (at destruction time) call our own
+  // class method and get a bogus const answer of false. This DCHECK only helps
+  // when this method has a valid overridden definition.
+  DCHECK(!IsCachedContent());
+
+  base::TimeDelta duration = final_packet_time_ - request_time_snapshot_;
+  switch (statistic) {
+    case SDCH_DECODE: {
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_Latency_F_a", duration,
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+      UMA_HISTOGRAM_COUNTS_100("Sdch3.Network_Decode_Packets_b",
+                               static_cast<int>(observed_packet_count_));
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Sdch3.Network_Decode_Bytes_Processed_b",
+          static_cast<int>(bytes_observed_in_packets_), 500, 100000, 100);
+      if (packet_times_.empty())
+        return;
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_1st_To_Last_a",
+                                  final_packet_time_ - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+
+      DCHECK(max_packets_timed_ >= kSdchPacketHistogramCount);
+      DCHECK(kSdchPacketHistogramCount > 4);
+      if (packet_times_.size() <= 4)
+        return;
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_1st_To_2nd_c",
+                                  packet_times_[1] - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_2nd_To_3rd_c",
+                                  packet_times_[2] - packet_times_[1],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_3rd_To_4th_c",
+                                  packet_times_[3] - packet_times_[2],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_4th_To_5th_c",
+                                  packet_times_[4] - packet_times_[3],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      return;
+    }
+    case SDCH_PASSTHROUGH: {
+      // Despite advertising a dictionary, we handled non-sdch compressed
+      // content.
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_Latency_F_a",
+                                  duration,
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+      UMA_HISTOGRAM_COUNTS_100("Sdch3.Network_Pass-through_Packets_b",
+                               observed_packet_count_);
+      if (packet_times_.empty())
+        return;
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_1st_To_Last_a",
+                                  final_packet_time_ - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+      DCHECK(max_packets_timed_ >= kSdchPacketHistogramCount);
+      DCHECK(kSdchPacketHistogramCount > 4);
+      if (packet_times_.size() <= 4)
+        return;
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_1st_To_2nd_c",
+                                  packet_times_[1] - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_2nd_To_3rd_c",
+                                  packet_times_[2] - packet_times_[1],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_3rd_To_4th_c",
+                                  packet_times_[3] - packet_times_[2],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_4th_To_5th_c",
+                                  packet_times_[4] - packet_times_[3],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      return;
+    }
+
+    case SDCH_EXPERIMENT_DECODE: {
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Decode",
+                                  duration,
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+      // We already provided interpacket histograms above in the SDCH_DECODE
+      // case, so we don't need them here.
+      return;
+    }
+    case SDCH_EXPERIMENT_HOLDBACK: {
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback",
+                                  duration,
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_1st_To_Last_a",
+                                  final_packet_time_ - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(20),
+                                  base::TimeDelta::FromMinutes(10), 100);
+
+      DCHECK(max_packets_timed_ >= kSdchPacketHistogramCount);
+      DCHECK(kSdchPacketHistogramCount > 4);
+      if (packet_times_.size() <= 4)
+        return;
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_1st_To_2nd_c",
+                                  packet_times_[1] - packet_times_[0],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_2nd_To_3rd_c",
+                                  packet_times_[2] - packet_times_[1],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_3rd_To_4th_c",
+                                  packet_times_[3] - packet_times_[2],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_4th_To_5th_c",
+                                  packet_times_[4] - packet_times_[3],
+                                  base::TimeDelta::FromMilliseconds(1),
+                                  base::TimeDelta::FromSeconds(10), 100);
+      return;
+    }
+    default:
+      NOTREACHED();
+      return;
+  }
 }

@@ -6,23 +6,29 @@
 
 #include <vector>
 
-#include "base/file_util.h"
+#include "app/gfx/canvas.h"
+#include "app/gfx/text_elider.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "app/theme_provider.h"
+#include "base/file_path.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/views/download_shelf_view.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/text_elider.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/win_util.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/menu/menu.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/widget/widget.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/menu/menu.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 
 using base::TimeDelta;
 
@@ -51,42 +57,49 @@ static const int kButtonPadding = 5;  // Pixels.
 // The space on the left and right side of the dangerous download label.
 static const int kLabelPadding = 4;  // Pixels.
 
-static const SkColor kFileNameColor = SkColorSetRGB(87, 108, 149);
+static const SkColor kFileNameDisabledColor = SkColorSetRGB(171, 192, 212);
 static const SkColor kStatusColor = SkColorSetRGB(123, 141, 174);
 
 // How long the 'download complete' animation should last for.
 static const int kCompleteAnimationDurationMs = 2500;
 
+// How long we keep the item disabled after the user clicked it to open the
+// downloaded item.
+static const int kDisabledOnOpenDuration = 3000;
+
 // DownloadShelfContextMenuWin -------------------------------------------------
 
 class DownloadShelfContextMenuWin : public DownloadShelfContextMenu,
-                                    public Menu::Delegate {
+                                    public views::Menu::Delegate {
  public:
-  DownloadShelfContextMenuWin::DownloadShelfContextMenuWin(
-     BaseDownloadItemModel* model,
-     HWND window,
-     const gfx::Point& point)
-       : DownloadShelfContextMenu(model) {
+  DownloadShelfContextMenuWin(BaseDownloadItemModel* model,
+                              gfx::NativeView window,
+                              const gfx::Point& point)
+      : DownloadShelfContextMenu(model) {
     DCHECK(model);
 
     // The menu's anchor point is determined based on the UI layout.
-    Menu::AnchorPoint anchor_point;
+    views::Menu::AnchorPoint anchor_point;
     if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-      anchor_point = Menu::TOPRIGHT;
+      anchor_point = views::Menu::TOPRIGHT;
     else
-      anchor_point = Menu::TOPLEFT;
+      anchor_point = views::Menu::TOPLEFT;
 
-    Menu context_menu(this, anchor_point, window);
-    if (download_->state() == DownloadItem::COMPLETE)
-      context_menu.AppendMenuItem(OPEN_WHEN_COMPLETE, L"", Menu::NORMAL);
-    else
-      context_menu.AppendMenuItem(OPEN_WHEN_COMPLETE, L"", Menu::CHECKBOX);
-    context_menu.AppendMenuItem(ALWAYS_OPEN_TYPE, L"", Menu::CHECKBOX);
-    context_menu.AppendSeparator();
-    context_menu.AppendMenuItem(SHOW_IN_FOLDER, L"", Menu::NORMAL);
-    context_menu.AppendSeparator();
-    context_menu.AppendMenuItem(CANCEL, L"", Menu::NORMAL);
-    context_menu.RunMenuAt(point.x(), point.y());
+    scoped_ptr<views::Menu> context_menu(
+        views::Menu::Create(this, anchor_point, window));
+    if (download_->state() == DownloadItem::COMPLETE) {
+      context_menu->AppendMenuItem(OPEN_WHEN_COMPLETE, L"",
+                                   views::Menu::NORMAL);
+    } else {
+      context_menu->AppendMenuItem(OPEN_WHEN_COMPLETE, L"",
+                                   views::Menu::CHECKBOX);
+    }
+    context_menu->AppendMenuItem(ALWAYS_OPEN_TYPE, L"", views::Menu::CHECKBOX);
+    context_menu->AppendSeparator();
+    context_menu->AppendMenuItem(SHOW_IN_FOLDER, L"", views::Menu::NORMAL);
+    context_menu->AppendSeparator();
+    context_menu->AppendMenuItem(CANCEL, L"", views::Menu::NORMAL);
+    context_menu->RunMenuAt(point.x(), point.y());
   }
 
   // Menu::Delegate implementation ---------------------------------------------
@@ -121,33 +134,25 @@ class DownloadShelfContextMenuWin : public DownloadShelfContextMenu,
 DownloadItemView::DownloadItemView(DownloadItem* download,
     DownloadShelfView* parent,
     BaseDownloadItemModel* model)
-  : download_(download),
+  : warning_icon_(NULL),
+    download_(download),
     parent_(parent),
-    model_(model),
-    progress_angle_(download_util::kStartAngleDegrees),
-    body_state_(NORMAL),
-    drop_down_state_(NORMAL),
-    drop_down_pressed_(false),
     status_text_(l10n_util::GetString(IDS_DOWNLOAD_STATUS_STARTING)),
     show_status_text_(true),
+    body_state_(NORMAL),
+    drop_down_state_(NORMAL),
+    progress_angle_(download_util::kStartAngleDegrees),
+    drop_down_pressed_(false),
     dragging_(false),
     starting_drag_(false),
-    warning_icon_(NULL),
+    model_(model),
     save_button_(NULL),
     discard_button_(NULL),
     dangerous_download_label_(NULL),
-    dangerous_download_label_sized_(false) {
-  // TODO(idana) Bug# 1163334
-  //
-  // We currently do not mirror each download item on the download shelf (even
-  // though the download shelf itself is mirrored and the items appear from
-  // right to left on RTL UIs).
-  //
-  // We explicitly disable mirroring for the item because the code that draws
-  // the download progress animation relies on the View's UI layout setting
-  // when positioning the animation so we should make sure that code doesn't
-  // treat our View as a mirrored View.
-  EnableUIMirroringForRTLLanguages(false);
+    dangerous_download_label_sized_(false),
+    disabled_while_opening_(false),
+    creation_time_(base::Time::Now()),
+    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)) {
   DCHECK(download_);
   download_->AddObserver(this);
 
@@ -241,7 +246,16 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     box_y_ = kVerticalPadding;
 
   gfx::Size size = GetPreferredSize();
-  drop_down_x_ = size.width() - normal_drop_down_image_set_.top->width();
+  if (UILayoutIsRightToLeft()) {
+    // Drop down button is glued to the left of the download shelf.
+    drop_down_x_left_ = 0;
+    drop_down_x_right_ = normal_drop_down_image_set_.top->width();
+  } else {
+    // Drop down button is glued to the right of the download shelf.
+    drop_down_x_left_ =
+        size.width() - normal_drop_down_image_set_.top->width();
+    drop_down_x_right_ = size.width();
+  }
 
   body_hover_animation_.reset(new SlideAnimation(this));
   drop_hover_animation_.reset(new SlideAnimation(this));
@@ -252,23 +266,33 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
 
     warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
     save_button_ = new views::NativeButton(
-        l10n_util::GetString(IDS_SAVE_DOWNLOAD));
-    save_button_->set_enforce_dlu_min_size(false);
-    save_button_->SetListener(this);
+        this, l10n_util::GetString(IDS_SAVE_DOWNLOAD));
+    save_button_->set_ignore_minimum_size(true);
     discard_button_ = new views::NativeButton(
-        l10n_util::GetString(IDS_DISCARD_DOWNLOAD));
-    discard_button_->SetListener(this);
-    discard_button_->set_enforce_dlu_min_size(false);
+        this, l10n_util::GetString(IDS_DISCARD_DOWNLOAD));
+    discard_button_->set_ignore_minimum_size(true);
     AddChildView(save_button_);
     AddChildView(discard_button_);
-    std::wstring file_name = download->original_name().ToWStringHack();
 
     // Ensure the file name is not too long.
 
     // Extract the file extension (if any).
-    std::wstring extension = file_util::GetFileExtensionFromPath(file_name);
+    FilePath filepath(download->original_name());
+#if defined(OS_LINUX)
+    std::wstring extension = base::SysNativeMBToWide(filepath.Extension());
+#else
+    std::wstring extension = filepath.Extension();
+#endif
+
+    // Remove leading '.'
+    if (extension.length() > 0)
+      extension = extension.substr(1);
+#if defined(OS_LINUX)
     std::wstring rootname =
-        file_util::GetFilenameWithoutExtensionFromPath(file_name);
+        base::SysNativeMBToWide(filepath.BaseName().RemoveExtension().value());
+#else
+    std::wstring rootname = filepath.BaseName().RemoveExtension().value();
+#endif
 
     // Elide giant extensions (this shouldn't currently be hit, but might
     // in future, should we ever notice unsafe giant extensions).
@@ -282,7 +306,6 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     dangerous_download_label_->SetMultiLine(true);
     dangerous_download_label_->SetHorizontalAlignment(
         views::Label::ALIGN_LEFT);
-    dangerous_download_label_->SetColor(kFileNameColor);
     AddChildView(dangerous_download_label_);
     SizeLabelToMinWidth();
   }
@@ -337,6 +360,10 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
       download_->is_paused() ? StopDownloadProgress() : StartDownloadProgress();
       break;
     case DownloadItem::COMPLETE:
+      if (download_->auto_opened()) {
+        parent_->RemoveDownloadView(this);  // This will delete us!
+        return;
+      }
       StopDownloadProgress();
       complete_animation_.reset(new SlideAnimation(this));
       complete_animation_->SetSlideDuration(kCompleteAnimationDurationMs);
@@ -366,11 +393,23 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
   GetParent()->SchedulePaint();
 }
 
+void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
+  disabled_while_opening_ = true;
+  SetEnabled(false);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      reenable_method_factory_.NewRunnableMethod(&DownloadItemView::Reenable),
+      kDisabledOnOpenDuration);
+}
+
 // View overrides
 
 // In dangerous mode we have to layout our buttons.
 void DownloadItemView::Layout() {
   if (IsDangerousMode()) {
+    dangerous_download_label_->SetColor(
+      GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT));
+
     int x = kLeftPadding + dangerous_mode_body_image_set_.top_left->width() +
       warning_icon_->width() + kLabelPadding;
     int y = (height() - dangerous_download_label_->height()) / 2;
@@ -382,18 +421,23 @@ void DownloadItemView::Layout() {
     y = (height() - button_size.height()) / 2;
     save_button_->SetBounds(x, y, button_size.width(), button_size.height());
     x += button_size.width() + kButtonPadding;
-    discard_button_->SetBounds(x, y, button_size.width(),
-                               button_size.height());
+    discard_button_->SetBounds(x, y, button_size.width(), button_size.height());
   }
 }
 
-void DownloadItemView::ButtonPressed(views::NativeButton* sender) {
+void DownloadItemView::ButtonPressed(views::Button* sender) {
   if (sender == discard_button_) {
+    UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
+                             base::Time::Now() - creation_time_);
     if (download_->state() == DownloadItem::IN_PROGRESS)
       download_->Cancel(true);
     download_->Remove(true);
     // WARNING: we are deleted at this point.  Don't access 'this'.
   } else if (sender == save_button_) {
+    // The user has confirmed a dangerous download.  We'd record how quickly the
+    // user did this to detect whether we're being clickjacked.
+    UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
+                             base::Time::Now() - creation_time_);
     // This will change the state and notify us.
     download_->manager()->DangerousDownloadValidated(download_);
   }
@@ -401,7 +445,7 @@ void DownloadItemView::ButtonPressed(views::NativeButton* sender) {
 
 // Load an icon for the file type we're downloading, and animate any in progress
 // download state.
-void DownloadItemView::Paint(ChromeCanvas* canvas) {
+void DownloadItemView::Paint(gfx::Canvas* canvas) {
   BodyImageSet* body_image_set;
   switch (body_state_) {
     case NORMAL:
@@ -446,6 +490,17 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
 
   // Paint the background images.
   int x = kLeftPadding;
+  bool rtl_ui = UILayoutIsRightToLeft();
+  if (rtl_ui) {
+    // Since we do not have the mirrored images for
+    // (hot_)body_image_set->top_left, (hot_)body_image_set->left,
+    // (hot_)body_image_set->bottom_left, and drop_down_image_set,
+    // for RTL UI, we flip the canvas to draw those images mirrored.
+    // Consequently, we do not need to mirror the x-axis of those images.
+    canvas->save();
+    canvas->TranslateInt(width(), 0);
+    canvas->ScaleInt(-1, 1);
+  }
   PaintBitmaps(canvas,
                body_image_set->top_left, body_image_set->left,
                body_image_set->bottom_left,
@@ -466,7 +521,7 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
     canvas->saveLayerAlpha(NULL,
         static_cast<int>(body_hover_animation_->GetCurrentValue() * 255),
         SkCanvas::kARGB_NoClipLayer_SaveFlag);
-    canvas->drawARGB(0, 255, 255, 255, SkPorterDuff::kClear_Mode);
+    canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
     int x = kLeftPadding;
     PaintBitmaps(canvas,
@@ -485,6 +540,13 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
                  x, box_y_, box_height_,
                  hot_body_image_set_.top_right->width());
     canvas->restore();
+    if (rtl_ui) {
+      canvas->restore();
+      canvas->save();
+      // Flip it for drawing drop-down images for RTL locales.
+      canvas->TranslateInt(width(), 0);
+      canvas->ScaleInt(-1, 1);
+    }
   }
 
   x += body_image_set->top_right->width();
@@ -501,7 +563,7 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
       canvas->saveLayerAlpha(NULL,
           static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255),
           SkCanvas::kARGB_NoClipLayer_SaveFlag);
-      canvas->drawARGB(0, 255, 255, 255, SkPorterDuff::kClear_Mode);
+      canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
       PaintBitmaps(canvas,
                    drop_down_image_set->top, drop_down_image_set->center,
@@ -512,42 +574,65 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
     }
   }
 
+  if (rtl_ui) {
+    // Restore the canvas to avoid file name etc. text are drawn flipped.
+    // Consequently, the x-axis of following canvas->DrawXXX() method should be
+    // mirrored so the text and images are down in the right positions.
+    canvas->restore();
+  }
+
   // Print the text, left aligned and always print the file extension.
   // Last value of x was the end of the right image, just before the button.
   // Note that in dangerous mode we use a label (as the text is multi-line).
   if (!IsDangerousMode()) {
-    std::wstring filename =
-        gfx::ElideFilename(download_->GetFileName().ToWStringHack(),
-                           font_,
-                           kTextWidth);
+    std::wstring filename;
+    if (!disabled_while_opening_) {
+      filename = gfx::ElideFilename(download_->GetFileName(),
+                                    font_, kTextWidth);
+    } else {
+      std::wstring tmp_name =
+          l10n_util::GetStringF(IDS_DOWNLOAD_STATUS_OPENING,
+                                download_->GetFileName().ToWStringHack());
+#if defined(OS_WIN)
+      FilePath filepath(tmp_name);
+#else
+      FilePath filepath(base::SysWideToNativeMB(tmp_name));
+#endif
+      filename = gfx::ElideFilename(filepath, font_, kTextWidth);
+    }
 
+    int mirrored_x = MirroredXWithWidthInsideView(
+        download_util::kSmallProgressIconSize, kTextWidth);
+    SkColor file_name_color = GetThemeProvider()->GetColor(
+        BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
     if (show_status_text_) {
       int y = box_y_ + kVerticalPadding;
 
       // Draw the file's name.
-      canvas->DrawStringInt(filename, font_, kFileNameColor,
-                            download_util::kSmallProgressIconSize, y,
-                            kTextWidth, font_.height());
+      canvas->DrawStringInt(filename, font_,
+                            IsEnabled() ? file_name_color :
+                                          kFileNameDisabledColor,
+                            mirrored_x, y, kTextWidth, font_.height());
 
       y += font_.height() + kVerticalTextPadding;
 
-      canvas->DrawStringInt(status_text_, font_, kStatusColor,
-                            download_util::kSmallProgressIconSize, y,
+      canvas->DrawStringInt(status_text_, font_, kStatusColor, mirrored_x, y,
                             kTextWidth, font_.height());
     } else {
       int y = box_y_ + (box_height_ - font_.height()) / 2;
 
       // Draw the file's name.
-      canvas->DrawStringInt(filename, font_, kFileNameColor,
-                            download_util::kSmallProgressIconSize, y,
-                            kTextWidth, font_.height());
+      canvas->DrawStringInt(filename, font_,
+                            IsEnabled() ? file_name_color :
+                                          kFileNameDisabledColor,
+                            mirrored_x, y, kTextWidth, font_.height());
     }
   }
 
   // Paint the icon.
   IconManager* im = g_browser_process->icon_manager();
   SkBitmap* icon = IsDangerousMode() ? warning_icon_ :
-      im->LookupIcon(download_->full_path().ToWStringHack(), IconLoader::SMALL);
+      im->LookupIcon(download_->full_path(), IconLoader::SMALL);
 
   // We count on the fact that the icon manager will cache the icons and if one
   // is available, it will be cached here. We *don't* want to request the icon
@@ -571,13 +656,22 @@ void DownloadItemView::Paint(ChromeCanvas* canvas) {
     }
 
     // Draw the icon image.
-    canvas->DrawBitmapInt(*icon,
-                          download_util::kSmallProgressIconOffset,
-                          download_util::kSmallProgressIconOffset);
+    int mirrored_x = MirroredXWithWidthInsideView(
+        download_util::kSmallProgressIconOffset, icon->width());
+    if (IsEnabled()) {
+      canvas->DrawBitmapInt(*icon, mirrored_x,
+                            download_util::kSmallProgressIconOffset);
+    } else {
+      // Use an alpha to make the image look disabled.
+      SkPaint paint;
+      paint.setAlpha(120);
+      canvas->DrawBitmapInt(*icon, mirrored_x,
+                            download_util::kSmallProgressIconOffset, paint);
+    }
   }
 }
 
-void DownloadItemView::PaintBitmaps(ChromeCanvas* canvas,
+void DownloadItemView::PaintBitmaps(gfx::Canvas* canvas,
                                     const SkBitmap* top_bitmap,
                                     const SkBitmap* center_bitmap,
                                     const SkBitmap* bottom_bitmap,
@@ -686,7 +780,7 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
 
   if (event.IsOnlyLeftMouseButton()) {
     gfx::Point point(event.location());
-    if (event.x() < drop_down_x_) {
+    if (!InDropDownButtonXCoordinateRange(event.x())) {
       SetState(PUSHED, NORMAL);
       return true;
     }
@@ -707,15 +801,11 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
     // The menu's position is different depending on the UI layout.
     // DownloadShelfContextMenu will take care of setting the right anchor for
     // the menu depending on the locale.
-    //
-    // TODO(idana): when bug# 1163334 is fixed the following check should be
-    // replaced with UILayoutIsRightToLeft().
     point.set_y(height());
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
-      point.set_x(width());
-    } else {
-      point.set_x(drop_down_x_);
-    }
+    if (UILayoutIsRightToLeft())
+      point.set_x(drop_down_x_right_);
+    else
+      point.set_x(drop_down_x_left_);
 
     views::View::ConvertPointToScreen(this, &point);
     DownloadShelfContextMenuWin menu(model_.get(),
@@ -733,7 +823,7 @@ void DownloadItemView::OnMouseMoved(const views::MouseEvent& event) {
   if (IsDangerousMode())
     return;
 
-  bool on_body = event.x() < drop_down_x_;
+  bool on_body = !InDropDownButtonXCoordinateRange(event.x());
   SetState(on_body ? HOT : NORMAL, on_body ? NORMAL : HOT);
   if (on_body) {
     body_hover_animation_->Show();
@@ -756,7 +846,8 @@ void DownloadItemView::OnMouseReleased(const views::MouseEvent& event,
     starting_drag_ = false;
     return;
   }
-  if (event.IsOnlyLeftMouseButton() && event.x() < drop_down_x_)
+  if (event.IsOnlyLeftMouseButton() &&
+      !InDropDownButtonXCoordinateRange(event.x()))
     OpenDownload();
 
   SetState(NORMAL, NORMAL);
@@ -775,13 +866,14 @@ bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
   if (dragging_) {
     if (download_->state() == DownloadItem::COMPLETE) {
       IconManager* im = g_browser_process->icon_manager();
-      SkBitmap* icon = im->LookupIcon(download_->full_path().ToWStringHack(),
+      SkBitmap* icon = im->LookupIcon(download_->full_path(),
                                       IconLoader::SMALL);
       if (icon)
         download_util::DragDownload(download_, icon);
     }
-  } else if (win_util::IsDrag(drag_start_point_.ToPOINT(),
-                              event.location().ToPOINT())) {
+  } else if (ExceededDragThreshold(
+                 event.location().x() - drag_start_point_.x(),
+                 event.location().y() - drag_start_point_.y())) {
     dragging_ = true;
   }
   return true;
@@ -794,6 +886,10 @@ void DownloadItemView::AnimationProgressed(const Animation* animation) {
 }
 
 void DownloadItemView::OpenDownload() {
+  // We're interested in how long it takes users to open downloads.  If they
+  // open downloads super quickly, we should be concerned about clickjacking.
+  UMA_HISTOGRAM_LONG_TIMES("clickjacking.open_download",
+                           base::Time::Now() - creation_time_);
   if (download_->state() == DownloadItem::IN_PROGRESS) {
     download_->set_open_when_complete(!download_->open_when_complete());
   } else if (download_->state() == DownloadItem::COMPLETE) {
@@ -809,8 +905,7 @@ void DownloadItemView::OnExtractIconComplete(IconManager::Handle handle,
 
 void DownloadItemView::LoadIcon() {
   IconManager* im = g_browser_process->icon_manager();
-  im->LoadIcon(download_->full_path().ToWStringHack(), IconLoader::SMALL,
-               &icon_consumer_,
+  im->LoadIcon(download_->full_path(), IconLoader::SMALL, &icon_consumer_,
                NewCallback(this, &DownloadItemView::OnExtractIconComplete));
 }
 
@@ -823,7 +918,7 @@ gfx::Size DownloadItemView::GetButtonSize() {
   // not showing, the native buttons are not parented and their preferred size
   // is 0, messing-up the layout.
   if (cached_button_size_.width() != 0)
-    size = cached_button_size_;
+    return cached_button_size_;
 
   size = save_button_->GetMinimumSize();
   gfx::Size discard_size = discard_button_->GetMinimumSize();
@@ -854,7 +949,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
 
   gfx::Size size;
   int min_width = -1;
-  int sp_index = text.find(L" ");
+  size_t sp_index = text.find(L" ");
   while (sp_index != std::wstring::npos) {
     text.replace(sp_index, 1, L"\n");
     dangerous_download_label_->SetText(text);
@@ -881,4 +976,15 @@ void DownloadItemView::SizeLabelToMinWidth() {
 
   dangerous_download_label_->SetBounds(0, 0, size.width(), size.height());
   dangerous_download_label_sized_ = true;
+}
+
+void DownloadItemView::Reenable() {
+  disabled_while_opening_ = false;
+  SetEnabled(true);  // Triggers a repaint.
+}
+
+bool DownloadItemView::InDropDownButtonXCoordinateRange(int x) {
+  if (x > drop_down_x_left_ && x < drop_down_x_right_)
+    return true;
+  return false;
 }

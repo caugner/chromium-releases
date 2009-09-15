@@ -95,7 +95,7 @@ class Rankings {
     List list;                     // Which entry was returned to the user.
     CacheRankingsBlock* nodes[3];  // Nodes on the first three lists.
     Rankings* my_rankings;
-    Iterator(Rankings* rankings) {
+    explicit Iterator(Rankings* rankings) {
       memset(this, 0, sizeof(Iterator));
       my_rankings = rankings;
     }
@@ -126,6 +126,9 @@ class Rankings {
   CacheRankingsBlock* GetNext(CacheRankingsBlock* node, List list);
   CacheRankingsBlock* GetPrev(CacheRankingsBlock* node, List list);
   void FreeRankingsBlock(CacheRankingsBlock* node);
+
+  // Controls tracking of nodes used for enumerations.
+  void TrackRankingsBlock(CacheRankingsBlock* node, bool start_tracking);
 
   // Peforms a simple self-check of the lists, and returns the number of items
   // or an error code (negative value).
@@ -171,11 +174,11 @@ class Rankings {
   bool IsHead(CacheAddr addr);
   bool IsTail(CacheAddr addr);
 
-  // Controls tracking of nodes used for enumerations.
-  void TrackRankingsBlock(CacheRankingsBlock* node, bool start_tracking);
-
   // Updates the iterators whenever node is being changed.
   void UpdateIterators(CacheRankingsBlock* node);
+
+  // Invalidates the iterators pointing to this node.
+  void InvalidateIterators(CacheRankingsBlock* node);
 
   // Keeps track of the number of entries on a list.
   void IncrementCounter(List list);

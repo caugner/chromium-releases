@@ -8,34 +8,17 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/views/widget/widget.h"
+#include "views/widget/widget.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsPageView
 
 OptionsPageView::OptionsPageView(Profile* profile)
-    : profile_(profile),
+    : OptionsPageBase(profile),
       initialized_(false) {
 }
 
 OptionsPageView::~OptionsPageView() {
-}
-
-void OptionsPageView::UserMetricsRecordAction(const wchar_t* action,
-                                              PrefService* prefs) {
-  UserMetrics::RecordComputedAction(action, profile());
-  if (prefs)
-    prefs->ScheduleSavePersistentPrefs(g_browser_process->file_thread());
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// OptionsPageView, NotificationObserver implementation:
-
-void OptionsPageView::Observe(NotificationType type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED)
-    NotifyPrefChanged(Details<std::wstring>(details).ptr());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -51,10 +34,4 @@ void OptionsPageView::ViewHierarchyChanged(bool is_add,
     InitControlLayout();
     NotifyPrefChanged(NULL);
   }
-}
-
-HWND OptionsPageView::GetRootWindow() const {
-  // Our Widget is the TabbedPane content HWND, which is a child HWND.
-  // We need the root HWND for parenting.
-  return GetAncestor(GetWidget()->GetNativeView(), GA_ROOT);
 }

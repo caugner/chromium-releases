@@ -21,6 +21,9 @@ class HttpAuth {
    // Http authentication can be done the the proxy server, origin server,
    // or both. This enum tracks who the target is.
    enum Target {
+     AUTH_NONE = -1,
+     // We depend on the valid targets (!= AUTH_NONE) being usable as indexes
+     // in an array, so start from 0.
      AUTH_PROXY = 0,
      AUTH_SERVER = 1,
    };
@@ -72,6 +75,7 @@ class HttpAuth {
   // |*handler| is set to NULL.
   static void CreateAuthHandler(const std::string& challenge,
                                 Target target,
+                                const GURL& origin,
                                 scoped_refptr<HttpAuthHandler>* handler);
 
   // Iterate through the challenge headers, and pick the best one that
@@ -81,11 +85,15 @@ class HttpAuth {
   // |*handler| is unchanged. If no supported challenge was found, |*handler|
   // is set to NULL.
   //
+  // |origin| is used by the NTLM authentication scheme to construct the
+  // service principal name.  It is ignored by other schemes.
+  //
   // TODO(wtc): Continuing to use the existing handler in |*handler| (for
   // NTLM) is new behavior.  Rename ChooseBestChallenge to fully encompass
   // what it does now.
   static void ChooseBestChallenge(const HttpResponseHeaders* headers,
                                   Target target,
+                                  const GURL& origin,
                                   scoped_refptr<HttpAuthHandler>* handler);
 
   // ChallengeTokenizer breaks up a challenge string into the the auth scheme

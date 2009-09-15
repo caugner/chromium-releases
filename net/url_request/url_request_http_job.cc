@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,22 @@
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/message_loop.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/filter.h"
+#include "net/base/force_tls_state.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/sdch_manager.h"
+#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
@@ -45,7 +50,10 @@ URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
   // network request.
   static const bool kForceHTTPS =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS);
-  if (kForceHTTPS && scheme != "https")
+  if (kForceHTTPS && scheme == "http" &&
+      request->context()->force_tls_state() &&
+      request->context()->force_tls_state()->IsEnabledForHost(
+          request->url().host()))
     return new URLRequestErrorJob(request, net::ERR_DISALLOWED_URL_SCHEME);
 
   return new URLRequestHttpJob(request);
@@ -53,7 +61,7 @@ URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
 
 URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
     : URLRequestJob(request),
-      transaction_(NULL),
+      context_(request->context()),
       response_info_(NULL),
       proxy_auth_state_(net::AUTH_STATE_DONT_NEED_AUTH),
       server_auth_state_(net::AUTH_STATE_DONT_NEED_AUTH),
@@ -62,10 +70,25 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
       ALLOW_THIS_IN_INITIALIZER_LIST(
           read_callback_(this, &URLRequestHttpJob::OnReadCompleted)),
       read_in_progress_(false),
-      context_(request->context()) {
+      transaction_(NULL),
+      sdch_dictionary_advertised_(false),
+      sdch_test_activated_(false),
+      sdch_test_control_(false),
+      is_cached_content_(false) {
 }
 
 URLRequestHttpJob::~URLRequestHttpJob() {
+  DCHECK(!sdch_test_control_ || !sdch_test_activated_);
+  if (!IsCachedContent()) {
+    if (sdch_test_control_)
+      RecordPacketStats(SDCH_EXPERIMENT_HOLDBACK);
+    if (sdch_test_activated_)
+      RecordPacketStats(SDCH_EXPERIMENT_DECODE);
+  }
+  // Make sure SDCH filters are told to emit histogram data while this class
+  // can still service the IsCachedContent() call.
+  DestroyFilters();
+
   if (sdch_dictionary_url_.is_valid()) {
     // Prior to reaching the destructor, request_ has been set to a NULL
     // pointer, so request_->url() is no longer valid in the destructor, and we
@@ -111,6 +134,7 @@ void URLRequestHttpJob::Start() {
   request_info_.referrer = referrer;
   request_info_.method = request_->method();
   request_info_.load_flags = request_->load_flags();
+  request_info_.priority = request_->priority();
 
   if (request_->context()) {
     request_info_.user_agent =
@@ -180,7 +204,7 @@ bool URLRequestHttpJob::GetResponseCookies(
   return true;
 }
 
-int URLRequestHttpJob::GetResponseCode() {
+int URLRequestHttpJob::GetResponseCode() const {
   DCHECK(transaction_.get());
 
   if (!response_info_)
@@ -203,29 +227,17 @@ bool URLRequestHttpJob::GetContentEncodings(
     encoding_types->push_back(Filter::ConvertEncodingToType(encoding_type));
   }
 
-  if (!encoding_types->empty()) {
-    Filter::FixupEncodingTypes(*this, encoding_types);
-  }
+  // Even if encoding types are empty, there is a chance that we need to add
+  // some decoding, as some proxies strip encoding completely. In such cases,
+  // we may need to add (for example) SDCH filtering (when the context suggests
+  // it is appropriate).
+  Filter::FixupEncodingTypes(*this, encoding_types);
+
   return !encoding_types->empty();
 }
 
 bool URLRequestHttpJob::IsSdchResponse() const {
-  return response_info_ &&
-      (request_info_.load_flags & net::LOAD_SDCH_DICTIONARY_ADVERTISED);
-}
-
-bool URLRequestHttpJob::IsRedirectResponse(GURL* location,
-                                           int* http_status_code) {
-  if (!response_info_)
-    return false;
-
-  std::string value;
-  if (!response_info_->headers->IsRedirect(&value))
-    return false;
-
-  *location = request_->url().Resolve(value);
-  *http_status_code = response_info_->headers->response_code();
-  return true;
+  return sdch_dictionary_advertised_;
 }
 
 bool URLRequestHttpJob::IsSafeRedirect(const GURL& location) {
@@ -298,9 +310,26 @@ void URLRequestHttpJob::SetAuth(const std::wstring& username,
     server_auth_state_ = net::AUTH_STATE_HAVE_AUTH;
   }
 
+  RestartTransactionWithAuth(username, password);
+}
+
+void URLRequestHttpJob::RestartTransactionWithAuth(
+    const std::wstring& username,
+    const std::wstring& password) {
+
   // These will be reset in OnStartCompleted.
   response_info_ = NULL;
   response_cookies_.clear();
+
+  // Update the cookies, since the cookie store may have been updated from the
+  // headers in the 401/407. Since cookies were already appended to
+  // extra_headers by AddExtraHeaders(), we need to strip them out.
+  static const char* const cookie_name[] = { "cookie" };
+  request_info_.extra_headers = net::HttpUtil::StripHeaders(
+      request_info_.extra_headers, cookie_name, arraysize(cookie_name));
+  // TODO(eroman): this ordering is inconsistent with non-restarted request,
+  // where cookies header appears second from the bottom.
+  request_info_.extra_headers += AssembleRequestCookies();
 
   // No matter what, we want to report our status as IO pending since we will
   // be notifying our consumer asynchronously via OnStartCompleted.
@@ -340,6 +369,26 @@ void URLRequestHttpJob::CancelAuth() {
   //
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       this, &URLRequestHttpJob::OnStartCompleted, net::OK));
+}
+
+void URLRequestHttpJob::ContinueWithCertificate(
+    net::X509Certificate* client_cert) {
+  DCHECK(transaction_.get());
+
+  DCHECK(!response_info_) << "should not have a response yet";
+
+  // No matter what, we want to report our status as IO pending since we will
+  // be notifying our consumer asynchronously via OnStartCompleted.
+  SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
+
+  int rv = transaction_->RestartWithCertificate(client_cert, &start_callback_);
+  if (rv == net::ERR_IO_PENDING)
+    return;
+
+  // The transaction started synchronously, but we need to notify the
+  // URLRequest delegate via the message loop.
+  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &URLRequestHttpJob::OnStartCompleted, rv));
 }
 
 void URLRequestHttpJob::ContinueDespiteLastError() {
@@ -404,15 +453,16 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
 
   if (result == net::OK) {
     NotifyHeadersComplete();
-  } else if (net::IsCertificateError(result) &&
-             !CommandLine::ForCurrentProcess()->HasSwitch(
-                 switches::kForceHTTPS)) {
+  } else if (ShouldTreatAsCertificateError(result)) {
     // We encountered an SSL certificate error.  Ask our delegate to decide
     // what we should do.
     // TODO(wtc): also pass ssl_info.cert_status, or just pass the whole
     // ssl_info.
     request_->delegate()->OnSSLCertificateError(
         request_, result, transaction_->GetResponseInfo()->ssl_info.cert);
+  } else if (result == net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
+    request_->delegate()->OnCertificateRequested(
+        request_, transaction_->GetResponseInfo()->cert_request_info);
   } else {
     NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, result));
   }
@@ -433,17 +483,37 @@ void URLRequestHttpJob::OnReadCompleted(int result) {
   NotifyReadComplete(result);
 }
 
+bool URLRequestHttpJob::ShouldTreatAsCertificateError(int result) {
+  if (!net::IsCertificateError(result))
+    return false;
+
+  // Hide the fancy processing behind a command line switch.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS))
+    return true;
+
+  // Check whether our context is using ForceTLS.
+  if (!context_->force_tls_state())
+    return true;
+
+  return !context_->force_tls_state()->IsEnabledForHost(
+      request_info_.url.host());
+}
+
 void URLRequestHttpJob::NotifyHeadersComplete() {
   DCHECK(!response_info_);
 
   response_info_ = transaction_->GetResponseInfo();
 
+  // Save boolean, as we'll need this info at destruction time, and filters may
+  // also need this info.
+  is_cached_content_ = response_info_->was_cached;
+
   // Get the Set-Cookie values, and send them to our cookie database.
   if (!(request_info_.load_flags & net::LOAD_DO_NOT_SAVE_COOKIES)) {
     URLRequestContext* ctx = request_->context();
     if (ctx && ctx->cookie_store() &&
-        ctx->cookie_policy()->CanSetCookie(request_->url(),
-                                           request_->policy_url())) {
+        ctx->cookie_policy()->CanSetCookie(
+            request_->url(), request_->first_party_for_cookies())) {
       FetchResponseCookies();
       net::CookieMonster::CookieOptions options;
       options.set_include_httponly();
@@ -452,6 +522,8 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
                                                  options);
     }
   }
+
+  ProcessForceTLSHeader();
 
   if (SdchManager::Global() &&
       SdchManager::Global()->IsInSupportedDomain(request_->url())) {
@@ -471,6 +543,15 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
       // Resolve suggested URL relative to request url.
       sdch_dictionary_url_ = request_info_.url.Resolve(url_text);
     }
+  }
+
+  // The HTTP transaction may be restarted several times for the purposes
+  // of sending authorization information. Each time it restarts, we get
+  // notified of the headers completion so that we can update the cookie store.
+  if (transaction_->IsReadyToRestartForAuth()) {
+    DCHECK(!response_info_->auth_challenge.get());
+    RestartTransactionWithAuth(std::wstring(), std::wstring());
+    return;
   }
 
   URLRequestJob::NotifyHeadersComplete();
@@ -515,45 +596,61 @@ void URLRequestHttpJob::StartTransaction() {
 }
 
 void URLRequestHttpJob::AddExtraHeaders() {
+  // TODO(jar): Consider optimizing away SDCH advertising bytes when the URL is
+  // probably an img or such (and SDCH encoding is not likely).
+  bool advertise_sdch = SdchManager::Global() &&
+      SdchManager::Global()->IsInSupportedDomain(request_->url());
+  std::string avail_dictionaries;
+  if (advertise_sdch) {
+    SdchManager::Global()->GetAvailDictionaryList(request_->url(),
+                                                  &avail_dictionaries);
+
+    // The AllowLatencyExperiment() is only true if we've successfully done a
+    // full SDCH compression recently in this browser session for this host.
+    // Note that for this path, there might be no applicable dictionaries, and
+    // hence we can't participate in the experiment.
+    if (!avail_dictionaries.empty() &&
+        SdchManager::Global()->AllowLatencyExperiment(request_->url())) {
+      // We are participating in the test (or control), and hence we'll
+      // eventually record statistics via either SDCH_EXPERIMENT_DECODE or
+      // SDCH_EXPERIMENT_HOLDBACK, and we'll need some packet timing data.
+      EnablePacketCounting(kSdchPacketHistogramCount);
+      if (base::RandDouble() < .01) {
+        sdch_test_control_ = true;  // 1% probability.
+        advertise_sdch = false;
+      } else {
+        sdch_test_activated_ = true;
+      }
+    }
+  }
+
   // Supply Accept-Encoding headers first so that it is more likely that they
   // will be in the first transmitted packet.  This can sometimes make it easier
   // to filter and analyze the streams to assure that a proxy has not damaged
   // these headers.  Some proxies deliberately corrupt Accept-Encoding headers.
-  if (!SdchManager::Global() ||
-      !SdchManager::Global()->IsInSupportedDomain(request_->url())) {
+  if (!advertise_sdch) {
     // Tell the server what compression formats we support (other than SDCH).
-    request_info_.extra_headers += "Accept-Encoding: gzip,deflate,bzip2\r\n";
+    request_info_.extra_headers += "Accept-Encoding: gzip,deflate\r\n";
   } else {
-    // Supply SDCH related headers, as well as accepting that encoding.
-    // Tell the server what compression formats we support.
+    // Include SDCH in acceptable list.
     request_info_.extra_headers += "Accept-Encoding: "
-        "gzip,deflate,bzip2,sdch\r\n";
-
-    // TODO(jar): See if it is worth optimizing away these bytes when the URL is
-    // probably an img or such. (and SDCH encoding is not likely).
-    std::string avail_dictionaries;
-    SdchManager::Global()->GetAvailDictionaryList(request_->url(),
-                                                  &avail_dictionaries);
+        "gzip,deflate,sdch\r\n";
     if (!avail_dictionaries.empty()) {
       request_info_.extra_headers += "Avail-Dictionary: "
           + avail_dictionaries + "\r\n";
-      request_info_.load_flags |= net::LOAD_SDCH_DICTIONARY_ADVERTISED;
+      sdch_dictionary_advertised_ = true;
+      // Since we're tagging this transaction as advertising a dictionary, we'll
+      // definately employ an SDCH filter (or tentative sdch filter) when we get
+      // a response.  When done, we'll record histograms via SDCH_DECODE or
+      // SDCH_PASSTHROUGH.  Hence we need to record packet arrival times.
+      EnablePacketCounting(kSdchPacketHistogramCount);
     }
   }
 
   URLRequestContext* context = request_->context();
   if (context) {
-    // Add in the cookie header.  TODO might we need more than one header?
-    if (context->cookie_store() &&
-        context->cookie_policy()->CanGetCookies(request_->url(),
-                                               request_->policy_url())) {
-      net::CookieMonster::CookieOptions options;
-      options.set_include_httponly();
-      std::string cookies = request_->context()->cookie_store()->
-          GetCookiesWithOptions(request_->url(), options);
-      if (!cookies.empty())
-        request_info_.extra_headers += "Cookie: " + cookies + "\r\n";
-    }
+    if (context->allowSendingCookies(request_))
+      request_info_.extra_headers += AssembleRequestCookies();
     if (!context->accept_language().empty())
       request_info_.extra_headers += "Accept-Language: " +
           context->accept_language() + "\r\n";
@@ -561,6 +658,27 @@ void URLRequestHttpJob::AddExtraHeaders() {
       request_info_.extra_headers += "Accept-Charset: " +
           context->accept_charset() + "\r\n";
   }
+}
+
+std::string URLRequestHttpJob::AssembleRequestCookies() {
+  if (request_info_.load_flags & net::LOAD_DO_NOT_SEND_COOKIES)
+    return std::string();
+
+  URLRequestContext* context = request_->context();
+  if (context) {
+    // Add in the cookie header.  TODO might we need more than one header?
+    if (context->cookie_store() &&
+        context->cookie_policy()->CanGetCookies(
+            request_->url(), request_->first_party_for_cookies())) {
+      net::CookieMonster::CookieOptions options;
+      options.set_include_httponly();
+      std::string cookies = request_->context()->cookie_store()->
+          GetCookiesWithOptions(request_->url(), options);
+      if (!cookies.empty())
+        return "Cookie: " + cookies + "\r\n";
+    }
+  }
+  return std::string();
 }
 
 void URLRequestHttpJob::FetchResponseCookies() {
@@ -572,5 +690,34 @@ void URLRequestHttpJob::FetchResponseCookies() {
 
   void* iter = NULL;
   while (response_info_->headers->EnumerateHeader(&iter, name, &value))
-    response_cookies_.push_back(value);
+    if (request_->context()->interceptCookie(request_, &value))
+      response_cookies_.push_back(value);
+}
+
+
+void URLRequestHttpJob::ProcessForceTLSHeader() {
+  DCHECK(response_info_);
+
+  // Hide processing behind a command line flag.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS))
+    return;
+
+  // Only process X-Force-TLS from HTTPS responses.
+  if (request_info_.url.scheme() != "https")
+    return;
+
+  // Only process X-Force-TLS from responses with valid certificates.
+  if (response_info_->ssl_info.cert_status & net::CERT_STATUS_ALL_ERRORS)
+    return;
+
+  URLRequestContext* ctx = request_->context();
+  if (!ctx || !ctx->force_tls_state())
+    return;
+
+  std::string name = "X-Force-TLS";
+  std::string value;
+
+  void* iter = NULL;
+  while (response_info_->headers->EnumerateHeader(&iter, name, &value))
+    ctx->force_tls_state()->DidReceiveHeader(request_info_.url, value);
 }

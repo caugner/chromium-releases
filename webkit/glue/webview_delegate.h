@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,44 +28,49 @@
 
 #include <vector>
 
+#include "base/gfx/native_widget_types.h"
+#include "webkit/api/public/WebNavigationPolicy.h"
+#include "webkit/api/public/WebNavigationType.h"
+#include "webkit/api/public/WebTextDirection.h"
+#include "webkit/api/public/WebWidgetClient.h"
 #include "webkit/glue/context_menu.h"
-#include "webkit/glue/webwidget_delegate.h"
-
-namespace gfx {
-class Point;
-class Rect;
-}
 
 namespace webkit_glue {
 class WebMediaPlayerDelegate;
 }
 
-struct PasswordForm;
-struct WebDropData;
-struct WebPreferences;
-class AutofillForm;
-class SkBitmap;
-class WebDevToolsAgentDelegate;
-class WebError;
-class WebFrame;
-class WebHistoryItem;
-class WebMediaPlayerDelegate;
-class WebPluginDelegate;
-class WebRequest;
-class WebResponse;
-class WebView;
-class WebWidget;
+namespace WebCore {
+class AccessibilityObject;
+}
+
+namespace WebKit {
+class WebDataSource;
+class WebDragData;
+class WebForm;
 class WebWorker;
 class WebWorkerClient;
+class WebMediaPlayer;
+class WebMediaPlayerClient;
+class WebNode;
+class WebURLRequest;
+class WebURLResponse;
+class WebWidget;
+struct WebPoint;
+struct WebPopupMenuInfo;
+struct WebRect;
+struct WebURLError;
+}
 
-enum WebNavigationType {
-  WebNavigationTypeLinkClicked,
-  WebNavigationTypeFormSubmitted,
-  WebNavigationTypeBackForward,
-  WebNavigationTypeReload,
-  WebNavigationTypeFormResubmitted,
-  WebNavigationTypeOther
-};
+class FilePath;
+class SkBitmap;
+class WebDevToolsAgentDelegate;
+class WebFrame;
+class WebMediaPlayerDelegate;
+class WebPluginDelegate;
+class WebView;
+struct ContextMenuMediaParams;
+struct WebPluginGeometry;
+struct WebPreferences;
 
 enum NavigationGesture {
   NavigationGestureUser,    // User initiated navigation/load. This is not
@@ -88,7 +93,7 @@ class WebFileChooserCallback {
  public:
   WebFileChooserCallback() {}
   virtual ~WebFileChooserCallback() {}
-  virtual void OnFileChoose(const std::vector<std::wstring>& file_names) { }
+  virtual void OnFileChoose(const std::vector<FilePath>& file_names) { }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebFileChooserCallback);
@@ -96,8 +101,8 @@ class WebFileChooserCallback {
 
 
 // Inheritance here is somewhat weird, but since a WebView is a WebWidget,
-// it makes sense that a WebViewDelegate is a WebWidgetDelegate.
-class WebViewDelegate : virtual public WebWidgetDelegate {
+// it makes sense that a WebViewDelegate is a WebWidgetClient.
+class WebViewDelegate : virtual public WebKit::WebWidgetClient {
  public:
   // WebView additions -------------------------------------------------------
 
@@ -105,14 +110,28 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // made visible until the new WebView's Delegate has its Show method called.
   // The returned WebView pointer is assumed to be owned by the host window,
   // and the caller of CreateWebView should not release the given WebView.
-  // user_gesture is true if a user action initiated this call.
-  virtual WebView* CreateWebView(WebView* webview, bool user_gesture) {
+  // |user_gesture| is true if a user action initiated this call.
+  // |creator_url|, if nonempty, holds the security origin of the page creating
+  // this WebView.
+  virtual WebView* CreateWebView(WebView* webview,
+                                 bool user_gesture,
+                                 const GURL& creator_url) {
     return NULL;
   }
 
   // This method is called to create a new WebWidget to act as a popup
   // (like a drop-down menu).
-  virtual WebWidget* CreatePopupWidget(WebView* webview, bool activatable) {
+  virtual WebKit::WebWidget* CreatePopupWidget(
+      WebView* webview,
+      bool activatable) {
+    return NULL;
+  }
+
+  // Like CreatePopupWidget, except the actual widget is rendered by the
+  // embedder using the supplied info.
+  virtual WebKit::WebWidget* CreatePopupWidgetWithInfo(
+      WebView* webview,
+      const WebKit::WebPopupMenuInfo& info) {
     return NULL;
   }
 
@@ -130,26 +149,29 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
     return NULL;
   }
 
+  // Called when a windowed plugin is initializing, to request a container
+  // for the plugin.  Only used on Linux.
+  virtual gfx::PluginWindowHandle CreatePluginContainer() { return 0; }
+
+  // Called when a windowed plugin is closing.
+  // Lets the view delegate shut down anything it is using to wrap the plugin.
+  virtual void WillDestroyPluginWindow(gfx::PluginWindowHandle handle) { }
+
   // This method is called when the renderer creates a worker object.
-  virtual WebWorker* CreateWebWorker(WebWorkerClient* client) {
+  virtual WebKit::WebWorker* CreateWebWorker(WebKit::WebWorkerClient* client) {
     return NULL;
   }
 
-  // Called when a WebMediaPlayerDelegate is needed.
-  virtual webkit_glue::WebMediaPlayerDelegate* CreateMediaPlayerDelegate() {
+  // Called when a WebMediaPlayer is needed.
+  virtual WebKit::WebMediaPlayer* CreateWebMediaPlayer(
+      WebKit::WebMediaPlayerClient* client) {
     return NULL;
-  }
-
-  // This method is called when default plugin has been correctly created and
-  // initialized, and found that the missing plugin is available to install or
-  // user has started installation.
-  virtual void OnMissingPluginStatus(WebPluginDelegate* delegate, int status) {
   }
 
   // This method is called to open a URL in the specified manner.
   virtual void OpenURL(WebView* webview, const GURL& url,
                        const GURL& referrer,
-                       WindowOpenDisposition disposition) {
+                       WebKit::WebNavigationPolicy policy) {
   }
 
   // Notifies how many matches have been found so far, for a given request_id.
@@ -167,22 +189,34 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // selection rect is currently located.
   virtual void ReportFindInPageSelection(int request_id,
                                          int active_match_ordinal,
-                                         const gfx::Rect& selection_rect) {
-  }
-
-  // This function is called to retrieve a resource bitmap from the
-  // renderer that was cached as a result of the renderer receiving a
-  // ViewMsg_Preload_Bitmap message from the browser.
-  virtual const SkBitmap* GetPreloadedResourceBitmap(int resource_id) {
-    return NULL;
+                                         const WebKit::WebRect& selection) {
   }
 
   // Returns whether this WebView was opened by a user gesture.
-  virtual bool WasOpenedByUserGesture(WebView* webview) const {
+  virtual bool WasOpenedByUserGesture() const {
     return true;
   }
 
+  // Called by ChromeClientImpl::focus() if accessibility on the renderer side
+  // is enabled, and a focus change has occurred. Will retrieve the id of the
+  // input AccessibilityObject and send it through IPC for handling on the
+  // browser side.
+  virtual void FocusAccessibilityObject(WebCore::AccessibilityObject* acc_obj) {
+  }
+
+  // Keeps track of the necessary window move for a plugin window that resulted
+  // from a scroll operation.  That way, all plugin windows can be moved at the
+  // same time as each other and the page.
+  virtual void DidMovePlugin(const WebPluginGeometry& move) {
+  }
+
   // FrameLoaderClient -------------------------------------------------------
+
+  virtual bool CanAcceptLoadDrops() const {
+    // Always return true here so layout tests (which use the default WebView
+    // delegate) continue to pass.
+    return true;
+  }
 
   // Notifies the delegate that a load has begun.
   virtual void DidStartLoading(WebView* webview) {
@@ -207,29 +241,49 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   virtual void DocumentElementAvailable(WebFrame* webframe) {
   }
 
+  // Notifies that a new script context has been created for this frame.
+  // This is similar to WindowObjectCleared but only called once per frame
+  // context.
+  virtual void DidCreateScriptContextForFrame(WebFrame* webframe) {
+  }
+
+  // Notifies that this frame's script context has been destroyed.
+  virtual void DidDestroyScriptContextForFrame(WebFrame* webframe) {
+  }
+
+  // Notifies that a garbage-collected context was created - content scripts.
+  virtual void DidCreateIsolatedScriptContext(WebFrame* webframe) {
+  }
+
   // PolicyDelegate ----------------------------------------------------------
 
   // This method is called to notify the delegate, and let it modify a
   // proposed navigation. It will be called before loading starts, and
   // on every redirect.
   //
-  // disposition specifies what should normally happen for this
+  // default_policy specifies what should normally happen for this
   // navigation (open in current tab, start a new tab, start a new
-  // window, etc).  This method can return an altered disposition, and
+  // window, etc).  This method can return an altered policy, and
   // take any additional separate action it wants to.
   //
   // is_redirect is true if this is a redirect rather than user action.
-  virtual WindowOpenDisposition DispositionForNavigationAction(
+  virtual WebKit::WebNavigationPolicy PolicyForNavigationAction(
       WebView* webview,
       WebFrame* frame,
-      const WebRequest* request,
-      WebNavigationType type,
-      WindowOpenDisposition disposition,
+      const WebKit::WebURLRequest& request,
+      WebKit::WebNavigationType type,
+      WebKit::WebNavigationPolicy default_policy,
       bool is_redirect) {
-    return disposition;
+    return default_policy;
   }
 
   // FrameLoadDelegate -------------------------------------------------------
+
+  // A datasource has been created for a new navigation.  The given datasource
+  // will become the provisional datasource for the frame.
+  virtual void DidCreateDataSource(WebFrame* frame,
+                                   WebKit::WebDataSource* ds) {
+  }
 
   // Notifies the delegate that the provisional load of a specified frame in a
   // given WebView has started. By the time the provisional load for a frame has
@@ -266,18 +320,19 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   //  committed data source if there is one.
   //  This notification is only received for errors like network errors.
   virtual void DidFailProvisionalLoadWithError(WebView* webview,
-                                               const WebError& error,
+                                               const WebKit::WebURLError& error,
                                                WebFrame* frame) {
   }
 
   // If the provisional load fails, we try to load a an error page describing
   // the user about the load failure.  |html| is the UTF8 text to display.  If
   // |html| is empty, we will fall back on a local error page.
-  virtual void LoadNavigationErrorPage(WebFrame* frame,
-                                       const WebRequest* failed_request,
-                                       const WebError& error,
-                                       const std::string& html,
-                                       bool replace) {
+  virtual void LoadNavigationErrorPage(
+      WebFrame* frame,
+      const WebKit::WebURLRequest& failed_request,
+      const WebKit::WebURLError& error,
+      const std::string& html,
+      bool replace) {
   }
 
   // Notifies the delegate that the load has changed from provisional to
@@ -332,7 +387,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   //  @discussion This method is called after a data source has committed but failed to completely load.
   //  - (void)webView:(WebView *)sender didFailLoadWithError:(NSError *)error forFrame:(WebFrame *)frame;
   virtual void DidFailLoadWithError(WebView* webview,
-                                    const WebError& error,
+                                    const WebKit::WebURLError& error,
                                     WebFrame* forFrame) {
   }
 
@@ -346,10 +401,11 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // This method is called when we load a resource from an in-memory cache.
   // A return value of |false| indicates the load should proceed, but WebCore
   // appears to largely ignore the return value.
-  virtual bool DidLoadResourceFromMemoryCache(WebView* webview,
-                                              const WebRequest& request,
-                                              const WebResponse& response,
-                                              WebFrame* frame) {
+  virtual bool DidLoadResourceFromMemoryCache(
+      WebView* webview,
+      const WebKit::WebURLRequest& request,
+      const WebKit::WebURLResponse& response,
+      WebFrame* frame) {
     return false;
   }
 
@@ -410,6 +466,12 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
                                          WebFrame* frame,
                                          const GURL& source) {
   }
+
+  // Notifies the delegate that a form is about to be submitted.
+  virtual void WillSubmitForm(WebView* webview, WebFrame* frame,
+                              const WebKit::WebForm& form) {
+  }
+
   //
   //  @method webView:willCloseFrame:
   //  @abstract Notifies the delegate that a frame will be closed
@@ -426,9 +488,10 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Associates the given identifier with the initial resource request.
   // Resource load callbacks will use the identifier throughout the life of the
   // request.
-  virtual void AssignIdentifierToRequest(WebView* webview,
-                                         uint32 identifier,
-                                         const WebRequest& request) {
+  virtual void AssignIdentifierToRequest(
+      WebView* webview,
+      uint32 identifier,
+      const WebKit::WebURLRequest& request) {
   }
 
   // Notifies the delegate that a request is about to be sent out, giving the
@@ -437,7 +500,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // to be made.
   virtual void WillSendRequest(WebView* webview,
                                uint32 identifier,
-                               WebRequest* request) {
+                               WebKit::WebURLRequest* request) {
   }
 
   // Notifies the delegate that a subresource load has succeeded.
@@ -447,7 +510,7 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Notifies the delegate that a subresource load has failed, and why.
   virtual void DidFailLoadingWithError(WebView* webview,
                                        uint32 identifier,
-                                       const WebError& error) {
+                                       const WebKit::WebURLError& error) {
   }
 
   // ChromeClient ------------------------------------------------------------
@@ -462,24 +525,6 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
                                    const std::wstring& source_id) {
   }
 
-  // Notification of possible password forms to be filled/submitted by
-  // the password manager
-  virtual void OnPasswordFormsSeen(WebView* webview,
-                                   const std::vector<PasswordForm>& forms) {
-  }
-
-  // Notification of the submission of a form so that its contents can be
-  // recorded for future autofilling.
-  virtual void OnAutofillFormSubmitted(WebView* webview,
-                                       const AutofillForm& form) {
-  }
-
-  virtual void EnableSuddenTermination() {
-  }
-
-  virtual void DisableSuddenTermination() {
-  }
-
   // Queries the browser for suggestions to be shown for the form text field
   // named |field_name|.  |text| is the text entered by the user so far and
   // |node_id| is the id of the node of the input field.
@@ -491,6 +536,10 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Instructs the browser to remove the autofill entry specified from it DB.
   virtual void RemoveStoredAutofillEntry(const std::wstring& name,
                                          const std::wstring& value) {
+  }
+
+  virtual void DidContentsSizeChange(WebKit::WebWidget* webwidget,
+                                     int new_width, int new_height) {
   }
 
   // UIDelegate --------------------------------------------------------------
@@ -559,9 +608,8 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // will own the WebFileChooserCallback object and is responsible for
   // freeing it.
   virtual void RunFileChooser(bool multi_select,
-                              const std::wstring& title,
-                              const std::wstring& initial_filename,
-                              const std::wstring& filter,
+                              const string16& title,
+                              const FilePath& initial_filename,
                               WebFileChooserCallback* file_chooser) {
     delete file_chooser;
   }
@@ -569,7 +617,8 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // @abstract Shows a context menu with commands relevant to a specific
   //           element on the current page.
   // @param webview The WebView sending the delegate method.
-  // @param node The node(s) the context menu is being invoked on
+  // @param node_type The type of the node(s) the context menu is being
+  // invoked on
   // @param x The x position of the mouse pointer (relative to the webview)
   // @param y The y position of the mouse pointer (relative to the webview)
   // @param link_url The absolute URL of the link that contains the node the
@@ -578,32 +627,39 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // clicked on
   // @param page_url The URL of the page the mouse right clicked on
   // @param frame_url The URL of the subframe the mouse right clicked on
+  // @param media_params Extra attributed needed by the context menu for
+  // media elements.
   // @param selection_text The raw text of the selection that the mouse right
   // clicked on
   // @param misspelled_word The editable (possibily) misspelled word
   // in the Editor on which dictionary lookup for suggestions will be done.
-  // @param edit_flags Which edit operations the renderer believes are available
-  // @param frame_encoding Which indicates the encoding of current focused
-  // sub frame.
+  // @param edit_flags which edit operations the renderer believes are available
+  // @param security_info
+  // @param frame_charset which indicates the character encoding of
+  // the currently focused frame.
   virtual void ShowContextMenu(WebView* webview,
-                               ContextNode node,
+                               ContextNodeType node_type,
                                int x,
                                int y,
                                const GURL& link_url,
                                const GURL& image_url,
                                const GURL& page_url,
                                const GURL& frame_url,
+                               const ContextMenuMediaParams& media_params,
                                const std::wstring& selection_text,
                                const std::wstring& misspelled_word,
                                int edit_flags,
-                               const std::string& security_info) {
+                               const std::string& security_info,
+                               const std::string& frame_charset) {
   }
 
   // Starts a drag session with the supplied contextual information.
   // webview: The WebView sending the delegate method.
   // drop_data: a WebDropData struct which should contain all the necessary
   // information for dragging data out of the webview.
-  virtual void StartDragging(WebView* webview, const WebDropData& drop_data) { }
+  virtual void StartDragging(WebView* webview,
+                             const WebKit::WebDragData& drag_data) {
+  }
 
   // Returns the focus to the client.
   // reverse: Whether the focus should go to the previous (if true) or the next
@@ -667,8 +723,6 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
     return true;
   }
 
-  virtual void SetSmartInsertDeleteEnabled(bool enabled);
-
   virtual bool IsSelectTrailingWhitespaceEnabled() {
 #if defined(OS_WIN)
     return true;
@@ -676,8 +730,6 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
     return false;
 #endif
   }
-
-  virtual void SetSelectTrailingWhitespaceEnabled(bool enabled);
 
   virtual void DidBeginEditing() { }
   virtual void DidChangeSelection(bool is_empty_selection) { }
@@ -717,10 +769,9 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
 
   // History Related ---------------------------------------------------------
 
-  // Returns the session history entry at a distance |offset| relative to the
-  // current entry.  Returns NULL on failure.
-  virtual WebHistoryItem* GetHistoryEntryAtOffset(int offset) {
-    return NULL;
+  // Tells the embedder to navigate back or forward in session history by the
+  // given offset (relative to the current position in session history).
+  virtual void NavigateBackForwardSoon(int offset) {
   }
 
   // Returns how many entries are in the back and forward lists, respectively.
@@ -739,19 +790,33 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
 
   // -------------------------------------------------------------------------
 
-  // Tell the delegate the tooltip text for the current mouse position.
+  // Tell the delegate the tooltip text and its directionality hint for the
+  // current mouse position.
   virtual void SetTooltipText(WebView* webview,
-                              const std::wstring& tooltip_text) { }
+                              const std::wstring& tooltip_text,
+                              WebKit::WebTextDirection text_direction_hint) { }
 
   // Downloading -------------------------------------------------------------
 
   virtual void DownloadUrl(const GURL& url, const GURL& referrer) { }
+
+  // InspectorClient ---------------------------------------------------------
+
+  virtual void UpdateInspectorSettings(const std::wstring& raw_settings) { }
 
   // DevTools ----------------------------------------------------------------
 
   virtual WebDevToolsAgentDelegate* GetWebDevToolsAgentDelegate() {
     return NULL;
   }
+
+  // Selection clipboard -----------------------------------------------------
+
+  // Request the text on the selection clipboard be sent back to the webview
+  // so it can be inserted into the current focus area. In response to this call
+  // the delegate should get the text and send it to the WebView via
+  // InsertText().
+  virtual void PasteFromSelectionClipboard() { }
 
   // Editor Client -----------------------------------------------------------
 
@@ -763,9 +828,15 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // indices (inclusive) will be filled with the offsets of the boundary of the
   // word within the given buffer. The out pointers must be specified. If the
   // word is correctly spelled (returns true), they will be set to (0,0).
-  virtual void SpellCheck(const std::wstring& word, int& misspell_location,
-                          int& misspell_length) {
-    misspell_location = misspell_length = 0;
+  virtual void SpellCheck(const std::wstring& word, int* misspell_location,
+                          int* misspell_length) {
+    *misspell_location = *misspell_length = 0;
+  }
+
+  // Computes an auto correct word for a misspelled word. If no word is found,
+  // empty string is computed.
+  virtual std::wstring GetAutoCorrectWord(const std::wstring& misspelled_word) {
+    return std::wstring();
   }
 
   // Changes the state of the input method editor.
@@ -774,12 +845,6 @@ class WebViewDelegate : virtual public WebWidgetDelegate {
   // Asks the user to print the page or a specific frame. Called in response to
   // a window.print() call.
   virtual void ScriptedPrint(WebFrame* frame) { }
-
-  virtual void WebInspectorOpened(int num_resources) { }
-
-  // Called when the FrameLoader goes into a state in which a new page load
-  // will occur.
-  virtual void TransitionToCommittedForNewPage() { }
 
   // Called when an item was added to the history
   virtual void DidAddHistoryItem() { }

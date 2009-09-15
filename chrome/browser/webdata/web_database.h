@@ -12,14 +12,18 @@
 #include "chrome/browser/meta_table_helper.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/sqlite_utils.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/glue/autofill_form.h"
 
 namespace base {
-  class Time;
+class Time;
 }
+
+namespace webkit_glue {
 struct PasswordForm;
+}
+
 #if defined(OS_WIN)
 struct IE7PasswordInfo;
 #endif
@@ -59,7 +63,7 @@ class WebDatabase {
   // Loads the keywords into the specified vector. It's up to the caller to
   // delete the returned objects.
   // Returns true on success.
-  bool GetKeywords(std::vector<TemplateURL*>* urls);
+  bool GetKeywords(std::vector<TemplateURL*>* urls) const;
 
   // Updates the database values for the specified url.
   // Returns true on success.
@@ -80,7 +84,7 @@ class WebDatabase {
   //////////////////////////////////////////////////////////////////////////////
 
   // Adds |form| to the list of remembered password forms.
-  bool AddLogin(const PasswordForm& form);
+  bool AddLogin(const webkit_glue::PasswordForm& form);
 
 #if defined(OS_WIN)
   // Adds |info| to the list of imported passwords from ie7/ie8.
@@ -94,10 +98,10 @@ class WebDatabase {
 #endif
 
   // Updates remembered password form.
-  bool UpdateLogin(const PasswordForm& form);
+  bool UpdateLogin(const webkit_glue::PasswordForm& form);
 
   // Removes |form| from the list of remembered password forms.
-  bool RemoveLogin(const PasswordForm& form);
+  bool RemoveLogin(const webkit_glue::PasswordForm& form);
 
   // Removes all logins created from |delete_begin| onwards (inclusive) and
   // before |delete_end|. You may use a null Time value to do an unbounded
@@ -108,14 +112,15 @@ class WebDatabase {
   // Loads a list of matching password forms into the specified vector |forms|.
   // The list will contain all possibly relevant entries to the observed |form|,
   // including blacklisted matches.
-  bool GetLogins(const PasswordForm& form, std::vector<PasswordForm*>* forms);
+  bool GetLogins(const webkit_glue::PasswordForm& form,
+                 std::vector<webkit_glue::PasswordForm*>* forms) const;
 
   // Loads the complete list of password forms into the specified vector |forms|
   // if include_blacklisted is true, otherwise only loads those which are
   // actually autofillable; i.e haven't been blacklisted by the user selecting
   // the 'Never for this site' button.
-  bool GetAllLogins(std::vector<PasswordForm*>* forms,
-                    bool include_blacklisted);
+  bool GetAllLogins(std::vector<webkit_glue::PasswordForm*>* forms,
+                    bool include_blacklisted) const;
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -126,10 +131,11 @@ class WebDatabase {
   // Records the form elements in |elements| in the database in the autofill
   // table.
   bool AddAutofillFormElements(
-      const std::vector<AutofillForm::Element>& elements);
+      const std::vector<webkit_glue::AutofillForm::Element>& elements);
 
   // Records a single form element in in the database in the autofill table.
-  bool AddAutofillFormElement(const AutofillForm::Element& element);
+  bool AddAutofillFormElement(
+      const webkit_glue::AutofillForm::Element& element);
 
   // Retrieves a vector of all values which have been recorded in the autofill
   // table as the value in a form element with name |name| and which start with
@@ -137,7 +143,7 @@ class WebDatabase {
   bool GetFormValuesForElementName(const std::wstring& name,
                                    const std::wstring& prefix,
                                    std::vector<std::wstring>* values,
-                                   int limit);
+                                   int limit) const;
 
   // Removes rows from autofill_dates if they were created on or after
   // |delete_begin| and strictly before |delete_end|.  Decrements the count of
@@ -159,20 +165,23 @@ class WebDatabase {
 
   // Gets the pair_id and count entries from name and value specified in
   // |element|.  Sets *count to 0 if there is no such row in the table.
-  bool GetIDAndCountOfFormElement(const AutofillForm::Element& element,
-                                  int64* pair_id,
-                                  int* count);
+  bool GetIDAndCountOfFormElement(
+      const webkit_glue::AutofillForm::Element& element,
+      int64* pair_id,
+      int* count) const;
 
   // Gets the count only given the pair_id.
   bool GetCountOfFormElement(int64 pair_id,
-                             int* count);
+                             int* count) const;
 
   // Updates the count entry in the row corresponding to |pair_id| to |count|.
   bool SetCountOfFormElement(int64 pair_id, int count);
 
   // Adds a new row to the autofill table with name and value given in
   // |element|.  Sets *pair_id to the pair_id of the new row.
-  bool InsertFormElement(const AutofillForm::Element& element, int64* pair_id);
+  bool InsertFormElement(
+      const webkit_glue::AutofillForm::Element& element,
+      int64* pair_id);
 
   // Adds a new row to the autofill_dates table.
   bool InsertPairIDAndDate(int64 pair_id, const base::Time date_created);
@@ -190,10 +199,10 @@ class WebDatabase {
   //////////////////////////////////////////////////////////////////////////////
 
   bool SetWebAppImage(const GURL& url, const SkBitmap& image);
-  bool GetWebAppImages(const GURL& url, std::vector<SkBitmap>* images);
+  bool GetWebAppImages(const GURL& url, std::vector<SkBitmap>* images) const;
 
   bool SetWebAppHasAllImages(const GURL& url, bool has_all_images);
-  bool GetWebAppHasAllImages(const GURL& url);
+  bool GetWebAppHasAllImages(const GURL& url) const;
 
   bool RemoveWebApp(const GURL& url);
 

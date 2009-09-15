@@ -13,7 +13,7 @@
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class GURL;
 class PrefService;
@@ -217,6 +217,8 @@ class TemplateURLModel : public WebDataServiceConsumer,
 
   typedef std::map<std::wstring, const TemplateURL*> KeywordToTemplateMap;
   typedef std::vector<const TemplateURL*> TemplateURLVector;
+  typedef std::set<const TemplateURL*> TemplateURLSet;
+  typedef std::map<std::string, TemplateURLSet> HostToURLsMap;
 
   // Helper functor for FindMatchingKeywords(), for finding the range of
   // keywords which begin with a prefix.
@@ -279,7 +281,11 @@ class TemplateURLModel : public WebDataServiceConsumer,
   // Iterates through the TemplateURLs to see if one matches the visited url.
   // For each TemplateURL whose url matches the visited url
   // SetKeywordSearchTermsForURL is invoked.
-  void UpdateKeywordSearchTermsForURL(const history::URLRow& row);
+  void UpdateKeywordSearchTermsForURL(
+      const history::URLVisitedDetails& details);
+
+  // If necessary, generates a visit for the site http:// + t_url.keyword().
+  void AddTabToSearchVisit(const TemplateURL& t_url);
 
   // Adds each of the query terms in the specified url whose key and value are
   // non-empty to query_terms. If a query key appears multiple times, the value
@@ -294,6 +300,8 @@ class TemplateURLModel : public WebDataServiceConsumer,
   // {google:baseSuggestURL}.
   void GoogleBaseURLChanged();
 
+  NotificationRegistrar registrar_;
+
   // Mapping from keyword to the TemplateURL.
   KeywordToTemplateMap keyword_to_template_map_;
 
@@ -302,8 +310,6 @@ class TemplateURLModel : public WebDataServiceConsumer,
   ObserverList<TemplateURLModelObserver> model_observers_;
 
   // Maps from host to set of TemplateURLs whose search url host is host.
-  typedef std::set<const TemplateURL*> TemplateURLSet;
-  typedef std::map<std::string, TemplateURLSet> HostToURLsMap;
   HostToURLsMap host_to_urls_map_;
 
   // Used to obtain the WebDataService.
@@ -329,7 +335,7 @@ class TemplateURLModel : public WebDataServiceConsumer,
 
   // All visits that occurred before we finished loading. Once loaded
   // UpdateKeywordSearchTermsForURL is invoked for each element of the vector.
-  std::vector<history::URLRow> visits_to_add_;
+  std::vector<history::URLVisitedDetails> visits_to_add_;
 
   const TemplateURL* default_search_provider_;
 

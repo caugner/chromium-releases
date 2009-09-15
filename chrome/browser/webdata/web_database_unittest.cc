@@ -4,30 +4,32 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/stl_util-inl.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/autofill_form.h"
 #include "webkit/glue/password_form.h"
 
 using base::Time;
 using base::TimeDelta;
+using webkit_glue::AutofillForm;
+using webkit_glue::PasswordForm;
 
 class WebDatabaseTest : public testing::Test {
  protected:
 
   virtual void SetUp() {
     PathService::Get(chrome::DIR_TEST_DATA, &file_);
-    file_ += FilePath::kSeparators[0];
-    file_ += L"TestWebDatabase";
-    file_ += Int64ToWString(base::Time::Now().ToInternalValue());
-    file_ += L".db";
+    const std::string test_db = "TestWebDatabase" +
+        Int64ToString(base::Time::Now().ToInternalValue()) +
+        ".db";
+    file_ = file_.AppendASCII(test_db);
     file_util::Delete(file_, false);
   }
 
@@ -79,13 +81,13 @@ class WebDatabaseTest : public testing::Test {
     url->set_prepopulate_id(id);
   }
 
-  std::wstring file_;
+  FilePath file_;
 };
 
 TEST_F(WebDatabaseTest, Keywords) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -146,7 +148,7 @@ TEST_F(WebDatabaseTest, Keywords) {
 TEST_F(WebDatabaseTest, KeywordMisc) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   ASSERT_EQ(0, db.GetDefaulSearchProviderID());
   ASSERT_EQ(0, db.GetBuitinKeywordVersion());
@@ -161,7 +163,7 @@ TEST_F(WebDatabaseTest, KeywordMisc) {
 TEST_F(WebDatabaseTest, UpdateKeyword) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -223,7 +225,7 @@ TEST_F(WebDatabaseTest, UpdateKeyword) {
 TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -250,7 +252,7 @@ TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
 TEST_F(WebDatabaseTest, Logins) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   std::vector<PasswordForm*> result;
 
@@ -383,7 +385,7 @@ TEST_F(WebDatabaseTest, Logins) {
 TEST_F(WebDatabaseTest, Autofill) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   Time t1 = Time::Now();
 
@@ -515,7 +517,7 @@ static void ClearResults(std::vector<PasswordForm*>* results) {
 TEST_F(WebDatabaseTest, ClearPrivateData_SavedPasswords) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
 
   std::vector<PasswordForm*> result;
 
@@ -557,7 +559,7 @@ TEST_F(WebDatabaseTest, ClearPrivateData_SavedPasswords) {
 TEST_F(WebDatabaseTest, BlacklistedLogins) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -596,7 +598,7 @@ TEST_F(WebDatabaseTest, BlacklistedLogins) {
 TEST_F(WebDatabaseTest, WebAppHasAllImages) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  EXPECT_TRUE(db.Init(file_.ToWStringHack()));
   GURL url("http://google.com/");
 
   // Initial value for unknown web app should be false.
@@ -614,7 +616,7 @@ TEST_F(WebDatabaseTest, WebAppHasAllImages) {
 TEST_F(WebDatabaseTest, WebAppImages) {
   WebDatabase db;
 
-  ASSERT_TRUE(db.Init(file_));
+  ASSERT_TRUE(db.Init(file_.ToWStringHack()));
   GURL url("http://google.com/");
 
   // Web app should initially have no images.
@@ -639,8 +641,16 @@ TEST_F(WebDatabaseTest, WebAppImages) {
   image.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
   image.allocPixels();
   image.eraseColor(SK_ColorBLACK);
-  // Some random pixels so that we can identify the image.
-  *(reinterpret_cast<unsigned char*>(image.getPixels())) = 0xAB;
+
+  // Set some random pixels so that we can identify the image. We don't use
+  // transparent images because of pre-multiplication rounding errors.
+  SkColor test_pixel_1 = 0xffccbbaa;
+  SkColor test_pixel_2 = 0x00aabbaa;
+  SkColor test_pixel_3 = 0xff339966;
+  image.getAddr32(0, 1)[0] = test_pixel_1;
+  image.getAddr32(0, 1)[1] = test_pixel_2;
+  image.getAddr32(0, 1)[2] = test_pixel_3;
+
   ASSERT_TRUE(db.SetWebAppImage(url, image));
   images.clear();
   ASSERT_TRUE(db.GetWebAppImages(url, &images));
@@ -648,10 +658,10 @@ TEST_F(WebDatabaseTest, WebAppImages) {
   ASSERT_EQ(16, images[0].width());
   ASSERT_EQ(16, images[0].height());
   images[0].lockPixels();
-  unsigned char* pixels =
-      reinterpret_cast<unsigned char*>(images[0].getPixels());
-  ASSERT_TRUE(pixels != NULL);
-  ASSERT_EQ(0xAB, *pixels);
+  ASSERT_TRUE(images[0].getPixels() != NULL);
+  ASSERT_EQ(test_pixel_1, images[0].getAddr32(0, 1)[0]);
+  ASSERT_EQ(test_pixel_2, images[0].getAddr32(0, 1)[1]);
+  ASSERT_EQ(test_pixel_3, images[0].getAddr32(0, 1)[2]);
   images[0].unlockPixels();
 
   // Add another image at a bigger size.

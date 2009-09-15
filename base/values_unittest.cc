@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,48 +94,43 @@ TEST(ValuesTest, List) {
 TEST(ValuesTest, BinaryValue) {
   char* buffer = NULL;
   // Passing a null buffer pointer doesn't yield a BinaryValue
-  BinaryValue* binary = BinaryValue::Create(buffer, 0);
-  ASSERT_FALSE(binary);
+  scoped_ptr<BinaryValue> binary(BinaryValue::Create(buffer, 0));
+  ASSERT_FALSE(binary.get());
 
   // If you want to represent an empty binary value, use a zero-length buffer.
   buffer = new char[1];
   ASSERT_TRUE(buffer);
-  binary = BinaryValue::Create(buffer, 0);
-  ASSERT_TRUE(binary);
+  binary.reset(BinaryValue::Create(buffer, 0));
+  ASSERT_TRUE(binary.get());
   ASSERT_TRUE(binary->GetBuffer());
   ASSERT_EQ(buffer, binary->GetBuffer());
   ASSERT_EQ(0U, binary->GetSize());
-  delete binary;
-  binary = NULL;
 
   // Test the common case of a non-empty buffer
   buffer = new char[15];
-  binary = BinaryValue::Create(buffer, 15);
-  ASSERT_TRUE(binary);
+  binary.reset(BinaryValue::Create(buffer, 15));
+  ASSERT_TRUE(binary.get());
   ASSERT_TRUE(binary->GetBuffer());
   ASSERT_EQ(buffer, binary->GetBuffer());
   ASSERT_EQ(15U, binary->GetSize());
-  delete binary;
-  binary = NULL;
 
   char stack_buffer[42];
   memset(stack_buffer, '!', 42);
-  binary = BinaryValue::CreateWithCopiedBuffer(stack_buffer, 42);
-  ASSERT_TRUE(binary);
+  binary.reset(BinaryValue::CreateWithCopiedBuffer(stack_buffer, 42));
+  ASSERT_TRUE(binary.get());
   ASSERT_TRUE(binary->GetBuffer());
   ASSERT_NE(stack_buffer, binary->GetBuffer());
   ASSERT_EQ(42U, binary->GetSize());
   ASSERT_EQ(0, memcmp(stack_buffer, binary->GetBuffer(), binary->GetSize()));
-  delete binary;
 }
 
 TEST(ValuesTest, StringValue) {
   // Test overloaded CreateStringValue.
-  Value* narrow_value = Value::CreateStringValue("narrow");
-  ASSERT_TRUE(narrow_value);
+  scoped_ptr<Value> narrow_value(Value::CreateStringValue("narrow"));
+  ASSERT_TRUE(narrow_value.get());
   ASSERT_TRUE(narrow_value->IsType(Value::TYPE_STRING));
-  Value* wide_value = Value::CreateStringValue(L"wide");
-  ASSERT_TRUE(wide_value);
+  scoped_ptr<Value> wide_value(Value::CreateStringValue(L"wide"));
+  ASSERT_TRUE(wide_value.get());
   ASSERT_TRUE(wide_value->IsType(Value::TYPE_STRING));
 
   // Test overloaded GetString.
@@ -149,14 +144,12 @@ TEST(ValuesTest, StringValue) {
   ASSERT_TRUE(wide_value->GetAsString(&wide));
   ASSERT_EQ(std::string("wide"), narrow);
   ASSERT_EQ(std::wstring(L"wide"), wide);
-  delete narrow_value;
-  delete wide_value;
 }
 
 // This is a Value object that allows us to tell if it's been
 // properly deleted by modifying the value of external flag on destruction.
 class DeletionTestValue : public Value {
-public:
+ public:
   DeletionTestValue(bool* deletion_flag) : Value(TYPE_NULL) {
     Init(deletion_flag);  // Separate function so that we can use ASSERT_*
   }
@@ -171,7 +164,7 @@ public:
     *deletion_flag_ = true;
   }
 
-private:
+ private:
   bool* deletion_flag_;
 };
 
@@ -319,10 +312,10 @@ TEST(ValuesTest, DeepCopy) {
   original_list->Append(original_list_element_1);
   original_dict.Set(L"list", original_list);
 
-  DictionaryValue* copy_dict =
-    static_cast<DictionaryValue*>(original_dict.DeepCopy());
-  ASSERT_TRUE(copy_dict);
-  ASSERT_NE(copy_dict, &original_dict);
+  scoped_ptr<DictionaryValue> copy_dict(
+      static_cast<DictionaryValue*>(original_dict.DeepCopy()));
+  ASSERT_TRUE(copy_dict.get());
+  ASSERT_NE(copy_dict.get(), &original_dict);
 
   Value* copy_null = NULL;
   ASSERT_TRUE(copy_dict->Get(L"null", &copy_null));
@@ -415,8 +408,6 @@ TEST(ValuesTest, DeepCopy) {
   int copy_list_element_1_value;
   ASSERT_TRUE(copy_list_element_1->GetAsInteger(&copy_list_element_1_value));
   ASSERT_EQ(1, copy_list_element_1_value);
-
-  delete copy_dict;
 }
 
 TEST(ValuesTest, Equals) {

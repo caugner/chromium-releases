@@ -25,13 +25,14 @@
 #include "net/base/net_util.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/webdatasource.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
+
+using WebKit::WebWidget;
 
 namespace {
 
@@ -314,7 +315,6 @@ GtkWidget* CreateMenuBar(TestShell* shell) {
 bool TestShell::Initialize(const std::wstring& startingURL) {
   m_mainWnd = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
   gtk_window_set_title(m_mainWnd, "Test Shell");
-  gtk_window_set_default_size(m_mainWnd, 640, 480);
   g_signal_connect(G_OBJECT(m_mainWnd), "destroy",
                    G_CALLBACK(MainWindowDestroyed), this);
   g_signal_connect(G_OBJECT(m_mainWnd), "focus-out-event",
@@ -370,11 +370,9 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
 
   gtk_container_add(GTK_CONTAINER(m_mainWnd), vbox);
   gtk_widget_show_all(GTK_WIDGET(m_mainWnd));
-  top_chrome_height_ = toolbar->allocation.height +
-      menu_bar->allocation.height + 2 * gtk_box_get_spacing(GTK_BOX(vbox));
 
-  // LoadURL will do a resize (which uses top_chrome_height_), so make
-  // sure we don't call LoadURL until we've completed all of our GTK setup.
+  // LoadURL will do a resize, so make sure we don't call LoadURL
+  // until we've completed all of our GTK setup.
   if (!startingURL.empty())
     LoadURL(startingURL.c_str());
 
@@ -400,8 +398,27 @@ void TestShell::TestFinished() {
 }
 
 void TestShell::SizeTo(int width, int height) {
-  gtk_window_resize(GTK_WINDOW(m_mainWnd), width,
-                    height + top_chrome_height_);
+  GtkWidget* widget = m_webViewHost->view_handle();
+  if (widget->allocation.width == width &&
+      widget->allocation.height == height) {
+    // Nothing to do.
+    return;
+  }
+
+  gtk_widget_set_size_request(widget, width, height);
+  if (widget->allocation.width > width ||
+      widget->allocation.height > height) {
+    // We've been sized smaller.  Shrink the window so it snaps back to the
+    // appropriate size.
+    gtk_window_resize(GTK_WINDOW(m_mainWnd), 1, 1);
+  }
+
+  // We've been asked to size the content area to a particular size.
+  // GTK works asynchronously: you request a size and then it
+  // eventually becomes that size.  But layout tests need to be sure
+  // the resize has gone into WebKit by the time SizeTo() returns.
+  // Force the webkit resize to happen now.
+  m_webViewHost->Resize(gfx::Size(width, height));
 }
 
 static void AlarmHandler(int signatl) {
@@ -452,7 +469,7 @@ void TestShell::DestroyWindow(gfx::NativeWindow windowHandle) {
 WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
   GtkWidget* popupwindow = gtk_window_new(GTK_WINDOW_POPUP);
   GtkWidget* vbox = gtk_vbox_new(FALSE, 0);
-  WebWidgetHost* host = WebWidgetHost::Create(vbox, delegate_);
+  WebWidgetHost* host = WebWidgetHost::Create(vbox, popup_delegate_);
   gtk_container_add(GTK_CONTAINER(popupwindow), vbox);
   m_popupHost = host;
 
@@ -482,14 +499,14 @@ void TestShell::ResizeSubViews() {
   // GTK manages layout for us so we do nothing.
 }
 
-/* static */ void TestShell::DumpBackForwardList(std::wstring* result) {
+/* static */ void TestShell::DumpAllBackForwardLists(std::wstring* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
        iter != TestShell::windowList()->end(); iter++) {
-      GtkWindow* window = *iter;
-      TestShell* shell =
-          static_cast<TestShell*>(g_object_get_data(G_OBJECT(window), "test-shell"));
-      webkit_glue::DumpBackForwardList(shell->webView(), NULL, result);
+    GtkWindow* window = *iter;
+    TestShell* shell =
+        static_cast<TestShell*>(g_object_get_data(G_OBJECT(window), "test-shell"));
+    shell->DumpBackForwardList(result);
   }
 }
 
@@ -570,7 +587,7 @@ void TestShell::LoadURLForFrame(const wchar_t* url,
   // PathExists will reject any string with no leading '/'
   // as well as empty strings.
   if (file_util::AbsolutePath(&path))
-    gurl = net::FilePathToFileURL(path);
+    gurl = net::FilePathToFileURL(FilePath::FromWStringHack(path));
   else
     gurl = GURL(WideToUTF8(url));
 
@@ -651,7 +668,7 @@ string16 GetLocalizedString(int message_id) {
                   res.length() / 2);
 }
 
-std::string GetDataResource(int resource_id) {
+StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
     case IDR_FEED_PREVIEW:
       // It is necessary to return a feed preview template that contains
@@ -666,12 +683,8 @@ std::string GetDataResource(int resource_id) {
     case IDR_TEXTAREA_RESIZER:
       resource_id = IDR_TEXTAREA_RESIZER_TESTSHELL;
       break;
-    default:
-      NOTREACHED();
   }
-  StringPiece res;
-  g_resource_data_pack->Get(resource_id, &res);
-  return res.as_string();
+  return TestShell::NetResourceProvider(resource_id);
 }
 
 bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {

@@ -16,12 +16,12 @@ goog.provide('devtools.InspectorController');
  * Creates inspector controller stub instance.
  * @constructor.
  */
-devtools.InspectorController = function() {  
+devtools.InspectorController = function() {
   /**
    * @type {boolean}
    */
   this.searchingForNode_ = false;
-  
+
   /**
    * @type {boolean}
    */
@@ -41,6 +41,11 @@ devtools.InspectorController = function() {
    * @type {boolean}
    */
   this.profilerEnabled_ = true;
+
+  /**
+   * @type {boolean}
+   */
+  this.resourceTrackingEnabled_ = false;
 };
 
 
@@ -66,8 +71,8 @@ devtools.InspectorController.prototype.isWindowVisible = function() {
 /**
  * @return {string} Platform identifier.
  */
-devtools.InspectorController.prototype.platform = function() { 
-  return "windows"; 
+devtools.InspectorController.prototype.platform = function() {
+  return 'windows';
 };
 
 
@@ -90,6 +95,14 @@ devtools.InspectorController.prototype.attach = function() {
  * Detaches frontend from the backend.
  */
 devtools.InspectorController.prototype.detach = function() {
+};
+
+
+/**
+ * Tell host that the active panel has changed.
+ * @param {string} panel Panel name that was last active.
+ */
+devtools.InspectorController.prototype.storeLastActivePanel = function(panel) {
 };
 
 
@@ -152,7 +165,6 @@ devtools.InspectorController.prototype.moveByUnrestricted = function(x, y) {
  */
 devtools.InspectorController.prototype.addResourceSourceToFrame =
     function(identifier, element) {
-  return false;
 };
 
 
@@ -215,7 +227,7 @@ devtools.InspectorController.prototype.loaded = function() {
  * @return {string} Url of the i18n-ed strings map.
  */
 devtools.InspectorController.prototype.localizedStringsURL = function() {
-  return undefined; 
+  return undefined;
 };
 
 
@@ -231,15 +243,41 @@ devtools.InspectorController.prototype.windowUnloading = function() {
  * @return {string} Identifiers of the panels that should be hidden.
  */
 devtools.InspectorController.prototype.hiddenPanels = function() {
-  return "";
+  return '';
 };
 
 
 /**
  * @return {boolean} True iff debugger is enabled.
  */
-devtools.InspectorController.prototype.debuggerEnabled = function() { 
+devtools.InspectorController.prototype.debuggerEnabled = function() {
   return this.debuggerEnabled_;
+};
+
+
+/**
+ * Enables resource tracking.
+ */
+devtools.InspectorController.prototype.enableResourceTracking = function() {
+  this.resourceTrackingEnabled_ = true;
+  WebInspector.resourceTrackingWasEnabled();
+};
+
+
+/**
+ * Disables resource tracking.
+ */
+devtools.InspectorController.prototype.disableResourceTracking = function() {
+  this.resourceTrackingEnabled_ = false;
+  WebInspector.resourceTrackingWasDisabled();
+};
+
+
+/**
+ * @return {boolean} True iff resource tracking is enabled.
+ */
+devtools.InspectorController.prototype.resourceTrackingEnabled = function() {
+  return this.resourceTrackingEnabled_;
 };
 
 
@@ -288,10 +326,21 @@ devtools.InspectorController.prototype.pauseInDebugger = function() {
 
 
 /**
- * Tells backend to pause in the debugger on the exceptions.
+ * @return {boolean} True iff the debugger will pause execution on the
+ * exceptions.
  */
-devtools.InspectorController.prototype.pauseOnExceptions = function() { 
+devtools.InspectorController.prototype.pauseOnExceptions = function() {
   // Does nothing in stub.
+  return false;
+};
+
+
+/**
+ * Tells whether to pause in the debugger on the exceptions or not.
+ * @param {boolean} value True iff execution should be stopped in the debugger
+ * on the exceptions.
+ */
+devtools.InspectorController.prototype.setPauseOnExceptions = function(value) {
 };
 
 
@@ -305,8 +354,8 @@ devtools.InspectorController.prototype.resumeDebugger = function() {
 /**
  * @return {boolean} True iff profiler is enabled.
  */
-devtools.InspectorController.prototype.profilerEnabled = function() { 
-  return true; 
+devtools.InspectorController.prototype.profilerEnabled = function() {
+  return true;
 };
 
 
@@ -352,8 +401,8 @@ devtools.InspectorController.prototype.stopProfiling = function() {
 /**
  * @return {Array.<Object>} Profile snapshots array.
  */
-devtools.InspectorController.prototype.profiles = function() { 
-  return []; 
+devtools.InspectorController.prototype.profiles = function() {
+  return [];
 };
 
 

@@ -7,10 +7,12 @@
 
 #include <queue>
 
-#include "chrome/views/window/app_modal_dialog_delegate.h"
+#include "base/singleton.h"
+#include "chrome/browser/app_modal_dialog.h"
 
-// Keeps a queue of AppModalDialogDelegates, making sure only one app modal
+// Keeps a queue of AppModalDialogs, making sure only one app modal
 // dialog is shown at a time.
+// This class is a singleton.
 class AppModalDialogQueue {
  public:
   // Adds a modal dialog to the queue, if there are no other dialogs in the
@@ -21,15 +23,15 @@ class AppModalDialogQueue {
   // assure it is the child of BrowserList::GetLastActive() so that it is
   // activated as well. See browser_list.h for more notes about our somewhat
   // sloppy app modality.
-  // Note: The AppModalDialogDelegate |dialog| must be window modal before it
+  // Note: The AppModalDialog |dialog| must be window modal before it
   // can be added as app modal.
-  static void AddDialog(views::AppModalDialogDelegate* dialog);
+  void AddDialog(AppModalDialog* dialog);
 
   // Removes the current dialog in the queue (the one that is being shown).
   // Shows the next dialog in the queue, if any is present. This does not
   // ensure that the currently showing dialog is closed, it just makes it no
   // longer app modal.
-  static void ShowNextDialog();
+  void ShowNextDialog();
 
   // Activates and shows the current dialog, if the user clicks on one of the
   // windows disabled by the presence of an app modal dialog. This forces
@@ -37,30 +39,35 @@ class AppModalDialogQueue {
   // opened the dialog on another virtual desktop. Assumes there is currently a
   // dialog being shown. (Call BrowserList::IsShowingAppModalDialog to test
   // this condition).
-  static void ActivateModalDialog();
+  void ActivateModalDialog();
 
   // Returns true if there is currently an active app modal dialog box.
-  static bool HasActiveDialog() {
+  bool HasActiveDialog() {
     return active_dialog_ != NULL;
   }
 
   // Accessor for |active_dialog_|.
-  static views::AppModalDialogDelegate* active_dialog() {
+  AppModalDialog* active_dialog() {
     return active_dialog_;
   }
 
  private:
+  friend struct DefaultSingletonTraits<AppModalDialogQueue>;
+
+  AppModalDialogQueue() : active_dialog_(NULL) { }
+
   // Shows |dialog| and notifies the BrowserList that a modal dialog is showing.
-  static void ShowModalDialog(views::AppModalDialogDelegate* dialog);
+  void ShowModalDialog(AppModalDialog* dialog);
 
   // Contains all app modal dialogs which are waiting to be shown, with the
   // currently modal dialog at the front of the queue.
-  static std::queue<views::AppModalDialogDelegate*>*
-      app_modal_dialog_queue_;
+  std::queue<AppModalDialog*> app_modal_dialog_queue_;
 
   // The currently active app-modal dialog box's delegate. NULL if there is no
   // active app-modal dialog box.
-  static views::AppModalDialogDelegate* active_dialog_;
+  AppModalDialog* active_dialog_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppModalDialogQueue);
 };
 
 #endif // CHROME_BROWSER_APP_MODAL_DIALOG_QUEUE_H__

@@ -186,7 +186,7 @@ each locale. -->
       <message name="IDS_APPMENU_TOOLTIP" desc="The tooltip to show for the browser menu">
         Customize and control <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>
       </message>
-      
+
       <message name="IDS_ALTERNATE_NAV_URL_VIEW_LABEL" desc="Label displayed in an infobar when a user searches for a term he may have meant to navigate to.">
         Did you mean to go to <ph name="SITE">$1<ex>http://intranetsite/</ex></ph>?
       </message>
@@ -197,8 +197,14 @@ each locale. -->
       <message name="IDS_AUTOCOMPLETE_SEARCH_CONTENTS" desc="Contents for a search match.">
         Search <ph name="ENGINE">$1<ex>Google</ex></ph> for <ph name="SEARCH_TERMS">$2<ex>flowers</ex></ph>
       </message>
+      <message name="IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION" desc="Description for the default search match.">
+        <ph name="ENGINE">$1<ex>Google</ex></ph> Search
+      </message>
       <message name="IDS_AUTOCOMPLETE_NO_QUERY" desc="Dummy search term displayed when the user has no query input.">
         &lt;enter query&gt;
+      </message>
+      <message name="IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR" desc="The separator between a result in the autocomplete popup and its description.">
+        ''' - '''
       </message>
 
       <message name="IDS_HISTORY_TITLE" desc="Title for the history tab.">
@@ -386,6 +392,67 @@ each locale. -->
         Open &amp;image in new tab
       </message>
 
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_MENU" desc="The text label of the Playback Rate submenu">
+        &amp;Playback Rate
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_SLOW" desc="The text label of the 0.5x Speed Playback Rate menu item. The slowest of 5 options.">
+        &amp;Slow (0.5x)
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_NORMAL" desc="The text label of the Normal Speed Playback Rate menu item. The default rate of 5 options.">
+        &amp;Normal (1.0x)
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_FAST" desc="The text label of the 1.25x Sped Up Playback Rate menu item. The 3rd fastest of 5 options.">
+        &amp;Fast (1.25x)
+      </message>      
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_FASTER" desc="The text label of the 1.5x Sped Up Playback Rate menu item. The 2nd fastest of 5 options.">
+        F&amp;aster (1.5x)
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PLAYBACKRATE_DOUBLETIME" desc="The text label of the 2.0x Sped Up Playback Rate menu item.  The fastest of 5 options.">
+        D&amp;ouble Time (2.0x)
+      </message>
+
+      <message name="IDS_CONTENT_CONTEXT_LOOP" desc="The name of the Loop command for audio and video playback in the content area context menu">
+        &amp;Loop
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PLAY" desc="The name of the Play command for audio and video playback in the content area context menu">
+        &amp;Play
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_PAUSE" desc="The name of the Pause command for audio and video playback in the content area context menu">
+        &amp;Pause
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_MUTE" desc="The name of the Mute command for audio and video playback in the content area context menu">
+        &amp;Mute
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_UNMUTE" desc="The name of the Unmute command for audio and video playback in the content area context menu">
+        Un&amp;mute
+      </message>
+      
+      <message name="IDS_CONTENT_CONTEXT_FULLSCREEN" desc="The name of the Fullscreen command for the video element in the content area context menu">
+        &amp;Fullscreen
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_SAVESCREENSHOTAS" desc="The name of the Copy Sceenshot As command the video element in the content area context menu">
+        Save &amp;Screenshot...
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_SAVEVIDEOAS" desc="The name of the Save Video As command in the content area context menu">
+        Sa&amp;ve video as...
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION" desc="The name of the Copy Video Location command in the content area context menu">
+        C&amp;opy video URL
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB" desc="The name of the Open Video in New Tab command in the content area context menu">
+        &amp;Open video in new tab
+      </message>
+
+      <message name="IDS_CONTENT_CONTEXT_SAVEAUDIOAS" desc="The name of the Save Audio As command in the content area context menu">
+        Sa&amp;ve audio as...
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION" desc="The name of the Copy Audio Location command in the content area context menu">
+        C&amp;opy audio URL
+      </message>
+      <message name="IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB" desc="The name of the Open Audio in New Tab command in the content area context menu">
+        &amp;Open audio in new tab
+      </message>
+      
       <message name="IDS_CONTENT_CONTEXT_UNDO" desc="The name of the Undo command in the content area context menu">
         &amp;Undo
       </message>
@@ -439,124 +506,124 @@ each locale. -->
       <message name="IDS_SHOW_AS_TAB" desc="The text label for the Show As tab menu item">
         &amp;Show as tab
       </message>
-      <message name="IDS_NEW_WINDOW" desc="The text label of the New Window menu item" >
+      <message name="IDS_NEW_WINDOW" desc="The text label of the New Window menu item">
         &amp;New window
       </message>
-      <message name="IDS_PROFILE_MENU" desc="The text label of the New profile Window menu item" >
+      <message name="IDS_PROFILE_MENU" desc="The text label of the New profile Window menu item">
         New window in &amp;profile
       </message>
-      <message name="IDS_SELECT_PROFILE" desc="The text label of the menu item to select a profile other than the ones displayed directly in the Profile submenu." >
+      <message name="IDS_SELECT_PROFILE" desc="The text label of the menu item to select a profile other than the ones displayed directly in the Profile submenu.">
         Other...
       </message>
       <message name="IDS_NEW_INCOGNITO_WINDOW" desc="The text label of the New incognito window menu item">
         New &amp;incognito window
       </message>
-      <message name="IDS_UNDO" desc="The text label of the Undo menu item" >
+      <message name="IDS_UNDO" desc="The text label of the Undo menu item">
         &amp;Undo
       </message>
-      <message name="IDS_CUT" desc="The text label of the Cut menu item" >
+      <message name="IDS_CUT" desc="The text label of the Cut menu item">
         Cu&amp;t
       </message>
-      <message name="IDS_COPY" desc="The text label of the Copy menu item" >
+      <message name="IDS_COPY" desc="The text label of the Copy menu item">
         &amp;Copy
       </message>
-      <message name="IDS_PASTE" desc="The text label of the Paste menu item" >
+      <message name="IDS_PASTE" desc="The text label of the Paste menu item">
         &amp;Paste
       </message>
-      <message name="IDS_SELECT_ALL" desc="The text label of the Select All menu item" >
+      <message name="IDS_SELECT_ALL" desc="The text label of the Select All menu item">
         Select &amp;all
       </message>
-      <message name="IDS_FIND" desc="The text label of the Find in Page menu item" >
+      <message name="IDS_FIND" desc="The text label of the Find in Page menu item">
         &amp;Find in page
       </message>
-      <message name="IDS_SAVE_PAGE" desc="The text label of the Save Page As menu item" >
+      <message name="IDS_SAVE_PAGE" desc="The text label of the Save Page As menu item">
         Save page &amp;as...
       </message>
-      <message name="IDS_PRINT" desc="The text label of the Print... menu item. Opens a dialog box to select print settings" >
+      <message name="IDS_PRINT" desc="The text label of the Print... menu item. Opens a dialog box to select print settings">
         &amp;Print...
       </message>
-      <message name="IDS_ZOOM_MENU" desc="The text label of the Zoom submenu" >
+      <message name="IDS_ZOOM_MENU" desc="The text label of the Zoom submenu">
         &amp;Zoom
       </message>
-      <message name="IDS_ZOOM_PLUS" desc="The text label of the Make Text Larger menu item" >
+      <message name="IDS_ZOOM_PLUS" desc="The text label of the Make Text Larger menu item">
         &amp;Larger
       </message>
-      <message name="IDS_ZOOM_NORMAL" desc="The text label of the Make Text Normal Size menu item" >
+      <message name="IDS_ZOOM_NORMAL" desc="The text label of the Make Text Normal Size menu item">
         &amp;Normal
       </message>
-      <message name="IDS_ZOOM_MINUS" desc="The text label of the Make Text Smaller menu item" >
+      <message name="IDS_ZOOM_MINUS" desc="The text label of the Make Text Smaller menu item">
         &amp;Smaller
       </message>
-      <message name="IDS_ENCODING_MENU" desc="The text label of the Encoding submenu" >
+      <message name="IDS_ENCODING_MENU" desc="The text label of the Encoding submenu">
         &amp;Encoding
       </message>
-      <message name="IDS_ENCODING_AUTO_DETECT" desc="The text label of the Auto Dectect submenu" >
+      <message name="IDS_ENCODING_AUTO_DETECT" desc="The text label of the Auto Dectect submenu">
         Auto detect
       </message>
       <message name="IDS_ENCODING_DISPLAY_TEMPLATE" desc="The format of encodings in the encoding menu. Encoding categories are Unicode, Western, Turkish, Cyrillic, Chinese Simplified, Thai, Arabic, Hebrew and so forth. Encoding names are UTF-8, ISO-8859-1, Windows-1251, GB2312, etc.">
         <ph name="ENCODING_CATEGORY">$1<ex>Japanese</ex></ph> (<ph name="ENCODING_NAME">$2<ex>Shift_JIS</ex></ph>)
       </message>
-      <message name="IDS_ENCODING_UNICODE" desc="The text label of Unicode encodings" >
+      <message name="IDS_ENCODING_UNICODE" desc="The text label of Unicode encodings">
         Unicode
       </message>
-      <message name="IDS_ENCODING_WESTERN" desc="The text label of West European character encoding" >
+      <message name="IDS_ENCODING_WESTERN" desc="The text label of West European character encoding">
         Western
       </message>
-      <message name="IDS_ENCODING_SIMP_CHINESE" desc="The text label of Simplified Chinese encodings" >
+      <message name="IDS_ENCODING_SIMP_CHINESE" desc="The text label of Simplified Chinese encodings">
         Chinese Simplified
       </message>
-      <message name="IDS_ENCODING_TRAD_CHINESE" desc="The text label of Tradtional Chinese encodings" >
+      <message name="IDS_ENCODING_TRAD_CHINESE" desc="The text label of Tradtional Chinese encodings">
         Chinese Traditional
       </message>
-      <message name="IDS_ENCODING_KOREAN" desc="The text label of Korean encoding" >
+      <message name="IDS_ENCODING_KOREAN" desc="The text label of Korean encoding">
         Korean
       </message>
-      <message name="IDS_ENCODING_JAPANESE" desc="The text label of Japanese encodings" >
+      <message name="IDS_ENCODING_JAPANESE" desc="The text label of Japanese encodings">
         Japanese
       </message>
-      <message name="IDS_ENCODING_THAI" desc="The text label of encoding thai lanuage" >
+      <message name="IDS_ENCODING_THAI" desc="The text label of encoding thai lanuage">
         Thai
       </message>
-      <message name="IDS_ENCODING_CENTRAL_EUROPEAN" desc="The text label of encoding Central European" >
+      <message name="IDS_ENCODING_CENTRAL_EUROPEAN" desc="The text label of encoding Central European">
         Central European
       </message>
-      <message name="IDS_ENCODING_CYRILLIC" desc="The text label of Cyrillic encodings" >
+      <message name="IDS_ENCODING_CYRILLIC" desc="The text label of Cyrillic encodings">
         Cyrillic
       </message>
-      <message name="IDS_ENCODING_GREEK" desc="The text label of Greek encodings" >
+      <message name="IDS_ENCODING_GREEK" desc="The text label of Greek encodings">
         Greek
       </message>
-      <message name="IDS_ENCODING_BALTIC" desc="The text label of Baltic encodings" >
+      <message name="IDS_ENCODING_BALTIC" desc="The text label of Baltic encodings">
         Baltic
       </message>
-      <message name="IDS_ENCODING_SOUTH_EUROPEAN" desc="The text label of South European encodings" >
+      <message name="IDS_ENCODING_SOUTH_EUROPEAN" desc="The text label of South European encodings">
         South European
       </message>
-      <message name="IDS_ENCODING_NORDIC" desc="The text label of Nordic encoding" >
+      <message name="IDS_ENCODING_NORDIC" desc="The text label of Nordic encoding">
         Nordic
       </message>
-      <message name="IDS_ENCODING_CELTIC" desc="The text label of Celtic encodings" >
+      <message name="IDS_ENCODING_CELTIC" desc="The text label of Celtic encodings">
         Celtic
       </message>
-      <message name="IDS_ENCODING_ROMANIAN" desc="The text label of Romanian encoding" >
+      <message name="IDS_ENCODING_ROMANIAN" desc="The text label of Romanian encoding">
         Romanian
       </message>
-      <message name="IDS_ENCODING_TURKISH" desc="The text label of Turkish encodings" >
+      <message name="IDS_ENCODING_TURKISH" desc="The text label of Turkish encodings">
         Turkish
       </message>
       <message name="IDS_ENCODING_ARABIC" desc="The text label of Arabic encodings">
         Arabic
       </message>
-      <message name="IDS_ENCODING_HEBREW" desc="The text label of Hebrew encodings" >
+      <message name="IDS_ENCODING_HEBREW" desc="The text label of Hebrew encodings">
         Hebrew
       </message>
-      <message name="IDS_ENCODING_VIETNAMESE" desc="The text label of Vietnamese encoding" >
+      <message name="IDS_ENCODING_VIETNAMESE" desc="The text label of Vietnamese encoding">
         Vietnamese
       </message>
       <message name="IDS_DEVELOPER_MENU" desc="The text label of the Developer submenu">
         Developer
       </message>
-      <message name="IDS_VIEW_SOURCE" desc="The text label of the View Page Source menu item" >
+      <message name="IDS_VIEW_SOURCE" desc="The text label of the View Page Source menu item">
         View s&amp;ource
       </message>
       <message name="IDS_DEBUGGER" desc="The text label of the JavaScript debugger menu item">
@@ -568,9 +635,16 @@ each locale. -->
       <message name="IDS_JS_CONSOLE" desc="The text the menu to show the JS console">
         &amp;JavaScript console
       </message>
-      <message name="IDS_TASK_MANAGER" desc="The text label of the Task Manager menu item" >
+      <message name="IDS_TASK_MANAGER" desc="The text label of the Task Manager menu item">
         &amp;Task manager
       </message>
+      <message name="IDS_RESTORE_TAB" desc="The text label of the Restore Tab menu item">
+        R&amp;eopen closed tab
+      </message>
+      <message name="IDS_RESTORE_WINDOW" desc="The text label of the Restore Window menu item">
+        R&amp;eopen closed window
+      </message>
+
       <!-- This really belongs under Generic Terms above. -->
       <message name="IDS_CLOSE" desc="A generic term for Close on buttons and menus.">
         Close
@@ -715,20 +789,18 @@ each locale. -->
         <ph name="ENGINE_NAME">$1<ex>Google</ex></ph> (Default)
       </message>
 
-      <!-- TODO(jungshik) : Improve the description to minimize translator errors.  -->
-
       <message name="IDS_TIME_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_SEC_SINGULAR"
                desc="">
         NA
@@ -737,7 +809,7 @@ each locale. -->
 
       <if expr="lang in ['ar', 'ro', 'lv']">
       <message name="IDS_TIME_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, just copy the source string.">
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
         <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs
       </message>
       </if>
@@ -750,7 +822,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs
       </message>
       </if>
@@ -763,7 +835,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs
       </message>
       </if>
@@ -776,7 +848,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs
       </message>
       </if>
@@ -789,18 +861,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_MIN_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_MINS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_MINS_ZERO"
                desc="">
         NA
       </message>
@@ -808,7 +893,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins
       </message>
       </if>
@@ -821,7 +906,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins
       </message>
       </if>
@@ -834,7 +919,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins
       </message>
       </if>
@@ -847,18 +932,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_HOURS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_HOUR_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_HOUR_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_HOURS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_HOURS_ZERO"
                desc="">
         NA
       </message>
@@ -866,7 +964,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_HOURS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours
       </message>
       </if>
@@ -879,7 +977,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_HOURS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours
       </message>
       </if>
@@ -892,7 +990,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_HOURS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours
       </message>
       </if>
@@ -905,18 +1003,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_DAYS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_DAY_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_DAY_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_DAYS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_DAYS_ZERO"
                desc="">
         NA
       </message>
@@ -924,7 +1035,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_DAYS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days
       </message>
       </if>
@@ -937,7 +1048,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_DAYS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days
       </message>
       </if>
@@ -950,7 +1061,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_DAYS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days
       </message>
       </if>
@@ -963,17 +1074,17 @@ each locale. -->
 
 
       <message name="IDS_TIME_REMAINING_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs left
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_REMAINING_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec left
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_REMAINING_SEC_SINGULAR"
                desc="">
         NA
@@ -982,7 +1093,7 @@ each locale. -->
 
       <if expr="lang in ['ar', 'ro', 'lv']">
       <message name="IDS_TIME_REMAINING_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, just copy the source string.">
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
         <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs left
       </message>
       </if>
@@ -995,7 +1106,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs left
       </message>
       </if>
@@ -1008,7 +1119,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs left
       </message>
       </if>
@@ -1021,7 +1132,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_REMAINING_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs left
       </message>
       </if>
@@ -1034,18 +1145,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_REMAINING_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins left
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_REMAINING_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min left
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_REMAINING_MIN_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_REMAINING_MINS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins left
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_REMAINING_MINS_ZERO"
                desc="">
         NA
       </message>
@@ -1053,7 +1177,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins left
       </message>
       </if>
@@ -1066,7 +1190,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins left
       </message>
       </if>
@@ -1079,7 +1203,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_REMAINING_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins left
       </message>
       </if>
@@ -1092,18 +1216,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_REMAINING_HOURS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours left
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_REMAINING_HOUR_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour left
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_REMAINING_HOUR_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_REMAINING_HOURS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours left
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_REMAINING_HOURS_ZERO"
                desc="">
         NA
       </message>
@@ -1111,7 +1248,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_HOURS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours left
       </message>
       </if>
@@ -1124,7 +1261,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_HOURS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours left
       </message>
       </if>
@@ -1137,7 +1274,7 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_REMAINING_HOURS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours left
       </message>
       </if>
@@ -1150,18 +1287,31 @@ each locale. -->
 
 
       <message name="IDS_TIME_REMAINING_DAYS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, and Turkish, this is the only string necessary. For languages with singular-plural distinction, this is generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
         <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days left
       </message>
 
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message name="IDS_TIME_REMAINING_DAY_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European languages), 1 and 0 (French and Brazillian Portugese), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese and Turkish, but just copy the source string.">
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
         <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day left
       </message>
       </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr']">
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
       <message translateable="false" name="IDS_TIME_REMAINING_DAY_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_REMAINING_DAYS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days left
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_REMAINING_DAYS_ZERO"
                desc="">
         NA
       </message>
@@ -1169,7 +1319,7 @@ each locale. -->
 
       <if expr="lang in ['ga', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_DAYS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, just copy the source string.">
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
         <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days left
       </message>
       </if>
@@ -1182,7 +1332,7 @@ each locale. -->
 
       <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
       <message name="IDS_TIME_REMAINING_DAYS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, just copy the source string.">
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
         <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days left
       </message>
       </if>
@@ -1195,12 +1345,296 @@ each locale. -->
 
       <if expr="lang == 'ar'">
       <message name="IDS_TIME_REMAINING_DAYS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, just copy the source string.">
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
         <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days left
       </message>
       </if>
       <if expr="lang != 'ar'">
       <message translateable="false" name="IDS_TIME_REMAINING_DAYS_MANY"
+               desc="">
+        NA
+      </message>
+      </if>
+
+
+      <message name="IDS_TIME_ELAPSED_SECS_DEFAULT"
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs ago
+      </message>
+
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message name="IDS_TIME_ELAPSED_SEC_SINGULAR"
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
+        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec ago
+      </message>
+      </if>
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_SEC_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_ELAPSED_SECS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs ago
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_ZERO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ga', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_SECS_TWO"
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
+        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs ago
+      </message>
+      </if>
+      <if expr="lang not in ['ga', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_TWO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_SECS_FEW"
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
+        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs ago
+      </message>
+      </if>
+      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_FEW"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang == 'ar'">
+      <message name="IDS_TIME_ELAPSED_SECS_MANY"
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
+        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs ago
+      </message>
+      </if>
+      <if expr="lang != 'ar'">
+      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_MANY"
+               desc="">
+        NA
+      </message>
+      </if>
+
+
+      <message name="IDS_TIME_ELAPSED_MINS_DEFAULT"
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins ago
+      </message>
+
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message name="IDS_TIME_ELAPSED_MIN_SINGULAR"
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
+        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min ago
+      </message>
+      </if>
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_MIN_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_ELAPSED_MINS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins ago
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_ZERO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ga', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_MINS_TWO"
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
+        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins ago
+      </message>
+      </if>
+      <if expr="lang not in ['ga', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_TWO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_MINS_FEW"
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
+        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins ago
+      </message>
+      </if>
+      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_FEW"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang == 'ar'">
+      <message name="IDS_TIME_ELAPSED_MINS_MANY"
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
+        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins ago
+      </message>
+      </if>
+      <if expr="lang != 'ar'">
+      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_MANY"
+               desc="">
+        NA
+      </message>
+      </if>
+
+
+      <message name="IDS_TIME_ELAPSED_HOURS_DEFAULT"
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours ago
+      </message>
+
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message name="IDS_TIME_ELAPSED_HOUR_SINGULAR"
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
+        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour ago
+      </message>
+      </if>
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_HOUR_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_ELAPSED_HOURS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours ago
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_ZERO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ga', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_HOURS_TWO"
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
+        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours ago
+      </message>
+      </if>
+      <if expr="lang not in ['ga', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_TWO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_HOURS_FEW"
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
+        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours ago
+      </message>
+      </if>
+      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_FEW"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang == 'ar'">
+      <message name="IDS_TIME_ELAPSED_HOURS_MANY"
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
+        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours ago
+      </message>
+      </if>
+      <if expr="lang != 'ar'">
+      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_MANY"
+               desc="">
+        NA
+      </message>
+      </if>
+
+
+      <message name="IDS_TIME_ELAPSED_DAYS_DEFAULT"
+               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
+        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days ago
+      </message>
+
+      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message name="IDS_TIME_ELAPSED_DAY_SINGULAR"
+               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazillian Portugese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Servian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
+        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day ago
+      </message>
+      </if>
+      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_DAY_SINGULAR"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ar', 'ro', 'lv']">
+      <message name="IDS_TIME_ELAPSED_DAYS_ZERO"
+               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
+        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days ago
+      </message>
+      </if>
+      <if expr="lang not in ['ar', 'ro', 'lv']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_ZERO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang in ['ga', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_DAYS_TWO"
+               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
+        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days ago
+      </message>
+      </if>
+      <if expr="lang not in ['ga', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_TWO"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message name="IDS_TIME_ELAPSED_DAYS_FEW"
+               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
+        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days ago
+      </message>
+      </if>
+      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
+      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_FEW"
+               desc="">
+        NA
+      </message>
+      </if>
+
+      <if expr="lang == 'ar'">
+      <message name="IDS_TIME_ELAPSED_DAYS_MANY"
+               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
+        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days ago
+      </message>
+      </if>
+      <if expr="lang != 'ar'">
+      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_MANY"
                desc="">
         NA
       </message>
@@ -1235,7 +1669,10 @@ each locale. -->
          desc="Status that the file download will be opened when the download completes.">
         Opening when complete
       </message>
-
+      <message name="IDS_DOWNLOAD_STATUS_OPENING"
+               desc="Temporary status shown when a user has clicked to open a downloaded file.">
+        Opening <ph name="FILE">$1<ex>image.jpg</ex></ph>...
+      </message>
       <message name="IDS_DOWNLOAD_STATUS_COMPLETE"
                desc="Size and units downloaded.">
         <ph name="DOWNLOAD_SIZE">$1<ex>54kB</ex></ph>, Complete
@@ -1264,7 +1701,7 @@ each locale. -->
       <message name="IDS_DISCARD_DOWNLOAD"
                desc="Text for the button used to stop a dangerous download.">
         Discard
-      </message>      
+      </message>
 
       <!-- Download Tab Items -->
       <message name="IDS_DOWNLOAD_LINK_PAUSE"
@@ -1296,9 +1733,13 @@ each locale. -->
                desc="Cancel link text">
         Cancelled
       </message>
-      <message name="IDS_DOWNLOAD_TAB_PROGRESS_SPEED"
-               desc="Speed and received byte counts">
+      <message name="IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN"
+               desc="The status text for a download in progress in the download manager. This includes information such as speed and received byte counts and is used when we do not know the remaining time">
         <ph name="SPEED">$1<ex>10kB/s</ex></ph> - <ph name="RECEIVED_AMOUNT">$2<ex>40kB</ex></ph>
+      </message>
+      <message name="IDS_DOWNLOAD_TAB_PROGRESS_STATUS"
+               desc="The status text for a download in progress in the download manager. This includes information such as speed, received byte counts as well as remaining time">
+        <ph name="SPEED">$1<ex>10kB/s</ex></ph> - <ph name="RECEIVED_AMOUNT">$2<ex>40kB</ex></ph>, <ph name="TIME_REMAINING">$3<ex>42 mins left</ex></ph>
       </message>
       <message name="IDS_DOWNLOAD_TAB_PROGRESS_SIZE"
                desc="Speed and received byte counts (with total)">
@@ -1307,6 +1748,10 @@ each locale. -->
       <message name="IDS_DOWNLOAD_PROGRESS_PAUSED"
                desc="Indicate the download is in progress but paused">
         Paused
+      </message>
+      <message name="IDS_DOWNLOAD_LINK_CLEAR_ALL"
+         desc="Clear all downloads link">
+        Clear all
       </message>
 
       <!-- Download Context Menu Items -->
@@ -1339,6 +1784,26 @@ each locale. -->
         &amp;Remove
       </message>
 
+      <!-- Remove in-progress downloads confirmation dialog -->
+      <message name="IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_TITLE" desc="Title of the dialog asking for user confirmation to close the browser when one download is in-progress.">
+        You have one download in progress. If you close Google Chrome now, this download will be canceled.
+      </message>
+      <message name="IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE" desc="Title of the dialog asking for user confirmation to close the browser when multiple downloads are in-progress.">
+        You have <ph name="DOWNLOAD_COUNT">$1<ex>3</ex></ph> downloads in progress. If you close Google Chrome now, these downloads will be canceled.
+      </message>
+      <message name="IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL" desc="Button text for OKing to close the browser when a single download is in-progress.">
+        Close and cancel download
+      </message>
+      <message name="IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL" desc="Button text for OKing to close the browser when multiple downloads are in-progress.">
+        Close and cancel downloads
+      </message>
+      <message name="IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL" desc="Button text for canceling the closing of the browser when a single download is in-progress.">
+        Wait for download to finish
+      </message>
+      <message name="IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL" desc="Button text for canceling the closing of the browser when downloads are in-progress.">
+        Wait for downloads to finish
+      </message>
+
       <!-- Gears shortcut strings -->
       <message name="IDS_CREATE_SHORTCUTS" desc="Default installation menu label">
         Create application &amp;shortcuts...
@@ -1349,22 +1814,22 @@ each locale. -->
         There are several SSL errors on this page:
       </message>
       <message name="IDS_SSL_MIXED_CONTENT_TITLE" desc="Title for mixed SSL / non-SSL content">
-        This page contains insecure elements.
+        This page contains insecure content.
       </message>
       <message name="IDS_SSL_MIXED_CONTENT_DESCRIPTION" desc="Description for mixed SSL / non-SSL content">
-        This page contains some insecure elements
+        This page contains some insecure content
       </message>
       <message name="IDS_SSL_MIXED_CONTENT_DETAILS" desc="Description for mixed SSL / non-SSL content">
-        This page is not retrieved entirely over a secure connection.  It contains some elements retrieved over insecure connections.
+        This page is not retrieved entirely over a secure connection.  It contains some content retrieved over insecure connections.
       </message>
       <message name="IDS_SSL_UNSAFE_CONTENT_TITLE" desc="Title for broken https resources in safe SSL page">
-        This page contains insecure elements.
+        This page contains insecure content.
       </message>
       <message name="IDS_SSL_UNSAFE_CONTENT_DESCRIPTION" desc="Description for broken https resources in safe SSL page">
-        This page contains some insecure elements
+        This page contains some insecure content
       </message>
       <message name="IDS_SSL_UNSAFE_CONTENT_DETAILS" desc="Title for broken https resources in safe SSL page">
-        Some elements in this page are retrieved over a connection with SSL errors.
+        Some content on this page was retrieved over a connection with SSL errors.
       </message>
 
       <!-- Certificate error strings -->
@@ -1534,7 +1999,7 @@ each locale. -->
         Close find bar
       </message>
 
-      
+
       <!-- Fullscreen mode -->
       <message name="IDS_EXIT_FULLSCREEN_MODE" desc="Clickable message displayed on entering fullscreen mode to tell users how to return to normal mode">
         Exit full screen (<ph name="ACCELERATOR">$1<ex>F11</ex></ph>)
@@ -1578,6 +2043,9 @@ each locale. -->
       <message name="IDS_TASK_MANAGER_WEB_BROWSER_CELL_TEXT" desc="The text of the web browser process row">
         Browser
       </message>
+      <message name="IDS_TASK_MANAGER_EXTENSION_PREFIX" desc="The prefix for a Task Manager extension row (always visible if the extension has a view)">
+        Extension: <ph name="EXTENSION_NAME">$1<ex>Sample Extension</ex></ph>
+      </message>
       <message name="IDS_TASK_MANAGER_TAB_PREFIX" desc="The prefix for a Task Manager Tab row">
         Tab: <ph name="TAB_NAME">$1<ex>Google</ex></ph>
       </message>
@@ -1589,6 +2057,48 @@ each locale. -->
       </message>
       <message name="IDS_TASK_MANAGER_WORKER_PREFIX" desc="The prefix for a Task Manager HTML5 Web Worker process row">
         Web Worker: <ph name="WORKER_NAME">$1<ex>http://www.domain.com</ex></ph>
+      </message>
+
+      <!-- Extension Crashed Info Bar-->
+      <message name="IDS_EXTENSION_CRASHED_INFOBAR_RESTART_BUTTON" desc="Title of the restart button in the extension crashed infobar. After the button is clicked, the extension process will be restarted.">
+        Restart
+      </message>
+      <message name="IDS_EXTENSION_CRASHED_INFOBAR_MESSAGE" desc="Message displayed on the extension crashed infobar.">
+        The following extension has crashed : <ph name="EXTENSION_NAME">$1<ex>Buildbot Monitor</ex></ph>
+  	  </message>
+
+      <!-- Theme preview info bar -->
+      <message name="IDS_THEME_INSTALL_INFOBAR_LABEL" desc="Text displayed on an infobar when a theme has been installed.">
+        Installed theme "<ph name="THEME_NAME">$1<ex>Snowflake Theme</ex></ph>"
+      </message>
+      <message name="IDS_THEME_INSTALL_INFOBAR_UNDO_BUTTON" desc="Text displayed on the button to undo a theme installation and go back to the previous theme.">
+        Undo
+      </message>
+      
+      <!-- Extesion install prompt -->
+      <message name="IDS_EXTENSION_PROMPT_TITLE" desc="Titlebar of the extension installation prompt window">
+        Confirm Installation
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_HEADING" desc="First bold line in the content area of the extension installation prompt. Asks the user if they want to install a particular extension.">
+        Install "<ph name="EXTENSION_NAME">$1<ex>Gmail Checker</ex></ph>"?
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_1" desc="Humorous warning displayed in the extension install prompt that tells users that extensions have access to their computer and private data.">
+        Extensions have access your computer and private data. This means they could forward all your email to your spouse.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_2" desc="Humorous warning displayed in the extension install prompt that tells users that extensions have access to their computer and private data.">
+        Extensions have access your computer and private data. They could send tweets or email on your behalf.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_3" desc="Humorous warning displayed in the extension install prompt that tells users that extensions have access to their computer and private data.">
+        Extensions can access your computer and private data. They could post unflattering pictures to your Wall.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_SEVERE" desc="A bolded warning below the humorous warning that reiterates that users should only install extensions they trust">
+        Only install extensions you trust.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_INSTALL_BUTTON" desc="Text for the install button on the extension install prompt">
+        Install
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_CANCEL_BUTTON" desc="Text for the cancel button on the extension install prompt">
+        Cancel
       </message>
 
       <!-- Session Crashed Info Bar-->
@@ -1641,11 +2151,18 @@ each locale. -->
       </message>
 
       <!-- Javascript Dialog Box strings -->
-      <message name="IDS_JAVASCRIPT_MESSAGEBOX_DEFAULT_TITLE" desc="Title for Javascript alert, prompt, and confirm if there is no hostname to display">
+      <message name="IDS_JAVASCRIPT_ALERT_DEFAULT_TITLE" desc="Title for Javascript alert if there is no hostname to display">
         Javascript Alert
       </message>
-      <message name="IDS_JAVASCRIPT_MESSAGEBOX_TITLE" desc="Title for Javascript alert, prompt, and confirm">
-        Alert <ph name="SITE">$1<ex>http://www.google.com</ex></ph>
+      <message name="IDS_JAVASCRIPT_MESSAGEBOX_DEFAULT_TITLE" desc="Title for Javascript prompt and confirm if there is no hostname to display">
+        Javascript
+      </message>
+      <message name="IDS_JAVASCRIPT_ALERT_TITLE" desc="Title for Javascript alert">
+        Alert <ph name="SITE">$1<ex>http://www.google.com</ex>
+        </ph>
+      </message>
+      <message name="IDS_JAVASCRIPT_MESSAGEBOX_TITLE" desc="Title for Javascript prompt and confirm">
+        <ph name="SITE">$1<ex>http://www.google.com</ex></ph>
       </message>
       <message name="IDS_JAVASCRIPT_MESSAGEBOX_SUPPRESS_OPTION" desc="Optional UI shown on the message box, in the form of a checkbox, allowing the user to suppress additional message boxes from the page.">
         Prevent this page from creating additional dialogs.
@@ -1700,10 +2217,10 @@ each locale. -->
       </message>
 
       <!-- Omnibox -->
-      <message name="IDS_PASTE_AND_GO" desc="The text label of the Paste And Go menu item when the clipboard contains a URL" >
+      <message name="IDS_PASTE_AND_GO" desc="The text label of the Paste And Go menu item when the clipboard contains a URL">
         Pa&amp;ste and go
       </message>
-      <message name="IDS_PASTE_AND_SEARCH" desc="The text label of the Paste And Go menu item when the clipboard contains a string to search for" >
+      <message name="IDS_PASTE_AND_SEARCH" desc="The text label of the Paste And Go menu item when the clipboard contains a string to search for">
         Pa&amp;ste and search
     </message>
       <message name="IDS_OMNIBOX_EMPTY_TEXT" desc="Text shown if omnibox is empty">
@@ -1834,45 +2351,61 @@ each locale. -->
         Kill pages
       </message>
 
+      <!-- Passwords and Exceptions Dialog -->
+      <message name="IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE" desc="Title for 'Passwords and exceptions dialog'">
+        Passwords and Exceptions
+      </message>
+      <message name="IDS_PASSWORDS_SHOW_PASSWORDS_TAB_TITLE" desc="Title for 'Saved passwords' tab">
+        Saved passwords
+      </message>
+      <message name="IDS_PASSWORDS_EXCEPTIONS_TAB_TITLE" desc="Title for 'Exceptions' tab">
+        Exceptions
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN" desc="Password table view Site column title">
+        Site
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_USERNAME_COLUMN" desc="Password table view Username column title">
+        Username
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_REMOVE_BUTTON" desc="Passwords page view's 'Remove' button text">
+        Remove
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_REMOVE_ALL_BUTTON" desc="Passwords page view's 'Remove all' button text">
+        Remove All
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_TEXT_DELETE_ALL_PASSWORDS" desc ="Passwords page view's confirmation message before removing all stored passwords">
+        Are you sure you want to remove all passwords?
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_CAPTION_DELETE_ALL_PASSWORDS" desc="Passwords page view's remove all confirmation message box window title">
+        Remove all passwords
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_SHOW_BUTTON" desc="Text for passwords page view's button to show a stored password">
+        Show password
+      </message>
+      <message name="IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON" desc="Text for passwords page view's button to hide a stored password">
+        Hide password
+      </message>
+      <message name="IDS_EXCEPTIONS_PAGE_VIEW_REMOVE_BUTTON" desc="Exceptions page view's 'Remove' button text">
+        Remove
+      </message>
+      <message name="IDS_EXCEPTIONS_PAGE_VIEW_REMOVE_ALL_BUTTON" desc="Exceptions page view's 'Remove all' button text">
+        Remove All
+      </message>
+
+      <!-- Confirm MessageBox Dialog -->
+      <message name="IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL" desc="Confirm MessageBox Dialog's 'Yes' button text">
+        Yes
+      </message>
+      <message name="IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL" desc="Confirm MessageBox Dialog's 'No' button text">
+        No
+      </message>
+      
       <!-- Password Manager -->
       <message name="IDS_PASSWORD_MANAGER_SAVE_BUTTON" desc="Save button text for password manager">
         Save password
       </message>
       <message name="IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON" desc="Button text for the 'Save Password' infobar's 'Never remember for this site' option">
         Never for this site
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_TITLE" desc="Password manager view window title">
-        Passwords
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_REMOVE_BUTTON" desc="Password manager view's remove button text">
-        Remove
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_REMOVE_ALL_BUTTON" desc="Password manager view's remove all button text">
-        Remove All
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_SHOW_BUTTON" desc="Text for password manager view's button to show a stored password">
-        Show password
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_HIDE_BUTTON" desc="Text for password manager view's button to hide a stored password">
-        Hide password
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_CLOSE_BUTTON" desc="Text for password manager view's close button">
-        Close      
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_SITE_COLUMN" desc="Password manager table view Site column title">
-        Site
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_VIEW_USERNAME_COLUMN" desc="Password manager table view Username column title">
-        Username
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_TITLE" desc="Password manager exceptions view window title">
-        Exceptions
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_REMOVE_BUTTON" desc="Password manager exceptions view's remove button text">
-        Remove
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_EXCEPTIONS_VIEW_REMOVE_ALL_BUTTON" desc="Password manager exceptions view's remove all button text">
-        Remove All
       </message>
 
       <!-- Import Settings Dialog -->
@@ -1917,6 +2450,9 @@ each locale. -->
       <message name="IDS_IMPORTER_GOOGLE_LOGIN_TEXT" desc="The message to be displayed on dialog">
         In order to import Toolbar bookmarks into Chrome, you must be logged into your Google account.  Please log in and try to import again.
       </message>
+      <message name="IDS_IMPORT_NO_PROFILE_FOUND" desc="Message displayed when we do not find any supported browser to import from.">
+        No supported browser found
+      </message>
 
       <!-- Import progress popup -->
       <message name="IDS_IMPORT_PROGRESS_TITLE" desc="Title for the importing progress dialog">
@@ -1943,7 +2479,7 @@ each locale. -->
       <message name="IDS_IMPORT_PROGRESS_STATUS_CANCEL" desc="Button text for import cancellation">
         Stop import
       </message>
-      
+
       <message name="IDS_IMPORT_PROGRESS_STATUS_CANCEL_CONFIRM_OK" desc="Import cancellation confirmation accept button">
         Continue Importing
       </message>
@@ -1962,7 +2498,7 @@ each locale. -->
       <message name="IDS_IMPORTER_LOCK_CANCEL" desc="Text for Cancel button on dialog">
         Skip Import
       </message>
-       
+
       <!-- Report Bug or Broken Web Site Dialog -->
       <message name="IDS_BUGREPORT_TITLE" desc="Dialog title for bug report dialog">
         Report Bug or Broken Web Site
@@ -2088,10 +2624,22 @@ each locale. -->
       <message name="IDS_UPGRADE_ERROR" desc="Status label: Error occurred during upgrade">
         Update server not available (error: <ph name="ERROR_NUMBER">$1<ex>1</ex></ph>)
       </message>
+      <message name="IDS_RESOURCE_ERROR" desc="Error loading resource">
+        An error was encountered while loading a program resource. Try reinstalling.
+      </message>
+      <message name="IDS_RESOURCE_ERROR_CAPTION" desc="Error loading resource caption">
+        Resource Error
+      </message>
 
-      <!-- Print preview UI -->
+      <!-- Print -->
       <message name="IDS_DEFAULT_PRINT_DOCUMENT_TITLE" desc="Default title for a print document">
         Untitled Document
+      </message>
+      <message name="IDS_DEFAULT_PRINTER_NOT_FOUND_WARNING_TITLE" desc="Title of the warning dialog when no when no printer is available">
+        No printer found, Please install a printer.
+      </message>
+      <message name="IDS_PRINT_SPOOL_FAILED_ERROR_TEXT" desc="Text in a messagebox when printing fails because of printer issues.">
+        Something went wrong when trying to print.  Please check your printer and try again.
       </message>
 
       <!-- Tabs -->
@@ -2125,7 +2673,7 @@ each locale. -->
       <message name="IDS_LOAD_STATE_READING_RESPONSE">
         Transferring from <ph name="HOST_NAME">$1<ex>www.google.com</ex></ph>...
       </message>
-      
+
       <!-- Tab Context Menu -->
       <message name="IDS_TAB_CXMENU_NEWTAB" desc="The label of the 'New Tab' Tab context menu item.">
         New tab
@@ -2147,6 +2695,9 @@ each locale. -->
       </message>
       <message name="IDS_TAB_CXMENU_CLOSETABSOPENEDBY" desc="The label of the 'Close Tabs opened by this Tab' Tab context menu item.">
         Close tabs opened by this tab
+      </message>
+      <message name="IDS_TAB_CXMENU_PIN_TAB" desc="The label of the tab context menu item for pinning a tab.">
+        Pin tab
       </message>
 
       <!-- Items in the bookmarks destination mode -->
@@ -2349,7 +2900,7 @@ each locale. -->
       </message>
       <message name="IDS_ERRORPAGES_SUMMARY_TOO_MANY_REDIRECTS" desc="Summary in the error page when there are too many URL redirects.">
         The webpage at &lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt; has resulted in
-        too many redirects.  Clearing your cookies for this site may fix the problem.  If
+        too many redirects.  Clearing your cookies for this site or allowing third-party cookies may fix the problem.  If
         not, it is possibly a server configuration issue and not a problem with your
         computer.
       </message>
@@ -2383,7 +2934,7 @@ each locale. -->
       <message name="IDS_ERRORPAGES_HTTP_POST_WARNING" desc="The error message displayed when the user navigates back or forward to a page which would resubmit post data. They can hit reload to send POST data again and load the page.">
         This web page requires data that you entered earlier in order to be properly displayed. You can send this data again, but by doing so you will repeat any action this page previously performed. Press Reload to resend that data and display this page.
       </message>
-      
+
       <message name="IDS_SAVEAS_ALL_FILES" desc="Save As dialog box default text">
         All Files
       </message>
@@ -2432,7 +2983,7 @@ each locale. -->
       <message name="IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV" desc="The text of the identity section when the page is secured with an EV cert.">
         The identity of <ph name="ORGANIZATION">$1<ex>Google</ex></ph> at <ph name="LOCALITY">$2<ex>Mountain View, CA US</ex></ph> has been verified by <ph name="ISSUER">$3<ex>VeriSign</ex></ph>.
       </message>
-      
+
       <message name="IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY" desc="The default name used when we did not find a principal name.">
         unknown name
       </message>
@@ -2494,6 +3045,15 @@ each locale. -->
       </message>
       <message name="IDS_MIXED_CONTENT_LOG_MESSAGE" desc="The text displayed in the log message of a page that contains insecure content.">
         The page at <ph name="SECURE_PAGE_URL">$1<ex>https://www.google.com/</ex></ph> contains insecure content from <ph name="INSECURE_RESOURCE_URL">$2<ex>http://www.google.com/</ex></ph>.
+      </message>
+
+      <!-- SSL client authentication certificate selection dialog -->
+      <message name="IDS_CLIENT_CERT_DIALOG_TITLE" desc="The title of the dialog that prompts for a certificate when doing SSL client authentication.">
+        Select a certificate
+      </message>
+
+      <message name="IDS_CLIENT_CERT_DIALOG_TEXT" desc="The text in the dialog that prompts for a certificate when doing SSL client authentication.">
+        Select a certificate to authenticate yourself to <ph name="HOST_NAME">$1<ex>www.google.com</ex></ph>
       </message>
 
       <!-- Advanced Font/Language settings -->
@@ -2559,7 +3119,7 @@ each locale. -->
       <message name="IDS_HTTP_POST_WARNING_CANCEL" desc="Cancel button for post warning">
         Cancel
       </message>
-      
+
       <!-- Menus -->
       <message name="IDS_MENU_EMPTY_SUBMENU" desc="Used when a submenu has no entries">
         (empty)
@@ -2616,7 +3176,7 @@ each locale. -->
       <message name="IDS_FIRSTRUN_DLG_CANCEL_CONFIRM_EXIT" desc="Exit installation button for cancel confirmation dialog">
         Exit Install
       </message>
-      
+
       <!-- Customize chrome messages -->
       <message name="IDS_FR_CUSTOMIZE_DLG_TITLE" desc="Dialog title for first run customize dialog">
         Customize Your Settings
@@ -2657,6 +3217,17 @@ each locale. -->
         Change search engine
       </message>
 
+      <!-- First run alternative minibubble popup -->
+      <message name="IDS_FR_OEM_BUBBLE_TITLE_1" desc="Bubble-like popup dialog title, part 1">
+        New!
+      </message>
+      <message name="IDS_FR_OEM_BUBBLE_TITLE_2" desc="Bubble-like popup dialog title, part 2">
+        Search from the address bar.
+      </message>
+      <message name="IDS_FR_OEM_BUBBLE_SUBTEXT" desc="Text under the title for the bubble. 'Orchids' may be translated into any locale-appropriate search term.">
+        Try it out - type "orchids" and press Enter.
+      </message>
+
       <!-- Sad Tab Strings -->
       <message name="IDS_SAD_TAB_TITLE" desc="The title of the sad tab page that is shown when a tab crashes. This is intended to be a humorous exclamation of dismay.">
         Aw, Snap!
@@ -2674,21 +3245,21 @@ each locale. -->
       <message name="IDS_HIDE_ICONS_NOT_SUPPORTED" desc="Message to explain we only support uninstall and not hide-icons.">
         To hide access to this program, you need to uninstall it by using\n<ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Programs</ex></ph> in Control Panel.\n\nWould you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Programs</ex></ph>?
       </message>
-      
+
       <!-- Options Window -->
       <message name="IDS_OPTIONS_DIALOG_TITLE" desc="The title of the Options dialog box">
         <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> Options
       </message>
-      <message name="IDS_OPTIONS_GENERAL_TAB_LABEL" desc="The title of the General tab">
+      <message name="IDS_OPTIONS_GENERAL_TAB_LABEL" desc="The title of the Basics tab">
         Basics
       </message>
-      <message name="IDS_OPTIONS_CONTENT_TAB_LABEL" desc="The title of the Tweaks tab">
-        Minor Tweaks
+      <message name="IDS_OPTIONS_CONTENT_TAB_LABEL" desc="The title of the Personal Stuff tab">
+        Personal Stuff
       </message>
       <message name="IDS_OPTIONS_USER_DATA_TAB_LABEL" desc="The title of the User Data tab">
         User Data
       </message>
-      <message name="IDS_OPTIONS_ADVANCED_TAB_LABEL" desc="The title of the Advanced tab">
+      <message name="IDS_OPTIONS_ADVANCED_TAB_LABEL" desc="The title of the Under the Hood tab">
         Under the Hood
       </message>
       <message name="IDS_OPTIONS_LEARN_MORE_LABEL" desc="In the options dialog, we have links to the support web pages where the user can learn more about a feature.">
@@ -2758,7 +3329,7 @@ each locale. -->
       </message>
 
       <message name="IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME" desc="The title of the download location group">
-        Download location:
+        Downloads
       </message>
       <message name="IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_BUTTON" desc="The label of the 'Browse...' button">
         Br&amp;owse...
@@ -2777,16 +3348,12 @@ each locale. -->
         Clear auto-opening settings
       </message>
 
-      
+
       <message name="IDS_OPTIONS_GEARSSETTINGS_GROUP_NAME" desc="The label of the 'Gears Settings' group">
-        Google Gears:
+        Gears:
       </message>
       <message name="IDS_OPTIONS_GEARSSETTINGS_CONFIGUREGEARS_BUTTON" desc="The label of the 'configure gears' button">
-        Change Google Gears settings
-      </message>
-
-      <message name="IDS_OPTIONS_SHOWPOPUPBLOCKEDNOTIFICATION" desc="The label of the checkbox that toggles the 'Notify me when a popup is blocked' option">
-        Notify me when a pop-up is blocked
+        Change Gears settings
       </message>
 
       <message name="IDS_OPTIONS_CERTIFICATES_LABEL" desc="The info label for the 'Manage certificates' button">
@@ -2795,7 +3362,7 @@ each locale. -->
       <message name="IDS_OPTIONS_CERTIFICATES_MANAGE_BUTTON" desc="The label of the 'Manage Certificates' button">
         Manage certificates
       </message>
-      
+
       <message name="IDS_OPTIONS_PASSWORDS_GROUP_NAME" desc="The title of the 'Passwords' group">
         Passwords:
       </message>
@@ -2808,15 +3375,31 @@ each locale. -->
       <message name="IDS_OPTIONS_PASSWORDS_SHOWPASSWORDS" desc="The label of the 'Show passwords' button">
         Show saved passwords
       </message>
-      <message name="IDS_OPTIONS_PASSWORDS_EXCEPTIONS" desc="The label of the 'Exceptions' button">
-        Exceptions
+      <message name="IDS_OPTIONS_PASSWORDS_EXCEPTIONS" desc="The label of the 'Show saved passwords' button">
+        Show saved passwords
       </message>
 
       <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="The title of the form autofill group">
         Form autofill:
       </message>
-      <message name="IDS_AUTOFILL_SAVEFORMS" desc="The autofill checkbox label">
+      <message name="IDS_OPTIONS_AUTOFILL_SAVE" desc="The label of the 'Ask me to save autofill' radio button">
         Save text from forms to make them easier to fill out
+      </message>
+      <message name="IDS_OPTIONS_AUTOFILL_NEVERSAVE" desc="The label of the 'Never save autofill' radio button">
+        Never save text from forms
+      </message>
+
+      <message name="IDS_THEMES_GROUP_NAME" desc="The title of the themes group">
+        Themes:
+      </message>
+      <message name="IDS_THEMES_GTK_BUTTON" desc="The button to choose GTK colors and icons as the current theme.">
+        Set to GTK+ theme
+      </message>
+      <message name="IDS_THEMES_RESET_BUTTON" desc="The button to reset your theme">
+        Reset to default theme
+      </message>
+      <message name="IDS_THEMES_GALLERY_BUTTON" desc="The button to get more themes">
+        Get themes
       </message>
 
       <message name="IDS_OPTIONS_FONTSANDLANGUAGES_GROUP_NAME" desc="The label of the 'Fonts and Languages' group">
@@ -2878,16 +3461,21 @@ each locale. -->
         Allow all content to load
       </message>
 
-      <message name="IDS_OPTIONS_IMPORT_DATA_GROUP_NAME" desc="The title of the 'Import' group.">
-        Import:
+      <message name="IDS_OPTIONS_BROWSING_DATA_GROUP_NAME" desc="The title of the 'Browsing data' group.">
+        Browsing data:
+      </message>
+      <message name="IDS_OPTIONS_BROWSING_DATA_INFO" desc="Information text about browsing data options.">
+        You can import your bookmarks and settings from other browsers or clear your browsing data from this computer.
       </message>
       <message name="IDS_OPTIONS_IMPORT_DATA_INFO" desc="Information text about import options.">
         You can import your bookmarks and settings from other browsers and user accounts on this computer.
       </message>
+      <message name="IDS_OPTIONS_IMPORT_DATA_GROUP_NAME" desc="The title of the 'Import' group.">
+        Import:
+      </message>
       <message name="IDS_OPTIONS_IMPORT_DATA_BUTTON" desc="Label for the import data button.">
         Import data...
       </message>
-
       <message name="IDS_OPTIONS_CLEAR_DATA_GROUP_NAME" desc="The title of the 'Clear data' group.">
         Clear Data:
       </message>
@@ -3008,9 +3596,33 @@ each locale. -->
                desc="The 'Bookmarks' heading on the new tab page">
         Recent bookmarks
       </message>
+      <message name="IDS_NEW_TAB_RECENT"
+               desc="The text to show for the 'Recent' heading. It is used to describe recent activity such as recent history, bookmarks, tabs, searches etc.">
+        Recent
+      </message>
       <message name="IDS_NEW_TAB_HISTORY_SHOW"
-               desc="The 'Show history' link on the new tab page">
+               desc="The link on the new tab page that takes users to the dedicated History page">
         Show full history
+      </message>
+      <message name="IDS_NEW_TAB_REMOVE_THUMBNAILS"
+         desc="The link on the new tab page that lets users remove one or more thumbnails">
+        Remove a thumbnail
+      </message>
+      <message name="IDS_NEW_TAB_MOST_VISITED_DONE_REMOVING_BUTTON"
+         desc="The caption of the button used to validate the removal of thumbnails">
+        Done
+      </message>
+      <message name="IDS_NEW_TAB_MOST_VISITED_CANCEL_REMOVING_BUTTON"
+         desc="The caption of the button used to cancel the current removal thumbnails mode">
+        Cancel
+      </message>
+      <message name="IDS_NEW_TAB_RESTORE_THUMBNAILS_LINK"
+         desc="The link that restores previously removed thumbnails">
+        Restore all removed thumbnails
+      </message>
+      <message name="IDS_NEW_TAB_MOST_VISITED_EDIT_MODE_HEADING"
+        desc="The new tab page heading when in edit thumbnails mode.">
+        Click <ph name="CROSS_IMAGE">&lt;div id="cross-image-container"&gt;&lt;/div&gt;</ph> to remove the thumbnail
       </message>
       <message name="IDS_NEW_TAB_HISTORY_SEARCH"
                desc="The label for the field that searches the user's history on the new tab page">
@@ -3042,9 +3654,321 @@ each locale. -->
         <ph name="END_LIST">&lt;/ul&gt;</ph>
         <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph> about incognito browsing.
       </message>
-      <message name="IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW"
-               desc="Title of recently closed windows in the recently closed section of the new tab page">
-        Window
+      <message name="IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE"
+               desc="Title of recently closed windows in the recently closed section of the new tab page when the window has a single tab">
+        1 Tab
+      </message>
+      <message name="IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE"
+               desc="Title of recently closed windows in the recently closed section of the new tab page when the window has more than one tab. The % is replaced by the number of tabs">
+        <ph name="TAB_COUNT">%s<ex>3</ex></ph> Tabs
+      </message>
+      <message name="IDS_NEW_TAB_ATTRIBUTION_INTRO"
+               desc="Leading sentence above a custom logo that the theme artist has provided">
+        Theme created by
+      </message>
+      <message name="IDS_NEW_TAB_WEB_RESOURCE_CACHE"
+               desc="Title of block that holds tips, suggestions, and other new information gathered from web resources in the new tab page.">
+        Recommendations
+      </message>
+      <message name="IDS_NEW_TAB_RECENT_ACTIVITIES"
+               desc="Heading text for the section containing recent activities. Recent activies includes closed windows and tabs as well as downloads.">
+        Recent activities
+      </message>
+      <message name="IDS_NEW_TAB_TIPS"
+               desc="Heading text for the section containing tips and suggestions.">
+        Tips and Suggestions
+      </message>
+      <message name="IDS_NEW_TAB_DEFAULT_TIPS_TITLE"
+               desc="Default content of tip box when no tips are available.  This is a short advertisement and explanation for the tips and suggestions to come.">
+        Watch this space for tips and suggestions for better browsing!
+      </message>
+      <message name="IDS_NEW_TAB_EVEN_MORE_TITLE"
+               desc="Title for the section on the new tab page that is currently empty. In later releases we plan to show web clips and tips and recommendations here.">
+        Even more
+      </message>
+      <message name="IDS_NEW_TAB_EVEN_MORE_CONTENT"
+               desc="Content for the section on the new tab page that is currently empty. In later releases we plan to show web clips and tips and recommendations here. This is intended to be funny.">
+        What will we put here?
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_EVEN_MORE"
+               desc="Menu item text used to show the even more section.">
+        Show even more
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_EVEN_MORE"
+               desc="Menu item text used to hide the even more section.">
+        Hide even more
+      </message>
+      <message name="IDS_NEW_TAB_DOWNLOADS"
+               desc="The header text of the recent downloads section.">
+        Downloads
+      </message>
+      <message name="IDS_NEW_TAB_VIEW_FULL_HISTORY"
+               desc="The text of the link that takes the user to the history page. This is shown under recent activities.">
+        View full history
+      </message>
+      <message name="IDS_NEW_TAB_VIEW_ALL_DOWNLOADS"
+               desc="The text of the link that takes the user to the downloads page. This is shown under recent activities.">
+        View all downloads
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_THUMBNAILS"
+               desc="Menu item text used to show the thumbnail grid for the most visited pages.">
+        Show thumbnails
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_THUMBNAILS"
+               desc="Menu item text used to hide the thumbnail grid for the most visited pages.">
+        Hide thumbnails
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_LIST"
+               desc="Menu item text used to show the list of the most visited pages.">
+        Show list
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_LIST"
+               desc="Menu item text used to hide the list of the most visited pages.">
+        Hide list
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_RECENT"
+               desc="Menu item text used to show recent activities.">
+        Show recent activities
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_RECENT"
+               desc="Menu item text used to hide recent activities.">
+        Hide recent activities
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_TIPS"
+               desc="Menu item text used to show tips.">
+        Show recommendations
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_TIPS"
+               desc="Menu item text used to hide tips.">
+        Hide recommendations
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_RECENTLY_CLOSED_TABS"
+               desc="Menu item text used to show recently closed tabs.">
+        Show recently closed tabs
+      </message>
+      <message name="IDS_NEW_TAB_HIDE_RECENTLY_CLOSED_TABS"
+               desc="Menu item text used to hide recently closed tabs.">
+        Hide recently closed tabs
+      </message>
+      <message name="IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION"
+               desc="Notification text shown when a thumbnail has been removed from the most visited section.">
+        The thumbnail for &#x201C;<ph name="THUMBNAIL_TITLE">%s</ph>&#x201D; will no longer appear.
+      </message>
+      <message name="IDS_NEW_TAB_UNDO_THUMBNAIL_REMOVE"
+         desc="Action link text to undo removing a thumbnail from the most visited section.">
+        Undo
+      </message>
+      <message name="IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP"
+         desc="Tooltip text for the button that removes/blacklists the thumbnail. Once removed the thumbnail will not show up on the new tab page again.">
+        Don't show on this page
+      </message>
+      <message name="IDS_NEW_TAB_PIN_THUMBNAIL_TOOLTIP"
+         desc="Tooltip text for the button that pins the thumbnail. Once pinned the thumbnail will always be shown on the new tab page and it will alwyas be shown in the same position.">
+        Keep on this page
+      </message>
+      <message name="IDS_NEW_TAB_UNPIN_THUMBNAIL_TOOLTIP"
+         desc="Tooltip text for the button that unpins the thumbnail. Once unpinned the thumbnail might not be displayed on the new tab page any more.">
+        Don't keep on this page
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_HIDE_THUMBNAIL_TOOLTIP"
+         desc="Tooltip text for the button that shows and hides the thumbnail.">
+        Thumbnail view
+      </message>
+      <message name="IDS_NEW_TAB_SHOW_HIDE_LIST_TOOLTIP"
+         desc="Tooltip text for the button that shows and hides the list view.">
+        List view
+      </message>
+      <message name="IDS_NEW_TAB_PAGE_DISPLAY_TOOLTIP"
+         desc="Tooltip text for the button that shows the menu that hides and shows different sections on the new tab page.">
+        Change page layout
+      </message>
+      <message name="IDS_NEW_TAB_FIRST_RUN_NOTIFICATION"
+         desc="Notification text to show in the banner at the top of the new tab page when the user first sees it.">
+        Over time, the area below will show your eight most visited sites.
+      </message>
+      <message name="IDS_NEW_TAB_CLOSE_FIRST_RUN_NOTIFICATION"
+         desc="Action text for link that closes the first run notification.">
+        Close
+      </message>
+      <!-- TODO: Should this be something none Chrome for Chromium? -->
+      <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
+         desc="Title for the hard coded thumbnail that represents the Google Chrome Welcome page. This is used on the NTP when there aren't enough thumbnails to show.">
+        Google Chrome
+      </message>
+      <!-- TODO: Should this be something none Chrome for Chromium? -->
+      <message name="IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE"
+         desc="Title for the hard coded thumbnail that represents the Google Chrome Themes Gallery page. This is used on the NTP when there aren't enough thumbnails to show.">
+        Google Chrome Themes Gallery
+      </message>      
+      
+      <!-- New tab page web clips. These are not in use yet -->
+      <message name="IDS_NEW_TAB_WEB_CLIPS_WEB_CLIPS"
+               desc="Web Clips module header">
+        Web Clips
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_CUSTOMIZE"
+               desc="Link at bottom ">
+        Customize
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_DESCRIPTION_TEXT"
+               desc="Description for Web Clips module">
+        Add your favorite sources to get news headlines, blog posts, RSS and Atom feeds right in this box.
+        <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_ADDED"
+               desc="Status message when user has added a web clip">
+        added
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_REMOVE"
+               desc="Action link for removing a current web clip">
+        remove
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_REMOVED"
+               desc="Status message when user has removed a web clip">
+        removed
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_ADD"
+               desc="Button label for adding a web clip">
+        Add
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_ADD_A_NEW_WEB_CLIP"
+               desc="Header for section that lets users add new web clips">
+        Add a new web clip
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED_WEB_CLIPS"
+               desc="Name for featured web clips category">
+        Featured web clips
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NEWS"
+               desc="Label of web clips category">
+        News
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FUN"
+               desc="Label of web clips category">
+        Fun
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_BUSINESS"
+               desc="Label of web clips category">
+        Business
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_SPORTS"
+               desc="Label of web clips category">
+        Sports
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_LIFESTYLE"
+               desc="Label of web clips category">
+        Lifestyle
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_TECHNOLOGY"
+               desc="Label of web clips category">
+        Technology
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_SEARCH_BY_TOPIC_OR_URL"
+               desc="Label for search box in Web Clips customization dialog">
+        Search by topic or URL:
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_HINT_EXAMPLES"
+               desc="Hint underneath search box in Web Clips customization dialog">
+        e.g. hockey, BBC, http://engadget.com/rss.xml
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NO_ITEMS"
+               desc="Message shown when no web clips are cached/available">
+        There are no items to show here yet.
+        <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Customize<ph name="END_LINK">&lt;/a&gt;</ph>
+        your web clips and add more sources.
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_PREVIEW"
+               desc="Link for showing preview of web clip items - seen in search results list">
+        preview
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_HIDE"
+               desc="Link for hiding preview of web clip items - seen in search results list">
+        hide
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_SEARCH_RESULTS"
+               desc="Search results when users searches for web clips">
+        Search results
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NO_FEEDS_MATCHED_YOUR_SEARCH_QUERY"
+               desc="Description when no web clip feeds were found for the user's query">
+        No feeds matched your search query.
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_THE_FEED_YOU_ENTERED_COULD_NOT_BE_LOADED"
+               desc="Error message when web clip feed could not be loaded">
+        The feed you entered could not be loaded.
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NOTE"
+               desc="Hint displayed underneath search results">
+        Note: Since many of these feeds don't come from Google, we can't vouch for their content.
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_N_HOURS_AGO"
+               desc="Label next to a web clip item, showing when the item was published">
+        <ph name="HOUR">$1<ex>1</ex></ph> hour/hours ago
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_MINUTES_AGO"
+               desc="Label next to a web clip item, showing when the item was published">
+        <ph name="MINUTE">$1<ex>1</ex></ph> minute/minutes ago
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NEW_IN_CHROME"
+               desc="Alternative header for Web Clips module">
+        New in Chrome
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED"
+               desc="Alternative header for Web Clips module">
+        Featured
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NEW"
+               desc="Alternative header for Web Clips module">
+        New!
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED_THEME"
+               desc="Alternative header for Web Clips module">
+        Featured theme
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED_THEMES"
+               desc="Alternative header for Web Clips module">
+        Featured themes
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED_EXTRA"
+               desc="Alternative header for Web Clips module">
+        Featured extra
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_FEATURED_EXTRAS"
+               desc="Alternative header for Web Clips module">
+        Featured extras
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_TIPS_AND_TRICKS"
+               desc="Alternative header for Web Clips module">
+        Tips &amp; tricks
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_GOOGLE_READER_PROMO"
+               desc="Google Reader promo">
+        Want to keep track of more sites in one place? Try
+        <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Google Reader<ph name="END_LINK">&lt;/a&gt;</ph>
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_CANCEL"
+               desc="Cancel button">
+        Cancel
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_DONE"
+               desc="Done button">
+        Done
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_SAVE"
+               desc="Save button">
+        Save
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_BACK"
+               desc="back link">
+        back
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_NEXT"
+               desc="Next link">
+        next
+      </message>
+      <message name="IDS_NEW_TAB_WEB_CLIPS_PREVIOUS"
+               desc="Previous link">
+        previous
       </message>
 
       <!-- SafeBrowsing -->
@@ -3142,12 +4066,15 @@ each locale. -->
       <message name="IDS_PLUGIN_CRASHED_PROMPT" desc="Info Bar message to notify about a crashed plugin">
         The following plug-in has crashed : <ph name="PLUGIN_NAME">$1<ex>Shockwave</ex></ph>
       </message>
+      <message name="IDS_WEBWORKER_CRASHED_PROMPT" desc="Info Bar message to notify about a crashed WebWorker">
+        A part of this page (HTML WebWorker) has crashed, so it might not function correctly.
+      </message>
 
       <message name="IDS_JS_OUT_OF_MEMORY_PROMPT" desc="Info Bar message to notify JS out of memory">
         Script on the page used too much memory. Reload to enable scripts again.
       </message>
-      
-      <message name="IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE" 
+
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE"
                desc="Title of the personal history section">
         Visit history
       </message>
@@ -3176,7 +4103,7 @@ each locale. -->
       <message name="IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT" desc="Checkbox to remember users decision.">
         Remember my choice for all links of this type.
       </message>
-      
+
       <!-- Debugger -->
       <message name="IDS_DEBUGGER_TITLE_BUSY" desc="V8 Debugger title bar displayed when busy (a command is running)">
         JavaScript Debugger - Busy
@@ -3198,7 +4125,7 @@ each locale. -->
       <message name="IDS_SHIFT_MODIFIER" desc="Shift key shortcut modifier">
         Shift+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
       </message>
-      
+
       <!-- Key names -->
       <message name="IDS_ESC_KEY" desc="Escape key">
         Esc
@@ -3262,10 +4189,13 @@ each locale. -->
       <message name="IDS_DIRECTORY_LISTING_DATE_MODIFIED" desc="When viewing a local directory, this is the text for the column above the last modified dates.">
         Date Modified
       </message>
-      
+
       <!-- Saving Page-->
-      <message name="IDS_SAVE_PAGE_FILTER" desc="Filter string for save page. \0's are required separators and additional two \0's should be appended when using this.">
-        Web Page, HTML Only\0*.htm\0Web Page, Complete\0*.htm
+      <message name="IDS_SAVE_PAGE_DESC_HTML_ONLY" desc="In the Save Page dialog, the description of saving only the HTML of a web page.">
+        Web Page, HTML Only
+      </message>
+      <message name="IDS_SAVE_PAGE_DESC_COMPLETE" desc="In the Save Page dialog, the description of saving both the HTML and all shown resources.">
+        Web Page, Complete
       </message>
       <message name="IDS_SAVE_PAGE_STATUS_COMPLETED" desc="Save page status: completed">
         Completed
@@ -3279,7 +4209,7 @@ each locale. -->
       <message name="IDS_SAVE_PAGE_PROGRESS" desc="Text string for saving page progress, the number of saved files and total files">
         <ph name="SAVED_FILES">$1<ex>5</ex></ph> / <ph name="TOTAL_FILES">$2<ex>13</ex></ph> files
       </message>
-      
+
       <!-- Report Phishing website -->
       <message name="IDS_PAGE_MENU_REPORT_PHISHING_WEBSITE" desc="The menu label for the menu item that allows the user to report the current page as a phishing website.">
         Report phishing website...
@@ -3291,7 +4221,7 @@ each locale. -->
       <message name="IDS_OPTIONS_LINKDOCTOR_URL" desc="The documentation string of the preference that sets the URL of the link doctor service">
         Service URL:
       </message>
-      
+
       <message name="IDS_OPTIONS_SUGGEST_PREF" desc="The documentation string of the 'Use Suggest' preference">
         Use a suggestion service to help complete searches and URLs typed in the address bar
       </message>
@@ -3305,7 +4235,7 @@ each locale. -->
       <message name="IDS_OPTIONS_FONTSETTINGS_CONFIGUREFONTS_BUTTON" desc="The label of the 'configure fonts' button">
         Change font and language settings
       </message>
-      
+
       <message name="IDS_OPTIONS_CHROME_DICTIONARY_INFO" desc="The documentation string of the 'Spell check dictionary language' section">
         Change the language of the spell-checking dictionary.
       </message>
@@ -3315,7 +4245,10 @@ each locale. -->
       <message name="IDS_OPTIONS_ENABLE_SPELLCHECK" desc="The documentation string of the 'Enable spellcheck' option">
         Check spelling:
       </message>
-      
+      <message name="IDS_OPTIONS_ENABLE_AUTO_SPELL_CORRECTION" desc="The documentation string of the 'Enable auto spell correction' option">
+        Correct spelling automatically:
+      </message>
+
       <message name="IDS_OPTIONS_RESET" desc="The label of the 'Reset all settings to defaults' button">
         Reset to defaults
       </message>
@@ -3325,7 +4258,7 @@ each locale. -->
       <message name="IDS_OPTIONS_RESET_CANCELLABEL" desc="The label of the Cancel button in the 'Reset Chrome options' confirmation dialog box">
         Don't reset
       </message>
-      
+
       <!-- Can't write to user data directory dialog -->
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_TITLE" desc="Title of dialog that is displayed when we can't create a directory for this user.">
         Failed To Create Data Directory
@@ -3391,11 +4324,17 @@ each locale. -->
       <message name="IDS_BLOCKED_POPUP" desc="Text on a blocked popup's window titlebar.">
         Blocked Pop-up
       </message>
-      <message name="IDS_POPUPS_BLOCKED_COUNT" desc="Message on the blocked popup window">
+      <message name="IDS_POPUPS_BLOCKED_COUNT" desc="Message on the blocked popup window when there are blocked popups">
         Pop-ups Blocked: <ph name="COUNT">$1<ex>2</ex></ph>
+      </message>
+      <message name="IDS_POPUPS_UNBLOCKED" desc="Message on the blocked popup window when there are only whitelisted popups">
+        Manage pop-ups
       </message>
       <message name="IDS_POPUP_TITLE_FORMAT" desc="Order of URL - Title on the popup">
         <ph name="URL">$1</ph> - <ph name="WINDOW_TITLE">$2</ph>
+      </message>
+      <message name="IDS_POPUP_HOST_FORMAT" desc="Checkable menu item to always allow popups from a particular hostname">
+        Always show pop-ups from <ph name="URL">$1</ph>
       </message>
 
       <!-- Multiple download warning-->
@@ -3474,6 +4413,28 @@ each locale. -->
 
       <message name="IDS_DEFAULT_FILENAME" desc="Default name for saved files when we have no idea what they could be.">
         unknown
+      </message>
+      <message name="IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED" desc="Tabs and windows on MacOS with no title use this string.">
+        Untitled
+      </message>
+
+      <message name="IDS_SET_AS_DEFAULT_INFOBAR_BUTTON_LABEL" desc="The label of the 'set as default' button on the default browser infobar.">
+        Set as default
+      </message>
+      <message name="IDS_DONT_ASK_AGAIN_INFOBAR_BUTTON_LABEL" desc="The label of the 'don't ask again' button on the default browser infobar.">
+        Don't ask again
+      </message>
+
+      <message name="IDS_SHOW_WINDOW_DECORATIONS" desc="The menu entry text in the tab strip context menu.  This toggles the system title bar and window borders (window decorations) on linux.">
+        Use system title bar and borders
+      </message>
+
+      <message name="IDS_RGBA_CSS_FORMAT_STRING" translateable="false" desc="The format string to use when converting colors to CSS rgba().">
+        rgba($1, $2, $3, $4)
+      </message>
+
+      <message name="IDS_USED_EXISTING_BROWSER" desc="Linux-specific message printed to console when the app is ran a second time, causing a new window to show rather than starting up a new browser.">
+        Created new window in existing browser session.
       </message>
 
     </messages>

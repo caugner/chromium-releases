@@ -1,31 +1,37 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/plugin/chrome_plugin_host.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/process_util.h"
+#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
-#include "chrome/plugin/plugin_process.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
 #include "net/base/data_url.h"
+#include "net/base/io_buffer.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/resource_type.h"
+#include "webkit/glue/webappcachecontext.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace {
 
 using webkit_glue::ResourceLoaderBridge;
+
+static MessageLoop* g_plugin_thread_message_loop;
 
 // This class manages a network request made by the plugin, handling the
 // data as it comes in from the ResourceLoaderBridge and is requested by the
@@ -40,8 +46,8 @@ class PluginRequestHandlerProxy
 
   PluginRequestHandlerProxy(ChromePluginLib* plugin,
                             ScopableCPRequest* cprequest)
-      : PluginHelper(plugin), cprequest_(cprequest), response_data_offset_(0),
-        completed_(false), sync_(false), read_buffer_(NULL) {
+      : PluginHelper(plugin), cprequest_(cprequest), sync_(false),
+        response_data_offset_(0), completed_(false), read_buffer_(NULL) {
     load_flags_ = PluginResponseUtils::CPLoadFlagsToNetFlags(0);
     cprequest_->data = this;  // see FromCPRequest().
   }
@@ -60,9 +66,12 @@ class PluginRequestHandlerProxy
       upload_progress(cprequest_.get(), position, size);
   }
 
-  virtual void OnReceivedRedirect(const GURL& new_url) {
+  virtual bool OnReceivedRedirect(
+      const GURL& new_url,
+      const ResourceLoaderBridge::ResponseInfo& info) {
     plugin_->functions().response_funcs->received_redirect(
         cprequest_.get(), new_url.spec().c_str());
+    return true;
   }
 
   virtual void OnReceivedResponse(
@@ -127,11 +136,11 @@ class PluginRequestHandlerProxy
     upload_content_.back().SetToBytes(bytes, bytes_len);
   }
 
-  void AppendFileToUpload(const std::wstring &filepath) {
+  void AppendFileToUpload(const FilePath &filepath) {
     AppendFileRangeToUpload(filepath, 0, kuint64max);
   }
 
-  void AppendFileRangeToUpload(const std::wstring &filepath,
+  void AppendFileRangeToUpload(const FilePath &filepath,
                                uint64 offset, uint64 length) {
     upload_content_.push_back(net::UploadData::Element());
     upload_content_.back().SetToFilePathRange(filepath, offset, length);
@@ -148,9 +157,10 @@ class PluginRequestHandlerProxy
             "null",  // main_frame_origin
             extra_headers_,
             load_flags_,
-            GetCurrentProcessId(),
+            base::GetCurrentProcId(),
             ResourceType::OBJECT,
             cprequest_->context,
+            WebAppCacheContext::kNoAppCacheContextId,
             MSG_ROUTING_CONTROL));
     if (!bridge_.get())
       return CPERR_FAILURE;
@@ -204,7 +214,6 @@ class PluginRequestHandlerProxy
     if (count > avail)
       count = avail;
 
-    int rv = CPERR_FAILURE;
     if (count) {
       // Data is ready now.
       memcpy(buf, &response_data_[0] + response_data_offset_, count);
@@ -238,7 +247,7 @@ class PluginRequestHandlerProxy
 
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
   std::string response_data_;
-  int response_data_offset_;
+  size_t response_data_offset_;
   bool completed_;
   void* read_buffer_;
   uint32 read_buffer_size_;
@@ -255,9 +264,9 @@ void STDCALL CPB_SetKeepProcessAlive(CPID id, CPBool keep_alive) {
   if (desired_value != g_keep_process_alive) {
     g_keep_process_alive = desired_value;
     if (g_keep_process_alive)
-      PluginProcess::current()->AddRefProcess();
+      ChildProcess::current()->AddRefProcess();
     else
-      PluginProcess::current()->ReleaseProcess();
+      ChildProcess::current()->ReleaseProcess();
   }
 }
 
@@ -307,6 +316,68 @@ CPError STDCALL CPB_ShowHtmlDialog(
     CPID id, CPBrowsingContext context, const char* url, int width, int height,
     const char* json_arguments, void* plugin_context) {
   // TODO(mpcomplete): support non-modal dialogs.
+  return CPERR_FAILURE;
+}
+
+CPError STDCALL CPB_GetDragData(
+    CPID id, CPBrowsingContext context, struct NPObject* event, bool add_data,
+    int32 *identity, int32 *event_id, char **drag_type, char **drag_data) {
+  CHECK(ChromePluginLib::IsPluginThread());
+
+  *identity = *event_id = 0;
+  WebPluginProxy* webplugin = WebPluginProxy::FromCPBrowsingContext(context);
+  if (!event || !webplugin)
+    return CPERR_INVALID_PARAMETER;
+
+  std::string type_str, data_str;
+  if (!webplugin->GetDragData(event, add_data,
+                              identity, event_id, &type_str, &data_str)) {
+    return CPERR_FAILURE;
+  }
+
+  if (add_data)
+    *drag_data = CPB_StringDup(CPB_Alloc, data_str);
+  *drag_type = CPB_StringDup(CPB_Alloc, type_str);
+  return CPERR_SUCCESS;
+}
+
+CPError STDCALL CPB_SetDropEffect(
+    CPID id, CPBrowsingContext context, struct NPObject* event, int effect) {
+  CHECK(ChromePluginLib::IsPluginThread());
+
+  WebPluginProxy* webplugin = WebPluginProxy::FromCPBrowsingContext(context);
+  if (!event || !webplugin)
+    return CPERR_INVALID_PARAMETER;
+
+  if (webplugin->SetDropEffect(event, effect))
+    return CPERR_SUCCESS;
+  return CPERR_FAILURE;
+}
+
+CPError STDCALL CPB_AllowFileDrop(
+    CPID id, CPBrowsingContext context, const char* file_drag_data) {
+  CHECK(ChromePluginLib::IsPluginThread());
+
+  WebPluginProxy* webplugin = WebPluginProxy::FromCPBrowsingContext(context);
+  if (!webplugin || !file_drag_data)
+    return CPERR_INVALID_PARAMETER;
+
+  const int pid = webplugin->GetRendererProcessId();
+  if (!pid)
+    return CPERR_FAILURE;
+
+  static const char kDelimiter('\b');
+  std::vector<std::string> files;
+  SplitStringDontTrim(file_drag_data, kDelimiter, &files);
+
+  bool allowed = false;
+  if (!PluginThread::current()->Send(
+          new PluginProcessHostMsg_AccessFiles(pid, files, &allowed))) {
+    return CPERR_FAILURE;
+  }
+
+  if (allowed)
+    return CPERR_SUCCESS;
   return CPERR_FAILURE;
 }
 
@@ -411,8 +482,7 @@ CPError STDCALL CPB_CreateRequest(CPID id, CPBrowsingContext context,
   CHECK(plugin);
 
   ScopableCPRequest* cprequest = new ScopableCPRequest(url, method, context);
-  PluginRequestHandlerProxy* handler =
-      new PluginRequestHandlerProxy(plugin, cprequest);
+  new PluginRequestHandlerProxy(plugin, cprequest);
 
   *request = cprequest;
   return CPERR_SUCCESS;
@@ -474,7 +544,8 @@ CPError STDCALL CPR_AppendFileToUpload(CPRequest* request, const char* filepath,
 
   if (!length) length = kuint64max;
   std::wstring wfilepath(UTF8ToWide(filepath));
-  handler->AppendFileRangeToUpload(wfilepath, offset, length);
+  handler->AppendFileRangeToUpload(FilePath::FromWStringHack(wfilepath), offset,
+                                   length);
   return CPERR_SUCCESS;
 }
 
@@ -542,11 +613,8 @@ CPError STDCALL CPB_SendSyncMessage(CPID id, const void *data, uint32 data_len,
 CPError STDCALL CPB_PluginThreadAsyncCall(CPID id,
                                           void (*func)(void *),
                                           void *user_data) {
-  MessageLoop *message_loop = PluginThread::current()->message_loop();
-  if (!message_loop) {
-    return CPERR_FAILURE;
-  }
-  message_loop->PostTask(FROM_HERE, NewRunnableFunction(func, user_data));
+  g_plugin_thread_message_loop->PostTask(
+      FROM_HERE, NewRunnableFunction(func, user_data));
 
   return CPERR_SUCCESS;
 }
@@ -573,6 +641,8 @@ CPBrowserFuncs* GetCPBrowserFuncsForPlugin() {
   if (!initialized) {
     initialized = true;
 
+    g_plugin_thread_message_loop = PluginThread::current()->message_loop();
+
     browser_funcs.size = sizeof(browser_funcs);
     browser_funcs.version = CP_VERSION;
     browser_funcs.enable_request_intercept = CPB_EnableRequestIntercept;
@@ -594,6 +664,9 @@ CPBrowserFuncs* GetCPBrowserFuncsForPlugin() {
     browser_funcs.send_sync_message = CPB_SendSyncMessage;
     browser_funcs.plugin_thread_async_call = CPB_PluginThreadAsyncCall;
     browser_funcs.open_file_dialog = CPB_OpenFileDialog;
+    browser_funcs.get_drag_data = CPB_GetDragData;
+    browser_funcs.set_drop_effect = CPB_SetDropEffect;
+    browser_funcs.allow_file_drop = CPB_AllowFileDrop;
 
     browser_funcs.request_funcs = &request_funcs;
     browser_funcs.response_funcs = &response_funcs;

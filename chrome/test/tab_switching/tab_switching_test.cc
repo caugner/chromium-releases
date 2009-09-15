@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/platform_thread.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -28,31 +30,29 @@ class TabSwitchingUITest : public UITest {
  public:
    TabSwitchingUITest() {
     PathService::Get(base::DIR_EXE, &path_prefix_);
-    file_util::UpOneDirectory(&path_prefix_);
-    file_util::UpOneDirectory(&path_prefix_);
-    file_util::AppendToPath(&path_prefix_, L"data");
-    file_util::AppendToPath(&path_prefix_, L"tab_switching");
-    path_prefix_ += FilePath::kSeparators[0];
+    path_prefix_ = path_prefix_.DirName();
+    path_prefix_ = path_prefix_.DirName();
+    path_prefix_ = path_prefix_.AppendASCII("data");
+    path_prefix_ = path_prefix_.AppendASCII("tab_switching");
 
     show_window_ = true;
   }
 
   void RunTabSwitchingUITest() {
     // Create a browser proxy.
-    browser_proxy_.reset(automation()->GetBrowserWindow(0));
+    browser_proxy_ = automation()->GetBrowserWindow(0);
 
     // Open all the tabs.
     int initial_tab_count = 0;
     ASSERT_TRUE(browser_proxy_->GetTabCount(&initial_tab_count));
     int new_tab_count = OpenTabs();
-    int final_tab_count = 0;
-    ASSERT_TRUE(browser_proxy_->WaitForTabCountToChange(initial_tab_count,
-                                                        &final_tab_count,
-                                                        10000));
-    ASSERT_TRUE(final_tab_count == initial_tab_count + new_tab_count);
+    ASSERT_TRUE(browser_proxy_->WaitForTabCountToBecome(
+        initial_tab_count + new_tab_count, 10000));
 
     // Switch linearly between tabs.
     browser_proxy_->ActivateTab(0);
+    int final_tab_count = 0;
+    ASSERT_TRUE(browser_proxy_->GetTabCount(&final_tab_count));
     for (int i = initial_tab_count; i < final_tab_count; ++i) {
       browser_proxy_->ActivateTab(i);
       ASSERT_TRUE(browser_proxy_->WaitForTabToBecomeActive(i, 10000));
@@ -64,16 +64,20 @@ class TabSwitchingUITest : public UITest {
 
     // Now open the corresponding log file and collect average and std dev from
     // the histogram stats generated for RenderWidgetHostHWND_WhiteoutDuration
-    std::wstring log_file_name;
+    FilePath log_file_name;
     PathService::Get(chrome::DIR_LOGS, &log_file_name);
-    file_util::AppendToPath(&log_file_name, L"chrome_debug.log");
+    log_file_name = log_file_name.AppendASCII("chrome_debug.log");
 
     bool log_has_been_dumped = false;
     std::string contents;
+    int max_tries = 20;
     do {
       log_has_been_dumped = file_util::ReadFileToString(log_file_name,
                                                         &contents);
-    } while (!log_has_been_dumped);
+      if (!log_has_been_dumped)
+        PlatformThread::Sleep(100);
+    } while (!log_has_been_dumped && max_tries--);
+    ASSERT_TRUE(log_has_been_dumped) << "Failed to read the log file";
 
     // Parse the contents to get average and std deviation.
     std::string average("0.0"), std_dev("0.0");
@@ -97,6 +101,8 @@ class TabSwitchingUITest : public UITest {
       comma_pos = contents.find(" ", pos);
       number_length = comma_pos - pos;
       std_dev = contents.substr(pos, number_length);
+    } else {
+      LOG(WARNING) << "Histogram: MPArch.RWHH_WhiteoutDuration wasn't found";
     }
 
     // Print the average and standard deviation.
@@ -109,18 +115,17 @@ class TabSwitchingUITest : public UITest {
   // Opens new tabs. Returns the number of tabs opened.
   int OpenTabs() {
     // Add tabs.
-    static const wchar_t* files[] = { L"espn.go.com", L"bugzilla.mozilla.org",
-                                      L"news.cnet.com", L"www.amazon.com",
-                                      L"kannada.chakradeo.net", L"allegro.pl",
-                                      L"ml.wikipedia.org", L"www.bbc.co.uk",
-                                      L"126.com", L"www.altavista.com"};
+    static const char* files[] = { "espn.go.com", "bugzilla.mozilla.org",
+                                   "news.cnet.com", "www.amazon.com",
+                                   "kannada.chakradeo.net", "allegro.pl",
+                                   "ml.wikipedia.org", "www.bbc.co.uk",
+                                   "126.com", "www.altavista.com"};
     int number_of_new_tabs_opened = 0;
-    std::wstring file_name;
-    for (int i = 0; i < arraysize(files); ++i) {
+    FilePath file_name;
+    for (size_t i = 0; i < arraysize(files); ++i) {
       file_name = path_prefix_;
-      file_name += files[i];
-      file_name += FilePath::kSeparators[0];
-      file_name += L"index.html";
+      file_name = file_name.AppendASCII(files[i]);
+      file_name = file_name.AppendASCII("index.html");
       browser_proxy_->AppendTab(net::FilePathToFileURL(file_name));
       number_of_new_tabs_opened++;
     }
@@ -128,16 +133,16 @@ class TabSwitchingUITest : public UITest {
     return number_of_new_tabs_opened;
   }
 
-  std::wstring path_prefix_;
+  FilePath path_prefix_;
   int number_of_tabs_to_open_;
-  scoped_ptr<BrowserProxy> browser_proxy_;
+  scoped_refptr<BrowserProxy> browser_proxy_;
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(TabSwitchingUITest);
 };
 
-}  // namespace
-
 TEST_F(TabSwitchingUITest, GenerateTabSwitchStats) {
   RunTabSwitchingUITest();
 }
+
+}  // namespace

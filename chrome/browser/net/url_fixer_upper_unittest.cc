@@ -88,6 +88,68 @@ static const segment_case segment_cases[] = {
     url_parse::Component(48, 3), // query
     url_parse::Component(52, 3), // ref
   },
+  { "[2001:db8::1]/path", "http",
+    url_parse::Component(), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(0, 13), // host
+    url_parse::Component(), // port
+    url_parse::Component(13, 5), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
+  { "[::1]", "http",
+    url_parse::Component(), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(0, 5), // host
+    url_parse::Component(), // port
+    url_parse::Component(), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
+  // Incomplete IPv6 addresses (will not canonicalize).
+  { "[2001:4860:", "http",
+    url_parse::Component(), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(0, 11), // host
+    url_parse::Component(), // port
+    url_parse::Component(), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
+  { "[2001:4860:/foo", "http",
+    url_parse::Component(), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(0, 11), // host
+    url_parse::Component(), // port
+    url_parse::Component(11, 4), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
+  { "http://:b005::68]", "http",
+    url_parse::Component(0, 4), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(7, 10), // host
+    url_parse::Component(), // port
+    url_parse::Component(), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
+  // Can't do anything useful with this.
+  { ":b005::68]", "",
+    url_parse::Component(0, 0), // scheme
+    url_parse::Component(), // username
+    url_parse::Component(), // password
+    url_parse::Component(), // host
+    url_parse::Component(), // port
+    url_parse::Component(), // path
+    url_parse::Component(), // query
+    url_parse::Component(), // ref
+  },
 };
 
 TEST(URLFixerUpperTest, SegmentURL) {
@@ -196,6 +258,12 @@ struct fixup_case {
   { "http://google.com/search?q=\xf0\x90\x80\xa0", "",
     "http://google.com/search?q=\xf0\x90\x80\xa0"
   },
+  // URLs containing IPv6 literals.
+  {"[2001:db8::2]", "", "http://[2001:db8::2]/"},
+  {"[::]:80", "", "http://[::]:80/"},
+  {"[::]:80/path", "", "http://[::]:80/path"},
+  // TODO(pmarks): Maybe we should parse bare IPv6 literals someday.
+  {"::1", "", "::1"},
 };
 
 TEST(URLFixerUpperTest, FixupURL) {
@@ -294,12 +362,21 @@ TEST(URLFixerUpperTest, FixupFile) {
     //   {"file://server/folder/file", "", "file://server/folder/file"},
     //   {"file:/\\/server\\folder/file", "", "file://server/folder/file"},
   };
+#elif defined(OS_POSIX)
+  fixup_case file_cases[] = {
+    // File URLs go through GURL, which tries to escape intelligently.
+    {"/This%20is a non-existent file.txt", "",
+     "file:///This%2520is%20a%20non-existent%20file.txt"},
+    // A plain "/" refers to the root.
+    {"/", "",
+     "file:///"},
+  };
+#endif
   for (size_t i = 0; i < arraysize(file_cases); i++) {
     fixedup = URLFixerUpper::FixupURL(file_cases[i].input,
                                       file_cases[i].desired_tld);
     EXPECT_EQ(file_cases[i].output, fixedup);
   }
-#endif
 
   EXPECT_TRUE(file_util::Delete(original, false));
 }

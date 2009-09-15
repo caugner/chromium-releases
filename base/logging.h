@@ -138,8 +138,15 @@ void InitLogging(const char* log_file, LoggingDestination logging_dest,
 // if this function is not called.
 void SetMinLogLevel(int level);
 
-// Gets the curreng log level.
+// Gets the current log level.
 int GetMinLogLevel();
+
+#if defined(OS_LINUX)
+// Get the file descriptor used for logging.
+// Returns -1 if none open.
+// Needed by ZygoteManager.
+int GetLoggingFileDescriptor();
+#endif
 
 // Sets the log filter prefix.  Any log message below LOG_ERROR severity that
 // doesn't start with this prefix with be silently ignored.  The filter defaults
@@ -540,6 +547,25 @@ class LogMessage {
   std::ostringstream stream_;
   size_t message_start_;  // Offset of the start of the message (past prefix
                           // info).
+#if defined(OS_WIN)
+  // Stores the current value of GetLastError in the constructor and restores
+  // it in the destructor by calling SetLastError.
+  // This is useful since the LogMessage class uses a lot of Win32 calls
+  // that will lose the value of GLE and the code that called the log function
+  // will have lost the thread error value when the log call returns.
+  class SaveLastError {
+   public:
+    SaveLastError();
+    ~SaveLastError();
+
+    unsigned long get_error() const { return last_error_; }
+
+   protected:
+    unsigned long last_error_;
+  };
+
+  SaveLastError last_error_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(LogMessage);
 };

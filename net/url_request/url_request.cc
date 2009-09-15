@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/string_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/ssl_cert_request_info.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
@@ -44,10 +45,10 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       load_flags_(net::LOAD_NORMAL),
       delegate_(delegate),
       is_pending_(false),
-      user_data_(NULL),
       enable_profiling_(false),
       redirect_limit_(kMaxRedirects),
-      final_upload_progress_(0) {
+      final_upload_progress_(0),
+      priority_(0) {
   URLREQUEST_COUNT_CTOR();
   SIMPLE_STATS_COUNTER("URLRequestCount");
   origin_pid_ = base::GetCurrentProcId();
@@ -66,8 +67,6 @@ URLRequest::~URLRequest() {
 
   if (job_)
     OrphanJob();
-
-  delete user_data_;  // NULL check unnecessary for delete
 }
 
 // static
@@ -93,9 +92,9 @@ void URLRequest::AppendBytesToUpload(const char* bytes, int bytes_len) {
   upload_->AppendBytes(bytes, bytes_len);
 }
 
-void URLRequest::AppendFileRangeToUpload(const wstring& file_path,
+void URLRequest::AppendFileRangeToUpload(const FilePath& file_path,
                                          uint64 offset, uint64 length) {
-  DCHECK(file_path.length() > 0 && length > 0);
+  DCHECK(file_path.value().length() > 0 && length > 0);
   if (!upload_)
     upload_ = new UploadData();
   upload_->AppendFileRange(file_path, offset, length);
@@ -223,9 +222,10 @@ bool URLRequest::IsHandledURL(const GURL& url) {
   return IsHandledProtocol(url.scheme());
 }
 
-void URLRequest::set_policy_url(const GURL& policy_url) {
+void URLRequest::set_first_party_for_cookies(
+    const GURL& first_party_for_cookies) {
   DCHECK(!is_pending_);
-  policy_url_ = policy_url;
+  first_party_for_cookies_ = first_party_for_cookies;
 }
 
 void URLRequest::set_method(const std::string& method) {
@@ -239,16 +239,21 @@ void URLRequest::set_referrer(const std::string& referrer) {
 }
 
 void URLRequest::Start() {
+  StartJob(GetJobManager()->CreateJob(this));
+}
+
+void URLRequest::StartJob(URLRequestJob* job) {
   DCHECK(!is_pending_);
   DCHECK(!job_);
 
-  job_ = GetJobManager()->CreateJob(this);
+  job_ = job;
   job_->SetExtraRequestHeaders(extra_request_headers_);
 
   if (upload_.get())
     job_->SetUpload(upload_.get());
 
   is_pending_ = true;
+
   response_info_.request_time = Time::Now();
   response_info_.was_cached = false;
 
@@ -257,6 +262,18 @@ void URLRequest::Start() {
   // we probably don't want this: they should be sent asynchronously so
   // the caller does not get reentered.
   job_->Start();
+}
+
+void URLRequest::Restart() {
+  // Should only be called if the original job didn't make any progress.
+  DCHECK(job_ && !job_->has_response_started());
+  RestartWithJob(GetJobManager()->CreateJob(this));
+}
+
+void URLRequest::RestartWithJob(URLRequestJob *job) {
+  DCHECK(job->request() == this);
+  PrepareToRestart();
+  StartJob(job);
 }
 
 void URLRequest::Cancel() {
@@ -318,6 +335,30 @@ bool URLRequest::Read(net::IOBuffer* dest, int dest_size, int *bytes_read) {
   return job_->Read(dest, dest_size, bytes_read);
 }
 
+void URLRequest::ReceivedRedirect(const GURL& location, bool* defer_redirect) {
+  URLRequestJob* job = GetJobManager()->MaybeInterceptRedirect(this, location);
+  if (job) {
+    RestartWithJob(job);
+  } else if (delegate_) {
+    delegate_->OnReceivedRedirect(this, location, defer_redirect);
+  }
+}
+
+void URLRequest::ResponseStarted() {
+  URLRequestJob* job = GetJobManager()->MaybeInterceptResponse(this);
+  if (job) {
+    RestartWithJob(job);
+  } else if (delegate_) {
+    delegate_->OnResponseStarted(this);
+  }
+}
+
+void URLRequest::FollowDeferredRedirect() {
+  DCHECK(job_);
+
+  job_->FollowDeferredRedirect();
+}
+
 void URLRequest::SetAuth(const wstring& username, const wstring& password) {
   DCHECK(job_);
   DCHECK(job_->NeedsAuth());
@@ -332,13 +373,31 @@ void URLRequest::CancelAuth() {
   job_->CancelAuth();
 }
 
+void URLRequest::ContinueWithCertificate(net::X509Certificate* client_cert) {
+  DCHECK(job_);
+
+  job_->ContinueWithCertificate(client_cert);
+}
+
 void URLRequest::ContinueDespiteLastError() {
   DCHECK(job_);
 
   job_->ContinueDespiteLastError();
 }
 
+void URLRequest::PrepareToRestart() {
+  DCHECK(job_);
+
+  job_->Kill();
+  OrphanJob();
+
+  response_info_ = net::HttpResponseInfo();
+  status_ = URLRequestStatus();
+  is_pending_ = false;
+}
+
 void URLRequest::OrphanJob() {
+  job_->Kill();
   job_->DetachRequest();  // ensures that the job will not call us again
   job_ = NULL;
 }
@@ -351,26 +410,8 @@ std::string URLRequest::StripPostSpecificHeaders(const std::string& headers) {
       "content-length",
       "origin"
   };
-
-  std::string stripped_headers;
-  net::HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
-
-  while (it.GetNext()) {
-    bool is_post_specific = false;
-    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kPostHeaders); ++i) {
-      if (LowerCaseEqualsASCII(it.name_begin(), it.name_end(),
-                               kPostHeaders[i])) {
-        is_post_specific = true;
-        break;
-      }
-    }
-    if (!is_post_specific) {
-      // Assume that name and values are on the same line.
-      stripped_headers.append(it.name_begin(), it.values_end());
-      stripped_headers.append("\r\n");
-    }
-  }
-  return stripped_headers;
+  return net::HttpUtil::StripHeaders(
+      headers, kPostHeaders, arraysize(kPostHeaders));
 }
 
 int URLRequest::Redirect(const GURL& location, int http_status_code) {
@@ -378,6 +419,9 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     DLOG(INFO) << "disallowing redirect: exceeds limit";
     return net::ERR_TOO_MANY_REDIRECTS;
   }
+
+  if (!location.is_valid())
+    return net::ERR_INVALID_URL;
 
   if (!job_->IsSafeRedirect(location)) {
     DLOG(INFO) << "disallowing redirect: unsafe protocol";
@@ -394,10 +438,9 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     // prompt and so shall we.
     strip_post_specific_headers = method_ == "POST";
     method_ = "GET";
+    upload_ = NULL;
   }
   url_ = location;
-  upload_ = NULL;
-  status_ = URLRequestStatus();
   --redirect_limit_;
 
   if (strip_post_specific_headers) {
@@ -412,13 +455,10 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     extra_request_headers_ = StripPostSpecificHeaders(extra_request_headers_);
   }
 
-  if (!final_upload_progress_) {
+  if (!final_upload_progress_)
     final_upload_progress_ = job_->GetUploadProgress();
-  }
 
-  OrphanJob();
-
-  is_pending_ = false;
+  PrepareToRestart();
   Start();
   return net::OK;
 }
@@ -437,6 +477,17 @@ int64 URLRequest::GetExpectedContentSize() const {
     expected_content_size = job_->expected_content_size();
 
   return expected_content_size;
+}
+
+URLRequest::UserData* URLRequest::GetUserData(void* key) const {
+  UserDataMap::const_iterator found = user_data_.find(key);
+  if (found != user_data_.end())
+    return found->second.get();
+  return NULL;
+}
+
+void URLRequest::SetUserData(void* key, UserData* data) {
+  user_data_[key] = linked_ptr<UserData>(data);
 }
 
 #ifndef NDEBUG

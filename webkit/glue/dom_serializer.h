@@ -57,6 +57,9 @@ class DomSerializer {
                 const std::vector<FilePath>& local_paths,
                 const FilePath& local_directory_name);
 
+  // Generate the META for charset declaration.
+  static std::wstring GenerateMetaCharsetDeclaration(
+      const std::wstring& charset);
   // Generate the MOTW declaration.
   static std::string GenerateMarkOfTheWebDeclaration(const GURL& url);
   // Generate the default base tag declaration.
@@ -113,6 +116,12 @@ class DomSerializer {
     // Flag indicates whether we have written xml document declaration.
     // It is only used in xml document
     bool has_doc_declaration;
+    // Flag indicates whether we have added additional contents before end tag.
+    // This flag will be re-assigned in each call of function
+    // PostActionAfterSerializeOpenTag and it could be changed in function
+    // PreActionBeforeSerializeEndTag if the function adds new contents into
+    // serialization stream.
+    bool has_added_contents_before_end;
 
     // Constructor.
     SerializeDomParam(

@@ -6,17 +6,17 @@
 #define CHROME_BROWSER_VIEWS_ABOUT_IPC_DIALOG_H_
 
 #include "base/singleton.h"
-#include "chrome/common/ipc_logging.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "ipc/ipc_logging.h"
+#include "views/controls/button/button.h"
+#include "views/controls/table/table_view.h"
+#include "views/window/dialog_delegate.h"
 
 #if defined(OS_WIN) && defined(IPC_MESSAGE_LOG_ENABLED)
 
 class Profile;
 namespace views {
+class NativeViewHost;
 class TextButton;
-class HWNDView;
 }  // namespace views
 
 class AboutIPCDialog : public views::DialogDelegate,
@@ -59,7 +59,7 @@ class AboutIPCDialog : public views::DialogDelegate,
   views::TextButton* track_toggle_;
   views::TextButton* clear_button_;
   views::TextButton* filter_button_;
-  views::HWNDView* table_;
+  views::NativeViewHost* table_;
 
   // Set to true when we're tracking network status.
   bool tracking_;

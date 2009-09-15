@@ -1,36 +1,69 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_GLUE_WEBFRAME_H_
 #define WEBKIT_GLUE_WEBFRAME_H_
 
+#include <vector>
+
 #include "base/scoped_ptr.h"
-#include "googleurl/src/gurl.h"
+#include "base/string16.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
-#include "webkit/glue/console_message_level.h"
-#include "webkit/glue/feed.h"
-#include "webkit/glue/find_in_page_request.h"
-#include "webkit/glue/webscriptsource.h"
+#include "webkit/api/public/WebCanvas.h"
+#include "webkit/api/public/WebURL.h"
 
-class WebDataSource;
-class WebError;
-class WebRequest;
+class GURL;
 class WebView;
 class WebTextInput;
 struct NPObject;
 
-namespace gfx {
-class Rect;
-class Size;
+namespace WebKit {
+class WebData;
+class WebDataSource;
+class WebForm;
+class WebHistoryItem;
+class WebString;
+class WebURLRequest;
+struct WebConsoleMessage;
+struct WebFindOptions;
+struct WebRect;
+struct WebScriptSource;
+struct WebSize;
+struct WebURLError;
 }
+
+#if WEBKIT_USING_V8
+namespace v8 {
+  template <class T> class Local;
+  class Context;
+}
+#endif
 
 // Every frame in a web page is represented by one WebFrame, including the
 // outermost frame.
 class WebFrame {
  public:
   WebFrame() {}
+
+  // The two functions below retrieve WebFrame instances relating the currently
+  // executing JavaScript. Since JavaScript can make function calls across
+  // frames, though, we need to be more precise.
+  //
+  // For example, imagine that a JS function in frame A calls a function in
+  // frame B, which calls native code, which wants to know what the 'active'
+  // frame is.
+  //
+  // The 'entered context' is the context where execution first entered the
+  // script engine; the context that is at the bottom of the JS function stack.
+  // RetrieveFrameForEnteredContext() would return Frame A in our example.
+  //
+  // The 'current context' is the context the JS engine is currently inside of;
+  // the context that is at the top of the JS function stack.
+  // RetrieveFrameForCurrentContext() would return Frame B in our example.
+  static WebFrame* RetrieveFrameForEnteredContext();
+  static WebFrame* RetrieveFrameForCurrentContext();
 
   // Binds a C++ class to a JavaScript property of the window object.  This
   // should generally be used via CppBoundClass::BindToJavascript() instead of
@@ -40,87 +73,102 @@ class WebFrame {
 
   virtual void CallJSGC() = 0;
 
-  // WARNING: DON'T USE THIS METHOD unless you know what it is doing.
-  //
-  // Returns a pointer to the underlying implementation WebCore::Frame.
-  // Currently it is a hack to avoid including "Frame.h". The caller
-  // casts the return value to WebCore::Frame.
-  // TODO(fqian): Remove this method when V8 supports NP runtime.
-  virtual void* GetFrameImplementation() = 0;
+  // This grants the currently loaded Document access to all security origins
+  // (including file URLs).  Use with care.  The access is revoked when a new
+  // document is loaded into this frame.
+  virtual void GrantUniversalAccess() = 0;
 
   virtual NPObject* GetWindowNPObject() = 0;
 
-  // Loads the given WebRequest.
-  virtual void LoadRequest(WebRequest* request) = 0;
+#if WEBKIT_USING_V8
+  // Returns the V8 context for this frame, or an empty handle if there is
+  // none.
+  virtual v8::Local<v8::Context> GetScriptContext() = 0;
+#endif
 
-  // This method is short-hand for calling LoadAlternateHTMLString with a dummy
-  // request for the given base_url.
-  virtual void LoadHTMLString(const std::string& html_text,
-                              const GURL& base_url) = 0;
+  // Reload the current document.
+  virtual void Reload() = 0;
 
-  // Loads alternative HTML text in place of a particular URL. This method is
-  // designed with error pages in mind, in which case it would typically be
-  // called in response to WebViewDelegate's didFailProvisionalLoadWithError
-  // method.
-  //
-  // |html_text| is a utf8 string to load in the frame.  |display_url| is the
-  // URL that the content will appear to have been loaded from.  The |replace|
-  // parameter controls how this affects session history.  If |replace| is
-  // true, then the current session history entry is replaced with the given
-  // HTML text.  Otherwise, a new navigation is produced.
-  //
-  // In either case, when the corresponding session history entry is revisited,
-  // it is the given request /w the |display_url| substituted for the request's
-  // URL, which is repeated.  The |html_text| is not stored in session history.
-  //
-  virtual void LoadAlternateHTMLString(const WebRequest* request,
-                                       const std::string& html_text,
-                                       const GURL& display_url,
-                                       bool replace) = 0;
+  // Loads the given WebURLRequest.
+  virtual void LoadRequest(const WebKit::WebURLRequest& request) = 0;
+
+  // Loads the given WebHistoryItem.  This corresponds to a back/forward
+  // navigation.
+  virtual void LoadHistoryItem(const WebKit::WebHistoryItem& item) = 0;
+
+  // Loads the given data with specific mime type and optional text encoding.
+  // For HTML data, base_url indicates the security origin of the document and
+  // is used to resolve links.  If specified, unreachable_url is reported via
+  // WebDataSource::unreachableURL.  If replace is false, then this data will
+  // be loaded as a normal navigation.  Otherwise, the current history item
+  // will be replaced.
+  virtual void LoadData(
+      const WebKit::WebData& data,
+      const WebKit::WebString& mime_type,
+      const WebKit::WebString& text_encoding,
+      const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
+      bool replace = false) = 0;
+
+  // This method is short-hand for calling LoadData, where mime_type is
+  // "text/html" and text_encoding is "UTF-8".
+  virtual void LoadHTMLString(
+      const WebKit::WebData& html,
+      const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
+      bool replace = false) = 0;
 
   // Asks the WebFrame to try and download the alternate error page.  We notify
   // the WebViewDelegate of the results so it can decide whether or not to show
   // something to the user (e.g., a local error page or the alternate error
   // page).
-  virtual void LoadAlternateHTMLErrorPage(const WebRequest* request,
-                                          const WebError& error,
+  virtual void LoadAlternateHTMLErrorPage(const WebKit::WebURLRequest& request,
+                                          const WebKit::WebURLError& error,
                                           const GURL& error_page_url,
                                           bool replace,
                                           const GURL& fake_url) = 0;
 
+  // Called to associate the WebURLRequest with this frame.  The request will
+  // be modified to inherit parameters that allow it to be loaded.  This method
+  // ends up triggering WebViewDelegate::WillSendRequest.
+  virtual void DispatchWillSendRequest(WebKit::WebURLRequest* request) = 0;
+
   // Executes JavaScript in the web frame.
-  virtual void ExecuteScript(const webkit_glue::WebScriptSource& source) = 0;
+  virtual void ExecuteScript(const WebKit::WebScriptSource& source) = 0;
 
   // Executes JavaScript in a new context associated with the web frame. The
   // script gets its own global scope and its own prototypes for intrinsic
   // JavaScript objects (String, Array, and so-on). It shares the wrappers for
   // all DOM nodes and DOM constructors.
   virtual void ExecuteScriptInNewContext(
-      const webkit_glue::WebScriptSource* sources, int num_sources) = 0;
+      const WebKit::WebScriptSource* sources, int num_sources) = 0;
+
+  // Executes JavaScript in a new world associated with the web frame. The
+  // script gets its own global scope and its own prototypes for intrinsic
+  // JavaScript objects (String, Array, and so-on). It also gets its own
+  // wrappers for all DOM nodes and DOM constructors.
+  virtual void ExecuteScriptInNewWorld(
+      const WebKit::WebScriptSource* sources, int num_sources) = 0;
 
   // Inserts the given CSS styles at the beginning of the document.
   virtual bool InsertCSSStyles(const std::string& css) = 0;
 
-  // Returns a string representing the state of the previous page load for
-  // later use when loading. The previous page is the page that was loaded
-  // before DidCommitLoadForFrame was received.
+  // Returns the WebHistoryItem representing the state of the previous page
+  // load for later use when loading. The previous page is the page that was
+  // loaded before DidCommitLoadForFrame was received.
   //
-  // Returns false if there is no valid state to return (for example, there is
-  // no previous item). Returns true if the previous item's state was retrieved,
-  // even if that state may be empty.
-  virtual bool GetPreviousHistoryState(std::string* history_state) const = 0;
+  // Returns a null item if there is no valid state to return (for example,
+  // there is no previous item). Returns true if the previous item's state was
+  // retrieved, even if that state may be empty.
+  virtual WebKit::WebHistoryItem GetPreviousHistoryItem() const = 0;
 
-  // Returns a string representing the state of the current page load for later
-  // use when loading as well as the url and title of the page.
+  // Returns the WebHistoryItem representing the state of the current page load
+  // for later use when loading.
   //
-  // Returns false if there is no valid state to return (for example, there is
-  // no previous item). Returns true if the current item's state was retrieved,
-  // even if that state may be empty.
-  virtual bool GetCurrentHistoryState(std::string* history_state) const = 0;
-
-  // Returns true if there is a current history item.  A newly created WebFrame
-  // lacks a history item.  Otherwise, this will always be true.
-  virtual bool HasCurrentHistoryState() const = 0;
+  // Returns a null item if there is no valid state to return (for example,
+  // there is no previous item). Returns true if the current item's state was
+  // retrieved, even if that state may be empty.
+  virtual WebKit::WebHistoryItem GetCurrentHistoryItem() const = 0;
 
   // Returns the current URL of the frame, or an empty GURL if there is no
   // URL to retrieve (for example, the frame may never have had any content).
@@ -135,21 +183,20 @@ class WebFrame {
   // the page does not have a valid document, an empty GURL is returned.
   virtual GURL GetOSDDURL() const = 0;
 
-  // Return the list of feeds specified in the document for the frame. If
-  // the page does not have a valid document, an empty list is returned.
-  virtual scoped_refptr<class FeedList> GetFeedList() const = 0;
+  // Return the minPrefWidth of the content contained in the current Document
+  virtual int GetContentsPreferredWidth() const = 0;
 
   // Returns the committed data source, which is the last data source that has
   // successfully started loading. Will return NULL if no provisional data
   // has been committed.
-  virtual WebDataSource* GetDataSource() const = 0;
+  virtual WebKit::WebDataSource* GetDataSource() const = 0;
 
   // Returns the provisional data source, which is a data source where a
   // request has been made, but we are not sure if we will use data from it
   // (for example, it may be an invalid URL). When the provisional load is
   // "committed," it will become the "real" data source (see GetDataSource
   // above) and the provisional data source will be NULL.
-  virtual WebDataSource* GetProvisionalDataSource() const = 0;
+  virtual WebKit::WebDataSource* GetProvisionalDataSource() const = 0;
 
   //
   //  @method stopLoading
@@ -187,6 +234,9 @@ class WebFrame {
   // unless it is AddRef'd separately by the caller.
   virtual WebView* GetView() const = 0;
 
+  // Returns a vector of WebForms (corresponds to document.forms).
+  virtual void GetForms(std::vector<WebKit::WebForm>* forms) const = 0;
+
   // Returns the serialization of the frame's security origin.
   virtual std::string GetSecurityOrigin() const = 0;
 
@@ -210,9 +260,11 @@ class WebFrame {
   // If no match is found, this function clears all tickmarks and highlighting.
   //
   // Returns true if the search string was found, false otherwise.
-  virtual bool Find(const FindInPageRequest& request,
+  virtual bool Find(int request_id,
+                    const string16& search_text,
+                    const WebKit::WebFindOptions& options,
                     bool wrap_within_frame,
-                    gfx::Rect* selection_rect) = 0;
+                    WebKit::WebRect* selection_rect) = 0;
 
   // Notifies the frame that we are no longer interested in searching. This will
   // abort any asynchronous scoping effort already under way (see the function
@@ -233,7 +285,9 @@ class WebFrame {
   // cancel at any time (see CancelPendingScopingEffort). The parameter Request
   // specifies what to look for and Reset signals whether this is a brand new
   // request or a continuation of the last scoping effort.
-  virtual void ScopeStringMatches(FindInPageRequest request,
+  virtual void ScopeStringMatches(int request_id,
+                                  const string16& search_text,
+                                  const WebKit::WebFindOptions& options,
                                   bool reset) = 0;
 
   // Cancels any outstanding requests for scoping string matches on a frame.
@@ -246,7 +300,7 @@ class WebFrame {
 
   // Notifies the webview-delegate about a new selection rect. This will result
   // in the browser getting notified. For more information see WebViewDelegate.
-  virtual void ReportFindInPageSelection(const gfx::Rect& selection_rect,
+  virtual void ReportFindInPageSelection(const WebKit::WebRect& selection_rect,
                                          int active_match_ordinal,
                                          int request_id) = 0;
 
@@ -295,24 +349,16 @@ class WebFrame {
   // Clear any text selection in the frame.
   virtual void ClearSelection() = 0;
 
+  // Checks if there is currently a selected area (indicates that GetSelection
+  // would return a non-empty string).
+  virtual bool HasSelection() = 0;
+
   // Returns the selected text if there is any.  If |as_html| is true, returns
   // the selection as HTML.  The return value is encoded in utf-8.
   virtual std::string GetSelection(bool as_html) = 0;
 
-  // Paints the contents of this web view in a bitmapped image. This image
-  // will not have plugins drawn. Devices are cheap to copy because the data is
-  // internally refcounted so we allocate and return a new copy
-  //
-  // Set scroll_to_zero to force all frames to be scrolled to 0,0 before
-  // being painted into the image. This will not send DOM events because it
-  // just draws the contents at a different place, but it does mean the
-  // scrollbars in the resulting image will appear to be wrong (they'll be
-  // painted as if the content was scrolled).
-  //
-  // Returns false on failure. CaptureImage can fail if 'image' argument
-  // is not valid or due to failure to allocate a canvas.
-  virtual bool CaptureImage(scoped_ptr<skia::BitmapPlatformDevice>* image,
-                            bool scroll_to_zero) = 0;
+  // Returns the full HTML of the page.
+  virtual std::string GetFullPageHtml() = 0;
 
   // This function sets a flag within WebKit to instruct it to render the page
   // as View-Source (showing the HTML source for the page).
@@ -332,17 +378,16 @@ class WebFrame {
   // superset of those accepted by javascript:document.execCommand().
   // This method is exposed in order to implement
   // javascript:layoutTestController.execCommand()
-  virtual bool ExecuteCoreCommandByName(const std::string& name,
+  virtual bool ExecuteEditCommandByName(const std::string& name,
                                         const std::string& value) = 0;
 
   // Checks whether a webkit editor command is currently enabled. This
   // method is exposed in order to implement
   // javascript:layoutTestController.isCommandEnabled()
-  virtual bool IsCoreCommandEnabled(const std::string& name) = 0;
+  virtual bool IsEditCommandEnabled(const std::string& name) = 0;
 
   // Adds a message to the frame's console.
-  virtual void AddMessageToConsole(const std::wstring& msg,
-                                   ConsoleMessageLevel level) = 0;
+  virtual void AddMessageToConsole(const WebKit::WebConsoleMessage&) = 0;
 
   // Tells the current page to close, running the onunload handler.
   // TODO(creis): We'd rather use WebView::Close(), but that sets its delegate_
@@ -352,25 +397,20 @@ class WebFrame {
   virtual void ClosePage() = 0;
 
   // The current scroll offset from the top of frame in pixels.
-  virtual gfx::Size ScrollOffset() const = 0;
+  virtual WebKit::WebSize ScrollOffset() const = 0;
 
-  // Reformats the web frame for printing. |page_size_px| is the page size in
-  // pixels.
-  // |width| is the resulting document width in pixel.
-  // |page_count| is the number of printed pages.
-  // Returns false if it fails. It'll fail if the main frame failed to load but
-  // will succeed even if a child frame failed to load.
-  virtual bool BeginPrint(const gfx::Size& page_size_px,
-                          int* page_count) = 0;
+  // Reformats the WebFrame for printing.  page_size is the page size in
+  // pixels.  Returns the number of pages that can be printed at the given page
+  // size.
+  virtual int PrintBegin(const WebKit::WebSize& page_size) = 0;
 
-  // Prints one page. |page| is 0-based.
-  // Returns the page shrinking factor calculated by webkit (usually between
-  // 1/1.25 and 1/2). Returns 0 if the page number is invalid or not in printing
-  // mode.
-  virtual float PrintPage(int page, skia::PlatformCanvas* canvas) = 0;
+  // Prints one page, and returns the calculated page shrinking factor (usually
+  // between 1/1.25 and 1/2).  Returns 0 if the page number is invalid or not
+  // in printing mode.
+  virtual float PrintPage(int page_to_print, WebKit::WebCanvas* canvas) = 0;
 
-  // Reformats the web frame for screen display.
-  virtual void EndPrint() = 0;
+  // Reformats the WebFrame for screen display.
+  virtual void PrintEnd() = 0;
 
   // Only for test_shell
   virtual int PendingFrameUnloadEventCount() const = 0;

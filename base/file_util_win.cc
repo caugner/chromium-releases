@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/scoped_handle.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/win_util.h"
 
 namespace file_util {
@@ -39,12 +40,14 @@ bool AbsolutePath(FilePath* path) {
   return true;
 }
 
-int CountFilesCreatedAfter(const std::wstring& path,
-                           const FILETIME& comparison_time) {
+int CountFilesCreatedAfter(const FilePath& path,
+                           const base::Time& comparison_time) {
   int file_count = 0;
+  FILETIME comparison_filetime(comparison_time.ToFileTime());
 
   WIN32_FIND_DATA find_file_data;
-  std::wstring filename_spec = path + L"\\*";  // All files in given dir
+  // All files in given dir
+  std::wstring filename_spec = path.Append(L"*").value();
   HANDLE find_handle = FindFirstFile(filename_spec.c_str(), &find_file_data);
   if (find_handle != INVALID_HANDLE_VALUE) {
     do {
@@ -54,7 +57,7 @@ int CountFilesCreatedAfter(const std::wstring& path,
         continue;
 
       long result = CompareFileTime(&find_file_data.ftCreationTime,
-                                    &comparison_time);
+                                    &comparison_filetime);
       // File was created after or on comparison time
       if ((result == 1) || (result == 0))
         ++file_count;
@@ -111,6 +114,18 @@ bool Move(const FilePath& from_path, const FilePath& to_path) {
     return CopyAndDeleteDirectory(from_path, to_path);
   }
   return false;
+}
+
+bool ReplaceFile(const FilePath& from_path, const FilePath& to_path) {
+  // Make sure that the target file exists.
+  HANDLE target_file = ::CreateFile(to_path.value().c_str(), 0,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    NULL, CREATE_NEW,
+                                    FILE_ATTRIBUTE_NORMAL, NULL);
+  if (target_file != INVALID_HANDLE_VALUE)
+    ::CloseHandle(target_file);
+  return ::ReplaceFile(to_path.value().c_str(), from_path.value().c_str(),
+                       NULL, 0, NULL, NULL) ? true : false;
 }
 
 bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
@@ -240,6 +255,13 @@ bool GetFileCreationLocalTime(const std::wstring& filename,
 }
 
 bool ResolveShortcut(std::wstring* path) {
+  FilePath file_path(*path);
+  bool result = ResolveShortcut(&file_path);
+  *path = file_path.value();
+  return result;
+}
+
+bool ResolveShortcut(FilePath* path) {
   HRESULT result;
   IShellLink *shell = NULL;
   bool is_resolved = false;
@@ -256,14 +278,14 @@ bool ResolveShortcut(std::wstring* path) {
     if (SUCCEEDED(result)) {
       WCHAR temp_path[MAX_PATH];
       // Load the shell link
-      result = persist->Load(path->c_str(), STGM_READ);
+      result = persist->Load(path->value().c_str(), STGM_READ);
       if (SUCCEEDED(result)) {
         // Try to find the target of a shortcut
         result = shell->Resolve(0, SLR_NO_UI);
         if (SUCCEEDED(result)) {
           result = shell->GetPath(temp_path, MAX_PATH,
                                   NULL, SLGP_UNCPRIORITY);
-          *path = temp_path;
+          *path = FilePath(temp_path);
           is_resolved = true;
         }
       }
@@ -397,8 +419,9 @@ bool UpdateShortcutLink(const wchar_t *source, const wchar_t *destination,
 }
 
 bool IsDirectoryEmpty(const std::wstring& dir_path) {
-  FileEnumerator files(FilePath(dir_path),
-                       false, FileEnumerator::FILES_AND_DIRECTORIES);
+  FileEnumerator files(FilePath(dir_path), false,
+    static_cast<FileEnumerator::FILE_TYPE>(
+        FileEnumerator::FILES | FileEnumerator::DIRECTORIES));
   if (files.Next().value().empty())
     return true;
   return false;
@@ -436,20 +459,24 @@ bool CreateTemporaryFileName(FilePath* path) {
   return false;
 }
 
+FILE* CreateAndOpenTemporaryShmemFile(FilePath* path) {
+  return CreateAndOpenTemporaryFile(path);
+}
+
 // On POSIX we have semantics to create and open a temporary file
 // atomically.
 // TODO(jrg): is there equivalent call to use on Windows instead of
 // going 2-step?
-FILE* CreateAndOpenTemporaryFile(FilePath* path) {
-
-  if (!CreateTemporaryFileName(path)) {
+FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* path) {
+  std::wstring wstring_path;
+  if (!CreateTemporaryFileNameInDir(dir.value(), &wstring_path)) {
     return NULL;
   }
-  return OpenFile(*path, "w+");
-}
-
-FILE* CreateAndOpenTemporaryShmemFile(FilePath* path) {
-  return CreateAndOpenTemporaryFile(path);
+  *path = FilePath(wstring_path);
+  // Open file in binary mode, to avoid problems with fwrite. On Windows
+  // it replaces \n's with \r\n's, which may surprise you.
+  // Reference: http://msdn.microsoft.com/en-us/library/h9t88zwz(VS.71).aspx
+  return OpenFile(*path, "wb+");
 }
 
 bool CreateTemporaryFileNameInDir(const std::wstring& dir,
@@ -649,6 +676,8 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
       file_type_(file_type),
       is_in_find_op_(false),
       find_handle_(INVALID_HANDLE_VALUE) {
+  // INCLUDE_DOT_DOT must not be specified if recursive.
+  DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   pending_paths_.push(root_path);
 }
 
@@ -661,6 +690,8 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
       is_in_find_op_(false),
       pattern_(pattern),
       find_handle_(INVALID_HANDLE_VALUE) {
+  // INCLUDE_DOT_DOT must not be specified if recursive.
+  DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   pending_paths_.push(root_path);
 }
 
@@ -720,8 +751,7 @@ FilePath FileEnumerator::Next() {
   }
 
   FilePath cur_file(find_data_.cFileName);
-  // Skip over . and ..
-  if (L"." == cur_file.value() || L".." == cur_file.value())
+  if (ShouldSkip(cur_file))
     return Next();
 
   // Construct the absolute filename.
@@ -783,21 +813,4 @@ void MemoryMappedFile::CloseHandles() {
   length_ = INVALID_FILE_SIZE;
 }
 
-// Deprecated functions ----------------------------------------------------
-
-void InsertBeforeExtension(std::wstring* path_str,
-                           const std::wstring& suffix) {
-  FilePath path(*path_str);
-  InsertBeforeExtension(&path, suffix);
-  path_str->assign(path.value());
-}
-void PathComponents(const std::wstring& path,
-                    std::vector<std::wstring>* components) {
-  PathComponents(FilePath(path), components);
-}
-void ReplaceExtension(std::wstring* file_name, const std::wstring& extension) {
-  FilePath path(*file_name);
-  ReplaceExtension(&path, extension);
-  file_name->assign(path.value());
-}
 }  // namespace file_util

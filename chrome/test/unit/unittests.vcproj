@@ -42,6 +42,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)\..\global_intermediate\app"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -55,7 +56,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="winmm.lib"
+				AdditionalDependencies="urlmon.lib winmm.lib"
 				LinkIncremental="1"
 			/>
 			<Tool
@@ -108,6 +109,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)\..\global_intermediate\app"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -121,7 +123,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="winmm.lib"
+				AdditionalDependencies="urlmon.lib winmm.lib"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -160,6 +162,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\file_test_utils.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\file_test_utils.h"
+				>
+			</File>
+			<File
 				RelativePath="..\in_process_browser_test.cc"
 				>
 			</File>
@@ -189,6 +199,14 @@
 			</File>
 			<File
 				RelativePath="..\..\tools\build\win\precompiled_wtl.h"
+				>
+			</File>
+			<File
+				RelativePath="..\render_view_test.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\render_view_test.h"
 				>
 			</File>
 			<File
@@ -300,7 +318,7 @@
 				>
 			</File>
 			<File
-				RelativePath="$(OutDir)\grit_derived_sources\browser_resources.rc"
+				RelativePath="$(OutDir)\obj\global_intermediate\chrome\browser_resources.rc"
 				>
 			</File>
 			<File
@@ -324,7 +342,7 @@
 				>
 			</File>
 			<File
-				RelativePath="$(OutDir)\grit_derived_sources\common_resources.rc"
+				RelativePath="$(OutDir)\obj\global_intermediate\chrome\common_resources.rc"
 				>
 			</File>
 			<File
@@ -332,7 +350,7 @@
 				>
 			</File>
 			<File
-				RelativePath="$(OutDir)\grit_derived_sources\debugger_resources.rc"
+				RelativePath="$(OutDir)\obj\global_intermediate\chrome\debugger_resources.rc"
 				>
 			</File>
 			<File
@@ -340,7 +358,7 @@
 				>
 			</File>
 			<File
-				RelativePath="$(OutDir)\grit_derived_sources\renderer_resources.rc"
+				RelativePath="$(OutDir)\obj\global_intermediate\chrome\renderer_resources.rc"
 				>
 			</File>
 			<File
@@ -360,7 +378,7 @@
 				>
 			</File>
 			<File
-				RelativePath="$(OutDir)\grit_derived_sources\webkit_resources.rc"
+				RelativePath="$(OutDir)\obj\global_intermediate\webkit\webkit_resources.rc"
 				>
 			</File>
 			<File
@@ -388,7 +406,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\privacy_blacklist\blacklist_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\safe_browsing\bloom_filter_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\bookmarks\bookmark_codec_unittest.cc"
 				>
 			</File>
 			<File
@@ -412,6 +438,18 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\bookmarks\bookmark_index_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\bookmarks\bookmark_model_test_utils.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\bookmarks\bookmark_model_test_utils.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\bookmarks\bookmark_model_unittest.cc"
 				>
 			</File>
@@ -428,7 +466,23 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\browser_theme_provider_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\browser_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\child_process_security_policy_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\chrome_thread_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\net\chrome_url_request_context_unittest.cc"
 				>
 			</File>
 			<File
@@ -444,11 +498,31 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\debugger\devtools_remote_listen_socket_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\debugger\devtools_remote_listen_socket_unittest.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\debugger\devtools_remote_message_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\net\dns_host_info_unittest.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\..\browser\net\dns_master_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\dom_ui\dom_ui_theme_source_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\dom_ui\dom_ui_unittest.cc"
 				>
 			</File>
 			<File
@@ -460,6 +534,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\encoding_menu_controller_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\password_manager\encryptor_unittest.cc"
 				>
 			</File>
@@ -468,15 +546,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\extensions\extension_messages_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\extensions\extension_process_manager_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\extensions\extension_ui_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\browser\extensions\extension_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\browser\extensions\extension_view_unittest.cc"
 				>
 			</File>
 			<File
@@ -484,7 +562,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\browser\views\find_bar_win_unittest.cc"
+				RelativePath="..\..\browser\find_backend_unittest.cc"
 				>
 			</File>
 			<File
@@ -544,11 +622,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\browser\navigation_controller_unittest.cc"
+				RelativePath="..\..\browser\tab_contents\navigation_controller_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\browser\navigation_entry_unittest.cc"
+				RelativePath="..\..\browser\tab_contents\navigation_entry_unittest.cc"
 				>
 			</File>
 			<File
@@ -596,15 +674,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\tab_contents\render_view_host_manager_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\renderer_host\render_view_host_unittest.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\..\browser\renderer_host\render_widget_host_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\browser\renderer_host\renderer_security_policy_unittest.cc"
 				>
 			</File>
 			<File
@@ -624,6 +702,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\safe_browsing\safe_browsing_blocking_page_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\safe_browsing\safe_browsing_database_unittest.cc"
 				>
 			</File>
@@ -633,6 +715,10 @@
 			</File>
 			<File
 				RelativePath="..\..\browser\download\save_package_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\autocomplete\search_provider_unittest.cc"
 				>
 			</File>
 			<File
@@ -652,7 +738,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\browser\site_instance_unittest.cc"
+				RelativePath="..\..\browser\tab_contents\site_instance_unittest.cc"
 				>
 			</File>
 			<File
@@ -661,6 +747,10 @@
 			</File>
 			<File
 				RelativePath="..\..\browser\spellcheck_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\ssl\ssl_host_state_unittest.cc"
 				>
 			</File>
 			<File
@@ -676,6 +766,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\task_manager_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\search_engines\template_url_model_unittest.cc"
 				>
 			</File>
@@ -688,7 +782,19 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\search_engines\template_url_scraper_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\search_engines\template_url_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\extensions\test_extension_loader.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\extensions\test_extension_loader.h"
 				>
 			</File>
 			<File
@@ -700,7 +806,19 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\browser\theme_resources_util_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\..\browser\history\thumbnail_database_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\tab_contents\thumbnail_generator_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\browser\thumbnail_store_unittest.cc"
 				>
 			</File>
 			<File
@@ -791,11 +909,11 @@
 					>
 				</File>
 				<File
-					RelativePath="..\test_tab_contents.cc"
+					RelativePath="..\..\browser\net\test_url_fetcher_factory.cc"
 					>
 				</File>
 				<File
-					RelativePath="..\test_tab_contents.h"
+					RelativePath="..\..\browser\net\test_url_fetcher_factory.h"
 					>
 				</File>
 				<File
@@ -806,13 +924,25 @@
 					RelativePath="..\..\browser\tab_contents\test_web_contents.h"
 					>
 				</File>
+				<File
+					RelativePath="..\..\browser\importer\toolbar_importer_unittest.cc"
+					>
+				</File>
 			</Filter>
 		</Filter>
 		<Filter
 			Name="renderer"
 			>
 			<File
-				RelativePath="..\..\renderer\extensions\greasemonkey_api_unittest.cc"
+				RelativePath="..\..\renderer\audio_message_filter_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\renderer\extensions\extension_api_client_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\renderer\extensions\json_schema_unittest.cc"
 				>
 			</File>
 			<File
@@ -843,6 +973,38 @@
 				Name="test_infrastructure"
 				>
 				<File
+					RelativePath="..\..\renderer\mock_keyboard.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_keyboard.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_keyboard_driver_win.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_keyboard_driver_win.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_printer.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_printer.h"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_printer_driver_win.cc"
+					>
+				</File>
+				<File
+					RelativePath="..\..\renderer\mock_printer_driver_win.h"
+					>
+				</File>
+				<File
 					RelativePath="..\..\renderer\mock_render_process.h"
 					>
 				</File>
@@ -860,10 +1022,6 @@
 			Name="common"
 			>
 			<File
-				RelativePath="..\..\common\animation_unittest.cc"
-				>
-			</File>
-			<File
 				RelativePath="..\..\common\bzip2_unittest.cc"
 				>
 			</File>
@@ -876,7 +1034,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\common\gfx\icon_util_unittest.cc"
+				RelativePath="..\..\common\extensions\extension_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\common\important_file_writer_unittest.cc"
 				>
 			</File>
 			<File
@@ -904,19 +1066,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\common\l10n_util_unittest.cc"
-				>
-			</File>
-			<File
 				RelativePath="..\..\common\mru_cache_unittest.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\..\common\notification_service_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\common\os_exchange_data_unittest.cc"
 				>
 			</File>
 			<File
@@ -936,15 +1090,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\common\gfx\text_elider_unittest.cc"
-				>
-			</File>
-			<File
 				RelativePath="..\..\common\time_format_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\common\unzip_unittest.cc"
 				>
 			</File>
 			<File
@@ -952,11 +1098,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\common\win_util_unittest.cc"
+				RelativePath="..\..\common\worker_thread_ticker_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\common\worker_thread_ticker_unittest.cc"
+				RelativePath="..\..\common\zip_unittest.cc"
 				>
 			</File>
 		</Filter>
@@ -964,27 +1110,23 @@
 			Name="views"
 			>
 			<File
-				RelativePath="..\..\views\focus\focus_manager_unittest.cc"
+				RelativePath="..\..\..\views\focus\focus_manager_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\views\grid_layout_unittest.cc"
+				RelativePath="..\..\..\views\grid_layout_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\views\controls\label_unittest.cc"
+				RelativePath="..\..\..\views\controls\label_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\views\controls\table\table_view_unittest.cc"
+				RelativePath="..\..\..\views\controls\table\table_view_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\..\views\controls\tree\tree_node_iterator_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\..\views\view_unittest.cc"
+				RelativePath="..\..\..\views\view_unittest.cc"
 				>
 			</File>
 		</Filter>
@@ -1006,6 +1148,60 @@
 			<File
 				RelativePath="..\..\..\googleurl\src\url_util_unittest.cc"
 				>
+			</File>
+		</Filter>
+		<Filter
+			Name="app"
+			>
+			<File
+				RelativePath="..\..\..\app\animation_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\gfx\font_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\gfx\icon_util_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\l10n_util_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\os_exchange_data_win_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\gfx\text_elider_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\tree_node_iterator_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\..\app\win_util_unittest.cc"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						ObjectFile="$(IntDir)\$(InputName)1.obj"
+						XMLDocumentationFileName="$(IntDir)\$(InputName)1.xdc"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						ObjectFile="$(IntDir)\$(InputName)1.obj"
+						XMLDocumentationFileName="$(IntDir)\$(InputName)1.xdc"
+					/>
+				</FileConfiguration>
 			</File>
 		</Filter>
 	</Files>

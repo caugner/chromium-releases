@@ -4,10 +4,10 @@
 
 #include "chrome/browser/views/options/language_combobox_model.h"
 
+#include "app/l10n_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "unicode/uloc.h"
@@ -16,39 +16,27 @@
 // LanguageComboboxModel used to populate a combobox with native names
 // corresponding to the language code (e.g. English (United States) for en-US)
 //
+
 LanguageComboboxModel::LanguageComboboxModel()
     : profile_(NULL) {
   // Enumerate the languages we know about.
-  const std::vector<std::wstring>& locale_codes =
+  const std::vector<std::string>& locale_codes =
       l10n_util::GetAvailableLocales();
-  InitNativeNames(locale_codes);
-}
-
-// Overload using a profile and customized local_codes vector.
-LanguageComboboxModel::LanguageComboboxModel(
-    Profile* profile, const std::vector<std::wstring>& locale_codes)
-    : profile_(profile) {
   InitNativeNames(locale_codes);
 }
 
 LanguageComboboxModel::LanguageComboboxModel(
     Profile* profile, const std::vector<std::string>& locale_codes)
     : profile_(profile) {
-  std::vector<std::wstring> locale_codes_w;
-  for (std::vector<std::string>::const_iterator iter = locale_codes.begin();
-      iter != locale_codes.end(); ++iter) {
-    locale_codes_w.push_back(ASCIIToWide(*iter));
-  }
-  InitNativeNames(locale_codes_w);
+  InitNativeNames(locale_codes);
 }
 
-void LanguageComboboxModel::InitNativeNames(const std::vector<std::wstring>&
-                                            locale_codes) {
-  const std::string app_locale = WideToASCII(
-      g_browser_process->GetApplicationLocale());
+void LanguageComboboxModel::InitNativeNames(
+    const std::vector<std::string>& locale_codes) {
+  const std::string app_locale = g_browser_process->GetApplicationLocale();
   for (size_t i = 0; i < locale_codes.size(); ++i) {
-    std::string locale_code_str = WideToASCII(locale_codes[i]);
-    const char* locale_code = locale_code_str.c_str();
+    std::string locale_code_str = locale_codes[i];
+    const char* locale_code = locale_codes[i].c_str();
 
     // Internally, we use the language code of zh-CN and zh-TW, but we want the
     // display names to be Chinese (Simplified) and Chinese (Traditional).  To
@@ -84,11 +72,11 @@ void LanguageComboboxModel::InitNativeNames(const std::vector<std::wstring>&
 }
 
 // Overridden from views::Combobox::Model:
-int LanguageComboboxModel::GetItemCount(views::ComboBox* source) {
+int LanguageComboboxModel::GetItemCount(views::Combobox* source) {
   return static_cast<int>(locale_names_.size());
 }
 
-std::wstring LanguageComboboxModel::GetItemAt(views::ComboBox* source,
+std::wstring LanguageComboboxModel::GetItemAt(views::Combobox* source,
                                               int index) {
   DCHECK(static_cast<int>(locale_names_.size()) > index);
   LocaleDataMap::const_iterator it =
@@ -134,7 +122,7 @@ std::wstring LanguageComboboxModel::GetItemAt(views::ComboBox* source,
 }
 
 // Return the locale for the given index.  E.g., may return pt-BR.
-std::wstring LanguageComboboxModel::GetLocaleFromIndex(int index) {
+std::string LanguageComboboxModel::GetLocaleFromIndex(int index) {
   DCHECK(static_cast<int>(locale_names_.size()) > index);
   LocaleDataMap::const_iterator it =
       native_names_.find(locale_names_[index]);
@@ -143,7 +131,7 @@ std::wstring LanguageComboboxModel::GetLocaleFromIndex(int index) {
   return it->second.locale_code;
 }
 
-int LanguageComboboxModel::GetIndexFromLocale(const std::wstring& locale) {
+int LanguageComboboxModel::GetIndexFromLocale(const std::string& locale) {
   for (size_t i = 0; i < locale_names_.size(); ++i) {
     LocaleDataMap::const_iterator it =
         native_names_.find(locale_names_[i]);
@@ -161,8 +149,7 @@ int LanguageComboboxModel::GetIndexFromLocale(const std::wstring& locale) {
 // shouldn't be reflected in this combo box.  We return -1 if the value in
 // the pref doesn't map to a know language (possible if the user edited the
 // prefs file manually).
-int LanguageComboboxModel::GetSelectedLanguageIndex(const std::wstring&
-                                                    prefs) {
+int LanguageComboboxModel::GetSelectedLanguageIndex(const std::wstring& prefs) {
   PrefService* local_state;
   if (!profile_)
     local_state = g_browser_process->local_state();
@@ -170,7 +157,8 @@ int LanguageComboboxModel::GetSelectedLanguageIndex(const std::wstring&
     local_state = profile_->GetPrefs();
 
   DCHECK(local_state);
-  const std::wstring& current_lang = local_state->GetString(prefs.c_str());
+  const std::string& current_locale =
+      WideToASCII(local_state->GetString(prefs.c_str()));
 
-  return GetIndexFromLocale(current_lang);
+  return GetIndexFromLocale(current_locale);
 }

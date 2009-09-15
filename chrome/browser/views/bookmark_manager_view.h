@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,21 @@
 
 #include "base/ref_counted.h"
 #include "base/task.h"
-#include "chrome/browser/bookmarks/bookmark_context_menu.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/views/controls/menu/view_menu_delegate.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/controls/tree/tree_view.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/window_delegate.h"
+#include "chrome/browser/views/bookmark_context_menu.h"
+#include "views/controls/menu/view_menu_delegate.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/controls/tree/tree_view.h"
+#include "views/view.h"
+#include "views/window/window_delegate.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class BookmarkFolderTreeModel;
 class BookmarkFolderTreeView;
 class BookmarkTableModel;
 class BookmarkTableView;
-class PrefService;
 class Profile;
 
 namespace views {
@@ -38,7 +37,7 @@ class BookmarkManagerView : public views::View,
                             public views::WindowDelegate,
                             public views::TreeViewController,
                             public views::TableViewObserver,
-                            public views::TextField::Controller,
+                            public views::Textfield::Controller,
                             public BookmarkModelObserver,
                             public views::ContextMenuController,
                             public views::ViewMenuDelegate,
@@ -55,8 +54,6 @@ class BookmarkManagerView : public views::View,
   explicit BookmarkManagerView(Profile* profile);
   virtual ~BookmarkManagerView();
 
-  static void RegisterPrefs(PrefService* prefs);
-
   // Shows the bookmark manager. Only one bookmark manager exists.
   static void Show(Profile* profile);
 
@@ -65,18 +62,18 @@ class BookmarkManagerView : public views::View,
 
   // Selects the specified node in the tree. If node is a URL it's parent is
   // selected and node is selected in the table.
-  void SelectInTree(BookmarkNode* node);
+  void SelectInTree(const BookmarkNode* node);
 
   // Expands all the children of the selected folder.
-  void ExpandAll(BookmarkNode* node);
+  void ExpandAll(const BookmarkNode* node);
 
   // Returns the selected folder in the tree, which may be null.
-  BookmarkNode* GetSelectedFolder();
+  const BookmarkNode* GetSelectedFolder();
 
   // Returns the selection of the table.
-  std::vector<BookmarkNode*> GetSelectedTableNodes();
+  std::vector<const BookmarkNode*> GetSelectedTableNodes();
 
-  virtual void PaintBackground(ChromeCanvas* canvas);
+  virtual void PaintBackground(gfx::Canvas* canvas);
 
   virtual gfx::Size GetPreferredSize();
 
@@ -93,11 +90,16 @@ class BookmarkManagerView : public views::View,
 
   Profile* profile() const { return profile_; }
 
+ protected:
+  // View methods.
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
+
  private:
   // TableViewObserver methods.
   virtual void OnSelectionChanged() {}
   // Overriden to open the selected table nodes in the current browser.
   virtual void OnDoubleClick();
+  virtual void OnMiddleClick();
   virtual void OnTableViewDelete(views::TableView* table);
   virtual void OnKeyDown(unsigned short virtual_keycode);
 
@@ -110,35 +112,31 @@ class BookmarkManagerView : public views::View,
   virtual void Loaded(BookmarkModel* model);
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) {}
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index) {}
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {}
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
-                                   int index) {}
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
+                                   const BookmarkNode* parent,
                                    int old_index,
-                                   BookmarkNode* node) {}
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {}
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node) {}
+                                             const BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {}
+                                         const BookmarkNode* node) {}
 
-  // TextField::Controller methods.
+  // Textfield::Controller methods.
   // Starts a timer to search for the search text.
-  virtual void ContentsChanged(views::TextField* sender,
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
   // If return has been pressed this performs an immediate search.
-  virtual void HandleKeystroke(views::TextField* sender,
-                               UINT message, TCHAR key, UINT repeat_count,
-                               UINT flags);
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key);
 
   // ContextMenuController.
   virtual void ShowContextMenu(views::View* source,
@@ -147,13 +145,14 @@ class BookmarkManagerView : public views::View,
                                bool is_mouse_gesture);
 
   // ViewMenuDelegate.
-  virtual void RunMenu(views::View* source, const CPoint& pt, HWND hwnd);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt, HWND hwnd);
 
   // MenuDelegate.
   virtual void ExecuteCommand(int id);
 
   // SelectFileDialog::Listener.
-  virtual void FileSelected(const std::wstring& path, void* params);
+  virtual void FileSelected(const FilePath& path,
+                            int index, void* params);
   virtual void FileSelectionCanceled(void* params);
 
   // Creates the table model to use when searching. This returns NULL if there
@@ -163,7 +162,7 @@ class BookmarkManagerView : public views::View,
   // Sets the model of the table and its parent node. If |is_search| is true,
   // it means the table is showing search results.
   void SetTableModel(BookmarkTableModel* new_table_model,
-                     BookmarkNode* parent_node,
+                     const BookmarkNode* parent_node,
                      bool is_search);
 
   // Sets the table's model to the results of CreateSearchTableModel and selects
@@ -186,7 +185,7 @@ class BookmarkManagerView : public views::View,
   void ShowMenu(HWND host,
                 int x,
                 int y,
-                BookmarkContextMenu::ConfigurationType config);
+                BookmarkContextMenuController::ConfigurationType config);
 
   // Invoked to handle cut/copy/paste from the table or tree. If |from_table|
   // is true the source is the table.
@@ -205,7 +204,7 @@ class BookmarkManagerView : public views::View,
   BookmarkFolderTreeView* tree_view_;
   scoped_ptr<BookmarkTableModel> table_model_;
   scoped_ptr<BookmarkFolderTreeModel> tree_model_;
-  views::TextField* search_tf_;
+  views::Textfield* search_tf_;
   views::SingleSplitView* split_view_;
 
   // Import/export file dialog.

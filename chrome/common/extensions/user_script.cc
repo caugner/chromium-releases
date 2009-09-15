@@ -4,16 +4,17 @@
 
 #include "chrome/common/extensions/user_script.h"
 
+#include "base/pickle.h"
 #include "base/string_util.h"
 
-bool UserScript::MatchesUrl(const GURL& url) {
+bool UserScript::MatchesUrl(const GURL& url) const {
   for (std::vector<std::string>::const_iterator glob = globs_.begin();
        glob != globs_.end(); ++glob) {
     if (MatchPattern(url.spec(), *glob))
       return true;
   }
 
-  for (std::vector<URLPattern>::iterator pattern = url_patterns_.begin();
+  for (std::vector<URLPattern>::const_iterator pattern = url_patterns_.begin();
        pattern != url_patterns_.end(); ++pattern) {
     if (pattern->MatchesUrl(url))
       return true;
@@ -38,6 +39,9 @@ void UserScript::File::Unpickle(const ::Pickle& pickle, void** iter) {
 void UserScript::Pickle(::Pickle* pickle) const {
   // Write the run location.
   pickle->WriteInt(run_location());
+
+  // Write the extension id.
+  pickle->WriteString(extension_id());
 
   // Write globs.
   pickle->WriteSize(globs_.size());
@@ -74,6 +78,9 @@ void UserScript::Unpickle(const ::Pickle& pickle, void** iter) {
   CHECK(pickle.ReadInt(iter, &run_location));
   CHECK(run_location >= 0 && run_location < RUN_LOCATION_LAST);
   run_location_ = static_cast<RunLocation>(run_location);
+
+  // Read the extension ID.
+  CHECK(pickle.ReadString(iter, &extension_id_));
 
   // Read globs.
   size_t num_globs = 0;

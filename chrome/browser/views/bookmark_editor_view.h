@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,17 @@
 
 #include <set>
 
+#include "app/tree_node_model.h"
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/menu/menu.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/controls/tree/tree_node_model.h"
-#include "chrome/views/controls/tree/tree_view.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/controls/button/button.h"
+#include "views/controls/menu/simple_menu_model.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/controls/tree/tree_view.h"
+#include "views/window/dialog_delegate.h"
 
 namespace views {
+class NativeButton;
 class Window;
 }
 
@@ -32,13 +33,14 @@ class Profile;
 //
 // To use BookmarkEditorView invoke the static show method.
 
-class BookmarkEditorView : public views::View,
-                           public views::NativeButton::Listener,
+class BookmarkEditorView : public BookmarkEditor,
+                           public views::View,
+                           public views::ButtonListener,
                            public views::TreeViewController,
                            public views::DialogDelegate,
-                           public views::TextField::Controller,
+                           public views::Textfield::Controller,
                            public views::ContextMenuController,
-                           public Menu::Delegate,
+                           public views::SimpleMenuModel::Delegate,
                            public BookmarkModelObserver {
   FRIEND_TEST(BookmarkEditorViewTest, ChangeParent);
   FRIEND_TEST(BookmarkEditorViewTest, ChangeParentAndURL);
@@ -51,46 +53,21 @@ class BookmarkEditorView : public views::View,
   FRIEND_TEST(BookmarkEditorViewTest, ChangeURLNoTree);
   FRIEND_TEST(BookmarkEditorViewTest, ChangeTitleNoTree);
  public:
-  // Handler is notified when the BookmarkEditorView creates a new bookmark.
-  // Handler is owned by the BookmarkEditorView and deleted when it is deleted.
-  class Handler {
-   public:
-    virtual ~Handler() {}
-    virtual void NodeCreated(BookmarkNode* new_node) = 0;
-  };
-
-  // An enumeration of the possible configurations offered.
-  enum Configuration {
-    SHOW_TREE,
-    NO_TREE
-  };
-
   BookmarkEditorView(Profile* profile,
-                     BookmarkNode* parent,
-                     BookmarkNode* node,
-                     Configuration configuration,
-                     Handler* handler);
+                     const BookmarkNode* parent,
+                     const BookmarkNode* node,
+                     BookmarkEditor::Configuration configuration,
+                     BookmarkEditor::Handler* handler);
 
   virtual ~BookmarkEditorView();
 
-  // Shows the BookmarkEditorView editing |node|. If |node| is NULL a new entry
-  // is created initially parented to |parent|. If |show_tree| is false the
-  // tree is not shown. BookmarkEditorView takes ownership of |handler| and
-  // deletes it when done. |handler| may be null. See description of Handler
-  // for details.
-  static void Show(HWND parent_window,
-                   Profile* profile,
-                   BookmarkNode* parent,
-                   BookmarkNode* node,
-                   Configuration configuration,
-                   Handler* handler);
-
   // DialogDelegate methods:
-  virtual bool IsDialogButtonEnabled(DialogButton button) const;
+  virtual bool IsDialogButtonEnabled(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
   virtual bool Accept();
-  virtual bool AreAcceleratorsEnabled(DialogButton button);
+  virtual bool AreAcceleratorsEnabled(MessageBoxFlags::DialogButton button);
   virtual views::View* GetContentsView();
 
   // View methods.
@@ -101,25 +78,25 @@ class BookmarkEditorView : public views::View,
 
   // TreeViewObserver methods.
   virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view);
-  virtual bool CanEdit(views::TreeView* tree_view,
-                       views::TreeModelNode* node);
+  virtual bool CanEdit(views::TreeView* tree_view, TreeModelNode* node);
 
-  // TextField::Controller methods.
-  virtual void ContentsChanged(views::TextField* sender,
+  // Textfield::Controller methods.
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender,
-                               UINT message, TCHAR key, UINT repeat_count,
-                               UINT flags) {}
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke&) {
+    return false;
+  }
 
-  // NativeButton/CheckBox.
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // NativeButton.
+  virtual void ButtonPressed(views::Button* sender);
 
-  // Menu::Delegate method.
-  virtual void ExecuteCommand(int id);
-
-  // Menu::Delegate method, return false if id is edit and the bookmark node
-  // was selected, true otherwise.
-  virtual bool IsCommandEnabled(int id) const;
+  // SimpleMenuModel::Delegate.
+  virtual bool IsCommandIdChecked(int command_id) const;
+  virtual bool IsCommandIdEnabled(int command_id) const;
+  virtual bool GetAcceleratorForCommandId(int command_id,
+                                          views::Accelerator* accelerator);
+  virtual void ExecuteCommand(int command_id);
 
   // Creates a Window and adds the BookmarkEditorView to it. When the window is
   // closed the BookmarkEditorView is deleted.
@@ -136,16 +113,16 @@ class BookmarkEditorView : public views::View,
 
  private:
   // Type of node in the tree.
-  typedef views::TreeNodeWithValue<int> EditorNode;
+  typedef TreeNodeWithValue<int64> EditorNode;
 
   // Model for the TreeView. Trivial subclass that doesn't allow titles with
   // empty strings.
-  class EditorTreeModel : public views::TreeNodeModel<EditorNode> {
+  class EditorTreeModel : public TreeNodeModel<EditorNode> {
    public:
     explicit EditorTreeModel(EditorNode* root)
         : TreeNodeModel<EditorNode>(root) {}
 
-    virtual void SetTitle(views::TreeModelNode* node,
+    virtual void SetTitle(TreeModelNode* node,
                           const std::wstring& title) {
       if (!title.empty())
         TreeNodeModel::SetTitle(node, title);
@@ -163,23 +140,23 @@ class BookmarkEditorView : public views::View,
   // resetting the tree model.
   virtual void Loaded(BookmarkModel* model) { }
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index);
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index);
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
+                                   const BookmarkNode* parent,
                                    int index,
-                                   BookmarkNode* node);
+                                   const BookmarkNode* node);
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {}
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node);
+                                             const BookmarkNode* node);
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {}
+                                         const BookmarkNode* node) {}
 
   // Resets the model of the tree and updates the various buttons appropriately.
   void Reset();
@@ -195,10 +172,10 @@ class BookmarkEditorView : public views::View,
 
   // Adds and creates a child node in b_node for all children of bb_node that
   // are groups.
-  void CreateNodes(BookmarkNode* bb_node, EditorNode* b_node);
+  void CreateNodes(const BookmarkNode* bb_node, EditorNode* b_node);
 
   // Returns the node with the specified id, or NULL if one can't be found.
-  EditorNode* FindNodeWithID(BookmarkEditorView::EditorNode* node, int id);
+  EditorNode* FindNodeWithID(BookmarkEditorView::EditorNode* node, int64 id);
 
   // Invokes ApplyEdits with the selected node.
   void ApplyEdits();
@@ -217,10 +194,10 @@ class BookmarkEditorView : public views::View,
   // used to determine the new BookmarkNode parent based on the EditorNode
   // parent.
   void ApplyNameChangesAndCreateNewGroups(
-      BookmarkNode* bb_node,
+      const BookmarkNode* bb_node,
       BookmarkEditorView::EditorNode* b_node,
       BookmarkEditorView::EditorNode* parent_b_node,
-      BookmarkNode** parent_bb_node);
+      const BookmarkNode** parent_bb_node);
 
   // Returns the current url the user has input.
   GURL GetInputURL() const;
@@ -229,7 +206,7 @@ class BookmarkEditorView : public views::View,
   std::wstring GetInputTitle() const;
 
   // Invoked when the url or title has possibly changed. Updates the background
-  // of textfields and ok button appropriately.
+  // of Textfields and ok button appropriately.
   void UserInputChanged();
 
   // Creates a new group as a child of the selected node. If no node is
@@ -255,19 +232,20 @@ class BookmarkEditorView : public views::View,
   scoped_ptr<views::NativeButton> new_group_button_;
 
   // Used for editing the URL.
-  views::TextField url_tf_;
+  views::Textfield url_tf_;
 
   // Used for editing the title.
-  views::TextField title_tf_;
+  views::Textfield title_tf_;
 
   // Initial parent to select. Is only used if node_ is NULL.
-  BookmarkNode* parent_;
+  const BookmarkNode* parent_;
 
   // Node being edited. Is NULL if creating a new node.
-  BookmarkNode* node_;
+  const BookmarkNode* node_;
 
   // The context menu.
-  scoped_ptr<Menu> context_menu_;
+  scoped_ptr<views::SimpleMenuModel> context_menu_contents_;
+  scoped_ptr<views::Menu2> context_menu_;
 
   // Mode used to create nodes from.
   BookmarkModel* bb_model_;
@@ -279,7 +257,7 @@ class BookmarkEditorView : public views::View,
   // Is the tree shown?
   bool show_tree_;
 
-  scoped_ptr<Handler> handler_;
+  scoped_ptr<BookmarkEditor::Handler> handler_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkEditorView);
 };

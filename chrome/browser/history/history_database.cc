@@ -10,6 +10,8 @@
 #include "base/string_util.h"
 #include "chrome/common/sqlite_utils.h"
 
+using base::Time;
+
 namespace history {
 
 namespace {
@@ -17,6 +19,7 @@ namespace {
 // Current version number.
 static const int kCurrentVersionNumber = 16;
 static const int kCompatibleVersionNumber = 16;
+static const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
 }  // namespace
 
@@ -57,8 +60,8 @@ InitStatus HistoryDatabase::Init(const FilePath& history_name,
   // Make sure the statement cache is properly initialized.
   statement_cache_->set_db(db_);
 
-  // Prime the cache. See the header file's documentation for this function.
-  PrimeCache();
+  // Prime the cache.
+  MetaTableHelper::PrimeCache(std::string(), db_);
 
   // Create the tables and indices.
   // NOTE: If you add something here, also add it to
@@ -86,19 +89,6 @@ InitStatus HistoryDatabase::Init(const FilePath& history_name,
 
 void HistoryDatabase::BeginExclusiveMode() {
   sqlite3_exec(db_, "PRAGMA locking_mode=EXCLUSIVE", NULL, NULL, NULL);
-}
-
-void HistoryDatabase::PrimeCache() {
-  // A statement must be open for the preload command to work. If the meta
-  // table can't be read, it probably means this is a new database and there
-  // is nothing to preload (so it's OK we do nothing).
-  SQLStatement dummy;
-  if (dummy.prepare(db_, "SELECT * from meta") != SQLITE_OK)
-    return;
-  if (dummy.step() != SQLITE_ROW)
-    return;
-
-  sqlite3Preload(db_);
 }
 
 // static
@@ -182,6 +172,27 @@ SegmentID HistoryDatabase::GetSegmentID(VisitID visit_id) {
       return s.column_int64(0);
   }
   return 0;
+}
+
+Time HistoryDatabase::GetEarlyExpirationThreshold() {
+  if (!cached_early_expiration_threshold_.is_null())
+    return cached_early_expiration_threshold_;
+
+  int64 threshold;
+  if (!meta_table_.GetValue(kEarlyExpirationThresholdKey, &threshold)) {
+    // Set to a very early non-zero time, so it's before all history, but not
+    // zero to avoid re-retrieval.
+    threshold = 1L;
+  }
+
+  cached_early_expiration_threshold_ = Time::FromInternalValue(threshold);
+  return cached_early_expiration_threshold_;
+}
+
+void HistoryDatabase::UpdateEarlyExpirationThreshold(Time threshold) {
+  meta_table_.SetValue(kEarlyExpirationThresholdKey,
+                       threshold.ToInternalValue());
+  cached_early_expiration_threshold_ = threshold;
 }
 
 sqlite3* HistoryDatabase::GetDB() {

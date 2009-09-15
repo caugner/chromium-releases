@@ -4,16 +4,19 @@
 
 #include <vector>
 
+#include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "chrome/browser/renderer_host/renderer_security_policy.h"
+#include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/render_messages.h"
+#include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/glue/webappcachecontext.h"
 
 static int RequestIDForMessage(const IPC::Message& msg) {
   int request_id = -1;
@@ -34,7 +37,7 @@ static ViewHostMsg_Resource_Request CreateResourceRequest(const char* method,
   ViewHostMsg_Resource_Request request;
   request.method = std::string(method);
   request.url = url;
-  request.policy_url = url;  // bypass third-party cookie blocking
+  request.first_party_for_cookies = url;  // bypass third-party cookie blocking
   // init the rest to default values to prevent getting UMR.
   request.frame_origin = "null";
   request.main_frame_origin = "null";
@@ -42,6 +45,7 @@ static ViewHostMsg_Resource_Request CreateResourceRequest(const char* method,
   request.origin_pid = 0;
   request.resource_type = ResourceType::SUB_RESOURCE;
   request.request_context = 0;
+  request.app_cache_context_id = WebAppCacheContext::kNoAppCacheContextId;
   return request;
 }
 
@@ -109,13 +113,13 @@ class ResourceDispatcherHostTest : public testing::Test,
  protected:
   // testing::Test
   virtual void SetUp() {
-    RendererSecurityPolicy::GetInstance()->Add(0);
+    ChildProcessSecurityPolicy::GetInstance()->Add(0);
     URLRequest::RegisterProtocolFactory("test", &URLRequestTestJob::Factory);
     EnsureTestSchemeIsAllowed();
   }
   virtual void TearDown() {
     URLRequest::RegisterProtocolFactory("test", NULL);
-    RendererSecurityPolicy::GetInstance()->Remove(0);
+    ChildProcessSecurityPolicy::GetInstance()->Remove(0);
 
     // The plugin lib is automatically loaded during these test
     // and we want a clean environment for other tests.
@@ -140,7 +144,7 @@ class ResourceDispatcherHostTest : public testing::Test,
     static bool have_white_listed_test_scheme = false;
 
     if (!have_white_listed_test_scheme) {
-      RendererSecurityPolicy::GetInstance()->RegisterWebSafeScheme("test");
+      ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme("test");
       have_white_listed_test_scheme = true;
     }
   }
@@ -250,8 +254,6 @@ TEST_F(ResourceDispatcherHostTest, TestMany) {
 // Tests whether messages get canceled properly. We issue three requests,
 // cancel one of them, and make sure that each sent the proper notifications.
 TEST_F(ResourceDispatcherHostTest, Cancel) {
-  ResourceDispatcherHost host(NULL);
-
   EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
 
   MakeTestRequest(0, 0, 1, URLRequestTestJob::test_url_1());
@@ -532,43 +534,41 @@ TEST_F(ResourceDispatcherHostTest, CalculateApproximateMemoryCost) {
   EXPECT_EQ(4434, ResourceDispatcherHost::CalculateApproximateMemoryCost(&req));
 
   // Add a file upload -- should have no effect.
-  req.AppendFileToUpload(L"does-not-exist.png");
+  req.AppendFileToUpload(FilePath(FILE_PATH_LITERAL("does-not-exist.png")));
   EXPECT_EQ(4434, ResourceDispatcherHost::CalculateApproximateMemoryCost(&req));
 }
 
 // Test the private helper method "IncrementOutstandingRequestsMemoryCost()".
 TEST_F(ResourceDispatcherHostTest, IncrementOutstandingRequestsMemoryCost) {
-  ResourceDispatcherHost host(NULL);
-
   // Add some counts for render_process_host=7
-  EXPECT_EQ(0, host.GetOutstandingRequestsMemoryCost(7));
-  EXPECT_EQ(1, host.IncrementOutstandingRequestsMemoryCost(1, 7));
-  EXPECT_EQ(2, host.IncrementOutstandingRequestsMemoryCost(1, 7));
-  EXPECT_EQ(3, host.IncrementOutstandingRequestsMemoryCost(1, 7));
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(7));
+  EXPECT_EQ(1, host_.IncrementOutstandingRequestsMemoryCost(1, 7));
+  EXPECT_EQ(2, host_.IncrementOutstandingRequestsMemoryCost(1, 7));
+  EXPECT_EQ(3, host_.IncrementOutstandingRequestsMemoryCost(1, 7));
 
   // Add some counts for render_process_host=3
-  EXPECT_EQ(0, host.GetOutstandingRequestsMemoryCost(3));
-  EXPECT_EQ(1, host.IncrementOutstandingRequestsMemoryCost(1, 3));
-  EXPECT_EQ(2, host.IncrementOutstandingRequestsMemoryCost(1, 3));
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(3));
+  EXPECT_EQ(1, host_.IncrementOutstandingRequestsMemoryCost(1, 3));
+  EXPECT_EQ(2, host_.IncrementOutstandingRequestsMemoryCost(1, 3));
 
   // Remove all the counts for render_process_host=7
-  EXPECT_EQ(3, host.GetOutstandingRequestsMemoryCost(7));
-  EXPECT_EQ(2, host.IncrementOutstandingRequestsMemoryCost(-1, 7));
-  EXPECT_EQ(1, host.IncrementOutstandingRequestsMemoryCost(-1, 7));
-  EXPECT_EQ(0, host.IncrementOutstandingRequestsMemoryCost(-1, 7));
-  EXPECT_EQ(0, host.GetOutstandingRequestsMemoryCost(7));
+  EXPECT_EQ(3, host_.GetOutstandingRequestsMemoryCost(7));
+  EXPECT_EQ(2, host_.IncrementOutstandingRequestsMemoryCost(-1, 7));
+  EXPECT_EQ(1, host_.IncrementOutstandingRequestsMemoryCost(-1, 7));
+  EXPECT_EQ(0, host_.IncrementOutstandingRequestsMemoryCost(-1, 7));
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(7));
 
   // Remove all the counts for render_process_host=3
-  EXPECT_EQ(2, host.GetOutstandingRequestsMemoryCost(3));
-  EXPECT_EQ(1, host.IncrementOutstandingRequestsMemoryCost(-1, 3));
-  EXPECT_EQ(0, host.IncrementOutstandingRequestsMemoryCost(-1, 3));
-  EXPECT_EQ(0, host.GetOutstandingRequestsMemoryCost(3));
+  EXPECT_EQ(2, host_.GetOutstandingRequestsMemoryCost(3));
+  EXPECT_EQ(1, host_.IncrementOutstandingRequestsMemoryCost(-1, 3));
+  EXPECT_EQ(0, host_.IncrementOutstandingRequestsMemoryCost(-1, 3));
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(3));
 
   // When an entry reaches 0, it should be deleted.
-  EXPECT_TRUE(host.outstanding_requests_memory_cost_map_.end() ==
-      host.outstanding_requests_memory_cost_map_.find(7));
-  EXPECT_TRUE(host.outstanding_requests_memory_cost_map_.end() ==
-      host.outstanding_requests_memory_cost_map_.find(3));
+  EXPECT_TRUE(host_.outstanding_requests_memory_cost_map_.end() ==
+      host_.outstanding_requests_memory_cost_map_.find(7));
+  EXPECT_TRUE(host_.outstanding_requests_memory_cost_map_.end() ==
+      host_.outstanding_requests_memory_cost_map_.find(3));
 }
 
 // Test that when too many requests are outstanding for a particular

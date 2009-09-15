@@ -4,39 +4,61 @@
 
 #include "chrome/worker/worker_webkitclient_impl.h"
 
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "base/logging.h"
+#include "chrome/worker/worker_thread.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebURL.h"
+
+WebKit::WebClipboard* WorkerWebKitClientImpl::clipboard() {
+  NOTREACHED();
+  return NULL;
+}
 
 WebKit::WebMimeRegistry* WorkerWebKitClientImpl::mimeRegistry() {
+  NOTREACHED();
   return NULL;
 }
 
 WebKit::WebSandboxSupport* WorkerWebKitClientImpl::sandboxSupport() {
+  NOTREACHED();
   return NULL;
 }
 
-uint64_t WorkerWebKitClientImpl::visitedLinkHash(const char* canonical_url,
-                                                 size_t length) {
+unsigned long long WorkerWebKitClientImpl::visitedLinkHash(
+    const char* canonical_url,
+    size_t length) {
+  NOTREACHED();
   return 0;
 }
 
-bool WorkerWebKitClientImpl::isLinkVisited(uint64_t link_hash) {
+bool WorkerWebKitClientImpl::isLinkVisited(unsigned long long link_hash) {
+  NOTREACHED();
   return false;
 }
 
 void WorkerWebKitClientImpl::setCookies(const WebKit::WebURL& url,
                                         const WebKit::WebURL& policy_url,
                                         const WebKit::WebString& value) {
+  NOTREACHED();
 }
 
 WebKit::WebString WorkerWebKitClientImpl::cookies(
     const WebKit::WebURL& url, const WebKit::WebURL& policy_url) {
+  NOTREACHED();
   return WebKit::WebString();
 }
 
 void WorkerWebKitClientImpl::prefetchHostName(const WebKit::WebString&) {
+  NOTREACHED();
+}
+
+bool WorkerWebKitClientImpl::getFileSize(const WebKit::WebString& path,
+                                         long long& result) {
+  NOTREACHED();
+  return false;
 }
 
 WebKit::WebString WorkerWebKitClientImpl::defaultLocale() {
+  NOTREACHED();
   return WebKit::WebString();
 }

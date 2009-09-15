@@ -64,6 +64,8 @@ public:
 
       // Filename we dump pixels to (when pixel testing is enabled).
       std::wstring pixel_file_name;
+      // The md5 hash of the bitmap dump (when pixel testing is enabled).
+      std::string pixel_hash;
       // URL of the test.
       std::string test_url;
     };
@@ -91,7 +93,9 @@ public:
       return m_webViewHost.get() ? m_webViewHost->webview() : NULL;
     }
     WebViewHost* webViewHost() { return m_webViewHost.get(); }
-    WebWidget* popup() { return m_popupHost ? m_popupHost->webwidget() : NULL; }
+    WebKit::WebWidget* popup() {
+      return m_popupHost ? m_popupHost->webwidget() : NULL;
+    }
     WebWidgetHost* popupHost() { return m_popupHost; }
 
     // Called by the LayoutTestController to signal test completion.
@@ -100,7 +104,7 @@ public:
     // Called to block the calling thread until TestFinished is called.
     void WaitTestFinished();
 
-    void Show(WebView* webview, WindowOpenDisposition disposition);
+    void Show(WebKit::WebNavigationPolicy policy);
 
     // We use this to avoid relying on Windows focus during layout test mode.
     void SetFocus(WebWidgetHost* host, bool enable);
@@ -109,6 +113,7 @@ public:
       return layout_test_controller_.get();
     }
     TestWebViewDelegate* delegate() { return delegate_.get(); }
+    TestWebViewDelegate* popup_delegate() { return popup_delegate_.get(); }
     TestNavigationController* navigation_controller() {
       return navigation_controller_.get();
     }
@@ -118,18 +123,7 @@ public:
     // may arrive after the previous page has finished dumping its text and
     // therefore end up in the next test's results if the messages are still
     // enabled.
-    void ResetTestController() {
-      layout_test_controller_->Reset();
-      event_sending_controller_->Reset();
-
-      // Reset state in the test webview delegate.
-      delegate()->SetSmartInsertDeleteEnabled(true);
-#if defined(OS_WIN)
-      delegate()->SetSelectTrailingWhitespaceEnabled(true);
-#else
-      delegate()->SetSelectTrailingWhitespaceEnabled(false);
-#endif
-    }
+    void ResetTestController();
 
     // Passes options from LayoutTestController through to the delegate (or
     // any other caller).
@@ -184,7 +178,7 @@ public:
     // Implements CreateWebView for TestWebViewDelegate, which in turn
     // is called as a WebViewDelegate.
     WebView* CreateWebView(WebView* webview);
-    WebWidget* CreatePopupWidget(WebView* webview);
+    WebKit::WebWidget* CreatePopupWidget(WebView* webview);
     void ClosePopup();
 
 #if defined(OS_WIN)
@@ -203,7 +197,14 @@ public:
     static bool RunFileTest(const TestParams& params);
 
     // Writes the back-forward list data for every open window into result.
-    static void DumpBackForwardList(std::wstring* result);
+    // Should call DumpBackForwardListOfWindow on each TestShell window.
+    static void DumpAllBackForwardLists(std::wstring* result);
+
+    // Writes the single back-forward entry into result.
+    void DumpBackForwardEntry(int index, std::wstring* result);
+
+    // Writes the back-forward list data for this test shell into result.
+    void DumpBackForwardList(std::wstring* result);
 
     // Dumps the output from given test as text and/or image depending on
     // the flags set.
@@ -211,8 +212,9 @@ public:
 
     // Writes the image captured from the given web frame to the given file.
     // The returned string is the ASCII-ized MD5 sum of the image.
-    static std::string DumpImage(WebFrame* web_frame,
-                                 const std::wstring& file_name);
+    static std::string DumpImage(WebView* view,
+                                 const std::wstring& file_name,
+                                 const std::string& pixel_hash);
 
     static void ResetWebPreferences();
 
@@ -323,6 +325,7 @@ private:
     scoped_ptr<TestNavigationController> navigation_controller_;
 
     scoped_refptr<TestWebViewDelegate> delegate_;
+    scoped_refptr<TestWebViewDelegate> popup_delegate_;
 
     const TestParams* test_params_;
 
@@ -345,11 +348,6 @@ private:
 
     // Dump the stats table counters on exit.
     bool dump_stats_table_on_exit_;
-
-#if defined(OS_LINUX)
-    // The height of the non-rendering area of the main window, in pixels.
-    int top_chrome_height_;
-#endif
 };
 
 #endif // WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_H_

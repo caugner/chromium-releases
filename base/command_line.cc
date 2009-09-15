@@ -168,13 +168,29 @@ bool CommandLine::IsSwitch(const StringType& parameter_string,
 }
 
 // static
+void CommandLine::Reset() {
+  delete current_process_commandline_;
+  current_process_commandline_ = NULL;
+}
+
+// static
 void CommandLine::Init(int argc, const char* const* argv) {
-  DCHECK(current_process_commandline_ == NULL);
 #if defined(OS_WIN)
   current_process_commandline_ = new CommandLine;
   current_process_commandline_->ParseFromString(::GetCommandLineW());
 #elif defined(OS_POSIX)
   current_process_commandline_ = new CommandLine(argc, argv);
+#endif
+}
+
+// static
+void CommandLine::Init(const std::vector<std::string>& argv) {
+  DCHECK(current_process_commandline_ == NULL);
+#if defined(OS_WIN)
+  current_process_commandline_ = new CommandLine;
+  current_process_commandline_->ParseFromString(::GetCommandLineW());
+#elif defined(OS_POSIX)
+  current_process_commandline_ = new CommandLine(argv);
 #endif
 }
 
@@ -304,6 +320,15 @@ void CommandLine::AppendArguments(const CommandLine& other,
   std::map<std::string, StringType>::const_iterator i;
   for (i = other.switches_.begin(); i != other.switches_.end(); ++i)
     switches_[i->first] = i->second;
+}
+
+void CommandLine::PrependWrapper(const std::wstring& wrapper) {
+  // The wrapper may have embedded arguments (like "gdb --args"). In this case,
+  // we don't pretend to do anything fancy, we just split on spaces.
+  std::vector<std::wstring> wrapper_and_args;
+  SplitString(wrapper, ' ', &wrapper_and_args);
+  program_ = wrapper_and_args[0];
+  command_line_string_ = wrapper + L" " + command_line_string_;
 }
 
 #elif defined(OS_POSIX)

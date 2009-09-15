@@ -7,6 +7,7 @@
 #include "chrome/test/automation/automation_proxy.h"
 
 #include "base/basictypes.h"
+#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
@@ -17,55 +18,14 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
-
+#include "ipc/ipc_descriptors.h"
 #if defined(OS_WIN)
 // TODO(port): Enable when dialog_delegate is ported.
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/window/dialog_delegate.h"
 #endif
 
 using base::TimeDelta;
 using base::TimeTicks;
-
-// This class exists to group together the data and functionality used for
-// synchronous automation requests.
-class AutomationRequest :
-    public base::RefCountedThreadSafe<AutomationRequest> {
-public:
-  AutomationRequest() : received_response_(true, false) {
-    static int32 routing_id = 0;
-    routing_id_ = ++routing_id;
-  }
-
-  // This is called on the background thread once the response has been
-  // received and the foreground thread can resume execution.
-  void SignalResponseReady(const IPC::Message& response) {
-    response_.reset(new IPC::Message(response));
-
-    received_response_.Signal();
-  }
-
-  // This can be used to take ownership of the response object that
-  // we've received, reducing the need to copy the message.
-  void GrabResponse(IPC::Message** response) {
-    DCHECK(response);
-    *response = response_.get();
-    response_.release();
-  }
-
-  int32 routing_id() { return routing_id_; }
-
-  const IPC::Message& response() {
-    DCHECK(response_.get());
-    return *(response_.get());
-  }
-
-private:
-  DISALLOW_EVIL_CONSTRUCTORS(AutomationRequest);
-
-  int32 routing_id_;
-  scoped_ptr<IPC::Message> response_;
-  base::WaitableEvent received_response_;
-};
 
 namespace {
 
@@ -78,33 +38,11 @@ class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
   // Return true to indicate that the message was handled, or false to let
   // the message be handled in the default way.
   virtual bool OnMessageReceived(const IPC::Message& message) {
-    {
-      // Here we're checking to see if it matches the (because there should
-      // be at most one) synchronous request.  If the received message is
-      // the response to the synchronous request, we clear the server's
-      // "current_request" pointer and signal to the request object that
-      // the response is ready for processing.  We're clearing current_request
-      // here rather than on the foreground thread so that we can assert
-      // that both threads perceive it as cleared at the time that the
-      // foreground thread wakes up.
-      scoped_refptr<AutomationRequest> request = server_->current_request();
-      if (request.get() && (message.routing_id() == request->routing_id())) {
-        server_->clear_current_request();
-        request->SignalResponseReady(message);
-        return true;
-      }
-      if (message.routing_id() > 0) {
-        // The message is either the previous async response or arrived
-        // after timeout.
-        return true;
-      }
-    }
-
     bool handled = true;
 
     IPC_BEGIN_MESSAGE_MAP(AutomationMessageFilter, message)
-      IPC_MESSAGE_HANDLER_GENERIC(
-        AutomationMsg_Hello, server_->SignalAppLaunch());
+      IPC_MESSAGE_HANDLER_GENERIC(AutomationMsg_Hello,
+                                  OnAutomationHello(message));
       IPC_MESSAGE_HANDLER_GENERIC(
         AutomationMsg_InitialLoadsComplete, server_->SignalInitialLoads());
       IPC_MESSAGE_HANDLER(AutomationMsg_InitialNewTabUILoadComplete,
@@ -121,6 +59,19 @@ class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
     server_->SignalNewTabUITab(load_time);
   }
 
+  void OnAutomationHello(const IPC::Message& hello_message) {
+    std::string server_version;
+    void* iter = NULL;
+    if (!hello_message.ReadString(&iter, &server_version)) {
+      // We got an AutomationMsg_Hello from an old automation provider
+      // that doesn't send version info. Leave server_version as an empty
+      // string to signal a version mismatch.
+      LOG(ERROR) << "Pre-versioning protocol detected in automation provider.";
+    }
+
+    server_->SignalAppLaunch(server_version);
+  }
+
  private:
   AutomationProxy* server_;
 };
@@ -133,7 +84,8 @@ AutomationProxy::AutomationProxy(int command_execution_timeout_ms)
       initial_loads_complete_(true, false),
       new_tab_ui_load_complete_(true, false),
       shutdown_event_(new base::WaitableEvent(true, false)),
-      current_request_(NULL),
+      app_launch_signaled_(0),
+      perform_version_check_(false),
       command_execution_timeout_(
           TimeDelta::FromMilliseconds(command_execution_timeout_ms)) {
   InitializeChannelID();
@@ -150,7 +102,6 @@ AutomationProxy::~AutomationProxy() {
   // AutomationMessageFilter::OnMessageReceived.
   channel_.reset();
   thread_.reset();
-  DCHECK(NULL == current_request_);
   tracker_.reset();
 }
 
@@ -162,9 +113,9 @@ void AutomationProxy::InitializeChannelID() {
   // wasn't getting freed up in time for the next test.)
   static int channel_counter = 0;
 
-  std::wostringstream buf;
-  buf << L"ChromeTestingInterface:" << base::GetCurrentProcId() <<
-         L"." << ++channel_counter;
+  std::ostringstream buf;
+  buf << "ChromeTestingInterface:" << base::GetCurrentProcId() <<
+         "." << ++channel_counter;
   channel_id_ = buf.str();
 }
 
@@ -199,11 +150,43 @@ void AutomationProxy::InitializeHandleTracker() {
   tracker_.reset(new AutomationHandleTracker(this));
 }
 
-bool AutomationProxy::WaitForAppLaunch() {
-  return app_launched_.TimedWait(command_execution_timeout_);
+AutomationLaunchResult AutomationProxy::WaitForAppLaunch() {
+  AutomationLaunchResult result = AUTOMATION_SUCCESS;
+  if (app_launched_.TimedWait(command_execution_timeout_)) {
+    if (perform_version_check_) {
+      // Obtain our own version number and compare it to what the automation
+      // provider sent.
+      scoped_ptr<FileVersionInfo> file_version_info(
+          FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      DCHECK(file_version_info != NULL);
+      std::string version_string(
+          WideToASCII(file_version_info->file_version()));
+
+      // Note that we use a simple string comparison since we expect the version
+      // to be a punctuated numeric string. Consider using base/Version if we
+      // ever need something more complicated here.
+      if (server_version_ != version_string) {
+        result = AUTOMATION_VERSION_MISMATCH;
+      }
+    }
+  } else {
+    result = AUTOMATION_TIMEOUT;
+  }
+  return result;
 }
 
-void AutomationProxy::SignalAppLaunch() {
+void AutomationProxy::SignalAppLaunch(const std::string& version_string) {
+  // The synchronization of the reading / writing of server_version_ is a bit
+  // messy but does work as long as SignalAppLaunch is only called once.
+  // Review this if we ever want an AutomationProxy instance to launch
+  // multiple AutomationProviders.
+  app_launch_signaled_++;
+  if (app_launch_signaled_ > 1) {
+    NOTREACHED();
+    LOG(ERROR) << "Multiple AutomationMsg_Hello messages received";
+    return;
+  }
+  server_version_ = version_string;
   app_launched_.Signal();
 }
 
@@ -233,6 +216,11 @@ bool AutomationProxy::SavePackageShouldPromptUser(bool should_prompt) {
   return Send(new AutomationMsg_SavePackageShouldPromptUser(0, should_prompt));
 }
 
+bool AutomationProxy::SetEnableExtensionAutomation(bool enable_automation) {
+  return Send(
+      new AutomationMsg_SetEnableExtensionAutomation(0, enable_automation));
+}
+
 bool AutomationProxy::GetBrowserWindowCount(int* num_windows) {
   if (!num_windows) {
     NOTREACHED();
@@ -251,18 +239,22 @@ bool AutomationProxy::GetBrowserWindowCount(int* num_windows) {
   return succeeded;
 }
 
-bool AutomationProxy::WaitForWindowCountToChange(int count, int* new_count,
-                                                 int wait_timeout) {
-  const TimeTicks start = TimeTicks::Now();
-  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
-  while (TimeTicks::Now() - start < timeout) {
-    bool succeeded = GetBrowserWindowCount(new_count);
-    if (!succeeded) return false;
-    if (count != *new_count) return true;
-    PlatformThread::Sleep(automation::kSleepTime);
+bool AutomationProxy::GetNormalBrowserWindowCount(int* num_windows) {
+  if (!num_windows) {
+    NOTREACHED();
+    return false;
   }
-  // Window count never changed.
-  return false;
+
+  bool succeeded = SendWithTimeout(
+      new AutomationMsg_NormalBrowserWindowCount(0, num_windows),
+      command_execution_timeout_ms(), NULL);
+
+  if (!succeeded) {
+    DLOG(ERROR) << "GetNormalWindowCount did not complete in a timely fashion";
+    return false;
+  }
+
+  return succeeded;
 }
 
 bool AutomationProxy::WaitForWindowCountToBecome(int count,
@@ -284,11 +276,9 @@ bool AutomationProxy::WaitForWindowCountToBecome(int count,
   return false;
 }
 
-#if defined(OS_WIN)
-// TODO(port): Port when DialogDelegate is ported.
 bool AutomationProxy::GetShowingAppModalDialog(
     bool* showing_app_modal_dialog,
-    views::DialogDelegate::DialogButton* button) {
+    MessageBoxFlags::DialogButton* button) {
   if (!showing_app_modal_dialog || !button) {
     NOTREACHED();
     return false;
@@ -304,12 +294,12 @@ bool AutomationProxy::GetShowingAppModalDialog(
     return false;
   }
 
-  *button = static_cast<views::DialogDelegate::DialogButton>(button_int);
+  *button = static_cast<MessageBoxFlags::DialogButton>(button_int);
   return true;
 }
 
 bool AutomationProxy::ClickAppModalDialogButton(
-    views::DialogDelegate::DialogButton button) {
+    MessageBoxFlags::DialogButton button) {
   bool succeeded = false;
 
   if (!SendWithTimeout(
@@ -327,8 +317,7 @@ bool AutomationProxy::WaitForAppModalDialog(int wait_timeout) {
   const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
   while (TimeTicks::Now() - start < timeout) {
     bool dialog_shown = false;
-    views::DialogDelegate::DialogButton button =
-        views::DialogDelegate::DIALOGBUTTON_NONE;
+    MessageBoxFlags::DialogButton button = MessageBoxFlags::DIALOGBUTTON_NONE;
     bool succeeded = GetShowingAppModalDialog(&dialog_shown, &button);
     if (!succeeded) {
       // Try again next round, but log it.
@@ -336,12 +325,11 @@ bool AutomationProxy::WaitForAppModalDialog(int wait_timeout) {
     } else if (dialog_shown) {
       return true;
     }
-    Sleep(automation::kSleepTime);
+    PlatformThread::Sleep(automation::kSleepTime);
   }
   // Dialog never shown.
   return false;
 }
-#endif  // defined(OS_WIN)
 
 bool AutomationProxy::WaitForURLDisplayed(GURL url, int wait_timeout) {
   const TimeTicks start = TimeTicks::Now();
@@ -352,8 +340,8 @@ bool AutomationProxy::WaitForURLDisplayed(GURL url, int wait_timeout) {
       return false;
 
     for (int i = 0; i < window_count; i++) {
-      BrowserProxy* window = GetBrowserWindow(i);
-      if (!window)
+      scoped_refptr<BrowserProxy> window = GetBrowserWindow(i);
+      if (!window.get())
         break;
 
       int tab_count;
@@ -361,8 +349,8 @@ bool AutomationProxy::WaitForURLDisplayed(GURL url, int wait_timeout) {
         continue;
 
       for (int j = 0; j < tab_count; j++) {
-        TabProxy* tab = window->GetTab(j);
-        if (!tab)
+        scoped_refptr<TabProxy> tab = window->GetTab(j);
+        if (!tab.get())
           break;
 
         GURL tab_url;
@@ -383,6 +371,17 @@ bool AutomationProxy::SetFilteredInet(bool enabled) {
   return Send(new AutomationMsg_SetFilteredInet(0, enabled));
 }
 
+int AutomationProxy::GetFilteredInetHitCount() {
+  int hit_count;
+  if (!Send(new AutomationMsg_GetFilteredInetHitCount(0, &hit_count)))
+    return -1;
+  return hit_count;
+}
+
+bool AutomationProxy::SendProxyConfig(const std::string& new_proxy_config) {
+  return Send(new AutomationMsg_SetProxyConfig(0, new_proxy_config));
+}
+
 void AutomationProxy::Disconnect() {
   channel_.reset();
 }
@@ -397,7 +396,7 @@ void AutomationProxy::OnChannelError() {
   DLOG(ERROR) << "Channel error in AutomationProxy.";
 }
 
-WindowProxy* AutomationProxy::GetActiveWindow() {
+scoped_refptr<WindowProxy> AutomationProxy::GetActiveWindow() {
   int handle = 0;
 
   if (!SendWithTimeout(new AutomationMsg_ActiveWindow(0, &handle),
@@ -405,11 +404,11 @@ WindowProxy* AutomationProxy::GetActiveWindow() {
     return NULL;
   }
 
-  return new WindowProxy(this, tracker_.get(), handle);
+  return ProxyObjectFromHandle<WindowProxy>(handle);
 }
 
-
-BrowserProxy* AutomationProxy::GetBrowserWindow(int window_index) {
+scoped_refptr<BrowserProxy> AutomationProxy::GetBrowserWindow(
+    int window_index) {
   int handle = 0;
 
   if (!SendWithTimeout(new AutomationMsg_BrowserWindow(0, window_index,
@@ -419,14 +418,35 @@ BrowserProxy* AutomationProxy::GetBrowserWindow(int window_index) {
     return NULL;
   }
 
-  if (handle == 0) {
+  return ProxyObjectFromHandle<BrowserProxy>(handle);
+}
+
+bool AutomationProxy::GetBrowserLocale(string16* locale) {
+  DCHECK(locale != NULL);
+  if (!SendWithTimeout(new AutomationMsg_GetBrowserLocale(0, locale),
+                       command_execution_timeout_ms(), NULL)) {
+    DLOG(ERROR) << "GetBrowserLocale did not complete in a timely fashion";
+    return false;
+  }
+
+  // An empty locale means that the browser has no UI language
+  // which is impossible.
+  DCHECK(!locale->empty());
+  return !locale->empty();
+}
+
+scoped_refptr<BrowserProxy> AutomationProxy::FindNormalBrowserWindow() {
+  int handle = 0;
+
+  if (!SendWithTimeout(new AutomationMsg_FindNormalBrowserWindow(0, &handle),
+                       command_execution_timeout_ms(), NULL)) {
     return NULL;
   }
 
-  return new BrowserProxy(this, tracker_.get(), handle);
+  return ProxyObjectFromHandle<BrowserProxy>(handle);
 }
 
-BrowserProxy* AutomationProxy::GetLastActiveBrowserWindow() {
+scoped_refptr<BrowserProxy> AutomationProxy::GetLastActiveBrowserWindow() {
   int handle = 0;
 
   if (!SendWithTimeout(new AutomationMsg_LastActiveBrowserWindow(
@@ -436,16 +456,15 @@ BrowserProxy* AutomationProxy::GetLastActiveBrowserWindow() {
     return NULL;
   }
 
-  return new BrowserProxy(this, tracker_.get(), handle);
+  return ProxyObjectFromHandle<BrowserProxy>(handle);
 }
 
 #if defined(OS_POSIX)
 base::file_handle_mapping_vector AutomationProxy::fds_to_map() const {
   base::file_handle_mapping_vector map;
-  int src_fd = -1, dest_fd = -1;
-  channel_->GetClientFileDescriptorMapping(&src_fd, &dest_fd);
-  if (src_fd > -1)
-    map.push_back(std::make_pair(src_fd, dest_fd));
+  const int ipcfd = channel_->GetClientFileDescriptor();
+  if (ipcfd > -1)
+    map.push_back(std::make_pair(ipcfd, kPrimaryIPCChannel + 3));
   return map;
 }
 #endif  // defined(OS_POSIX)
@@ -480,29 +499,47 @@ void AutomationProxy::InvalidateHandle(const IPC::Message& message) {
   }
 }
 
-bool AutomationProxy::OpenNewBrowserWindow(int show_command) {
-  return Send(new AutomationMsg_OpenNewBrowserWindow(0, show_command));
+bool AutomationProxy::OpenNewBrowserWindow(bool show) {
+  return Send(new AutomationMsg_OpenNewBrowserWindow(0, show));
 }
 
-#if defined(OS_WIN)
-// TODO(port): Replace HWNDs.
-TabProxy* AutomationProxy::CreateExternalTab(HWND parent,
-                                             const gfx::Rect& dimensions,
-                                             unsigned int style,
-                                             HWND* external_tab_container) {
-  IPC::Message* response = NULL;
+scoped_refptr<TabProxy> AutomationProxy::CreateExternalTab(
+    const IPC::ExternalTabSettings& settings,
+    gfx::NativeWindow* external_tab_container,
+    gfx::NativeWindow* tab) {
   int handle = 0;
-
   bool succeeded =
-      Send(new AutomationMsg_CreateExternalTab(0, parent, dimensions, style,
+      Send(new AutomationMsg_CreateExternalTab(0, settings,
                                                external_tab_container,
+                                               tab,
                                                &handle));
   if (!succeeded) {
     return NULL;
   }
 
+#if defined(OS_WIN)
   DCHECK(IsWindow(*external_tab_container));
-
+#else  // defined(OS_WIN)
+  DCHECK(*external_tab_container);
+#endif  // defined(OS_WIN)
+  DCHECK(tracker_->GetResource(handle) == NULL);
   return new TabProxy(this, tracker_.get(), handle);
 }
-#endif  // defined(OS_WIN)
+
+template <class T> scoped_refptr<T> AutomationProxy::ProxyObjectFromHandle(
+    int handle) {
+  if (!handle)
+    return NULL;
+
+  // Get AddRef-ed pointer to the object if handle is already seen.
+  T* p = static_cast<T*>(tracker_->GetResource(handle));
+  if (!p) {
+    p = new T(this, tracker_.get(), handle);
+    p->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<T> result;
+  result.swap(&p);
+  return result;
+}

@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/os_exchange_data.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/common/os_exchange_data.h"
 #include "chrome/test/testing_profile.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,7 +22,7 @@ TEST_F(BookmarkDragDataTest, InitialState) {
 TEST_F(BookmarkDragDataTest, BogusRead) {
   scoped_refptr<OSExchangeData> data(new OSExchangeData());
   BookmarkDragData drag_data;
-  EXPECT_FALSE(drag_data.Read(data.get()));
+  EXPECT_FALSE(drag_data.Read(OSExchangeData(data.get())));
   EXPECT_FALSE(drag_data.is_valid());
 }
 
@@ -36,7 +36,7 @@ TEST_F(BookmarkDragDataTest, JustURL) {
   data->SetURL(url, title);
 
   BookmarkDragData drag_data;
-  EXPECT_TRUE(drag_data.Read(data.get()));
+  EXPECT_TRUE(drag_data.Read(OSExchangeData(data.get())));
   EXPECT_TRUE(drag_data.is_valid());
   ASSERT_EQ(1, drag_data.elements.size());
   EXPECT_TRUE(drag_data.elements[0].is_url);
@@ -51,10 +51,10 @@ TEST_F(BookmarkDragDataTest, URL) {
   profile.CreateBookmarkModel(false);
   profile.SetID(L"id");
   BookmarkModel* model = profile.GetBookmarkModel();
-  BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->GetBookmarkBarNode();
   GURL url(GURL("http://foo.com"));
   const std::wstring title(L"blah");
-  BookmarkNode* node = model->AddURL(root, 0, title, url);
+  const BookmarkNode* node = model->AddURL(root, 0, title, url);
   BookmarkDragData drag_data(node);
   EXPECT_TRUE(drag_data.is_valid());
   ASSERT_EQ(1, drag_data.elements.size());
@@ -93,10 +93,10 @@ TEST_F(BookmarkDragDataTest, Group) {
   profile.CreateBookmarkModel(false);
   profile.SetID(L"id");
   BookmarkModel* model = profile.GetBookmarkModel();
-  BookmarkNode* root = model->GetBookmarkBarNode();
-  BookmarkNode* g1 = model->AddGroup(root, 0, L"g1");
-  BookmarkNode* g11 = model->AddGroup(g1, 0, L"g11");
-  BookmarkNode* g12 = model->AddGroup(g1, 0, L"g12");
+  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* g1 = model->AddGroup(root, 0, L"g1");
+  const BookmarkNode* g11 = model->AddGroup(g1, 0, L"g11");
+  const BookmarkNode* g12 = model->AddGroup(g1, 0, L"g12");
 
   BookmarkDragData drag_data(g12);
   EXPECT_TRUE(drag_data.is_valid());
@@ -117,7 +117,7 @@ TEST_F(BookmarkDragDataTest, Group) {
   EXPECT_FALSE(read_data.elements[0].is_url);
 
   // We should get back the same node when asking for the same profile.
-  BookmarkNode* r_g12 = read_data.GetFirstNode(&profile);
+  const BookmarkNode* r_g12 = read_data.GetFirstNode(&profile);
   EXPECT_TRUE(g12 == r_g12);
 
   // A different profile should return NULL for the node.
@@ -131,8 +131,8 @@ TEST_F(BookmarkDragDataTest, GroupWithChild) {
   profile.SetID(L"id");
   profile.CreateBookmarkModel(false);
   BookmarkModel* model = profile.GetBookmarkModel();
-  BookmarkNode* root = model->GetBookmarkBarNode();
-  BookmarkNode* group = model->AddGroup(root, 0, L"g1");
+  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* group = model->AddGroup(root, 0, L"g1");
 
   GURL url(GURL("http://foo.com"));
   const std::wstring title(L"blah2");
@@ -159,7 +159,7 @@ TEST_F(BookmarkDragDataTest, GroupWithChild) {
   EXPECT_TRUE(read_child.is_url);
 
   // And make sure we get the node back.
-  BookmarkNode* r_group = read_data.GetFirstNode(&profile);
+  const BookmarkNode* r_group = read_data.GetFirstNode(&profile);
   EXPECT_TRUE(group == r_group);
 }
 
@@ -169,16 +169,16 @@ TEST_F(BookmarkDragDataTest, MultipleNodes) {
   profile.SetID(L"id");
   profile.CreateBookmarkModel(false);
   BookmarkModel* model = profile.GetBookmarkModel();
-  BookmarkNode* root = model->GetBookmarkBarNode();
-  BookmarkNode* group = model->AddGroup(root, 0, L"g1");
+  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* group = model->AddGroup(root, 0, L"g1");
 
   GURL url(GURL("http://foo.com"));
   const std::wstring title(L"blah2");
 
-  BookmarkNode* url_node = model->AddURL(group, 0, title, url);
+  const BookmarkNode* url_node = model->AddURL(group, 0, title, url);
 
   // Write the nodes to the clipboard.
-  std::vector<BookmarkNode*> nodes;
+  std::vector<const BookmarkNode*> nodes;
   nodes.push_back(group);
   nodes.push_back(url_node);
   BookmarkDragData drag_data(nodes);
@@ -204,7 +204,7 @@ TEST_F(BookmarkDragDataTest, MultipleNodes) {
   EXPECT_EQ(0, read_url.children.size());
 
   // And make sure we get the node back.
-  std::vector<BookmarkNode*> read_nodes = read_data.GetNodes(&profile);
+  std::vector<const BookmarkNode*> read_nodes = read_data.GetNodes(&profile);
   ASSERT_EQ(2, read_nodes.size());
   EXPECT_TRUE(read_nodes[0] == group);
   EXPECT_TRUE(read_nodes[1] == url_node);

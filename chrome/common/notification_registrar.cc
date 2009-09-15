@@ -47,25 +47,43 @@ void NotificationRegistrar::Remove(NotificationObserver* observer,
   Record record = { observer, type, source };
   RecordVector::iterator found = std::find(
       registered_.begin(), registered_.end(), record);
-  if (found != registered_.end()) {
-    registered_.erase(found);
-  } else {
-    // Fall through to passing the removal through to the notification service.
-    // If it really isn't registered, it will also assert and do nothing, but
-    // we might as well catch the case where the class is trying to unregister
-    // for something they registered without going through us.
-    NOTREACHED();
+  if (found == registered_.end()) {
+    NOTREACHED() << "Trying to remove unregistered observer of type " <<
+        type.value << " from list of size " << registered_.size() << ".";
+    return;
   }
+  registered_.erase(found);
 
-  NotificationService::current()->RemoveObserver(observer, type, source);
+  // This can be NULL if our owner outlives the NotificationService, e.g. if our
+  // owner is a Singleton.
+  NotificationService* service = NotificationService::current();
+  if (service)
+    service->RemoveObserver(observer, type, source);
 }
 
 void NotificationRegistrar::RemoveAll() {
+  // Early-exit if no registrations, to avoid calling
+  // NotificationService::current.  If we've constructed an object with a
+  // NotificationRegistrar member, but haven't actually used the notification
+  // service, and we reach prgram exit, then calling current() below could try
+  // to initialize the service's lazy TLS pointer during exit, which throws
+  // wrenches at things.
+  if (registered_.empty())
+    return;
+
+  // This can be NULL if our owner outlives the NotificationService, e.g. if our
+  // owner is a Singleton.
   NotificationService* service = NotificationService::current();
-  for (size_t i = 0; i < registered_.size(); i++) {
-    service->RemoveObserver(registered_[i].observer,
-                            registered_[i].type,
-                            registered_[i].source);
+  if (service) {
+    for (size_t i = 0; i < registered_.size(); i++) {
+      service->RemoveObserver(registered_[i].observer,
+                              registered_[i].type,
+                              registered_[i].source);
+    }
   }
   registered_.clear();
+}
+
+bool NotificationRegistrar::IsEmpty() const {
+  return registered_.empty();
 }

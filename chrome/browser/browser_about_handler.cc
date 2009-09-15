@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/file_version_info.h"
 #include "base/histogram.h"
 #include "base/platform_thread.h"
@@ -22,12 +24,11 @@
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/about_handler.h"
 #include "googleurl/src/gurl.h"
@@ -44,6 +45,9 @@
 #include "chrome/browser/views/about_ipc_dialog.h"
 #include "chrome/browser/views/about_network_dialog.h"
 #endif
+
+using base::Time;
+using base::TimeDelta;
 
 namespace {
 
@@ -76,7 +80,7 @@ ChromeURLDataManager::DataSource* about_source = NULL;
 // time that about memory is being computed.
 std::string GetAboutMemoryRedirectResponse() {
   return "<meta http-equiv=\"refresh\" "
-      "content=\"0;chrome-ui://about/memory\">";
+      "content=\"0;chrome://about/memory\">";
 }
 
 class AboutSource : public ChromeURLDataManager::DataSource {
@@ -137,24 +141,31 @@ std::string AboutDns() {
 }
 
 std::string AboutHistograms(const std::string& query) {
+  TimeDelta wait_time = TimeDelta::FromMilliseconds(10000);
+
+  HistogramSynchronizer* current_synchronizer =
+      HistogramSynchronizer::CurrentSynchronizer();
+  DCHECK(current_synchronizer != NULL);
+  current_synchronizer->FetchRendererHistogramsSynchronously(wait_time);
+
   std::string data;
-  for (RenderProcessHost::iterator it = RenderProcessHost::begin();
-       it != RenderProcessHost::end(); ++it) {
-    it->second->Send(new ViewMsg_GetRendererHistograms());
-  }
-
-  // TODO(raman): Delay page layout until we get respnoses
-  // back from renderers, and not have to use a fixed size delay.
-  PlatformThread::Sleep(1000);
-
   StatisticsRecorder::WriteHTMLGraph(query, &data);
   return data;
 }
 
 std::string AboutLinuxSplash() {
+  int resource_id = IDR_LINUX_SPLASH_HTML_CHROMIUM;
+  scoped_ptr<FileVersionInfo> version_info(
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+  if (version_info == NULL) {
+    DLOG(ERROR) << "Unable to create FileVersionInfo object";
+  } else {
+    if (version_info->is_official_build()) {
+      resource_id = IDR_LINUX_SPLASH_HTML_CHROME;
+    }
+  }
   static const std::string linux_splash_html =
-      ResourceBundle::GetSharedInstance().GetDataResource(
-          IDR_LINUX_SPLASH_HTML);
+      ResourceBundle::GetSharedInstance().GetDataResource(resource_id);
 
   return linux_splash_html;
 }
@@ -370,8 +381,8 @@ std::string AboutVersion() {
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_VERSION_HTML));
 
-  return jstemplate_builder::GetTemplateHtml(
-      version_html, &localized_strings, "t" /* template root node id */);
+  return jstemplate_builder::GetI18nTemplateHtml(
+      version_html, &localized_strings);
 }
 
 // AboutSource -----------------------------------------------------------------
@@ -577,7 +588,7 @@ void AboutMemoryHandler::OnDetailsAvailable() {
 
 // -----------------------------------------------------------------------------
 
-bool WillHandleBrowserAboutURL(GURL* url, TabContentsType* type) {
+bool WillHandleBrowserAboutURL(GURL* url) {
   // We only handle about: schemes.
   if (!url->SchemeIs(chrome::kAboutScheme))
     return false;
@@ -592,7 +603,14 @@ bool WillHandleBrowserAboutURL(GURL* url, TabContentsType* type) {
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutCacheURL)) {
     // Create an mapping from about:cache to the view-cache: internal URL.
     *url = GURL(std::string(chrome::kViewCacheScheme) + ":");
-    *type = TAB_CONTENTS_WEB;
+    return true;
+  }
+
+  // Handle URL to crash the browser process.
+  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutBrowserCrash)) {
+    // Induce an intentional crash in the browser process.
+    int* bad_pointer = NULL;
+    *bad_pointer = 42;
     return true;
   }
 
@@ -613,25 +631,25 @@ bool WillHandleBrowserAboutURL(GURL* url, TabContentsType* type) {
   // Special case about:memory to go through a redirect before ending up on
   // the final page. See GetAboutMemoryRedirectResponse above for why.
   if (LowerCaseEqualsASCII(url->path(), kMemoryPath)) {
-    *url = GURL("chrome-ui://about/memory-redirect");
-    *type = TAB_CONTENTS_WEB;
+    *url = GURL("chrome://about/memory-redirect");
     return true;
   }
 
-  // Rewrite the about URL to use chrome-ui. WebKit treats all about URLS the
+  // Rewrite the about URL to use chrome:. WebKit treats all about URLS the
   // same (blank page), so if we want to display content, we need another
   // scheme.
-  std::string about_url = "chrome-ui://about/";
+  std::string about_url = "chrome://about/";
   about_url.append(url->path());
   *url = GURL(about_url);
-  *type = TAB_CONTENTS_WEB;
   return true;
 }
 
-// This function gets called with the fixed-up chrome-ui URLs, so we have to
+// This function gets called with the fixed-up chrome: URLs, so we have to
 // compare against those instead of "about:blah".
 bool HandleNonNavigationAboutURL(const GURL& url) {
-#if defined(OS_WIN)
+  // About:network and IPC and currently buggy, so we disable it for official
+  // builds.
+#if defined(OS_WIN) && !defined(OFFICIAL_BUILD)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUINetworkURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
     AboutNetworkDialog::RunDialog();

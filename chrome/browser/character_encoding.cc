@@ -7,12 +7,12 @@
 #include <map>
 #include <set>
 
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/common/l10n_util.h"
 #include "grit/generated_resources.h"
 #include "unicode/ucnv.h"
 
@@ -344,7 +344,7 @@ std::wstring CharacterEncoding::GetCanonicalEncodingNameByAliasName(
 // At last, we put all rest encoding items.
 const std::vector<CharacterEncoding::EncodingInfo>*
     CharacterEncoding::GetCurrentDisplayEncodings(
-    const std::wstring& locale,
+    const std::string& locale,
     const std::wstring& locale_encodings,
     const std::wstring& recently_select_encodings) {
   std::vector<int>* const locale_dependent_encoding_list =

@@ -4,7 +4,10 @@
 
 #include "net/proxy/proxy_resolver_v8.h"
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
+#include "base/waitable_event.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/address_list.h"
@@ -22,6 +25,8 @@ namespace {
 
 // Pseudo-name for the PAC script.
 const char kPacResourceName[] = "proxy-pac-script.js";
+// Pseudo-name for the PAC utility script.
+const char kPacUtilityResourceName[] = "proxy-pac-utility-script.js";
 
 // Convert a V8 String to a std::string.
 std::string V8StringToStdString(v8::Handle<v8::String> s) {
@@ -50,9 +55,77 @@ bool V8ObjectToString(v8::Handle<v8::Value> object, std::string* result) {
   return true;
 }
 
+// Wrapper around HostResolver to give a sync API while running the resolve
+// in async mode on |host_resolver_loop|. If |host_resolver_loop| is NULL,
+// runs sync on the current thread (this mode is just used by testing).
+class SyncHostResolverBridge
+    : public base::RefCountedThreadSafe<SyncHostResolverBridge> {
+ public:
+  SyncHostResolverBridge(HostResolver* host_resolver,
+                         MessageLoop* host_resolver_loop)
+      : host_resolver_(host_resolver),
+        host_resolver_loop_(host_resolver_loop),
+        event_(false, false),
+        ALLOW_THIS_IN_INITIALIZER_LIST(
+            callback_(this, &SyncHostResolverBridge::OnResolveCompletion)) {
+  }
+
+  // Run the resolve on host_resolver_loop, and wait for result.
+  int Resolve(const std::string& hostname, net::AddressList* addresses) {
+    // Port number doesn't matter.
+    HostResolver::RequestInfo info(hostname, 80);
+
+    // Hack for tests -- run synchronously on current thread.
+    if (!host_resolver_loop_)
+      return host_resolver_->Resolve(info, addresses, NULL, NULL);
+
+    // Otherwise start an async resolve on the resolver's thread.
+    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+        &SyncHostResolverBridge::StartResolve, info, addresses));
+
+    // Wait for the resolve to complete in the resolver's thread.
+    event_.Wait();
+    return err_;
+  }
+
+ private:
+  // Called on host_resolver_loop_.
+  void StartResolve(const HostResolver::RequestInfo& info,
+                    net::AddressList* addresses) {
+    DCHECK_EQ(host_resolver_loop_, MessageLoop::current());
+    int error = host_resolver_->Resolve(info, addresses, &callback_, NULL);
+    if (error != ERR_IO_PENDING)
+      OnResolveCompletion(error);  // Completed synchronously.
+  }
+
+  // Called on host_resolver_loop_.
+  void OnResolveCompletion(int result) {
+    DCHECK_EQ(host_resolver_loop_, MessageLoop::current());
+    err_ = result;
+    event_.Signal();
+  }
+
+  scoped_refptr<HostResolver> host_resolver_;
+  MessageLoop* host_resolver_loop_;
+
+  // Event to notify completion of resolve request.
+  base::WaitableEvent event_;
+
+  // Callback for when the resolve completes on host_resolver_loop_.
+  net::CompletionCallbackImpl<SyncHostResolverBridge> callback_;
+
+  // The result from the result request (set by in host_resolver_loop_).
+  int err_;
+};
+
 // JSBIndings implementation.
 class DefaultJSBindings : public ProxyResolverV8::JSBindings {
  public:
+  DefaultJSBindings(HostResolver* host_resolver,
+                    MessageLoop* host_resolver_loop)
+      : host_resolver_(new SyncHostResolverBridge(
+          host_resolver, host_resolver_loop)) {}
+
   // Handler for "alert(message)".
   virtual void Alert(const std::string& message) {
     LOG(INFO) << "PAC-alert: " << message;
@@ -61,7 +134,7 @@ class DefaultJSBindings : public ProxyResolverV8::JSBindings {
   // Handler for "myIpAddress()". Returns empty string on failure.
   virtual std::string MyIpAddress() {
     // DnsResolve("") returns "", so no need to check for failure.
-    return DnsResolve(GetMyHostName());
+    return DnsResolve(GetHostName());
   }
 
   // Handler for "dnsResolve(host)". Returns empty string on failure.
@@ -71,10 +144,9 @@ class DefaultJSBindings : public ProxyResolverV8::JSBindings {
     if (host.empty())
       return std::string();
 
-    // Try to resolve synchronously.
+    // Do a sync resolve of the hostname.
     net::AddressList address_list;
-    const int kPort = 80;  // Doesn't matter what this is.
-    int result = host_resolver_.Resolve(host, kPort, &address_list, NULL);
+    int result = host_resolver_->Resolve(host, &address_list);
 
     if (result != OK)
       return std::string();  // Failed.
@@ -96,7 +168,7 @@ class DefaultJSBindings : public ProxyResolverV8::JSBindings {
   }
 
  private:
-  HostResolver host_resolver_;
+  scoped_refptr<SyncHostResolverBridge> host_resolver_;
 };
 
 }  // namespace
@@ -106,7 +178,7 @@ class DefaultJSBindings : public ProxyResolverV8::JSBindings {
 class ProxyResolverV8::Context {
  public:
   Context(JSBindings* js_bindings, const std::string& pac_data)
-       : js_bindings_(js_bindings) {
+      : js_bindings_(js_bindings) {
     DCHECK(js_bindings != NULL);
     InitV8(pac_data);
   }
@@ -184,21 +256,18 @@ class ProxyResolverV8::Context {
 
     v8::Context::Scope ctx(v8_context_);
 
-    v8::TryCatch try_catch;
+    // Add the PAC utility functions to the environment.
+    // (This script should never fail, as it is a string literal!)
+    int rv = RunScript(PROXY_RESOLVER_SCRIPT, kPacUtilityResourceName);
+    if (rv != OK) {
+      NOTREACHED();
+      return;
+    }
 
-    // Compile the script, including the PAC library functions.
-    std::string text_raw = pac_data + PROXY_RESOLVER_SCRIPT;
-    v8::Local<v8::String> text = StdStringToV8String(text_raw);
-    v8::ScriptOrigin origin = v8::ScriptOrigin(
-        v8::String::New(kPacResourceName));
-    v8::Local<v8::Script> code = v8::Script::Compile(text, &origin);
-
-    // Execute.
-    if (!code.IsEmpty())
-      code->Run();
-
-    if (try_catch.HasCaught())
-      HandleError(try_catch.Message());
+    // Add the user's PAC code to the environment.
+    rv = RunScript(pac_data, kPacResourceName);
+    if (rv != OK)
+      return;
   }
 
   // Handle an exception thrown by V8.
@@ -211,6 +280,29 @@ class ProxyResolverV8::Context {
     std::string error_message;
     V8ObjectToString(message->Get(), &error_message);
     js_bindings_->OnError(line_number, error_message);
+  }
+
+  // Compiles and runs |script_utf8| in the current V8 context.
+  // Returns OK on success, otherwise an error code.
+  int RunScript(const std::string& script_utf8, const char* script_name) {
+    v8::TryCatch try_catch;
+
+    // Compile the script.
+    v8::Local<v8::String> text = StdStringToV8String(script_utf8);
+    v8::ScriptOrigin origin = v8::ScriptOrigin(v8::String::New(script_name));
+    v8::Local<v8::Script> code = v8::Script::Compile(text, &origin);
+
+    // Execute.
+    if (!code.IsEmpty())
+      code->Run();
+
+    // Check for errors.
+    if (try_catch.HasCaught()) {
+      HandleError(try_catch.Message());
+      return ERR_PAC_SCRIPT_FAILED;
+    }
+
+    return OK;
   }
 
   // V8 callback for when "alert()" is invoked by the PAC script.
@@ -266,19 +358,11 @@ class ProxyResolverV8::Context {
   }
 
   JSBindings* js_bindings_;
-  HostResolver host_resolver_;
   v8::Persistent<v8::External> v8_this_;
   v8::Persistent<v8::Context> v8_context_;
 };
 
 // ProxyResolverV8 ------------------------------------------------------------
-
-// the |false| argument to ProxyResolver means the ProxyService will handle
-// downloading of the PAC script, and notify changes through SetPacScript().
-ProxyResolverV8::ProxyResolverV8()
-    : ProxyResolver(false /*does_fetch*/),
-      js_bindings_(new DefaultJSBindings()) {
-}
 
 ProxyResolverV8::ProxyResolverV8(
     ProxyResolverV8::JSBindings* custom_js_bindings)
@@ -303,6 +387,12 @@ void ProxyResolverV8::SetPacScript(const std::string& data) {
   context_.reset();
   if (!data.empty())
     context_.reset(new Context(js_bindings_.get(), data));
+}
+
+// static
+ProxyResolverV8::JSBindings* ProxyResolverV8::CreateDefaultBindings(
+    HostResolver* host_resolver, MessageLoop* host_resolver_loop) {
+  return new DefaultJSBindings(host_resolver, host_resolver_loop);
 }
 
 }  // namespace net

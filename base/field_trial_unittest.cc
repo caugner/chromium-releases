@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,6 +69,25 @@ TEST_F(FieldTrialTest, AbsoluteProbabilities) {
   }
 }
 
+TEST_F(FieldTrialTest, RemainingProbability) {
+  // First create a test that hasn't had a winner yet.
+  const std::string winner = "Winner";
+  const std::string loser = "Loser";
+  scoped_refptr<FieldTrial> trial;
+  int counter = 0;
+  do {
+    std::string name = StringPrintf("trial%d", ++counter);
+    trial = new FieldTrial(name, 10);
+    trial->AppendGroup(loser, 5);  // 50% chance of not being chosen.
+  } while (trial->group() != FieldTrial::kNotParticipating);
+
+  // Now add a winner with all remaining probability.
+  trial->AppendGroup(winner, FieldTrial::kAllRemainingProbability);
+
+  // And that winner should ALWAYS win.
+  EXPECT_EQ(winner, trial->group_name());
+}
+
 TEST_F(FieldTrialTest, MiddleProbabilities) {
   char name[] = " same name";
   bool false_event_seen = false;
@@ -113,4 +132,67 @@ TEST_F(FieldTrialTest, OneWinner) {
   EXPECT_GE(winner_index, 0);
   EXPECT_EQ(trial->group(), winner_index);
   EXPECT_EQ(winner_name, trial->group_name());
+}
+
+TEST_F(FieldTrialTest, Save) {
+  std::string save_string;
+
+  FieldTrial* trial = new FieldTrial("Some name", 10);
+  // There is no winner yet, so no textual group name is associated with trial.
+  EXPECT_EQ(trial->group_name(), "");
+  FieldTrialList::StatesToString(&save_string);
+  EXPECT_EQ(save_string, "");
+  save_string.clear();
+
+  // Create a winning group.
+  trial->AppendGroup("Winner", 10);
+  FieldTrialList::StatesToString(&save_string);
+  EXPECT_EQ(save_string, "Some name/Winner/");
+  save_string.clear();
+
+  // Create a second trial and winning group.
+  FieldTrial* trial2 = new FieldTrial("xxx", 10);
+  trial2->AppendGroup("yyyy", 10);
+
+  FieldTrialList::StatesToString(&save_string);
+  // We assume names are alphabetized... though this is not critical.
+  EXPECT_EQ(save_string, "Some name/Winner/xxx/yyyy/");
+}
+
+TEST_F(FieldTrialTest, Restore) {
+  EXPECT_EQ(NULL, FieldTrialList::Find("Some_name"));
+  EXPECT_EQ(NULL, FieldTrialList::Find("xxx"));
+
+  FieldTrialList::StringAugmentsState("Some_name/Winner/xxx/yyyy/");
+
+  FieldTrial* trial = FieldTrialList::Find("Some_name");
+  ASSERT_NE(static_cast<FieldTrial*>(NULL), trial);
+  EXPECT_EQ(trial->group_name(), "Winner");
+  EXPECT_EQ(trial->name(), "Some_name");
+
+  trial = FieldTrialList::Find("xxx");
+  ASSERT_NE(static_cast<FieldTrial*>(NULL), trial);
+  EXPECT_EQ(trial->group_name(), "yyyy");
+  EXPECT_EQ(trial->name(), "xxx");
+}
+
+TEST_F(FieldTrialTest, BogusRestore) {
+  EXPECT_FALSE(FieldTrialList::StringAugmentsState("MissingSlash"));
+  EXPECT_FALSE(FieldTrialList::StringAugmentsState("MissingGroupName/"));
+  EXPECT_FALSE(FieldTrialList::StringAugmentsState("MissingFinalSlash/gname"));
+  EXPECT_FALSE(FieldTrialList::StringAugmentsState("/noname, only group/"));
+}
+
+TEST_F(FieldTrialTest, DuplicateRestore) {
+  FieldTrial* trial = new FieldTrial("Some name", 10);
+  trial->AppendGroup("Winner", 10);
+  std::string save_string;
+  FieldTrialList::StatesToString(&save_string);
+  EXPECT_EQ("Some name/Winner/", save_string);
+
+  // It is OK if we redundantly specify a winner.
+  EXPECT_TRUE(FieldTrialList::StringAugmentsState(save_string));
+
+  // But it is an error to try to change to a different winner.
+  EXPECT_FALSE(FieldTrialList::StringAugmentsState("Some name/Loser/"));
 }

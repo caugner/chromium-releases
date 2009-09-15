@@ -8,31 +8,23 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/task.h"
+#include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/save_file.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/stl_util-inl.h"
+#include "chrome/common/platform_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request_context.h"
 
-#if defined(OS_WIN)
-#include "chrome/common/win_util.h"
-#endif
-
-#if defined(OS_WIN)
-// TODO(port): port these headers to posix.
-#include "chrome/browser/tab_contents/tab_contents.h"
-#elif defined(OS_POSIX)
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 SaveFileManager::SaveFileManager(MessageLoop* ui_loop,
                                  MessageLoop* io_loop,
@@ -221,7 +213,7 @@ void SaveFileManager::RemoveSaveFile(int save_id, const GURL& save_url,
 // only on the UI thread.
 SavePackage* SaveFileManager::GetSavePackageFromRenderIds(
     int render_process_id, int render_view_id) {
-  WebContents* contents = tab_util::GetWebContentsByID(render_process_id,
+  TabContents* contents = tab_util::GetTabContentsByID(render_process_id,
                                                        render_view_id);
   if (contents)
     return contents->save_package();
@@ -521,12 +513,7 @@ void SaveFileManager::OnDeleteDirectoryOrFile(const FilePath& full_path,
 // We run on this thread to avoid blocking the UI with slow Shell operations.
 void SaveFileManager::OnShowSavedFileInShell(const FilePath full_path) {
   DCHECK(MessageLoop::current() == GetSaveLoop());
-  // TODO(port): make an equivalent call on mac/linux.
-#if defined(OS_WIN)
-  win_util::ShowItemInFolder(full_path.value());
-#elif defined(OS_POSIX)
-  NOTIMPLEMENTED();
-#endif
+  platform_util::ShowItemInFolder(full_path);
 }
 
 void SaveFileManager::RenameAllFiles(

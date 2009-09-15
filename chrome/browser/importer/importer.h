@@ -5,24 +5,28 @@
 #ifndef CHROME_BROWSER_IMPORTER_IMPORTER_H_
 #define CHROME_BROWSER_IMPORTER_IMPORTER_H_
 
-#include <set>
+#include <string>
 #include <vector>
 
 #include "build/build_config.h"
 
 #include "base/basictypes.h"
-#include "base/message_loop.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/history/history_types.h"
-#if defined(OS_WIN)
-#include "chrome/browser/password_manager/ie7_password.h"
-#endif
 #include "chrome/browser/profile.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/password_form.h"
+
+class MessageLoop;
+class TemplateURL;
+
+struct IE7PasswordInfo;
+
+namespace webkit_glue {
+struct PasswordForm;
+}
 
 // An enumeration of the type of browsers that we support to import
 // settings and data from them.
@@ -32,6 +36,7 @@ enum ProfileType {
 #endif
   FIREFOX2,
   FIREFOX3,
+  GOOGLE_TOOLBAR5,
   // Identifies a 'bookmarks.html' file.
   BOOKMARKS_HTML
 };
@@ -71,22 +76,15 @@ class ProfileWriter : public base::RefCounted<ProfileWriter> {
     // URL with the same url, path and title.
     ADD_IF_UNIQUE = 1 << 0,
 
-    // Indicates the bookmarks are being added during first run.
-    FIRST_RUN     = 1 << 1
+    // Indicates the bookmarks should be added to the bookmark bar.
+    IMPORT_TO_BOOKMARK_BAR     = 1 << 1
   };
 
   explicit ProfileWriter(Profile* profile) : profile_(profile) { }
   virtual ~ProfileWriter() { }
 
-  // Methods for monitoring BookmarkModel status.
   virtual bool BookmarkModelIsLoaded() const;
-  virtual void AddBookmarkModelObserver(
-      BookmarkModelObserver* observer);
-
-  // Methods for monitoring TemplateURLModel status.
   virtual bool TemplateURLModelIsLoaded() const;
-  virtual void AddTemplateURLModelObserver(
-      NotificationObserver* observer);
 
   // A bookmark entry.
   struct BookmarkEntry {
@@ -100,7 +98,7 @@ class ProfileWriter : public base::RefCounted<ProfileWriter> {
   };
 
   // Helper methods for adding data to local stores.
-  virtual void AddPasswordForm(const PasswordForm& form);
+  virtual void AddPasswordForm(const webkit_glue::PasswordForm& form);
 #if defined(OS_WIN)
   virtual void AddIE7PasswordInfo(const IE7PasswordInfo& info);
 #endif
@@ -108,10 +106,10 @@ class ProfileWriter : public base::RefCounted<ProfileWriter> {
   virtual void AddHomepage(const GURL& homepage);
   // Adds the bookmarks to the BookmarkModel.
   // |options| is a bitmask of BookmarkOptions and dictates how and
-  // which bookmarks are added. If the bitmask contains FIRST_RUN,
+  // which bookmarks are added. If the bitmask contains IMPORT_TO_BOOKMARK_BAR,
   // then any entries with a value of true for in_toolbar are added to
-  // the bookmark bar. If the bitmask does not contain FIRST_RUN then
-  // the folder name the bookmarks are added to is uniqued based on
+  // the bookmark bar. If the bitmask does not contain IMPORT_TO_BOOKMARK_BAR
+  // then the folder name the bookmarks are added to is uniqued based on
   // |first_folder_name|. For example, if |first_folder_name| is 'foo'
   // and a folder with the name 'foo' already exists in the other
   // bookmarks folder, then the folder name 'foo 2' is used.
@@ -150,11 +148,11 @@ class ProfileWriter : public base::RefCounted<ProfileWriter> {
 
   // Returns true if a bookmark exists with the same url, title and path
   // as |entry|. |first_folder_name| is the name to use for the first
-  // path entry if |first_run| is true.
+  // path entry if |import_to_bookmark_bar| is true.
   bool DoesBookmarkExist(BookmarkModel* model,
                          const BookmarkEntry& entry,
                          const std::wstring& first_folder_name,
-                         bool first_run);
+                         bool import_to_bookmark_bar);
 
   Profile* profile_;
 
@@ -178,22 +176,23 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   // BookmarkModelObserver methods.
   virtual void Loaded(BookmarkModel* model);
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index) {}
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {}
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
-                                   int index) {}
+                                   const BookmarkNode* parent,
+                                   int old_index,
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {}
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node) {}
+                                             const BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {}
+                                         const BookmarkNode* node) {}
 
   // NotificationObserver method. Called when TemplateURLModel has been loaded.
   void Observe(NotificationType type,
@@ -211,6 +210,7 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   // Starts the process of importing the settings and data depending
   // on what the user selected.
   void StartImportSettings(const ProfileInfo& profile_info,
+                           Profile* target_profile,
                            uint16 items,
                            ProfileWriter* writer,
                            bool first_run);
@@ -226,6 +226,10 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
 
   bool is_headless() const {
     return headless_;
+  }
+
+  void set_parent_window(gfx::NativeWindow parent_window) {
+    parent_window_ = parent_window;
   }
 
   // An interface which an object can implement to be notified of events during
@@ -270,6 +274,9 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   // passed to StartImportSettings().
   const ProfileInfo& GetSourceProfileInfoAt(int index) const;
 
+  // Returns the ProfileInfo with the given browser type
+  const ProfileInfo& GetSourceProfileInfoForBrowserType(int browser_type) const;
+
  private:
   // If we're not waiting on any model to finish loading, invokes the task_.
   void InvokeTaskIfDone();
@@ -284,6 +291,9 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   void DetectIEProfiles();
 #endif
   void DetectFirefoxProfiles();
+  void DetectGoogleToolbarProfiles();
+
+  NotificationRegistrar registrar_;
 
   // The list of profiles with the default one first.
   std::vector<ProfileInfo*> source_profiles_;
@@ -302,13 +312,15 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
 
   // True if we're waiting for the model to finish loading.
   bool waiting_for_bookmarkbar_model_;
-  bool waiting_for_template_url_model_;
 
   // True if source profile is readable.
   bool is_source_readable_;
 
   // True if UI is not to be shown.
   bool headless_;
+
+  // Parent Window to use when showing any modal dialog boxes.
+  gfx::NativeWindow parent_window_;
 
   // Firefox profile lock.
   scoped_ptr<FirefoxProfileLock> firefox_lock_;
@@ -336,43 +348,28 @@ class Importer : public base::RefCounted<Importer> {
   // Cancels the import process.
   virtual void Cancel() { cancelled_ = true; }
 
-  void set_first_run(bool first_run) { first_run_ = first_run; }
+  void set_import_to_bookmark_bar(bool import_to_bookmark_bar) {
+    import_to_bookmark_bar_ = import_to_bookmark_bar;
+  }
 
   bool cancelled() const { return cancelled_; }
 
  protected:
-  Importer()
-      : main_loop_(MessageLoop::current()),
-        delagate_loop_(NULL),
-        importer_host_(NULL),
-        cancelled_(false),
-        first_run_(false) {}
+  Importer();
 
   // Notifies the coordinator that the collection of data for the specified
   // item has begun.
-  void NotifyItemStarted(ImportItem item) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(importer_host_,
-        &ImporterHost::ImportItemStarted, item));
-  }
+  void NotifyItemStarted(ImportItem item);
 
   // Notifies the coordinator that the collection of data for the specified
   // item has completed.
-  void NotifyItemEnded(ImportItem item) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(importer_host_,
-        &ImporterHost::ImportItemEnded, item));
-  }
+  void NotifyItemEnded(ImportItem item);
 
   // Notifies the coordinator that the import operation has begun.
-  void NotifyStarted() {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(importer_host_,
-        &ImporterHost::ImportStarted));
-  }
+  void NotifyStarted();
 
   // Notifies the coordinator that the entire import operation has completed.
-  void NotifyEnded() {
-    main_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(importer_host_, &ImporterHost::ImportEnded));
-  }
+  void NotifyEnded();
 
   // Given raw image data, decodes the icon, re-sampling to the correct size as
   // necessary, and re-encodes as PNG data in the given output vector. Returns
@@ -380,7 +377,7 @@ class Importer : public base::RefCounted<Importer> {
   static bool ReencodeFavicon(const unsigned char* src_data, size_t src_len,
                               std::vector<unsigned char>* png_data);
 
-  bool first_run() const { return first_run_; }
+  bool import_to_bookmark_bar() const { return import_to_bookmark_bar_; }
 
   // The importer should know the main thread so that ProfileWriter
   // will be invoked in thread instead.
@@ -397,7 +394,7 @@ class Importer : public base::RefCounted<Importer> {
   bool cancelled_;
 
   // True if the importer is created in the first run UI.
-  bool first_run_;
+  bool import_to_bookmark_bar_;
 
   DISALLOW_EVIL_CONSTRUCTORS(Importer);
 };
@@ -416,7 +413,7 @@ class ImportObserver {
 };
 
 
-#if defined(OS_WIN)
+#if !defined(OS_MACOSX)
 // TODO(port): Make StartImportingWithUI portable.
 
 // Shows a UI for importing and begins importing the specified items from
@@ -424,7 +421,7 @@ class ImportObserver {
 // complete, can be NULL. parent is the window to parent the UI to, can be NULL
 // if there's nothing to parent to. first_run is true if it's invoked in the
 // first run UI.
-void StartImportingWithUI(HWND parent_window,
+void StartImportingWithUI(gfx::NativeWindow parent_window,
                           int16 items,
                           ImporterHost* coordinator,
                           const ProfileInfo& source_profile,

@@ -3,34 +3,33 @@
 // found in the LICENSE file.
 
 #include "config.h"
-#include "base/compiler_specific.h"
 
-MSVC_PUSH_WARNING_LEVEL(0);
 #include "Frame.h"
+#include "HTMLFormElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
-MSVC_POP_WARNING();
-
 #undef LOG
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "webkit/api/public/WebForm.h"
 #include "webkit/glue/autofill_form.h"
 #include "webkit/glue/glue_util.h"
 
-AutofillForm* AutofillForm::CreateAutofillForm(
-    WebCore::HTMLFormElement* form) {
+using WebKit::WebForm;
 
+namespace webkit_glue {
+
+AutofillForm* AutofillForm::Create(const WebForm& webform) {
+  RefPtr<WebCore::HTMLFormElement> form = WebFormToHTMLFormElement(webform);
   DCHECK(form);
 
   WebCore::Frame* frame = form->document()->frame();
-
   if (!frame)
     return NULL;
 
   WebCore::FrameLoader* loader = frame->loader();
-
   if (!loader)
     return NULL;
 
@@ -50,7 +49,7 @@ AutofillForm* AutofillForm::CreateAutofillForm(
 
     WebCore::HTMLInputElement* input_element =
         static_cast<WebCore::HTMLInputElement*>(form_element);
-    if (!input_element->isEnabled())
+    if (!input_element->isEnabledFormControl())
       continue;
 
     // Ignore all input types except TEXT.
@@ -58,8 +57,7 @@ AutofillForm* AutofillForm::CreateAutofillForm(
       continue;
 
     // For each TEXT input field, store the name and value
-    std::wstring value = webkit_glue::StringToStdWString(
-        input_element->value());
+    std::wstring value = StringToStdWString(input_element->value());
     TrimWhitespace(value, TRIM_LEADING, &value);
     if (value.length() == 0)
       continue;
@@ -77,16 +75,18 @@ AutofillForm* AutofillForm::CreateAutofillForm(
 // static
 std::wstring AutofillForm::GetNameForInputElement(WebCore::HTMLInputElement*
     element) {
-  std::wstring name = webkit_glue::StringToStdWString(element->name());
+  std::wstring name = StringToStdWString(element->name());
   std::wstring trimmed_name;
   TrimWhitespace(name, TRIM_LEADING, &trimmed_name);
   if (trimmed_name.length() > 0)
     return trimmed_name;
 
-  name = webkit_glue::StringToStdWString(element->id());
+  name = StringToStdWString(element->id());
   TrimWhitespace(name, TRIM_LEADING, &trimmed_name);
   if (trimmed_name.length() > 0)
     return trimmed_name;
 
   return std::wstring();
 }
+
+}  // namespace webkit_glue

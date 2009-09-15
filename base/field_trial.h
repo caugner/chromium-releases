@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 // pseudo-randomly selected).
 //
 // States are typically generated randomly, either based on a one time
-// randomization (generated randomly once, and then persitently reused in the
+// randomization (generated randomly once, and then persistently reused in the
 // client during each future run of the program), or by a startup randomization
 // (generated each time the application starts up, but held constant during the
 // duration of the process), or by continuous randomization across a run (where
@@ -50,7 +50,7 @@
 //                                       "MemoryExperiment").data(), count);
 
 // The above code will create 3 distinct histograms, with each run of the
-// application being assigned to of of teh three groups, and for each group, the
+// application being assigned to of of the three groups, and for each group, the
 // correspondingly named histogram will be populated:
 
 // Memory.RendererTotal            // 96% of users still fill this histogram.
@@ -66,16 +66,24 @@
 #include <string>
 
 #include "base/lock.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
 
 
 class FieldTrial : public base::RefCounted<FieldTrial> {
  public:
+  typedef int Probability;  // Probability type for being selected in a trial.
+
+  // A return value to indicate that a given instance has not yet had a group
+  // assignment (and hence is not yet participating in the trial).
   static const int kNotParticipating;
 
-  typedef int Probability;  // Use scaled up probability.
+  // Provide an easy way to assign all remaining probability to a group.  Note
+  // that this will force an instance to participate, and make it illegal to
+  // attempt to probabalistically add any other groups to the trial.  When doing
+  // A/B tests with timings, it is often best to define all groups, so that
+  // histograms will get unique names via the MakeName() methods.
+  static const Probability kAllRemainingProbability;
 
   // The name is used to register the instance with the FieldTrialList class,
   // and can be used to find the trial (only one trial can be present for each
@@ -143,6 +151,11 @@ class FieldTrial : public base::RefCounted<FieldTrial> {
 // Only one instance of this class exists.
 class FieldTrialList {
  public:
+  // Define a separator charactor to use when creating a persistent form of an
+  // instance.  This is intended for use as a command line argument, passed to a
+  // second process to mimic our state (i.e., provide the same group name).
+  static const char kPersistentStringSeparator;  // Currently a slash.
+
   // This singleton holds the global list of registered FieldTrials.
   FieldTrialList();
   // Destructor Release()'s references to all registered FieldTrial instances.
@@ -160,6 +173,21 @@ class FieldTrialList {
 
   static std::string FindFullName(const std::string& name);
 
+  // Create a persistent representation of all FieldTrial instances for
+  // resurrection in another process.  This allows randomization to be done in
+  // one process, and secondary processes can by synchronized on the result.
+  // The resulting string contains only the names, the trial name, and a "/"
+  // separator.
+  static void StatesToString(std::string* output);
+
+  // Use a previously generated state string (re: StatesToString()) augment the
+  // current list of field tests to include the supplied tests, and using a 100%
+  // probability for each test, force them to have the same group string.  This
+  // is commonly used in a sub-process, to carry randomly selected state in a
+  // parent process into this sub-process.
+  //  Currently only the group_name_ and name_ are restored.
+  static bool StringAugmentsState(const std::string& prior_state);
+
   // The time of construction of the global map is recorded in a static variable
   // and is commonly used by experiments to identify the time since the start
   // of the application.  In some experiments it may be useful to discount
@@ -169,6 +197,7 @@ class FieldTrialList {
     if (global_)
       return global_->application_start_time_;
     // For testing purposes only, or when we don't yet have a start time.
+    // TODO(jar): Switch to TimeTicks
     return base::Time::Now();
   }
 
@@ -176,10 +205,19 @@ class FieldTrialList {
   // Helper function should be called only while holding lock_.
   FieldTrial* PreLockedFind(const std::string& name);
 
+  // A map from FieldTrial names to the actual instances.
   typedef std::map<std::string, FieldTrial*> RegistrationList;
 
   static FieldTrialList* global_;  // The singleton of this class.
 
+  // This will tell us if there is an attempt to register a field trial without
+  // creating the FieldTrialList. This is not an error, unless a FieldTrialList
+  // is created after that.
+  static bool register_without_global_;
+
+  // A helper value made availabel to users, that shows when the FieldTrialList
+  // was initialized.  Note that this is a singleton instance, and hence is a
+  // good approximation to the start of the process.
   base::Time application_start_time_;
 
   // Lock for access to registered_.
@@ -190,3 +228,4 @@ class FieldTrialList {
 };
 
 #endif  // BASE_FIELD_TRIAL_H_
+

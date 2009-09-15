@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,10 +65,17 @@ bool PluginInstallerImpl::Initialize(HINSTANCE module_handle, NPP instance,
   DCHECK(instance != NULL);
   DCHECK(module_handle != NULL);
 
+  instance_ = instance;
+  mime_type_ = mime_type;
+
   // The clsid without the {} parentheses.
   std::string raw_activex_clsid;
   if (!ParseInstantiationArguments(mime_type, instance, argc, argn, argv,
-                                   &raw_activex_clsid)) {
+                                   &raw_activex_clsid, &is_activex_,
+                                   &activex_clsid_,
+                                   &activex_codebase_,
+                                   &plugin_download_url_,
+                                   &plugin_finder_url_)) {
     DLOG(ERROR) << "Incorrect arguments passed to plugin";
     NOTREACHED();
     return false;
@@ -274,9 +281,6 @@ void PluginInstallerImpl::URLNotify(const char* url, NPReason reason) {
       DisplayStatus(IDS_DEFAULT_PLUGIN_NO_PLUGIN_AVAILABLE_MSG);
     }
   }
-
-  default_plugin::g_browser->destroystream(instance_, plugin_install_stream_,
-                                           NPRES_DONE);
 }
 
 int16 PluginInstallerImpl::NPP_HandleEvent(void* event) {
@@ -392,12 +396,12 @@ LRESULT PluginInstallerImpl::OnEraseBackGround(UINT message, WPARAM wparam,
 // Use ICU in order to determine whether the locale is right-to-left.
 //
 // TODO(idana) bug# 1246452: there is already code in
-// chrome/common/l10n_util.h/cc that uses ICU to determine the locale
-// direction. We don't currently use this code since code in WebKit should not
-// depend on code in Chrome. We can fix this by pulling (at least part of) the
-// l10n_util functionality up into the Base module.
+// app/l10n_util.h/cc that uses ICU to determine the locale direction. We don't
+// currently use this code since code in WebKit should not depend on code in
+// Chrome. We can fix this by pulling (at least part of) the l10n_util
+// functionality up into the Base module.
 bool PluginInstallerImpl::IsRTLLayout() const {
-  const Locale& locale = Locale::getDefault();
+  const icu::Locale& locale = icu::Locale::getDefault();
   const char* lang = locale.getLanguage();
 
   // Check only for Arabic and Hebrew languages for now.
@@ -667,13 +671,18 @@ LRESULT PluginInstallerImpl::OnActiveXInstallResult(UINT message,
 
 std::string PluginInstallerImpl::ResolveURL(NPP instance,
                                             const std::string& relative_url) {
-  NPObject* object = NULL;
-  default_plugin::g_browser->getvalue(instance, NPNVWindowNPObject, &object);
-  activex_shim::NPNScriptableObject window(instance, object);
-  std::wstring url =
-      window.GetObjectProperty("document").GetStringProperty("URL");
-  GURL base(url);
-  return base.Resolve(relative_url).spec();
+  // The NPAPI functions may not be available if this function is called
+  // as a result of a unit test.
+  if (default_plugin::g_browser) {
+    NPObject* object = NULL;
+    default_plugin::g_browser->getvalue(instance, NPNVWindowNPObject, &object);
+    activex_shim::NPNScriptableObject window(instance, object);
+    std::wstring url =
+        window.GetObjectProperty("document").GetStringProperty("URL");
+    GURL base(url);
+    return base.Resolve(relative_url).spec();
+  }
+  return relative_url;
 }
 
 bool PluginInstallerImpl::InitializeResources(HINSTANCE module_handle) {
@@ -702,42 +711,62 @@ bool PluginInstallerImpl::InitializeResources(HINSTANCE module_handle) {
 }
 
 bool PluginInstallerImpl::ParseInstantiationArguments(
-    NPMIMEType mime_type, NPP instance, int16 argc, char* argn[], char* argv[],
-    std::string* raw_activex_clsid) {
-  instance_ = instance;
-  mime_type_ = mime_type;
+    NPMIMEType mime_type,
+    NPP instance,
+    int16 argc,
+    char* argn[],
+    char* argv[],
+    std::string* raw_activex_clsid,
+    bool* is_activex,
+    std::string* activex_clsid,
+    std::string* activex_codebase,
+    std::string* plugin_download_url,
+    std::string* plugin_finder_url) {
+
+  if (!raw_activex_clsid || !is_activex || !activex_clsid ||
+      !plugin_download_url || !plugin_finder_url || !activex_codebase) {
+    NOTREACHED();
+    return false;
+  }
+
+  *is_activex = false;
+
+  bool valid_mime_type = (mime_type != NULL ? strlen(mime_type) > 0 : false);
 
   for (int i = 0; i < argc; ++i) {
-    if (LowerCaseEqualsASCII(argn[i], "classid") &&
+    // We should only look for activex installation if the mime type passed in
+    // is not valid. In any case this code will be taken out when we remove
+    // the activex shim.
+    if (!valid_mime_type && LowerCaseEqualsASCII(argn[i], "classid") &&
         activex_shim::GetClsidFromClassidAttribute(argv[i],
                                                    raw_activex_clsid)) {
-      is_activex_ = true;
-      activex_clsid_ = std::string("{") + *raw_activex_clsid + "}";
+      *is_activex = true;
+      *activex_clsid = std::string("{") + *raw_activex_clsid + "}";
     }
     if (LowerCaseEqualsASCII(argn[i], "codebase")) {
-      activex_codebase_ = ResolveURL(instance, argv[i]);
-      size_t pos = activex_codebase_.find('#');
+      *activex_codebase = ResolveURL(instance, argv[i]);
+      size_t pos = activex_codebase->find('#');
       if (pos != std::string::npos)
-        plugin_download_url_ = activex_codebase_.substr(0, pos);
+        *plugin_download_url = activex_codebase->substr(0, pos);
       else
-        plugin_download_url_ = activex_codebase_;
+        *plugin_download_url = *activex_codebase;
     }
   }
 
-  if (!is_activex_) {
-    if (!mime_type || !instance) {
+  if (!*is_activex) {
+    if (!valid_mime_type || !instance) {
       DLOG(WARNING) << __FUNCTION__ << " Invalid parameters passed in";
       NOTREACHED();
       return false;
     }
 
-    if (!webkit_glue::GetPluginFinderURL(&plugin_finder_url_)) {
+    if (!webkit_glue::GetPluginFinderURL(plugin_finder_url)) {
       NOTREACHED();
       DLOG(WARNING) << __FUNCTION__ << " Failed to get the plugin finder URL";
       return false;
     }
 
-    DLOG(INFO) << "Plugin finder URL is " << plugin_finder_url_.c_str();
+    DLOG(INFO) << "Plugin finder URL is " << plugin_finder_url->c_str();
   }
 
   return true;

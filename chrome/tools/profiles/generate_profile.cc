@@ -18,7 +18,7 @@
 #include "base/time.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/common/thumbnail_score.h"
-#include "SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using base::Time;
 
@@ -140,7 +140,7 @@ void InsertURLBatch(const std::wstring& profile_dir, int page_id,
     }
 
     // Randomly construct a redirect chain.
-    HistoryService::RedirectList redirects;
+    history::RedirectList redirects;
     if (RandomFloat() < kRedirectProbability) {
       const int redir_count = RandomInt(1, 4);
       for (int i = 0; i < redir_count; ++i)
@@ -152,7 +152,7 @@ void InsertURLBatch(const std::wstring& profile_dir, int page_id,
     history_service->AddPage(url,
                              id_scope, page_id,
                              previous_url, transition,
-                             redirects);
+                             redirects, true);
     ThumbnailScore score(0.75, false, false);
     history_service->SetPageTitle(url, ConstructRandomTitle());
     if (!history_only) {

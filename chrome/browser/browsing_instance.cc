@@ -5,7 +5,8 @@
 #include "chrome/browser/browsing_instance.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/tab_contents/site_instance.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 
@@ -29,9 +30,10 @@ bool BrowsingInstance::ShouldUseProcessPerSite(const GURL& url) {
     // Note that --single-process may have been specified, but that affects the
     // process creation logic in RenderProcessHost, so we do not need to worry
     // about it here.
-    if (url.SchemeIs(chrome::kChromeUIScheme))
+    if (url.SchemeIs(chrome::kChromeUIScheme) ||
+        url.SchemeIs(chrome::kExtensionScheme))
       // Always consolidate instances of the new tab page (and instances of any
-      // other internal resource urls).
+      // other internal resource urls), as well as extensions.
       return true;
 
     // TODO(creis): List any other special cases that we want to limit to a

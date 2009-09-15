@@ -7,10 +7,12 @@
 SCons build system.
 '''
 
-import os
+import filecmp
 import getopt
-import types
+import os
+import shutil
 import sys
+import types
 
 from grit import grd_reader
 from grit import util
@@ -52,6 +54,9 @@ Options:
                     value VAL (defaults to 1) which will be used to control
                     conditional inclusion of resources.
 
+  -E NAME=VALUE     Set environment variable NAME to VALUE (within grit).
+
+
 Conditional inclusion of resources only affects the output of files which
 control which resources get linked into a binary, e.g. it affects .rc files
 meant for compilation but it does not affect resource header files (that define
@@ -64,13 +69,17 @@ are exported to translation interchange files (e.g. XMB files), etc.
 
   def Run(self, opts, args):
     self.output_directory = '.'
-    (own_opts, args) = getopt.getopt(args, 'o:D:')
+    (own_opts, args) = getopt.getopt(args, 'o:D:E:')
     for (key, val) in own_opts:
       if key == '-o':
         self.output_directory = val
       elif key == '-D':
         name, val = ParseDefine(val)
         self.defines[name] = val
+      elif key == '-E':
+        (env_name, env_value) = val.split('=')
+        os.environ[env_name] = env_value
+
     if len(args):
       print "This tool takes no tool-specific arguments."
       return 2
@@ -160,7 +169,8 @@ are exported to translation interchange files (e.g. XMB files), etc.
       # Microsoft's RC compiler can only deal with single-byte or double-byte
       # files (no UTF-8), so we make all RC files UTF-16 to support all
       # character sets.
-      if output.GetType() in ['rc_header']:
+      if output.GetType() in ('rc_header', 'resource_map_header',
+                              'resource_map_source'):
         encoding = 'cp1252'
       else:
         encoding = 'utf_16'
@@ -169,7 +179,9 @@ are exported to translation interchange files (e.g. XMB files), etc.
       outdir = os.path.split(output.GetOutputFilename())[0]
       if not os.path.exists(outdir):
         os.makedirs(outdir)
-      outfile = self.fo_create(output.GetOutputFilename(), 'wb')
+      # Write the results to a temporary file and only overwrite the original
+      # if the file changed.  This avoids unnecessary rebuilds.
+      outfile = self.fo_create(output.GetOutputFilename() + '.tmp', 'wb')
 
       if output.GetType() != 'data_package':
         outfile = util.WrapOutputStream(outfile, encoding)
@@ -186,17 +198,36 @@ are exported to translation interchange files (e.g. XMB files), etc.
       self.ProcessNode(self.res, output, outfile)
       outfile.close()
 
+      # Now copy from the temp file back to the real output, but on Windows,
+      # only if the real output doesn't exist or the contents of the file
+      # changed.  This prevents identical headers from being written and .cc
+      # files from recompiling (which is painful on Windows).
+      if not os.path.exists(output.GetOutputFilename()):
+        os.rename(output.GetOutputFilename() + '.tmp',
+                  output.GetOutputFilename())
+      else:
+        files_match = filecmp.cmp(output.GetOutputFilename(),
+            output.GetOutputFilename() + '.tmp')
+        if (output.GetType() != 'rc_header' or not files_match
+            or sys.platform != 'win32'):
+          shutil.copy2(output.GetOutputFilename() + '.tmp',
+                       output.GetOutputFilename())
+        os.remove(output.GetOutputFilename() + '.tmp')
+
       self.VerboseOut(' done.\n')
 
     # Print warnings if there are any duplicate shortcuts.
-    print '\n'.join(shortcuts.GenerateDuplicateShortcutsWarnings(
-      self.res.UberClique(), self.res.GetTcProject()))
+    warnings = shortcuts.GenerateDuplicateShortcutsWarnings(
+        self.res.UberClique(), self.res.GetTcProject())
+    if warnings:
+      print '\n'.join(warnings)
 
     # Print out any fallback warnings, and missing translation errors, and
     # exit with an error code if there are missing translations in a non-pseudo
     # build
-    print (self.res.UberClique().MissingTranslationsReport().
+    warnings = (self.res.UberClique().MissingTranslationsReport().
         encode('ascii', 'replace'))
+    if warnings:
+      print warnings
     if self.res.UberClique().HasMissingTranslations():
       sys.exit(-1)
-

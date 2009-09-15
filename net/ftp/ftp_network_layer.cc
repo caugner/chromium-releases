@@ -4,18 +4,24 @@
 
 #include "net/ftp/ftp_network_layer.h"
 
-#include "net/base/client_socket_factory.h"
 #include "net/ftp/ftp_network_session.h"
 #include "net/ftp/ftp_network_transaction.h"
+#include "net/socket/client_socket_factory.h"
 
 namespace net {
 
-FtpNetworkLayer::FtpNetworkLayer()
-    : suspended_(false) {
-  session_ = new FtpNetworkSession();
+FtpNetworkLayer::FtpNetworkLayer(HostResolver* host_resolver)
+    : session_(new FtpNetworkSession(host_resolver)),
+      suspended_(false) {
 }
 
 FtpNetworkLayer::~FtpNetworkLayer() {
+}
+
+// static
+FtpTransactionFactory* FtpNetworkLayer::CreateFactory(
+    HostResolver* host_resolver) {
+  return new FtpNetworkLayer(host_resolver);
 }
 
 FtpTransaction* FtpNetworkLayer::CreateTransaction() {
@@ -24,10 +30,6 @@ FtpTransaction* FtpNetworkLayer::CreateTransaction() {
 
   return new FtpNetworkTransaction(
       session_, ClientSocketFactory::GetDefaultFactory());
-}
-
-FtpAuthCache* FtpNetworkLayer::GetAuthCache() {
-  return session_->auth_cache();
 }
 
 void FtpNetworkLayer::Suspend(bool suspend) {
