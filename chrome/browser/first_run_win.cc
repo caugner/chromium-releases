@@ -4,8 +4,6 @@
 
 #include "chrome/browser/first_run.h"
 
-#include <atlbase.h>
-#include <atlcom.h>
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -14,8 +12,6 @@
 
 // TODO(port): trim this include list once first run has been refactored fully.
 #include "app/app_switches.h"
-#include "app/l10n_util.h"
-#include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -25,6 +21,7 @@
 #include "base/process.h"
 #include "base/process_util.h"
 #include "base/registry.h"
+#include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -49,8 +46,6 @@
 #include "chrome/installer/util/util_constants.h"
 #include "google_update_idl.h"
 #include "grit/app_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "views/background.h"
@@ -60,9 +55,9 @@
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
+#include "views/focus/accelerator_handler.h"
 #include "views/grid_layout.h"
 #include "views/standard_layout.h"
-#include "views/widget/accelerator_handler.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
 #include "views/window/window.h"
@@ -97,8 +92,8 @@ FilePath GetDefaultPrefFilePath(bool create_profile_dir,
 }
 
 bool InvokeGoogleUpdateForRename() {
-  CComPtr<IProcessLauncher> ipl;
-  if (!FAILED(ipl.CoCreateInstance(__uuidof(ProcessLauncherClass)))) {
+  ScopedComPtr<IProcessLauncher> ipl;
+  if (!FAILED(ipl.CreateInstance(__uuidof(ProcessLauncherClass)))) {
     ULONG_PTR phandle = NULL;
     DWORD id = GetCurrentProcessId();
     if (!FAILED(ipl->LaunchCmdElevated(google_update::kChromeGuid,
@@ -115,7 +110,7 @@ bool InvokeGoogleUpdateForRename() {
   return false;
 }
 
-bool LaunchSetupWithParam(const std::wstring& param, const std::wstring& value,
+bool LaunchSetupWithParam(const std::string& param, const std::wstring& value,
                           int* ret_code) {
   FilePath exe_path;
   if (!PathService::Get(base::DIR_MODULE, &exe_path))
@@ -173,7 +168,8 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
                                         const FilePath& master_prefs_path,
                                         std::vector<std::wstring>* new_tabs,
                                         int* ping_delay,
-                                        int* import_items,
+                                        bool* homepage_defined,
+                                        int* do_import_items,
                                         int* dont_import_items) {
   DCHECK(!user_data_dir.empty());
   FilePath master_prefs = master_prefs_path;
@@ -200,6 +196,8 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
       *ping_delay = 90;
     }
   }
+  if (homepage_defined)
+    prefs->GetBoolean(prefs::kHomePage, homepage_defined);
 
   bool value = false;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
@@ -213,7 +211,7 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
     FilePath inner_html;
     if (WriteEULAtoTempFile(&inner_html)) {
       int retcode = 0;
-      const std::wstring& eula = installer_util::switches::kShowEula;
+      const std::string eula = WideToASCII(installer_util::switches::kShowEula);
       if (!LaunchSetupWithParam(eula, inner_html.ToWStringHack(), &retcode) ||
           (retcode == installer_util::EULA_REJECTED)) {
         LOG(WARNING) << "EULA rejected. Fast exit.";
@@ -246,13 +244,13 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
   // Even though we skip all other import_* preferences below, if
   // skip-first-run-ui is not specified, we make exception for this one
   // preference.
-  int items_to_import = 0;
+  int import_items = 0;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
       installer_util::master_preferences::kDistroImportSearchPref, &value)) {
     if (value) {
-      items_to_import += SEARCH_ENGINES;
-      if (import_items)
-        *import_items += SEARCH_ENGINES;
+      import_items += SEARCH_ENGINES;
+      if (do_import_items)
+        *do_import_items += SEARCH_ENGINES;
     } else if (dont_import_items) {
         *dont_import_items += SEARCH_ENGINES;
     }
@@ -283,23 +281,23 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
       installer_util::master_preferences::kDistroImportHistoryPref, &value) &&
       value)
-    items_to_import += HISTORY;
+    import_items += HISTORY;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
       installer_util::master_preferences::kDistroImportBookmarksPref, &value) &&
       value)
-    items_to_import += FAVORITES;
+    import_items += FAVORITES;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
       installer_util::master_preferences::kDistroImportHomePagePref, &value) &&
       value)
-    items_to_import += HOME_PAGE;
+    import_items += HOME_PAGE;
 
-  if (items_to_import) {
+  if (import_items) {
     // There is something to import from the default browser. This launches
     // the importer process and blocks until done or until it fails.
     scoped_refptr<ImporterHost> importer_host = new ImporterHost();
     if (!FirstRun::ImportSettings(NULL,
           importer_host->GetSourceProfileInfoAt(0).browser_type,
-          items_to_import, NULL)) {
+          import_items, NULL)) {
       LOG(WARNING) << "silent import failed";
     }
   }
@@ -336,7 +334,7 @@ bool Upgrade::SwapNewChromeExeIfPresent() {
   std::wstring new_chrome_exe;
   if (!GetNewerChromeFile(&new_chrome_exe))
     return false;
-  if (!file_util::PathExists(new_chrome_exe))
+  if (!file_util::PathExists(FilePath::FromWStringHack(new_chrome_exe)))
     return false;
   std::wstring curr_chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &curr_chrome_exe))
@@ -378,6 +376,7 @@ bool Upgrade::SwapNewChromeExeIfPresent() {
 }
 
 bool OpenFirstRunDialog(Profile* profile,
+                        bool homepage_defined,
                         int import_items,
                         int dont_import_items,
                         ProcessSingleton* process_singleton) {
@@ -387,7 +386,9 @@ bool OpenFirstRunDialog(Profile* profile,
   // We need the FirstRunView to outlive its parent, as we retrieve the accept
   // state from it after the dialog has been closed.
   scoped_ptr<FirstRunView> first_run_view(new FirstRunView(profile,
-      import_items, dont_import_items));
+                                                           homepage_defined,
+                                                           import_items,
+                                                           dont_import_items));
   first_run_view->SetParentOwned(false);
   views::Window* first_run_ui = views::Window::CreateChromeWindow(
       NULL, gfx::Rect(), first_run_view.get());
@@ -405,7 +406,8 @@ bool OpenFirstRunDialog(Profile* profile,
   // is closed) so that the window can receive messages and we block the
   // browser window from showing up. We pass the accelerator handler here so
   // that keyboard accelerators (Enter, Esc, etc) work in the dialog box.
-  MessageLoopForUI::current()->Run(g_browser_process->accelerator_handler());
+  views::AcceleratorHandler accelerator_handler;
+  MessageLoopForUI::current()->Run(&accelerator_handler);
   process_singleton->Unlock();
 
   return first_run_view->accepted();
@@ -545,8 +547,13 @@ bool DecodeImportParams(const std::wstring& encoded,
   SplitString(encoded, L'@', &v);
   if (v.size() != 3)
     return false;
-  *browser_type = static_cast<int>(StringToInt64(v[0]));
-  *options = static_cast<int>(StringToInt64(v[1]));
+
+  if (!StringToInt(v[0], browser_type))
+    return false;
+
+  if (!StringToInt(v[1], options))
+    return false;
+
   *window = reinterpret_cast<HWND>(StringToInt64(v[2]));
   return true;
 }
@@ -648,8 +655,51 @@ bool FirstRun::SetOEMFirstRunBubblePref() {
 
 namespace {
 
+// These strings are used by TryChromeDialog. They will need to be localized
+// if we use it for other locales.
+const wchar_t* kHeading[] = {
+  L"You stopped using Google Chrome. Would you like to ...",
+  L"Google Chrome misses you.",
+  L"There is a new version of Google Chrome available.",
+  L"Google Chrome has been updated, but you haven't tried it yet"
+};
+
+const wchar_t* kGiveChromeATry[] = {
+  L"Give the new version a try (already installed)",
+  L"Give it a second chance",
+  L"Try it out (already installed)"
+};
+
+const wchar_t* kNahUninstallIt[] = {
+  L"Uninstall Google Chrome",
+  L"Uninstall Google Chrome, it had its chance"
+};
+
+const wchar_t* kOKButn[] = {
+  L"OK",
+  L"Try it"
+};
+
+const wchar_t kDontBugMe[] = L"Don't bug me";
+const wchar_t kWhyThis[] = L"Why am I seeing this?";
 const wchar_t kHelpCenterUrl[] =
-    L"http://www.google.com/support/chrome/bin/answer.py?answer=150752";
+    L"http://www.google.com/support/chrome/bin/answer.py?hl=en&answer=150752";
+
+// This structure and the following constant defines how the dialog looks with
+// respect of buttons and text, but does not fundamentally change the behavior.
+struct VersionConfig {
+  int heading_index;
+  int try_index;
+  int uninstall_index;
+  int ok_button_index;
+};
+
+const VersionConfig kDialogVersion[] = {
+  {0, 0, 0, 0},     // 0 is classic.
+  {1, 1, 1, 0},     // 1 is humorous.
+  {2, 2, 0, 0},     // 2 is update-focused.
+  {3, -1, -1, 1}    // 3 is simpler (no radio buttons).
+};
 
 // This class displays a modal dialog using the views system. The dialog asks
 // the user to give chrome another try. This class only handles the UI so the
@@ -666,12 +716,15 @@ const wchar_t kHelpCenterUrl[] =
 class TryChromeDialog : public views::ButtonListener,
                         public views::LinkController {
  public:
-  TryChromeDialog(size_t version)
+  explicit TryChromeDialog(size_t version)
       : version_(version),
         popup_(NULL),
         try_chrome_(NULL),
         kill_chrome_(NULL),
         result_(Upgrade::TD_LAST_ENUM) {
+    // In case of doubt, use the first version of the dialog.
+    if (version_ >= arraysize(kHeading))
+      version_ = 0;
   }
 
   virtual ~TryChromeDialog() {
@@ -753,9 +806,8 @@ class TryChromeDialog : public views::ButtonListener,
     // First row views.
     layout->StartRow(0, 0);
     layout->AddView(icon);
-    const std::wstring heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING);
     views::Label* label =
-        new views::Label(heading);
+        new views::Label(kHeading[kDialogVersion[version_].heading_index]);
     label->SetFont(rb.GetFont(ResourceBundle::MediumBoldFont));
     label->SetMultiLine(true);
     label->SizeToFit(200);
@@ -770,35 +822,33 @@ class TryChromeDialog : public views::ButtonListener,
                           rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
     close_button->set_tag(BT_CLOSE_BUTTON);
     layout->AddView(close_button);
-
     // Second row views.
-    const std::wstring try_it(l10n_util::GetString(IDS_TRY_TOAST_TRY_OPT));
-    layout->StartRowWithPadding(0, 1, 0, 10);
-    try_chrome_ = new views::RadioButton(try_it, 1);
-    layout->AddView(try_chrome_);
-    try_chrome_->SetChecked(true);
-
+    if (kDialogVersion[version_].try_index >= 0) {
+      layout->StartRowWithPadding(0, 1, 0, 10);
+      try_chrome_ = new views::RadioButton(
+          kGiveChromeATry[kDialogVersion[version_].try_index], 1);
+      layout->AddView(try_chrome_);
+      try_chrome_->SetChecked(true);
+    }
     // Third row views.
-    const std::wstring
-        kill_it(l10n_util::GetString(IDS_UNINSTALL_CHROME));
-    layout->StartRow(0, 2);
-    kill_chrome_ = new views::RadioButton(kill_it, 1);
-    layout->AddView(kill_chrome_);
-
+    if (kDialogVersion[version_].try_index >= 0) {
+      layout->StartRow(0, 2);
+      kill_chrome_ = new views::RadioButton(
+          kNahUninstallIt[kDialogVersion[version_].uninstall_index], 1);
+      layout->AddView(kill_chrome_);
+    }
     // Fourth row views.
-    const std::wstring ok_it(l10n_util::GetString(IDS_OK));
-    const std::wstring cancel_it(l10n_util::GetString(IDS_TRY_TOAST_CANCEL));
-    const std::wstring why_this(l10n_util::GetString(IDS_TRY_TOAST_WHY));
     layout->StartRowWithPadding(0, 3, 0, 10);
-    views::Button* accept_button = new views::NativeButton(this, ok_it);
+    views::Button* accept_button = new views::NativeButton(this,
+        kOKButn[kDialogVersion[version_].ok_button_index]);
     accept_button->set_tag(BT_OK_BUTTON);
     layout->AddView(accept_button);
-    views::Button* cancel_button = new views::NativeButton(this, cancel_it);
+    views::Button* cancel_button = new views::NativeButton(this, kDontBugMe);
     cancel_button->set_tag(BT_CLOSE_BUTTON);
     layout->AddView(cancel_button);
     // Fifth row views.
     layout->StartRowWithPadding(0, 4, 0, 10);
-    views::Link* link = new views::Link(why_this);
+    views::Link* link = new views::Link(kWhyThis);
     link->SetController(this);
     layout->AddView(link);
 
@@ -823,7 +873,7 @@ class TryChromeDialog : public views::ButtonListener,
   // Overridden from ButtonListener. We have two buttons and according to
   // what the user clicked we set |result_| and we should always close and
   // end the modal loop.
-  virtual void ButtonPressed(views::Button* sender) {
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event) {
     if (sender->tag() == BT_CLOSE_BUTTON) {
       // The user pressed cancel or the [x] button.
       result_ = Upgrade::TD_NOT_NOW;

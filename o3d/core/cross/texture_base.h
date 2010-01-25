@@ -40,6 +40,7 @@
 
 namespace o3d {
 
+class Bitmap;
 class Pack;
 class Renderer;
 class RenderSurface;
@@ -51,8 +52,6 @@ class Texture : public ParamObject {
  public:
   typedef SmartPointer<Texture> Ref;
   typedef WeakPointer<Texture> WeakPointerType;
-
-  enum Type { TEXTURE_1D, TEXTURE_2D, TEXTURE_3D, TEXTURE_CUBE };
 
   enum Format {
     UNKNOWN_FORMAT,
@@ -66,6 +65,14 @@ class Texture : public ParamObject {
     DXT5
   };
 
+  // Defines how you want to access a texture when locking.
+  enum AccessMode {
+    kNone = 0,
+    kReadOnly = 1,
+    kWriteOnly = 2,
+    kReadWrite = 3,
+  };
+
   typedef unsigned RGBASwizzleIndices[4];
 
   // This is the maximum texture size we allow and hence the largest
@@ -75,13 +82,12 @@ class Texture : public ParamObject {
   // NOTE: class Bitmap supports a larger size. The plan is to expose Bitmap
   // to Javascript so you can download larger images, scale them, then put
   // them in a texture.
-  static const int MAX_DIMENSION = 2048;
+  static const int kMaxDimension = 2048;
+  static const int kMaxLevels = 12;
 
   Texture(ServiceLocator* service_locator,
           Format format,
           int levels,
-          bool alpha_is_one,
-          bool resize_to_pot,
           bool enable_render_surfaces);
   virtual ~Texture() {}
 
@@ -89,6 +95,14 @@ class Texture : public ParamObject {
 
   // Returns the implementation-specific texture handle.
   virtual void* GetTextureHandle() const = 0;
+
+  static bool IsCompressedFormat(Format format) {
+    return format == DXT1 || format == DXT3 || format == DXT5;
+  }
+
+  bool IsCompressed() const {
+    return IsCompressedFormat(format_);
+  }
 
   bool alpha_is_one() const { return alpha_is_one_; }
   void set_alpha_is_one(bool value)  { alpha_is_one_ = value; }
@@ -107,6 +121,9 @@ class Texture : public ParamObject {
     return render_surfaces_enabled_;
   }
 
+  // Generates mips.
+  virtual void GenerateMips(int source_level, int num_levels) = 0;
+
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the graphics API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices() = 0;
@@ -124,12 +141,6 @@ class Texture : public ParamObject {
   void set_format(Format format) {
     format_ = format;
   }
-
-  // Whether or not to resize NPOT textures to POT when passing to the
-  // underlying graphics API.
-  bool resize_to_pot_;
-
-  static void RegisterSurface(RenderSurface* surface, Pack* pack);
 
  private:
   // The number of mipmap levels contained in this texture.
@@ -161,7 +172,7 @@ class ParamTexture : public TypedRefParam<Texture> {
   friend class IClassManager;
   static ObjectBase::Ref Create(ServiceLocator* service_locator);
 
-  O3D_DECL_CLASS(ParamTexture, RefParamBase)
+  O3D_DECL_CLASS(ParamTexture, RefParamBase);
   DISALLOW_COPY_AND_ASSIGN(ParamTexture);
 };
 

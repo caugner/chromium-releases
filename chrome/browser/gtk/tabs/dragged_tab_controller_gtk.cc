@@ -4,6 +4,8 @@
 
 #include "chrome/browser/gtk/tabs/dragged_tab_controller_gtk.h"
 
+#include <algorithm>
+
 #include "chrome/browser/browser.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/tabs/dragged_tab_gtk.h"
@@ -100,8 +102,14 @@ TabGtk* DraggedTabControllerGtk::GetDragSourceTabForContents(
   return NULL;
 }
 
-bool DraggedTabControllerGtk::IsDragSourceTab(TabGtk* tab) const {
+bool DraggedTabControllerGtk::IsDragSourceTab(const TabGtk* tab) const {
   return source_tab_ == tab;
+}
+
+bool DraggedTabControllerGtk::IsTabDetached(const TabGtk* tab) const {
+  if (!IsDragSourceTab(tab))
+    return false;
+  return (attached_tabstrip_ == NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -544,7 +552,7 @@ void DraggedTabControllerGtk::Detach() {
 
   // If we've removed the last tab from the tabstrip, hide the frame now.
   if (attached_model->empty())
-    HideFrame();
+    HideWindow();
 
   // Update the dragged tab. This NULL check is necessary apparently in some
   // conditions during automation where the view_ is destroyed inside a
@@ -728,8 +736,8 @@ bool DraggedTabControllerGtk::EndDragImpl(EndDragType type) {
 }
 
 void DraggedTabControllerGtk::RevertDrag() {
-  // TODO(jhawkins): Restore the window frame.
   // We save this here because code below will modify |attached_tabstrip_|.
+  bool restore_window = attached_tabstrip_ != source_tabstrip_;
   if (attached_tabstrip_) {
     int index = attached_tabstrip_->model()->GetIndexOfTabContents(
         dragged_contents_);
@@ -760,6 +768,12 @@ void DraggedTabControllerGtk::RevertDrag() {
   }
   source_tabstrip_->model()->SetTabPinned(source_model_index_, was_pinned_);
 
+  // If we're not attached to any tab strip, or attached to some other tab
+  // strip, we need to restore the bounds of the original tab strip's frame, in
+  // case it has been hidden.
+  if (restore_window)
+    ShowWindow();
+
   source_tab_->SetVisible(true);
 }
 
@@ -775,15 +789,9 @@ bool DraggedTabControllerGtk::CompleteDrag() {
     destroy_immediately = false;
   } else {
     // Compel the model to construct a new window for the detached TabContents.
-    GtkWindow* browser_window =
-        platform_util::GetTopLevel(source_tabstrip_->widget());
-    gint x, y, width, height;
-    gtk_window_get_position(browser_window, &x, &y);
-    gtk_window_get_size(browser_window, &width, &height);
-    gfx::Rect browser_rect = gfx::Rect(x, y, width, height);
-    gfx::Rect window_bounds(
-        GetWindowCreatePoint(),
-        gfx::Size(browser_rect.width(), browser_rect.height()));
+    BrowserWindowGtk* window = source_tabstrip_->window();
+    gfx::Rect window_bounds = window->GetRestoredBounds();
+    window_bounds.set_origin(GetWindowCreatePoint());
     Browser* new_browser =
         source_tabstrip_->model()->delegate()->CreateNewStripWithContents(
             dragged_contents_, window_bounds, dock_info_);
@@ -820,23 +828,29 @@ gfx::Rect DraggedTabControllerGtk::GetTabScreenBounds(TabGtk* tab) {
   // A hidden widget moved with gtk_fixed_move in a GtkFixed container doesn't
   // update its allocation until after the widget is shown, so we have to use
   // the tab bounds we keep track of.
-  int x, y;
-  x = tab->bounds().x();
-  y = tab->bounds().y();
-
+  //
+  // We use the requested bounds instead of the allocation because the
+  // allocation is relative to the first windowed widget ancestor of the tab.
+  // Because of this, we can't use the tabs allocation to get the screen bounds.
+  gfx::Rect bounds = tab->GetRequisition();
   GtkWidget* widget = tab->widget();
   GtkWidget* parent = gtk_widget_get_parent(widget);
   gfx::Point point = gtk_util::GetWidgetScreenPosition(parent);
-  x += point.x();
-  y += point.y();
+  bounds.Offset(point);
 
-  return gfx::Rect(x, y, widget->allocation.width, widget->allocation.height);
+  return gfx::Rect(bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
-void DraggedTabControllerGtk::HideFrame() {
+void DraggedTabControllerGtk::HideWindow() {
   GtkWidget* tabstrip = source_tabstrip_->widget();
   GtkWindow* window = platform_util::GetTopLevel(tabstrip);
   gtk_widget_hide(GTK_WIDGET(window));
+}
+
+void DraggedTabControllerGtk::ShowWindow() {
+  GtkWidget* tabstrip = source_tabstrip_->widget();
+  GtkWindow* window = platform_util::GetTopLevel(tabstrip);
+  gtk_window_present(window);
 }
 
 void DraggedTabControllerGtk::CleanUpHiddenFrame() {

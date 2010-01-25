@@ -8,8 +8,9 @@
 #include <SecurityInterface/SFCertificatePanel.h>
 
 #include "app/l10n_util.h"
+#include "base/scoped_cftyperef.h"
+#include "base/i18n/time_formatting.h"
 #include "base/string_util.h"
-#include "base/time_format.h"
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/cocoa/page_info_window_controller.h"
 #include "chrome/browser/cert_store.h"
@@ -67,16 +68,28 @@ void PageInfoWindowMac::ShowCertDialog(int) {
   if (!cert_mac)
     return;
 
+  scoped_cftyperef<CFMutableArrayRef> certificates(
+      CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
+  if (!certificates.get()) {
+    NOTREACHED();
+    return;
+  }
+  CFArrayAppendValue(certificates, cert_mac);
+
+  CFArrayRef ca_certs = cert->GetIntermediateCertificates();
+  if (ca_certs) {
+    // Server certificate must be first in the array; subsequent certificates
+    // in the chain can be in any order.
+    CFArrayAppendArray(certificates, ca_certs,
+                       CFRangeMake(0, CFArrayGetCount(ca_certs)));
+  }
+
   [[SFCertificatePanel sharedCertificatePanel]
       beginSheetForWindow:[controller_ window]
             modalDelegate:nil
            didEndSelector:NULL
               contextInfo:NULL
-              // This is cast to id because we get compiler errors about an
-              // OpaqueSecCertificateRef* being converted to an ObjC class.
-              // It's a CF-type so it's toll-free bridged and casting to id
-              // is OK.
-             certificates:[NSArray arrayWithObject:(id)cert_mac]
+             certificates:reinterpret_cast<NSArray*>(certificates.get())
                 showGroup:YES
   ];
 }
@@ -94,7 +107,7 @@ void PageInfoWindowMac::LayoutSections() {
     [controller_ setIdentityImg:[controller_ goodImg]];
   else
     [controller_ setIdentityImg:[controller_ badImg]];
-  [controller_ setIdentityMsg:base::SysWideToNSString(
+  [controller_ setIdentityMsg:base::SysUTF16ToNSString(
       identity_section.description)];
 
   // Connection section.
@@ -105,7 +118,7 @@ void PageInfoWindowMac::LayoutSections() {
   else
     [controller_ setConnectionImg:[controller_ badImg]];
   [controller_ setConnectionMsg:
-      base::SysWideToNSString(connection_section.description)];
+      base::SysUTF16ToNSString(connection_section.description)];
 
   if (model_.GetSectionCount() > 2) {
     // We have the history info.
@@ -117,7 +130,7 @@ void PageInfoWindowMac::LayoutSections() {
       [controller_ setHistoryImg:[controller_ badImg]];
 
     [controller_ setHistoryMsg:
-        base::SysWideToNSString(history_section.description)];
+        base::SysUTF16ToNSString(history_section.description)];
   }
 
   // By default, assume that we don't have certificate information to show.

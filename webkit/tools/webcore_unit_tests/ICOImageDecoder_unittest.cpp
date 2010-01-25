@@ -35,15 +35,13 @@
 #include "ICOImageDecoder.h"
 #include "SharedBuffer.h"
 
-static const int kFavIconSize = 16;
-
 class ICOImageDecoderTest : public ImageDecoderTest {
  public:
-  ICOImageDecoderTest() : ImageDecoderTest(L"ico") { }
+  ICOImageDecoderTest() : ImageDecoderTest("ico") { }
 
  protected:
   virtual WebCore::ImageDecoder* CreateDecoder() const {
-    return new WebCore::ICOImageDecoder(WebCore::IntSize());
+    return new WebCore::ICOImageDecoder();
   }
 };
 
@@ -58,27 +56,21 @@ TEST_F(ICOImageDecoderTest, ChunkedDecoding) {
 #endif
 
 TEST_F(ICOImageDecoderTest, FaviconSize) {
-  // Test that the decoder decodes a preferred size when specified.
+  // Test that the decoder decodes multiple sizes of icons which have them.
 
   // Load an icon that has both favicon-size and larger entries.
-  std::wstring multisize_icon_path(data_dir_);
-  file_util::AppendToPath(&multisize_icon_path, L"yahoo.ico");
-  Vector<char> image_contents;
-  ReadFileToVector(multisize_icon_path, &image_contents);
-
-  // Decode, preferring the favicon size.
-  scoped_ptr<WebCore::ImageDecoder> decoder(new WebCore::ICOImageDecoder(
-      WebCore::IntSize(kFavIconSize, kFavIconSize)));
-  RefPtr<WebCore::SharedBuffer> shared_contents(WebCore::SharedBuffer::create());
-  shared_contents->append(image_contents.data(),
-                          static_cast<int>(image_contents.size()));
-  decoder->setData(shared_contents.get(), true);
+  FilePath multisize_icon_path(data_dir_.AppendASCII("yahoo.ico"));
+  scoped_ptr<WebCore::ImageDecoder> decoder(SetupDecoder(multisize_icon_path,
+                                                         false));
 
   // Verify the decoding.
-  const std::wstring md5_sum_path(GetMD5SumPath(multisize_icon_path) + L"2");
+  const FilePath md5_sum_path(
+      GetMD5SumPath(multisize_icon_path).value() + FILE_PATH_LITERAL("2"));
+  static const int kDesiredFrameIndex = 3;
 #ifdef CALCULATE_MD5_SUMS
-  SaveMD5Sum(md5_sum_path, decoder->frameBufferAtIndex(0));
+  SaveMD5Sum(md5_sum_path, decoder->frameBufferAtIndex(kDesiredFrameIndex));
 #else
-  VerifyImage(decoder.get(), multisize_icon_path, md5_sum_path);
+  VerifyImage(decoder.get(), multisize_icon_path, md5_sum_path,
+              kDesiredFrameIndex);
 #endif
 }

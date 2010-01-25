@@ -6,14 +6,15 @@
 #include <gtk/gtk.h>
 #endif
 
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebURLResponse.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/unittest_test_server.h"
-#include "webkit/glue/webview.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/resource_fetcher.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
+using WebKit::WebFrame;
 using WebKit::WebURLResponse;
 using webkit_glue::ResourceFetcher;
 using webkit_glue::ResourceFetcherWithTimeout;
@@ -155,7 +156,7 @@ TEST_F(ResourceFetcherTests, ResourceFetcherDownload) {
       UnittestTestServer::CreateServer();
   ASSERT_TRUE(NULL != server.get());
 
-  WebFrame* frame = test_shell_->webView()->GetMainFrame();
+  WebFrame* frame = test_shell_->webView()->mainFrame();
 
   GURL url = server->TestServerPage("files/test_shell/index.html");
   scoped_ptr<FetcherDelegate> delegate(new FetcherDelegate);
@@ -186,7 +187,7 @@ TEST_F(ResourceFetcherTests, ResourceFetcherDidFail) {
       UnittestTestServer::CreateServer();
   ASSERT_TRUE(NULL != server.get());
 
-  WebFrame* frame = test_shell_->webView()->GetMainFrame();
+  WebFrame* frame = test_shell_->webView()->mainFrame();
 
   // Try to fetch a page on a site that doesn't exist.
   GURL url("http://localhost:1339/doesnotexist");
@@ -209,7 +210,7 @@ TEST_F(ResourceFetcherTests, ResourceFetcherTimeout) {
       UnittestTestServer::CreateServer();
   ASSERT_TRUE(NULL != server.get());
 
-  WebFrame* frame = test_shell_->webView()->GetMainFrame();
+  WebFrame* frame = test_shell_->webView()->mainFrame();
 
   // Grab a page that takes at least 1 sec to respond, but set the fetcher to
   // timeout in 0 sec.

@@ -72,12 +72,12 @@ static const int kDisabledOnOpenDuration = 3000;
 class DownloadShelfContextMenuWin : public DownloadShelfContextMenu,
                                     public views::Menu::Delegate {
  public:
-  DownloadShelfContextMenuWin(BaseDownloadItemModel* model,
-                              gfx::NativeView window,
-                              const gfx::Point& point)
+  DownloadShelfContextMenuWin(BaseDownloadItemModel* model)
       : DownloadShelfContextMenu(model) {
     DCHECK(model);
+  }
 
+  void Run(gfx::NativeView window, const gfx::Point& point) {
     // The menu's anchor point is determined based on the UI layout.
     views::Menu::AnchorPoint anchor_point;
     if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
@@ -96,36 +96,56 @@ class DownloadShelfContextMenuWin : public DownloadShelfContextMenu,
     }
     context_menu->AppendMenuItem(ALWAYS_OPEN_TYPE, L"", views::Menu::CHECKBOX);
     context_menu->AppendSeparator();
+    if (download_->state() == DownloadItem::IN_PROGRESS)
+      context_menu->AppendMenuItem(TOGGLE_PAUSE, L"", views::Menu::NORMAL);
     context_menu->AppendMenuItem(SHOW_IN_FOLDER, L"", views::Menu::NORMAL);
     context_menu->AppendSeparator();
     context_menu->AppendMenuItem(CANCEL, L"", views::Menu::NORMAL);
     context_menu->RunMenuAt(point.x(), point.y());
   }
 
+  // This method runs when the caller has been deleted and we should not attempt
+  // to access |download_|.
+  void Stop() {
+    download_ = NULL;
+    model_ = NULL;
+  }
+
   // Menu::Delegate implementation ---------------------------------------------
 
   virtual bool IsItemChecked(int id) const {
+    if (!download_)
+      return false;
     return ItemIsChecked(id);
   }
 
   virtual bool IsItemDefault(int id) const {
+    if (!download_)
+      return false;
     return ItemIsDefault(id);
   }
 
   virtual std::wstring GetLabel(int id) const {
+    if (!download_)
+      return std::wstring();
     return GetItemLabel(id);
   }
 
   virtual bool SupportsCommand(int id) const {
+    if (!download_)
+      return false;
     return id > 0 && id < MENU_LAST;
   }
 
   virtual bool IsCommandEnabled(int id) const {
+    if (!download_)
+      return false;
     return IsItemCommandEnabled(id);
   }
 
   virtual void ExecuteCommand(int id) {
-    return ExecuteItemCommand(id);
+    if (download_)
+      ExecuteItemCommand(id);
   }
 };
 
@@ -152,7 +172,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     dangerous_download_label_sized_(false),
     disabled_while_opening_(false),
     creation_time_(base::Time::Now()),
-    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)) {
+    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)),
+    active_menu_(NULL) {
   DCHECK(download_);
   download_->AddObserver(this);
 
@@ -300,9 +321,18 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
       ElideString(extension, kFileNameMaxLength / 2, &extension);
 
     ElideString(rootname, kFileNameMaxLength - extension.length(), &rootname);
-    dangerous_download_label_ = new views::Label(
-        l10n_util::GetStringF(IDS_PROMPT_DANGEROUS_DOWNLOAD,
-                              rootname + L"." + extension));
+    std::wstring filename = rootname + L"." + extension;
+    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+      l10n_util::WrapStringWithLTRFormatting(&filename);
+
+    // The dangerous download label text is different for an extension file.
+    if (DownloadManager::IsExtensionInstall(download)) {
+      dangerous_download_label_ = new views::Label(
+          l10n_util::GetString(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION));
+    } else {
+      dangerous_download_label_ = new views::Label(
+          l10n_util::GetStringF(IDS_PROMPT_DANGEROUS_DOWNLOAD, filename));
+    }
     dangerous_download_label_->SetMultiLine(true);
     dangerous_download_label_->SetHorizontalAlignment(
         views::Label::ALIGN_LEFT);
@@ -315,6 +345,10 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
 }
 
 DownloadItemView::~DownloadItemView() {
+  if (active_menu_) {
+    active_menu_->Stop();
+    active_menu_ = NULL;
+  }
   icon_consumer_.CancelAllRequests();
   StopDownloadProgress();
   download_->RemoveObserver(this);
@@ -425,7 +459,8 @@ void DownloadItemView::Layout() {
   }
 }
 
-void DownloadItemView::ButtonPressed(views::Button* sender) {
+void DownloadItemView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == discard_button_) {
     UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
                              base::Time::Now() - creation_time_);
@@ -446,7 +481,7 @@ void DownloadItemView::ButtonPressed(views::Button* sender) {
 // Load an icon for the file type we're downloading, and animate any in progress
 // download state.
 void DownloadItemView::Paint(gfx::Canvas* canvas) {
-  BodyImageSet* body_image_set;
+  BodyImageSet* body_image_set = NULL;
   switch (body_state_) {
     case NORMAL:
     case HOT:
@@ -461,7 +496,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
     default:
       NOTREACHED();
   }
-  DropDownImageSet* drop_down_image_set;
+  DropDownImageSet* drop_down_image_set = NULL;
   switch (drop_down_state_) {
     case NORMAL:
     case HOT:
@@ -590,15 +625,18 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
       filename = gfx::ElideFilename(download_->GetFileName(),
                                     font_, kTextWidth);
     } else {
-      std::wstring tmp_name =
-          l10n_util::GetStringF(IDS_DOWNLOAD_STATUS_OPENING,
-                                download_->GetFileName().ToWStringHack());
-#if defined(OS_WIN)
-      FilePath filepath(tmp_name);
-#else
-      FilePath filepath(base::SysWideToNativeMB(tmp_name));
-#endif
-      filename = gfx::ElideFilename(filepath, font_, kTextWidth);
+      // First, Calculate the download status opening string width.
+      std::wstring empty_string;
+      std::wstring status_string =
+          l10n_util::GetStringF(IDS_DOWNLOAD_STATUS_OPENING, empty_string);
+      int status_string_width = font_.GetStringWidth(status_string);
+      // Then, elide the file name.
+      std::wstring filename_string =
+          gfx::ElideFilename(download_->GetFileName(), font_,
+                             kTextWidth - status_string_width);
+      // Last, concat the whole string.
+      filename = l10n_util::GetStringF(IDS_DOWNLOAD_STATUS_OPENING,
+                                       filename_string);
     }
 
     int mirrored_x = MirroredXWithWidthInsideView(
@@ -808,12 +846,22 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
       point.set_x(drop_down_x_left_);
 
     views::View::ConvertPointToScreen(this, &point);
-    DownloadShelfContextMenuWin menu(model_.get(),
-                                     GetWidget()->GetNativeView(),
-                                     point);
-    drop_down_pressed_ = false;
-    // Showing the menu blocks. Here we revert the state.
-    SetState(NORMAL, NORMAL);
+    DownloadShelfContextMenuWin menu(model_.get());
+
+    // Protect against deletion while the menu is running. This can happen if
+    // the menu is showing when an auto-opened download completes and the user
+    // chooses a menu entry.
+    active_menu_ = &menu;
+    menu.Run(GetWidget()->GetNativeView(), point);
+
+    // If the menu action was to remove the download, this view will also be
+    // invalid so we must not access 'this' in this case.
+    if (menu.download()) {
+      active_menu_ = NULL;
+      drop_down_pressed_ = false;
+      // Showing the menu blocks. Here we revert the state.
+      SetState(NORMAL, NORMAL);
+    }
   }
   return true;
 }
@@ -868,8 +916,11 @@ bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
       IconManager* im = g_browser_process->icon_manager();
       SkBitmap* icon = im->LookupIcon(download_->full_path(),
                                       IconLoader::SMALL);
-      if (icon)
-        download_util::DragDownload(download_, icon);
+      if (icon) {
+        views::Widget* widget = GetWidget();
+        download_util::DragDownload(download_, icon,
+                                    widget ? widget->GetNativeView() : NULL);
+      }
     }
   } else if (ExceededDragThreshold(
                  event.location().x() - drag_start_point_.x(),

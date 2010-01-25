@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 #include <string>
 
-#include "base/clipboard.h"
+#include "app/clipboard/clipboard.h"
 #include "base/string_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
@@ -78,9 +78,14 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
+#if defined(OS_WIN)
   virtual sandbox::BrokerServices* broker_services() {
     return NULL;
   }
+
+  virtual void InitBrokerServices(sandbox::BrokerServices*) {
+  }
+#endif
 
   virtual DebuggerWrapper* debugger_wrapper() {
     return NULL;
@@ -102,9 +107,6 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual void InitBrokerServices(sandbox::BrokerServices*) {
-  }
-
   virtual AutomationProviderList* InitAutomationProviderList() {
     return NULL;
   }
@@ -123,10 +125,6 @@ class TestingBrowserProcess : public BrowserProcess {
     return false;
   }
 
-  virtual views::AcceleratorHandler* accelerator_handler() {
-    return NULL;
-  }
-
   virtual printing::PrintJobManager* print_job_manager() {
     return NULL;
   }
@@ -138,11 +136,15 @@ class TestingBrowserProcess : public BrowserProcess {
     return *value;
   }
 
-  virtual MemoryModel memory_model() { return HIGH_MEMORY_MODEL; }
-
   virtual base::WaitableEvent* shutdown_event() {
     return shutdown_event_.get();
   }
+
+  virtual void CheckForInspectorFiles() {}
+  virtual bool have_inspector_files() const { return true; }
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+  virtual void SetIPCLoggingEnabled(bool enable) {}
+#endif
 
  private:
   NotificationService notification_service_;

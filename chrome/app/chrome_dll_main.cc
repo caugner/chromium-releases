@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include <malloc.h>
 #include <new.h>
 #elif defined(OS_POSIX)
+#include <locale.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -34,10 +35,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
-#if defined(OS_POSIX)
-#include "base/global_descriptors_posix.h"
-#endif
-#include "base/icu_util.h"
+#include "base/i18n/icu_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -45,12 +43,6 @@
 #include "base/stats_counters.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#endif
-#if defined(OS_MACOSX)
-#include "chrome/app/breakpad_mac.h"
-#endif
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
@@ -62,19 +54,36 @@
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/sandbox_init_wrapper.h"
 #include "ipc/ipc_switches.h"
+
+#if defined(OS_LINUX)
+#include "base/nss_init.h"
+#include "chrome/browser/renderer_host/render_sandbox_host_linux.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#include "chrome/common/chrome_paths_internal.h"
+#include "chrome/app/breakpad_mac.h"
+#include "third_party/WebKit/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
+#endif
+
+#if defined(OS_POSIX)
+#include "base/global_descriptors_posix.h"
+#endif
+
 #if defined(OS_WIN)
+#include "base/win_util.h"
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
-#endif
-#if defined(OS_MACOSX)
-#include "third_party/WebKit/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #endif
 
 extern int BrowserMain(const MainFunctionParams&);
 extern int RendererMain(const MainFunctionParams&);
 extern int PluginMain(const MainFunctionParams&);
 extern int WorkerMain(const MainFunctionParams&);
+extern int NaClMain(const MainFunctionParams&);
 extern int UtilityMain(const MainFunctionParams&);
+extern int ProfileImportMain(const MainFunctionParams&);
 extern int ZygoteMain(const MainFunctionParams&);
 
 #if defined(OS_WIN)
@@ -89,7 +98,8 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
 }
 #elif defined(OS_POSIX)
 extern "C" {
-int ChromeMain(int argc, const char** argv);
+__attribute__((visibility("default")))
+int ChromeMain(int argc, char** argv);
 }
 #endif
 
@@ -183,8 +193,11 @@ static void GLibLogHandler(const gchar* log_domain,
     // This warning only occurs in obsolete versions of GTK and is harmless.
     // http://crbug.com/11133
   } else if (strstr(message, "Theme file for default has no") ||
-             strstr(message, "Theme directory")) {
+             strstr(message, "Theme directory") ||
+             strstr(message, "theme pixmap")) {
     LOG(ERROR) << "GTK theme error: " << message;
+  } else if (strstr(message, "gtk_drag_dest_leave: assertion")) {
+    LOG(ERROR) << "Drag destination deleted: http://crbug.com/18557";
   } else {
 #ifdef NDEBUG
     LOG(ERROR) << log_domain << ": " << message;
@@ -287,16 +300,18 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
                                  sandbox::SandboxInterfaceInfo* sandbox_info,
                                  TCHAR* command_line) {
 #elif defined(OS_POSIX)
-int ChromeMain(int argc, const char** argv) {
+int ChromeMain(int argc, char** argv) {
 #endif
 
 #if defined(OS_MACOSX)
-  // If Breakpad is not present then turn off os crash dumps so we don't have
-  // to wait eons for Apple's Crash Reporter to generate a dump.
-  if (IsCrashReporterDisabled()) {
-    DebugUtil::DisableOSCrashDumps();
-  }
-#endif
+  // TODO(mark): Some of these things ought to be handled in chrome_exe_main.mm.
+  // Under the current architecture, nothing in chrome_exe_main can rely
+  // directly on chrome_dll code on the Mac, though, so until some of this code
+  // is refactored to avoid such a dependency, it lives here.  See also the
+  // TODO(mark) below at InitCrashReporter() and DestructCrashReporter().
+  base::EnableTerminationOnHeapCorruption();
+#endif  // OS_MACOSX
+
   RegisterInvalidParamHandler();
 
   // The exit manager is in charge of calling the dtors of singleton objects.
@@ -318,6 +333,12 @@ int ChromeMain(int argc, const char** argv) {
 #endif
 #endif
 
+#if defined(OS_POSIX)
+  // Set C library locale to make sure CommandLine can parse argument values
+  // in correct encoding.
+  setlocale(LC_ALL, "");
+#endif
+
   // Initialize the command line.
 #if defined(OS_WIN)
   CommandLine::Init(0, NULL);
@@ -325,17 +346,28 @@ int ChromeMain(int argc, const char** argv) {
   CommandLine::Init(argc, argv);
 #endif
 
-#if defined(OS_MACOSX)
-  // Needs to be called after CommandLine::Init().
-  InitCrashProcessInfo();
-#endif
-
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  std::string process_type =
+      parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
+
+#if defined(OS_MACOSX)
+  mac_util::SetOverrideAppBundlePath(chrome::GetFrameworkBundlePath());
+#endif  // OS_MACOSX
 
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
   if (HasDeprecatedArguments(parsed_command_line.command_line_string()))
     return 1;
+#endif
+
+#if defined(OS_LINUX)
+  // Show the man page on --help or -h.
+  if (parsed_command_line.HasSwitch("help") ||
+      parsed_command_line.HasSwitch("h")) {
+    FilePath binary(parsed_command_line.argv()[0]);
+    execlp("man", "man", binary.BaseName().value().c_str(), NULL);
+    PLOG(FATAL) << "execlp failed";
+  }
 #endif
 
 #if defined(OS_POSIX)
@@ -344,8 +376,6 @@ int ChromeMain(int argc, const char** argv) {
 #endif  // OS_POSIX
 
   int browser_pid;
-  std::wstring process_type =
-    parsed_command_line.GetSwitchValue(switches::kProcessType);
   if (process_type.empty()) {
     browser_pid = base::GetCurrentProcId();
   } else {
@@ -378,6 +408,44 @@ int ChromeMain(int argc, const char** argv) {
   // Initialize the Chrome path provider.
   app::RegisterPathProvider();
   chrome::RegisterPathProvider();
+
+#if defined(OS_MACOSX)
+  // TODO(mark): Right now, InitCrashReporter() needs to be called after
+  // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally, Breakpad
+  // initialization could occur sooner, preferably even before the framework
+  // dylib is even loaded, to catch potential early crashes.
+  InitCrashReporter();
+
+#if defined(NDEBUG)
+  bool is_debug_build = false;
+#else
+  bool is_debug_build = true;
+#endif
+
+  // Details on when we enable Apple's Crash reporter.
+  //
+  // Motivation:
+  //    In debug mode it takes Apple's crash reporter eons to generate a crash
+  // dump.
+  //
+  // What we do:
+  // * We only pass crashes for foreground processes to Apple's Crash reporter.
+  //    At the time of this writing, that means just the Browser process.
+  // * If Breakpad is enabled, it will pass browser crashes to Crash Reporter
+  //    itself.
+  // * If Breakpad is disabled, we only turn on Crash Reporter for the
+  //    Browser process in release mode.
+  if (!parsed_command_line.HasSwitch(switches::kDisableBreakpad)) {
+    bool disable_apple_crash_reporter = is_debug_build
+                                        || mac_util::IsBackgroundOnlyProcess();
+    if (!IsCrashReporterEnabled() && disable_apple_crash_reporter) {
+      DebugUtil::DisableOSCrashDumps();
+    }
+  }
+
+  if (IsCrashReporterEnabled())
+    InitCrashProcessInfo();
+#endif  // OS_MACOSX
 
   // Initialize the Stats Counters table.  With this initialized,
   // the StatsViewer can be utilized to read counters outside of
@@ -418,8 +486,8 @@ int ChromeMain(int argc, const char** argv) {
 #endif
 
   // Notice a user data directory override if any
-  const std::wstring user_data_dir =
-      parsed_command_line.GetSwitchValue(switches::kUserDataDir);
+  const FilePath user_data_dir = FilePath::FromWStringHack(
+      parsed_command_line.GetSwitchValue(switches::kUserDataDir));
   if (!user_data_dir.empty())
     CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
@@ -478,8 +546,20 @@ int ChromeMain(int argc, const char** argv) {
     rv = PluginMain(main_params);
   } else if (process_type == switches::kUtilityProcess) {
     rv = UtilityMain(main_params);
+  } else if (process_type == switches::kProfileImportProcess) {
+#if defined (OS_MACOSX)
+    rv = ProfileImportMain(main_params);
+#else
+    // TODO(port): Use OOP profile import - http://crbug.com/22142 .
+    NOTIMPLEMENTED();
+    rv = -1;
+#endif
   } else if (process_type == switches::kWorkerProcess) {
     rv = WorkerMain(main_params);
+#ifndef DISABLE_NACL
+  } else if (process_type == switches::kNaClProcess) {
+    rv = NaClMain(main_params);
+#endif
   } else if (process_type == switches::kZygoteProcess) {
 #if defined(OS_LINUX)
     if (ZygoteMain(main_params)) {
@@ -489,21 +569,30 @@ int ChromeMain(int argc, const char** argv) {
         *CommandLine::ForCurrentProcess();
       MainFunctionParams main_params(parsed_command_line, sandbox_wrapper,
                                      &autorelease_pool);
-      RendererMain(main_params);
+      rv = RendererMain(main_params);
+    } else {
+      rv = 0;
     }
 #else
     NOTIMPLEMENTED();
 #endif
   } else if (process_type.empty()) {
 #if defined(OS_LINUX)
+    // Tickle the sandbox host so it forks now.
+    Singleton<RenderSandboxHostLinux>().get();
+
+    // We want to be sure to init NSPR on the main thread.
+    base::EnsureNSPRInit();
+
+    g_thread_init(NULL);
     // Glib type system initialization. Needed at least for gconf,
     // used in net/proxy/proxy_config_service_linux.cc. Most likely
     // this is superfluous as gtk_init() ought to do this. It's
     // definitely harmless, so retained as a reminder of this
     // requirement for gconf.
     g_type_init();
-    // gtk_init() can change |argc| and |argv|, but nobody else uses them.
-    gtk_init(&argc, const_cast<char***>(&argv));
+    // gtk_init() can change |argc| and |argv|.
+    gtk_init(&argc, &argv);
     SetUpGLibLogHandler();
 #endif
 
@@ -526,6 +615,11 @@ int ChromeMain(int argc, const char** argv) {
 #endif
 
   logging::CleanupChromeLogging();
+
+#if defined(OS_MACOSX) && defined(GOOGLE_CHROME_BUILD)
+  // TODO(mark): See the TODO(mark) above at InitCrashReporter.
+  DestructCrashReporter();
+#endif  // OS_MACOSX && GOOGLE_CHROME_BUILD
 
   return rv;
 }

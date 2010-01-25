@@ -32,7 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 <title>o3dPingPong</title>
 
 <script type="text/javascript" src="../o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.rendergraph');
@@ -520,24 +520,13 @@ window.onunload = uninit;
 keyIsDown = new Array();
 
 document.onkeydown = function(e) {
-  var keycode;
-  if (window.event) {
-    keycode = window.event.keyCode;
-  } else if (e) {
-    keycode = e.which;
-  }
-  keyIsDown[keycode] = true;
+  var keyChar = o3djs.event.getEventKeyChar(e);
+  keyIsDown[keyChar] = true;
 }
 
 document.onkeyup = function(e) {
-  var keycode;
-  if (window.event) {
-    keycode = window.event.keyCode;
-  } else if (e) {
-    keycode = e.which;
-  }
-  keyIsDown[keycode] = false;
-
+  var keyChar = o3djs.event.getEventKeyChar(e);
+  keyIsDown[keyChar] = false;
 }
 
 

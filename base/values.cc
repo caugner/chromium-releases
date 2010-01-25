@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 
 ///////////////////// Value ////////////////////
@@ -184,7 +185,7 @@ bool StringValue::Equals(const Value* other) const {
 
 ///////////////////// BinaryValue ////////////////////
 
-//static
+// static
 BinaryValue* BinaryValue::Create(char* buffer, size_t size) {
   if (!buffer)
     return NULL;
@@ -192,8 +193,9 @@ BinaryValue* BinaryValue::Create(char* buffer, size_t size) {
   return new BinaryValue(buffer, size);
 }
 
-//static
-BinaryValue* BinaryValue::CreateWithCopiedBuffer(char* buffer, size_t size) {
+// static
+BinaryValue* BinaryValue::CreateWithCopiedBuffer(const char* buffer,
+                                                 size_t size) {
   if (!buffer)
     return NULL;
 
@@ -610,18 +612,29 @@ bool ListValue::Remove(size_t index, Value** out_value) {
   return true;
 }
 
-void ListValue::Remove(const Value& value) {
+int ListValue::Remove(const Value& value) {
   for (ValueVector::iterator i(list_.begin()); i != list_.end(); ++i) {
     if ((*i)->Equals(&value)) {
+      size_t index = i - list_.begin();
       list_.erase(i);
-      break;
+      return index;
     }
   }
+  return -1;
 }
 
 void ListValue::Append(Value* in_value) {
   DCHECK(in_value);
   list_.push_back(in_value);
+}
+
+bool ListValue::Insert(size_t index, Value* in_value) {
+  DCHECK(in_value);
+  if (index > list_.size())
+    return false;
+
+  list_.insert(list_.begin() + index, in_value);
+  return true;
 }
 
 Value* ListValue::DeepCopy() const {

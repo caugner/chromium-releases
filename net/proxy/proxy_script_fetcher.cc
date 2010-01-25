@@ -5,10 +5,12 @@
 #include "net/proxy/proxy_script_fetcher.h"
 
 #include "base/compiler_specific.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -43,6 +45,30 @@ bool IsPacMimeType(const std::string& mime_type) {
   return false;
 }
 
+// Convert |bytes| (which is encoded by |charset|) in place to UTF8.
+// If |charset| is empty, then we don't know what it was and guess.
+void ConvertResponseToUTF8(const std::string& charset, std::string* bytes) {
+  const char* codepage;
+
+  if (charset.empty()) {
+    // Assume ISO-8859-1 if no charset was specified.
+    codepage = base::kCodepageLatin1;
+  } else {
+    // Otherwise trust the charset that was provided.
+    codepage = charset.c_str();
+  }
+
+  // We will be generous in the conversion -- if any characters lie
+  // outside of |charset| (i.e. invalid), then substitute them with
+  // U+FFFD rather than failing.
+  std::wstring tmp_wide;
+  base::CodepageToWide(*bytes, codepage,
+                       base::OnStringConversionError::SUBSTITUTE,
+                       &tmp_wide);
+  // TODO(eroman): would be nice to have a CodepageToUTF8() function.
+  *bytes = WideToUTF8(tmp_wide);
+}
+
 }  // namespace
 
 class ProxyScriptFetcherImpl : public ProxyScriptFetcher,
@@ -57,8 +83,8 @@ class ProxyScriptFetcherImpl : public ProxyScriptFetcher,
 
   // ProxyScriptFetcher methods:
 
-  virtual void Fetch(const GURL& url, std::string* bytes,
-                     CompletionCallback* callback);
+  virtual int Fetch(const GURL& url, std::string* bytes,
+                    CompletionCallback* callback);
   virtual void Cancel();
 
   // URLRequest::Delegate methods:
@@ -137,9 +163,9 @@ ProxyScriptFetcherImpl::~ProxyScriptFetcherImpl() {
   // ensure that the delegate (this) is not called again.
 }
 
-void ProxyScriptFetcherImpl::Fetch(const GURL& url,
-                                   std::string* bytes,
-                                   CompletionCallback* callback) {
+int ProxyScriptFetcherImpl::Fetch(const GURL& url,
+                                  std::string* bytes,
+                                  CompletionCallback* callback) {
   // It is invalid to call Fetch() while a request is already in progress.
   DCHECK(!cur_request_.get());
 
@@ -171,6 +197,7 @@ void ProxyScriptFetcherImpl::Fetch(const GURL& url,
 
   // Start the request.
   cur_request_->Start();
+  return ERR_IO_PENDING;
 }
 
 void ProxyScriptFetcherImpl::Cancel() {
@@ -272,9 +299,15 @@ void ProxyScriptFetcherImpl::ReadBody(URLRequest* request) {
 }
 
 void ProxyScriptFetcherImpl::FetchCompleted() {
-  // On error, the caller expects empty string for bytes.
-  if (result_code_ != OK)
+  if (result_code_ == OK) {
+    // The caller expects the response to be encoded as UTF8.
+    std::string charset;
+    cur_request_->GetCharset(&charset);
+    ConvertResponseToUTF8(charset, result_bytes_);
+  } else {
+    // On error, the caller expects empty string for bytes.
     result_bytes_->clear();
+  }
 
   int result_code = result_code_;
   CompletionCallback* callback = callback_;

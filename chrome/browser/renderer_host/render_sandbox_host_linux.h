@@ -8,8 +8,6 @@
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_SANDBOX_HOST_LINUX_H_
 
 #include "base/singleton.h"
-#include "base/thread.h"
-#include "base/message_loop.h"
 
 // This is a singleton object which handles sandbox requests from the
 // renderers.
@@ -18,6 +16,7 @@ class RenderSandboxHostLinux {
   // Get the file descriptor which renderers should be given in order to signal
   // crashes to the browser.
   int GetRendererSocket() const { return renderer_socket_; }
+  pid_t pid() const { return pid_; }
 
  private:
   friend struct DefaultSingletonTraits<RenderSandboxHostLinux>;
@@ -27,6 +26,7 @@ class RenderSandboxHostLinux {
 
   int renderer_socket_;
   int childs_lifeline_fd_;
+  pid_t pid_;
 
   DISALLOW_EVIL_CONSTRUCTORS(RenderSandboxHostLinux);
 };

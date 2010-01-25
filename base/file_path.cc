@@ -159,6 +159,11 @@ bool FilePath::operator!=(const FilePath& that) const {
 }
 
 bool FilePath::IsParent(const FilePath& child) const {
+  return AppendRelativePath(child, NULL);
+}
+
+bool FilePath::AppendRelativePath(const FilePath& child,
+                                  FilePath* path) const {
   std::vector<FilePath::StringType> parent_components;
   std::vector<FilePath::StringType> child_components;
   GetComponents(&parent_components);
@@ -194,6 +199,11 @@ bool FilePath::IsParent(const FilePath& child) const {
     ++child_comp;
   }
 
+  if (path != NULL) {
+    for (; child_comp != child_components.end(); ++child_comp) {
+      *path = path->Append(*child_comp);
+    }
+  }
   return true;
 }
 
@@ -310,6 +320,16 @@ FilePath FilePath::InsertBeforeExtension(const StringType& suffix) const {
   return FilePath(ret);
 }
 
+FilePath FilePath::InsertBeforeExtensionASCII(const base::StringPiece& suffix)
+    const {
+  DCHECK(IsStringASCII(suffix));
+#if defined(OS_WIN)
+  return InsertBeforeExtension(ASCIIToWide(suffix));
+#elif defined(OS_POSIX)
+  return InsertBeforeExtension(suffix.as_string());
+#endif
+}
+
 FilePath FilePath::ReplaceExtension(const StringType& extension) const {
   if (path_.empty())
     return FilePath();
@@ -388,7 +408,7 @@ FilePath FilePath::Append(const FilePath& component) const {
   return Append(component.value());
 }
 
-FilePath FilePath::AppendASCII(const StringPiece& component) const {
+FilePath FilePath::AppendASCII(const base::StringPiece& component) const {
   DCHECK(IsStringASCII(component));
 #if defined(OS_WIN)
   return Append(ASCIIToWide(component));

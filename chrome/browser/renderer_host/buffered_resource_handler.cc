@@ -1,19 +1,26 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/buffered_resource_handler.h"
 
+#include <vector>
+
 #include "base/histogram.h"
+#include "base/logging.h"
 #include "base/string_util.h"
-#include "net/base/mime_sniffer.h"
-#include "net/base/net_errors.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/download_throttling_resource_handler.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "chrome/common/url_constants.h"
-#include "net/base/mime_sniffer.h"
 #include "net/base/io_buffer.h"
+#include "net/base/mime_sniffer.h"
+#include "net/base/mime_util.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
+#include "webkit/glue/plugins/plugin_list.h"
 
 namespace {
 
@@ -45,9 +52,11 @@ BufferedResourceHandler::BufferedResourceHandler(ResourceHandler* handler,
     : real_handler_(handler),
       host_(host),
       request_(request),
+      read_buffer_size_(0),
       bytes_read_(0),
       sniff_content_(false),
       should_buffer_(false),
+      wait_for_plugins_(false),
       buffering_(false),
       finished_(false) {
 }
@@ -74,12 +83,16 @@ bool BufferedResourceHandler::OnResponseStarted(int request_id,
   return true;
 }
 
-
 bool BufferedResourceHandler::OnResponseCompleted(
     int request_id,
     const URLRequestStatus& status,
     const std::string& security_info) {
   return real_handler_->OnResponseCompleted(request_id, status, security_info);
+}
+
+void BufferedResourceHandler::OnRequestClosed() {
+  request_ = NULL;
+  real_handler_->OnRequestClosed();
 }
 
 // We'll let the original event handler provide a buffer, and reuse it for
@@ -91,6 +104,8 @@ bool BufferedResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     my_buffer_ = new net::IOBuffer(kMaxBytesToSniff);
     *buf = my_buffer_.get();
     *buf_size = kMaxBytesToSniff;
+    // TODO(willchan): Remove after debugging bug 16371.
+    CHECK((*buf)->data());
     return true;
   }
 
@@ -101,6 +116,8 @@ bool BufferedResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     return false;
   }
   read_buffer_ = *buf;
+  // TODO(willchan): Remove after debugging bug 16371.
+  CHECK(read_buffer_->data());
   read_buffer_size_ = *buf_size;
   DCHECK(read_buffer_size_ >= kMaxBytesToSniff * 2);
   bytes_read_ = 0;
@@ -113,12 +130,13 @@ bool BufferedResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
       return true;
 
     LOG(INFO) << "Finished buffering " << request_->url().spec();
-    sniff_content_ = should_buffer_ = false;
     *bytes_read = bytes_read_;
 
     // Done buffering, send the pending ResponseStarted event.
     if (!CompleteResponseStarted(request_id, true))
       return false;
+  } else if (wait_for_plugins_) {
+    return true;
   }
 
   // Release the reference that we acquired at OnWillRead.
@@ -136,8 +154,11 @@ bool BufferedResourceHandler::DelayResponse() {
 
   const bool sniffing_blocked =
       LowerCaseEqualsASCII(content_type_options, "nosniff");
-  const bool we_would_like_to_sniff =
-      net::ShouldSniffMimeType(request_->url(), mime_type);
+  const bool not_modified_status =
+      response_->response_head.headers &&
+      response_->response_head.headers->response_code() == 304;
+  const bool we_would_like_to_sniff = not_modified_status ?
+      false : net::ShouldSniffMimeType(request_->url(), mime_type);
 
   RecordSnifferMetrics(sniffing_blocked, we_would_like_to_sniff, mime_type);
 
@@ -150,7 +171,7 @@ bool BufferedResourceHandler::DelayResponse() {
     return true;
   }
 
-  if (sniffing_blocked && mime_type.empty()) {
+  if (sniffing_blocked && mime_type.empty() && !not_modified_status) {
     // Ugg.  The server told us not to sniff the content but didn't give us a
     // mime type.  What's a browser to do?  Turns out, we're supposed to treat
     // the response as "text/plain".  This is the most secure option.
@@ -179,6 +200,12 @@ bool BufferedResourceHandler::DelayResponse() {
     LOG(INFO) << "To buffer: " << request_->url().spec();
     return true;
   }
+
+  if (!not_modified_status && ShouldWaitForPlugins()) {
+    wait_for_plugins_ = true;
+    return true;
+  }
+
   return false;
 }
 
@@ -195,6 +222,12 @@ bool BufferedResourceHandler::ShouldBuffer(const GURL& url,
   // performed by webkit: if there is not enough data it will go to quirks mode.
   // We only expect the doctype check to apply to html documents.
   return mime_type == "text/html";
+}
+
+bool BufferedResourceHandler::DidBufferEnough(int bytes_read) {
+  const int kRequiredLength = 256;
+
+  return bytes_read >= kRequiredLength;
 }
 
 bool BufferedResourceHandler::KeepBuffering(int bytes_read) {
@@ -227,17 +260,29 @@ bool BufferedResourceHandler::KeepBuffering(int bytes_read) {
     response_->response_head.mime_type.assign(new_type);
 
     // We just sniffed the mime type, maybe there is a doctype to process.
-    if (ShouldBuffer(request_->url(), new_type))
+    if (ShouldBuffer(request_->url(), new_type)) {
       should_buffer_ = true;
+    } else if (ShouldWaitForPlugins()) {
+      wait_for_plugins_ = true;
+    }
   }
 
-  if (!finished_ && should_buffer_) {
-    if (!DidBufferEnough(bytes_read_)) {
+  if (should_buffer_) {
+    if (!finished_ && !DidBufferEnough(bytes_read_)) {
       buffering_ = true;
       return true;
     }
+
+    should_buffer_ = false;
+    if (ShouldWaitForPlugins())
+      wait_for_plugins_ = true;
   }
+
   buffering_ = false;
+
+  if (wait_for_plugins_)
+    return true;
+
   return false;
 }
 
@@ -246,16 +291,10 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
   // Check to see if we should forward the data from this request to the
   // download thread.
   // TODO(paulg): Only download if the context from the renderer allows it.
-  std::string content_disposition;
-  request_->GetResponseHeaderByName("content-disposition",
-                                    &content_disposition);
+  ResourceDispatcherHostRequestInfo* info =
+      ResourceDispatcherHost::InfoForRequest(request_);
 
-  ResourceDispatcherHost::ExtraRequestInfo* info =
-      ResourceDispatcherHost::ExtraInfoForRequest(request_);
-
-  if (info->allow_download &&
-      host_->ShouldDownload(response_->response_head.mime_type,
-                            content_disposition)) {
+  if (info->allow_download() && ShouldDownload(NULL)) {
     if (response_->response_head.headers &&  // Can be NULL if FTP.
         response_->response_head.headers->response_code() / 100 != 2) {
       // The response code indicates that this is an error page, but we don't
@@ -267,16 +306,16 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
       return false;
     }
 
-    info->is_download = true;
+    info->set_is_download(true);
 
     scoped_refptr<DownloadThrottlingResourceHandler> download_handler =
         new DownloadThrottlingResourceHandler(host_,
-                                           request_,
-                                           request_->url(),
-                                           info->process_id,
-                                           info->route_id,
-                                           request_id,
-                                           in_complete);
+                                             request_,
+                                             request_->url(),
+                                             info->child_id(),
+                                             info->route_id(),
+                                             request_id,
+                                             in_complete);
     if (bytes_read_) {
       // a Read has already occurred and we need to copy the data into the
       // EventHandler.
@@ -289,9 +328,9 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
 
     // Send the renderer a response that indicates that the request will be
     // handled by an external source (the browser's DownloadManager).
-    real_handler_->OnResponseStarted(info->request_id, response_);
+    real_handler_->OnResponseStarted(info->request_id(), response_);
     URLRequestStatus status(URLRequestStatus::HANDLED_EXTERNALLY, 0);
-    real_handler_->OnResponseCompleted(info->request_id, status,
+    real_handler_->OnResponseCompleted(info->request_id(), status,
                                        std::string());
 
     // Ditch the old async handler that talks to the renderer for the new
@@ -301,8 +340,117 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
   return real_handler_->OnResponseStarted(request_id, response_);
 }
 
-bool BufferedResourceHandler::DidBufferEnough(int bytes_read) {
-  const int kRequiredLength = 256;
+bool BufferedResourceHandler::ShouldWaitForPlugins() {
+  bool need_plugin_list;
+  if (!ShouldDownload(&need_plugin_list) || !need_plugin_list)
+    return false;
 
-  return bytes_read >= kRequiredLength;
+  // We don't want to keep buffering as our buffer will fill up.
+  ResourceDispatcherHostRequestInfo* info =
+      ResourceDispatcherHost::InfoForRequest(request_);
+  host_->PauseRequest(info->child_id(), info->request_id(), true);
+
+  // Schedule plugin loading on the file thread.
+  // Note: it's possible that the only reference to this object is the task.  If
+  // If the task executes on the file thread, and before it returns, the task it
+  // posts to the IO thread runs, then this object will get destructed on the
+  // file thread.  This breaks assumptions in other message handlers (i.e. when
+  // unregistering with NotificationService in the destructor).
+  AddRef();
+  ChromeThread::GetMessageLoop(ChromeThread::FILE)->PostTask(FROM_HERE,
+      NewRunnableFunction(&BufferedResourceHandler::LoadPlugins,
+          this, host_->ui_loop()));
+  return true;
+}
+
+// This test mirrors the decision that WebKit makes in
+// WebFrameLoaderClient::dispatchDecidePolicyForMIMEType.
+bool BufferedResourceHandler::ShouldDownload(bool* need_plugin_list) {
+  if (need_plugin_list)
+    *need_plugin_list = false;
+  std::string type = StringToLowerASCII(response_->response_head.mime_type);
+  std::string disposition;
+  request_->GetResponseHeaderByName("content-disposition", &disposition);
+  disposition = StringToLowerASCII(disposition);
+
+  // First, examine content-disposition.
+  if (!disposition.empty()) {
+    bool should_download = true;
+
+    // Some broken sites just send ...
+    //    Content-Disposition: ; filename="file"
+    // ... screen those out here.
+    if (disposition[0] == ';')
+      should_download = false;
+
+    if (disposition.compare(0, 6, "inline") == 0)
+      should_download = false;
+
+    // Some broken sites just send ...
+    //    Content-Disposition: filename="file"
+    // ... without a disposition token... Screen those out.
+    if (disposition.compare(0, 8, "filename") == 0)
+      should_download = false;
+
+    // Also in use is Content-Disposition: name="file"
+    if (disposition.compare(0, 4, "name") == 0)
+      should_download = false;
+
+    // We have a content-disposition of "attachment" or unknown.
+    // RFC 2183, section 2.8 says that an unknown disposition
+    // value should be treated as "attachment".
+    if (should_download)
+      return true;
+  }
+
+  // MIME type checking.
+  if (net::IsSupportedMimeType(type))
+    return false;
+
+  if (need_plugin_list) {
+    if (!NPAPI::PluginList::Singleton()->PluginsLoaded()) {
+      *need_plugin_list = true;
+      return true;
+    }
+  } else {
+    DCHECK(NPAPI::PluginList::Singleton()->PluginsLoaded());
+  }
+
+  // Finally, check the plugin list.
+  WebPluginInfo info;
+  bool allow_wildcard = false;
+  return !NPAPI::PluginList::Singleton()->GetPluginInfo(
+      GURL(), type, allow_wildcard, &info, NULL);
+}
+
+void BufferedResourceHandler::LoadPlugins(BufferedResourceHandler* handler,
+                                          MessageLoop* main_message_loop) {
+  std::vector<WebPluginInfo> plugins;
+  NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
+
+  // Note, we want to get to the IO thread now, but the file thread outlives it
+  // so we can't post a task to it directly as it might be in the middle of
+  // destruction.  So hop through the main thread, where the destruction of the
+  // IO thread happens and hence no race conditions exist.
+  main_message_loop->PostTask(FROM_HERE,
+      NewRunnableFunction(&BufferedResourceHandler::NotifyPluginsLoaded,
+          handler));
+}
+
+void BufferedResourceHandler::NotifyPluginsLoaded(
+    BufferedResourceHandler* handler) {
+  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(handler, &BufferedResourceHandler::OnPluginsLoaded));
+}
+
+void BufferedResourceHandler::OnPluginsLoaded() {
+  wait_for_plugins_ = false;
+  if (request_) {
+    ResourceDispatcherHostRequestInfo* info =
+        ResourceDispatcherHost::InfoForRequest(request_);
+    host_->PauseRequest(info->child_id(), info->request_id(), false);
+    if (!CompleteResponseStarted(info->request_id(), false))
+      host_->CancelRequest(info->child_id(), info->request_id(), false);
+  }
+  Release();
 }

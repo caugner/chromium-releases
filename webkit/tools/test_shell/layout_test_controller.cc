@@ -14,17 +14,23 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "webkit/api/public/WebConsoleMessage.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebKit.h"
 #include "webkit/api/public/WebScriptSource.h"
+#include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/dom_operations.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
+#include "webkit/tools/test_shell/simple_database_system.h"
+#include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 using std::string;
 using std::wstring;
 
+using WebKit::WebConsoleMessage;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 
@@ -97,6 +103,7 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("setCanOpenWindows", &LayoutTestController::setCanOpenWindows);
   BindMethod("setCloseRemainingWindowsWhenComplete", &LayoutTestController::setCloseRemainingWindowsWhenComplete);
   BindMethod("objCIdentityIsEqual", &LayoutTestController::objCIdentityIsEqual);
+  BindMethod("setAlwaysAcceptCookies", &LayoutTestController::setAlwaysAcceptCookies);
   BindMethod("setWindowIsKey", &LayoutTestController::setWindowIsKey);
   BindMethod("setTabKeyCyclesThroughElements", &LayoutTestController::setTabKeyCyclesThroughElements);
   BindMethod("setUserStyleSheetLocation", &LayoutTestController::setUserStyleSheetLocation);
@@ -113,8 +120,14 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("pauseTransitionAtTimeOnElementWithId", &LayoutTestController::pauseTransitionAtTimeOnElementWithId);
   BindMethod("elementDoesAutoCompleteForElementWithId", &LayoutTestController::elementDoesAutoCompleteForElementWithId);
   BindMethod("numberOfActiveAnimations", &LayoutTestController::numberOfActiveAnimations);
+  BindMethod("disableImageLoading", &LayoutTestController::disableImageLoading);
+  BindMethod("setIconDatabaseEnabled", &LayoutTestController::setIconDatabaseEnabled);
   BindMethod("setCustomPolicyDelegate", &LayoutTestController::setCustomPolicyDelegate);
   BindMethod("waitForPolicyDelegate", &LayoutTestController::waitForPolicyDelegate);
+  BindMethod("setWillSendRequestReturnsNullOnRedirect", &LayoutTestController::setWillSendRequestReturnsNullOnRedirect);
+  BindMethod("whiteListAccessFromOrigin", &LayoutTestController::whiteListAccessFromOrigin);
+  BindMethod("clearAllDatabases", &LayoutTestController::clearAllDatabases);
+  BindMethod("setPOSIXLocale", &LayoutTestController::setPOSIXLocale);
 
   // The following are stubs.
   BindMethod("dumpAsWebArchive", &LayoutTestController::dumpAsWebArchive);
@@ -134,7 +147,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("setUseDashboardCompatibilityMode", &LayoutTestController::setUseDashboardCompatibilityMode);
 
   BindMethod("setXSSAuditorEnabled", &LayoutTestController::setXSSAuditorEnabled);
-  BindMethod("queueScriptInIsolatedWorld", &LayoutTestController::queueScriptInIsolatedWorld);
+  BindMethod("evaluateScriptInIsolatedWorld", &LayoutTestController::evaluateScriptInIsolatedWorld);
+  BindMethod("overridePreference", &LayoutTestController::overridePreference);
 
   // The fallback method is called when an unknown method is invoked.
   BindFallbackMethod(&LayoutTestController::fallbackMethod);
@@ -326,7 +340,7 @@ class WorkItemLoadingScript : public LayoutTestController::WorkItem {
  public:
   WorkItemLoadingScript(const string& script) : script_(script) {}
   bool Run(TestShell* shell) {
-    shell->webView()->GetMainFrame()->ExecuteScript(
+    shell->webView()->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
     return true;  // TODO(darin): Did it really start a navigation?
   }
@@ -338,20 +352,8 @@ class WorkItemNonLoadingScript : public LayoutTestController::WorkItem {
  public:
   WorkItemNonLoadingScript(const string& script) : script_(script) {}
   bool Run(TestShell* shell) {
-    shell->webView()->GetMainFrame()->ExecuteScript(
+    shell->webView()->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
-    return false;
-  }
- private:
-  string script_;
-};
-
-class WorkItemIsolatedWorldScript : public LayoutTestController::WorkItem {
- public:
-  WorkItemIsolatedWorldScript(const string& script) : script_(script) {}
-  bool Run(TestShell* shell) {
-    WebScriptSource source(WebString::fromUTF8(script_));
-    shell->webView()->GetMainFrame()->ExecuteScriptInNewWorld(&source, 1);
     return false;
   }
  private:
@@ -377,8 +379,7 @@ class WorkItemLoad : public LayoutTestController::WorkItem {
   WorkItemLoad(const GURL& url, const string& target)
       : url_(url), target_(target) {}
   bool Run(TestShell* shell) {
-    shell->LoadURLForFrame(UTF8ToWide(url_.spec()).c_str(),
-                           UTF8ToWide(target_).c_str());
+    shell->LoadURLForFrame(url_, UTF8ToWide(target_).c_str());
     return true;  // TODO(darin): Did it really start a navigation?
   }
  private:
@@ -389,7 +390,7 @@ class WorkItemLoad : public LayoutTestController::WorkItem {
 void LayoutTestController::queueLoad(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isString()) {
-    GURL current_url = shell_->webView()->GetMainFrame()->GetURL();
+    GURL current_url = shell_->webView()->mainFrame()->url();
     GURL full_url = current_url.Resolve(args[0].ToString());
 
     string target = "";
@@ -413,8 +414,8 @@ void LayoutTestController::objCIdentityIsEqual(
 
 void LayoutTestController::Reset() {
   if (shell_) {
-    shell_->webView()->ResetZoom();
-    shell_->webView()->SetTabKeyCyclesThroughElements(true);
+    shell_->webView()->zoomDefault();
+    shell_->webView()->setTabKeyCyclesThroughElements(true);
   }
   dump_as_text_ = false;
   dump_editing_callbacks_ = false;
@@ -432,6 +433,11 @@ void LayoutTestController::Reset() {
   stop_provisional_frame_loads_ = false;
   globalFlag_.Set(false);
   webHistoryItemCount_.Set(0);
+
+  SimpleResourceLoaderBridge::SetAcceptAllCookies(false);
+  WebKit::resetOriginAccessWhiteLists();
+
+  setlocale(LC_ALL, "");
 
   if (close_remaining_windows_) {
     // Iterate through the window list and close everything except the original
@@ -483,7 +489,7 @@ void LayoutTestController::setCanOpenWindows(
 void LayoutTestController::setTabKeyCyclesThroughElements(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isBool()) {
-    shell_->webView()->SetTabKeyCyclesThroughElements(args[0].ToBoolean());
+    shell_->webView()->setTabKeyCyclesThroughElements(args[0].ToBoolean());
   }
   result->SetNull();
 }
@@ -498,6 +504,14 @@ void LayoutTestController::setCloseRemainingWindowsWhenComplete(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isBool()) {
     close_remaining_windows_ = args[0].value.boolValue;
+  }
+  result->SetNull();
+}
+
+void LayoutTestController::setAlwaysAcceptCookies(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() > 0) {
+    SimpleResourceLoaderBridge::SetAcceptAllCookies(CppVariantToBool(args[0]));
   }
   result->SetNull();
 }
@@ -541,8 +555,8 @@ void LayoutTestController::execCommand(
       value = args[2].ToString();
 
     // Note: webkit's version does not return the boolean, so neither do we.
-    shell_->webView()->GetFocusedFrame()->ExecuteEditCommandByName(command,
-                                                                   value);
+    shell_->webView()->focusedFrame()->executeCommand(
+        WebString::fromUTF8(command), WebString::fromUTF8(value));
   }
   result->SetNull();
 }
@@ -555,7 +569,8 @@ void LayoutTestController::isCommandEnabled(
   }
 
   std::string command = args[0].ToString();
-  bool rv = shell_->webView()->GetFocusedFrame()->IsEditCommandEnabled(command);
+  bool rv = shell_->webView()->focusedFrame()->isCommandEnabled(
+      WebString::fromUTF8(command));
   result->Set(rv);
 }
 
@@ -565,8 +580,7 @@ void LayoutTestController::setPopupBlockingEnabled(
     bool block_popups = args[0].ToBoolean();
     WebPreferences* prefs = shell_->GetWebPreferences();
     prefs->javascript_can_open_windows_automatically = !block_popups;
-
-    shell_->webView()->SetPreferences(*prefs);
+    prefs->Apply(shell_->webView());
   }
   result->SetNull();
 }
@@ -594,6 +608,14 @@ void LayoutTestController::waitForPolicyDelegate(
     const CppArgumentList& args, CppVariant* result) {
   shell_->delegate()->WaitForPolicyDelegate();
   wait_until_done_ = true;
+  result->SetNull();
+}
+
+void LayoutTestController::setWillSendRequestReturnsNullOnRedirect(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() > 0 && args[0].isBool())
+    shell_->delegate()->set_block_redirects(args[0].value.boolValue);
+
   result->SetNull();
 }
 
@@ -703,6 +725,20 @@ void LayoutTestController::numberOfActiveAnimations(const CppArgumentList& args,
   result->Set(webkit_glue::NumberOfActiveAnimations(shell_->webView()));
 }
 
+void LayoutTestController::disableImageLoading(const CppArgumentList& args,
+                                               CppVariant* result) {
+  WebPreferences* prefs = shell_->GetWebPreferences();
+  prefs->loads_images_automatically = false;
+  prefs->Apply(shell_->webView());
+  result->SetNull();
+}
+
+void LayoutTestController::setIconDatabaseEnabled(const CppArgumentList& args,
+                                                  CppVariant* result) {
+  // We don't use the WebKit icon database.
+  result->SetNull();
+}
+
 //
 // Unimplemented stubs
 //
@@ -724,6 +760,9 @@ void LayoutTestController::dumpSelectionRect(
 
 void LayoutTestController::display(
     const CppArgumentList& args, CppVariant* result) {
+  WebViewHost* view_host = shell_->webViewHost();
+  view_host->Paint();
+  view_host->DisplayRepaintMask();
   result->SetNull();
 }
 
@@ -777,17 +816,129 @@ void LayoutTestController::setPrivateBrowsingEnabled(
 void LayoutTestController::setXSSAuditorEnabled(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isBool()) {
-    WebPreferences* preferences = shell_->GetWebPreferences();
-    preferences->xss_auditor_enabled = args[0].value.boolValue;
-    shell_->webView()->SetPreferences(*preferences);
+    WebPreferences* prefs = shell_->GetWebPreferences();
+    prefs->xss_auditor_enabled = args[0].value.boolValue;
+    prefs->Apply(shell_->webView());
   }
   result->SetNull();
 }
 
-void LayoutTestController::queueScriptInIsolatedWorld(
+void LayoutTestController::evaluateScriptInIsolatedWorld(
     const CppArgumentList& args, CppVariant* result) {
-  if (args.size() > 0 && args[0].isString())
-    work_queue_.AddWork(new WorkItemIsolatedWorldScript(args[0].ToString()));
+  if (args.size() >= 2 && args[0].isNumber() && args[1].isString()) {
+    WebScriptSource source(WebString::fromUTF8(args[1].ToString()));
+    // This relies on the iframe focusing itself when it loads. This is a bit
+    // sketchy, but it seems to be what other tests do.
+    shell_->webView()->focusedFrame()->executeScriptInIsolatedWorld(
+        args[0].ToInt32(), &source, 1, 1);
+  }
+  result->SetNull();
+}
+
+// Need these conversions because the format of the value for booleans
+// may vary - for example, on mac "1" and "0" are used for boolean.
+bool LayoutTestController::CppVariantToBool(const CppVariant& value) {
+  if (value.isBool())
+    return value.ToBoolean();
+  else if (value.isInt32())
+    return 0 != value.ToInt32();
+  else if (value.isString()) {
+    std::string valueString = value.ToString();
+    if (valueString == "true")
+      return true;
+    if (valueString == "false")
+      return false;
+  }
+  LogErrorToConsole("Invalid value. Expected boolean value.");
+  return false;
+}
+
+int32 LayoutTestController::CppVariantToInt32(const CppVariant& value) {
+    if (value.isInt32())
+    return value.ToInt32();
+  else if (value.isString()) {
+    int number;
+    if (StringToInt(value.ToString(), &number))
+      return number;
+  }
+  LogErrorToConsole("Invalid value for preference. Expected integer value.");
+  return 0;
+}
+
+std::wstring LayoutTestController::CppVariantToWstring(
+    const CppVariant& value) {
+  if (value.isString())
+    return UTF8ToWide(value.ToString());
+  LogErrorToConsole("Invalid value for preference. Expected string value.");
+  return std::wstring();
+}
+
+void LayoutTestController::overridePreference(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() == 2 && args[0].isString()) {
+    std::string key = args[0].ToString();
+    CppVariant value = args[1];
+    WebPreferences* preferences = shell_->GetWebPreferences();
+    if (key == "WebKitStandardFont")
+      preferences->standard_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitFixedFont")
+      preferences->fixed_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitSerifFont")
+      preferences->serif_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitSansSerifFont")
+      preferences->sans_serif_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitCursiveFont")
+      preferences->cursive_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitFantasyFont")
+      preferences->fantasy_font_family = CppVariantToWstring(value);
+    else if (key == "WebKitDefaultFontSize")
+      preferences->default_font_size = CppVariantToInt32(value);
+    else if (key == "WebKitDefaultFixedFontSize")
+      preferences->default_fixed_font_size = CppVariantToInt32(value);
+    else if (key == "WebKitMinimumFontSize")
+      preferences->minimum_font_size = CppVariantToInt32(value);
+    else if (key == "WebKitMinimumLogicalFontSize")
+      preferences->minimum_logical_font_size = CppVariantToInt32(value);
+    else if (key == "WebKitDefaultTextEncodingName")
+      preferences->default_encoding = value.ToString();
+    else if (key == "WebKitJavaScriptEnabled")
+      preferences->javascript_enabled = CppVariantToBool(value);
+    else if (key == "WebKitWebSecurityEnabled")
+      preferences->web_security_enabled = CppVariantToBool(value);
+    else if (key == "WebKitJavaScriptCanOpenWindowsAutomatically")
+      preferences->javascript_can_open_windows_automatically =
+          CppVariantToBool(value);
+    else if (key == "WebKitDisplayImagesKey")
+      preferences->loads_images_automatically = CppVariantToBool(value);
+    else if (key == "WebKitPluginsEnabled")
+      preferences->plugins_enabled = CppVariantToBool(value);
+    else if (key == "WebKitDOMPasteAllowedPreferenceKey")
+      preferences->dom_paste_enabled = CppVariantToBool(value);
+    else if (key == "WebKitDeveloperExtrasEnabledPreferenceKey")
+      preferences->developer_extras_enabled = CppVariantToBool(value);
+    else if (key == "WebKitShrinksStandaloneImagesToFit")
+      preferences->shrinks_standalone_images_to_fit = CppVariantToBool(value);
+    else if (key == "WebKitTextAreasAreResizable")
+      preferences->text_areas_are_resizable = CppVariantToBool(value);
+    else if (key == "WebKitJavaEnabled")
+      preferences->java_enabled = CppVariantToBool(value);
+    else if (key == "WebKitUsesPageCachePreferenceKey")
+      preferences->uses_page_cache = CppVariantToBool(value);
+    else if (key == "WebKitXSSAuditorEnabled")
+      preferences->xss_auditor_enabled = CppVariantToBool(value);
+    else if (key == "WebKitLocalStorageEnabledPreferenceKey")
+      preferences->local_storage_enabled = CppVariantToBool(value);
+    else if (key == "WebKitOfflineWebApplicationCacheEnabled")
+      preferences->application_cache_enabled = CppVariantToBool(value);
+    else if (key == "WebKitTabToLinksPreferenceKey")
+      preferences->tabs_to_links = CppVariantToBool(value);
+    else {
+      std::string message("Invalid name for preference: ");
+      message.append(key);
+      LogErrorToConsole(message);
+    }
+    preferences->Apply(shell_->webView());
+  }
   result->SetNull();
 }
 
@@ -800,4 +951,44 @@ void LayoutTestController::fallbackMethod(
     printf("CONSOLE MESSAGE: %S\n", message.c_str());
   }
   result->SetNull();
+}
+
+void LayoutTestController::whiteListAccessFromOrigin(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  if (args.size() != 4 || !args[0].isString() || !args[1].isString() ||
+      !args[2].isString() || !args[3].isBool())
+    return;
+
+  WebKit::WebURL url(GURL(args[0].ToString()));
+  if (!url.isValid())
+    return;
+
+  WebKit::whiteListAccessFromOrigin(url,
+                                    WebString::fromUTF8(args[1].ToString()),
+                                    WebString::fromUTF8(args[2].ToString()),
+                                    args[3].ToBoolean());
+}
+
+void LayoutTestController::clearAllDatabases(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+  SimpleDatabaseSystem::GetInstance()->ClearAllDatabases();
+}
+
+void LayoutTestController::setPOSIXLocale(const CppArgumentList& args,
+                                          CppVariant* result) {
+  result->SetNull();
+  if (args.size() == 1 && args[0].isString()) {
+    std::string new_locale = args[0].ToString();
+    setlocale(LC_ALL, new_locale.c_str());
+  }
+}
+
+void LayoutTestController::LogErrorToConsole(const std::string& text) {
+  shell_->delegate()->didAddMessageToConsole(
+      WebConsoleMessage(WebConsoleMessage::LevelError,
+                        WebString::fromUTF8(text)),
+      WebString(), 0);
 }

@@ -217,16 +217,17 @@ void DisassembleAdjustDiff(const std::wstring& model_file,
     Problem("Can't serialize encoded model.");
   courgette::DeleteEncodedProgram(encoded_model);
 
+  courgette::SinkStream empty_sink;
   for (int i = 0;  ; ++i) {
     courgette::SinkStream* old_stream = model_sinks.stream(i);
     courgette::SinkStream* new_stream = program_sinks.stream(i);
-    if (old_stream == NULL  && new_stream == NULL)
+    if (old_stream == NULL && new_stream == NULL)
       break;
 
     courgette::SourceStream old_source;
     courgette::SourceStream new_source;
-    old_source.Init(*old_stream);
-    new_source.Init(*new_stream);
+    old_source.Init(old_stream ? *old_stream : empty_sink);
+    new_source.Init(new_stream ? *new_stream : empty_sink);
     courgette::SinkStream patch_stream;
     courgette::BSDiffStatus status =
         courgette::CreateBinaryPatch(&old_source, &new_source, &patch_stream);
@@ -348,22 +349,22 @@ int main(int argc, const char* argv[]) {
   CommandLine::Init(argc, argv);
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  bool cmd_dis = command_line.HasSwitch(L"dis");
-  bool cmd_asm = command_line.HasSwitch(L"asm");
-  bool cmd_disadj = command_line.HasSwitch(L"disadj");
-  bool cmd_make_patch = command_line.HasSwitch(L"gen");
-  bool cmd_apply_patch = command_line.HasSwitch(L"apply");
-  bool cmd_make_bsdiff_patch = command_line.HasSwitch(L"genbsdiff");
-  bool cmd_apply_bsdiff_patch = command_line.HasSwitch(L"applybsdiff");
-  bool cmd_spread_1_adjusted = command_line.HasSwitch(L"gen1a");
-  bool cmd_spread_1_unadjusted = command_line.HasSwitch(L"gen1u");
+  bool cmd_dis = command_line.HasSwitch("dis");
+  bool cmd_asm = command_line.HasSwitch("asm");
+  bool cmd_disadj = command_line.HasSwitch("disadj");
+  bool cmd_make_patch = command_line.HasSwitch("gen");
+  bool cmd_apply_patch = command_line.HasSwitch("apply");
+  bool cmd_make_bsdiff_patch = command_line.HasSwitch("genbsdiff");
+  bool cmd_apply_bsdiff_patch = command_line.HasSwitch("applybsdiff");
+  bool cmd_spread_1_adjusted = command_line.HasSwitch("gen1a");
+  bool cmd_spread_1_unadjusted = command_line.HasSwitch("gen1u");
 
   std::vector<std::wstring> values = command_line.GetLooseValues();
 
   // '-repeat=N' is for debugging.  Running many iterations can reveal leaks and
   // bugs in cleanup.
   int repeat_count = 1;
-  std::wstring repeat_switch = command_line.GetSwitchValue(L"repeat");
+  std::wstring repeat_switch = command_line.GetSwitchValue("repeat");
   if (!repeat_switch.empty())
     if (!WideStringToInt(repeat_switch, &repeat_count))
       repeat_count = 1;

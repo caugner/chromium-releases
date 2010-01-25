@@ -6,6 +6,7 @@
 #include "base/gfx/rect.h"
 #include "base/path_service.h"
 #include "base/perftimer.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_paths.h"
@@ -38,20 +39,24 @@ class NewTabUIStartupTest : public UITest {
     PrintResultList("new_tab", "", label, times, "ms", important);
   }
 
-  // Run the test, by bringing up a browser and timing the new tab startup.
-  // |want_warm| is true if we should output warm-disk timings, false if
-  // we should report cold timings.
-  void RunStartupTest(const char* label, bool want_warm, bool important,
-                      int profile_type) {
+  void InitProfile(UITest::ProfileType profile_type) {
     profile_type_ = profile_type;
 
     // Install the location of the test profile file.
     set_template_user_data(UITest::ComputeTypicalUserDataSource(
-        profile_type).ToWStringHack());
+        profile_type));
 
     // Disable the first run notification because it has an animation which
     // masks any real performance regressions.
     launch_arguments_.AppendSwitch(switches::kDisableNewTabFirstRun);
+  }
+
+  // Run the test, by bringing up a browser and timing the new tab startup.
+  // |want_warm| is true if we should output warm-disk timings, false if
+  // we should report cold timings.
+  void RunStartupTest(const char* label, bool want_warm, bool important,
+                      UITest::ProfileType profile_type) {
+    InitProfile(profile_type);
 
     TimeDelta timings[kNumCycles];
     for (int i = 0; i < kNumCycles; ++i) {
@@ -65,9 +70,9 @@ class NewTabUIStartupTest : public UITest {
       // We resize the window so that we hit the normal layout of the NTP and
       // not the small layout mode.
 #if defined(OS_WIN)
-// TODO(port): SetBounds returns false when not implemented.
-// It is OK to comment out the resize since it will still be useful to test the
-// default size of the window.
+      // TODO(port): SetBounds returns false when not implemented.
+      // It is OK to comment out the resize since it will still be useful to
+      // test the default size of the window.
       ASSERT_TRUE(window->GetWindow().get()->SetBounds(gfx::Rect(1000, 1000)));
 #endif
       int tab_count = -1;
@@ -79,21 +84,76 @@ class NewTabUIStartupTest : public UITest {
       ASSERT_TRUE(window->WaitForTabCountToBecome(2, 5000));
       int load_time;
       ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
-      timings[i] = TimeDelta::FromMilliseconds(load_time);
 
       if (want_warm) {
         // Bring up a second tab, now that we've already shown one tab.
         window->ApplyAccelerator(IDC_NEW_TAB);
         ASSERT_TRUE(window->WaitForTabCountToBecome(3, 5000));
         ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
-        timings[i] = TimeDelta::FromMilliseconds(load_time);
       }
+      timings[i] = TimeDelta::FromMilliseconds(load_time);
 
       window = NULL;
       UITest::TearDown();
     }
 
     PrintTimings(label, timings, important);
+  }
+
+  void RunNewTabTimingTest() {
+    InitProfile(UITest::DEFAULT_THEME);
+
+    TimeDelta scriptstart_times[kNumCycles];
+    TimeDelta domcontentloaded_times[kNumCycles];
+    TimeDelta onload_times[kNumCycles];
+
+    for (int i = 0; i < kNumCycles; ++i) {
+      UITest::SetUp();
+
+      // Switch to the "new tab" tab, which should be any new tab after the
+      // first (the first is about:blank).
+      scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+      ASSERT_TRUE(window.get());
+
+      // We resize the window so that we hit the normal layout of the NTP and
+      // not the small layout mode.
+#if defined(OS_WIN)
+      // TODO(port): SetBounds returns false when not implemented.
+      // It is OK to comment out the resize since it will still be useful to
+      // test the default size of the window.
+      ASSERT_TRUE(window->GetWindow().get()->SetBounds(gfx::Rect(1000, 1000)));
+#endif
+      int tab_count = -1;
+      ASSERT_TRUE(window->GetTabCount(&tab_count));
+      ASSERT_EQ(1, tab_count);
+
+      // Hit ctl-t and wait for the tab to load.
+      window->ApplyAccelerator(IDC_NEW_TAB);
+      ASSERT_TRUE(window->WaitForTabCountToBecome(2, 5000));
+      int duration;
+      ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&duration));
+
+      // Collect the timing information.
+      ASSERT_TRUE(automation()->GetMetricEventDuration("Tab.NewTabScriptStart",
+          &duration));
+      scriptstart_times[i] = TimeDelta::FromMilliseconds(duration);
+
+      ASSERT_TRUE(automation()->GetMetricEventDuration(
+          "Tab.NewTabDOMContentLoaded", &duration));
+      domcontentloaded_times[i] = TimeDelta::FromMilliseconds(duration);
+
+      ASSERT_TRUE(automation()->GetMetricEventDuration("Tab.NewTabOnload",
+          &duration));
+      onload_times[i] = TimeDelta::FromMilliseconds(duration);
+
+      window = NULL;
+      UITest::TearDown();
+    }
+
+    PrintTimings("script_start", scriptstart_times, false /* important */);
+    PrintTimings("domcontent_loaded", domcontentloaded_times,
+                 false /* important */);
+    PrintTimings("onload", onload_times, false /* important */);
   }
 };
 
@@ -113,5 +173,29 @@ TEST_F(NewTabUIStartupTest, ComplexThemeCold) {
                  false /* not important */,
                  UITest::COMPLEX_THEME);
 }
+
+TEST_F(NewTabUIStartupTest, NewTabTimingTestsCold) {
+  RunNewTabTimingTest();
+}
+
+#if defined(OS_LINUX)
+TEST_F(NewTabUIStartupTest, GtkThemeCold) {
+  RunStartupTest("tab_gtk_theme_cold", false /* cold */,
+                 false /* not important */,
+                 UITest::NATIVE_THEME);
+}
+
+TEST_F(NewTabUIStartupTest, NativeFrameCold) {
+  RunStartupTest("tab_custom_frame_cold", false /* cold */,
+                 false /* not important */,
+                 UITest::CUSTOM_FRAME);
+}
+
+TEST_F(NewTabUIStartupTest, NativeFrameGtkThemeCold) {
+  RunStartupTest("tab_custom_frame_gtk_theme_cold", false /* cold */,
+                 false /* not important */,
+                 UITest::CUSTOM_FRAME_NATIVE_THEME);
+}
+#endif
 
 }  // namespace

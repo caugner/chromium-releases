@@ -1,14 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/message_box_view.h"
 
+#include "app/clipboard/clipboard.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/l10n_util.h"
 #include "app/message_box_flags.h"
-#include "base/clipboard.h"
 #include "base/message_loop.h"
-#include "base/scoped_clipboard_writer.h"
 #include "base/string_util.h"
 #include "views/controls/button/checkbox.h"
 #include "views/standard_layout.h"
@@ -47,7 +47,7 @@ MessageBoxView::MessageBoxView(int dialog_flags,
 
 std::wstring MessageBoxView::GetInputText() {
   if (prompt_field_)
-    return prompt_field_->text();
+    return UTF16ToWideHack(prompt_field_->text());
   return EmptyWString();
 }
 
@@ -106,7 +106,7 @@ bool MessageBoxView::AcceleratorPressed(
     return false;
 
   ScopedClipboardWriter scw(clipboard);
-  scw.WriteText(message_label_->GetText());
+  scw.WriteText(WideToUTF16Hack(message_label_->GetText()));
   return true;
 }
 
@@ -138,7 +138,7 @@ void MessageBoxView::Init(int dialog_flags,
 
   if (dialog_flags & MessageBoxFlags::kFlagHasPromptField) {
     prompt_field_ = new views::Textfield;
-    prompt_field_->SetText(default_prompt);
+    prompt_field_->SetText(WideToUTF16Hack(default_prompt));
   }
 
   ResetLayoutManager();

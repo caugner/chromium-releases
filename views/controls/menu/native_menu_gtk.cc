@@ -4,8 +4,13 @@
 
 #include "views/controls/menu/native_menu_gtk.h"
 
+#include <string>
+
+#include "app/gfx/gtk_util.h"
+#include "base/keyboard_codes.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_2.h"
 
@@ -131,15 +136,23 @@ void NativeMenuGtk::AddMenuItemAt(int index,
       }
       break;
     case Menu2Model::TYPE_SUBMENU:
-    case Menu2Model::TYPE_COMMAND:
-      menu_item = gtk_menu_item_new_with_mnemonic(label.c_str());
+    case Menu2Model::TYPE_COMMAND: {
+      SkBitmap icon;
+      // Create menu item with icon if icon exists.
+      if (model_->HasIcons() && model_->GetIconAt(index, &icon)) {
+        menu_item = gtk_image_menu_item_new_with_mnemonic(label.c_str());
+        GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
+        gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
+                                      gtk_image_new_from_pixbuf(pixbuf));
+      } else {
+        menu_item = gtk_menu_item_new_with_mnemonic(label.c_str());
+      }
       break;
+    }
     default:
       NOTREACHED();
       break;
   }
-
-  // TODO(beng): icons
 
   if (type == Menu2Model::TYPE_SUBMENU) {
     // TODO(beng): we're leaking these objects right now... consider some other
@@ -150,7 +163,7 @@ void NativeMenuGtk::AddMenuItemAt(int index,
                               submenu->GetNativeMenu());
   }
 
-  views::Accelerator accelerator(0, false, false, false);
+  views::Accelerator accelerator(base::VKEY_UNKNOWN, false, false, false);
   if (model_->GetAcceleratorAt(index, &accelerator)) {
     // TODO(beng): accelerators w/gtk_widget_add_accelerator.
   }
@@ -208,8 +221,8 @@ void NativeMenuGtk::MenuPositionFunc(GtkMenu* menu,
 }
 
 void NativeMenuGtk::OnActivate(GtkMenuItem* menu_item) {
-  int position = reinterpret_cast<int>(g_object_get_data(G_OBJECT(menu_item),
-                                                         "position"));
+  int position = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(menu_item),
+                                                   "position"));
   if (model_->IsEnabledAt(position) &&
       MenuTypeCanExecute(model_->GetTypeAt(position))) {
     model_->ActivatedAt(position);

@@ -29,23 +29,19 @@
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "skia/ext/platform_canvas.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/glue/password_autocomplete_listener.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webframeloaderclient_impl.h"
 
 MSVC_PUSH_WARNING_LEVEL(0);
 #include "ResourceHandleClient.h"
 #include "Frame.h"
 #include "PlatformString.h"
+#include <wtf/RefCounted.h>
 MSVC_POP_WARNING();
 
 class ChromePrintContext;
-class WebDataSourceImpl;
-class WebPluginDelegate;
-class WebView;
 class WebViewImpl;
-class WebTextInput;
-class WebTextInputImpl;
 
 namespace gfx {
 class BitmapPlatformDevice;
@@ -62,14 +58,118 @@ class SubstituteData;
 struct WindowFeatures;
 }
 
-namespace webkit_glue {
-class AltErrorPageResourceFetcher;
+namespace WebKit {
+class WebDataSourceImpl;
+class WebFrameClient;
+class WebView;
 }
 
 // Implementation of WebFrame, note that this is a reference counted object.
-class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
+class WebFrameImpl : public WebKit::WebFrame, public RefCounted<WebFrameImpl> {
  public:
-  WebFrameImpl();
+  // WebFrame methods:
+  virtual WebKit::WebString name() const;
+  virtual WebKit::WebURL url() const;
+  virtual WebKit::WebURL favIconURL() const;
+  virtual WebKit::WebURL openSearchDescriptionURL() const;
+  virtual WebKit::WebSize scrollOffset() const;
+  virtual WebKit::WebSize contentsSize() const;
+  virtual int contentsPreferredWidth() const;
+  virtual bool hasVisibleContent() const;
+  virtual WebKit::WebView* view() const;
+  virtual WebKit::WebFrame* opener() const;
+  virtual WebKit::WebFrame* parent() const;
+  virtual WebKit::WebFrame* top() const;
+  virtual WebKit::WebFrame* firstChild() const;
+  virtual WebKit::WebFrame* lastChild() const;
+  virtual WebKit::WebFrame* nextSibling() const;
+  virtual WebKit::WebFrame* previousSibling() const;
+  virtual WebKit::WebFrame* traverseNext(bool wrap) const;
+  virtual WebKit::WebFrame* traversePrevious(bool wrap) const;
+  virtual WebKit::WebFrame* findChildByName(const WebKit::WebString& name) const;
+  virtual WebKit::WebFrame* findChildByExpression(
+      const WebKit::WebString& xpath) const;
+  virtual void forms(WebKit::WebVector<WebKit::WebForm>&) const;
+  virtual WebKit::WebSecurityOrigin securityOrigin() const;
+  virtual void grantUniversalAccess();
+  virtual NPObject* windowObject() const;
+  virtual void bindToWindowObject(
+      const WebKit::WebString& name, NPObject* object);
+  virtual void executeScript(const WebKit::WebScriptSource&);
+  virtual void executeScriptInNewContext(
+      const WebKit::WebScriptSource* sources, unsigned num_sources,
+      int extension_group);
+  virtual void executeScriptInIsolatedWorld(
+      int world_id,  const WebKit::WebScriptSource* sources,
+      unsigned num_sources, int extension_group);
+  virtual void addMessageToConsole(const WebKit::WebConsoleMessage&);
+  virtual void collectGarbage();
+#if WEBKIT_USING_V8
+  virtual v8::Local<v8::Context> mainWorldScriptContext() const;
+#endif
+  virtual bool insertStyleText(
+      const WebKit::WebString& css, const WebKit::WebString& id);
+  virtual void reload();
+  virtual void loadRequest(const WebKit::WebURLRequest& request);
+  virtual void loadHistoryItem(const WebKit::WebHistoryItem& history_item);
+  virtual void loadData(
+      const WebKit::WebData& data, const WebKit::WebString& mime_type,
+      const WebKit::WebString& text_encoding, const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url, bool replace);
+  virtual void loadHTMLString(
+      const WebKit::WebData& html, const WebKit::WebURL& base_url,
+      const WebKit::WebURL& unreachable_url, bool replace);
+  virtual bool isLoading() const;
+  virtual void stopLoading();
+  virtual WebKit::WebDataSource* provisionalDataSource() const;
+  virtual WebKit::WebDataSource* dataSource() const;
+  virtual WebKit::WebHistoryItem previousHistoryItem() const;
+  virtual WebKit::WebHistoryItem currentHistoryItem() const;
+  virtual void enableViewSourceMode(bool enable);
+  virtual bool isViewSourceModeEnabled() const;
+  virtual void setReferrerForRequest(
+      WebKit::WebURLRequest& request, const WebKit::WebURL& referrer);
+  virtual void dispatchWillSendRequest(WebKit::WebURLRequest& request);
+  virtual void commitDocumentData(const char* data, size_t length);
+  virtual unsigned unloadListenerCount() const;
+  virtual bool isProcessingUserGesture() const;
+  virtual void replaceSelection(const WebKit::WebString& text);
+  virtual void insertText(const WebKit::WebString& text);
+  virtual void setMarkedText(
+      const WebKit::WebString& text, unsigned location, unsigned length);
+  virtual void unmarkText();
+  virtual bool hasMarkedText() const;
+  virtual WebKit::WebRange markedRange() const;
+  virtual bool executeCommand(const WebKit::WebString& command);
+  virtual bool executeCommand(
+      const WebKit::WebString& command, const WebKit::WebString& value);
+  virtual bool isCommandEnabled(const WebKit::WebString& command) const;
+  virtual void enableContinuousSpellChecking(bool enable);
+  virtual bool isContinuousSpellCheckingEnabled() const;
+  virtual bool hasSelection() const;
+  virtual WebKit::WebRange selectionRange() const;
+  virtual WebKit::WebString selectionAsText() const;
+  virtual WebKit::WebString selectionAsMarkup() const;
+  virtual int printBegin(const WebKit::WebSize& page_size);
+  virtual float printPage(int page_to_print, WebKit::WebCanvas* canvas);
+  virtual float getPrintPageShrink(int page);
+  virtual void printEnd();
+  virtual bool find(
+      int identifier, const WebKit::WebString& search_text,
+      const WebKit::WebFindOptions& options, bool wrap_within_frame,
+      WebKit::WebRect* selection_rect);
+  virtual void stopFinding(bool clear_selection);
+  virtual void scopeStringMatches(
+      int identifier, const WebKit::WebString& search_text,
+      const WebKit::WebFindOptions& options, bool reset);
+  virtual void cancelPendingScopingEffort();
+  virtual void increaseMatchCount(int count, int identifier);
+  virtual void resetMatchCount();
+  virtual WebKit::WebURL completeURL(const WebKit::WebString& url) const;
+  virtual WebKit::WebString contentAsText(size_t max_chars) const;
+  virtual WebKit::WebString contentAsMarkup() const;
+
+  static PassRefPtr<WebFrameImpl> create(WebKit::WebFrameClient* client);
   ~WebFrameImpl();
 
   static int live_object_count() {
@@ -79,146 +179,14 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // Called by the WebViewImpl to initialize its main frame:
   void InitMainFrame(WebViewImpl* webview_impl);
 
-  // WebFrame
-  virtual void Reload();
-  virtual void LoadRequest(const WebKit::WebURLRequest& request);
-  virtual void LoadHistoryItem(const WebKit::WebHistoryItem& item);
-  virtual void LoadData(
-      const WebKit::WebData& data,
-      const WebKit::WebString& mime_type,
-      const WebKit::WebString& text_encoding,
-      const WebKit::WebURL& base_url,
-      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
-      bool replace = false);
-  virtual void LoadHTMLString(
-      const WebKit::WebData& data,
-      const WebKit::WebURL& base_url,
-      const WebKit::WebURL& unreachable_url = WebKit::WebURL(),
-      bool replace = false);
-  virtual void LoadAlternateHTMLErrorPage(
-      const WebKit::WebURLRequest& request,
-      const WebKit::WebURLError& error,
-      const GURL& error_page_url,
-      bool replace,
-      const GURL& fake_url);
-  virtual void DispatchWillSendRequest(WebKit::WebURLRequest* request);
-  virtual void ExecuteScript(const WebKit::WebScriptSource& source);
-  virtual void ExecuteScriptInNewContext(
-      const WebKit::WebScriptSource* sources, int num_sources);
-  virtual void ExecuteScriptInNewWorld(
-      const WebKit::WebScriptSource* sources, int num_sources);
-  virtual bool InsertCSSStyles(const std::string& css);
-  virtual WebKit::WebHistoryItem GetPreviousHistoryItem() const;
-  virtual WebKit::WebHistoryItem GetCurrentHistoryItem() const;
-  virtual GURL GetURL() const;
-  virtual GURL GetFavIconURL() const;
-  virtual GURL GetOSDDURL() const;
-  virtual int GetContentsPreferredWidth() const;
-  virtual WebKit::WebDataSource* GetDataSource() const;
-  virtual WebKit::WebDataSource* GetProvisionalDataSource() const;
-  virtual void StopLoading();
-  virtual WebFrame* GetOpener() const;
-  virtual WebFrame* GetParent() const;
-  virtual WebFrame* GetTop() const;
-  virtual WebFrame* GetChildFrame(const std::wstring& xpath) const;
-  virtual WebView* GetView() const;
-  virtual void GetForms(std::vector<WebKit::WebForm>* forms) const;
-  virtual std::string GetSecurityOrigin() const;
-
-  // This method calls createRuntimeObject (in KJS::Bindings::Instance), which
-  // increments the refcount of the NPObject passed in.
-  virtual void BindToWindowObject(const std::wstring& name, NPObject* object);
-  virtual void CallJSGC();
-
-  virtual void GrantUniversalAccess();
-
-  virtual NPObject* GetWindowNPObject();
-
-#if USE(V8)
-  // Returns the V8 context for this frame, or an empty handle if there is
-  // none.
-  virtual v8::Local<v8::Context> GetScriptContext();
-#endif
-
-  virtual void GetContentAsPlainText(int max_chars, std::wstring* text) const;
-  virtual bool Find(
-      int request_id,
-      const string16& search_text,
-      const WebKit::WebFindOptions& options,
-      bool wrap_within_frame,
-      WebKit::WebRect* selection_rect);
-  virtual void StopFinding(bool clear_selection);
-  virtual void ScopeStringMatches(
-      int request_id,
-      const string16& search_text,
-      const WebKit::WebFindOptions& options,
-      bool reset);
-  virtual void CancelPendingScopingEffort();
-  virtual void ResetMatchCount();
-  virtual bool Visible();
-  virtual void SelectAll();
-  virtual void Copy();
-  virtual void Cut();
-  virtual void Paste();
-  virtual void Replace(const std::wstring& text);
-  virtual void ToggleSpellCheck();
-  virtual bool SpellCheckEnabled();
-  virtual void Delete();
-  virtual void Undo();
-  virtual void Redo();
-  virtual void ClearSelection();
-  virtual bool HasSelection();
-  virtual std::string GetSelection(bool as_html);
-  virtual std::string GetFullPageHtml();
-
-  virtual void SetInViewSourceMode(bool enable);
-
-  virtual bool GetInViewSourceMode() const;
-
-  virtual void DidReceiveData(WebCore::DocumentLoader* loader,
-                              const char* data,
-                              int length);
-  virtual void DidFail(const WebCore::ResourceError&, bool was_provisional);
-
-  virtual std::wstring GetName();
-
-  virtual WebTextInput* GetTextInput();
-
-  virtual bool ExecuteEditCommandByName(const std::string& name,
-                                        const std::string& value);
-  virtual bool IsEditCommandEnabled(const std::string& name);
-
-  virtual void AddMessageToConsole(const WebKit::WebConsoleMessage&);
-
-  virtual void ClosePage();
-
-  virtual WebKit::WebSize ScrollOffset() const;
-
-  virtual int PrintBegin(const WebKit::WebSize& page_size);
-  virtual float PrintPage(int page, WebKit::WebCanvas* canvas);
-  virtual void PrintEnd();
-
   PassRefPtr<WebCore::Frame> CreateChildFrame(
       const WebCore::FrameLoadRequest&,
       WebCore::HTMLFrameOwnerElement* owner_element);
 
-  // WebFrameImpl
   void Layout();
-  void Paint(skia::PlatformCanvas* canvas, const WebKit::WebRect& rect);
-
-  bool IsLoading();
+  void Paint(WebKit::WebCanvas* canvas, const WebKit::WebRect& rect);
 
   void CreateFrameView();
-
-  // The plugin delegate is used to get notifications when downloads complete.
-  // This is used by the NPAPI method getURLNotify.  plugin_delegate() may
-  // return NULL.  TODO(darin): how come there is only one per frame?!?
-  WebPluginDelegate* plugin_delegate() const {
-    return plugin_delegate_;
-  }
-  void set_plugin_delegate(WebPluginDelegate* plugin_delegate) {
-    plugin_delegate_ = plugin_delegate;
-  }
 
   WebCore::Frame* frame() const {
     return frame_;
@@ -234,8 +202,8 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
 
   // Getters for the impls corresponding to Get(Provisional)DataSource. They
   // may return NULL if there is no corresponding data source.
-  WebDataSourceImpl* GetDataSourceImpl() const;
-  WebDataSourceImpl* GetProvisionalDataSourceImpl() const;
+  WebKit::WebDataSourceImpl* GetDataSourceImpl() const;
+  WebKit::WebDataSourceImpl* GetProvisionalDataSourceImpl() const;
 
   // Returns which frame has an active match. This function should only be
   // called on the main frame, as it is the only frame keeping track. Returned
@@ -251,6 +219,8 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // allows us to set focus to a link (when we find text inside a link), which
   // allows us to navigate by pressing Enter after closing the Find box.
   void SetFindEndstateFocusAndSelection();
+
+  void DidFail(const WebCore::ResourceError& error, bool was_provisional);
 
   // Sets whether the WebFrameImpl allows its document to be scrolled.
   // If the parameter is true, allow the document to be scrolled.
@@ -272,21 +242,32 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   webkit_glue::PasswordAutocompleteListener* GetPasswordListener(
       WebCore::HTMLInputElement* user_name_input_element);
 
+  WebKit::WebFrameClient* client() const { return client_handle_->client(); }
+  void drop_client() { client_handle_->drop_client(); }
+
  protected:
   friend class WebFrameLoaderClient;
+
+  // A weak reference to the WebFrameClient.  Each WebFrame in the hierarchy
+  // owns a reference to a ClientHandle.  When the main frame is destroyed, it
+  // clears the WebFrameClient.
+  class ClientHandle : public RefCounted<ClientHandle> {
+   public:
+    static PassRefPtr<ClientHandle> create(WebKit::WebFrameClient* client) {
+      return adoptRef(new ClientHandle(client));
+    }
+    WebKit::WebFrameClient* client() { return client_; }
+    void drop_client() { client_ = NULL; }
+   private:
+    ClientHandle(WebKit::WebFrameClient* client) : client_(client) {}
+    WebKit::WebFrameClient* client_;
+  };
+
+  WebFrameImpl(PassRefPtr<ClientHandle> client_handle);
 
   // Informs the WebFrame that the Frame is being closed, called by the
   // WebFrameLoaderClient
   void Closing();
-
-  // See WebFrame.h for details.
-  virtual void IncreaseMatchCount(int count, int request_id);
-  virtual void ReportFindInPageSelection(const WebKit::WebRect& selection_rect,
-                                         int active_match_ordinal,
-                                         int request_id);
-
-  // Resource fetcher for downloading an alternate DNS error page.
-  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
 
   // Used to check for leaks of this object.
   static int live_object_count_;
@@ -297,16 +278,11 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // asynchronously in order to scope string matches during a find operation.
   ScopedRunnableMethodFactory<WebFrameImpl> scope_matches_factory_;
 
+  RefPtr<ClientHandle> client_handle_;
+
   // This is a weak pointer to our corresponding WebCore frame.  A reference to
   // ourselves is held while frame_ is valid.  See our Closing method.
   WebCore::Frame* frame_;
-
-  // Plugins sometimes need to be notified when loads are complete so we keep
-  // a pointer back to the appropriate plugin.
-  WebPluginDelegate* plugin_delegate_;
-
-  // Handling requests from TextInputController on this frame.
-  scoped_ptr<WebTextInputImpl> webtextinput_impl_;
 
   // A way for the main frame to keep track of which frame has an active
   // match. Should be NULL for all other frames.
@@ -366,6 +342,11 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
     INVALIDATE_ALL          = 3   // both content area and the scrollbar.
   };
 
+  // Notifies the delegate about a new selection rect.
+  void ReportFindInPageSelection(
+      const WebKit::WebRect& selection_rect, int active_match_ordinal,
+      int identifier);
+
   // Invalidates a certain area within the frame.
   void InvalidateArea(AreaToInvalidate area);
 
@@ -387,9 +368,6 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   // was searched.
   bool ShouldScopeMatches(const string16& search_text);
 
-  // Only for test_shell
-  int PendingFrameUnloadEventCount() const;
-
   // Determines whether to invalidate the content area and scrollbar.
   void InvalidateIfNecessary();
 
@@ -397,11 +375,6 @@ class WebFrameImpl : public WebFrame, public base::RefCounted<WebFrameImpl> {
   void ClearPasswordListeners();
 
   void LoadJavaScriptURL(const WebCore::KURL& url);
-
-  // Callback function for download of alternate error pages.  If the server is
-  // down or we take too long to download the page, |html| will be empty.
-  void AltErrorPageFinished(const GURL& unreachable_url,
-                            const std::string& html);
 
   // Valid between calls to BeginPrint() and EndPrint(). Containts the print
   // information. Is used by PrintPage().

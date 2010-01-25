@@ -12,6 +12,7 @@
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/metrics/metrics_service.h"
@@ -21,18 +22,26 @@
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 
 #if defined(TOOLKIT_VIEWS)  // TODO(port): whittle this down as we port
-#include "chrome/browser/task_manager.h"
 #include "chrome/browser/views/frame/browser_view.h"
+#endif
+
+#if defined(OS_WIN) || defined(OS_LINUX)
+#include "chrome/browser/task_manager.h"
 #endif
 
 #if defined(OS_WIN)
 #include "chrome/browser/views/keyword_editor_view.h"
+#endif
+
+#if defined(TOOLKIT_GTK)
+#include "chrome/browser/gtk/browser_window_gtk.h"
 #endif
 
 namespace browser {
@@ -43,6 +52,7 @@ void RegisterAllPrefs(PrefService* user_prefs, PrefService* local_state) {
   WebCacheManager::RegisterPrefs(local_state);
   ExternalProtocolHandler::RegisterPrefs(local_state);
   GoogleURLTracker::RegisterPrefs(local_state);
+  KeywordEditorController::RegisterPrefs(local_state);
   MetricsLog::RegisterPrefs(local_state);
   MetricsService::RegisterPrefs(local_state);
   SafeBrowsingService::RegisterPrefs(local_state);
@@ -52,6 +62,8 @@ void RegisterAllPrefs(PrefService* user_prefs, PrefService* local_state) {
   PageInfoModel::RegisterPrefs(local_state);
 #if defined(TOOLKIT_VIEWS)  // TODO(port): whittle this down as we port
   BrowserView::RegisterBrowserViewPrefs(local_state);
+#endif
+#if defined(OS_WIN) || defined(OS_LINUX)
   TaskManager::RegisterPrefs(local_state);
 #endif
 
@@ -66,9 +78,13 @@ void RegisterAllPrefs(PrefService* user_prefs, PrefService* local_state) {
   AutofillManager::RegisterUserPrefs(user_prefs);
   TabContents::RegisterUserPrefs(user_prefs);
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
+  ExtensionDOMUI::RegisterUserPrefs(user_prefs);
   NewTabUI::RegisterUserPrefs(user_prefs);
   BlockedPopupContainer::RegisterUserPrefs(user_prefs);
   DevToolsManager::RegisterUserPrefs(user_prefs);
+#if defined(TOOLKIT_GTK)
+  BrowserWindowGtk::RegisterUserPrefs(user_prefs);
+#endif
 }
 
 }  // namespace browser

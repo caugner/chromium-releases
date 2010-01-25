@@ -1,6 +1,8 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "net/base/net_util.h"
 
 #include <algorithm>
 #include <map>
@@ -24,11 +26,12 @@
 #include <fcntl.h>
 #endif
 
-#include "net/base/net_util.h"
-
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/i18n/file_util_icu.h"
+#include "base/i18n/icu_string_conversions.h"
+#include "base/i18n/time_formatting.h"
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -41,7 +44,7 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
-#include "base/time_format.h"
+#include "base/utf_string_conversions.h"
 #include "grit/net_resources.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon.h"
@@ -263,8 +266,9 @@ bool DecodeWord(const std::string& encoded_word,
     } else {
       std::wstring wide_output;
       if (!referrer_charset.empty() &&
-          CodepageToWide(encoded_word, referrer_charset.c_str(),
-                         OnStringUtilConversionError::FAIL, &wide_output)) {
+          base::CodepageToWide(encoded_word, referrer_charset.c_str(),
+                               base::OnStringConversionError::FAIL,
+                               &wide_output)) {
         *output = WideToUTF8(wide_output);
       } else {
         *output = WideToUTF8(base::SysNativeMBToWide(encoded_word));
@@ -636,14 +640,13 @@ bool IsIDNComponentSafe(const char16* str,
   // the remainder.
   component_characters.removeAll(common_characters);
 
-  bool safe = false;
   std::string languages_list(WideToASCII(languages));
   StringTokenizer t(languages_list, ",");
   while (t.GetNext()) {
-    if (safe = IsComponentCoveredByLang(component_characters, t.token()))
-      break;
+    if (IsComponentCoveredByLang(component_characters, t.token()))
+      return true;
   }
-  return safe;
+  return false;
 }
 
 // Converts one component of a host (between dots) to IDN if safe. The result
@@ -750,6 +753,8 @@ std::wstring FormatViewSourceUrl(const GURL& url,
 
 namespace net {
 
+std::set<int> explicitly_allowed_ports;
+
 // Appends the substring |in_component| inside of the URL |spec| to |output|,
 // and the resulting range will be filled into |out_component|. |unescape_rules|
 // defines how to clean the URL for human readability.
@@ -781,6 +786,11 @@ GURL FilePathToFileURL(const FilePath& path) {
 
   ReplaceSubstringsAfterOffset(&url_string, 0,
       FILE_PATH_LITERAL("#"), FILE_PATH_LITERAL("%23"));
+
+#if defined(OS_POSIX)
+  ReplaceSubstringsAfterOffset(&url_string, 0,
+      FILE_PATH_LITERAL("\\"), FILE_PATH_LITERAL("%5C"));
+#endif
 
   return GURL(url_string);
 }
@@ -912,17 +922,69 @@ std::string CanonicalizeHost(const std::wstring& host,
 }
 
 std::string GetDirectoryListingHeader(const string16& title) {
-  static const StringPiece header(NetModule::GetResource(IDR_DIR_HEADER_HTML));
-  if (header.empty()) {
-    NOTREACHED() << "expected resource not found";
-  }
-  std::string result(header.data(), header.size());
+  static const base::StringPiece header(
+      NetModule::GetResource(IDR_DIR_HEADER_HTML));
+  // This can be null in unit tests.
+  DLOG_IF(WARNING, header.empty()) <<
+      "Missing resource: directory listing header";
+
+  std::string result;
+  if (!header.empty())
+    result.assign(header.data(), header.size());
 
   result.append("<script>start(");
   string_escape::JsonDoubleQuote(title, true, &result);
   result.append(");</script>\n");
 
   return result;
+}
+
+inline bool IsHostCharAlpha(char c) {
+  // We can just check lowercase because uppercase characters have already been
+  // normalized.
+  return (c >= 'a') && (c <= 'z');
+}
+
+inline bool IsHostCharDigit(char c) {
+  return (c >= '0') && (c <= '9');
+}
+
+bool IsCanonicalizedHostRFC1738Compliant(const std::string& host) {
+  if (host.empty())
+    return false;
+
+  enum State {
+    NOT_IN_COMPONENT,
+    IN_COMPONENT_STARTED_DIGIT,
+    IN_COMPONENT_STARTED_ALPHA
+  } state = NOT_IN_COMPONENT;
+  bool last_char_was_hyphen = false;
+
+  for (std::string::const_iterator i(host.begin()); i != host.end(); ++i) {
+    const char c = *i;
+    if (state == NOT_IN_COMPONENT) {
+      if (IsHostCharDigit(c))
+        state = IN_COMPONENT_STARTED_DIGIT;
+      else if (IsHostCharAlpha(c))
+        state = IN_COMPONENT_STARTED_ALPHA;
+      else
+        return false;
+    } else {
+      if (c == '.') {
+        if (last_char_was_hyphen)
+          return false;
+        state = NOT_IN_COMPONENT;
+      } else if (IsHostCharAlpha(c) || IsHostCharDigit(c)) {
+        last_char_was_hyphen = false;
+      } else if (c == '-') {
+        last_char_was_hyphen = true;
+      } else {
+        return false;
+      }
+    }
+  }
+
+  return state == IN_COMPONENT_STARTED_ALPHA;
 }
 
 std::string GetDirectoryListingEntry(const string16& name,
@@ -1032,6 +1094,18 @@ bool IsPortAllowedByFtp(int port) {
   }
   // Port not explicitly allowed by FTP, so return the default restrictions.
   return IsPortAllowedByDefault(port);
+}
+
+bool IsPortAllowedByOverride(int port) {
+  if (explicitly_allowed_ports.empty())
+    return false;
+
+  std::set<int>::const_iterator it =
+      std::find(explicitly_allowed_ports.begin(),
+                explicitly_allowed_ports.end(),
+                port);
+
+  return it != explicitly_allowed_ports.end();
 }
 
 int SetNonBlocking(int fd) {
@@ -1145,6 +1219,14 @@ std::string GetHostName() {
     buffer[0] = '\0';
   }
   return std::string(buffer);
+}
+
+void GetIdentityFromURL(const GURL& url,
+                        std::wstring* username,
+                        std::wstring* password) {
+  UnescapeRule::Type flags = UnescapeRule::SPACES;
+  *username = UnescapeAndDecodeUTF8URLComponent(url.username(), flags);
+  *password = UnescapeAndDecodeUTF8URLComponent(url.password(), flags);
 }
 
 void AppendFormattedHost(const GURL& url,
@@ -1298,6 +1380,44 @@ std::wstring FormatUrl(const GURL& url,
   }
 
   return url_string;
+}
+
+GURL SimplifyUrlForRequest(const GURL& url) {
+  DCHECK(url.is_valid());
+  GURL::Replacements replacements;
+  replacements.ClearUsername();
+  replacements.ClearPassword();
+  replacements.ClearRef();
+  return url.ReplaceComponents(replacements);
+}
+
+// Specifies a comma separated list of port numbers that should be accepted
+// despite bans. If the string is invalid no allowed ports are stored.
+void SetExplicitlyAllowedPorts(const std::wstring& allowed_ports) {
+  if (allowed_ports.empty())
+    return;
+
+  std::set<int> ports;
+  size_t last = 0;
+  size_t size = allowed_ports.size();
+  // The comma delimiter.
+  const std::wstring::value_type kComma = L',';
+
+  // Overflow is still possible for evil user inputs.
+  for (size_t i = 0; i <= size; ++i) {
+    // The string should be composed of only digits and commas.
+    if (i != size && !IsAsciiDigit(allowed_ports[i]) &&
+        (allowed_ports[i] != kComma))
+      return;
+    if (i == size || allowed_ports[i] == kComma) {
+      size_t length = i - last;
+      if (length > 0)
+        ports.insert(StringToInt(WideToASCII(
+            allowed_ports.substr(last, length))));
+      last = i + 1;
+    }
+  }
+  explicitly_allowed_ports = ports;
 }
 
 }  // namespace net

@@ -20,8 +20,7 @@ class AutomationExtensionFunction : public ExtensionFunction {
   AutomationExtensionFunction() { }
 
   // ExtensionFunction implementation.
-  virtual void SetName(const std::string& name);
-  virtual void SetArgs(const std::string& args);
+  virtual void SetArgs(const Value* args);
   virtual const std::string GetResult();
   virtual const std::string GetError();
   virtual void Run();
@@ -44,7 +43,6 @@ class AutomationExtensionFunction : public ExtensionFunction {
 
  private:
   static bool enabled_;
-  std::string name_;
   std::string args_;
   DISALLOW_COPY_AND_ASSIGN(AutomationExtensionFunction);
 };

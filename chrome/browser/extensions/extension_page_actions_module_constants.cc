@@ -10,13 +10,6 @@ const wchar_t kTabIdKey[] = L"tabId";
 const wchar_t kUrlKey[] = L"url";
 const wchar_t kTitleKey[] = L"title";
 const wchar_t kIconIdKey[] = L"iconId";
-
-const char kNoExtensionError[] = "No extension with id: *.";
-const char kNoTabError[] = "No tab with id: *.";
-const char kNoPageActionError[] = "No PageAction with id: *.";
-const char kUrlNotActiveError[] = "This url is no longer active: *.";
-
-const char kEnablePageActionFunction[] = "pageActions.enableForTab";
-const char kDisablePageActionFunction[] = "pageActions.disableForTab";
+const wchar_t kButtonKey[] = L"button";
 
 }  // namespace extension_page_actions_module_constants

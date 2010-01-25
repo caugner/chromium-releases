@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,11 @@
 #include "chrome/browser/tab_contents/interstitial_page.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/test_web_contents.h"
+#include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/testing_profile.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -150,7 +151,7 @@ class TestInterstitialPage : public InterstitialPage {
   virtual RenderViewHost* CreateRenderViewHost() {
     return new TestRenderViewHost(
         SiteInstance::CreateSiteInstance(tab()->profile()),
-        this, MSG_ROUTING_NONE, NULL);
+        this, MSG_ROUTING_NONE);
   }
 
   virtual TabContentsView* CreateTabContentsView() { return NULL; }
@@ -206,10 +207,10 @@ class TabContentsTest : public RenderViewHostTestHarness {
 // Test to make sure that title updates get stripped of whitespace.
 TEST_F(TabContentsTest, UpdateTitle) {
   ViewHostMsg_FrameNavigate_Params params;
-  InitNavigateParams(&params, 0, GURL("about:blank"));
+  InitNavigateParams(&params, 0, GURL(chrome::kAboutBlankURL));
 
   NavigationController::LoadCommittedDetails details;
-  controller().RendererDidNavigate(params, &details);
+  controller().RendererDidNavigate(params, 0, &details);
 
   contents()->UpdateTitle(rvh(), 0, L"    Lots O' Whitespace\n");
   EXPECT_EQ(ASCIIToUTF16("Lots O' Whitespace"), contents()->GetTitle());
@@ -221,6 +222,10 @@ TEST_F(TabContentsTest, NTPViewSource) {
   const GURL kGURL(kUrl);
 
   process()->sink().ClearMessages();
+
+  // The sync service must be created to host the sync NTP advertisement.
+  profile_->CreateProfileSyncService();
+
   controller().LoadURL(kGURL, GURL(), PageTransition::TYPED);
   rvh()->delegate()->RenderViewCreated(rvh());
   // Did we get the expected message?
@@ -230,7 +235,7 @@ TEST_F(TabContentsTest, NTPViewSource) {
   ViewHostMsg_FrameNavigate_Params params;
   InitNavigateParams(&params, 0, kGURL);
   NavigationController::LoadCommittedDetails details;
-  controller().RendererDidNavigate(params, &details);
+  controller().RendererDidNavigate(params, 0, &details);
   // Also check title and url.
   EXPECT_EQ(ASCIIToUTF16(kUrl), contents()->GetTitle());
   EXPECT_EQ(true, contents()->ShouldDisplayURL());
@@ -555,7 +560,7 @@ TEST_F(TabContentsTest, NavigationEntryContentStateNewWindow) {
 
   // When opening a new window, it is navigated to about:blank internally.
   // Currently, this results in two DidNavigate events.
-  const GURL url("about:blank");
+  const GURL url(chrome::kAboutBlankURL);
   ViewHostMsg_FrameNavigate_Params params1;
   InitNavigateParams(&params1, 1, url);
   contents()->TestDidNavigate(orig_rvh, params1);
@@ -572,13 +577,18 @@ TEST_F(TabContentsTest, WebKitPrefs) {
   WebPreferences webkit_prefs = contents()->TestGetWebkitPrefs();
 
   // These values have been overridden by the profile preferences.
-  EXPECT_EQ(L"UTF-8", webkit_prefs.default_encoding);
+  EXPECT_EQ("UTF-8", webkit_prefs.default_encoding);
   EXPECT_EQ(20, webkit_prefs.default_font_size);
   EXPECT_EQ(false, webkit_prefs.text_areas_are_resizable);
   EXPECT_EQ(true, webkit_prefs.uses_universal_detector);
 
   // These should still be the default values.
-  EXPECT_EQ(L"Times New Roman", webkit_prefs.standard_font_family);
+#if defined(OS_MACOSX)
+  const wchar_t kDefaultFont[] = L"Times";
+#else
+  const wchar_t kDefaultFont[] = L"Times New Roman";
+#endif
+  EXPECT_EQ(kDefaultFont, webkit_prefs.standard_font_family);
   EXPECT_EQ(true, webkit_prefs.javascript_enabled);
 }
 

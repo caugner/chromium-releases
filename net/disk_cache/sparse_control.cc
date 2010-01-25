@@ -185,13 +185,14 @@ int SparseControl::StartIO(SparseOperation op, int64 offset, net::IOBuffer* buf,
   // Copy the operation parameters.
   operation_ = op;
   offset_ = offset;
-  user_buf_ = buf ? new net::ReusedIOBuffer(buf, buf_len) : NULL;
+  user_buf_ = buf ? new net::DrainableIOBuffer(buf, buf_len) : NULL;
   buf_len_ = buf_len;
   user_callback_ = callback;
 
   result_ = 0;
   pending_ = false;
   finished_ = false;
+  abort_ = false;
 
   DoChildrenIO();
 
@@ -224,6 +225,24 @@ int SparseControl::GetAvailableRange(int64 offset, int len, int64* start) {
   // This is a failure. We want to return a valid start value in any case.
   *start = offset;
   return result < 0 ? result : 0;  // Don't mask error codes to the caller.
+}
+
+void SparseControl::CancelIO() {
+  if (operation_ == kNoOperation)
+    return;
+  abort_ = true;
+}
+
+int SparseControl::ReadyToUse(net::CompletionCallback* completion_callback) {
+  if (!abort_)
+    return net::OK;
+
+  // We'll grab another reference to keep this object alive because we just have
+  // one extra reference due to the pending IO operation itself, but we'll
+  // release that one before invoking user_callback_.
+  entry_->AddRef();  // Balanced in DoAbortCallbacks.
+  abort_callbacks_.push_back(completion_callback);
+  return net::ERR_IO_PENDING;
 }
 
 // Static
@@ -506,6 +525,13 @@ void SparseControl::UpdateRange(int result) {
   int last_bit = (child_offset_ + result) >> 10;
   block_offset = (child_offset_ + result) & (kBlockSize - 1);
 
+  // This condition will hit with the following criteria:
+  // 1. The first byte doesn't follow the last write.
+  // 2. The first byte is in the middle of a block.
+  // 3. The first byte and the last byte are in the same block.
+  if (first_bit > last_bit)
+    return;
+
   if (block_offset && !child_map_.Get(last_bit)) {
     // The last block is not completely filled; save it for later.
     child_data_.header.last_block = last_bit;
@@ -594,7 +620,7 @@ bool SparseControl::DoChildIO() {
       // progress. However, this entry can still be closed, and that would not
       // be a good thing for us, so we increase the refcount until we're
       // finished doing sparse stuff.
-      entry_->AddRef();
+      entry_->AddRef();  // Balanced in DoUserCallback.
     }
     return false;
   }
@@ -613,7 +639,8 @@ int SparseControl::DoGetAvailableRange() {
   int last_bit = (child_offset_ + child_len_ + 1023) >> 10;
   int start = child_offset_ >> 10;
   int partial_start_bytes = PartialBlockLength(start);
-  int bits_found = child_map_.FindBits(&start, last_bit, true);
+  int found = start;
+  int bits_found = child_map_.FindBits(&found, last_bit, true);
 
   // We don't care if there is a partial block in the middle of the range.
   int block_offset = child_offset_ & (kBlockSize - 1);
@@ -623,15 +650,18 @@ int SparseControl::DoGetAvailableRange() {
   // We are done. Just break the loop and reset result_ to our real result.
   range_found_ = true;
 
-  // start now points to the first 1. Lets see if we have zeros before it.
-  int empty_start = (start << 10) - child_offset_;
+  // found now points to the first 1. Lets see if we have zeros before it.
+  int empty_start = std::max((found << 10) - child_offset_, 0);
 
   int bytes_found = bits_found << 10;
-  bytes_found += PartialBlockLength(start + bits_found);
+  bytes_found += PartialBlockLength(found + bits_found);
+
+  if (start == found)
+    bytes_found -= block_offset;
 
   // If the user is searching past the end of this child, bits_found is the
   // right result; otherwise, we have some empty space at the start of this
-  // query that we have to substarct from the range that we searched.
+  // query that we have to subtract from the range that we searched.
   result_ = std::min(bytes_found, child_len_ - empty_start);
 
   if (!bits_found) {
@@ -663,12 +693,20 @@ void SparseControl::DoChildIOCompleted(int result) {
 
   // We'll be reusing the user provided buffer for the next chunk.
   if (buf_len_ && user_buf_)
-    user_buf_->SetOffset(result_);
+    user_buf_->DidConsume(result);
 }
 
 void SparseControl::OnChildIOCompleted(int result) {
   DCHECK_NE(net::ERR_IO_PENDING, result);
   DoChildIOCompleted(result);
+
+  if (abort_) {
+    // We'll return the current result of the operation, which may be less than
+    // the bytes to read or write, but the user cancelled the operation.
+    abort_ = false;
+    DoUserCallback();
+    return DoAbortCallbacks();
+  }
 
   // We are running a callback from the message loop. It's time to restart what
   // we were doing before.
@@ -684,6 +722,19 @@ void SparseControl::DoUserCallback() {
   operation_ = kNoOperation;
   entry_->Release();  // Don't touch object after this line.
   c->Run(result_);
+}
+
+void SparseControl::DoAbortCallbacks() {
+  for (size_t i = 0; i < abort_callbacks_.size(); i++) {
+    // Releasing all references to entry_ may result in the destruction of this
+    // object so we should not be touching it after the last Release().
+    net::CompletionCallback* c = abort_callbacks_[i];
+    if (i == abort_callbacks_.size() - 1)
+      abort_callbacks_.clear();
+
+    entry_->Release();  // Don't touch object after this line.
+    c->Run(net::OK);
+  }
 }
 
 }  // namespace disk_cache

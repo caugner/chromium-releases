@@ -7,6 +7,8 @@
 
 ''' Given a valgrind XML file, parses errors and uniques them.'''
 
+import gdb_helper
+
 import logging
 import optparse
 import os
@@ -15,6 +17,10 @@ import sys
 import time
 from xml.dom.minidom import parse
 from xml.parsers.expat import ExpatError
+
+# Global symbol table (yuck)
+TheAddressTable = None
+
 
 # These are functions (using C++ mangled names) that we look for in stack
 # traces. We don't show stack frames while pretty printing when they are below
@@ -35,6 +41,19 @@ def getTextOf(top_node, name):
   for nodes_named in top_node.getElementsByTagName(name):
     text += "".join([node.data for node in nodes_named.childNodes
                      if node.nodeType == node.TEXT_NODE])
+  return text
+
+def getCDATAOf(top_node, name):
+  ''' Returns all CDATA in all DOM nodes with a certain |name| that are children
+  of |top_node|.
+  '''
+
+  text = ""
+  for nodes_named in top_node.getElementsByTagName(name):
+    text += "".join([node.data for node in nodes_named.childNodes
+                     if node.nodeType == node.CDATA_SECTION_NODE])
+  if (text == ""):
+    return None
   return text
 
 def removeCommonRoot(source_dir, directory):
@@ -71,6 +90,10 @@ def gatherFrames(node, source_dir):
     frames += [frame_dict]
     if frame_dict[FUNCTION_NAME] in _TOP_OF_STACK_POINTS:
       break
+    global TheAddressTable
+    if TheAddressTable != None and frame_dict[SRC_LINE] == "":
+      # Try using gdb
+      TheAddressTable.Add(frame_dict[OBJECT_FILE], frame_dict[INSTRUCTION_POINTER])
   return frames
 
 class ValgrindError:
@@ -78,17 +101,19 @@ class ValgrindError:
   ValgrindError is immutable and is hashed on its pretty printed output.
   '''
 
-  def __init__(self, source_dir, error_node):
+  def __init__(self, source_dir, error_node, commandline):
     ''' Copies all the relevant information out of the DOM and into object
     properties.
 
     Args:
       error_node: The <error></error> DOM node we're extracting from.
       source_dir: Prefix that should be stripped from the <dir> node.
+      commandline: The command that was run under valgrind
     '''
 
     # Valgrind errors contain one <what><stack> pair, plus an optional
-    # <auxwhat><stack> pair, plus an optional <origin><what><stack></origin>.
+    # <auxwhat><stack> pair, plus an optional <origin><what><stack></origin>,
+    # plus (since 3.5.0) a <suppression></suppression> pair.
     # (Origin is nicely enclosed; too bad the other two aren't.)
     # The most common way to see all three in one report is
     # a syscall with a parameter that points to uninitialized memory, e.g.
@@ -117,9 +142,44 @@ class ValgrindError:
     #     </frame>
     #   </stack>
     #   </origin>
+    #   <suppression>
+    #     <sname>insert_a_suppression_name_here</sname>
+    #     <skind>Memcheck:Param</skind>
+    #     <skaux>write(buf)</skaux>
+    #     <sframe> <fun>__write_nocancel</fun> </sframe>
+    #     ...
+    #     <sframe> <fun>main</fun> </sframe>
+    #     <rawtext>
+    # <![CDATA[
+    # {
+    #    <insert_a_suppression_name_here>
+    #    Memcheck:Param
+    #    write(buf)
+    #    fun:__write_nocancel
+    #    ...
+    #    fun:main
+    # }
+    # ]]>
+    #     </rawtext>
+    #   </suppression>
+    # </error>
+    #
+    # Each frame looks like this:
+    #  <frame>
+    #    <ip>0x83751BC</ip>
+    #    <obj>/data/dkegel/chrome-build/src/out/Release/base_unittests</obj>
+    #    <fn>_ZN7testing8internal12TestInfoImpl7RunTestEPNS_8TestInfoE</fn>
+    #    <dir>/data/dkegel/chrome-build/src/testing/gtest/src</dir>
+    #    <file>gtest-internal-inl.h</file>
+    #    <line>655</line>
+    #  </frame>
+    # although the dir, file, and line elements are missing if there is
+    # no debug info.
 
     self._kind = getTextOf(error_node, "kind")
     self._backtraces = []
+    self._suppression = None
+    self._commandline = commandline
 
     # Iterate through the nodes, parsing <what|auxwhat><stack> pairs.
     description = None
@@ -127,6 +187,8 @@ class ValgrindError:
       if node.localName == "what" or node.localName == "auxwhat":
         description = "".join([n.data for n in node.childNodes
                               if n.nodeType == n.TEXT_NODE])
+      elif node.localName == "xwhat":
+        description = getTextOf(node, "text")
       elif node.localName == "stack":
         self._backtraces.append([description, gatherFrames(node, source_dir)])
         description = None
@@ -138,11 +200,16 @@ class ValgrindError:
         description = None
         stack = None
         frames = None
+      elif node.localName == "suppression":
+        self._suppression = getCDATAOf(node, "rawtext");
 
   def __str__(self):
     ''' Pretty print the type and backtrace(s) of this specific error,
         including suppression (which is just a mangled backtrace).'''
     output = self._kind + "\n"
+    if (self._commandline):
+      output += self._commandline + "\n"
+
     for backtrace in self._backtraces:
       output += backtrace[0] + "\n"
       filter = subprocess.Popen("c++filt -n", stdin=subprocess.PIPE,
@@ -158,19 +225,54 @@ class ValgrindError:
 
       i = 0
       for frame in backtrace[1]:
-        output += ("  " + demangled_names[i] + " (")
+        output += ("  " + demangled_names[i])
         i = i + 1
 
-        if frame[SRC_FILE_DIR] != "":
-          output += (frame[SRC_FILE_DIR] + "/" + frame[SRC_FILE_NAME] + ":" +
-                     frame[SRC_LINE])
+        global TheAddressTable
+        if TheAddressTable != None and frame[SRC_FILE_DIR] == "":
+           # Try using gdb
+           foo = TheAddressTable.GetFileLine(frame[OBJECT_FILE],
+                                             frame[INSTRUCTION_POINTER])
+           if foo[0] != None:
+             output += (" (" + foo[0] + ":" + foo[1] + ")")
+        elif frame[SRC_FILE_DIR] != "":
+          output += (" (" + frame[SRC_FILE_DIR] + "/" + frame[SRC_FILE_NAME] +
+                     ":" + frame[SRC_LINE] + ")")
         else:
-          output += frame[OBJECT_FILE]
-        output += ")\n"
+          output += " (" + frame[OBJECT_FILE] + ")"
+        output += "\n"
 
-      output += "Suppression:\n"
-      for frame in backtrace[1]:
-        output += "  fun:" + (frame[FUNCTION_NAME] or "*") + "\n"
+      # TODO(dank): stop synthesizing suppressions once everyone has
+      # valgrind-3.5 and we can rely on xml
+      if (self._suppression == None):
+        output += "Suppression:\n"
+        for frame in backtrace[1]:
+          output += "  fun:" + (frame[FUNCTION_NAME] or "*") + "\n"
+
+    if (self._suppression != None):
+      output += "Suppression:"
+      # Widen suppression slightly to make portable between mac and linux
+      supp = self._suppression;
+      supp = supp.replace("fun:_Znwj", "fun:_Znw*")
+      supp = supp.replace("fun:_Znwm", "fun:_Znw*")
+      # Split into lines so we can enforce length limits
+      supplines = supp.split("\n")
+
+      # Truncate at line 26 (VG_MAX_SUPP_CALLERS plus 2 for name and type)
+      # or at the first 'boring' caller.
+      # (https://bugs.kde.org/show_bug.cgi?id=199468 proposes raising
+      # VG_MAX_SUPP_CALLERS, but we're probably fine with it as is.)
+      # TODO(dkegel): add more boring callers
+      newlen = 26;
+      try:
+        newlen = min(newlen, supplines.index("   fun:_ZN11MessageLoop3RunEv"))
+      except ValueError:
+        pass
+      if (len(supplines) > newlen):
+        supplines = supplines[0:newlen]
+        supplines.append("}")
+
+      output += "\n".join(supplines) + "\n"
 
     return output
 
@@ -194,11 +296,22 @@ class ValgrindError:
   def __eq__(self, rhs):
     return self.UniqueString() == rhs
 
+def find_and_truncate(f):
+  f.seek(0)
+  while True:
+    line = f.readline()
+    if line == "":
+      return False
+    if '</valgrindoutput>' in line:
+      # valgrind often has garbage after </valgrindoutput> upon crash
+      f.truncate()
+      return True
+
 class MemcheckAnalyze:
   ''' Given a set of Valgrind XML files, parse all the errors out of them,
   unique them and output the results.'''
 
-  def __init__(self, source_dir, files, show_all_leaks=False):
+  def __init__(self, source_dir, files, show_all_leaks=False, use_gdb=False):
     '''Reads in a set of files.
 
     Args:
@@ -207,35 +320,56 @@ class MemcheckAnalyze:
       show_all_leaks: whether to show even less important leaks
     '''
 
+    # Beyond the detailed errors parsed by ValgrindError above,
+    # the xml file contain records describing suppressions that were used:
+    # <suppcounts>
+    #  <pair>
+    #    <count>28</count>
+    #    <name>pango_font_leak_todo</name>
+    #  </pair>
+    #  <pair>
+    #    <count>378</count>
+    #    <name>bug_13243</name>
+    #  </pair>
+    # </suppcounts
+    # Collect these and print them at the end.
+    #
+    # With our patch for https://bugs.kde.org/show_bug.cgi?id=205000 in,
+    # the file also includes records of the form
+    # <load_obj><obj>/usr/lib/libgcc_s.1.dylib</obj><ip>0x27000</ip></load_obj>
+    # giving the filename and load address of each binary that was mapped
+    # into the process.
+
+    global TheAddressTable
+    if use_gdb:
+      TheAddressTable = gdb_helper.AddressTable()
     self._errors = set()
+    self._suppcounts = {}
     badfiles = set()
     start = time.time()
     self._parse_failed = False
     for file in files:
       # Wait up to three minutes for valgrind to finish writing all files,
       # but after that, just skip incomplete files and warn.
-      f = open(file, "r")
+      f = open(file, "r+")
       found = False
       firstrun = True
-      while (firstrun or ((time.time() - start) < 180.0)):
+      origsize = os.path.getsize(file)
+      while (not found and (firstrun or ((time.time() - start) < 180.0))):
         firstrun = False
         f.seek(0)
-        if sum((1 for line in f if '</valgrindoutput>' in line)) > 0:
-          found = True
-          break
-        time.sleep(1)
+        found = find_and_truncate(f)
+        if not found:
+          time.sleep(1)
       f.close()
       if not found:
         badfiles.add(file)
       else:
+        newsize = os.path.getsize(file)
+        if origsize > newsize+1:
+          logging.warn(str(origsize - newsize) + " bytes of junk were after </valgrindoutput> in %s!" % file)
         try:
-          raw_errors = parse(file).getElementsByTagName("error")
-          for raw_error in raw_errors:
-            # Ignore "possible" leaks for now by default.
-            if (show_all_leaks or
-                getTextOf(raw_error, "kind") != "Leak_PossiblyLost"):
-              error = ValgrindError(source_dir, raw_error)
-              self._errors.add(error)
+          parsed_file = parse(file);
         except ExpatError, e:
           self._parse_failed = True
           logging.warn("could not parse %s: %s" % (file, e))
@@ -254,16 +388,66 @@ class MemcheckAnalyze:
               logging.warn("> %s" % context_data)
           context_file.close()
           continue
+        if TheAddressTable != None:
+          load_objs = parsed_file.getElementsByTagName("load_obj")
+          for load_obj in load_objs:
+            obj = getTextOf(load_obj, "obj")
+            ip = getTextOf(load_obj, "ip")
+            TheAddressTable.AddBinaryAt(obj, ip)
+
+        commandline = None
+        preamble = parsed_file.getElementsByTagName("preamble")[0];
+        for node in preamble.getElementsByTagName("line"):
+          if node.localName == "line":
+            for x in node.childNodes:
+              if x.nodeType == node.TEXT_NODE and "Command" in x.data:
+                commandline = x.data
+                break
+
+        raw_errors = parsed_file.getElementsByTagName("error")
+        for raw_error in raw_errors:
+          # Ignore "possible" leaks for now by default.
+          if (show_all_leaks or
+              getTextOf(raw_error, "kind") != "Leak_PossiblyLost"):
+            error = ValgrindError(source_dir, raw_error, commandline)
+            self._errors.add(error)
+
+        suppcountlist = parsed_file.getElementsByTagName("suppcounts")
+        if len(suppcountlist) > 0:
+          suppcountlist = suppcountlist[0]
+          for node in suppcountlist.getElementsByTagName("pair"):
+            count = getTextOf(node, "count");
+            name = getTextOf(node, "name");
+            if name in self._suppcounts:
+              self._suppcounts[name] += int(count)
+            else:
+              self._suppcounts[name] = int(count)
+
     if len(badfiles) > 0:
       logging.warn("valgrind didn't finish writing %d files?!" % len(badfiles))
+      for file in badfiles:
+        logging.warn("Last 20 lines of %s :" % file)
+        os.system("tail -n 20 '%s' 1>&2" % file)
 
   def Report(self):
     if self._parse_failed:
       logging.error("FAIL! Couldn't parse Valgrind output file")
       return -2
 
+    print "-----------------------------------------------------"
+    print "Suppressions used:"
+    print "  count name"
+    for item in sorted(self._suppcounts.items(), key=lambda (k,v): (v,k)):
+      print "%7s %s" % (item[1], item[0])
+    print "-----------------------------------------------------"
+    sys.stdout.flush()
+
     if self._errors:
       logging.error("FAIL! There were %s errors: " % len(self._errors))
+
+      global TheAddressTable
+      if TheAddressTable != None:
+        TheAddressTable.ResolveAll()
 
       for error in self._errors:
         logging.error(error)
@@ -286,7 +470,7 @@ def _main():
     parser.error("no filename specified")
   filenames = args
 
-  analyzer = MemcheckAnalyze(options.source_dir, filenames)
+  analyzer = MemcheckAnalyze(options.source_dir, filenames, use_gdb=True)
   retcode = analyzer.Report()
 
   sys.exit(retcode)

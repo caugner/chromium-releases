@@ -32,12 +32,23 @@
 #define WebMediaPlayer_h
 
 #include "WebCanvas.h"
+#include "WebVector.h"
 
 namespace WebKit {
     class WebMediaPlayerClient;
     class WebURL;
     struct WebRect;
     struct WebSize;
+
+    struct WebTimeRange {
+        WebTimeRange() : start(0), end(0) {}
+        WebTimeRange(float s, float e) : start(s), end(e) {}
+
+        float start;
+        float end;
+    };
+
+    typedef WebVector<WebTimeRange> WebTimeRanges;
 
     class WebMediaPlayer {
     public:
@@ -83,7 +94,7 @@ namespace WebKit {
         virtual void setVisible(bool) = 0;
         virtual bool setAutoBuffer(bool) = 0;
         virtual bool totalBytesKnown() = 0;
-        virtual float maxTimeBuffered() const = 0;
+        virtual const WebTimeRanges& buffered() const = 0;
         virtual float maxTimeSeekable() const = 0;
 
         virtual void setSize(const WebSize&) = 0;

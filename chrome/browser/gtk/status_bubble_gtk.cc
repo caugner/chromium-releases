@@ -6,11 +6,13 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gfx/gtk_util.h"
 #include "app/gfx/text_elider.h"
-#include "base/gfx/gtk_util.h"
+#include "app/l10n_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/rounded_window.h"
 #include "chrome/browser/gtk/slide_animator_gtk.h"
 #include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
@@ -18,19 +20,15 @@
 
 namespace {
 
-const GdkColor kTextColor = GDK_COLOR_RGB(100, 100, 100);
-const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xe6, 0xed, 0xf4);
-const GdkColor kFrameBorderColor = GDK_COLOR_RGB(0xbe, 0xc8, 0xd4);
-
 // Inner padding between the border and the text label.
 const int kInternalTopBottomPadding = 1;
 const int kInternalLeftRightPadding = 2;
 
-// Border of color kFrameBorderColor around the status bubble.
-const int kBorderPadding = 1;
+// The radius of the edges of our bubble.
+const int kCornerSize = 3;
 
 // Milliseconds before we hide the status bubble widget when you mouseout.
-static const int kHideDelay = 250;
+const int kHideDelay = 250;
 
 }  // namespace
 
@@ -39,6 +37,7 @@ StatusBubbleGtk::StatusBubbleGtk(Profile* profile)
       timer_factory_(this) {
   InitWidgets();
 
+  theme_provider_->InitThemesFor(this);
   registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
 }
@@ -138,16 +137,17 @@ void StatusBubbleGtk::InitWidgets() {
   GtkWidget* padding = gtk_alignment_new(0, 0, 1, 1);
   gtk_alignment_set_padding(GTK_ALIGNMENT(padding),
       kInternalTopBottomPadding, kInternalTopBottomPadding,
-      kInternalLeftRightPadding, kInternalLeftRightPadding);
+      kInternalLeftRightPadding,
+      kInternalLeftRightPadding + kCornerSize);
   gtk_container_add(GTK_CONTAINER(padding), label_);
 
-  bg_box_ = gtk_event_box_new();
-  gtk_container_add(GTK_CONTAINER(bg_box_), padding);
-
-  container_.Own(gtk_util::CreateGtkBorderBin(bg_box_, &kFrameBorderColor,
-          kBorderPadding, kBorderPadding, kBorderPadding, kBorderPadding));
+  container_.Own(gtk_event_box_new());
+  gtk_util::ActAsRoundedWindow(
+      container_.get(), gfx::kGdkWhite, kCornerSize,
+      gtk_util::ROUNDED_TOP_RIGHT,
+      gtk_util::BORDER_TOP | gtk_util::BORDER_RIGHT);
   gtk_widget_set_name(container_.get(), "status-bubble");
-  gtk_widget_set_app_paintable(container_.get(), TRUE);
+  gtk_container_add(GTK_CONTAINER(container_.get()), padding);
 
   UserChangedTheme();
 }
@@ -155,7 +155,7 @@ void StatusBubbleGtk::InitWidgets() {
 void StatusBubbleGtk::UserChangedTheme() {
   if (theme_provider_->UseGtkTheme()) {
     gtk_widget_modify_fg(label_, GTK_STATE_NORMAL, NULL);
-    gtk_widget_modify_bg(bg_box_, GTK_STATE_NORMAL, NULL);
+    gtk_widget_modify_bg(container_.get(), GTK_STATE_NORMAL, NULL);
   } else {
     // TODO(erg): This is the closest to "text that will look good on a
     // toolbar" that I can find. Maybe in later iterations of the theme system,
@@ -166,17 +166,9 @@ void StatusBubbleGtk::UserChangedTheme() {
 
     GdkColor toolbar_color =
         theme_provider_->GetGdkColor(BrowserThemeProvider::COLOR_TOOLBAR);
-    gtk_widget_modify_bg(bg_box_, GTK_STATE_NORMAL, &toolbar_color);
+    gtk_widget_modify_bg(container_.get(), GTK_STATE_NORMAL, &toolbar_color);
   }
 
-  // TODO(erg): I don't know what to do with the status bubble border
-  // (|container_|). There needs to be a border in GTK mode, and I'm not sure
-  // which BrowserThemeProvider::COLOR I'm supposed to use here since the Views
-  // implementation still uses constants in the equivalent, and it's used for
-  // alpha blending instead of drawing a real border.
-  //
-  // This doesn't really matter because this part of the UI needs to be
-  // rewritten per the UI review anyway; we should be matching windows with a
-  // semi-transparent, rounded border instead of our constantly
-  // CreateGtkBorderBin() usage.
+  gtk_util::SetRoundedWindowBorderColor(container_.get(),
+                                        theme_provider_->GetBorderColor());
 }

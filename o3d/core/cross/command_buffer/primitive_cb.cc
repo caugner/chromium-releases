@@ -47,7 +47,7 @@
 
 namespace o3d {
 
-using command_buffer::ResourceID;
+using command_buffer::ResourceId;
 using command_buffer::CommandBufferHelper;
 using command_buffer::CommandBufferEntry;
 using command_buffer::GAPIInterface;
@@ -63,55 +63,39 @@ PrimitiveCB::~PrimitiveCB() {
 }
 
 // Converts an O3D primitive type to a command-buffer one.
-static GAPIInterface::PrimitiveType GetCBPrimitiveType(
+static command_buffer::PrimitiveType GetCBPrimitiveType(
     Primitive::PrimitiveType primitive_type) {
   switch (primitive_type) {
     case Primitive::LINELIST:
-      return GAPIInterface::LINES;
+      return command_buffer::kLines;
     case Primitive::LINESTRIP:
-      return GAPIInterface::LINE_STRIPS;
+      return command_buffer::kLineStrips;
     case Primitive::TRIANGLELIST:
-      return GAPIInterface::TRIANGLES;
+      return command_buffer::kTriangles;
     case Primitive::TRIANGLESTRIP:
-      return GAPIInterface::TRIANGLE_STRIPS;
+      return command_buffer::kTriangleStrips;
     case Primitive::TRIANGLEFAN:
-      return GAPIInterface::TRIANGLE_FANS;
+      return command_buffer::kTriangleFans;
     default:
       // Note that POINTLIST falls into this case, for compatibility with D3D.
-      return GAPIInterface::MAX_PRIMITIVE_TYPE;
+      return command_buffer::kMaxPrimitiveType;
   }
 }
 
 // Sends the draw commands to the command buffers.
-void PrimitiveCB::Render(Renderer* renderer,
-                         DrawElement* draw_element,
-                         Material* material,
-                         ParamObject* override,
-                         ParamCache* param_cache) {
+void PrimitiveCB::PlatformSpecificRender(Renderer* renderer,
+                                         DrawElement* draw_element,
+                                         Material* material,
+                                         ParamObject* override,
+                                         ParamCache* param_cache) {
   DLOG_ASSERT(draw_element);
   DLOG_ASSERT(param_cache);
-  if (!material) {
-    O3D_ERROR(service_locator())
-        << "No Material attached to Shape '"
-        << draw_element->name() << "'";
-    return;
-  }
+  DLOG_ASSERT(material);
+
   EffectCB *effect_cb = down_cast<EffectCB*>(material->effect());
-  // If there's no effect attached to this Material, draw nothing.
-  if (!effect_cb ||
-      effect_cb->resource_id() == command_buffer::kInvalidResource) {
-    O3D_ERROR(service_locator())
-        << "No Effect attached to Material '"
-        << material->name() << "' in Shape '"
-        << draw_element->name() << "'";
-    return;
-  }
+  DLOG_ASSERT(effect_cb);
   StreamBankCB* stream_bank_cb = down_cast<StreamBankCB*>(stream_bank());
-  if (!stream_bank_cb) {
-    O3D_ERROR(service_locator())
-        << "No StreamBank attached to Shape '"
-        << draw_element->name() << "'";
-  }
+  DLOG_ASSERT(stream_bank_cb);
 
   ParamCacheCB *param_cache_cb = down_cast<ParamCacheCB *>(param_cache);
 
@@ -128,14 +112,13 @@ void PrimitiveCB::Render(Renderer* renderer,
   IndexBufferCB *index_buffer_cb =
       down_cast<IndexBufferCB *>(index_buffer());
   if (!index_buffer_cb) {
-    // TODO: draw non-index in this case ? we don't do it currently on
-    // other platforms, so keep compatibility.
+    // TODO(gman): draw non-indexed primitives.
     DLOG(INFO) << "Trying to draw with an empty index buffer.";
     return;
   }
-  GAPIInterface::PrimitiveType cb_primitive_type =
+  command_buffer::PrimitiveType cb_primitive_type =
       GetCBPrimitiveType(primitive_type_);
-  if (cb_primitive_type == GAPIInterface::MAX_PRIMITIVE_TYPE) {
+  if (cb_primitive_type == command_buffer::kMaxPrimitiveType) {
     DLOG(INFO) << "Invalid primitive type (" << primitive_type_ << ").";
     return;
   }
@@ -146,23 +129,15 @@ void PrimitiveCB::Render(Renderer* renderer,
   stream_bank_cb->BindStreamsForRendering();
 
   CommandBufferHelper *helper = renderer_->helper();
-  CommandBufferEntry args[6];
 
   // Sets current effect.
   // TODO: cache current effect ?
-  args[0].value_uint32 = effect_cb->resource_id();
-  helper->AddCommand(command_buffer::SET_EFFECT, 1, args);
+  helper->SetEffect(effect_cb->resource_id());
   param_cache_cb->RunHandlers(helper);
 
-
   // Draws.
-  args[0].value_uint32 = cb_primitive_type;
-  args[1].value_uint32 = index_buffer_cb->resource_id();
-  args[2].value_uint32 = 0;                     // first index.
-  args[3].value_uint32 = number_primitives_;    // primitive count.
-  args[4].value_uint32 = 0;                     // min index.
-  args[5].value_uint32 = number_vertices_ - 1;  // max index.
-  helper->AddCommand(command_buffer::DRAW_INDEXED, 6, args);
+  helper->DrawIndexed(cb_primitive_type, index_buffer_cb->resource_id(),
+                       0, number_primitives_, 0, number_vertices_ - 1);
 }
 
 }  // namespace o3d

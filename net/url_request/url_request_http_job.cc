@@ -13,9 +13,8 @@
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "net/base/cert_status_flags.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/filter.h"
-#include "net/base/force_tls_state.h"
+#include "net/base/strict_transport_security_state.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -29,15 +28,16 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
+#include "net/url_request/url_request_redirect_job.h"
 
 // TODO(darin): make sure the port blocking code is not lost
-
 // static
 URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
                                           const std::string& scheme) {
   DCHECK(scheme == "http" || scheme == "https");
 
-  if (!net::IsPortAllowedByDefault(request->url().IntPort()))
+  int port = request->url().IntPort();
+  if (!net::IsPortAllowedByDefault(port) && !net::IsPortAllowedByOverride(port))
     return new URLRequestErrorJob(request, net::ERR_UNSAFE_PORT);
 
   if (!request->context() ||
@@ -46,15 +46,18 @@ URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
     return new URLRequestErrorJob(request, net::ERR_INVALID_ARGUMENT);
   }
 
-  // We cache the value of the switch because this code path is hit on every
-  // network request.
-  static const bool kForceHTTPS =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS);
-  if (kForceHTTPS && scheme == "http" &&
-      request->context()->force_tls_state() &&
-      request->context()->force_tls_state()->IsEnabledForHost(
-          request->url().host()))
-    return new URLRequestErrorJob(request, net::ERR_DISALLOWED_URL_SCHEME);
+  if (scheme == "http" &&
+      request->context()->strict_transport_security_state() &&
+      request->context()->strict_transport_security_state()->IsEnabledForHost(
+          request->url().host())) {
+    DCHECK_EQ(request->url().scheme(), "http");
+    url_canon::Replacements<char> replacements;
+    static const char kNewScheme[] = "https";
+    replacements.SetScheme(kNewScheme,
+                           url_parse::Component(0, strlen(kNewScheme)));
+    GURL new_location = request->url().ReplaceComponents(replacements);
+    return new URLRequestRedirectJob(request, new_location);
+  }
 
   return new URLRequestHttpJob(request);
 }
@@ -119,16 +122,8 @@ void URLRequestHttpJob::SetExtraRequestHeaders(
 void URLRequestHttpJob::Start() {
   DCHECK(!transaction_.get());
 
-  // TODO(darin): URLRequest::referrer() should return a GURL
-  GURL referrer(request_->referrer());
-
   // Ensure that we do not send username and password fields in the referrer.
-  if (referrer.has_username() || referrer.has_password()) {
-    GURL::Replacements referrer_mods;
-    referrer_mods.ClearUsername();
-    referrer_mods.ClearPassword();
-    referrer = referrer.ReplaceComponents(referrer_mods);
-  }
+  GURL referrer(request_->GetSanitizedReferrer());
 
   request_info_.url = request_->url();
   request_info_.referrer = referrer;
@@ -487,15 +482,11 @@ bool URLRequestHttpJob::ShouldTreatAsCertificateError(int result) {
   if (!net::IsCertificateError(result))
     return false;
 
-  // Hide the fancy processing behind a command line switch.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS))
+  // Check whether our context is using Strict-Transport-Security.
+  if (!context_->strict_transport_security_state())
     return true;
 
-  // Check whether our context is using ForceTLS.
-  if (!context_->force_tls_state())
-    return true;
-
-  return !context_->force_tls_state()->IsEnabledForHost(
+  return !context_->strict_transport_security_state()->IsEnabledForHost(
       request_info_.url.host());
 }
 
@@ -515,7 +506,7 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
         ctx->cookie_policy()->CanSetCookie(
             request_->url(), request_->first_party_for_cookies())) {
       FetchResponseCookies();
-      net::CookieMonster::CookieOptions options;
+      net::CookieOptions options;
       options.set_include_httponly();
       ctx->cookie_store()->SetCookiesWithOptions(request_->url(),
                                                  response_cookies_,
@@ -523,7 +514,7 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
     }
   }
 
-  ProcessForceTLSHeader();
+  ProcessStrictTransportSecurityHeader();
 
   if (SdchManager::Global() &&
       SdchManager::Global()->IsInSupportedDomain(request_->url())) {
@@ -573,26 +564,36 @@ void URLRequestHttpJob::StartTransaction() {
   DCHECK(request_->context());
   DCHECK(request_->context()->http_transaction_factory());
 
-  transaction_.reset(
-      request_->context()->http_transaction_factory()->CreateTransaction());
-
   // No matter what, we want to report our status as IO pending since we will
   // be notifying our consumer asynchronously via OnStartCompleted.
   SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
 
-  int rv;
-  if (transaction_.get()) {
-    rv = transaction_->Start(&request_info_, &start_callback_);
+  int rv = request_->context()->http_transaction_factory()->CreateTransaction(
+      &transaction_);
+
+  if (rv == net::OK) {
+    rv = transaction_->Start(
+        &request_info_, &start_callback_, request_->load_log());
     if (rv == net::ERR_IO_PENDING)
       return;
-  } else {
-    rv = net::ERR_FAILED;
   }
 
   // The transaction started synchronously, but we need to notify the
   // URLRequest delegate via the message loop.
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       this, &URLRequestHttpJob::OnStartCompleted, rv));
+}
+
+// Helper. If |*headers| already contains |header_name| do nothing,
+// otherwise add <header_name> ": " <header_value> to the end of the list.
+static void AppendHeaderIfMissing(const char* header_name,
+                                  const std::string& header_value,
+                                  std::string* headers) {
+  if (header_value.empty())
+    return;
+  if (net::HttpUtil::HasHeader(*headers, header_name))
+    return;
+  *headers += std::string(header_name) + ": " + header_value + "\r\n";
 }
 
 void URLRequestHttpJob::AddExtraHeaders() {
@@ -649,14 +650,17 @@ void URLRequestHttpJob::AddExtraHeaders() {
 
   URLRequestContext* context = request_->context();
   if (context) {
-    if (context->allowSendingCookies(request_))
+    if (context->AllowSendingCookies(request_))
       request_info_.extra_headers += AssembleRequestCookies();
-    if (!context->accept_language().empty())
-      request_info_.extra_headers += "Accept-Language: " +
-          context->accept_language() + "\r\n";
-    if (!context->accept_charset().empty())
-      request_info_.extra_headers += "Accept-Charset: " +
-          context->accept_charset() + "\r\n";
+
+    // Only add default Accept-Language and Accept-Charset if the request
+    // didn't have them specified.
+    AppendHeaderIfMissing("Accept-Language",
+                          context->accept_language(),
+                          &request_info_.extra_headers);
+    AppendHeaderIfMissing("Accept-Charset",
+                          context->accept_charset(),
+                          &request_info_.extra_headers);
   }
 }
 
@@ -670,7 +674,7 @@ std::string URLRequestHttpJob::AssembleRequestCookies() {
     if (context->cookie_store() &&
         context->cookie_policy()->CanGetCookies(
             request_->url(), request_->first_party_for_cookies())) {
-      net::CookieMonster::CookieOptions options;
+      net::CookieOptions options;
       options.set_include_httponly();
       std::string cookies = request_->context()->cookie_store()->
           GetCookiesWithOptions(request_->url(), options);
@@ -690,34 +694,32 @@ void URLRequestHttpJob::FetchResponseCookies() {
 
   void* iter = NULL;
   while (response_info_->headers->EnumerateHeader(&iter, name, &value))
-    if (request_->context()->interceptCookie(request_, &value))
+    if (request_->context()->InterceptCookie(request_, &value))
       response_cookies_.push_back(value);
 }
 
 
-void URLRequestHttpJob::ProcessForceTLSHeader() {
+void URLRequestHttpJob::ProcessStrictTransportSecurityHeader() {
   DCHECK(response_info_);
 
-  // Hide processing behind a command line flag.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS))
-    return;
-
-  // Only process X-Force-TLS from HTTPS responses.
+  // Only process Strict-Transport-Security from HTTPS responses.
   if (request_info_.url.scheme() != "https")
     return;
 
-  // Only process X-Force-TLS from responses with valid certificates.
+  // Only process Strict-Transport-Security from responses with valid certificates.
   if (response_info_->ssl_info.cert_status & net::CERT_STATUS_ALL_ERRORS)
     return;
 
   URLRequestContext* ctx = request_->context();
-  if (!ctx || !ctx->force_tls_state())
+  if (!ctx || !ctx->strict_transport_security_state())
     return;
 
-  std::string name = "X-Force-TLS";
+  std::string name = "Strict-Transport-Security";
   std::string value;
 
   void* iter = NULL;
-  while (response_info_->headers->EnumerateHeader(&iter, name, &value))
-    ctx->force_tls_state()->DidReceiveHeader(request_info_.url, value);
+  while (response_info_->headers->EnumerateHeader(&iter, name, &value)) {
+    ctx->strict_transport_security_state()->DidReceiveHeader(
+        request_info_.url, value);
+  }
 }

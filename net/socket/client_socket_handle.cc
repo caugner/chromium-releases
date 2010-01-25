@@ -7,37 +7,18 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "net/base/net_errors.h"
-#include "net/socket/client_socket.h"
 #include "net/socket/client_socket_pool.h"
 
 namespace net {
 
-ClientSocketHandle::ClientSocketHandle(ClientSocketPool* pool)
-    : pool_(pool),
-      socket_(NULL),
+ClientSocketHandle::ClientSocketHandle()
+    : socket_(NULL),
       is_reused_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           callback_(this, &ClientSocketHandle::OnIOComplete)) {}
 
 ClientSocketHandle::~ClientSocketHandle() {
   Reset();
-}
-
-int ClientSocketHandle::Init(const std::string& group_name,
-                             const HostResolver::RequestInfo& resolve_info,
-                             int priority,
-                             CompletionCallback* callback) {
-  CHECK(!group_name.empty());
-  ResetInternal(true);
-  group_name_ = group_name;
-  int rv = pool_->RequestSocket(
-      group_name, resolve_info, priority, this, &callback_);
-  if (rv == ERR_IO_PENDING) {
-    user_callback_ = callback;
-  } else {
-    HandleInitCompletion(rv);
-  }
-  return rv;
 }
 
 void ClientSocketHandle::Reset() {
@@ -59,6 +40,9 @@ void ClientSocketHandle::ResetInternal(bool cancel) {
   group_name_.clear();
   is_reused_ = false;
   user_callback_ = NULL;
+  pool_ = NULL;
+  idle_time_ = base::TimeDelta();
+  init_time_ = base::TimeTicks();
 }
 
 LoadState ClientSocketHandle::GetLoadState() const {

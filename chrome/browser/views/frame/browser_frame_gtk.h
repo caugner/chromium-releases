@@ -24,7 +24,7 @@ class BrowserFrameGtk : public BrowserFrame,
   // separate to avoid recursive calling of the frame from its constructor.
   void Init();
 
-  // BrowserFrame implementation.
+  // Overridden from BrowserFrame:
   virtual views::Window* GetWindow();
   virtual void TabStripCreated(TabStripWrapper* tabstrip);
   virtual int GetMinimizeButtonOffset() const;
@@ -32,14 +32,17 @@ class BrowserFrameGtk : public BrowserFrame,
   virtual void UpdateThrobber(bool running);
   virtual void ContinueDraggingDetachedTab();
   virtual ThemeProvider* GetThemeProviderForFrame() const;
+  virtual bool AlwaysUseNativeFrame() const;
 
-  // Overridden from views::Widget.
+  // Overridden from views::Widget:
   virtual ThemeProvider* GetThemeProvider() const;
   virtual ThemeProvider* GetDefaultThemeProvider() const;
+  virtual void IsActiveChanged();
 
  protected:
-  // WidgetGtk overrides.
+  // Overridden from views::WidgetGtk:
   virtual views::RootView* CreateRootView();
+  virtual bool GetAccelerator(int cmd_id, views::Accelerator* accelerator);
 
  private:
   // The BrowserView is our ClientView. This is a pointer to it.

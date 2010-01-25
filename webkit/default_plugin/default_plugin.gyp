@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'targets': [
   ],
   'conditions': [
@@ -16,23 +13,21 @@
           'type': '<(library)',
           'dependencies': [
             '../../net/net.gyp:net_resources',
-            '../../third_party/icu38/icu38.gyp:icui18n',
-            '../../third_party/icu38/icu38.gyp:icuuc',
+            '../../third_party/icu/icu.gyp:icui18n',
+            '../../third_party/icu/icu.gyp:icuuc',
             '../../third_party/libxml/libxml.gyp:libxml',
             '../../third_party/npapi/npapi.gyp:npapi',
-            '../activex_shim/activex_shim.gyp:activex_shim',
             '../webkit.gyp:webkit_resources',
             '../webkit.gyp:webkit_strings',
           ],
           'include_dirs': [
             '../..',
+            '../../chrome/third_party/wtl/include',
             # TODO(bradnelson): this should fall out of the dependencies.
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
           'msvs_guid': '5916D37D-8C97-424F-A904-74E52594C2D6',
           'sources': [
-            'activex_installer.cc',
-            'activex_installer.h',
             'default_plugin.cc',
             'default_plugin_resources.h',
             'default_plugin_shared.h',
@@ -55,3 +50,9 @@
     },],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

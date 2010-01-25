@@ -35,7 +35,8 @@ struct Thread::StartupData {
 };
 
 Thread::Thread(const char *name)
-    : startup_data_(NULL),
+    : stopping_(false),
+      startup_data_(NULL),
       thread_(0),
       message_loop_(NULL),
       thread_id_(0),
@@ -98,41 +99,37 @@ void Thread::Stop() {
   if (!thread_was_started())
     return;
 
-  // We should only be called on the same thread that started us.
-  DCHECK_NE(thread_id_, PlatformThread::CurrentId());
+  StopSoon();
 
-  // StopSoon may have already been called.
-  if (message_loop_)
-    message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
-
-  // Wait for the thread to exit.  It should already have terminated but make
-  // sure this assumption is valid.
+  // Wait for the thread to exit.
   //
   // TODO(darin): Unfortunately, we need to keep message_loop_ around until
   // the thread exits.  Some consumers are abusing the API.  Make them stop.
   //
   PlatformThread::Join(thread_);
 
-  // The thread can't receive messages anymore.
-  message_loop_ = NULL;
+  // The thread should NULL message_loop_ on exit.
+  DCHECK(!message_loop_);
 
   // The thread no longer needs to be joined.
   startup_data_ = NULL;
+
+  stopping_ = false;
 }
 
 void Thread::StopSoon() {
-  if (!message_loop_)
-    return;
-
   // We should only be called on the same thread that started us.
   DCHECK_NE(thread_id_, PlatformThread::CurrentId());
 
-  // We had better have a message loop at this point!  If we do not, then it
-  // most likely means that the thread terminated unexpectedly, probably due
-  // to someone calling Quit() on our message loop directly.
-  DCHECK(message_loop_);
+  if (stopping_ || !message_loop_)
+    return;
 
+  stopping_ = true;
   message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
+}
+
+void Thread::Run(MessageLoop* message_loop) {
+  message_loop->Run();
 }
 
 void Thread::ThreadMain() {
@@ -153,7 +150,7 @@ void Thread::ThreadMain() {
   // startup_data_ can't be touched anymore since the starting thread is now
   // unlocked.
 
-  message_loop.Run();
+  Run(message_loop_);
 
   // Let the thread do extra cleanup.
   CleanUp();

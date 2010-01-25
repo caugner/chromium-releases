@@ -32,8 +32,8 @@
 
 // This file contains the declarations for Texture2DD3D9 and TextureCUBED3D9.
 
-#ifndef O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H__
-#define O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H__
+#ifndef O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H_
+#define O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H_
 
 #include <atlbase.h>
 #include <vector>
@@ -59,30 +59,26 @@ class Texture2DD3D9 : public Texture2D {
   // creation fails then it returns NULL otherwise it returns a pointer to the
   // newly created Texture object.
   static Texture2DD3D9* Create(ServiceLocator* service_locator,
-                               Bitmap* bitmap,
+                               Texture::Format format,
+                               int levels,
+                               int width,
+                               int height,
                                RendererD3D9* renderer,
                                bool enable_render_surfaces);
 
   virtual ~Texture2DD3D9();
 
-  // Locks the image buffer of a given mipmap level for loading from
-  // main memory.  A pointer to the current contents of the texture is returned
-  // in texture_data.
-  virtual bool Lock(int level, void** texture_data);
-
-  // Notifies DX9 that the texture data has been updated.
-  virtual bool Unlock(int level);
+  // Overridden from Texture2D
+  virtual void SetRect(int level,
+                       unsigned left,
+                       unsigned top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
 
   // Returns the implementation-specific texture handle for this texture.
   virtual void* GetTextureHandle() const { return d3d_texture_; }
-
-  // Returns a RenderSurface object associated with a mip_level of a texture.
-  // Parameters:
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(int mip_level, Pack* pack);
 
   // Handler for lost device. This invalidates the texture for a device reset.
   bool OnLostDevice();
@@ -94,17 +90,35 @@ class Texture2DD3D9 : public Texture2D {
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificLock(
+      int level, void** texture_data, int* pitch, AccessMode mode);
+
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificUnlock(int level);
+
+  // Overridden from Texture2D
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(int mip_level);
+
  private:
   // Initializes the Texture2DD3D9 from a DX9 texture.
   Texture2DD3D9(ServiceLocator* service_locator,
                 IDirect3DTexture9* tex,
-                const Bitmap& bitmap,
+                Texture::Format format,
+                int levels,
+                int width,
+                int height,
                 bool resize_to_pot,
                 bool enable_render_surfaces);
 
   // Updates a mip level, sending it from the backing bitmap to Direct3D,
   // rescaling it if resize_to_pot_ is set.
-  bool UpdateBackedMipLevel(unsigned int level);
+  void UpdateBackedMipLevel(unsigned int level);
+
+  // Whether or not this texture needs to be resized from NPOT to pot behind
+  // the scenes.
+  bool resize_to_pot_;
 
   // A pointer to the Direct3D 2D texture object containing this texture.
   CComPtr<IDirect3DTexture9> d3d_texture_;
@@ -124,34 +138,26 @@ class TextureCUBED3D9 : public TextureCUBE {
   // creation fails then it returns NULL otherwise it returns a pointer to the
   // newly created Texture object.
   static TextureCUBED3D9* Create(ServiceLocator* service_locator,
-                                 Bitmap* bitmap,
+                                 Texture::Format format,
+                                 int levels,
+                                 int edge_length,
                                  RendererD3D9* renderer,
                                  bool enable_render_surfaces);
 
   virtual ~TextureCUBED3D9();
 
-  // Locks the image buffer of a given face and mipmap level for loading from
-  // main memory.
-  bool Lock(CubeFace face, int level, void** texture_data);
-
-  // Notifies DX9 that the image buffer of a given face and mipmap level has
-  // been updated.
-  bool Unlock(CubeFace face, int level);
+  // Overridden from TextureCUBE
+  virtual void SetRect(CubeFace face,
+                       int level,
+                       unsigned dst_left,
+                       unsigned dst_top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
 
   // Returns the implementation-specific texture handle for this texture.
   virtual void* GetTextureHandle() const { return d3d_cube_texture_; }
-
-  // Returns a RenderSurface object associated with a given cube face and
-  // mip_level of a texture.
-  // Parameters:
-  //  face: [in] The cube face from which to extract the surface.
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(CubeFace face,
-                                              int level,
-                                              Pack* pack);
 
   // Handler for lost device. This invalidates the texture for a device reset.
   bool OnLostDevice();
@@ -163,26 +169,45 @@ class TextureCUBED3D9 : public TextureCUBE {
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificLock(
+      CubeFace face, int level, void** texture_data, int* pitch,
+      AccessMode mode);
+
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificUnlock(CubeFace face, int level);
+
+  // Overridden from TextureCUBE.
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(CubeFace face,
+                                                              int level);
+
  private:
   TextureCUBED3D9(ServiceLocator* service_locator,
                   IDirect3DCubeTexture9* tex,
-                  const Bitmap& bitmap,
+                  int edge_length,
+                  Texture::Format format,
+                  int levels,
                   bool resize_to_pot,
                   bool enable_render_surfaces);
 
+  // Whether or not this texture needs to be resized from NPOT to pot behind
+  // the scenes.
+  bool resize_to_pot_;
+
   // Updates a mip level, sending it from the backing bitmap to Direct3D,
   // rescaling it if resize_to_pot_ is set.
-  bool UpdateBackedMipLevel(unsigned int level, CubeFace face);
+  void UpdateBackedMipLevel(CubeFace face, unsigned int level);
 
   // A pointer to the Direct3D cube texture object containing this texture.
   CComPtr<IDirect3DCubeTexture9> d3d_cube_texture_;
 
-  // A bitmap used to back the NPOT textures on POT-only hardware.
-  Bitmap::Ref backing_bitmap_;
+  // Bitmaps used to back the NPOT textures on POT-only hardware.
+  Bitmap::Ref backing_bitmaps_[NUMBER_OF_FACES];
 
   DISALLOW_COPY_AND_ASSIGN(TextureCUBED3D9);
 };
 
 }  // namespace o3d
 
-#endif  // O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H__
+#endif  // O3D_CORE_WIN_D3D9_TEXTURE_D3D9_H_

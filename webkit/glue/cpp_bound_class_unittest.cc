@@ -10,12 +10,14 @@
 
 #include "base/message_loop.h"
 #include "webkit/api/public/WebData.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/cpp_binding_example.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webframe.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
+
+using WebKit::WebFrame;
 
 namespace {
 
@@ -68,8 +70,8 @@ class ExampleTestShell : public TestShell {
 
   // This is a public interface to TestShell's protected method, so it
   // can be called by our CreateEmptyWindow.
-  bool PublicInitialize(const std::wstring& startingURL) {
-    return Initialize(startingURL);
+  bool PublicInitialize(const std::string& starting_url) {
+    return Initialize(GURL(starting_url));
   }
 
   CppBindingExampleWithOptionalFallback example_bound_class_;
@@ -82,11 +84,11 @@ class CppBoundClassTest : public TestShellTest {
    virtual void CreateEmptyWindow() {
      ExampleTestShell* host = new ExampleTestShell(useFallback());
      ASSERT_TRUE(host != NULL);
-     bool rv = host->PublicInitialize(L"about:blank");
+     bool rv = host->PublicInitialize("about:blank");
      if (rv) {
        test_shell_ = host;
        TestShell::windowList()->push_back(host->mainWnd());
-       webframe_ = test_shell_->webView()->GetMainFrame();
+       webframe_ = test_shell_->webView()->mainFrame();
        ASSERT_TRUE(webframe_ != NULL);
      } else {
        delete host;
@@ -102,7 +104,7 @@ class CppBoundClassTest : public TestShellTest {
      html.append(javascript);
      html.append("</script></body></html>");
      // The base URL doesn't matter.
-     webframe_->LoadHTMLString(html, GURL("about:blank"));
+     webframe_->loadHTMLString(html, GURL("about:blank"));
 
      test_shell_->WaitTestFinished();
     }
@@ -205,6 +207,25 @@ TEST_F(CppBoundClassTest, SetAndGetProperties) {
     js.append(BuildJSCondition(left, right));
     CheckJavaScriptSuccess(js);
   }
+}
+
+TEST_F(CppBoundClassTest, SetAndGetPropertiesWithCallbacks) {
+  // TODO(dglazkov): fix NPObject issues around failing property setters and
+  // getters and add tests for situations when GetProperty or SetProperty fail.
+  std::string js = "var result = 'SUCCESS';\n"
+    "example.my_value_with_callback = 10;\n"
+    "if (example.my_value_with_callback != 10)\n"
+    "  result = 'FAIL: unable to set property.';\n"
+    "example.my_value_with_callback = 11;\n"
+    "if (example.my_value_with_callback != 11)\n"
+    "  result = 'FAIL: unable to set property again';\n"
+    "if (example.same != 42)\n"
+    "  result = 'FAIL: same property should always be 42';\n"
+    "example.same = 24;\n"
+    "if (example.same != 42)\n"
+    "  result = 'FAIL: same property should always be 42';\n"
+    "document.writeln(result);\n";
+  CheckJavaScriptSuccess(js);
 }
 
 TEST_F(CppBoundClassTest, InvokeMethods) {

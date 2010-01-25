@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,23 @@
 
 #include "app/gfx/font.h"
 #include "app/gfx/text_elider.h"
-#include "app/win_util.h"
 #include "base/file_util.h"
+#include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/i18n/time_formatting.h"
 #include "printing/page_number.h"
 #include "printing/page_overlays.h"
 #include "printing/printed_pages_source.h"
 #include "printing/printed_page.h"
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
+
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 
 using base::Time;
 
@@ -35,22 +40,6 @@ struct PrintDebugDumpPath {
 };
 
 Singleton<PrintDebugDumpPath> g_debug_dump_info;
-
-void SimpleModifyWorldTransform(HDC context,
-                                int offset_x,
-                                int offset_y,
-                                double shrink_factor) {
-  XFORM xform = { 0 };
-  xform.eDx = static_cast<float>(offset_x);
-  xform.eDy = static_cast<float>(offset_y);
-  xform.eM11 = xform.eM22 = static_cast<float>(1. / shrink_factor);
-  BOOL res = ModifyWorldTransform(context, &xform, MWT_LEFTMULTIPLY);
-  DCHECK_NE(res, 0);
-}
-
-void DrawRect(HDC context, gfx::Rect rect) {
-  Rectangle(context, rect.x(), rect.y(), rect.right(), rect.bottom());
-}
 
 }  // namespace
 
@@ -108,107 +97,8 @@ bool PrintedDocument::GetPage(int page_number,
   return false;
 }
 
-void PrintedDocument::RenderPrintedPage(const PrintedPage& page,
-                                        HDC context) const {
-#ifndef NDEBUG
-  {
-    // Make sure the page is from our list.
-    AutoLock lock(lock_);
-    DCHECK(&page == mutable_.pages_.find(page.page_number() - 1)->second.get());
-  }
-#endif
-
-  const printing::PageSetup& page_setup(
-      immutable_.settings_.page_setup_pixels());
-
-  // Save the state to make sure the context this function call does not modify
-  // the device context.
-  int saved_state = SaveDC(context);
-  DCHECK_NE(saved_state, 0);
-  skia::PlatformDevice::InitializeDC(context);
-  {
-    // Save the state (again) to apply the necessary world transformation.
-    int saved_state = SaveDC(context);
-    DCHECK_NE(saved_state, 0);
-
-#if 0
-    // Debug code to visually verify margins (leaks GDI handles).
-    XFORM debug_xform = { 0 };
-    ModifyWorldTransform(context, &debug_xform, MWT_IDENTITY);
-    // Printable area:
-    SelectObject(context, CreatePen(PS_SOLID, 1, RGB(0, 0, 0)));
-    SelectObject(context, CreateSolidBrush(RGB(0x90, 0x90, 0x90)));
-    Rectangle(context,
-              0,
-              0,
-              page_setup.printable_area().width(),
-              page_setup.printable_area().height());
-    // Overlay area:
-    gfx::Rect debug_overlay_area(page_setup.overlay_area());
-    debug_overlay_area.Offset(-page_setup.printable_area().x(),
-                              -page_setup.printable_area().y());
-    SelectObject(context, CreateSolidBrush(RGB(0xb0, 0xb0, 0xb0)));
-    DrawRect(context, debug_overlay_area);
-    // Content area:
-    gfx::Rect debug_content_area(page_setup.content_area());
-    debug_content_area.Offset(-page_setup.printable_area().x(),
-                              -page_setup.printable_area().y());
-    SelectObject(context, CreateSolidBrush(RGB(0xd0, 0xd0, 0xd0)));
-    DrawRect(context, debug_content_area);
-#endif
-
-    // Setup the matrix to translate and scale to the right place. Take in
-    // account the actual shrinking factor.
-    // Note that the printing output is relative to printable area of the page.
-    // That is 0,0 is offset by PHYSICALOFFSETX/Y from the page.
-    SimpleModifyWorldTransform(
-        context,
-        page_setup.content_area().x() - page_setup.printable_area().x(),
-        page_setup.content_area().y() - page_setup.printable_area().y(),
-        mutable_.shrink_factor);
-
-    if (!page.native_metafile()->SafePlayback(context)) {
-      NOTREACHED();
-    }
-
-    BOOL res = RestoreDC(context, saved_state);
-    DCHECK_NE(res, 0);
-  }
-
-  // Print the header and footer.  Offset by printable area offset (see comment
-  // above).
-  SimpleModifyWorldTransform(
-      context,
-      -page_setup.printable_area().x(),
-      -page_setup.printable_area().y(),
-      1);
-  int base_font_size = gfx::Font().height();
-  int new_font_size = ConvertUnit(10,
-                                  immutable_.settings_.desired_dpi,
-                                  immutable_.settings_.dpi());
-  DCHECK_GT(new_font_size, base_font_size);
-  gfx::Font font(gfx::Font().DeriveFont(new_font_size - base_font_size));
-  HGDIOBJ old_font = SelectObject(context, font.hfont());
-  DCHECK(old_font != NULL);
-  // We don't want a white square around the text ever if overflowing.
-  SetBkMode(context, TRANSPARENT);
-  PrintHeaderFooter(context, page, PageOverlays::LEFT, PageOverlays::TOP,
-                    font);
-  PrintHeaderFooter(context, page, PageOverlays::CENTER, PageOverlays::TOP,
-                    font);
-  PrintHeaderFooter(context, page, PageOverlays::RIGHT, PageOverlays::TOP,
-                    font);
-  PrintHeaderFooter(context, page, PageOverlays::LEFT, PageOverlays::BOTTOM,
-                    font);
-  PrintHeaderFooter(context, page, PageOverlays::CENTER, PageOverlays::BOTTOM,
-                    font);
-  PrintHeaderFooter(context, page, PageOverlays::RIGHT, PageOverlays::BOTTOM,
-                    font);
-  int res = RestoreDC(context, saved_state);
-  DCHECK_NE(res, 0);
-}
-
-bool PrintedDocument::RenderPrintedPageNumber(int page_number, HDC context) {
+bool PrintedDocument::RenderPrintedPageNumber(
+    int page_number, gfx::NativeDrawingContext context) {
   scoped_refptr<PrintedPage> page;
   if (!GetPage(page_number, &page))
     return false;
@@ -238,7 +128,7 @@ void PrintedDocument::DisconnectSource() {
 }
 
 size_t PrintedDocument::MemoryUsage() const {
-  std::vector<scoped_refptr<PrintedPage>> pages_copy;
+  std::vector< scoped_refptr<PrintedPage> > pages_copy;
   {
     AutoLock lock(lock_);
     pages_copy.reserve(mutable_.pages_.size());
@@ -280,7 +170,7 @@ int PrintedDocument::expected_page_count() const {
   return mutable_.expected_page_count_;
 }
 
-void PrintedDocument::PrintHeaderFooter(HDC context,
+void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
                                         const PrintedPage& page,
                                         PageOverlays::HorizontalPosition x,
                                         PageOverlays::VerticalPosition y,
@@ -339,6 +229,9 @@ void PrintedDocument::PrintHeaderFooter(HDC context,
     }
   }
 
+  // TODO(stuartmorgan): Factor out this platform-specific part into another
+  // method that can be moved into the platform files.
+#if defined(OS_WIN)
   // Save the state (again) for the clipping region.
   int saved_state = SaveDC(context);
   DCHECK_NE(saved_state, 0);
@@ -352,6 +245,9 @@ void PrintedDocument::PrintHeaderFooter(HDC context,
           static_cast<int>(output.size()));
   int res = RestoreDC(context, saved_state);
   DCHECK_NE(res, 0);
+#else  // OS_WIN
+  NOTIMPLEMENTED();
+#endif  // OS_WIN
 }
 
 void PrintedDocument::DebugDump(const PrintedPage& page) {
@@ -370,7 +266,11 @@ void PrintedDocument::DebugDump(const PrintedPage& page) {
   file_util::ReplaceIllegalCharacters(&filename, '_');
   std::wstring path(g_debug_dump_info->debug_dump_path);
   file_util::AppendToPath(&path, filename);
+#if defined(OS_WIN)
   page.native_metafile()->SaveTo(path);
+#else  // OS_WIN
+  NOTIMPLEMENTED();
+#endif  // OS_WIN
 }
 
 void PrintedDocument::set_debug_dump_path(const std::wstring& debug_dump_path) {
@@ -398,17 +298,17 @@ PrintedDocument::Immutable::Immutable(const PrintSettings& settings,
       url_(source->RenderSourceUrl()),
       cookie_(cookie) {
   // Setup the document's date.
-#ifdef WIN32
+#if defined(OS_WIN)
   // On Windows, use the native time formatting for printing.
   SYSTEMTIME systemtime;
   GetLocalTime(&systemtime);
   date_ = win_util::FormatSystemDate(systemtime, std::wstring());
   time_ = win_util::FormatSystemTime(systemtime, std::wstring());
-#else
+#else  // OS_WIN
   Time now = Time::Now();
-  date_ = TimeFormat::ShortDateNumeric(now);
-  time_ = TimeFormat::TimeOfDay(now);
-#endif  // WIN32
+  date_ = base::TimeFormatShortDateNumeric(now);
+  time_ = base::TimeFormatTimeOfDay(now);
+#endif  // OS_WIN
 }
 
 }  // namespace printing

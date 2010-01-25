@@ -2,19 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "views/controls/textfield/native_textfield_win.h"
+
+#include <algorithm>
+
+#include "app/clipboard/clipboard.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/win_util.h"
-#include "base/clipboard.h"
-#include "base/gfx/native_theme.h"
-#include "base/scoped_clipboard_writer.h"
+#include "base/keyboard_codes.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
 #include "grit/app_strings.h"
 #include "skia/ext/skia_utils_win.h"
 #include "views/controls/menu/menu_win.h"
 #include "views/controls/native/native_view_host.h"
-#include "views/controls/textfield/native_textfield_win.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/focus/focus_manager.h"
 #include "views/focus/focus_util_win.h"
@@ -66,6 +70,7 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
       ime_discard_composition_(false),
       ime_composition_start_(0),
       ime_composition_length_(0),
+      container_view_(new NativeViewHost),
       bg_color_(0) {
   if (!did_load_library_)
     did_load_library_ = !!LoadLibrary(L"riched20.dll");
@@ -93,14 +98,9 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
   }
 
   // Set up the text_object_model_.
-  CComPtr<IRichEditOle> ole_interface;
+  ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
   ole_interface.Attach(GetOleInterface());
-  text_object_model_ = ole_interface;
-
-  container_view_ = new NativeViewHost;
-  textfield_->AddChildView(container_view_);
-  container_view_->set_focus_view(textfield_);
-  container_view_->Attach(m_hWnd);
+  text_object_model_.QueryFrom(ole_interface);
 }
 
 NativeTextfieldWin::~NativeTextfieldWin() {
@@ -108,10 +108,16 @@ NativeTextfieldWin::~NativeTextfieldWin() {
     DestroyWindow();
 }
 
+void NativeTextfieldWin::AttachHack() {
+  // See the code in textfield.cc that calls this for why this is here.
+  container_view_->set_focus_view(textfield_);
+  container_view_->Attach(m_hWnd);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldWin, NativeTextfieldWrapper implementation:
 
-std::wstring NativeTextfieldWin::GetText() const {
+string16 NativeTextfieldWin::GetText() const {
   int len = GetTextLength() + 1;
   std::wstring str;
   GetWindowText(WriteInto(&str, len), len);
@@ -130,14 +136,14 @@ void NativeTextfieldWin::UpdateText() {
   SetWindowText(text_to_set.c_str());
 }
 
-void NativeTextfieldWin::AppendText(const std::wstring& text) {
+void NativeTextfieldWin::AppendText(const string16& text) {
   int text_length = GetWindowTextLength();
   ::SendMessage(m_hWnd, TBM_SETSEL, true, MAKELPARAM(text_length, text_length));
   ::SendMessage(m_hWnd, EM_REPLACESEL, false,
                 reinterpret_cast<LPARAM>(text.c_str()));
 }
 
-std::wstring NativeTextfieldWin::GetSelectedText() const {
+string16 NativeTextfieldWin::GetSelectedText() const {
   // Figure out the length of the selection.
   long start;
   long end;
@@ -166,6 +172,15 @@ void NativeTextfieldWin::UpdateBorder() {
                SWP_NOOWNERZORDER | SWP_NOSIZE);
 }
 
+void NativeTextfieldWin::UpdateTextColor() {
+  CHARFORMAT cf = {0};
+  cf.dwMask = CFM_COLOR;
+  cf.crTextColor = textfield_->use_default_text_color() ?
+      GetSysColor(textfield_->read_only() ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT) :
+      skia::SkColorToCOLORREF(textfield_->text_color());
+  CRichEditCtrl::SetDefaultCharFormat(cf);
+}
+
 void NativeTextfieldWin::UpdateBackgroundColor() {
   if (!textfield_->use_default_background_color()) {
     bg_color_ = skia::SkColorToCOLORREF(textfield_->background_color());
@@ -183,10 +198,21 @@ void NativeTextfieldWin::UpdateReadOnly() {
 void NativeTextfieldWin::UpdateFont() {
   SendMessage(m_hWnd, WM_SETFONT,
               reinterpret_cast<WPARAM>(textfield_->font().hfont()), TRUE);
+  // Setting the font blows away any text color we've set, so reset it.
+  UpdateTextColor();
 }
 
 void NativeTextfieldWin::UpdateEnabled() {
   SendMessage(m_hWnd, WM_ENABLE, textfield_->IsEnabled(), 0);
+}
+
+gfx::Insets NativeTextfieldWin::CalculateInsets() {
+  // NOTE: One would think GetThemeMargins would return the insets we should
+  // use, but it doesn't. The margins returned by GetThemeMargins are always
+  // 0.
+
+  // This appears to be the insets used by Windows.
+  return gfx::Insets(3, 3, 3, 3);
 }
 
 void NativeTextfieldWin::SetHorizontalMargins(int left, int right) {
@@ -237,13 +263,13 @@ bool NativeTextfieldWin::GetAcceleratorForCommandId(int command_id,
   // anywhere so we need to check for them explicitly here.
   switch (command_id) {
     case IDS_APP_CUT:
-      *accelerator = views::Accelerator(L'X', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_X, false, true, false);
       return true;
     case IDS_APP_COPY:
-      *accelerator = views::Accelerator(L'C', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_C, false, true, false);
       return true;
     case IDS_APP_PASTE:
-      *accelerator = views::Accelerator(L'V', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_V, false, true, false);
       return true;
   }
   return container_view_->GetWidget()->GetAccelerator(command_id, accelerator);
@@ -270,8 +296,8 @@ void NativeTextfieldWin::OnChar(TCHAR ch, UINT repeat_count, UINT flags) {
   HandleKeystroke(GetCurrentMessage()->message, ch, repeat_count, flags);
 }
 
-void NativeTextfieldWin::OnContextMenu(HWND window, const CPoint& point) {
-  CPoint p(point);
+void NativeTextfieldWin::OnContextMenu(HWND window, const POINT& point) {
+  POINT p(point);
   if (point.x == -1 || point.y == -1) {
     GetCaretPos(&p);
     MapWindowPoints(HWND_DESKTOP, &p, 1);
@@ -303,7 +329,9 @@ void NativeTextfieldWin::OnCut() {
   ReplaceSel(L"", true);
 }
 
-LRESULT NativeTextfieldWin::OnImeChar(UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT NativeTextfieldWin::OnImeChar(UINT message,
+                                      WPARAM wparam,
+                                      LPARAM lparam) {
   // http://crbug.com/7707: a rich-edit control may crash when it receives a
   // WM_IME_CHAR message while it is processing a WM_IME_COMPOSITION message.
   // Since view controls don't need WM_IME_CHAR messages, we prevent WM_IME_CHAR
@@ -510,7 +538,7 @@ LRESULT NativeTextfieldWin::OnMouseWheel(UINT message, WPARAM w_param,
   // applicable.
   if (views::RerouteMouseWheel(m_hWnd, w_param, l_param))
     return 0;
-  return DefWindowProc(message, w_param, l_param);;
+  return DefWindowProc(message, w_param, l_param);
 }
 
 void NativeTextfieldWin::OnMouseMove(UINT keys, const CPoint& point) {
@@ -569,7 +597,8 @@ void NativeTextfieldWin::OnMouseMove(UINT keys, const CPoint& point) {
 
 int NativeTextfieldWin::OnNCCalcSize(BOOL w_param, LPARAM l_param) {
   content_insets_.Set(0, 0, 0, 0);
-  textfield_->CalculateInsets(&content_insets_);
+  if (textfield_->draw_border())
+    content_insets_ = CalculateInsets();
   if (w_param) {
     NCCALCSIZE_PARAMS* nc_params =
         reinterpret_cast<NCCALCSIZE_PARAMS*>(l_param);
@@ -662,11 +691,12 @@ void NativeTextfieldWin::OnPaste() {
     return;
 
   Clipboard* clipboard = ViewsDelegate::views_delegate->GetClipboard();
-  if (!clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType()))
+  if (!clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType(),
+                                    Clipboard::BUFFER_STANDARD))
     return;
 
   std::wstring clipboard_str;
-  clipboard->ReadText(&clipboard_str);
+  clipboard->ReadText(Clipboard::BUFFER_STANDARD, &clipboard_str);
   if (!clipboard_str.empty()) {
     std::wstring collapsed(CollapseWhitespace(clipboard_str, false));
     if (textfield_->style() & Textfield::STYLE_LOWERCASE)
@@ -839,9 +869,9 @@ void NativeTextfieldWin::SetContainsMouse(bool contains_mouse) {
 
 ITextDocument* NativeTextfieldWin::GetTextObjectModel() const {
   if (!text_object_model_) {
-    CComPtr<IRichEditOle> ole_interface;
+    ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
     ole_interface.Attach(GetOleInterface());
-    text_object_model_ = ole_interface;
+    text_object_model_.QueryFrom(ole_interface);
   }
   return text_object_model_;
 }

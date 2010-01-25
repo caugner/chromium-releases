@@ -10,7 +10,6 @@
 namespace extension_tabs_module_constants {
 
 // Keys used in serializing tab data & events.
-extern const wchar_t kDataKey[];
 extern const wchar_t kFavIconUrlKey[];
 extern const wchar_t kFocusedKey[];
 extern const wchar_t kFromIndexKey[];
@@ -22,7 +21,7 @@ extern const wchar_t kNewPositionKey[];
 extern const wchar_t kNewWindowIdKey[];
 extern const wchar_t kOldPositionKey[];
 extern const wchar_t kOldWindowIdKey[];
-extern const wchar_t kPageActionIdKey[];
+extern const wchar_t kPopulateKey[];
 extern const wchar_t kSelectedKey[];
 extern const wchar_t kStatusKey[];
 extern const wchar_t kTabIdKey[];
@@ -46,25 +45,14 @@ extern const char kWindowNotFoundError[];
 extern const char kTabNotFoundError[];
 extern const char kNoSelectedTabError[];
 extern const char kInvalidUrlError[];
+extern const char kInternalVisibleTabCaptureError[];
+extern const char kNotImplementedError[];
+extern const char kCannotAccessPageError[];
+extern const char kSupportedInWindowsOnlyError[];
 
-// Function names, Windows API.
-extern const char kGetWindowFunction[];
-extern const char kGetCurrentWindowFunction[];
-extern const char kGetLastFocusedWindowFunction[];
-extern const char kGetAllWindowsFunction[];
-extern const char kCreateWindowFunction[];
-extern const char kUpdateWindowFunction[];
-extern const char kRemoveWindowFunction[];
-
-// Function names, Tabs API.
-extern const char kGetTabFunction[];
-extern const char kGetSelectedTabFunction[];
-extern const char kGetAllTabsInWindowFunction[];
-extern const char kCreateTabFunction[];
-extern const char kUpdateTabFunction[];
-extern const char kMoveTabFunction[];
-extern const char kRemoveTabFunction[];
-extern const char kDetectTabLanguageFunction[];
+extern const char kNoCodeOrFileToExecuteError[];
+extern const char kMoreThanOneValuesError[];
+extern const char kLoadFileError[];
 
 };  // namespace extension_tabs_module_constants
 

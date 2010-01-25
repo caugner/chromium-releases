@@ -11,16 +11,16 @@
 namespace default_plugin {
 
 // We use the NPNGetValue host function to send notification message to host.
-// This corresponds to NPNVariable defined in npapi.h. However, we don't care
-// too much about value conflicts because on the host side, it will only respond
-// to such request coming from default plugin.
-const int kMissingPluginStatusStart = 3000;
+// This corresponds to NPNVariable defined in npapi.h, and should be chosen so
+// as to not overlap values if NPAPI is updated.
+
+const int kMissingPluginStatusStart = 5000;
 
 enum MissingPluginStatus {
   MISSING_PLUGIN_AVAILABLE,
   MISSING_PLUGIN_USER_STARTED_DOWNLOAD
 };
 
-}  // namespace activex_shim
+}  // namespace default_plugin
 
 #endif // #ifndef WEBKIT_DEFAULT_PLUGIN_DEFAULT_PLUGIN_SHARED_H

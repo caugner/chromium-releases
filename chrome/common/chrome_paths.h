@@ -5,6 +5,8 @@
 #ifndef CHROME_COMMON_CHROME_PATHS_H__
 #define CHROME_COMMON_CHROME_PATHS_H__
 
+#include "build/build_config.h"
+
 // This file declares path keys for the chrome module.  These can be used with
 // the PathService to access various special directories and files.
 
@@ -16,6 +18,7 @@ enum {
   DIR_APP = PATH_START,  // directory where dlls and data reside
   DIR_LOGS,              // directory where logs should be written
   DIR_USER_DATA,         // directory where user data can be written
+  DIR_USER_CACHE,        // directory where user cache data resides
   DIR_CRASH_DUMPS,       // directory where crash dumps are written
   DIR_USER_DESKTOP,      // directory that correspond to the desktop
   DIR_INSPECTOR,         // directory where web inspector is located
@@ -32,6 +35,10 @@ enum {
   FILE_LIBAVCODEC,       // full path to libavcodec media decoding library.
   FILE_LIBAVFORMAT,      // full path to libavformat media parsing library.
   FILE_LIBAVUTIL,        // full path to libavutil media utility library.
+#if defined(OS_CHROMEOS)
+  FILE_CHROMEOS_API,     // full path to chrome os api shared object.
+#endif
+
 
   // Valid only in development environment; TODO(darin): move these
   DIR_TEST_DATA,         // directory where unit test data resides

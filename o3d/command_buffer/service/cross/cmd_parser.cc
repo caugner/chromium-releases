@@ -49,7 +49,7 @@ CommandParser::CommandParser(void *shm_address,
   // check proper alignments.
   DCHECK_EQ(0, (reinterpret_cast<intptr_t>(shm_address)) % 4);
   DCHECK_EQ(0, offset % 4);
-  DCHECK_EQ(0, size % 4);
+  DCHECK_EQ(0u, size % 4);
   // check that the command buffer fits into the memory buffer.
   DCHECK_GE(shm_size, offset + size);
   char * buffer_begin = static_cast<char *>(shm_address) + offset;
@@ -64,28 +64,42 @@ CommandParser::CommandParser(void *shm_address,
 // conditions). This function only validates the header, leaving the arguments
 // validation to the handler, so it can pass a reference to them.
 // - get_ is modified *after* the command has been executed.
-BufferSyncInterface::ParseError CommandParser::ProcessCommand() {
+parse_error::ParseError CommandParser::ProcessCommand() {
   CommandBufferOffset get = get_;
-  if (get == put_) return BufferSyncInterface::PARSE_NO_ERROR;
+  if (get == put_) return parse_error::kParseNoError;
 
   CommandHeader header = buffer_[get].value_header;
-  if (header.size == 0) return BufferSyncInterface::PARSE_INVALID_SIZE;
-  if (header.size + get > entry_count_)
-    return BufferSyncInterface::PARSE_OUT_OF_BOUNDS;
-  BufferSyncInterface::ParseError result = handler_->DoCommand(
-      header.command, header.size - 1, buffer_ + get + 1);
+  if (header.size == 0) {
+    DLOG(INFO) << "Error: zero sized command in command buffer";
+    return parse_error::kParseInvalidSize;
+  }
+
+  if (header.size + get > entry_count_) {
+    DLOG(INFO) << "Error: get offset out of bounds";
+    return parse_error::kParseOutOfBounds;
+  }
+
+  parse_error::ParseError result = handler_->DoCommand(
+      header.command, header.size - 1, buffer_ + get);
+  // TODO(gman): If you want to log errors this is the best place to catch them.
+  //     It seems like we need an official way to turn on a debug mode and
+  //     get these errors.
+  if (result != parse_error::kParseNoError) {
+    DLOG(INFO) << "Error: " << result << " for Command "
+               << GetCommandName(static_cast<CommandId>(header.command));
+  }
   get_ = (get + header.size) % entry_count_;
   return result;
 }
 
 // Processes all the commands, while the buffer is not empty. Stop if an error
 // is encountered.
-BufferSyncInterface::ParseError CommandParser::ProcessAllCommands() {
+parse_error::ParseError CommandParser::ProcessAllCommands() {
   while (!IsEmpty()) {
-    BufferSyncInterface::ParseError error = ProcessCommand();
+    parse_error::ParseError error = ProcessCommand();
     if (error) return error;
   }
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 }  // namespace command_buffer

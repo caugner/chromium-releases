@@ -9,21 +9,23 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
-#include "base/gfx/gtk_util.h"
+#include "app/gfx/gtk_util.h"
 #include "base/gfx/point.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "chrome/common/page_transition_types.h"
+#include "webkit/api/public/WebCString.h"
 #include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebString.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webdropdata.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webview.h"
 #include "webkit/glue/plugins/gtk_plugin_container_manager.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -32,8 +34,12 @@
 #include "webkit/tools/test_shell/test_shell.h"
 
 using WebKit::WebCursorInfo;
+using WebKit::WebFrame;
 using WebKit::WebNavigationPolicy;
+using WebKit::WebPopupMenuInfo;
 using WebKit::WebRect;
+using WebKit::WebWidget;
+using WebKit::WebView;
 
 namespace {
 
@@ -54,12 +60,17 @@ void SelectionClipboardGetContents(GtkClipboard* clipboard,
     return;
 
   WebView* webview = static_cast<WebView*>(data);
-  WebFrame* frame = webview->GetFocusedFrame();
+  WebFrame* frame = webview->focusedFrame();
   if (!frame)
-    frame = webview->GetMainFrame();
+    frame = webview->mainFrame();
   DCHECK(frame);
 
-  std::string selection = frame->GetSelection(TEXT_HTML == info);
+  std::string selection;
+  if (TEXT_HTML == info) {
+    selection = frame->selectionAsMarkup().utf8();
+  } else {
+    selection = frame->selectionAsText().utf8();
+  }
   if (TEXT_HTML == info) {
     gtk_selection_data_set(selection_data,
                            GetTextHtmlAtom(),
@@ -74,51 +85,15 @@ void SelectionClipboardGetContents(GtkClipboard* clipboard,
 
 }  // namespace
 
-// WebViewDelegate -----------------------------------------------------------
+// WebViewClient --------------------------------------------------------------
 
-TestWebViewDelegate::~TestWebViewDelegate() {
+WebWidget* TestWebViewDelegate::createPopupMenu(
+    const WebPopupMenuInfo& info) {
+  NOTREACHED();
+  return NULL;
 }
 
-WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
-    WebView* webview,
-    const GURL& url,
-    const std::string& mime_type,
-    const std::string& clsid,
-    std::string* actual_mime_type) {
-  bool allow_wildcard = true;
-  WebPluginInfo info;
-  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(url, mime_type, clsid,
-                                                     allow_wildcard, &info,
-                                                     actual_mime_type))
-    return NULL;
-
-  const std::string& mtype =
-      (actual_mime_type && !actual_mime_type->empty()) ? *actual_mime_type
-                                                       : mime_type;
-  // TODO(evanm): we probably shouldn't be doing this mapping to X ids at
-  // this level.
-  GdkNativeWindow plugin_parent =
-      GDK_WINDOW_XWINDOW(shell_->webViewHost()->view_handle()->window);
-
-  return WebPluginDelegateImpl::Create(info.path, mtype, plugin_parent);
-}
-
-gfx::PluginWindowHandle TestWebViewDelegate::CreatePluginContainer() {
-  return shell_->webViewHost()->CreatePluginContainer();
-}
-
-void TestWebViewDelegate::WillDestroyPluginWindow(unsigned long id) {
-  shell_->webViewHost()->OnPluginWindowDestroyed(id);
-}
-
-void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
-  GtkWidget* dialog = gtk_message_dialog_new(
-      shell_->mainWnd(), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
-      GTK_BUTTONS_OK, "%s", WideToUTF8(message).c_str());
-  gtk_window_set_title(GTK_WINDOW(dialog), "JavaScript Alert");
-  gtk_dialog_run(GTK_DIALOG(dialog));  // Runs a nested message loop.
-  gtk_widget_destroy(dialog);
-}
+// WebWidgetClient ------------------------------------------------------------
 
 void TestWebViewDelegate::show(WebNavigationPolicy policy) {
   WebWidgetHost* host = GetWidgetHost();
@@ -152,7 +127,7 @@ void TestWebViewDelegate::didChangeCursor(const WebCursorInfo& cursor_info) {
     // non-pixmap branch.
     if (cursor_type_ == cursor_type)
       return;
-    if (cursor_type_ == GDK_LAST_CURSOR)
+    if (cursor_type == GDK_LAST_CURSOR)
       gdk_cursor = NULL;
     else
       gdk_cursor = gdk_cursor_new(cursor_type);
@@ -182,7 +157,7 @@ WebRect TestWebViewDelegate::windowRect() {
 
 void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
   if (this == shell_->delegate()) {
-    // ignored
+    set_fake_window_rect(rect);
   } else if (this == shell_->popup_delegate()) {
     WebWidgetHost* host = GetWidgetHost();
     GtkWidget* drawing_area = host->view_handle();
@@ -194,6 +169,9 @@ void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
 }
 
 WebRect TestWebViewDelegate::rootWindowRect() {
+  if (using_fake_rect_) {
+    return fake_window_rect();
+  }
   if (WebWidgetHost* host = GetWidgetHost()) {
     // We are being asked for the x/y and width/height of the entire browser
     // window.  This means the x/y is the distance from the corner of the
@@ -215,16 +193,53 @@ WebRect TestWebViewDelegate::windowResizerRect() {
   return WebRect();
 }
 
-void TestWebViewDelegate::DidMovePlugin(const WebPluginGeometry& move) {
+void TestWebViewDelegate::runModal() {
+  NOTIMPLEMENTED();
+}
+
+// WebPluginPageDelegate ------------------------------------------------------
+
+webkit_glue::WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
+    const GURL& url,
+    const std::string& mime_type,
+    std::string* actual_mime_type) {
+  bool allow_wildcard = true;
+  WebPluginInfo info;
+  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
+          url, mime_type, allow_wildcard, &info, actual_mime_type)) {
+    return NULL;
+  }
+
+  const std::string& mtype =
+      (actual_mime_type && !actual_mime_type->empty()) ? *actual_mime_type
+                                                       : mime_type;
+  // TODO(evanm): we probably shouldn't be doing this mapping to X ids at
+  // this level.
+  GdkNativeWindow plugin_parent =
+      GDK_WINDOW_XWINDOW(shell_->webViewHost()->view_handle()->window);
+
+  return WebPluginDelegateImpl::Create(info.path, mtype, plugin_parent);
+}
+
+void TestWebViewDelegate::CreatedPluginWindow(
+    gfx::PluginWindowHandle id) {
+  shell_->webViewHost()->CreatePluginContainer(id);
+}
+
+void TestWebViewDelegate::WillDestroyPluginWindow(
+    gfx::PluginWindowHandle id) {
+  shell_->webViewHost()->DestroyPluginContainer(id);
+}
+
+void TestWebViewDelegate::DidMovePlugin(
+    const webkit_glue::WebPluginGeometry& move) {
   WebWidgetHost* host = GetWidgetHost();
   GtkPluginContainerManager* plugin_container_manager =
       static_cast<WebViewHost*>(host)->plugin_container_manager();
   plugin_container_manager->MovePluginContainer(move);
 }
 
-void TestWebViewDelegate::runModal() {
-  NOTIMPLEMENTED();
-}
+// Public methods -------------------------------------------------------------
 
 void TestWebViewDelegate::UpdateSelectionClipboard(bool is_empty_selection) {
   if (is_empty_selection)
@@ -247,7 +262,16 @@ void TestWebViewDelegate::UpdateSelectionClipboard(bool is_empty_selection) {
   gtk_target_table_free(targets, num_targets);
 }
 
-// Private methods -----------------------------------------------------------
+// Private methods ------------------------------------------------------------
+
+void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
+  GtkWidget* dialog = gtk_message_dialog_new(
+      shell_->mainWnd(), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
+      GTK_BUTTONS_OK, "%s", WideToUTF8(message).c_str());
+  gtk_window_set_title(GTK_WINDOW(dialog), "JavaScript Alert");
+  gtk_dialog_run(GTK_DIALOG(dialog));  // Runs a nested message loop.
+  gtk_widget_destroy(dialog);
+}
 
 void TestWebViewDelegate::SetPageTitle(const std::wstring& title) {
   gtk_window_set_title(GTK_WINDOW(shell_->mainWnd()),

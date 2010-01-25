@@ -24,7 +24,8 @@ class ResourceDispatcherTest : public UITest {
  public:
   void CheckTitleTest(const std::wstring& file,
                       const std::wstring& expected_title) {
-    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
+    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
+                      FilePath::FromWStringHack(file)));
     const int kCheckDelayMs = 100;
     int max_wait_time = 5000;
     while (max_wait_time > 0) {
@@ -148,11 +149,7 @@ TEST_F(ResourceDispatcherTest, SyncXMLHttpRequest_DuringUnload) {
 
   // Navigate to a new page, to dispatch unload event and trigger xhr.
   // (the bug would make this step hang the renderer).
-  bool timed_out = false;
-  tab->NavigateToURLWithTimeout(server->TestServerPageW(L"files/title2.html"),
-                                action_max_timeout_ms(),
-                                &timed_out);
-  EXPECT_FALSE(timed_out);
+  tab->NavigateToURL(server->TestServerPageW(L"files/title2.html"));
 
   // Check that the new page got loaded, and that no download was triggered.
   EXPECT_TRUE(tab->GetTabTitle(&tab_title));
@@ -248,11 +245,7 @@ TEST_F(ResourceDispatcherTest, CrossSiteNavigationNonBuffered) {
   // Make sure that the page loads and displays a title, and doesn't get stuck.
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("title2.html");
-  bool timed_out = false;
-  tab->NavigateToURLWithTimeout(net::FilePathToFileURL(test_file),
-                                action_max_timeout_ms(),
-                                &timed_out);
-  EXPECT_FALSE(timed_out);
+  tab->NavigateToURL(net::FilePathToFileURL(test_file));
   EXPECT_EQ(L"Title Of Awesomeness", GetActiveTabTitle());
 }
 

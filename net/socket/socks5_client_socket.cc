@@ -102,6 +102,14 @@ int SOCKS5ClientSocket::Write(IOBuffer* buf, int buf_len,
   return transport_->Write(buf, buf_len, callback);
 }
 
+bool SOCKS5ClientSocket::SetReceiveBufferSize(int32 size) {
+  return transport_->SetReceiveBufferSize(size);
+}
+
+bool SOCKS5ClientSocket::SetSendBufferSize(int32 size) {
+  return transport_->SetSendBufferSize(size);
+}
+
 void SOCKS5ClientSocket::DoCallback(int result) {
   DCHECK_NE(ERR_IO_PENDING, result);
   DCHECK(user_callback_);
@@ -176,7 +184,8 @@ int SOCKS5ClientSocket::DoResolveHost() {
   DCHECK_EQ(kEndPointUnresolved, address_type_);
 
   next_state_ = STATE_RESOLVE_HOST_COMPLETE;
-  return host_resolver_.Resolve(host_request_info_, &addresses_, &io_callback_);
+  return host_resolver_.Resolve(
+      host_request_info_, &addresses_, &io_callback_, NULL);
 }
 
 int SOCKS5ClientSocket::DoResolveHostComplete(int result) {
@@ -427,4 +436,3 @@ int SOCKS5ClientSocket::GetPeerName(struct sockaddr* name,
 #endif
 
 }  // namespace net
-

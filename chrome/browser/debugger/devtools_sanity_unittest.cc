@@ -15,12 +15,13 @@
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 
+
 namespace {
 
 // Used to block until a dev tools client window's browser is closed.
 class BrowserClosedObserver : public NotificationObserver {
  public:
-  BrowserClosedObserver(Browser* browser) {
+  explicit BrowserClosedObserver(Browser* browser) {
     registrar_.Add(this, NotificationType::BROWSER_CLOSED,
                    Source<Browser>(browser));
     ui_test_utils::RunMessageLoop();
@@ -45,7 +46,19 @@ const wchar_t kConsoleTestPage[] = L"files/devtools/console_test_page.html";
 const wchar_t kDebuggerTestPage[] = L"files/devtools/debugger_test_page.html";
 const wchar_t kEvalTestPage[] = L"files/devtools/eval_test_page.html";
 const wchar_t kJsPage[] = L"files/devtools/js_page.html";
+const wchar_t kResourceTestPage[] = L"files/devtools/resource_test_page.html";
 const wchar_t kSimplePage[] = L"files/devtools/simple_page.html";
+const wchar_t kSyntaxErrorTestPage[] =
+    L"files/devtools/script_syntax_error.html";
+const wchar_t kDebuggerStepTestPage[] =
+    L"files/devtools/debugger_step.html";
+const wchar_t kDebuggerClosurePage[] =
+    L"files/devtools/debugger_closure.html";
+const wchar_t kDebuggerIntrinsicPropertiesPage[] =
+    L"files/devtools/debugger_intrinsic_properties.html";
+const wchar_t kCompletionOnPause[] =
+    L"files/devtools/completion_on_pause.html";
+
 
 class DevToolsSanityTest : public InProcessBrowserTest {
  public:
@@ -75,7 +88,8 @@ class DevToolsSanityTest : public InProcessBrowserTest {
           ui_test_utils::ExecuteJavaScriptAndExtractString(
               client_contents_->render_view_host(),
               L"",
-              UTF8ToWide(StringPrintf("uiTests.runTest('%s')", test_name.c_str())),
+              UTF8ToWide(StringPrintf("uiTests.runTest('%s')",
+                                      test_name.c_str())),
               &result));
       EXPECT_EQ("[OK]", result);
     } else {
@@ -132,33 +146,80 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestMainResource) {
 }
 
 // Tests resources panel enabling.
-// http://crbug.com/16767
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEnableResourcesTab) {
   RunTest("testEnableResourcesTab", kSimplePage);
 }
 
 // Tests resource headers.
-// http://crbug.com/16767
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestResourceHeaders) {
-  RunTest("testResourceHeaders", kDebuggerTestPage);
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestResourceHeaders) {
+  RunTest("testResourceHeaders", kResourceTestPage);
 }
 
 // Tests profiler panel.
-// http://crbug.com/16767
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestProfilerTab) {
   RunTest("testProfilerTab", kJsPage);
 }
 
 // Tests scripts panel showing.
-// http://crbug.com/16767
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
   RunTest("testShowScriptsTab", kDebuggerTestPage);
 }
 
+// Tests that scripts are not duplicated after Scripts Panel switch.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
+                       TestNoScriptDuplicatesOnPanelSwitch) {
+  RunTest("testNoScriptDuplicatesOnPanelSwitch", kDebuggerTestPage);
+}
+
 // Tests set breakpoint.
-// http://crbug.com/16767
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestSetBreakpoint) {
   RunTest("testSetBreakpoint", kDebuggerTestPage);
+}
+
+// Tests eval on call frame.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEvalOnCallFrame) {
+  RunTest("testEvalOnCallFrame", kDebuggerTestPage);
+}
+
+// Tests step over functionality in the debugger.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepOver) {
+  RunTest("testStepOver", kDebuggerStepTestPage);
+}
+
+// Tests step out functionality in the debugger.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepOut) {
+  RunTest("testStepOut", kDebuggerStepTestPage);
+}
+
+// Tests step in functionality in the debugger.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepIn) {
+  RunTest("testStepIn", kDebuggerStepTestPage);
+}
+
+// Tests that scope can be expanded and contains expected variables.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestExpandScope) {
+  RunTest("testExpandScope", kDebuggerClosurePage);
+}
+
+// Tests that intrinsic properties(__proto__, prototype, constructor) are
+// present.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDebugIntrinsicProperties) {
+  RunTest("testDebugIntrinsicProperties", kDebuggerIntrinsicPropertiesPage);
+}
+
+// Tests that execution continues automatically when there is a syntax error in
+// script and DevTools are open.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestAutoContinueOnSyntaxError) {
+  RunTest("testAutoContinueOnSyntaxError", kSyntaxErrorTestPage);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestCompletionOnPause) {
+  RunTest("testCompletionOnPause", kCompletionOnPause);
+}
+
+// Tests that 'Pause' button works for eval.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestPauseInEval) {
+  RunTest("testPauseInEval", kDebuggerTestPage);
 }
 
 // Tests console eval.
@@ -174,11 +235,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleLog) {
 // Tests eval global values.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEvalGlobal) {
   RunTest("testEvalGlobal", kEvalTestPage);
-}
-
-// Tests eval on call frame.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEvalCallFrame) {
-  RunTest("testEvalCallFrame", kEvalTestPage);
 }
 
 }  // namespace

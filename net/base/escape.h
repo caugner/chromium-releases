@@ -11,9 +11,14 @@
 
 // Escaping --------------------------------------------------------------------
 
-// Escape a file or url path.  This includes:
+// Escape a file.  This includes:
 // non-printable, non-7bit, and (including space)  "#%:<>?[\]^`{|}
 std::string EscapePath(const std::string& path);
+
+// Escape application/x-www-form-urlencoded content.  This includes:
+// non-printable, non-7bit, and (including space)  ?>=<;+'&%$#"![\]^`{|}
+// Space is escaped as + and other special characters as %XX (hex).
+std::string EscapeUrlEncodedData(const std::string& path);
 
 // Escape all non-ASCII input.
 std::string EscapeNonASCII(const std::string& input);

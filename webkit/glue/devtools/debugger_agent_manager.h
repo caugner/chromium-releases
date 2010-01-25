@@ -8,8 +8,9 @@
 #include <wtf/HashMap.h>
 
 #include "base/basictypes.h"
+#include "base/logging.h"
 #include "v8/include/v8-debug.h"
-#include "webkit/glue/webdevtoolsagent.h"
+#include "webkit/api/public/WebDevToolsAgent.h"
 
 namespace WebCore {
 class PageGroupLoadDeferrer;
@@ -37,12 +38,12 @@ class DebuggerAgentManager {
   static void DebugAttach(DebuggerAgentImpl* debugger_agent);
   static void DebugDetach(DebuggerAgentImpl* debugger_agent);
   static void DebugBreak(DebuggerAgentImpl* debugger_agent);
-  static void DebugCommand(const std::string& command);
+  static void DebugCommand(const WebCore::String& command);
 
-  static void ExecuteDebuggerCommand(const std::string& command,
+  static void ExecuteDebuggerCommand(const WebCore::String& command,
                                      int caller_id);
   static void SetMessageLoopDispatchHandler(
-      WebDevToolsAgent::MessageLoopDispatchHandler handler);
+      WebKit::WebDevToolsAgent::MessageLoopDispatchHandler handler);
 
   // Sets |host_id| as the frame context data. This id is used to filter scripts
   // related to the inspected page.
@@ -52,13 +53,30 @@ class DebuggerAgentManager {
 
   static void OnNavigate();
 
+  class UtilityContextScope {
+   public:
+    UtilityContextScope() {
+      DCHECK(!in_utility_context_);
+      in_utility_context_ = true;
+    }
+    ~UtilityContextScope() {
+      if (debug_break_delayed_) {
+        v8::Debug::DebugBreak();
+        debug_break_delayed_ = false;
+      }
+      in_utility_context_ = false;
+    }
+   private:
+    DISALLOW_COPY_AND_ASSIGN(UtilityContextScope);
+  };
+
  private:
   DebuggerAgentManager();
   ~DebuggerAgentManager();
 
   static void V8DebugHostDispatchHandler();
   static void OnV8DebugMessage(const v8::Debug::Message& message);
-  static void SendCommandToV8(const string16& cmd,
+  static void SendCommandToV8(const WebCore::String& cmd,
                               v8::Debug::ClientData* data);
   static void SendContinueCommandToV8();
 
@@ -68,12 +86,15 @@ class DebuggerAgentManager {
   typedef HashMap<int, DebuggerAgentImpl*> AttachedAgentsMap;
   static AttachedAgentsMap* attached_agents_map_;
 
-  static WebDevToolsAgent::MessageLoopDispatchHandler
+  static WebKit::WebDevToolsAgent::MessageLoopDispatchHandler
       message_loop_dispatch_handler_;
   static bool in_host_dispatch_handler_;
   typedef HashMap<WebViewImpl*, WebCore::PageGroupLoadDeferrer*>
       DeferrersMap;
   static DeferrersMap page_deferrers_;
+
+  static bool in_utility_context_;
+  static bool debug_break_delayed_;
 
   DISALLOW_COPY_AND_ASSIGN(DebuggerAgentManager);
 };

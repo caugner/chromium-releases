@@ -11,8 +11,8 @@ namespace chrome {
 
 // Canonical schemes you can use as input to GURL.SchemeIs().
 extern const char kAboutScheme[];
-extern const char kChromeInternalScheme[];  // Used for new tab page.
-extern const char kChromeUIScheme[];  // The scheme used for DOMUIContentses.
+extern const char kChromeInternalScheme[];
+extern const char kChromeUIScheme[];  // The scheme used for DOMUIs.
 extern const char kDataScheme[];
 extern const char kExtensionScheme[];
 extern const char kFileScheme[];
@@ -24,20 +24,25 @@ extern const char kJavaScriptScheme[];
 extern const char kMailToScheme[];
 extern const char kPrintScheme[];
 extern const char kUserScriptScheme[];
-extern const char kViewCacheScheme[];
 extern const char kViewSourceScheme[];
 
 // Used to separate a standard scheme and the hostname: "://".
 extern const char kStandardSchemeSeparator[];
 
+// Null terminated list of schemes that are savable.
+extern const char* kSavableSchemes[];
+
 // About URLs (including schmes).
 extern const char kAboutBlankURL[];
 extern const char kAboutBrowserCrash[];
 extern const char kAboutCacheURL[];
+extern const char kAboutNetInternalsURL[];
 extern const char kAboutCrashURL[];
+extern const char kAboutCreditsURL[];
 extern const char kAboutHangURL[];
 extern const char kAboutMemoryURL[];
 extern const char kAboutShorthangURL[];
+extern const char kAboutTermsURL[];
 
 // chrome: URLs (including schemes). Should be kept in sync with the
 // components below.
@@ -61,6 +66,18 @@ extern const char kChromeUIInspectorHost[];
 extern const char kChromeUINewTabHost[];
 extern const char kChromeUIThumbnailPath[];
 extern const char kChromeUIThemePath[];
+
+// Sync related URL components.
+extern const char kSyncResourcesHost[];
+extern const char kSyncGaiaLoginPath[];
+extern const char kSyncMergeAndSyncPath[];
+extern const char kSyncThrobberPath[];
+extern const char kSyncSetupFlowPath[];
+extern const char kSyncSetupDonePath[];
+
+// Network related URLs.
+extern const char kNetworkViewCacheURL[];
+extern const char kNetworkViewInternalsURL[];
 
 }  // namespace chrome
 

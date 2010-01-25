@@ -8,20 +8,30 @@
 // Keys used in JSON representation of extensions.
 namespace extension_manifest_keys {
   extern const wchar_t* kBackground;
+  extern const wchar_t* kBrowserAction;
+  extern const wchar_t* kChromeURLOverrides;
   extern const wchar_t* kContentScripts;
   extern const wchar_t* kCss;
+  extern const wchar_t* kDefaultLocale;
   extern const wchar_t* kDescription;
   extern const wchar_t* kIcons;
   extern const wchar_t* kJs;
   extern const wchar_t* kMatches;
   extern const wchar_t* kName;
   extern const wchar_t* kPageActionId;
+  extern const wchar_t* kPageAction;
   extern const wchar_t* kPageActions;
   extern const wchar_t* kPageActionIcons;
+  extern const wchar_t* kPageActionDefaultIcon;
+  extern const wchar_t* kPageActionDefaultTitle;
+  extern const wchar_t* kPageActionPopup;
+  extern const wchar_t* kPageActionPopupHeight;
+  extern const wchar_t* kPageActionPopupPath;
   extern const wchar_t* kPermissions;
   extern const wchar_t* kPlugins;
   extern const wchar_t* kPluginsPath;
   extern const wchar_t* kPluginsPublic;
+  extern const wchar_t* kPrivacyBlacklists;
   extern const wchar_t* kPublicKey;
   extern const wchar_t* kSignature;
   extern const wchar_t* kRunAt;
@@ -30,12 +40,15 @@ namespace extension_manifest_keys {
   extern const wchar_t* kThemeColors;
   extern const wchar_t* kThemeTints;
   extern const wchar_t* kThemeDisplayProperties;
+  extern const wchar_t* kToolstripMoleHeight;
+  extern const wchar_t* kToolstripMolePath;
   extern const wchar_t* kToolstripPath;
   extern const wchar_t* kToolstrips;
   extern const wchar_t* kType;
   extern const wchar_t* kVersion;
   extern const wchar_t* kUpdateURL;
-} // namespace extension_manifest_keys
+  extern const wchar_t* kOptionsPage;
+}  // namespace extension_manifest_keys
 
 // Some values expected in manifests.
 namespace extension_manifest_values {
@@ -47,6 +60,8 @@ namespace extension_manifest_values {
 
 // Error messages returned from Extension::InitFromValue().
 namespace extension_manifest_errors {
+  extern const char* kInvalidBrowserAction;
+  extern const char* kInvalidChromeURLOverrides;
   extern const char* kInvalidContentScript;
   extern const char* kInvalidContentScriptsList;
   extern const char* kInvalidCss;
@@ -65,6 +80,8 @@ namespace extension_manifest_errors {
   extern const char* kInvalidPlugins;
   extern const char* kInvalidPluginsPath;
   extern const char* kInvalidPluginsPublic;
+  extern const char* kInvalidPrivacyBlacklists;
+  extern const char* kInvalidPrivacyBlacklistsPath;
 
   extern const char* kInvalidBackground;
   extern const char* kInvalidRunAt;
@@ -74,12 +91,15 @@ namespace extension_manifest_errors {
   extern const char* kInvalidVersion;
   extern const char* kInvalidPageAction;
   extern const char* kInvalidPageActionsList;
+  extern const char* kInvalidPageActionsListSize;
   extern const char* kInvalidPageActionIconPath;
-  extern const char* kInvalidPageActionIconPaths;
   extern const char* kInvalidPageActionId;
+  extern const char* kInvalidPageActionDefaultTitle;
+  extern const char* kInvalidPageActionPopup;
+  extern const char* kInvalidPageActionPopupHeight;
+  extern const char* kInvalidPageActionPopupPath;
   extern const char* kInvalidPageActionTypeValue;
   extern const char* kInvalidPermissions;
-  extern const char* kInvalidPermissionCountWarning;
   extern const char* kInvalidPermission;
   extern const char* kInvalidPermissionScheme;
   extern const char* kInvalidZipHash;
@@ -88,9 +108,16 @@ namespace extension_manifest_errors {
   extern const char* kInvalidThemeImages;
   extern const char* kInvalidThemeColors;
   extern const char* kInvalidThemeTints;
+  extern const char* kOneUISurfaceOnly;
   extern const char* kThemesCannotContainExtensions;
+  extern const char* kManifestParseError;
+  extern const char* kManifestUnreadable;
   extern const char* kMissingFile;
   extern const char* kInvalidUpdateURL;
+  extern const char* kInvalidDefaultLocale;
+  extern const char* kLocalesNoDefaultLocaleSpecified;
+  extern const char* kLocalesNoValidLocaleNamesListed;
+  extern const char* kInvalidOptionsPage;
 }  // namespace extension_manifest_errors
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

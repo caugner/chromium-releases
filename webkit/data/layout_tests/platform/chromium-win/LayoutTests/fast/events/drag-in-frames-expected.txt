@@ -1,8 +1,9 @@
 Event log
 
 ondragstart src
-ondrag src
 ondragenter left target
+ondrag src
+ondragover left target
 ondrag src
 ondragover left target
 ondrag src
@@ -10,7 +11,8 @@ ondragenter right target
 ondragleave left target
 ondrag src
 ondragover right target
+ondrag src
 ondragover right target
-ondragend src
 ondrop right target
+ondragend src
 These results are just "sensible" at the moment, meaning that all the events fire on the right elements, nothing more. The order in particular can rightfully change.

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,12 +20,15 @@
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/api/public/WebRect.h"
 #include "webkit/api/public/WebWidgetClient.h"
-#include "webkit/glue/event_conversion.h"
+#include "webkit/api/src/WebInputEventConversion.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webpopupmenu_impl.h"
 
 using namespace WebCore;
 
+using WebKit::PlatformKeyboardEventBuilder;
+using WebKit::PlatformMouseEventBuilder;
+using WebKit::PlatformWheelEventBuilder;
 using WebKit::WebCanvas;
 using WebKit::WebCompositionCommand;
 using WebKit::WebInputEvent;
@@ -81,29 +84,29 @@ void WebPopupMenuImpl::MouseMove(const WebMouseEvent& event) {
   if (event.x != last_mouse_position_.x ||
       event.y != last_mouse_position_.y) {
     last_mouse_position_ = WebPoint(event.x, event.y);
-    widget_->handleMouseMoveEvent(MakePlatformMouseEvent(widget_, event));
+    widget_->handleMouseMoveEvent(PlatformMouseEventBuilder(widget_, event));
   }
 }
 
 void WebPopupMenuImpl::MouseLeave(const WebMouseEvent& event) {
-  widget_->handleMouseMoveEvent(MakePlatformMouseEvent(widget_, event));
+  widget_->handleMouseMoveEvent(PlatformMouseEventBuilder(widget_, event));
 }
 
 void WebPopupMenuImpl::MouseDown(const WebMouseEvent& event) {
-  widget_->handleMouseDownEvent(MakePlatformMouseEvent(widget_, event));
+  widget_->handleMouseDownEvent(PlatformMouseEventBuilder(widget_, event));
 }
 
 void WebPopupMenuImpl::MouseUp(const WebMouseEvent& event) {
   mouseCaptureLost();
-  widget_->handleMouseReleaseEvent(MakePlatformMouseEvent(widget_, event));
+  widget_->handleMouseReleaseEvent(PlatformMouseEventBuilder(widget_, event));
 }
 
 void WebPopupMenuImpl::MouseWheel(const WebMouseWheelEvent& event) {
-  widget_->handleWheelEvent(MakePlatformWheelEvent(widget_, event));
+  widget_->handleWheelEvent(PlatformWheelEventBuilder(widget_, event));
 }
 
 bool WebPopupMenuImpl::KeyEvent(const WebKeyboardEvent& event) {
-  return widget_->handleKeyEvent(MakePlatformKeyboardEvent(event));
+  return widget_->handleKeyEvent(PlatformKeyboardEventBuilder(event));
 }
 
 // WebWidget -------------------------------------------------------------------
@@ -141,15 +144,15 @@ void WebPopupMenuImpl::paint(WebCanvas* canvas, const WebRect& rect) {
     return;
 
   if (!rect.isEmpty()) {
-#if defined(OS_MACOSX)
-    CGContextRef context = canvas->getTopPlatformDevice().GetBitmapContext();
-    GraphicsContext gc(context);
-#else
+#if WEBKIT_USING_CG
+    GraphicsContext gc(canvas);
+#elif WEBKIT_USING_SKIA
     PlatformContextSkia context(canvas);
     // PlatformGraphicsContext is actually a pointer to PlatformContextSkia.
     GraphicsContext gc(reinterpret_cast<PlatformGraphicsContext*>(&context));
+#else
+    NOTIMPLEMENTED();
 #endif
-
     widget_->paint(&gc, webkit_glue::WebRectToIntRect(rect));
   }
 }
@@ -261,14 +264,14 @@ WebCore::IntRect WebPopupMenuImpl::windowToScreen(
   return WebCore::IntRect();
 }
 
-PlatformWidget WebPopupMenuImpl::platformWindow() const {
-  return NULL;
-}
-
 void WebPopupMenuImpl::scrollRectIntoView(
     const WebCore::IntRect&, const WebCore::ScrollView*) const {
   // Nothing to be done here since we do not have the concept of a container
   // that implements its own scrolling.
+}
+
+void WebPopupMenuImpl::scrollbarsModeDidChange() const {
+  // Nothing to be done since we have no concept of different scrollbar modes.
 }
 
 //-----------------------------------------------------------------------------

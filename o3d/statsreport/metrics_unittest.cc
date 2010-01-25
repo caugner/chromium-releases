@@ -30,11 +30,23 @@
  */
 
 
+#include "build/build_config.h"
+
+#ifndef OS_WIN
+#include <unistd.h>
+#endif
+
 // Metrics report unit testing
 #include <new>
 #include <algorithm>
 #include "gtest/gtest.h"
 #include "metrics.h"
+
+#ifdef OS_WIN
+#define SLEEP_ONE_SECOND() ::Sleep(1000)
+#else
+#define SLEEP_ONE_SECOND() ::sleep(1)
+#endif
 
 DECLARE_METRIC_count(count);
 DEFINE_METRIC_count(count);
@@ -62,7 +74,6 @@ using ::stats_report::kCountType;
 using ::stats_report::kIntegerType;
 using ::stats_report::kTimingType;
 
-namespace {
 
 class MetricsTest: public testing::Test {
  protected:
@@ -90,19 +101,18 @@ class MetricsEnumTest: public MetricsTest {
   BoolMetric bool_;
 };
 
-}  // namespace
 
 // Validates that the above-declared metrics are available
 // in the expected namespace
 TEST_F(MetricsTest, Globals) {
-  EXPECT_EQ(0, ::metric_count.Reset());
+  EXPECT_EQ(0u, ::metric_count.Reset());
   TimingMetric::TimingData data = ::metric_timing.Reset();
-  EXPECT_EQ(0, data.count);
-  EXPECT_EQ(0, data.maximum);
-  EXPECT_EQ(0, data.minimum);
-  EXPECT_EQ(0, data.sum);
+  EXPECT_EQ(0u, data.count);
+  EXPECT_EQ(0u, data.maximum);
+  EXPECT_EQ(0u, data.minimum);
+  EXPECT_EQ(0u, data.sum);
 
-  EXPECT_EQ(0, ::metric_integer.value());
+  EXPECT_EQ(0u, ::metric_integer.value());
   EXPECT_EQ(BoolMetric::kBoolUnset, ::metric_bool.Reset());
 
   // Check for correct initialization
@@ -140,7 +150,7 @@ TEST_F(MetricsTest, CollectionInitialization) {
 TEST_F(MetricsTest, Count) {
   CountMetric foo("foo", &coll_);
 
-  EXPECT_EQ(0, foo.Reset());
+  EXPECT_EQ(0u, foo.Reset());
   EXPECT_EQ(kCountType, foo.type());
   ASSERT_TRUE(NULL != foo.AsCount());
   ASSERT_TRUE(NULL == foo.AsTiming());
@@ -148,12 +158,12 @@ TEST_F(MetricsTest, Count) {
   ASSERT_TRUE(NULL == foo.AsBool());
 
   ++foo;
-  EXPECT_EQ(1, foo.value());
+  EXPECT_EQ(1u, foo.value());
   foo++;
-  EXPECT_EQ(2, foo.value());
+  EXPECT_EQ(2u, foo.value());
 
   foo += 100;
-  EXPECT_EQ(102, foo.value());
+  EXPECT_EQ(102u, foo.value());
 }
 
 TEST_F(MetricsTest, Timing) {
@@ -168,32 +178,32 @@ TEST_F(MetricsTest, Timing) {
   foo.AddSample(100);
   foo.AddSample(50);
 
-  EXPECT_EQ(2, foo.count());
-  EXPECT_EQ(150, foo.sum());
-  EXPECT_EQ(100, foo.maximum());
-  EXPECT_EQ(50, foo.minimum());
-  EXPECT_EQ(75, foo.average());
+  EXPECT_EQ(2u, foo.count());
+  EXPECT_EQ(150u, foo.sum());
+  EXPECT_EQ(100u, foo.maximum());
+  EXPECT_EQ(50u, foo.minimum());
+  EXPECT_EQ(75u, foo.average());
 
   TimingMetric::TimingData data = foo.Reset();
-  EXPECT_EQ(2, data.count);
-  EXPECT_EQ(150, data.sum);
-  EXPECT_EQ(100, data.maximum);
-  EXPECT_EQ(50, data.minimum);
+  EXPECT_EQ(2u, data.count);
+  EXPECT_EQ(150u, data.sum);
+  EXPECT_EQ(100u, data.maximum);
+  EXPECT_EQ(50u, data.minimum);
 
-  EXPECT_EQ(0, foo.count());
-  EXPECT_EQ(0, foo.sum());
-  EXPECT_EQ(0, foo.maximum());
-  EXPECT_EQ(0, foo.minimum());
-  EXPECT_EQ(0, foo.average());
+  EXPECT_EQ(0u, foo.count());
+  EXPECT_EQ(0u, foo.sum());
+  EXPECT_EQ(0u, foo.maximum());
+  EXPECT_EQ(0u, foo.minimum());
+  EXPECT_EQ(0u, foo.average());
 
   // Test counted samples
-  foo.AddSamples(10, 1000);
-  foo.AddSamples(10, 500);
-  EXPECT_EQ(20, foo.count());
-  EXPECT_EQ(1500, foo.sum());
-  EXPECT_EQ(100, foo.maximum());
-  EXPECT_EQ(50, foo.minimum());
-  EXPECT_EQ(75, foo.average());
+  foo.AddSamples(10u, 1000);
+  foo.AddSamples(10u, 500);
+  EXPECT_EQ(20u, foo.count());
+  EXPECT_EQ(1500u, foo.sum());
+  EXPECT_EQ(100u, foo.maximum());
+  EXPECT_EQ(50u, foo.minimum());
+  EXPECT_EQ(75u, foo.average());
 }
 
 TEST_F(MetricsTest, TimingSample) {
@@ -203,47 +213,26 @@ TEST_F(MetricsTest, TimingSample) {
   {
     TimingSample sample(&foo);
 
-    ::Sleep(30);
+    SLEEP_ONE_SECOND();
   }
 
   TimingMetric::TimingData data = foo.Reset();
 
   // Should be precisely one sample in there
-  EXPECT_EQ(1, data.count);
-
-  // Disable flaky tests on build server, unfortunately this reduces coverage
-  // too, but it seems preferrable to breaking the build on a regular basis.
-#ifndef BUILD_SERVER_BUILD
-  // Let's hope the scheduler doesn't leave us hanging more than 10 ms.
-  EXPECT_GT(40, data.sum);
-  // The sleep above seems to often terminate early on the build server,
-  // I've observed captured times down to 18 ms, which is strange.
-  // TODO: figure out whether the timer is broken or whether
-  //    sleep is breaking its promise, or whether e.g. we're getting different
-  //    walltimes on different CPUs due to BIOS bugs on the build server
-  EXPECT_LT(15, data.sum);
-#endif
+  EXPECT_EQ(1u, data.count);
 
   // again, this time with a non-unity count
   {
     TimingSample sample(&foo, 2);
 
-    EXPECT_EQ(2, sample.count());
-    ::Sleep(30);
+    EXPECT_EQ(2u, sample.count());
+    SLEEP_ONE_SECOND();
   }
 
   data = foo.Reset();
 
   // Should be precisely two samples in there
-  EXPECT_EQ(2, data.count);
-
-  // Disable flaky tests on build server, unfortunately this reduces coverage
-  // too, but it seems preferrable to breaking the build on a regular basis.
-#ifndef BUILD_SERVER_BUILD
-  // Let's hope the scheduler doesn't leave us hanging more than 10 ms.
-  EXPECT_GT(40, data.sum);
-  EXPECT_LT(15, data.sum);
-#endif
+  EXPECT_EQ(2u, data.count);
 
   // now with zero count
   {
@@ -253,7 +242,7 @@ TEST_F(MetricsTest, TimingSample) {
   data = foo.Reset();
 
   // Should be no samples in there
-  EXPECT_EQ(0, data.count);
+  EXPECT_EQ(0u, data.count);
 }
 
 TEST_F(MetricsTest, Integer) {
@@ -265,28 +254,28 @@ TEST_F(MetricsTest, Integer) {
   ASSERT_TRUE(NULL != foo.AsInteger());
   ASSERT_TRUE(NULL == foo.AsBool());
 
-  EXPECT_EQ(0, foo.value());
+  EXPECT_EQ(0u, foo.value());
   foo.Set(1005);
-  EXPECT_EQ(1005, foo.value());
+  EXPECT_EQ(1005u, foo.value());
   foo = 1009UL;
-  EXPECT_EQ(1009, foo.value());
+  EXPECT_EQ(1009u, foo.value());
 
   foo.Set(0);
 
   ++foo;
-  EXPECT_EQ(1, foo.value());
+  EXPECT_EQ(1u, foo.value());
   foo++;
-  EXPECT_EQ(2, foo.value());
+  EXPECT_EQ(2u, foo.value());
 
   foo += 100;
-  EXPECT_EQ(102, foo.value());
+  EXPECT_EQ(102u, foo.value());
 
   foo -= 100;
-  EXPECT_EQ(2, foo.value());
+  EXPECT_EQ(2u, foo.value());
   foo--;
-  EXPECT_EQ(1, foo.value());
+  EXPECT_EQ(1u, foo.value());
   --foo;
-  EXPECT_EQ(0, foo.value());
+  EXPECT_EQ(0u, foo.value());
 }
 
 TEST_F(MetricsTest, Bool) {
@@ -314,7 +303,8 @@ TEST_F(MetricsEnumTest, Enumeration) {
     &bool_,
   };
 
-  for (int i = 0; i < sizeof(metrics) / sizeof(metrics[0]); ++i) {
+  int limit = sizeof(metrics) / sizeof(metrics[0]);
+  for (int i = 0; i < limit; ++i) {
     MetricBase *stat = metrics[i];
     MetricBase *curr = coll_.first();
 
@@ -358,7 +348,8 @@ TEST_F(MetricsEnumTest, Iterator) {
   }
 
   // and that all metrics can be found
-  for (int i = 0; i < sizeof(metrics) / sizeof(metrics[0]); ++i) {
+  int limit = sizeof(metrics) / sizeof(metrics[0]);
+  for (int i = 0; i < limit; ++i) {
     MetricBase *stat = metrics[i];
 
     EXPECT_EQ(stat, *std::find(MetricIterator(coll_), end, stat));
@@ -368,7 +359,7 @@ TEST_F(MetricsEnumTest, Iterator) {
 TEST_F(MetricsTest, SimpleConstruction) {
   const CountMetric c("c", 100);
 
-  EXPECT_EQ(100, c.value());
+  EXPECT_EQ(100u, c.value());
   EXPECT_EQ(kCountType, c.type());
   EXPECT_STREQ("c", c.name());
   EXPECT_TRUE(NULL == c.next());
@@ -376,17 +367,17 @@ TEST_F(MetricsTest, SimpleConstruction) {
   TimingMetric::TimingData data = { 10, 0, 1000, 10, 500 };
   const TimingMetric t("t", data);
 
-  EXPECT_EQ(10, t.count());
-  EXPECT_EQ(1000, t.sum());
-  EXPECT_EQ(10, t.minimum());
-  EXPECT_EQ(500, t.maximum());
+  EXPECT_EQ(10u, t.count());
+  EXPECT_EQ(1000u, t.sum());
+  EXPECT_EQ(10u, t.minimum());
+  EXPECT_EQ(500u, t.maximum());
   EXPECT_EQ(kTimingType, t.type());
   EXPECT_STREQ("t", t.name());
   EXPECT_TRUE(NULL == t.next());
 
   const IntegerMetric i("i", 200);
 
-  EXPECT_EQ(200, i.value());
+  EXPECT_EQ(200u, i.value());
   EXPECT_EQ(kIntegerType, i.type());
   EXPECT_STREQ("i", i.name());
   EXPECT_TRUE(NULL == i.next());

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_accessibility_manager.h"
 
+#include "base/scoped_comptr_win.h"
 #include "chrome/browser/browser_accessibility.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -43,7 +44,7 @@ STDMETHODIMP BrowserAccessibilityManager::CreateAccessibilityInstance(
     if (!instance)
       return E_FAIL;
 
-    CComPtr<IAccessible> accessibility_instance(instance);
+    ScopedComPtr<IAccessible> accessibility_instance(instance);
 
     // Set class member variables.
     instance->Initialize(acc_obj_id, routing_id, process_id, parent_hwnd);
@@ -53,8 +54,7 @@ STDMETHODIMP BrowserAccessibilityManager::CreateAccessibilityInstance(
 
     // Update cache with RenderProcessHost/BrowserAccessibility pair.
     if (rvh && rvh->process()) {
-      render_process_host_map_.insert(
-          MapEntry(rvh->process()->pid(), instance));
+      render_process_host_map_.insert(MapEntry(rvh->process()->id(), instance));
     } else {
       // No RenderProcess active for this instance.
       return E_FAIL;
@@ -140,10 +140,10 @@ void BrowserAccessibilityManager::Observe(NotificationType type,
   DCHECK(rph);
 
   RenderProcessHostMap::iterator it =
-      render_process_host_map_.lower_bound(rph->pid());
+      render_process_host_map_.lower_bound(rph->id());
 
   RenderProcessHostMap::iterator end_of_matching_objects =
-    render_process_host_map_.upper_bound(rph->pid());
+    render_process_host_map_.upper_bound(rph->id());
 
   for (; it != end_of_matching_objects; ++it) {
     if (it->second) {

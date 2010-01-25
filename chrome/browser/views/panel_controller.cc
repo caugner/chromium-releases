@@ -4,11 +4,6 @@
 
 #include "chrome/browser/views/panel_controller.h"
 
-#include <gdk/gdkx.h>
-extern "C" {
-#include <X11/Xlib.h>
-}
-
 #include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "base/singleton.h"
@@ -22,6 +17,7 @@ extern "C" {
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/controls/button/image_button.h"
+#include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/event.h"
 #include "views/view.h"
@@ -30,16 +26,28 @@ extern "C" {
 static int close_button_width;
 static int close_button_height;
 static SkBitmap* close_button_n;
+static SkBitmap* close_button_m;
 static SkBitmap* close_button_h;
 static SkBitmap* close_button_p;
-static gfx::Font* title_font = NULL;
+static gfx::Font* active_font = NULL;
+static gfx::Font* inactive_font = NULL;
 
 namespace {
 
 const int kTitleWidth = 200;
-const int kTitleHeight = 24;
-const int kTitlePad = 8;
-const int kButtonPad = 8;
+const int kTitleHeight = 20;
+const int kTitleIconSize = 16;
+const int kTitleWidthPad = 2;
+const int kTitleHeightPad = 1;
+const int kButtonPad = 4;
+
+const SkColor kActiveGradientStart = 0xffebeff9;
+const SkColor kActiveGradientEnd = 0xffb3c4f6;
+const SkColor kInactiveGradientStart = 0xfff2f2f2;
+const SkColor kInactiveGradientEnd = 0xfff2f2f2;
+const SkColor kActiveColor = SK_ColorBLACK;
+const SkColor kInactiveColor = 0xff333333;
+const SkColor kCloseButtonColor = SK_ColorBLACK;
 
 static bool resources_initialized;
 static void InitializeResources() {
@@ -49,8 +57,10 @@ static void InitializeResources() {
 
   resources_initialized = true;
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  title_font = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
+  inactive_font = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
+  active_font = new gfx::Font(inactive_font->DeriveFont(0, gfx::Font::BOLD));
   close_button_n = rb.GetBitmapNamed(IDR_TAB_CLOSE);
+  close_button_m = rb.GetBitmapNamed(IDR_TAB_CLOSE_MASK);
   close_button_h = rb.GetBitmapNamed(IDR_TAB_CLOSE_H);
   close_button_p = rb.GetBitmapNamed(IDR_TAB_CLOSE_P);
   close_button_width = close_button_n->width();
@@ -68,7 +78,7 @@ PanelController::PanelController(BrowserWindowGtk* browser_window)
        dragging_(false) {
   title_window_ = new views::WidgetGtk(views::WidgetGtk::TYPE_WINDOW);
   gfx::Rect title_bounds(
-      0, 0, browser_window->GetNormalBounds().width(), kTitleHeight);
+      0, 0, browser_window->bounds().width(), kTitleHeight);
   title_window_->Init(NULL, title_bounds);
   title_ = title_window_->GetNativeView();
   title_xid_ = x11_util::GetX11WindowFromGtkWidget(title_);
@@ -95,22 +105,30 @@ PanelController::PanelController(BrowserWindowGtk* browser_window)
 }
 
 void PanelController::UpdateTitleBar() {
-  title_content_->title_label()->SetText(UTF16ToWideHack(
-      browser_window_->browser()->GetWindowTitleForCurrentTab()));
+  Browser* browser = browser_window_->browser();
+  title_content_->title_label()->SetText(
+      UTF16ToWideHack(browser->GetWindowTitleForCurrentTab()));
+  title_content_->title_icon()->SetImage(browser->GetCurrentPageIcon());
 }
 
 bool PanelController::TitleMousePressed(const views::MouseEvent& event) {
   if (!event.IsOnlyLeftMouseButton()) {
     return false;
   }
-  gfx::Point abs_location = event.location();
-  views::View::ConvertPointToScreen(title_content_, &abs_location);
+  GdkEvent* gdk_event = gtk_get_current_event();
+  if (gdk_event->type != GDK_BUTTON_PRESS) {
+    gdk_event_free(gdk_event);
+    NOTREACHED();
+    return false;
+  }
+  GdkEventButton last_button_event = gdk_event->button;
   mouse_down_ = true;
-  mouse_down_abs_x_ = abs_location.x();
-  mouse_down_abs_y_ = abs_location.y();
+  mouse_down_abs_x_ = last_button_event.x_root;
+  mouse_down_abs_y_ = last_button_event.y_root;
   mouse_down_offset_x_ = event.x();
   mouse_down_offset_y_ = event.y();
   dragging_ = false;
+  gdk_event_free(gdk_event);
   return true;
 }
 
@@ -145,22 +163,28 @@ bool PanelController::TitleMouseDragged(const views::MouseEvent& event) {
     return false;
   }
 
-  gfx::Point abs_location = event.location();
-  views::View::ConvertPointToScreen(title_content_, &abs_location);
+  GdkEvent* gdk_event = gtk_get_current_event();
+  if (gdk_event->type != GDK_MOTION_NOTIFY) {
+    gdk_event_free(gdk_event);
+    NOTREACHED();
+    return false;
+  }
+  GdkEventMotion last_motion_event = gdk_event->motion;
   if (!dragging_) {
     if (views::View::ExceededDragThreshold(
-        abs_location.x() - mouse_down_abs_x_,
-        abs_location.y() - mouse_down_abs_y_)) {
+        last_motion_event.x_root - mouse_down_abs_x_,
+        last_motion_event.y_root - mouse_down_abs_y_)) {
       dragging_ = true;
     }
   }
   if (dragging_) {
     TabOverviewTypes::Message msg(TabOverviewTypes::Message::WM_MOVE_PANEL);
     msg.set_param(0, panel_xid_);
-    msg.set_param(1, abs_location.x() - mouse_down_offset_x_);
-    msg.set_param(2, abs_location.y() - mouse_down_offset_y_);
+    msg.set_param(1, last_motion_event.x_root - mouse_down_offset_x_);
+    msg.set_param(2, last_motion_event.y_root - mouse_down_offset_y_);
     TabOverviewTypes::instance()->SendMessage(msg);
   }
+  gdk_event_free(gdk_event);
   return true;
 }
 
@@ -170,6 +194,14 @@ bool PanelController::OnPanelClientEvent(
     GdkEventClient* event,
     PanelController* panel_controller) {
   return panel_controller->PanelClientEvent(event);
+}
+
+void PanelController::OnFocusIn() {
+  title_content_->OnFocusIn();
+}
+
+void PanelController::OnFocusOut() {
+  title_content_->OnFocusOut();
 }
 
 bool PanelController::PanelClientEvent(GdkEventClient* event) {
@@ -185,7 +217,8 @@ void PanelController::Close() {
   title_window_->Close();
 }
 
-void PanelController::ButtonPressed(views::Button* sender) {
+void PanelController::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == title_content_->close_button()) {
     browser_window_->Close();
   }
@@ -199,26 +232,38 @@ PanelController::TitleContentView::TitleContentView(
   close_button_->SetImage(views::CustomButton::BS_NORMAL, close_button_n);
   close_button_->SetImage(views::CustomButton::BS_HOT, close_button_h);
   close_button_->SetImage(views::CustomButton::BS_PUSHED, close_button_p);
+  close_button_->SetBackground(
+      kCloseButtonColor, close_button_n, close_button_m);
   AddChildView(close_button_);
 
-  title_label_ = new views::Label(std::wstring(), *title_font);
+  title_icon_ = new views::ImageView();
+  AddChildView(title_icon_);
+  title_label_ = new views::Label(std::wstring());
   title_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(title_label_);
 
-  set_background(views::Background::CreateSolidBackground(0xdd, 0xdd, 0xdd, 1));
+  // Default to inactive
+  OnFocusOut();
 }
 
 void PanelController::TitleContentView::Layout() {
+  int close_button_x = bounds().width() - (close_button_width + kButtonPad);
   close_button_->SetBounds(
-      bounds().width() - (close_button_width + kButtonPad),
+      close_button_x,
       (bounds().height() - close_button_height) / 2,
       close_button_width,
       close_button_height);
+  title_icon_->SetBounds(
+      kTitleWidthPad,
+      kTitleHeightPad * 2,
+      kTitleIconSize,
+      kTitleIconSize);
+  int title_x = kTitleWidthPad * 2 + kTitleIconSize;
   title_label_->SetBounds(
-      kTitlePad,
-      0,
-      bounds().width() - (kTitlePad + close_button_width + 2 * kButtonPad),
-      bounds().height());
+      title_x,
+      kTitleHeightPad,
+      close_button_x - (title_x + kButtonPad),
+      bounds().height() - kTitleHeightPad);
 }
 
 bool PanelController::TitleContentView::OnMousePressed(
@@ -234,5 +279,23 @@ void PanelController::TitleContentView::OnMouseReleased(
 bool PanelController::TitleContentView::OnMouseDragged(
     const views::MouseEvent& event) {
   return panel_controller_->TitleMouseDragged(event);
+}
+
+void PanelController::TitleContentView::OnFocusIn() {
+  set_background(views::Background::CreateVerticalGradientBackground(
+      kActiveGradientStart, kActiveGradientEnd));
+  title_label_->SetColor(kActiveColor);
+  title_label_->SetFont(*active_font);
+  Layout();
+  SchedulePaint();
+}
+
+void PanelController::TitleContentView::OnFocusOut() {
+  set_background(views::Background::CreateVerticalGradientBackground(
+      kInactiveGradientStart, kInactiveGradientEnd));
+  title_label_->SetColor(kInactiveColor);
+  title_label_->SetFont(*inactive_font);
+  Layout();
+  SchedulePaint();
 }
 

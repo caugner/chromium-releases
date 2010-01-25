@@ -48,7 +48,10 @@ class DraggedTabControllerGtk : public NotificationObserver,
   TabGtk* GetDragSourceTabForContents(TabContents* contents) const;
 
   // Returns true if the specified tab matches the tab being dragged.
-  bool IsDragSourceTab(TabGtk* tab) const;
+  bool IsDragSourceTab(const TabGtk* tab) const;
+
+  // Returns true if the specified tab is detached.
+  bool IsTabDetached(const TabGtk* tab) const;
 
  private:
   // Enumeration of the ways a drag session can end.
@@ -196,9 +199,12 @@ class DraggedTabControllerGtk : public NotificationObserver,
   // for the attached TabStrip.
   int NormalizeIndexToAttachedTabStrip(int index) const;
 
-  // Hides the frame for the window that contains the TabStrip the current
-  // drag session was initiated from.
-  void HideFrame();
+  // Hides the window that contains the tab strip the current drag session was
+  // initiated from.
+  void HideWindow();
+
+  // Presents the window that was hidden by HideWindow.
+  void ShowWindow();
 
   // Closes a hidden frame at the end of a drag session.
   void CleanUpHiddenFrame();

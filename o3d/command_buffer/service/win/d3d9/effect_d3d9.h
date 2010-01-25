@@ -33,8 +33,8 @@
 // This file contains the definition of the D3D9 versions of effect-related
 // resource classes.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H__
-#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H_
+#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H_
 
 #include <vector>
 #include "command_buffer/common/cross/gapi_interface.h"
@@ -79,7 +79,8 @@ class EffectParamD3D9: public EffectParam {
 // D3D9 version of Effect.
 class EffectD3D9 : public Effect {
  public:
-  EffectD3D9(ID3DXEffect *d3d_effect,
+  EffectD3D9(GAPID3D9 *gapi,
+             ID3DXEffect *d3d_effect,
              ID3DXConstantTable *fs_constant_table,
              IDirect3DVertexShader9 *d3d_vertex_shader);
   virtual ~EffectD3D9();
@@ -89,12 +90,12 @@ class EffectD3D9 : public Effect {
                             const String &vertex_program_entry,
                             const String &fragment_program_entry);
   // Applies the effect states (vertex shader, pixel shader) to D3D.
-  bool Begin(GAPID3D9 *gapi);
+  bool Begin();
   // Resets the effect states (vertex shader, pixel shader) to D3D.
-  void End(GAPID3D9 *gapi);
+  void End();
   // Commits parameters to D3D, if they were modified while the effect is
   // active.
-  bool CommitParameters(GAPID3D9 *gapi);
+  bool CommitParameters();
 
   // Gets the number of parameters in the effect.
   unsigned int GetParamCount();
@@ -115,17 +116,18 @@ class EffectD3D9 : public Effect {
   // Unlinks a param into this effect.
   void UnlinkParam(EffectParamD3D9 *param);
   // Sets sampler states.
-  bool SetSamplers(GAPID3D9 *gapi);
+  bool SetSamplers();
   // Sets streams vector.
   bool SetStreams();
 
+  GAPID3D9* gapi_;
   ID3DXEffect *d3d_effect_;
   IDirect3DVertexShader9 *d3d_vertex_shader_;
   ID3DXConstantTable *fs_constant_table_;
   ParamList params_;
   StreamList streams_;
   bool sync_parameters_;
-  ResourceID samplers_[kMaxSamplerUnits];
+  ResourceId samplers_[kMaxSamplerUnits];
 
   friend class EffectParamD3D9;
   DISALLOW_COPY_AND_ASSIGN(EffectD3D9);
@@ -134,4 +136,4 @@ class EffectD3D9 : public Effect {
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_EFFECT_D3D9_H_

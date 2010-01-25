@@ -44,7 +44,7 @@ O3D: Convolution Shader Sample
 </title>
 <!-- Include sample javascript library functions-->
 <script type="text/javascript" src="o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.camera');
@@ -233,7 +233,7 @@ function createConvolutionMaterial(viewInfo, kernelSize) {
 }
 
 function createRenderSurfaceSet(texture) {
-  var renderSurface = texture.getRenderSurface(0, g_pack);
+  var renderSurface = texture.getRenderSurface(0);
 
   // Create the depth-stencil buffer required when rendering this pass.
   var depthSurface = g_pack.createDepthStencilSurface(RENDER_TARGET_WIDTH,

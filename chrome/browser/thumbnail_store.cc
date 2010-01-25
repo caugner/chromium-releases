@@ -7,9 +7,11 @@
 #include <string.h>
 #include <algorithm>
 
+#include "app/gfx/codec/jpeg_codec.h"
+#include "app/sql/statement.h"
+#include "app/sql/transaction.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
-#include "base/gfx/jpeg_codec.h"
 #include "base/md5.h"
 #include "base/string_util.h"
 #include "base/thread.h"
@@ -17,16 +19,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/sqlite_utils.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 
 ThumbnailStore::ThumbnailStore()
     : cache_(NULL),
-      db_(NULL),
       hs_(NULL),
-      url_blacklist_(NULL) {
+      url_blacklist_(NULL),
+      disk_data_loaded_(false) {
 }
 
 ThumbnailStore::~ThumbnailStore() {
@@ -34,8 +35,7 @@ ThumbnailStore::~ThumbnailStore() {
   DCHECK(hs_ == NULL);
 }
 
-void ThumbnailStore::Init(const FilePath& db_name,
-                          Profile* profile) {
+void ThumbnailStore::Init(const FilePath& db_name, Profile* profile) {
   // Load thumbnails already in the database.
   g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(this, &ThumbnailStore::InitializeFromDB,
@@ -47,10 +47,13 @@ void ThumbnailStore::Init(const FilePath& db_name,
   // Store a pointer to a persistent table of blacklisted URLs.
   url_blacklist_ = profile->GetPrefs()->
     GetMutableDictionary(prefs::kNTPMostVisitedURLsBlacklist);
+  DCHECK(url_blacklist_);
 
   // Get the list of most visited URLs and redirect information from the
   // HistoryService.
-  seconds_to_next_update_ = kInitialUpdateIntervalSecs;
+  most_visited_urls_.reset(new MostVisitedMap);
+  timer_.Start(base::TimeDelta::FromSeconds(kUpdateIntervalSecs), this,
+      &ThumbnailStore::UpdateURLData);
   UpdateURLData();
 
   // Register to get notified when the history is cleared.
@@ -75,9 +78,9 @@ bool ThumbnailStore::SetPageThumbnail(const GURL& url,
   // Encode the SkBitmap to jpeg.
   scoped_refptr<RefCountedBytes> jpeg_data = new RefCountedBytes;
   SkAutoLockPixels thumbnail_lock(thumbnail);
-  bool encoded = JPEGCodec::Encode(
+  bool encoded = gfx::JPEGCodec::Encode(
       reinterpret_cast<unsigned char*>(thumbnail.getAddr32(0, 0)),
-      JPEGCodec::FORMAT_BGRA, thumbnail.width(),
+      gfx::JPEGCodec::FORMAT_BGRA, thumbnail.width(),
       thumbnail.height(),
       static_cast<int>(thumbnail.rowBytes()), 90,
       &jpeg_data->data);
@@ -139,8 +142,7 @@ void ThumbnailStore::Shutdown() {
   // for details.
   hs_ = NULL;
 
-  // The source of notifications is the Profile. We may outlive the Profile so
-  // we unregister for notifications here.
+  // De-register for notifications.
   registrar_.RemoveAll();
 
   // Stop the timer to ensure that UpdateURLData is not called during shutdown.
@@ -161,6 +163,11 @@ void ThumbnailStore::OnRedirectsForURLAvailable(
   if (!success)
     return;
 
+  DCHECK(redirect_urls_.get());
+
+  // If A -> B -> C is a redirect chain, then this function would be called
+  // with url=C and redirects = {B, A}. This is entered into the RedirectMap as
+  // A => {B -> C}.
   if (redirects->empty()) {
     (*redirect_urls_)[url] = new RefCountedVector<GURL>;
   } else {
@@ -171,9 +178,20 @@ void ThumbnailStore::OnRedirectsForURLAvailable(
   }
 }
 
+history::RedirectMap::iterator ThumbnailStore::GetRedirectIteratorForURL(
+    const GURL& url) const {
+  for (history::RedirectMap::iterator it = redirect_urls_->begin();
+      it != redirect_urls_->end(); ++it) {
+    if (it->first == url ||
+        (!it->second->data.empty() && it->second->data.back() == url))
+      return it;
+  }
+  return redirect_urls_->end();
+}
+
 void ThumbnailStore::Observe(NotificationType type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+    const NotificationSource& source,
+    const NotificationDetails& details) {
   if (type.value != NotificationType::HISTORY_URLS_DELETED) {
     NOTREACHED();
     return;
@@ -183,37 +201,58 @@ void ThumbnailStore::Observe(NotificationType type,
   // If all history was cleared, clear all of our data and reset the update
   // timer.
   if (url_details->all_history) {
-    most_visited_urls_.reset();
-    redirect_urls_.reset();
-    cache_.reset();
-
-    timer_.Stop();
-    seconds_to_next_update_ = kInitialUpdateIntervalSecs;
-    timer_.Start(base::TimeDelta::FromSeconds(seconds_to_next_update_), this,
-        &ThumbnailStore::UpdateURLData);
+    most_visited_urls_->clear();
+    redirect_urls_->clear();
+    cache_->clear();
+    timer_.Reset();
   }
 }
 
+void ThumbnailStore::NotifyThumbnailStoreReady() {
+  NotificationService::current()->Notify(
+      NotificationType::THUMBNAIL_STORE_READY,
+      Source<ThumbnailStore>(this),
+      NotificationService::NoDetails());
+}
+
 void ThumbnailStore::UpdateURLData() {
+  DCHECK(url_blacklist_);
+
   int result_count = ThumbnailStore::kMaxCacheSize + url_blacklist_->GetSize();
   hs_->QueryTopURLsAndRedirects(result_count, &consumer_,
       NewCallback(this, &ThumbnailStore::OnURLDataAvailable));
 }
 
-void ThumbnailStore::OnURLDataAvailable(std::vector<GURL>* urls,
+void ThumbnailStore::OnURLDataAvailable(HistoryService::Handle handle,
+                                        bool success,
+                                        std::vector<GURL>* urls,
                                         history::RedirectMap* redirects) {
+  if (!success)
+    return;
+
   DCHECK(urls);
   DCHECK(redirects);
 
-  most_visited_urls_.reset(new std::vector<GURL>(*urls));
+  // Each element of |urls| is the start of a redirect chain. When thumbnails
+  // are stored from TabContents, the tails of the redirect chains are
+  // associated with the image. Since SetPageThumbnail is called frequently, we
+  // look up the tail end of each element in |urls| and insert that into the
+  // MostVisitedMap. This way SetPageThumbnail can more quickly check if a
+  // given url is in the most visited list.
+  most_visited_urls_->clear();
+  for (size_t i = 0; i < urls->size(); ++i) {
+    history::RedirectMap::iterator it = redirects->find(urls->at(i));
+    if (it->second->data.empty())
+      (*most_visited_urls_)[urls->at(i)] = GURL();
+    else
+      (*most_visited_urls_)[it->second->data.back()] = urls->at(i);
+  }
   redirect_urls_.reset(new history::RedirectMap(*redirects));
-  CleanCacheData();
 
-  // Schedule the next update.
-  if (seconds_to_next_update_ < kMaxUpdateIntervalSecs)
-    seconds_to_next_update_ *= 2;
-  timer_.Start(base::TimeDelta::FromSeconds(seconds_to_next_update_), this,
-      &ThumbnailStore::UpdateURLData);
+  if (IsReady())
+    NotifyThumbnailStoreReady();
+
+  CleanCacheData();
 }
 
 void ThumbnailStore::CleanCacheData() {
@@ -228,26 +267,15 @@ void ThumbnailStore::CleanCacheData() {
   // be written to disk.
   for (Cache::iterator cache_it = cache_->begin();
        cache_it != cache_->end();) {
-    const GURL* url = NULL;
-    // For each URL in the cache, search the RedirectMap for the originating
-    // URL.
-    for (history::RedirectMap::iterator it = redirect_urls_->begin();
-         it != redirect_urls_->end(); ++it) {
-      if (cache_it->first == it->first ||
-          (it->second->data.size() &&
-          cache_it->first == it->second->data.back())) {
-        url = &it->first;
-        break;
-      }
-    }
+    history::RedirectMap::iterator redirect_it =
+        GetRedirectIteratorForURL(cache_it->first);
+    const GURL* url = redirect_it == redirect_urls_->end() ?
+                          NULL : &redirect_it->first;
 
     // If this URL is blacklisted or not in the most visited list, mark it for
     // deletion. Otherwise, if the cache entry is dirty, mark it to be written
     // to disk.
     if (url == NULL || IsURLBlacklisted(*url) || !IsPopular(*url)) {
-      // Note that we don't check whether the cache entry is dirty or not. If
-      // it is not dirty, then the thumbnail exists on disk and must be
-      // deleted. If it is dirty, it may exist on disk so we delete it anyways.
       urls_to_delete->data.push_back(cache_it->first);
       cache_->erase(cache_it++);
     } else {
@@ -266,22 +294,27 @@ void ThumbnailStore::CleanCacheData() {
 
 void ThumbnailStore::CommitCacheToDB(
     scoped_refptr<RefCountedVector<GURL> > urls_to_delete,
-    Cache* data) const {
+    Cache* data) {
   scoped_ptr<Cache> data_to_save(data);
-  if (!db_)
+  if (!db_.is_open())
     return;
 
-  int rv = sqlite3_exec(db_, "BEGIN TRANSACTION", NULL, NULL, NULL);
-  DCHECK(rv == SQLITE_OK) << "Failed to begin transaction";
+  base::TimeTicks db_start = base::TimeTicks::Now();
+
+  sql::Transaction transaction(&db_);
+  if (!transaction.Begin())
+    return;
 
   // Delete old thumbnails.
   if (urls_to_delete.get()) {
     for (std::vector<GURL>::iterator it = urls_to_delete->data.begin();
         it != urls_to_delete->data.end(); ++it) {
-      SQLITE_UNIQUE_STATEMENT(statement, *statement_cache_,
-          "DELETE FROM thumbnails WHERE url=?");
-      statement->bind_string(0, it->spec());
-      if (statement->step() != SQLITE_DONE)
+      sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
+          "DELETE FROM thumbnails WHERE url=?"));
+      if (!statement)
+        return;
+      statement.BindString(0, it->spec());
+      if (!statement.Run())
         NOTREACHED();
     }
   }
@@ -290,99 +323,98 @@ void ThumbnailStore::CommitCacheToDB(
   if (data_to_save.get()) {
     for (Cache::iterator it = data_to_save->begin();
          it != data_to_save->end(); ++it) {
-      SQLITE_UNIQUE_STATEMENT(statement, *statement_cache_,
+      sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
           "INSERT OR REPLACE INTO thumbnails "
-          "(url, boring_score, good_clipping, at_top, time_taken, data) "
-          "VALUES (?,?,?,?,?,?)");
-      statement->bind_string(0, it->first.spec());
-      statement->bind_double(1, it->second.score_.boring_score);
-      statement->bind_bool(2, it->second.score_.good_clipping);
-      statement->bind_bool(3, it->second.score_.at_top);
-      statement->bind_int64(4, it->second.score_.time_at_snapshot.
-                                  ToInternalValue());
-      statement->bind_blob(5, &it->second.data_->data[0],
-                           static_cast<int>(it->second.data_->data.size()));
-      if (statement->step() != SQLITE_DONE)
+          "(url, boring_score, good_clipping, "
+          "at_top, time_taken, data) "
+          "VALUES (?,?,?,?,?,?)"));
+      statement.BindString(0, it->first.spec());
+      statement.BindDouble(1, it->second.score_.boring_score);
+      statement.BindBool(2, it->second.score_.good_clipping);
+      statement.BindBool(3, it->second.score_.at_top);
+      statement.BindInt64(4,
+          it->second.score_.time_at_snapshot.ToInternalValue());
+      statement.BindBlob(5, &it->second.data_->data[0],
+                          static_cast<int>(it->second.data_->data.size()));
+      if (!statement.Run())
         DLOG(WARNING) << "Unable to insert thumbnail for URL";
     }
   }
 
-  rv = sqlite3_exec(db_, "COMMIT", NULL, NULL, NULL);
-  DCHECK(rv == SQLITE_OK) << "Failed to commit transaction";
+  transaction.Commit();
+
+  base::TimeDelta delta = base::TimeTicks::Now() - db_start;
+  HISTOGRAM_TIMES("ThumbnailStore.WriteDBToDisk", delta);
 }
 
 void ThumbnailStore::InitializeFromDB(const FilePath& db_name,
                                       MessageLoop* cb_loop) {
-  if (OpenSqliteDb(db_name, &db_) != SQLITE_OK)
+  db_.set_page_size(4096);
+  db_.set_cache_size(64);
+  db_.set_exclusive_locking();
+  if (!db_.Open(db_name))
     return;
 
-  // Use a large page size since the thumbnails we are storing are typically
-  // large, a small cache size since we cache in memory and don't go to disk
-  // often, and take exclusive access since nobody else uses this db.
-  sqlite3_exec(db_, "PRAGMA page_size=4096 "
-                    "PRAGMA cache_size=64 "
-                    "PRAGMA locking_mode=EXCLUSIVE", NULL, NULL, NULL);
-
-  statement_cache_ = new SqliteStatementCache;
-
-  // Use local DBCloseScoper so that if we cannot create the table and
-  // need to return, the |db_| and |statement_cache_| are closed properly.
-  history::DBCloseScoper scoper(&db_, &statement_cache_);
-
-  if (!DoesSqliteTableExist(db_, "thumbnails")) {
-    if (sqlite3_exec(db_, "CREATE TABLE thumbnails ("
+  if (!db_.DoesTableExist("thumbnails")) {
+    if (!db_.Execute("CREATE TABLE thumbnails ("
           "url LONGVARCHAR PRIMARY KEY,"
           "boring_score DOUBLE DEFAULT 1.0,"
           "good_clipping INTEGER DEFAULT 0,"
           "at_top INTEGER DEFAULT 0,"
           "time_taken INTEGER DEFAULT 0,"
-          "data BLOB)", NULL, NULL, NULL) != SQLITE_OK)
+          "data BLOB)"))
       return;
   }
-
-  statement_cache_->set_db(db_);
-
-  // Now we can use a DBCloseScoper at the object scope.
-  scoper.Detach();
-  close_scoper_.Attach(&db_, &statement_cache_);
 
   if (cb_loop)
     GetAllThumbnailsFromDisk(cb_loop);
 }
 
 void ThumbnailStore::GetAllThumbnailsFromDisk(MessageLoop* cb_loop) {
-  ThumbnailStore::Cache* cache = new ThumbnailStore::Cache;
+  sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
+      "SELECT * FROM thumbnails"));
+  if (!statement)
+    return;
 
-  SQLITE_UNIQUE_STATEMENT(statement, *statement_cache_,
-      "SELECT * FROM thumbnails");
+  Cache* cache = new Cache;
+  while (statement.Step()) {
+    // The URL
+    GURL url(statement.ColumnString(0));
 
-  while (statement->step() == SQLITE_ROW) {
-    GURL url(statement->column_string(0));
-    ThumbnailScore score(statement->column_double(1),      // Boring score
-                         statement->column_bool(2),        // Good clipping
-                         statement->column_bool(3),        // At top
+    // The score.
+    ThumbnailScore score(statement.ColumnDouble(1),      // Boring score
+                         statement.ColumnBool(2),        // Good clipping
+                         statement.ColumnBool(3),        // At top
                          base::Time::FromInternalValue(
-                            statement->column_int64(4)));  // Time taken
+                            statement.ColumnInt64(4)));  // Time taken
+
+    // The image.
     scoped_refptr<RefCountedBytes> data = new RefCountedBytes;
-    if (statement->column_blob_as_vector(5, &data->data))
-      (*cache)[url] = CacheEntry(data, score, false);
+    statement.ColumnBlobAsVector(5, &data->data);
+    (*cache)[url] = CacheEntry(data, score, false);
   }
 
   cb_loop->PostTask(FROM_HERE,
       NewRunnableMethod(this, &ThumbnailStore::OnDiskDataAvailable, cache));
 }
 
-void ThumbnailStore::OnDiskDataAvailable(ThumbnailStore::Cache* cache) {
+void ThumbnailStore::OnDiskDataAvailable(Cache* cache) {
   if (cache)
     cache_.reset(cache);
+
+  disk_data_loaded_ = true;
+  if (IsReady())
+    NotifyThumbnailStoreReady();
 }
 
 bool ThumbnailStore::ShouldStoreThumbnailForURL(const GURL& url) const {
-  if (IsURLBlacklisted(url) || cache_->size() >= ThumbnailStore::kMaxCacheSize)
+  if (!cache_.get())
     return false;
 
-  return most_visited_urls_->size() < ThumbnailStore::kMaxCacheSize ||
-         IsPopular(url);
+  if (IsURLBlacklisted(url) || cache_->size() >= kMaxCacheSize)
+    return false;
+
+  return IsPopular(url);
 }
 
 bool ThumbnailStore::IsURLBlacklisted(const GURL& url) const {
@@ -397,7 +429,6 @@ std::wstring ThumbnailStore::GetDictionaryKeyForURL(
 }
 
 bool ThumbnailStore::IsPopular(const GURL& url) const {
-  return most_visited_urls_->end() != find(most_visited_urls_->begin(),
-                                           most_visited_urls_->end(),
-                                           url);
+  return most_visited_urls_->size() < kMaxCacheSize ||
+         most_visited_urls_->find(url) != most_visited_urls_->end();
 }

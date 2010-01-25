@@ -34,6 +34,9 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
   GURL ntp(chrome::kChromeUINewTabURL);
   GURL dest("http://www.google.com/");
 
+  // The sync service must be created to host the sync NTP advertisement.
+  profile_->CreateProfileSyncService();
+
   // Navigate our first tab to the new tab page and then to the destination.
   NavigateActiveAndCommit(ntp);
   NavigateActiveAndCommit(dest);
@@ -78,6 +81,9 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   const GURL kNtpUrl(chrome::kChromeUINewTabURL);
   const GURL kUrl("view-source:http://foo");
 
+  // The sync service must be created to host the sync NTP advertisement.
+  profile_->CreateProfileSyncService();
+
   // We have to navigate to some page at first since without this, the first
   // navigation will reuse the SiteInstance created by Init(), and the second
   // one will create a new SiteInstance. Because current_instance and
@@ -87,6 +93,8 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   NavigateActiveAndCommit(kNtpUrl);
 
   // Navigate.
+  // The sync service must be available to show the NTP sync advertisement.
+  profile_->CreateProfileSyncService();
   controller().LoadURL(kUrl, GURL() /* referer */, PageTransition::TYPED);
   // Simulate response from RenderView for FirePageBeforeUnload.
   rvh()->TestOnMessageReceived(
@@ -128,8 +136,7 @@ TEST_F(RenderViewHostManagerTest, Init) {
   TestTabContents tab_contents(profile_.get(), instance);
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE,
-               NULL /* modal_dialog_event */);
+  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
 
   RenderViewHost* host = manager.current_host();
   ASSERT_TRUE(host);
@@ -153,8 +160,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
   // Create.
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE,
-               NULL /* modal_dialog_event */);
+  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
 
   RenderViewHost* host;
 
@@ -227,9 +233,10 @@ TEST_F(RenderViewHostManagerTest, DOMUI) {
   TestTabContents tab_contents(profile_.get(), instance);
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE,
-               NULL /* modal_dialog_event */);
+  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
 
+  // The sync service must be created to host the sync advertisement on the NTP.
+  profile_->CreateProfileSyncService();
   GURL url("chrome://newtab");
   NavigationEntry entry(NULL /* instance */, -1 /* page_id */, url,
                         GURL() /* referrer */, string16() /* title */,

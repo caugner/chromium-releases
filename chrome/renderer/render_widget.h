@@ -6,8 +6,9 @@
 #define CHROME_RENDERER_RENDER_WIDGET_H_
 
 #include <vector>
+
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/point.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
@@ -25,10 +26,13 @@
 
 class RenderThreadBase;
 struct ViewHostMsg_ShowPopup_Params;
-struct WebPluginGeometry;
 
 namespace WebKit {
 struct WebPopupMenuInfo;
+}
+
+namespace webkit_glue {
+struct WebPluginGeometry;
 }
 
 // RenderWidget provides a communication bridge between a WebWidget and
@@ -84,13 +88,17 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // Called when a plugin is moved.  These events are queued up and sent with
   // the next paint or scroll message to the host.
-  void SchedulePluginMove(const WebPluginGeometry& move);
+  void SchedulePluginMove(const webkit_glue::WebPluginGeometry& move);
+
+  // Called when a plugin window has been destroyed, to make sure the currently
+  // pending moves don't try to reference it.
+  void CleanupWindowInPluginMoves(gfx::PluginWindowHandle window);
 
   // Invalidates entire widget rect to generate a full repaint.
   void GenerateFullRepaint();
 
   // Close the underlying WebWidget.
-  void Close();
+  virtual void Close();
 
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
@@ -112,7 +120,9 @@ class RenderWidget : public IPC::Channel::Listener,
   // must ensure that the given rect fits within the bounds of the WebWidget.
   void PaintRect(const gfx::Rect& rect, skia::PlatformCanvas* canvas);
 
+  void CallDoDeferredPaint();
   void DoDeferredPaint();
+  void CallDoDeferredScroll();
   void DoDeferredScroll();
   void DoDeferredClose();
   void DoDeferredSetWindowRect(const WebKit::WebRect& pos);
@@ -146,6 +156,11 @@ class RenderWidget : public IPC::Channel::Listener,
   // Override point to notify that a paint has happened. This fires after the
   // browser side has updated the screen for a newly painted region.
   virtual void DidPaint() {}
+
+  // Sets the "hidden" state of this widget.  All accesses to is_hidden_ should
+  // use this method so that we can properly inform the RenderThread of our
+  // state.
+  void SetHidden(bool hidden);
 
   // True if a PaintRect_ACK message is pending.
   bool paint_reply_pending() const {
@@ -181,6 +196,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // size.  If JS code sets the WindowRect, and then immediately calls
   // GetWindowRect() we'll use this pending window rect as the size.
   void SetPendingWindowRect(const WebKit::WebRect& r);
+
+  // Called by OnHandleInputEvent() to notify subclasses that a key event was
+  // just handled.
+  virtual void DidHandleKeyEvent() {}
 
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
@@ -256,6 +275,9 @@ class RenderWidget : public IPC::Channel::Listener,
   // Indicates whether we have been focused/unfocused by the browser.
   bool has_focus_;
 
+  // Are we currently handling an input event?
+  bool handling_input_event_;
+
   // True if we have requested this widget be closed.  No more messages will
   // be sent, except for a Close.
   bool closing_;
@@ -283,7 +305,8 @@ class RenderWidget : public IPC::Channel::Listener,
   bool activatable_;
 
   // Holds all the needed plugin window moves for a scroll.
-  std::vector<WebPluginGeometry> plugin_window_moves_;
+  typedef std::vector<webkit_glue::WebPluginGeometry> WebPluginGeometryVector;
+  WebPluginGeometryVector plugin_window_moves_;
 
   // A custom background for the widget.
   SkBitmap background_;
@@ -294,6 +317,8 @@ class RenderWidget : public IPC::Channel::Listener,
   WebKit::WebRect pending_window_rect_;
 
   scoped_ptr<ViewHostMsg_ShowPopup_Params> popup_params_;
+
+  scoped_ptr<IPC::Message> pending_input_event_ack_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

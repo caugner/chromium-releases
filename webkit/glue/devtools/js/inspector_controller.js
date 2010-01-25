@@ -46,6 +46,16 @@ devtools.InspectorController = function() {
    * @type {boolean}
    */
   this.resourceTrackingEnabled_ = false;
+
+  /**
+   * @type {boolean}
+   */
+  this.timelineEnabled_ = false;
+
+  /**
+   * @type {Object}
+   */
+  this.settings_ = {};
 };
 
 
@@ -282,6 +292,31 @@ devtools.InspectorController.prototype.resourceTrackingEnabled = function() {
 
 
 /**
+ * Enables timeline.
+ */
+devtools.InspectorController.prototype.enableTimeline = function() {
+  this.timelineEnabled_ = true;
+  WebInspector.timelineWasEnabled();
+};
+
+
+/**
+ * Disables timeline.
+ */
+devtools.InspectorController.prototype.disableTimeline = function() {
+  this.timelineEnabled_ = false;
+  WebInspector.timelineWasDisabled();
+};
+
+/**
+ * @return {boolean} True iff timeline is enabled.
+ */
+devtools.InspectorController.prototype.timelineEnabled = function() {
+  return this.timelineEnabled_;
+};
+
+
+/**
  * Enables debugger.
  */
 devtools.InspectorController.prototype.enableDebugger = function() {
@@ -301,9 +336,10 @@ devtools.InspectorController.prototype.disableDebugger = function() {
  * Adds breakpoint to the given line of the source with given ID.
  * @param {string} sourceID Source Id to add breakpoint to.
  * @param {number} line Line number to add breakpoint to.
+ * @param {?string} condition The breakpoint condition.
  */
 devtools.InspectorController.prototype.addBreakpoint =
-    function(sourceID, line) {
+    function(sourceID, line, condition) {
 };
 
 
@@ -314,6 +350,17 @@ devtools.InspectorController.prototype.addBreakpoint =
  */
 devtools.InspectorController.prototype.removeBreakpoint =
     function(sourceID, line) {
+};
+
+
+/**
+ * Sets a breakpoint condition given a line of the source and an ID.
+ * @param {string} sourceID Source Id to remove breakpoint from.
+ * @param {number} line Line number to remove breakpoint from.
+ * @param {?string} condition New breakpoint condition.
+ */
+devtools.InspectorController.prototype.updateBreakpoint =
+    function(sourceID, line, condition) {
 };
 
 
@@ -399,10 +446,36 @@ devtools.InspectorController.prototype.stopProfiling = function() {
 
 
 /**
+ * TODO(mnaganov): Remove after injected script change landing in WebKit.
  * @return {Array.<Object>} Profile snapshots array.
  */
 devtools.InspectorController.prototype.profiles = function() {
   return [];
+};
+
+
+/**
+ * Async function for retrieving headers of existing profiles.
+ */
+devtools.InspectorController.prototype.getProfileHeaders = function(callId) {
+  WebInspector.didGetProfileHeaders(callId, []);
+};
+
+
+/**
+ * Async function for lazy loading an existing profile.
+ */
+devtools.InspectorController.prototype.getProfile = function(callId, uid) {
+  if (WebInspector.__fullProfiles && (uid in WebInspector.__fullProfiles)) {
+    WebInspector.didGetProfile(callId, WebInspector.__fullProfiles[uid]);
+  }
+};
+
+
+/**
+ * Tells backend to create a heap snapshot.
+ */
+devtools.InspectorController.prototype.takeHeapSnapshot = function() {
 };
 
 
@@ -436,3 +509,24 @@ devtools.InspectorController.prototype.stepOutOfFunctionInDebugger =
 devtools.InspectorController.prototype.stepOverStatementInDebugger =
     function() {
 };
+
+
+/**
+ * Sets a setting value in backend.
+ */
+devtools.InspectorController.prototype.setSetting =
+    function(setting, value) {
+  this.settings_[setting] = value;
+};
+
+
+/**
+ * Retrieves a setting value stored in backend.
+ */
+devtools.InspectorController.prototype.setting =
+    function(setting) {
+  return this.settings_[setting];
+};
+
+
+var InspectorController = new devtools.InspectorController();

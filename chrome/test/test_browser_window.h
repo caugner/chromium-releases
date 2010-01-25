@@ -7,19 +7,15 @@
 
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/views/tabs/tab_strip.h"
 #include "chrome/test/test_location_bar.h"
 
 // An implementation of BrowserWindow used for testing. TestBrowserWindow only
-// contains a valid TabStrip, all other getters return NULL.
+// contains a valid LocationBar, all other getters return NULL.
 // See BrowserWithTestWindowTest for an example of using this class.
 class TestBrowserWindow : public BrowserWindow {
  public:
-  explicit TestBrowserWindow(Browser* browser)
-      : tab_strip_(browser->tabstrip_model()) {
-    tab_strip_.InitTabStripButtons();
-  }
-  ~TestBrowserWindow() {}
+  explicit TestBrowserWindow(Browser* browser) {}
+  virtual ~TestBrowserWindow() {}
 
   virtual void Init() {}
   virtual void Show() {}
@@ -32,12 +28,14 @@ class TestBrowserWindow : public BrowserWindow {
   virtual BrowserWindowTesting* GetBrowserWindowTesting() { return NULL; }
   virtual StatusBubble* GetStatusBubble() { return NULL; }
   virtual void SelectedTabToolbarSizeChanged(bool is_animating) {}
+  virtual void SelectedTabExtensionShelfSizeChanged() {}
   virtual void UpdateTitleBar() {}
+  virtual void ShelfVisibilityChanged() {}
   virtual void UpdateDevTools() {}
   virtual void FocusDevTools() {}
   virtual void UpdateLoadingAnimations(bool should_animate) {}
   virtual void SetStarredState(bool is_starred) {}
-  virtual gfx::Rect GetNormalBounds() const { return gfx::Rect(); }
+  virtual gfx::Rect GetRestoredBounds() const { return gfx::Rect(); }
   virtual bool IsMaximized() const { return false; }
   virtual void SetFullscreen(bool fullscreen) {}
   virtual bool IsFullscreen() const { return false; }
@@ -49,11 +47,15 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state) {}
   virtual void FocusToolbar() {}
+  virtual void ShowPageMenu() {}
+  virtual void ShowAppMenu() {}
+  virtual int GetCommandId(const NativeWebKeyboardEvent& event) { return -1; }
   virtual bool IsBookmarkBarVisible() const { return false; }
   virtual gfx::Rect GetRootWindowResizerRect() const { return gfx::Rect(); }
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
+  virtual void ToggleExtensionShelf() {}
   virtual void ShowAboutChromeDialog() {}
   virtual void ShowTaskManager() {}
   virtual void ShowBookmarkManager() {}
@@ -67,6 +69,9 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowPasswordManager() {}
   virtual void ShowSelectProfileDialog() {}
   virtual void ShowNewProfileDialog() {}
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) {}
+  virtual void ShowHistoryTooNewDialog() {}
+  virtual void ShowThemeInstallBubble() {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() {}
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
                               gfx::NativeWindow parent_window) {}
@@ -82,8 +87,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void DestroyBrowser() {}
 
  private:
-  TabStrip tab_strip_;
-
   TestLocationBar location_bar_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserWindow);

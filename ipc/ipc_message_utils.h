@@ -11,6 +11,7 @@
 
 #include "base/file_path.h"
 #include "base/format_macros.h"
+#include "base/nullable_string16.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -43,6 +44,7 @@ enum IPCMessageStart {
   WorkerProcessHostMsgStart,
   WorkerMsgStart,
   WorkerHostMsgStart,
+  NaClProcessMsgStart,
   // NOTE: When you add a new message class, also update
   // IPCStatusView::IPCStatusView to ensure logging works.
   // NOTE: this enum is used by IPC_MESSAGE_MACRO to generate a unique message
@@ -100,22 +102,31 @@ class MessageIterator {
 //-----------------------------------------------------------------------------
 // ParamTraits specializations, etc.
 
-template <class P> struct ParamTraits {};
+template <class P> struct ParamTraits {
+};
+
+template <class P>
+struct SimilarTypeTraits {
+  typedef P Type;
+};
 
 template <class P>
 static inline void WriteParam(Message* m, const P& p) {
-  ParamTraits<P>::Write(m, p);
+  typedef typename SimilarTypeTraits<P>::Type Type;
+  ParamTraits<Type>::Write(m, static_cast<const Type& >(p));
 }
 
 template <class P>
 static inline bool WARN_UNUSED_RESULT ReadParam(const Message* m, void** iter,
                                                 P* p) {
-  return ParamTraits<P>::Read(m, iter, p);
+  typedef typename SimilarTypeTraits<P>::Type Type;
+  return ParamTraits<Type>::Read(m, iter, reinterpret_cast<Type* >(p));
 }
 
 template <class P>
 static inline void LogParam(const P& p, std::wstring* l) {
-  ParamTraits<P>::Log(p, l);
+  typedef typename SimilarTypeTraits<P>::Type Type;
+  ParamTraits<Type>::Log(static_cast<const Type& >(p), l);
 }
 
 template <>
@@ -147,6 +158,20 @@ struct ParamTraits<int> {
 };
 
 template <>
+struct ParamTraits<unsigned int> {
+  typedef unsigned int param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return m->ReadInt(iter, reinterpret_cast<int*>(r));
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"%d", p));
+  }
+};
+
+template <>
 struct ParamTraits<long> {
   typedef long param_type;
   static void Write(Message* m, const param_type& p) {
@@ -156,14 +181,10 @@ struct ParamTraits<long> {
     return m->ReadLong(iter, r);
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%l", p));
+    l->append(StringPrintf(L"%ld", p));
   }
 };
 
-#if defined(OS_LINUX) || defined(OS_WIN)
-// On Linux, unsigned long is used for serializing X window ids.
-// On Windows, it's used for serializing process ids.
-// On Mac, it conflicts with some other definition.
 template <>
 struct ParamTraits<unsigned long> {
   typedef unsigned long param_type;
@@ -171,67 +192,16 @@ struct ParamTraits<unsigned long> {
     m->WriteLong(p);
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    long read_output;
-    if (!m->ReadLong(iter, &read_output))
-      return false;
-    *r = static_cast<unsigned long>(read_output);
-    return true;
+    return m->ReadLong(iter, reinterpret_cast<long*>(r));
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%ul", p));
-  }
-};
-#endif
-
-template <>
-struct ParamTraits<size_t> {
-  typedef size_t param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteSize(p);
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    return m->ReadSize(iter, r);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%u", p));
-  }
-};
-
-#if defined(OS_MACOSX)
-// On Linux size_t & uint32 can be the same type.
-// TODO(playmobil): Fix compilation if this is not the case.
-template <>
-struct ParamTraits<uint32> {
-  typedef uint32 param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteUInt32(p);
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    return m->ReadUInt32(iter, r);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%u", p));
-  }
-};
-#endif  // defined(OS_MACOSX)
-
-template <>
-struct ParamTraits<int64> {
-  typedef int64 param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteInt64(p);
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    return m->ReadInt64(iter, r);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%" WidePRId64, p));
+    l->append(StringPrintf(L"%lu", p));
   }
 };
 
 template <>
-struct ParamTraits<uint64> {
-  typedef uint64 param_type;
+struct ParamTraits<long long> {
+  typedef long long param_type;
   static void Write(Message* m, const param_type& p) {
     m->WriteInt64(static_cast<int64>(p));
   }
@@ -239,7 +209,21 @@ struct ParamTraits<uint64> {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
   static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%" WidePRId64, p));
+    l->append(Int64ToWString(static_cast<int64>(p)));
+  }
+};
+
+template <>
+struct ParamTraits<unsigned long long> {
+  typedef unsigned long long param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt64(p);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(Uint64ToWString(p));
   }
 };
 
@@ -386,6 +370,29 @@ struct ParamTraits<std::string> {
   }
 };
 
+template<typename CharType>
+static void LogBytes(const std::vector<CharType>& data, std::wstring* out) {
+#if defined(OS_WIN)
+  // Windows has a GUI for logging, which can handle arbitrary binary data.
+  for (size_t i = 0; i < data.size(); ++i)
+    out->push_back(data[i]);
+#else
+  // On POSIX, we log to stdout, which we assume can display ASCII.
+  static const size_t kMaxBytesToLog = 100;
+  for (size_t i = 0; i < std::min(data.size(), kMaxBytesToLog); ++i) {
+    if (isprint(data[i]))
+      out->push_back(data[i]);
+    else
+      out->append(StringPrintf(L"[%02X]", static_cast<unsigned char>(data[i])));
+  }
+  if (data.size() > kMaxBytesToLog) {
+    out->append(
+        StringPrintf(L" and %u more bytes",
+                     static_cast<unsigned>(data.size() - kMaxBytesToLog)));
+  }
+#endif
+}
+
 template <>
 struct ParamTraits<std::vector<unsigned char> > {
   typedef std::vector<unsigned char> param_type;
@@ -408,8 +415,7 @@ struct ParamTraits<std::vector<unsigned char> > {
     return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
-    for (size_t i = 0; i < p.size(); ++i)
-      l->push_back(p[i]);
+    LogBytes(p, l);
   }
 };
 
@@ -434,8 +440,7 @@ struct ParamTraits<std::vector<char> > {
     return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
-    for (size_t i = 0; i < p.size(); ++i)
-      l->push_back(p[i]);
+    LogBytes(p, l);
   }
 };
 
@@ -520,6 +525,51 @@ struct ParamTraits<std::wstring> {
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(p);
+  }
+};
+
+template <class A, class B>
+struct ParamTraits<std::pair<A, B> > {
+  typedef std::pair<A, B> param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.first);
+    WriteParam(m, p.second);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return ReadParam(m, iter, &r->first) && ReadParam(m, iter, &r->second);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.first, l);
+    l->append(L", ");
+    LogParam(p.second, l);
+    l->append(L")");
+  }
+};
+
+template <>
+struct ParamTraits<NullableString16> {
+  typedef NullableString16 param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.string());
+    WriteParam(m, p.is_null());
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    string16 string;
+    if (!ReadParam(m, iter, &string))
+      return false;
+    bool is_null;
+    if (!ReadParam(m, iter, &is_null))
+      return false;
+    *r = NullableString16(string, is_null);
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.string(), l);
+    l->append(L", ");
+    LogParam(p.is_null(), l);
+    l->append(L")");
   }
 };
 
@@ -732,7 +782,7 @@ struct ParamTraits<XFORM> {
 struct LogData {
   std::string channel;
   int32 routing_id;
-  uint16 type;
+  uint16 type;  // "User-defined" message type, from ipc_message.h.
   std::wstring flags;
   int64 sent;  // Time that the message was sent (i.e. at Send()).
   int64 receive;  // Time before it was dispatched (i.e. before calling
@@ -774,7 +824,6 @@ struct ParamTraits<LogData> {
     // Doesn't make sense to implement this!
   }
 };
-
 
 template <>
 struct ParamTraits<Message> {

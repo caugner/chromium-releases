@@ -13,30 +13,32 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditModel;
-class AutocompleteEditViewGtk;
+class AutocompleteEditView;
 class AutocompletePopupModel;
 class Profile;
 class SkBitmap;
 
 class AutocompletePopupViewGtk : public AutocompletePopupView {
  public:
-  AutocompletePopupViewGtk(AutocompleteEditViewGtk* edit_view,
+  AutocompletePopupViewGtk(AutocompleteEditView* edit_view,
                            AutocompleteEditModel* edit_model,
                            Profile* profile,
-                           AutocompletePopupPositioner* popup_positioner);
+                           const BubblePositioner* bubble_positioner);
   ~AutocompletePopupViewGtk();
 
   // Implement the AutocompletePopupView interface.
   virtual bool IsOpen() const { return opened_; }
   virtual void InvalidateLine(size_t line);
   virtual void UpdatePopupAppearance();
-  virtual void OnHoverEnabledOrDisabled(bool disabled);
   virtual void PaintUpdatesNow();
   virtual AutocompletePopupModel* GetModel();
 
  private:
   void Show(size_t num_results);
   void Hide();
+
+  // Restack the popup window directly above the browser's toplevel window.
+  void StackWindow();
 
   // Convert a y-coordinate to the closest line / result.
   size_t LineFromY(int y);
@@ -75,8 +77,8 @@ class AutocompletePopupViewGtk : public AutocompletePopupView {
   gboolean HandleButtonRelease(GtkWidget* widget, GdkEventButton* event);
 
   scoped_ptr<AutocompletePopupModel> model_;
-  AutocompleteEditViewGtk* edit_view_;
-  AutocompletePopupPositioner* popup_positioner_;
+  AutocompleteEditView* edit_view_;
+  const BubblePositioner* bubble_positioner_;
 
   // Our popup window, which is the only widget used, and we paint it on our
   // own.  This widget shouldn't be exposed outside of this class.

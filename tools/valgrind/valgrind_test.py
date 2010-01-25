@@ -43,6 +43,10 @@ class ValgrindTool(object):
       shutil.rmtree(self.TMP_DIR)
     os.mkdir(self.TMP_DIR)
 
+  def UseXML(self):
+    # Override if tool prefers nonxml output
+    return True
+
   def ToolName(self):
     raise RuntimeError, "This method should be implemented " \
                         "in the tool-specific subclass"
@@ -58,6 +62,8 @@ class ValgrindTool(object):
                                  "(used to normalize source paths in baseline)")
     self._parser.add_option("", "--gtest_filter", default="",
                             help="which test case to run")
+    self._parser.add_option("", "--gtest_repeat",
+                            help="how many times to run each test")
     self._parser.add_option("", "--gtest_print_time", action="store_true",
                             default=False,
                             help="show how long each test takes")
@@ -71,9 +77,6 @@ class ValgrindTool(object):
     self._parser.add_option("", "--trace_children", action="store_true",
                             default=False,
                             help="also trace child processes")
-    self._parser.add_option("", "--gen_suppressions", action="store_true",
-                            dest="generate_suppressions", default=False,
-                            help="skip analysis and generate suppressions")
     self._parser.add_option("", "--num-callers",
                             dest="num_callers", default=30,
                             help="number of callers to show in stack traces")
@@ -84,10 +87,9 @@ class ValgrindTool(object):
     self._parser.description = __doc__
 
   def ExtendOptionParser(self, parser):
-    if sys.platform == 'darwin':
-      parser.add_option("", "--generate_dsym", action="store_true",
-                            default=False,
-                            help="Generate .dSYM file on Mac if needed. Slow!")
+    parser.add_option("", "--generate_dsym", action="store_true",
+                          default=False,
+                          help="Generate .dSYM file on Mac if needed. Slow!")
 
   def ParseArgv(self, args):
     self.CreateOptionParser()
@@ -118,12 +120,13 @@ class ValgrindTool(object):
 
     self._timeout = int(self._options.timeout)
     self._num_callers = int(self._options.num_callers)
-    self._generate_suppressions = self._options.generate_suppressions
     self._suppressions = self._options.suppressions
     self._source_dir = self._options.source_dir
     self._nocleanup_on_exit = self._options.nocleanup_on_exit
     if self._options.gtest_filter != "":
       self._args.append("--gtest_filter=%s" % self._options.gtest_filter)
+    if self._options.gtest_repeat:
+      self._args.append("--gtest_repeat=%s" % self._options.gtest_repeat)
     if self._options.gtest_print_time:
       self._args.append("--gtest_print_time");
 
@@ -185,9 +188,11 @@ class ValgrindTool(object):
 
         dsymutil_command = ['dsymutil', test_command]
 
-        # dsymutil is crazy slow.  Let it run for up to a half hour.  I hope
-        # that's enough.
-        common.RunSubprocess(dsymutil_command, 30 * 60)
+        # dsymutil is crazy slow.  Ideally we'd have a timeout here,
+        # but common.RunSubprocess' timeout is only checked
+        # after each line of output; dsymutil is silent
+        # until the end, and is then killed, which is silly.
+        common.RunSubprocess(dsymutil_command)
 
         if saved_test_command:
           os.rename(saved_test_command, test_command)
@@ -204,18 +209,13 @@ class ValgrindTool(object):
     # Construct the valgrind command.
     proc = ["valgrind",
             "--tool=%s" % tool_name,
-            "--smc-check=all",
-            "--num-callers=%i" % self._num_callers,
-            "--demangle=no"]
+            "--num-callers=%i" % self._num_callers]
 
     if self._options.trace_children:
       proc += ["--trace-children=yes"];
 
     proc += self.ToolSpecificFlags()
     proc += self._tool_flags
-
-    if self._generate_suppressions:
-      proc += ["--gen-suppressions=all"]
 
     suppression_count = 0
     for suppression_file in self._suppressions:
@@ -226,7 +226,15 @@ class ValgrindTool(object):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    proc += ["--log-file=" + self.TMP_DIR + ("/%s." % tool_name) + "%p"]
+    logfilename = self.TMP_DIR + ("/%s." % tool_name) + "%p"
+    if self.UseXML():
+      if os.system("valgrind --help | grep -q xml-file") == 0:
+        proc += ["--xml=yes", "--xml-file=" + logfilename]
+      else:
+        # TODO(dank): remove once valgrind-3.5 is deployed everywhere
+        proc += ["--xml=yes", "--log-file=" + logfilename]
+    else:
+      proc += ["--log-file=" + logfilename]
 
     # The Valgrind command is constructed.
 
@@ -337,23 +345,15 @@ class Memcheck(ValgrindTool):
                       help="Show whence uninitialized bytes came. 30% slower.")
 
   def ToolSpecificFlags(self):
-    ret = ["--leak-check=full"]
+    ret = ["--leak-check=full", "--gen-suppressions=all", "--demangle=no"]
 
     if self._options.show_all_leaks:
       ret += ["--show-reachable=yes"];
+    else:
+      ret += ["--show-possible=no"];
 
     if self._options.track_origins:
       ret += ["--track-origins=yes"];
-
-    """Either generate suppressions or load them.
-    TODO(dkegel): enhance valgrind to support generating
-    suppressions in xml mode.  See
-    http://bugs.kde.org/show_bug.cgi?id=191189
-    """
-    if self._generate_suppressions:
-      ret += ["--gen-suppressions=all"]
-    else:
-      ret += ["--xml=yes"]
 
     return ret
 
@@ -361,20 +361,9 @@ class Memcheck(ValgrindTool):
     # Glob all the files in the "valgrind.tmp" directory
     filenames = glob.glob(self.TMP_DIR + "/memcheck.*")
 
-    # TODO(dkegel): use new xml suppressions feature when it lands
-    if self._generate_suppressions:
-      # Just concatenate all the output files.  Lame...
-      for filename in filenames:
-        print "## %s" % filename
-        f = file(filename)
-        while True:
-          line = f.readline()
-          if len(line) == 0:
-            break
-          print line, # comma means don't add newline
-        f.close()
-      return 0
-    analyzer = memcheck_analyze.MemcheckAnalyze(self._source_dir, filenames, self._options.show_all_leaks)
+    use_gdb = (sys.platform == 'darwin')
+    analyzer = memcheck_analyze.MemcheckAnalyze(self._source_dir, filenames, self._options.show_all_leaks,
+                                                use_gdb=use_gdb)
     return analyzer.Report()
 
 class ThreadSanitizer(ValgrindTool):
@@ -385,6 +374,9 @@ class ThreadSanitizer(ValgrindTool):
 
   def ToolName(self):
     return "tsan"
+
+  def UseXML(self):
+    return False
 
   def ExtendOptionParser(self, parser):
     ValgrindTool.ExtendOptionParser(self, parser)
@@ -406,9 +398,23 @@ class ThreadSanitizer(ValgrindTool):
     raise RuntimeError, "Can't parse flag value (%s)" % flag_value
 
   def ToolSpecificFlags(self):
-    ret = ["--ignore=%s" % \
-           os.path.join(self._source_dir,
-                        "tools", "valgrind", "tsan", "ignores.txt")]
+    ret = []
+
+    ignore_files = ["ignores.txt"]
+    platform_suffix = {
+      'darwin': 'mac',
+      'linux2': 'linux'
+    }[sys.platform]
+    ignore_files.append("ignores_%s.txt" % platform_suffix)
+    for ignore_file in ignore_files:
+      fullname =  os.path.join(self._source_dir,
+          "tools", "valgrind", "tsan", ignore_file)
+      if os.path.exists(fullname):
+        ret += ["--ignore=%s" % fullname]
+
+    # The -v flag is needed for printing the list of used suppressions.
+    ret += ["-v"]
+
     ret += ["--file-prefix-to-cut=%s/" % self._source_dir]
 
     if self.EvalBoolFlag(self._options.pure_happens_before):
@@ -417,11 +423,17 @@ class ThreadSanitizer(ValgrindTool):
     if self.EvalBoolFlag(self._options.announce_threads):
       ret += ["--announce-threads"]
 
+    # --show-pc flag is needed for parsing the error logs on Darwin.
+    if platform_suffix == 'mac':
+      ret += ["--show-pc=yes"]
+
     return ret
 
   def Analyze(self):
     filenames = glob.glob(self.TMP_DIR + "/tsan.*")
-    analyzer = tsan_analyze.TsanAnalyze(self._source_dir, filenames)
+    use_gdb = (sys.platform == 'darwin')
+    analyzer = tsan_analyze.TsanAnalyze(self._source_dir, filenames,
+                                        use_gdb=use_gdb)
     return analyzer.Report()
 
 

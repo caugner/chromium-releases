@@ -35,7 +35,8 @@ class PostMessageTask : public Task {
   }
   ~PostMessageTask() { }
   void Run() {
-    client_->postMessageToWorkerObject(message_string_);
+    WebKit::WebMessagePortChannelArray empty_array;
+    client_->postMessageToWorkerObject(message_string_, empty_array);
   }
 
  private:
@@ -108,7 +109,12 @@ WebKit::WebWorker* NativeWebWorkerImpl::create(
 }
 
 NativeWebWorkerImpl::NativeWebWorkerImpl(WebKit::WebWorkerClient* client)
-    : client_(client) {
+    : client_(client),
+      nap_(NULL),
+      channel_(NULL),
+      upcall_thread_(NULL) {
+  descs_[0] = NULL;
+  descs_[1] = NULL;
 }
 
 NativeWebWorkerImpl::~NativeWebWorkerImpl() {
@@ -147,7 +153,8 @@ void NativeWebWorkerImpl::terminateWorkerContext() {
 }
 
 void NativeWebWorkerImpl::postMessageToWorkerContext(
-         const WebKit::WebString& message) {
+    const WebKit::WebString& message,
+    const WebKit::WebMessagePortChannelArray& channel) {
   size_t len;
   char* bufp = WebStringToCharp(message, &len);
   // Send a message to NaCl object
@@ -156,4 +163,7 @@ void NativeWebWorkerImpl::postMessageToWorkerContext(
 }
 
 void NativeWebWorkerImpl::workerObjectDestroyed() {
+}
+
+void NativeWebWorkerImpl::clientDestroyed() {
 }

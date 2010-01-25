@@ -10,13 +10,16 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "chrome/common/view_types.h"
 #include "net/base/load_states.h"
+#include "webkit/api/public/WebDragOperation.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutofillForm;
 struct ContextMenuParams;
 class FilePath;
 class GURL;
+class Value;
 struct NativeWebKeyboardEvent;
 class NavigationEntry;
 class Profile;
@@ -39,6 +42,7 @@ class WaitableEvent;
 
 namespace gfx {
 class Rect;
+class Size;
 }
 
 namespace IPC {
@@ -78,8 +82,7 @@ class RenderViewHostDelegate {
     // the Windows function which is actually a #define.
     //
     // NOTE: this takes ownership of @modal_dialog_event
-    virtual void CreateNewWindow(int route_id,
-                                 base::WaitableEvent* modal_dialog_event) = 0;
+    virtual void CreateNewWindow(int route_id) = 0;
 
     // The page is trying to open a new widget (e.g. a select popup). The
     // widget should be created associated with the given route, but it should
@@ -110,11 +113,12 @@ class RenderViewHostDelegate {
     // The user started dragging content of the specified type within the
     // RenderView. Contextual information about the dragged content is supplied
     // by WebDropData.
-    virtual void StartDragging(const WebDropData& drop_data) = 0;
+    virtual void StartDragging(const WebDropData& drop_data,
+                               WebKit::WebDragOperationsMask allowed_ops) = 0;
 
     // The page wants to update the mouse cursor during a drag & drop operation.
-    // |is_drop_target| is true if the mouse is over a valid drop target.
-    virtual void UpdateDragCursor(bool is_drop_target) = 0;
+    // |operation| describes the current operation (none, move, copy, link.)
+    virtual void UpdateDragCursor(WebKit::WebDragOperation operation) = 0;
 
     // Notification that view for this delegate got the focus.
     virtual void GotFocus() = 0;
@@ -122,6 +126,10 @@ class RenderViewHostDelegate {
     // Callback to inform the browser it should take back focus. If reverse is
     // true, it means the focus was retrieved by doing a Shift-Tab.
     virtual void TakeFocus(bool reverse) = 0;
+
+    // Returns whether the event is a reserved keyboard shortcut that should not
+    // be sent to the renderer.
+    virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event) = 0;
 
     // Callback to inform the browser that the renderer did not process the
     // specified events. This gives an opportunity to the browser to process the
@@ -133,8 +141,8 @@ class RenderViewHostDelegate {
     virtual void HandleMouseEvent() = 0;
     virtual void HandleMouseLeave() = 0;
 
-    // The content's intrinsic width (prefWidth) changed.
-    virtual void UpdatePreferredWidth(int pref_width) = 0;
+    // The contents' preferred size changed.
+    virtual void UpdatePreferredSize(const gfx::Size& pref_size) = 0;
   };
 
   // RendererManagerment -------------------------------------------------------
@@ -252,6 +260,9 @@ class RenderViewHostDelegate {
         const std::string& main_frame_origin,
         const std::string& security_info) = 0;
 
+    virtual void DidDisplayInsecureContent() = 0;
+    virtual void DidRunInsecureContent(const std::string& security_origin) = 0;
+
     // The RenderView failed a provisional load with an error.
     virtual void DidFailProvisionalLoadWithError(
         RenderViewHost* render_view_host,
@@ -342,15 +353,15 @@ class RenderViewHostDelegate {
     // query. When the database thread is finished, the autofill manager
     // retrieves the calling RenderViewHost and then passes the vector of
     // suggestions to RenderViewHost::AutofillSuggestionsReturned.
-    virtual void GetAutofillSuggestions(const std::wstring& field_name,
-                                        const std::wstring& user_text,
-                                        int64 node_id,
-                                        int request_id) = 0;
+    // Return true to indicate that AutofillSuggestionsReturned will be called.
+    virtual bool GetAutofillSuggestions(int query_id,
+                                        const string16& field_name,
+                                        const string16& user_text) = 0;
 
     // Called when the user has indicated that she wants to remove the specified
     // autofill suggestion from the database.
-    virtual void RemoveAutofillEntry(const std::wstring& field_name,
-                                     const std::wstring& value) = 0;
+    virtual void RemoveAutofillEntry(const string16& field_name,
+                                     const string16& value) = 0;
   };
 
   // ---------------------------------------------------------------------------
@@ -372,6 +383,16 @@ class RenderViewHostDelegate {
   // Return this object cast to a TabContents, if it is one. If the object is
   // not a TabContents, returns NULL.
   virtual TabContents* GetAsTabContents();
+
+  // Adds a notice that something was blocked.
+  virtual void AddBlockedNotice(const GURL& url, const string16& reason);
+
+  // Return id number of browser window which this object is attached to. If no
+  // browser window is attached to, just return -1.
+  virtual int GetBrowserWindowID() const = 0;
+
+  // Return type of RenderView which is attached with this object.
+  virtual ViewType::Type GetRenderViewType() const = 0;
 
   // The RenderView is being constructed (message sent to the renderer process
   // to construct a RenderView).  Now is a good time to send other setup events
@@ -404,7 +425,7 @@ class RenderViewHostDelegate {
 
   // The page's encoding was changed and should be updated.
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
-                              const std::wstring& encoding) {}
+                              const std::string& encoding) {}
 
   // The destination URL has changed should be updated
   virtual void UpdateTargetURL(int32 page_id, const GURL& url) {}
@@ -415,7 +436,7 @@ class RenderViewHostDelegate {
                                const ThumbnailScore& score) {}
 
   // Inspector settings were changes and should be persisted.
-  virtual void UpdateInspectorSettings(const std::wstring& raw_settings) {}
+  virtual void UpdateInspectorSettings(const std::string& raw_settings) {}
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -425,11 +446,15 @@ class RenderViewHostDelegate {
 
   // The RenderView began loading a new page. This corresponds to WebKit's
   // notion of the throbber starting.
-  virtual void DidStartLoading(RenderViewHost* render_view_host) {}
+  virtual void DidStartLoading() {}
 
   // The RenderView stopped loading a page. This corresponds to WebKit's
   // notion of the throbber stopping.
-  virtual void DidStopLoading(RenderViewHost* render_view_host) {}
+  virtual void DidStopLoading() {}
+
+  // The RenderView's main frame document element is ready. This happens when
+  // the document has finished parsing.
+  virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host) {}
 
   // The page wants to open a URL with the specified disposition.
   virtual void RequestOpenURL(const GURL& url,
@@ -444,7 +469,7 @@ class RenderViewHostDelegate {
   // A message was sent from HTML-based UI.
   // By default we ignore such messages.
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const std::string& content,
+                                   const Value* content,
                                    int request_id,
                                    bool has_callback) {}
 
@@ -520,13 +545,17 @@ class RenderViewHostDelegate {
   virtual void RendererResponsive(RenderViewHost* render_view_host) {}
 
   // Notification that the RenderViewHost's load state changed.
-  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state) {}
+  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state,
+                                uint64 upload_position, uint64 upload_size) {}
 
   // Returns true if this view is used to host an external tab container.
   virtual bool IsExternalTabContainer() const;
 
   // The RenderView has inserted one css file into page.
   virtual void DidInsertCSS() {}
+
+  // A different node in the page got focused.
+  virtual void FocusedNodeChanged() {}
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RENDER_VIEW_HOST_DELEGATE_H_

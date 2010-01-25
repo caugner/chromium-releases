@@ -33,52 +33,185 @@
 // Tests the functionality defined in MessageQueue.cc/h
 
 #include "core/cross/message_queue.h"
-#include "core/cross/client.h"
+#include "core/cross/client_info.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
+#include "core/cross/error_status.h"
+#include "core/cross/service_dependency.h"
+#include "core/cross/texture.h"
 #include "core/cross/types.h"
+#include "core/cross/renderer.h"
 #include "tests/common/win/testing_common.h"
+#include "base/condition_variable.h"
+#include "base/lock.h"
+#include "base/platform_thread.h"
+#include "base/time.h"
 
+using ::base::Time;
+using ::base::TimeDelta;
 
 namespace o3d {
 
-// Name of socket address used in this test
-nacl::SocketAddress my_address = {
-  "test-client"
+//----------------------------------------------------------------------
+// These are helper classes for the little multithreaded test harness
+// below.
+
+class TimeSource {
+ public:
+  virtual ~TimeSource() {}
+  virtual TimeDelta TimeSinceConstruction() = 0;
 };
 
-class MessageQueueTest : public testing::Test {
- protected:
-
-  MessageQueueTest()
-      : object_manager_(g_service_locator) {}
-
-  virtual void SetUp();
-  virtual void TearDown();
-
-  Pack* pack() { return pack_; }
-  nacl::Handle my_socket_handle() { return my_socket_handle_; }
-
+class WallClockTimeSource : public TimeSource {
  private:
-  ServiceDependency<ObjectManager> object_manager_;
-  Pack *pack_;
-  nacl::Handle my_socket_handle_;
+  Time construction_time_;
+
+ public:
+  WallClockTimeSource() {
+    construction_time_ = Time::Now();
+  }
+
+  virtual TimeDelta TimeSinceConstruction() {
+    return Time::Now() - construction_time_;
+  }
 };
 
-void MessageQueueTest::SetUp() {
-  pack_ = object_manager_->CreatePack(L"MessageQueueTest");
+// The TestWatchdog expects to be signalled a certain number of times
+// within a certain period of time. If it is not signalled this number
+// of times, this indicates one failure mode of the test.
+class TestWatchdog {
+ private:
+  Lock lock_;
+  ConditionVariable condition_;
+  int expected_num_signals_;
+  TimeDelta time_to_run_;
+  TimeSource* time_source_;
 
-  // Create a bound socket to connect to the MessageQueue.
-  my_socket_handle_ = nacl::BoundSocket(&my_address);
+ public:
+  TestWatchdog(int expected_num_signals,
+               TimeDelta time_to_run,
+               TimeSource* time_source)
+      : lock_(),
+        condition_(&lock_),
+        expected_num_signals_(expected_num_signals),
+        time_to_run_(time_to_run),
+        time_source_(time_source) {}
 
-  ASSERT_TRUE(my_socket_handle_ != nacl::kInvalidHandle);
-}
+  void Signal() {
+    AutoLock locker(lock_);
+    ASSERT_GE(expected_num_signals_, 0);
+    --expected_num_signals_;
+    condition_.Broadcast();
+  }
 
-void MessageQueueTest::TearDown() {
-  nacl::Close(my_socket_handle_);
-  object_manager_->DestroyPack(pack_);
-}
+  // Pause the current thread briefly waiting for a signal so we don't
+  // consume all CPU
+  void WaitBrieflyForSignal() {
+    AutoLock locker(lock_);
+    condition_.TimedWait(TimeDelta::FromMilliseconds(5));
+  }
 
-// Helper class that handles connecting to the MessageQueue and issuing
-// commands to it.
+  bool Expired() {
+    return time_source_->TimeSinceConstruction() > time_to_run_;
+  }
+
+  bool Succeeded() {
+    return expected_num_signals_ == 0;
+  }
+
+  bool Done() {
+    return Succeeded() || Expired();
+  }
+};
+
+// This is the base class for the multithreaded tests which are
+// executed via MessageQueueTest::RunTests(). Each instance is run in
+// its own thread. Override the Run() method with the body of the
+// test.
+class PerThreadConnectedTest : public PlatformThread::Delegate {
+ private:
+  MessageQueue* queue_;
+  nacl::Handle socket_handle_;
+  TestWatchdog* watchdog_;
+  volatile bool completed_;
+  volatile bool passed_;
+  String file_;
+  int line_;
+  String failure_message_;
+
+ protected:
+  void Pass() {
+    completed_ = true;
+    passed_ = true;
+    watchdog_->Signal();
+  }
+
+  void Fail(String file,
+            int line,
+            String failure_message) {
+    completed_ = true;
+    passed_ = false;
+    file_ = file;
+    line_ = line;
+    failure_message_ = failure_message;
+    watchdog_->Signal();
+  }
+
+ public:
+  PerThreadConnectedTest()
+      : queue_(NULL),
+        socket_handle_(nacl::kInvalidHandle),
+        watchdog_(NULL),
+        completed_(false),
+        passed_(false),
+        line_(0) {}
+
+  // Override this with the particular test's functionality
+  virtual void Run(MessageQueue* queue,
+                   nacl::Handle socket_handle) = 0;
+
+  void Configure(MessageQueue* queue,
+                 nacl::Handle socket_handle,
+                 TestWatchdog* watchdog) {
+    queue_ = queue;
+    watchdog_ = watchdog;
+    socket_handle_ = socket_handle;
+  }
+
+  // Indicates whether or not the PerThreadTest should be deleted;
+  // if it is hanging then to avoid crashes we do not delete it
+  bool Completed() {
+    return completed_;
+  }
+
+  bool Passed() {
+    return passed_;
+  }
+
+  const String FailureMessage() {
+    std::ostringstream oss;
+    oss << file_ << ", line " << line_ << ": " + failure_message_;
+    return oss.str();
+  }
+
+  // This overrides the functionality in PlatformThread::Delegate;
+  // don't override this in subclasses.
+  virtual void ThreadMain() {
+    Run(queue_, socket_handle_);
+  }
+};
+
+#define FAIL_TEST(message) Fail(__FILE__, __LINE__, message); return
+
+class TestProvider {
+ public:
+  virtual ~TestProvider() {}
+  virtual PerThreadConnectedTest* CreateTest() = 0;
+};
+
+//----------------------------------------------------------------------
+// This is a helper class that handles connecting to the MessageQueue
+// and issuing commands to it.
 class TextureUpdateHelper {
  public:
   TextureUpdateHelper() : o3d_handle_(nacl::kInvalidHandle) {}
@@ -98,6 +231,33 @@ class TextureUpdateHelper {
                             int shared_memory_id,
                             size_t offset,
                             size_t number_of_bytes);
+
+  // Makes a request to update a portion of a texture.
+  bool RequestTextureRectUpdate(unsigned int texture_id,
+                                int level,
+                                int x,
+                                int y,
+                                int width,
+                                int height,
+                                int shared_memory_id,
+                                size_t offset,
+                                size_t number_of_bytes);
+
+  // Registers a client-allocated shared memory segment with O3D,
+  // returning O3D's shared memory ID for later updating. Returns -1
+  // upon failure.
+  int RegisterSharedMemory(nacl::Handle shared_memory,
+                           size_t shared_memory_size);
+
+  // Unregisters a previously-registered client-allocated shared
+  // memory segment.
+  bool UnregisterSharedMemory(int shared_memory_id);
+
+  // Tells the renderer to render.
+  bool Render();
+
+  // Gets the version
+  bool GetVersion();
 
  private:
   // Handle of the socket that's connected to o3d.
@@ -122,7 +282,7 @@ bool TextureUpdateHelper::ReceiveBooleanResponse() {
 
   int result = nacl::ReceiveDatagram(o3d_handle_, &header, 0);
 
-  EXPECT_EQ(sizeof(response), result);
+  EXPECT_EQ(sizeof(response), static_cast<unsigned>(result));
   if (result != sizeof(response)) {
     return false;
   }
@@ -140,20 +300,16 @@ bool TextureUpdateHelper::ConnectToO3D(const char* o3d_address,
     return false;
   }
 
-  char buffer[128];
-  int message_size = 0;
-  MessageQueue::MessageId *msg_id =
-      reinterpret_cast<MessageQueue::MessageId*>(buffer);
-  *msg_id = MessageQueue::HELLO;
-  message_size += sizeof(*msg_id);
-
+  MessageHello msg;
   nacl::MessageHeader header;
   nacl::IOVec vec;
-  vec.base = buffer;
-  vec.length = message_size;
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
 
-  nacl::SocketAddress o3d_address;
-  sprintf_s(o3d_address.path, sizeof(o3d_address.path), "%s", o3d_address);
+  nacl::SocketAddress socket_address;
+  ::base::snprintf(socket_address.path,
+                   sizeof(socket_address.path),
+                   "%s", o3d_address);
 
   header.iov = &vec;
   header.iov_length = 1;
@@ -162,10 +318,10 @@ bool TextureUpdateHelper::ConnectToO3D(const char* o3d_address,
   int result = nacl::SendDatagramTo(my_socket_handle,
                                     &header,
                                     0,
-                                    &o3d_address);
+                                    &socket_address);
 
-  EXPECT_EQ(message_size, result);
-  if (result != message_size) {
+  EXPECT_EQ(sizeof(msg.msg), static_cast<size_t>(result));
+  if (static_cast<size_t>(result) != sizeof(msg.msg)) {
     return false;
   }
 
@@ -194,22 +350,12 @@ bool TextureUpdateHelper::RequestSharedMemory(size_t requested_size,
     return false;
   }
 
-  MessageQueue::MessageId message_id = MessageQueue::ALLOCATE_SHARED_MEMORY;
-
+  MessageAllocateSharedMemory msg(requested_size);
   nacl::MessageHeader header;
   nacl::IOVec vec;
-  char buffer[256];
-  char *buffer_ptr = &buffer[0];
 
-  // Message contains the ID and one argument (the size of the shared memory
-  // buffer to be allocated).
-  *(reinterpret_cast<MessageQueue::MessageId*>(buffer_ptr)) = message_id;
-  buffer_ptr += sizeof(message_id);
-  *(reinterpret_cast<size_t*>(buffer_ptr)) = requested_size;
-  buffer_ptr += sizeof(requested_size);
-
-  vec.base = buffer;
-  vec.length = buffer_ptr - &buffer[0];
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
 
   header.iov = &vec;
   header.iov_length = 1;
@@ -218,8 +364,8 @@ bool TextureUpdateHelper::RequestSharedMemory(size_t requested_size,
 
   // Send message.
   int result = nacl::SendDatagram(o3d_handle_, &header, 0);
-  EXPECT_EQ(vec.length, result);
-  if (result != vec.length) {
+  EXPECT_EQ(vec.length, static_cast<unsigned>(result));
+  if (static_cast<unsigned>(result) != vec.length) {
     return false;
   }
 
@@ -237,9 +383,9 @@ bool TextureUpdateHelper::RequestSharedMemory(size_t requested_size,
   result = nacl::ReceiveDatagram(o3d_handle_, &header, 0);
 
   EXPECT_LT(0, result);
-  EXPECT_FALSE(header.flags & nacl::kMessageTruncated);
-  EXPECT_EQ(1, header.handle_count);
-  EXPECT_EQ(1, header.iov_length);
+  EXPECT_EQ(0, header.flags & nacl::kMessageTruncated);
+  EXPECT_EQ(1U, header.handle_count);
+  EXPECT_EQ(1U, header.iov_length);
 
   if (result < 0 ||
       header.flags & nacl::kMessageTruncated ||
@@ -277,44 +423,26 @@ bool TextureUpdateHelper::RequestTextureUpdate(unsigned int texture_id,
                                                int shared_memory_id,
                                                size_t offset,
                                                size_t number_of_bytes) {
-  MessageQueue::MessageId message_id = MessageQueue::UPDATE_TEXTURE2D;
+  MessageUpdateTexture2D msg(
+      texture_id, level, shared_memory_id, offset, number_of_bytes);
 
   nacl::MessageHeader header;
   nacl::IOVec vec;
-  char buffer[256];
-  char *buffer_ptr = &buffer[0];
 
-  // Message contains the message ID and two arguments, the id of the Texture
-  // object in O3D and the offset in the shared memory region where the
-  // bitmap is stored.
-  *(reinterpret_cast<MessageQueue::MessageId*>(buffer_ptr)) = message_id;
-  buffer_ptr += sizeof(message_id);
-  *(reinterpret_cast<unsigned int*>(buffer_ptr)) = texture_id;
-  buffer_ptr += sizeof(texture_id);
-  *(reinterpret_cast<int*>(buffer_ptr)) = level;
-  buffer_ptr += sizeof(level);
-  *(reinterpret_cast<int*>(buffer_ptr)) = shared_memory_id;
-  buffer_ptr += sizeof(shared_memory_id);
-  *(reinterpret_cast<size_t*>(buffer_ptr)) = offset;
-  buffer_ptr += sizeof(offset);
-  *(reinterpret_cast<size_t*>(buffer_ptr)) = number_of_bytes;
-  buffer_ptr += sizeof(number_of_bytes);
-
-  vec.base = buffer;
-  vec.length = buffer_ptr - &buffer[0];
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
 
   header.iov = &vec;
   header.iov_length = 1;
   header.handles = NULL;
   header.handle_count = 0;
 
-
   // Send message.
   int result = nacl::SendDatagram(o3d_handle_, &header, 0);
 
-  EXPECT_EQ(vec.length, result);
+  EXPECT_EQ(vec.length, static_cast<unsigned>(result));
 
-  if (result != vec.length) {
+  if (static_cast<unsigned>(result) != vec.length) {
     return false;
   }
 
@@ -327,7 +455,318 @@ bool TextureUpdateHelper::RequestTextureUpdate(unsigned int texture_id,
   return texture_updated;
 }
 
+// Sends a message to O3D to update the a potion of the contents of a texture
+// using the data stored in shared memory.
+bool TextureUpdateHelper::RequestTextureRectUpdate(unsigned int texture_id,
+                                                   int level,
+                                                   int x,
+                                                   int y,
+                                                   int width,
+                                                   int height,
+                                                   int shared_memory_id,
+                                                   size_t offset,
+                                                   size_t number_of_bytes) {
+  MessageUpdateTexture2DRect msg(
+      texture_id, level, x, y, width, height,
+      shared_memory_id, offset, number_of_bytes);
 
+  nacl::MessageHeader header;
+  nacl::IOVec vec;
+
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
+
+  header.iov = &vec;
+  header.iov_length = 1;
+  header.handles = NULL;
+  header.handle_count = 0;
+
+  // Send message.
+  int result = nacl::SendDatagram(o3d_handle_, &header, 0);
+
+  EXPECT_EQ(vec.length, static_cast<unsigned>(result));
+
+  if (static_cast<unsigned>(result) != vec.length) {
+    return false;
+  }
+
+  // Wait for a response from the server.  If the server returns true then
+  // the texture update was successfully procesed.
+  bool texture_updated = ReceiveBooleanResponse();
+
+  EXPECT_TRUE(texture_updated);
+
+  return texture_updated;
+}
+
+// Registers a client-allocated shared memory segment with O3D. It
+// receives back a shared memory ID for later texture updating.
+// Returns -1 upon failure.
+int TextureUpdateHelper::RegisterSharedMemory(nacl::Handle shared_memory,
+                                              size_t shared_memory_size) {
+  if (o3d_handle_ == nacl::kInvalidHandle) {
+    return false;
+  }
+
+  MessageRegisterSharedMemory msg(static_cast<int32>(shared_memory_size));
+
+  nacl::MessageHeader header;
+  nacl::IOVec vec;
+
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
+
+  header.iov = &vec;
+  header.iov_length = 1;
+  header.handles = &shared_memory;
+  header.handle_count = 1;
+
+  // Send message.
+  int result = nacl::SendDatagram(o3d_handle_, &header, 0);
+  EXPECT_EQ(vec.length, static_cast<unsigned>(result));
+  if (static_cast<unsigned>(result) != vec.length) {
+    return -1;
+  }
+
+  // Wait for a message back from the server containing the ID of the
+  // shared memory object.
+  nacl::MessageHeader reply_header;
+  int shared_memory_id = -1;
+  nacl::IOVec shared_memory_vec;
+  shared_memory_vec.base = &shared_memory_id;
+  shared_memory_vec.length = sizeof(shared_memory_id);
+  reply_header.iov = &shared_memory_vec;
+  reply_header.iov_length = 1;
+  reply_header.handles = NULL;
+  reply_header.handle_count = 0;
+
+  result = nacl::ReceiveDatagram(o3d_handle_, &reply_header, 0);
+  EXPECT_EQ(shared_memory_vec.length, static_cast<unsigned>(result));
+  EXPECT_EQ(0, reply_header.flags & nacl::kMessageTruncated);
+  EXPECT_EQ(0U, reply_header.handle_count);
+  EXPECT_EQ(1U, reply_header.iov_length);
+
+  return shared_memory_id;
+}
+
+// Unregisters a previously-registered client-allocated shared
+// memory segment.
+bool TextureUpdateHelper::UnregisterSharedMemory(int shared_memory_id) {
+  MessageUnregisterSharedMemory msg(shared_memory_id);
+  nacl::MessageHeader header;
+  nacl::IOVec vec;
+
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
+  header.iov = &vec;
+  header.iov_length = 1;
+  header.handles = NULL;
+  header.handle_count = 0;
+
+  // Send message.
+  int result = nacl::SendDatagram(o3d_handle_, &header, 0);
+  EXPECT_EQ(static_cast<int>(vec.length), result);
+  // Read back the boolean reply from the O3D plugin
+  bool reply = ReceiveBooleanResponse();
+  EXPECT_TRUE(reply);
+  return reply;
+}
+
+// Tells the renderer to render..
+bool TextureUpdateHelper::Render() {
+  MessageRender msg;
+  nacl::MessageHeader header;
+  nacl::IOVec vec;
+
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
+  header.iov = &vec;
+  header.iov_length = 1;
+  header.handles = NULL;
+  header.handle_count = 0;
+
+  // Send message.
+  int result = nacl::SendDatagram(o3d_handle_, &header, 0);
+  EXPECT_EQ(static_cast<int>(vec.length), result);
+  return true;
+}
+
+bool TextureUpdateHelper::GetVersion() {
+  MessageGetVersion msg;
+  nacl::MessageHeader header;
+  nacl::IOVec vec;
+
+  vec.base = &msg.msg;
+  vec.length = sizeof(msg.msg);
+  header.iov = &vec;
+  header.iov_length = 1;
+  header.handles = NULL;
+  header.handle_count = 0;
+
+  // Send message.
+  int result = nacl::SendDatagram(o3d_handle_, &header, 0);
+  EXPECT_EQ(static_cast<int>(vec.length), result);
+
+  // Wait for a message back from the server containing the version of O3D.
+  MessageGetVersion::ResponseData response;
+  nacl::MessageHeader reply_header;
+  nacl::IOVec version_vec;
+  version_vec.base = &response;
+  version_vec.length = sizeof(response);
+  reply_header.iov = &version_vec;
+  reply_header.iov_length = 1;
+  reply_header.handles = NULL;
+  reply_header.handle_count = 0;
+
+  result = nacl::ReceiveDatagram(o3d_handle_, &reply_header, 0);
+  EXPECT_EQ(version_vec.length, static_cast<unsigned>(result));
+  EXPECT_EQ(0, reply_header.flags & nacl::kMessageTruncated);
+  EXPECT_EQ(0U, reply_header.handle_count);
+  EXPECT_EQ(1U, reply_header.iov_length);
+
+  ClientInfoManager* manager(
+      g_service_locator->GetService<ClientInfoManager>());
+  EXPECT_TRUE(manager != NULL);
+  if (manager) {
+    EXPECT_EQ(0, manager->client_info().version().compare(response.version));
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------
+// This is the main class containing all of the other ones. It knows
+// how to run multiple concurrent PerThreadConnectedTests.
+class MessageQueueTest : public testing::Test {
+ protected:
+  MessageQueueTest()
+      : object_manager_(g_service_locator),
+        error_status_(g_service_locator),
+        socket_handles_(NULL),
+        num_socket_handles_(0) {}
+
+  virtual void SetUp();
+  virtual void TearDown();
+
+  // This is the entry point for test cases that need to be run in one
+  // or more threads.
+  void RunTests(int num_threads,
+                TimeDelta timeout,
+                TestProvider* test_provider);
+
+  Pack* pack() { return pack_; }
+
+  // Checks if an error has occured on the client then clears the error.
+  bool CheckErrorExists() {
+    bool have_error = !error_status_.GetLastError().empty();
+    error_status_.ClearLastError();
+    return have_error;
+  }
+
+ private:
+  ServiceDependency<ObjectManager> object_manager_;
+  ErrorStatus error_status_;
+  Pack *pack_;
+  nacl::Handle* socket_handles_;
+  int num_socket_handles_;
+
+  // This can't be part of SetUp since it needs to be called from each
+  // individual test.
+  void ConfigureSockets(int number_of_clients);
+
+  nacl::Handle GetSocketHandle(int i) {
+    // We would use ASSERT_ here, but that doesn't seem to work from
+    // within methods that have non-void return types.
+    EXPECT_TRUE(socket_handles_ != NULL);
+    EXPECT_LT(i, num_socket_handles_);
+    return socket_handles_[i];
+  }
+};
+
+void MessageQueueTest::SetUp() {
+  pack_ = object_manager_->CreatePack();
+  pack_->set_name("MessageQueueTest pack");
+}
+
+void MessageQueueTest::ConfigureSockets(int number_of_clients) {
+  ASSERT_GT(number_of_clients, 0);
+  num_socket_handles_ = number_of_clients;
+  socket_handles_ = new nacl::Handle[num_socket_handles_];
+  ASSERT_TRUE(socket_handles_ != NULL);
+  for (int i = 0; i < num_socket_handles_; i++) {
+    nacl::SocketAddress socket_address;
+    ::base::snprintf(socket_address.path,
+                     sizeof(socket_address.path),
+                     "%s%d",
+                     "test-client",
+                     i);
+    socket_handles_[i] = nacl::BoundSocket(&socket_address);
+    ASSERT_NE(nacl::kInvalidHandle, socket_handles_[i]);
+  }
+}
+
+void MessageQueueTest::TearDown() {
+  if (socket_handles_ != NULL) {
+    for (int i = 0; i < num_socket_handles_; i++) {
+      nacl::Close(socket_handles_[i]);
+    }
+    delete[] socket_handles_;
+    socket_handles_ = NULL;
+    num_socket_handles_ = 0;
+  }
+
+  object_manager_->DestroyPack(pack_);
+}
+
+void MessageQueueTest::RunTests(int num_threads,
+                                TimeDelta timeout,
+                                TestProvider* provider) {
+  MessageQueue* message_queue = new MessageQueue(g_service_locator);
+  message_queue->Initialize();
+
+  TimeSource* time_source = new WallClockTimeSource();
+  TestWatchdog* watchdog = new TestWatchdog(num_threads,
+                                            timeout,
+                                            time_source);
+  PerThreadConnectedTest** tests = new PerThreadConnectedTest*[num_threads];
+  ASSERT_TRUE(tests != NULL);
+  PlatformThreadHandle* thread_handles = new PlatformThreadHandle[num_threads];
+  ASSERT_TRUE(thread_handles != NULL);
+  ConfigureSockets(num_threads);
+  for (int i = 0; i < num_threads; i++) {
+    tests[i] = provider->CreateTest();
+    ASSERT_TRUE(tests[i] != NULL);
+    tests[i]->Configure(message_queue, GetSocketHandle(i), watchdog);
+  }
+  // Now that all tests are created, start them up
+  for (int i = 0; i < num_threads; i++) {
+    ASSERT_TRUE(PlatformThread::Create(0, tests[i], &thread_handles[i]));
+  }
+  // Wait for completion
+  while (!watchdog->Done()) {
+    ASSERT_TRUE(message_queue->CheckForNewMessages());
+    watchdog->WaitBrieflyForSignal();
+  }
+  ASSERT_FALSE(watchdog->Expired());
+  ASSERT_TRUE(watchdog->Succeeded());
+  for (int i = 0; i < num_threads; i++) {
+    PerThreadConnectedTest* test = tests[i];
+    ASSERT_TRUE(test->Passed()) << test->FailureMessage();
+    // Only join the thread and delete the test if it completed
+    if (test->Completed()) {
+      PlatformThread::Join(thread_handles[i]);
+      delete test;
+    }
+  }
+  delete[] thread_handles;
+  delete[] tests;
+  delete watchdog;
+  delete time_source;
+  delete message_queue;
+}
+
+//----------------------------------------------------------------------
+// Test cases follow.
 
 // Tests that the message queue socket is properly initialized.
 TEST_F(MessageQueueTest, Initialize) {
@@ -337,94 +776,534 @@ TEST_F(MessageQueueTest, Initialize) {
 
   String socket_addr = message_queue->GetSocketAddress();
 
-  // Make sure the name starts with "google-o3d"
-  EXPECT_EQ(0, socket_addr.find("google-o3d"));
+  // Make sure the name starts with the expected value
+  EXPECT_EQ(0U, socket_addr.find("o3d"));
 
   delete message_queue;
+  EXPECT_FALSE(CheckErrorExists());
 }
 
 // Tests that the a client can actually establish a connection to the
 // MessageQueue.
 TEST_F(MessageQueueTest, TestConnection) {
-  MessageQueue* message_queue = new MessageQueue(g_service_locator);
-  message_queue->Initialize();
+  class ConnectionTest : public PerThreadConnectedTest {
+   public:
+    void Run(MessageQueue* queue,
+             nacl::Handle socket_handle) {
+      String socket_addr = queue->GetSocketAddress();
+      TextureUpdateHelper helper;
+      if (helper.ConnectToO3D(socket_addr.c_str(),
+                              socket_handle)) {
+        Pass();
+      } else {
+        FAIL_TEST("Failed to connect to O3D");
+      }
+    }
+  };
 
-  String socket_addr = message_queue->GetSocketAddress();
-  std::string socket_addr_utf8;
-  StringToUTF8(socket_addr, &socket_addr_utf8);
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new ConnectionTest();
+    }
+  };
 
-  TextureUpdateHelper helper;
-  EXPECT_TRUE(helper.ConnectToO3D(socket_addr_utf8.c_str(),
-                                  my_socket_handle()));
-
-  delete message_queue;
+  Provider provider;
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
 }
 
 // Tests a request for shared memory.
 TEST_F(MessageQueueTest, GetSharedMemory) {
-  MessageQueue* message_queue = new MessageQueue(g_service_locator);
-  message_queue->Initialize();
+  class SharedMemoryTest : public PerThreadConnectedTest {
+   public:
+    void Run(MessageQueue* queue,
+             nacl::Handle socket_handle) {
+      String socket_addr = queue->GetSocketAddress();
+      TextureUpdateHelper helper;
+      if (!helper.ConnectToO3D(socket_addr.c_str(),
+                               socket_handle)) {
+        FAIL_TEST("Failed to connect to O3D");
+      }
 
-  String socket_addr = message_queue->GetSocketAddress();
-  std::string socket_addr_utf8;
-  StringToUTF8(socket_addr, &socket_addr_utf8);
+      void *shared_mem_address = NULL;
+      int shared_mem_id = -1;
+      bool memory_ok = helper.RequestSharedMemory(65536,
+                                                  &shared_mem_id,
+                                                  &shared_mem_address);
+      if (shared_mem_id == -1) {
+        FAIL_TEST("Shared memory id was -1");
+      }
 
-  TextureUpdateHelper helper;
-  ASSERT_TRUE(helper.ConnectToO3D(socket_addr_utf8.c_str(),
-                                  my_socket_handle()));
+      if (shared_mem_address == NULL) {
+        FAIL_TEST("Shared memory address was NULL");
+      }
 
-  void *shared_mem_address = NULL;
-  int shared_mem_id = -1;
-  bool memory_ok = helper.RequestSharedMemory(65536,
-                                              &shared_mem_id,
-                                              &shared_mem_address);
-  EXPECT_NE(-1, shared_mem_id);
-  EXPECT_TRUE(shared_mem_address != NULL);
+      if (!memory_ok) {
+        FAIL_TEST("Memory request failed");
+      }
 
-  EXPECT_TRUE(memory_ok);
+      Pass();
+    }
+  };
 
-  delete message_queue;
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new SharedMemoryTest();
+    }
+  };
+
+  Provider provider;
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
 }
 
 // Tests a request to update a texture.
 TEST_F(MessageQueueTest, UpdateTexture2D) {
-  MessageQueue* message_queue = new MessageQueue(g_service_locator);
-  message_queue->Initialize();
+  class UpdateTexture2DTest : public PerThreadConnectedTest {
+   public:
+    UpdateTexture2DTest(int texture_id, int buffer_size)
+        : texture_id_(texture_id),
+          buffer_size_(buffer_size) {
+    }
 
-  String socket_addr = message_queue->GetSocketAddress();
-  std::string socket_addr_utf8;
-  StringToUTF8(socket_addr, &socket_addr_utf8);
+    void Run(MessageQueue* queue,
+             nacl::Handle socket_handle) {
+      String socket_addr = queue->GetSocketAddress();
+      TextureUpdateHelper helper;
+      if (!helper.ConnectToO3D(socket_addr.c_str(),
+                               socket_handle)) {
+        FAIL_TEST("Failed to connect to O3D");
+      }
 
-  TextureUpdateHelper helper;
-  ASSERT_TRUE(helper.ConnectToO3D(socket_addr_utf8.c_str(),
-                                  my_socket_handle()));
+      void *shared_mem_address = NULL;
+      int shared_mem_id = -1;
+      bool memory_ok = helper.RequestSharedMemory(65536,
+                                                  &shared_mem_id,
+                                                  &shared_mem_address);
+      if (shared_mem_id == -1) {
+        FAIL_TEST("Shared memory id was -1");
+      }
 
-  void *shared_mem_address = NULL;
-  int shared_mem_id = -1;
-  bool memory_ok = helper.RequestSharedMemory(65536,
-                                              &shared_mem_id,
-                                              &shared_mem_address);
+      if (shared_mem_address == NULL) {
+        FAIL_TEST("Shared memory address was NULL");
+      }
 
-  ASSERT_TRUE(memory_ok);
+      if (!memory_ok) {
+        FAIL_TEST("Memory request failed");
+      }
 
-  Texture2D* texture = pack()->CreateTexture2D("test_texture",
-                                               128,
+      if (!helper.RequestTextureUpdate(texture_id_,
+                                       0,
+                                       shared_mem_id,
+                                       0,
+                                       buffer_size_)) {
+        FAIL_TEST("RequestTextureUpdate failed");
+      }
+
+      Pass();
+    }
+
+   private:
+    int texture_id_;
+    int buffer_size_;
+  };
+
+  class Provider : public TestProvider {
+   public:
+    Provider(int texture_id, int buffer_size)
+        : texture_id_(texture_id),
+          buffer_size_(buffer_size) {
+    }
+
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new UpdateTexture2DTest(texture_id_, buffer_size_);
+    }
+
+   private:
+    int texture_id_;
+    int buffer_size_;
+  };
+
+  Texture2D* texture = pack()->CreateTexture2D(128,
                                                128,
                                                Texture::ARGB8,
-                                               0);
+                                               0,
+                                               false);
 
   ASSERT_TRUE(texture != NULL);
 
-  int texture_buffer_size = 128*128*4;
-
-  EXPECT_TRUE(helper.RequestTextureUpdate(texture->id(),
-                                          0,
-                                          shared_mem_id,
-                                          0,
-                                          texture_buffer_size));
-
-  delete message_queue;
+  Provider provider(texture->id(), 128 * 128 * 4);
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
 }
 
+// Tests a request to update a partial texture.
+TEST_F(MessageQueueTest, UpdateTexture2DPartial) {
+  class UpdateTexture2DTest : public PerThreadConnectedTest {
+   public:
+    UpdateTexture2DTest(int texture_id, int buffer_size)
+        : texture_id_(texture_id),
+          buffer_size_(buffer_size) {
+    }
+
+    void Run(MessageQueue* queue,
+             nacl::Handle socket_handle) {
+      String socket_addr = queue->GetSocketAddress();
+      TextureUpdateHelper helper;
+      if (!helper.ConnectToO3D(socket_addr.c_str(),
+                               socket_handle)) {
+        FAIL_TEST("Failed to connect to O3D");
+      }
+
+      void *shared_mem_address = NULL;
+      int shared_mem_id = -1;
+      bool memory_ok = helper.RequestSharedMemory(65536,
+                                                  &shared_mem_id,
+                                                  &shared_mem_address);
+      if (shared_mem_id == -1) {
+        FAIL_TEST("Shared memory id was -1");
+      }
+
+      if (shared_mem_address == NULL) {
+        FAIL_TEST("Shared memory address was NULL");
+      }
+
+      if (!memory_ok) {
+        FAIL_TEST("Memory request failed");
+      }
+
+      if (!helper.RequestTextureUpdate(texture_id_,
+                                       0,
+                                       shared_mem_id,
+                                       0,
+                                       buffer_size_)) {
+        FAIL_TEST("RequestTextureUpdate failed");
+      }
+
+      Pass();
+    }
+
+   private:
+    int texture_id_;
+    int buffer_size_;
+  };
+
+  class Provider : public TestProvider {
+   public:
+    Provider(int texture_id, int buffer_size)
+        : texture_id_(texture_id),
+          buffer_size_(buffer_size) {
+    }
+
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new UpdateTexture2DTest(texture_id_, buffer_size_);
+    }
+
+   private:
+    int texture_id_;
+    int buffer_size_;
+  };
+
+  // Check updating a partial texture.
+  // Because we pass in 8 * 127 * 4 + 4 that means we'll update
+  // 127 rows and 1 pixel in the last row.
+  Texture2D* texture = pack()->CreateTexture2D(8,
+                                               128,
+                                               Texture::ARGB8,
+                                               0,
+                                               false);
+
+  ASSERT_TRUE(texture != NULL);
+
+  Provider provider(texture->id(), 8 * 127 * 4 + 4);
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+}
+
+// Tests a request to update a texture.
+TEST_F(MessageQueueTest, UpdateTexture2DRect) {
+  class UpdateTexture2DRectTest : public PerThreadConnectedTest {
+   private:
+    int texture_id_;
+
+   public:
+    explicit UpdateTexture2DRectTest(int texture_id) {
+      texture_id_ = texture_id;
+    }
+
+    void Run(MessageQueue* queue,
+             nacl::Handle socket_handle) {
+      String socket_addr = queue->GetSocketAddress();
+      TextureUpdateHelper helper;
+      if (!helper.ConnectToO3D(socket_addr.c_str(),
+                               socket_handle)) {
+        FAIL_TEST("Failed to connect to O3D");
+      }
+
+      void *shared_mem_address = NULL;
+      int shared_mem_id = -1;
+      bool memory_ok = helper.RequestSharedMemory(65536,
+                                                  &shared_mem_id,
+                                                  &shared_mem_address);
+      if (shared_mem_id == -1) {
+        FAIL_TEST("Shared memory id was -1");
+      }
+
+      if (shared_mem_address == NULL) {
+        FAIL_TEST("Shared memory address was NULL");
+      }
+
+      if (!memory_ok) {
+        FAIL_TEST("Memory request failed");
+      }
+
+      const int kLevel = 0;
+      const int kX = 10;
+      const int kY = 11;
+      const int kWidth = 12;
+      const int kHeight = 13;
+      const int kTextureRectSize = kWidth * kHeight * 4;
+
+      if (!helper.RequestTextureRectUpdate(texture_id_,
+                                           kLevel,
+                                           kX,
+                                           kY,
+                                           kWidth,
+                                           kHeight,
+                                           shared_mem_id,
+                                           0,
+                                           kTextureRectSize)) {
+        FAIL_TEST("RequestTextureRectUpdate failed");
+      }
+
+      Pass();
+    }
+  };
+
+  class Provider : public TestProvider {
+   private:
+    int texture_id_;
+
+   public:
+    explicit Provider(int texture_id) : texture_id_(texture_id) {}
+
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new UpdateTexture2DRectTest(texture_id_);
+    }
+  };
+
+  Texture2D* texture = pack()->CreateTexture2D(128,
+                                               128,
+                                               Texture::ARGB8,
+                                               0,
+                                               false);
+
+  ASSERT_TRUE(texture != NULL);
+
+  Provider provider(texture->id());
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+}
+
+namespace {
+
+// This helper class is used for both single-threaded and concurrent
+// shared memory registration / unregistration tests.
+class SharedMemoryRegisterUnregisterTest : public PerThreadConnectedTest {
+ private:
+  int num_iterations_;
+
+ public:
+  explicit SharedMemoryRegisterUnregisterTest(int num_iterations) {
+    num_iterations_ = num_iterations;
+  }
+
+  void Run(MessageQueue* queue,
+           nacl::Handle socket_handle) {
+    String socket_addr = queue->GetSocketAddress();
+    TextureUpdateHelper helper;
+    if (!helper.ConnectToO3D(socket_addr.c_str(),
+                             socket_handle)) {
+      FAIL_TEST("Failed to connect to O3D");
+    }
+
+    // Allocate a shared memory segment
+    size_t mem_size = nacl::kMapPageSize;
+    nacl::Handle shared_memory = nacl::CreateMemoryObject(mem_size);
+    if (shared_memory == nacl::kInvalidHandle) {
+      FAIL_TEST("Failed to allocate shared memory object");
+    }
+
+    // Note that we don't actually have to map it in our process in
+    // order to test the failure mode (corrupted messages) this test
+    // exercises
+
+    for (int i = 0; i < num_iterations_; i++) {
+      int shared_mem_id =
+        helper.RegisterSharedMemory(shared_memory, mem_size);
+      if (shared_mem_id < 0) {
+        FAIL_TEST("Failed to register shared memory with server");
+      }
+      bool result = helper.UnregisterSharedMemory(shared_mem_id);
+      if (!result) {
+        FAIL_TEST("Failed to unregister shared memory from server");
+      }
+    }
+
+    nacl::Close(shared_memory);
+
+    Pass();
+  }
+};
+
+}  // anonymous namespace.
+
+// Tests that a simple shared memory registration and unregistration
+// pair appear to work.
+TEST_F(MessageQueueTest, RegisterAndUnregisterSharedMemory) {
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new SharedMemoryRegisterUnregisterTest(1);
+    }
+  };
+
+  Provider provider;
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+}
+
+// Tests that multiple concurrent clients of the MessageQueue don't
+// break its deserialization operations.
+TEST_F(MessageQueueTest, ConcurrentSharedMemoryOperations) {
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new SharedMemoryRegisterUnregisterTest(100);
+    }
+  };
+
+  Provider provider;
+  RunTests(2, TimeDelta::FromSeconds(6), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+}
+
+namespace {
+
+// This is a helper class for Render test.
+class RenderTest : public PerThreadConnectedTest {
+ private:
+  int num_iterations_;
+
+ public:
+  explicit RenderTest(int num_iterations) {
+    num_iterations_ = num_iterations;
+  }
+
+  void Run(MessageQueue* queue,
+           nacl::Handle socket_handle) {
+    String socket_addr = queue->GetSocketAddress();
+    TextureUpdateHelper helper;
+    if (!helper.ConnectToO3D(socket_addr.c_str(),
+                             socket_handle)) {
+      FAIL_TEST("Failed to connect to O3D");
+    }
+
+    // Allocate a shared memory segment
+    size_t mem_size = nacl::kMapPageSize;
+    nacl::Handle shared_memory = nacl::CreateMemoryObject(mem_size);
+    if (shared_memory == nacl::kInvalidHandle) {
+      FAIL_TEST("Failed to allocate shared memory object");
+    }
+
+    for (int i = 0; i < num_iterations_; i++) {
+      bool result = helper.Render();
+      if (!result) {
+        FAIL_TEST("Failed to request a render");
+      }
+      // Because Render has no result we run a few more messages the do
+      // to make sure Render was processed.
+      int shared_mem_id =
+        helper.RegisterSharedMemory(shared_memory, mem_size);
+      if (shared_mem_id < 0) {
+        FAIL_TEST("Failed to register shared memory with server");
+      }
+      result = helper.UnregisterSharedMemory(shared_mem_id);
+      if (!result) {
+        FAIL_TEST("Failed to unregister shared memory from server");
+      }
+    }
+
+    Pass();
+  }
+};
+
+}  // anonymous namespace.
+
+// Tests requesting a render.
+TEST_F(MessageQueueTest, Render) {
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new RenderTest(1);
+    }
+  };
+
+  Renderer* renderer(g_service_locator->GetService<Renderer>());
+  ASSERT_TRUE(renderer != NULL);
+  renderer->set_need_to_render(false);
+
+  Provider provider;
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+  EXPECT_TRUE(renderer->need_to_render());
+}
+
+namespace {
+
+// This is a helper class for GetVersion test.
+class GetVersionTest : public PerThreadConnectedTest {
+ private:
+  int num_iterations_;
+
+ public:
+  explicit GetVersionTest(int num_iterations) {
+    num_iterations_ = num_iterations;
+  }
+
+  void Run(MessageQueue* queue, nacl::Handle socket_handle) {
+    String socket_addr = queue->GetSocketAddress();
+    TextureUpdateHelper helper;
+    if (!helper.ConnectToO3D(socket_addr.c_str(), socket_handle)) {
+      FAIL_TEST("Failed to connect to O3D");
+    }
+
+    for (int i = 0; i < num_iterations_; i++) {
+      bool result = helper.GetVersion();
+      if (!result) {
+        FAIL_TEST("Failed to request a GetVersion");
+      }
+    }
+
+    Pass();
+  }
+};
+
+}  // anonymous namespace.
+
+// Tests requesting a GetVersion.
+TEST_F(MessageQueueTest, GetVersion) {
+  class Provider : public TestProvider {
+   public:
+    virtual PerThreadConnectedTest* CreateTest() {
+      return new GetVersionTest(1);
+    }
+  };
+
+  Provider provider;
+  RunTests(1, TimeDelta::FromSeconds(1), &provider);
+  EXPECT_FALSE(CheckErrorExists());
+}
 
 }  // namespace o3d

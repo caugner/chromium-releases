@@ -1,19 +1,21 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "printing/image.h"
 
+#include "app/gfx/codec/png_codec.h"
 #include "base/file_util.h"
-#include "base/gfx/png_decoder.h"
-#include "base/gfx/png_encoder.h"
 #include "base/gfx/rect.h"
 #include "base/md5.h"
 #include "base/string_util.h"
 #include "skia/ext/platform_device.h"
 
 #if defined(OS_WIN)
-#include "base/gfx/gdi_util.h"  // EMF support
+#include "app/gfx/gdi_util.h"  // EMF support
+#elif defined(OS_MACOSX)
+#include <ApplicationServices/ApplicationServices.h>
+#include "base/scoped_cftyperef.h"
 #endif
 
 namespace {
@@ -98,20 +100,20 @@ std::string Image::checksum() const {
   return HexEncode(&digest, sizeof(digest));
 }
 
-bool Image::SaveToPng(const std::wstring& filename) const {
+bool Image::SaveToPng(const FilePath& filepath) const {
   DCHECK(!data_.empty());
   std::vector<unsigned char> compressed;
-  bool success = PNGEncoder::Encode(&*data_.begin(),
-                                    PNGEncoder::FORMAT_BGRA,
-                                    size_.width(),
-                                    size_.height(),
-                                    row_length_,
-                                    true,
-                                    &compressed);
+  bool success = gfx::PNGCodec::Encode(&*data_.begin(),
+                                       gfx::PNGCodec::FORMAT_BGRA,
+                                       size_.width(),
+                                       size_.height(),
+                                       row_length_,
+                                       true,
+                                       &compressed);
   DCHECK(success && compressed.size());
   if (success) {
     int write_bytes = file_util::WriteFile(
-        filename,
+        filepath,
         reinterpret_cast<char*>(&*compressed.begin()), compressed.size());
     success = (write_bytes == static_cast<int>(compressed.size()));
     DCHECK(success);
@@ -179,9 +181,9 @@ double Image::PercentageDifferent(const Image& rhs) const {
 bool Image::LoadPng(const std::string& compressed) {
   int w;
   int h;
-  bool success = PNGDecoder::Decode(
+  bool success = gfx::PNGCodec::Decode(
       reinterpret_cast<const unsigned char*>(compressed.c_str()),
-      compressed.size(), PNGDecoder::FORMAT_BGRA, &data_, &w, &h);
+      compressed.size(), gfx::PNGCodec::FORMAT_BGRA, &data_, &w, &h);
   size_.SetSize(w, h);
   row_length_ = size_.width() * sizeof(uint32);
   return success;
@@ -189,7 +191,7 @@ bool Image::LoadPng(const std::string& compressed) {
 
 bool Image::LoadMetafile(const std::string& data) {
   DCHECK(!data.empty());
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   NativeMetafile metafile;
   metafile.CreateFromData(data.data(), data.size());
   return LoadMetafile(metafile);
@@ -229,6 +231,26 @@ bool Image::LoadMetafile(const NativeMetafile& metafile) {
     DeleteDC(hdc);
     DeleteObject(bitmap);
     return success;
+  }
+#elif defined(OS_MACOSX)
+  // The printing system uses single-page metafiles (page indexes are 1-based).
+  const unsigned int page_number = 1;
+  gfx::Rect rect(metafile.GetPageBounds(page_number));
+  if (rect.width() > 0 && rect.height() > 0) {
+    size_ = rect.size();
+    row_length_ = size_.width() * sizeof(uint32);
+    size_t bytes = row_length_ * size_.height();
+    DCHECK(bytes);
+    data_.resize(bytes);
+    scoped_cftyperef<CGColorSpaceRef> color_space(
+        CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB));
+    scoped_cftyperef<CGContextRef> bitmap_context(
+        CGBitmapContextCreate(&*data_.begin(), size_.width(), size_.height(),
+                              8, row_length_, color_space,
+                              kCGImageAlphaPremultipliedLast));
+    DCHECK(bitmap_context.get());
+    metafile.RenderPage(page_number, bitmap_context,
+                        CGRectMake(0, 0, size_.width(), size_.height()));
   }
 #else
   NOTIMPLEMENTED();

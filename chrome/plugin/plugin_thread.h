@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,6 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-class NotificationService;
-
 // The PluginThread class represents a background thread where plugin instances
 // live.  Communication occurs between WebPluginDelegateProxy in the renderer
 // process and WebPluginDelegateStub in this thread through IPC messages.
@@ -29,20 +27,14 @@ class PluginThread : public ChildThread {
   // Returns the one plugin thread.
   static PluginThread* current();
 
+  FilePath plugin_path() { return plugin_path_; }
+
  private:
   virtual void OnControlMessageReceived(const IPC::Message& msg);
 
-  // Thread implementation:
-  virtual void Init();
-  virtual void CleanUp();
-
   // Callback for when a channel has been created.
-  void OnCreateChannel(
-      int process_id,
-      bool off_the_record);
+  void OnCreateChannel(int renderer_id, bool off_the_record);
   void OnPluginMessage(const std::vector<uint8> &data);
-
-  scoped_ptr<NotificationService> notification_service_;
 
   // The plugin module which is preloaded in Init
   base::NativeLibrary preloaded_plugin_module_;

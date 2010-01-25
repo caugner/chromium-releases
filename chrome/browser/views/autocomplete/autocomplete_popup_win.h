@@ -7,21 +7,35 @@
 
 #include "views/widget/widget_win.h"
 
-class AutocompleteEditViewWin;
+class AutocompleteEditView;
 class AutocompletePopupContentsView;
 
 class AutocompletePopupWin : public views::WidgetWin {
  public:
-  // Creates the popup and shows it. |edit_view| is the edit that created us.
-  AutocompletePopupWin(AutocompleteEditViewWin* edit_view,
-                       AutocompletePopupContentsView* contents);
+  explicit AutocompletePopupWin(AutocompletePopupContentsView* contents);
   virtual ~AutocompletePopupWin();
 
- private:
+  // Creates the popup and shows it for the first time. |edit_view| is the edit
+  // that created us.
+  void Init(AutocompleteEditView* edit_view, views::View* contents);
+
+  // Shows the popup and moves it to the right position.
+  void Show();
+
+  // Returns true if the popup is open.
+  bool IsOpen() const;
+
+  // Returns true if the popup has been created.
+  bool IsCreated() const;
+
+ protected:
   // Overridden from WidgetWin:
   virtual LRESULT OnMouseActivate(HWND window,
                                   UINT hit_test,
                                   UINT mouse_message);
+
+ private:
+  AutocompletePopupContentsView* contents_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompletePopupWin);
 };

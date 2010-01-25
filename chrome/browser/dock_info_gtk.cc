@@ -6,7 +6,7 @@
 
 #include <gtk/gtk.h>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/logging.h"
 #include "base/task.h"
 #include "chrome/browser/browser_list.h"
@@ -75,7 +75,7 @@ class TopMostFinder : public BaseWindowFinder {
       return true;
     }
 
-    if (x11_util::IsWindowVisible(window)) {
+    if (!x11_util::IsWindowVisible(window)) {
       // The window isn't visible, keep iterating.
       return false;
     }

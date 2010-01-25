@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,17 @@
 
 #include "webkit/tools/test_shell/webwidget_host.h"
 
-#include "base/gfx/platform_canvas.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "base/logging.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/api/public/mac/WebInputEventFactory.h"
 #include "webkit/api/public/mac/WebScreenInfoFactory.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/api/public/WebPopupMenu.h"
 #include "webkit/api/public/WebScreenInfo.h"
 #include "webkit/api/public/WebSize.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 using WebKit::WebInputEvent;
@@ -140,16 +141,12 @@ WebWidgetHost::WebWidgetHost()
     : view_(NULL),
       webwidget_(NULL),
       scroll_dx_(0),
-      scroll_dy_(0),
-      track_mouse_leave_(false)
-{
+      scroll_dy_(0) {
   set_painting(false);
 }
 
 WebWidgetHost::~WebWidgetHost() {
   // win_util::SetWindowUserData(hwnd_, 0);
-
-  TrackMouseLeave(false);
 
   webwidget_->close();
 }
@@ -235,16 +232,6 @@ void WebWidgetHost::Resize(const gfx::Rect& rect) {
 void WebWidgetHost::MouseEvent(NSEvent *event) {
   const WebMouseEvent& web_event = WebInputEventFactory::mouseEvent(
       event, view_);
-  switch (web_event.type) {
-    case WebInputEvent::MouseMove:
-      TrackMouseLeave(true);
-      break;
-    case WebInputEvent::MouseLeave:
-      TrackMouseLeave(false);
-      break;
-    default:
-      break;
-  }
   webwidget_->handleInputEvent(web_event);
 }
 
@@ -254,7 +241,15 @@ void WebWidgetHost::WheelEvent(NSEvent *event) {
 }
 
 void WebWidgetHost::KeyEvent(NSEvent *event) {
-  webwidget_->handleInputEvent(WebInputEventFactory::keyboardEvent(event));
+  WebKeyboardEvent keyboard_event(WebInputEventFactory::keyboardEvent(event));
+  webwidget_->handleInputEvent(keyboard_event);
+  if ([event type] == NSKeyDown) {
+    // Send a Char event here to emulate the keyboard events.
+    // TODO(hbono): Bug 20852 <http://crbug.com/20852> implement the
+    // NSTextInput protocol and remove this code.
+    keyboard_event.type = WebInputEvent::Char;
+    webwidget_->handleInputEvent(keyboard_event);
+  }
 }
 
 void WebWidgetHost::SetFocus(bool enable) {
@@ -262,9 +257,6 @@ void WebWidgetHost::SetFocus(bool enable) {
   // other's focus when running in parallel.
   if (!TestShell::layout_test_mode())
     webwidget_->setFocus(enable);
-}
-
-void WebWidgetHost::TrackMouseLeave(bool track) {
 }
 
 void WebWidgetHost::ResetScrollRect() {
@@ -280,6 +272,6 @@ void WebWidgetHost::PaintRect(const gfx::Rect& rect) {
   DCHECK(canvas_.get());
 
   set_painting(true);
-  webwidget_->paint(canvas_.get(), rect);
+  webwidget_->paint(webkit_glue::ToWebCanvas(canvas_.get()), rect);
   set_painting(false);
 }

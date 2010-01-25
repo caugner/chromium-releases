@@ -7,6 +7,7 @@
 #ifndef NET_DISK_CACHE_BACKEND_IMPL_H_
 #define NET_DISK_CACHE_BACKEND_IMPL_H_
 
+#include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/timer.h"
 #include "net/disk_cache/block_files.h"
@@ -19,11 +20,14 @@
 namespace disk_cache {
 
 enum BackendFlags {
-  kMask = 1,
-  kMaxSize = 1 << 1,
-  kUnitTestMode = 1 << 2,
-  kUpgradeMode = 1 << 3,
-  kNewEviction = 1 << 4
+  kNone = 0,
+  kMask = 1,                    // A mask (for the index table) was specified.
+  kMaxSize = 1 << 1,            // A maximum size was provided.
+  kUnitTestMode = 1 << 2,       // We are modifying the behavior for testing.
+  kUpgradeMode = 1 << 3,        // This is the upgrade tool (dump).
+  kNewEviction = 1 << 4,        // Use of new eviction was specified.
+  kNoRandom = 1 << 5,           // Don't add randomness to the behavior.
+  kNoLoadProtection = 1 << 6    // Don't act conservatively under load.
 };
 
 // This class implements the Backend interface. An object of this
@@ -31,20 +35,26 @@ enum BackendFlags {
 class BackendImpl : public Backend {
   friend class Eviction;
  public:
-  explicit BackendImpl(const std::wstring& path)
+  explicit BackendImpl(const FilePath& path)
       : path_(path), block_files_(path), mask_(0), max_size_(0),
         cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(0),
         init_(false), restarted_(false), unit_test_(false), read_only_(false),
         new_eviction_(false), first_timer_(true),
         ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
   // mask can be used to limit the usable size of the hash table, for testing.
-  BackendImpl(const std::wstring& path, uint32 mask)
+  BackendImpl(const FilePath& path, uint32 mask)
       : path_(path), block_files_(path), mask_(mask), max_size_(0),
         cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(kMask),
         init_(false), restarted_(false), unit_test_(false), read_only_(false),
         new_eviction_(false), first_timer_(true),
         ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
   ~BackendImpl();
+
+  // Returns a new backend with the desired flags. See the declaration of
+  // CreateCacheBackend().
+  static Backend* CreateBackend(const FilePath& full_path, bool force,
+                                int max_bytes, net::CacheType type,
+                                BackendFlags flags);
 
   // Performs general initialization for this current instance of the cache.
   bool Init();
@@ -69,7 +79,7 @@ class BackendImpl : public Backend {
   void SetType(net::CacheType type);
 
   // Returns the full name for an external storage file.
-  std::wstring GetFileName(Addr address) const;
+  FilePath GetFileName(Addr address) const;
 
   // Returns the actual file used to store a given (non-external) address.
   MappedFile* File(Addr address);
@@ -105,9 +115,10 @@ class BackendImpl : public Backend {
   // |address| is the cache address of the entry.
   void CacheEntryDestroyed(Addr address);
 
-  // Returns true if the data stored by the provided |rankings| points to an
-  // open entry, false otherwise.
-  bool IsOpen(CacheRankingsBlock* rankings) const;
+  // If the data stored by the provided |rankings| points to an open entry,
+  // returns a pointer to that entry, otherwise returns NULL. Note that this
+  // method does NOT increase the ref counter for the entry.
+  EntryImpl* GetOpenEntry(CacheRankingsBlock* rankings) const;
 
   // Returns the id being used on this run of the cache.
   int32 GetCurrentEntryId() const;
@@ -168,6 +179,9 @@ class BackendImpl : public Backend {
 
   // Sets the eviction algorithm to version 2.
   void SetNewEviction();
+
+  // Sets an explicit set of BackendFlags.
+  void SetFlags(uint32 flags);
 
   // Clears the counter of references to test handling of corruptions.
   void ClearRefCountForTest();
@@ -249,7 +263,7 @@ class BackendImpl : public Backend {
   bool CheckEntry(EntryImpl* cache_entry);
 
   scoped_refptr<MappedFile> index_;  // The main cache index.
-  std::wstring path_;  // Path to the folder used as backing storage.
+  FilePath path_;  // Path to the folder used as backing storage.
   Index* data_;  // Pointer to the index data.
   BlockFiles block_files_;  // Set of files used to store all data.
   Rankings rankings_;  // Rankings to be able to trim the cache.

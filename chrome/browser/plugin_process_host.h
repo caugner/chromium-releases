@@ -11,8 +11,8 @@
 #include <queue>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/net/resolve_proxy_msg_helper.h"
@@ -40,12 +40,8 @@ class PluginProcessHost : public ChildProcessHost,
   ~PluginProcessHost();
 
   // Initialize the new plugin process, returning true on success. This must
-  // be called before the object can be used. If plugin_path is the
-  // ActiveX-shim, then activex_clsid is the class id of ActiveX control,
-  // otherwise activex_clsid is ignored.
-  bool Init(const WebPluginInfo& info,
-            const std::string& activex_clsid,
-            const std::wstring& locale);
+  // be called before the object can be used.
+  bool Init(const WebPluginInfo& info, const std::wstring& locale);
 
   virtual void OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelConnected(int32 peer_pid);
@@ -67,7 +63,7 @@ class PluginProcessHost : public ChildProcessHost,
   // channel name.
   static void ReplyToRenderer(ResourceMessageFilter* renderer_message_filter,
                               const IPC::ChannelHandle& channel,
-                              const FilePath& plugin_path,
+                              const WebPluginInfo& info,
                               IPC::Message* reply_msg);
 
   // This function is called on the IO thread once we receive a reply from the
@@ -101,19 +97,26 @@ class PluginProcessHost : public ChildProcessHost,
   void OnGetPluginFinderUrl(std::string* plugin_finder_url);
   void OnGetCookies(uint32 request_context, const GURL& url,
                     std::string* cookies);
-  void OnAccessFiles(int process_id, const std::vector<std::string>& files,
+  void OnAccessFiles(int renderer_id, const std::vector<std::string>& files,
                      bool* allowed);
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
   void OnPluginMessage(const std::vector<uint8>& data);
 
 #if defined(OS_WIN)
   void OnPluginWindowDestroyed(HWND window, HWND parent);
-  void OnDownloadUrl(const std::string& url, int source_pid,
+  void OnDownloadUrl(const std::string& url, int source_child_unique_id,
                      gfx::NativeWindow caller_window);
 #endif
 
 #if defined(OS_LINUX)
   void OnMapNativeViewId(gfx::NativeViewId id, gfx::PluginWindowHandle* output);
+#endif
+
+#if defined(OS_MACOSX)
+  void OnPluginSelectWindow(uint32 window_id, gfx::Rect window_rect);
+  void OnPluginShowWindow(uint32 window_id, gfx::Rect window_rect);
+  void OnPluginHideWindow(uint32 window_id, gfx::Rect window_rect);
+  void OnPluginDisposeWindow(uint32 window_id, gfx::Rect window_rect);
 #endif
 
   virtual bool CanShutdown() { return sent_requests_.empty(); }
@@ -147,8 +150,14 @@ class PluginProcessHost : public ChildProcessHost,
   // Tracks plugin parent windows created on the UI thread.
   std::set<HWND> plugin_parent_windows_set_;
 #endif
+#if defined(OS_MACOSX)
+  // Tracks plugin windows currently visible
+  std::set<uint32> plugin_visible_windows_set_;
+  // Tracks full screen windows currently visible
+  std::set<uint32> plugin_fullscreen_windows_set_;
+#endif
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginProcessHost);
+  DISALLOW_COPY_AND_ASSIGN(PluginProcessHost);
 };
 
 #endif  // CHROME_BROWSER_PLUGIN_PROCESS_HOST_H_

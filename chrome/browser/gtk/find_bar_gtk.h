@@ -11,12 +11,15 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/gtk/focus_store_gtk.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
 
 class Browser;
 class BrowserWindowGtk;
 class CustomDrawButton;
 class FindBarController;
+class GtkThemeProvider;
 class NineBox;
 class SlideAnimatorGtk;
 class TabContentsContainerGtk;
@@ -24,7 +27,8 @@ class TabContentsContainerGtk;
 // Currently this class contains both a model and a view.  We may want to
 // eventually pull out the model specific bits and share with Windows.
 class FindBarGtk : public FindBar,
-                   public FindBarTesting {
+                   public FindBarTesting,
+                   public NotificationObserver {
  public:
   explicit FindBarGtk(Browser* browser);
   virtual ~FindBarGtk();
@@ -59,6 +63,11 @@ class FindBarGtk : public FindBar,
   virtual bool GetFindBarWindowInfo(gfx::Point* position,
                                     bool* fully_visible);
 
+  // Overridden from NotificationObserver:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
  private:
   void InitWidgets();
 
@@ -82,6 +91,9 @@ class FindBarGtk : public FindBar,
 
   void UpdateMatchLabelAppearance(bool failure);
 
+  // Repositions the dialog without worrying about overlapping search results.
+  void Reposition();
+
   // Callback when the entry text changes.
   static gboolean OnChanged(GtkWindow* window, FindBarGtk* find_bar);
 
@@ -99,13 +111,14 @@ class FindBarGtk : public FindBar,
                                   GtkAllocation* allocation,
                                   FindBarGtk* findbar);
 
-  // Called when |container_| is allocated.
-  static void OnContainerSizeAllocate(GtkWidget* container,
-                                      GtkAllocation* allocation,
-                                      FindBarGtk* findbar);
-
+  // Handles shapping and drawing the find bar background.
   static gboolean OnExpose(GtkWidget* widget, GdkEventExpose* event,
                            FindBarGtk* bar);
+
+  // Expose that draws the text entry background in GTK mode.
+  static gboolean OnContentEventBoxExpose(GtkWidget* widget,
+                                          GdkEventExpose* event,
+                                          FindBarGtk* bar);
 
   // These are both used for focus management.
   static gboolean OnFocus(GtkWidget* text_entry, GtkDirectionType focus,
@@ -115,6 +128,9 @@ class FindBarGtk : public FindBar,
 
   Browser* browser_;
   BrowserWindowGtk* window_;
+
+  // Provides colors and information about GTK.
+  GtkThemeProvider* theme_provider_;
 
   // GtkFixed containing the find bar widgets.
   OwnedWidgetGtk fixed_;
@@ -130,12 +146,23 @@ class FindBarGtk : public FindBar,
   // A GtkAlignment that is the child of |slide_widget_|.
   GtkWidget* container_;
 
-  // This will be set to true after ContourWidget() has been called so we don't
-  // call it twice.
-  bool container_shaped_;
+  // Cached allocation of |container_|. We keep this on hand so that we can
+  // reset the widget's shape when the width/height change.
+  int container_width_;
+  int container_height_;
 
   // The widget where text is entered.
   GtkWidget* text_entry_;
+
+  // An event box and alignment that wrap the entry area and the count label.
+  GtkWidget* content_event_box_;
+  GtkWidget* content_alignment_;
+
+  // The border around the text entry area.
+  GtkWidget* border_bin_;
+  GtkWidget* border_bin_alignment_;
+  GtkWidget* border_bin_aa_;
+  GtkWidget* border_bin_aa_alignment_;
 
   // The next and previous match buttons.
   scoped_ptr<CustomDrawButton> find_previous_button_;
@@ -144,6 +171,9 @@ class FindBarGtk : public FindBar,
   // The GtkLabel listing how many results were found.
   GtkWidget* match_count_label_;
   GtkWidget* match_count_event_box_;
+  // Cache whether the match count label is showing failure or not so that
+  // we can update its appearance without changing its semantics.
+  bool match_label_failure_;
 
   // The X to close the find bar.
   scoped_ptr<CustomDrawButton> close_button_;
@@ -160,7 +190,13 @@ class FindBarGtk : public FindBar,
   // If true, the change signal for the text entry is ignored.
   bool ignore_changed_signal_;
 
+  // This is the width of widget(). We cache it so we can recognize whether
+  // allocate signals have changed it, and if so take appropriate actions.
+  int current_fixed_width_;
+
   scoped_ptr<NineBox> dialog_background_;
+
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarGtk);
 };

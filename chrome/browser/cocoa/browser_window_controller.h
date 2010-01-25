@@ -16,16 +16,22 @@
 #include "base/scoped_ptr.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
 #import "chrome/browser/cocoa/bookmark_bar_controller.h"
+#import "chrome/browser/cocoa/bookmark_bubble_controller.h"
+#import "chrome/browser/cocoa/view_resizer.h"
 #import "third_party/GTM/AppKit/GTMTheme.h"
 
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
+@class ChromeBrowserWindow;
+class ConstrainedWindowMac;
 @class DownloadShelfController;
+@class ExtensionShelfController;
 @class FindBarCocoaController;
+@class GTMWindowSheetController;
 @class InfoBarContainerController;
 class LocationBar;
-class StatusBubble;
+class StatusBubbleMac;
 class TabContents;
 @class TabContentsController;
 @class TabStripController;
@@ -37,6 +43,8 @@ class TabStripModelObserverBridge;
 @interface BrowserWindowController :
   TabWindowController<NSUserInterfaceValidations,
                       BookmarkURLOpener,
+                      BookmarkBubbleControllerDelegate,
+                      ViewResizer,
                       GTMThemeDelegate> {
  @private
   // The ordering of these members is important as it determines the order in
@@ -48,7 +56,7 @@ class TabStripModelObserverBridge;
   // alive ensures that weak view or window pointers remain valid through
   // their destruction sequence.
   scoped_ptr<Browser> browser_;
-  scoped_nsobject<NSWindow> window_;
+  scoped_nsobject<ChromeBrowserWindow> window_;
   scoped_nsobject<NSWindow> fullscreen_window_;
   scoped_ptr<TabStripModelObserverBridge> tabObserver_;
   scoped_ptr<BrowserWindowCocoa> windowShim_;
@@ -57,11 +65,15 @@ class TabStripModelObserverBridge;
   scoped_nsobject<TabStripController> tabStripController_;
   scoped_nsobject<FindBarCocoaController> findBarCocoaController_;
   scoped_nsobject<InfoBarContainerController> infoBarContainerController_;
-  scoped_ptr<StatusBubble> statusBubble_;
+  scoped_ptr<StatusBubbleMac> statusBubble_;
   scoped_nsobject<DownloadShelfController> downloadShelfController_;
+  scoped_nsobject<ExtensionShelfController> extensionShelfController_;
+  scoped_nsobject<BookmarkBarController> bookmarkBarController_;
+  scoped_nsobject<BookmarkBubbleController> bookmarkBubbleController_;
   scoped_nsobject<GTMTheme> theme_;
   BOOL ownsBrowser_;  // Only ever NO when testing
   BOOL fullscreen_;
+  CGFloat verticalOffsetForStatusBubble_;
 }
 
 // Load the browser window nib and do any Cocoa-specific initialization.
@@ -79,7 +91,7 @@ class TabStripModelObserverBridge;
 - (LocationBar*)locationBar;
 
 // Access the C++ bridge object representing the status bubble for the window.
-- (StatusBubble*)statusBubble;
+- (StatusBubbleMac*)statusBubble;
 
 // Updates the toolbar (and transitively the location bar) with the states of
 // the specified |tab|.  If |shouldRestore| is true, we're switching
@@ -98,15 +110,16 @@ class TabStripModelObserverBridge;
 // Called to tell the selected tab to update its loading state.
 - (void)setIsLoading:(BOOL)isLoading;
 
-// Called to start/stop the loading animations.
-- (void)updateLoadingAnimations:(BOOL)animate;
+// Brings this controller's window to the front.
+- (void)activate;
 
 // Make the location bar the first responder, if possible.
 - (void)focusLocationBar;
 
 - (BOOL)isBookmarkBarVisible;
 
-- (void)toggleBookmarkBar;
+// Called after the visibility perf changed.
+- (void)updateBookmarkBarVisibility;
 
 - (BOOL)isDownloadShelfVisible;
 
@@ -124,10 +137,6 @@ class TabStripModelObserverBridge;
 // Returns fullscreen state.
 - (BOOL)isFullscreen;
 
-// Sent when the infobar view has been resized and other content needs
-// to be shifted around it.
-- (void)infoBarResized:(float)newHeight;
-
 // The user changed the theme.
 - (void)userChangedTheme;
 
@@ -136,16 +145,40 @@ class TabStripModelObserverBridge;
 // "chrome/app/chrome_dll_resource.h" file.
 - (void)executeCommand:(int)command;
 
+// Delegate method for the status bubble to query about its vertical offset.
+- (float)verticalOffsetForStatusBubble;
+
+// Show the bookmark bubble (e.g. user just clicked on the STAR)
+- (void)showBookmarkBubbleForURL:(const GURL&)url
+               alreadyBookmarked:(BOOL)alreadyBookmarked;
+
+// Returns the (lazily created) window sheet controller of this window. Used
+// for the per-tab sheets.
+- (GTMWindowSheetController*)sheetController;
+
+- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window;
+- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
+
+// Delegate method called when window is resized.
+- (void)windowDidResize:(NSNotification*)notification;
+
 @end
 
 
 @interface BrowserWindowController(TestingAPI)
+
+// Put the incognito badge on the browser and adjust the tab strip
+// accordingly.
+- (void)installIncognitoBadge;
 
 // Allows us to initWithBrowser withOUT taking ownership of the browser.
 - (id)initWithBrowser:(Browser*)browser takeOwnership:(BOOL)ownIt;
 
 // Return an autoreleased NSWindow suitable for fullscreen use.
 - (NSWindow*)fullscreenWindow;
+
+// Return a point suitable for the topLeft for a bookmark bubble.
+- (NSPoint)topLeftForBubble;
 
 @end  // BrowserWindowController(TestingAPI)
 

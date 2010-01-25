@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ CustomButton::~CustomButton() {
 }
 
 void CustomButton::SetState(ButtonState state) {
-  if (state != state_) {
+  if (show_highlighted_ && state != state_) {
     if (animate_on_state_change_ || !hover_animation_->IsAnimating()) {
       animate_on_state_change_ = true;
       if (state_ == BS_NORMAL && state == BS_HOT) {
@@ -48,6 +48,10 @@ void CustomButton::SetAnimationDuration(int duration) {
   hover_animation_->SetSlideDuration(duration);
 }
 
+void CustomButton::SetShowHighlighted(bool show_highlighted) {
+  show_highlighted_ = show_highlighted;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // CustomButton, View overrides:
 
@@ -74,6 +78,7 @@ CustomButton::CustomButton(ButtonListener* listener)
     : Button(listener),
       state_(BS_NORMAL),
       animate_on_state_change_(true),
+      show_highlighted_(true),
       triggerable_event_flags_(MouseEvent::EF_LEFT_BUTTON_DOWN) {
   hover_animation_.reset(new ThrobAnimation(this));
   hover_animation_->SetSlideDuration(kHoverFadeDurationMs);
@@ -89,7 +94,9 @@ bool CustomButton::IsTriggerableEvent(const MouseEvent& e) {
 bool CustomButton::AcceleratorPressed(const Accelerator& accelerator) {
   if (enabled_) {
     SetState(BS_NORMAL);
-    NotifyClick(0);
+    KeyEvent key_event(Event::ET_KEY_RELEASED, accelerator.GetKeyCode(),
+                       accelerator.modifiers(), 0, 0);
+    NotifyClick(key_event);
     return true;
   }
   return false;
@@ -97,7 +104,7 @@ bool CustomButton::AcceleratorPressed(const Accelerator& accelerator) {
 
 bool CustomButton::OnMousePressed(const MouseEvent& e) {
   if (state_ != BS_DISABLED) {
-    if (IsTriggerableEvent(e) && HitTest(e.location()))
+    if (ShouldEnterPushedState(e) && HitTest(e.location()))
       SetState(BS_PUSHED);
     RequestFocus();
   }
@@ -108,7 +115,7 @@ bool CustomButton::OnMouseDragged(const MouseEvent& e) {
   if (state_ != BS_DISABLED) {
     if (!HitTest(e.location()))
       SetState(BS_NORMAL);
-    else if (IsTriggerableEvent(e))
+    else if (ShouldEnterPushedState(e))
       SetState(BS_PUSHED);
     else
       SetState(BS_HOT);
@@ -128,7 +135,7 @@ void CustomButton::OnMouseReleased(const MouseEvent& e, bool canceled) {
     } else {
       SetState(BS_HOT);
       if (IsTriggerableEvent(e)) {
-        NotifyClick(e.GetFlags());
+        NotifyClick(e);
         // We may be deleted at this point (by the listener's notification
         // handler) so no more doing anything, just return.
         return;
@@ -163,12 +170,12 @@ bool CustomButton::OnKeyPressed(const KeyEvent& e) {
     // Space sets button state to pushed. Enter clicks the button. This matches
     // the Windows native behavior of buttons, where Space clicks the button
     // on KeyRelease and Enter clicks the button on KeyPressed.
-    if (e.GetCharacter() == base::VKEY_SPACE) {
+    if (e.GetKeyCode() == base::VKEY_SPACE) {
       SetState(BS_PUSHED);
       return true;
-    } else if  (e.GetCharacter() == base::VKEY_RETURN) {
+    } else if  (e.GetKeyCode() == base::VKEY_RETURN) {
       SetState(BS_NORMAL);
-      NotifyClick(0);
+      NotifyClick(e);
       return true;
     }
   }
@@ -177,9 +184,9 @@ bool CustomButton::OnKeyPressed(const KeyEvent& e) {
 
 bool CustomButton::OnKeyReleased(const KeyEvent& e) {
   if (state_ != BS_DISABLED) {
-    if (e.GetCharacter() == base::VKEY_SPACE) {
+    if (e.GetKeyCode() == base::VKEY_SPACE) {
       SetState(BS_NORMAL);
-      NotifyClick(0);
+      NotifyClick(e);
       return true;
     }
   }
@@ -207,11 +214,29 @@ void CustomButton::ViewHierarchyChanged(bool is_add, View *parent,
     SetState(BS_NORMAL);
 }
 
+void CustomButton::SetHotTracked(bool flag) {
+  if (state_ != BS_DISABLED)
+    SetState(flag ? BS_HOT : BS_NORMAL);
+}
+
+bool CustomButton::IsHotTracked() const {
+  return state_ == BS_HOT;
+}
+
+void CustomButton::WillLoseFocus() {
+  if (IsHotTracked())
+    SetState(BS_NORMAL);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // CustomButton, AnimationDelegate implementation:
 
 void CustomButton::AnimationProgressed(const Animation* animation) {
   SchedulePaint();
+}
+
+bool CustomButton::ShouldEnterPushedState(const MouseEvent& e) {
+  return IsTriggerableEvent(e);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

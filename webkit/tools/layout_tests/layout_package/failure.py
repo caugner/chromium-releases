@@ -12,7 +12,7 @@ UNKNOWN = "Unknown"
 
 EXPECTED_IMAGE_FILE_ENDING = "-expected.png"
 ACTUAL_IMAGE_FILE_ENDING = "-actual.png"
-UPSTREAM_IMAGE_FILE_ENDING = "-upstream.png"
+UPSTREAM_IMAGE_FILE_ENDING = "-expected-upstream.png"
 EXPECTED_TEXT_FILE_ENDING = "-expected.txt"
 ACTUAL_TEXT_FILE_ENDING = "-actual.txt"
 DIFF_IMAGE_FILE_ENDING = "-diff.png"
@@ -22,6 +22,7 @@ CHROMIUM_SRC_HOME = "http://src.chromium.org/viewvc/chrome/trunk/src/webkit/"
 CHROMIUM_TRAC_HOME = CHROMIUM_SRC_HOME + "data/layout_tests/"
 WEBKIT_TRAC_HOME = "http://trac.webkit.org/browser/trunk/"
 WEBKIT_SVN_HOSTNAME = "svn.webkit.org"
+THIRD_PARTY = "third_party"
 
 WEBKIT_PLATFORM_URL_BASE = WEBKIT_TRAC_HOME + "LayoutTests/platform"
 WEBKIT_LAYOUT_TEST_BASE_URL = "http://svn.webkit.org/repository/webkit/trunk/"
@@ -34,6 +35,12 @@ WEBKIT_TRAC_IMAGE_BASELINE_BASE_URL_WIN = WEBKIT_PLATFORM_URL_BASE + "/win/"
 
 LAYOUT_TEST_RESULTS_DIR = "layout-test-results"
 
+FAIL = "FAIL"
+TIMEOUT = "TIMEOUT"
+CRASH = "CRASH"
+PASS = "PASS"
+WONTFIX = "WONTFIX"
+
 class Failure(object):
   """
   This class represents a failure in the test output, and is
@@ -43,7 +50,6 @@ class Failure(object):
     self.platform = ""
     self.test_path = ""
     self.text_diff_mismatch = False
-    self.simplified_text_diff_mismatch = False
     self.image_mismatch = False
     self.timeout = False
     self.crashed = False
@@ -78,6 +84,9 @@ class Failure(object):
 
   def GetTextDiffFilename(self):
     return self._RenameEndOfTestPath(DIFF_TEXT_FILE_ENDING)
+
+  def GetImageUpstreamFilename(self):
+    return self._RenameEndOfTestPath(UPSTREAM_IMAGE_FILE_ENDING)
 
   def _RenameEndOfTestPath(self, suffix):
     last_index = self.test_path.rfind(".")
@@ -132,7 +141,8 @@ class Failure(object):
     return UNKNOWN
 
   def _IsFileInWebKit(self, file):
-    return file != None and file.find(WEBKIT_SVN_HOSTNAME) > -1
+    return file != None and (file.find(WEBKIT_SVN_HOSTNAME) > -1 or
+                             file.find(THIRD_PARTY) > -1)
 
   def IsImageBaselineInChromium(self):
     return not self.IsImageBaselineInWebkit()
@@ -163,16 +173,19 @@ class Failure(object):
   # in order to know whether to retrieve expected test results for it.
   # (test results dont exist for tests expected to fail/crash.)
   def IsExpectedToFail(self):
-    return self._FindKeywordInExpectations("FAIL")
+    return self._FindKeywordInExpectations(FAIL)
 
   def IsExpectedToTimeout(self):
-    return self._FindKeywordInExpectations("TIMEOUT")
+    return self._FindKeywordInExpectations(TIMEOUT)
 
   def IsExpectedToCrash(self):
-    return self._FindKeywordInExpectations("CRASH")
+    return self._FindKeywordInExpectations(CRASH)
 
   def IsExpectedToPass(self):
-    return self._FindKeywordInExpectations("PASS")
+    return self._FindKeywordInExpectations(PASS)
+
+  def IsWontFix(self):
+    return self._FindKeywordInExpectations(WONTFIX)
 
   def _FindKeywordInExpectations(self, keyword):
     if (not self.test_expectations_line or

@@ -55,7 +55,6 @@
 
 #include <vector>
 
-#include "base/gfx/platform_canvas.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "base/lock.h"
@@ -63,6 +62,7 @@
 #include "base/ref_counted.h"
 #include "media/base/filters.h"
 #include "media/base/pipeline_impl.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/api/public/WebMediaPlayer.h"
 #include "webkit/api/public/WebMediaPlayerClient.h"
 
@@ -108,6 +108,7 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
     void PipelineSeekCallback();
     void PipelineEndedCallback();
     void PipelineErrorCallback();
+    void NetworkEventCallback();
 
    private:
     // Invoke |webmediaplayer_| to perform a repaint.
@@ -124,6 +125,9 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
 
     // Notify |webmediaplayer_| that a pipeline error has been set.
     void PipelineErrorTask();
+
+    // Notify |webmediaplayer_| that there's a network event.
+    void NetworkEventTask();
 
     // The render message loop where WebKit lives.
     MessageLoop* render_loop_;
@@ -173,7 +177,7 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   virtual void setVisible(bool visible);
   virtual bool setAutoBuffer(bool autoBuffer);
   virtual bool totalBytesKnown();
-  virtual float maxTimeBuffered() const;
+  virtual const WebKit::WebTimeRanges& buffered() const;
   virtual float maxTimeSeekable() const;
 
   // Methods for painting.
@@ -229,6 +233,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
 
   void OnPipelineError();
 
+  void OnNetworkEvent();
+
  private:
   // Helpers that set the network/ready state and notifies the client if
   // they've changed.
@@ -244,6 +250,9 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   // TODO(hclam): get rid of these members and read from the pipeline directly.
   WebKit::WebMediaPlayer::NetworkState network_state_;
   WebKit::WebMediaPlayer::ReadyState ready_state_;
+
+  // Keep a list of buffered time ranges.
+  WebKit::WebTimeRanges buffered_;
 
   // Message loops for posting tasks between Chrome's main thread. Also used
   // for DCHECKs so methods calls won't execute in the wrong thread.
@@ -268,6 +277,10 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   WebKit::WebMediaPlayerClient* client_;
 
   scoped_refptr<Proxy> proxy_;
+
+#if WEBKIT_USING_CG
+  scoped_ptr<skia::PlatformCanvas> skia_canvas_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/string_util.h"
 #include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/search_provider.h"
@@ -141,9 +142,9 @@ void SearchProviderTest::RunTillProviderDone() {
     return;
 
   quit_when_done_ = true;
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
   message_loop_.Run(NULL);
-#elif defined(OS_POSIX)
+#else
   message_loop_.Run();
 #endif
 }
@@ -167,7 +168,8 @@ void SearchProviderTest::TearDown() {
   provider_ = NULL;
 }
 
-AutocompleteMatch SearchProviderTest::FindMatchWithDestination(const GURL& url) {
+AutocompleteMatch SearchProviderTest::FindMatchWithDestination(
+    const GURL& url) {
   for (ACMatches::const_iterator i = provider_->matches().begin();
        i != provider_->matches().end(); ++i) {
     if (i->destination_url == url)

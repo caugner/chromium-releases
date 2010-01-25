@@ -7,19 +7,26 @@
 #include "base/process_util.h"
 #include "base/singleton.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_bookmarks_module_constants.h"
+#include "chrome/browser/extensions/extension_browser_actions_api.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/extension_i18n_api.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
 #include "chrome/browser/extensions/extension_page_actions_module_constants.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/extension_test_api.h"
+#include "chrome/browser/extensions/extension_toolstrip_api.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/result_codes.h"
+#include "chrome/common/url_constants.h"
 
 // FactoryRegistry -------------------------------------------------------------
 
@@ -53,6 +60,11 @@ class FactoryRegistry {
   ExtensionFunction* NewFunction(const std::string& name);
 
  private:
+  template<class T>
+  void RegisterFunction() {
+    factories_[T::function_name()] = &NewExtensionFunction<T>;
+  }
+
   typedef std::map<std::string, ExtensionFunctionFactory> FactoryMap;
   FactoryMap factories_;
 };
@@ -64,69 +76,67 @@ FactoryRegistry* FactoryRegistry::instance() {
 void FactoryRegistry::ResetFunctions() {
   // Register all functions here.
 
-  namespace tabs = extension_tabs_module_constants;
-  namespace page_actions = extension_page_actions_module_constants;
-  namespace bookmarks = extension_bookmarks_module_constants;
-
   // Windows
-  factories_[tabs::kGetWindowFunction] =
-      &NewExtensionFunction<GetWindowFunction>;
-  factories_[tabs::kGetCurrentWindowFunction] =
-      &NewExtensionFunction<GetCurrentWindowFunction>;
-  factories_[tabs::kGetLastFocusedWindowFunction] =
-      &NewExtensionFunction<GetLastFocusedWindowFunction>;
-  factories_[tabs::kGetAllWindowsFunction] =
-      &NewExtensionFunction<GetAllWindowsFunction>;
-  factories_[tabs::kCreateWindowFunction] =
-      &NewExtensionFunction<CreateWindowFunction>;
-  factories_[tabs::kUpdateWindowFunction] =
-      &NewExtensionFunction<UpdateWindowFunction>;
-  factories_[tabs::kRemoveWindowFunction] =
-      &NewExtensionFunction<RemoveWindowFunction>;
+  RegisterFunction<GetWindowFunction>();
+  RegisterFunction<GetCurrentWindowFunction>();
+  RegisterFunction<GetLastFocusedWindowFunction>();
+  RegisterFunction<GetAllWindowsFunction>();
+  RegisterFunction<CreateWindowFunction>();
+  RegisterFunction<UpdateWindowFunction>();
+  RegisterFunction<RemoveWindowFunction>();
 
   // Tabs
-  factories_[tabs::kGetTabFunction] =
-      &NewExtensionFunction<GetTabFunction>;
-  factories_[tabs::kGetSelectedTabFunction] =
-      &NewExtensionFunction<GetSelectedTabFunction>;
-  factories_[tabs::kGetAllTabsInWindowFunction] =
-      &NewExtensionFunction<GetAllTabsInWindowFunction>;
-  factories_[tabs::kCreateTabFunction] =
-      &NewExtensionFunction<CreateTabFunction>;
-  factories_[tabs::kUpdateTabFunction] =
-      &NewExtensionFunction<UpdateTabFunction>;
-  factories_[tabs::kMoveTabFunction] =
-      &NewExtensionFunction<MoveTabFunction>;
-  factories_[tabs::kRemoveTabFunction] =
-      &NewExtensionFunction<RemoveTabFunction>;
-  factories_[tabs::kDetectTabLanguageFunction] =
-      &NewExtensionFunction<DetectTabLanguageFunction>;
+  RegisterFunction<GetTabFunction>();
+  RegisterFunction<GetSelectedTabFunction>();
+  RegisterFunction<GetAllTabsInWindowFunction>();
+  RegisterFunction<CreateTabFunction>();
+  RegisterFunction<UpdateTabFunction>();
+  RegisterFunction<MoveTabFunction>();
+  RegisterFunction<RemoveTabFunction>();
+  RegisterFunction<DetectTabLanguageFunction>();
+  RegisterFunction<CaptureVisibleTabFunction>();
+  RegisterFunction<TabsExecuteScriptFunction>();
+  RegisterFunction<TabsInsertCSSFunction>();
 
   // Page Actions.
-  factories_[page_actions::kEnablePageActionFunction] =
-      &NewExtensionFunction<EnablePageActionFunction>;
-  factories_[page_actions::kDisablePageActionFunction] =
-      &NewExtensionFunction<DisablePageActionFunction>;
+  RegisterFunction<EnablePageActionFunction>();
+  RegisterFunction<DisablePageActionFunction>();
+  RegisterFunction<PageActionShowFunction>();
+  RegisterFunction<PageActionHideFunction>();
+  RegisterFunction<PageActionSetIconFunction>();
+  RegisterFunction<PageActionSetTitleFunction>();
+  RegisterFunction<PageActionSetBadgeBackgroundColorFunction>();
+  RegisterFunction<PageActionSetBadgeTextColorFunction>();
+  RegisterFunction<PageActionSetBadgeTextFunction>();
+
+  // Browser Actions.
+  RegisterFunction<BrowserActionSetIconFunction>();
+  RegisterFunction<BrowserActionSetTitleFunction>();
+  RegisterFunction<BrowserActionSetBadgeTextFunction>();
+  RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
 
   // Bookmarks.
-  factories_[bookmarks::kGetBookmarksFunction] =
-      &NewExtensionFunction<GetBookmarksFunction>;
-  factories_[bookmarks::kGetBookmarkChildrenFunction] =
-      &NewExtensionFunction<GetBookmarkChildrenFunction>;
-  factories_[bookmarks::kGetBookmarkTreeFunction] =
-      &NewExtensionFunction<GetBookmarkTreeFunction>;
-  factories_[bookmarks::kSearchBookmarksFunction] =
-      &NewExtensionFunction<SearchBookmarksFunction>;
-  factories_[bookmarks::kRemoveBookmarkFunction] =
-      &NewExtensionFunction<RemoveBookmarkFunction>;
-  factories_[bookmarks::kRemoveBookmarkTreeFunction] =
-    &NewExtensionFunction<RemoveBookmarkFunction>;
-  factories_[bookmarks::kCreateBookmarkFunction] =
-      &NewExtensionFunction<CreateBookmarkFunction>;
-  factories_[bookmarks::kMoveBookmarkFunction] =
-      &NewExtensionFunction<MoveBookmarkFunction>;
-  factories_[bookmarks::kSetBookmarkTitleFunction] =
-      &NewExtensionFunction<SetBookmarkTitleFunction>;
+  RegisterFunction<GetBookmarksFunction>();
+  RegisterFunction<GetBookmarkChildrenFunction>();
+  RegisterFunction<GetBookmarkTreeFunction>();
+  RegisterFunction<SearchBookmarksFunction>();
+  RegisterFunction<RemoveBookmarkFunction>();
+  RegisterFunction<RemoveTreeBookmarkFunction>();
+  RegisterFunction<CreateBookmarkFunction>();
+  RegisterFunction<MoveBookmarkFunction>();
+  RegisterFunction<UpdateBookmarkFunction>();
+
+  // Toolstrips.
+  RegisterFunction<ToolstripExpandFunction>();
+  RegisterFunction<ToolstripCollapseFunction>();
+
+  // I18N.
+  RegisterFunction<GetAcceptLanguagesFunction>();
+
+  // Test.
+  RegisterFunction<ExtensionTestPassFunction>();
+  RegisterFunction<ExtensionTestFailFunction>();
+  RegisterFunction<ExtensionTestLogFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -151,7 +161,7 @@ ExtensionFunction* FactoryRegistry::NewFunction(const std::string& name) {
   FactoryMap::iterator iter = factories_.find(name);
   DCHECK(iter != factories_.end());
   ExtensionFunction* function = iter->second();
-  function->SetName(name);
+  function->set_name(name);
   return function;
 }
 
@@ -187,12 +197,27 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
     delegate_(delegate),
     url_(url),
     ALLOW_THIS_IN_INITIALIZER_LIST(peer_(new Peer(this))) {
+  // TODO(erikkay) should we do something for these errors in Release?
+  DCHECK(url.SchemeIs(chrome::kExtensionScheme));
+
+  Extension* extension =
+      profile()->GetExtensionsService()->GetExtensionByURL(url);
+  DCHECK(extension);
+
   all_instances()->insert(this);
 
   // Notify the ExtensionProcessManager that the view was created.
   ExtensionProcessManager* epm = profile()->GetExtensionProcessManager();
   epm->RegisterExtensionProcess(extension_id(),
-                                render_view_host->process()->pid());
+                                render_view_host->process()->id());
+
+  // Update the extension permissions. Doing this each time we create an EFD
+  // ensures that new processes are informed of permissions for newly installed
+  // extensions.
+  render_view_host->Send(new ViewMsg_Extension_SetAPIPermissions(
+      extension->id(), extension->api_permissions()));
+  render_view_host->Send(new ViewMsg_Extension_SetHostPermissions(
+      extension->url(), extension->host_permissions()));
 }
 
 ExtensionFunctionDispatcher::~ExtensionFunctionDispatcher() {
@@ -201,14 +226,25 @@ ExtensionFunctionDispatcher::~ExtensionFunctionDispatcher() {
 }
 
 Browser* ExtensionFunctionDispatcher::GetBrowser() {
-  DCHECK(delegate_);
+  return delegate_->GetBrowser();
+}
 
-  Browser* retval = delegate_->GetBrowser();
-  return retval;
+ExtensionHost* ExtensionFunctionDispatcher::GetExtensionHost() {
+  return delegate_->GetExtensionHost();
+}
+
+Extension* ExtensionFunctionDispatcher::GetExtension() {
+  ExtensionsService* service = profile()->GetExtensionsService();
+  DCHECK(service);
+
+  Extension* extension = service->GetExtensionById(extension_id());
+  DCHECK(extension);
+
+  return extension;
 }
 
 void ExtensionFunctionDispatcher::HandleRequest(const std::string& name,
-                                                const std::string& args,
+                                                const Value* args,
                                                 int request_id,
                                                 bool has_callback) {
   scoped_refptr<ExtensionFunction> function(
@@ -227,7 +263,8 @@ void ExtensionFunctionDispatcher::SendResponse(ExtensionFunction* function,
 }
 
 void ExtensionFunctionDispatcher::HandleBadMessage(ExtensionFunction* api) {
-  LOG(ERROR) << "bad extension message " <<  // TODO(erikkay) name?
+  LOG(ERROR) << "bad extension message " <<
+                api->name() <<
                 " : terminating renderer.";
   if (RenderProcessHost::run_renderer_in_process()) {
     // In single process mode it is better if we don't suicide but just crash.

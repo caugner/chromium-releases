@@ -9,6 +9,7 @@
 #include "app/gfx/canvas.h"
 #include "app/gfx/color_utils.h"
 #include "app/l10n_util.h"
+#include "base/keyboard_codes.h"
 #include "base/thread.h"
 #include "chrome/browser/bookmarks/bookmark_folder_tree_model.h"
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
@@ -20,7 +21,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/options_window.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/sync/sync_status_ui_helper.h"
 #include "chrome/browser/views/bookmark_editor_view.h"
 #include "chrome/browser/views/bookmark_folder_tree_view.h"
 #include "chrome/browser/views/bookmark_table_view.h"
@@ -29,10 +32,12 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "skia/ext/skia_utils.h"
-#include "views/grid_layout.h"
+#include "third_party/skia/include/core/SkShader.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/label.h"
+#include "views/controls/menu/menu_item_view.h"
 #include "views/controls/single_split_view.h"
+#include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
@@ -160,6 +165,10 @@ BookmarkManagerView::BookmarkManagerView(Profile* profile)
     : profile_(profile->GetOriginalProfile()),
       table_view_(NULL),
       tree_view_(NULL),
+#if defined(BROWSER_SYNC)
+      sync_status_button_(NULL),
+      sync_service_(NULL),
+#endif
       ALLOW_THIS_IN_INITIALIZER_LIST(search_factory_(this)) {
   search_tf_ = new views::Textfield();
   search_tf_->set_default_width_in_chars(30);
@@ -198,6 +207,10 @@ BookmarkManagerView::BookmarkManagerView(Profile* profile)
                         0, views::GridLayout::USE_PREF, 0, 0);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
                         0, views::GridLayout::USE_PREF, 0, 0);
+#if defined(BROWSER_SYNC)
+  column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
+                        0, views::GridLayout::USE_PREF, 0, 0);
+#endif
   column_set->AddPaddingColumn(1, kUnrelatedControlHorizontalSpacing);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
                         0, views::GridLayout::USE_PREF, 0, 0);
@@ -213,6 +226,10 @@ BookmarkManagerView::BookmarkManagerView(Profile* profile)
   layout->StartRow(0, top_id);
   layout->AddView(organize_menu_button);
   layout->AddView(tools_menu_button);
+#if defined(BROWSER_SYNC)
+  sync_status_button_ = new views::TextButton(this, std::wstring());
+  layout->AddView(sync_status_button_);
+#endif
   layout->AddView(new views::Label(
       l10n_util::GetString(IDS_BOOKMARK_MANAGER_SEARCH_TITLE)));
   layout->AddView(search_tf_);
@@ -223,11 +240,19 @@ BookmarkManagerView::BookmarkManagerView(Profile* profile)
   layout->AddView(split_view_);
 
   // Press Ctrl-W to close bookmark manager window.
-  AddAccelerator(views::Accelerator('W', false, true, false));
+  AddAccelerator(views::Accelerator(base::VKEY_W, false, true, false));
 
   BookmarkModel* bookmark_model = profile_->GetBookmarkModel();
   if (!bookmark_model->IsLoaded())
     bookmark_model->AddObserver(this);
+
+#if defined(BROWSER_SYNC)
+  if (profile->GetProfileSyncService()) {
+    sync_service_ = profile_->GetProfileSyncService();
+    sync_service_->AddObserver(this);
+    UpdateSyncStatus();
+  }
+#endif
 }
 
 BookmarkManagerView::~BookmarkManagerView() {
@@ -245,8 +270,12 @@ BookmarkManagerView::~BookmarkManagerView() {
   }
   manager = NULL;
   open_window = NULL;
-}
 
+#if defined(BROWSER_SYNC)
+  if (sync_service_)
+    sync_service_->RemoveObserver(this);
+#endif
+}
 
 // static
 void BookmarkManagerView::Show(Profile* profile) {
@@ -353,6 +382,12 @@ void BookmarkManagerView::WindowClosing() {
   g_browser_process->local_state()->SetInteger(
       prefs::kBookmarkManagerSplitLocation, split_view_->divider_offset());
 }
+
+#if defined(BROWSER_SYNC)
+void BookmarkManagerView::OnStateChanged() {
+  UpdateSyncStatus();
+}
+#endif
 
 bool BookmarkManagerView::AcceleratorPressed(
     const views::Accelerator& accelerator) {
@@ -486,6 +521,16 @@ void BookmarkManagerView::OnTreeViewKeyDown(unsigned short virtual_keycode) {
   }
 }
 
+#if defined(BROWSER_SYNC)
+void BookmarkManagerView::ButtonPressed(views::Button* sender,
+                                        const views::Event& event) {
+  if (sender == sync_status_button_) {
+    UserMetrics::RecordAction(L"BookmarkManager_Sync", profile_);
+    OpenSyncMyBookmarksDialog();
+  }
+}
+#endif
+
 void BookmarkManagerView::Loaded(BookmarkModel* model) {
   model->RemoveObserver(this);
   LoadedImpl();
@@ -502,7 +547,7 @@ void BookmarkManagerView::ContentsChanged(views::Textfield* sender,
 bool BookmarkManagerView::HandleKeystroke(
     views::Textfield* sender,
     const views::Textfield::Keystroke& key) {
-  if (views::Textfield::IsKeystrokeEnter(key)) {
+  if (key.GetKeyboardCode() == base::VKEY_RETURN) {
     PerformSearch();
     search_tf_->SelectAll();
   }
@@ -516,14 +561,12 @@ void BookmarkManagerView::ShowContextMenu(views::View* source,
                                           bool is_mouse_gesture) {
   DCHECK(source == table_view_ || source == tree_view_);
   bool is_table = (source == table_view_);
-  ShowMenu(GetWidget()->GetNativeView(), x, y,
+  ShowMenu(x, y,
            is_table ? BookmarkContextMenuController::BOOKMARK_MANAGER_TABLE :
                       BookmarkContextMenuController::BOOKMARK_MANAGER_TREE);
 }
 
-void BookmarkManagerView::RunMenu(views::View* source,
-                                  const gfx::Point& pt,
-                                  HWND hwnd) {
+void BookmarkManagerView::RunMenu(views::View* source, const gfx::Point& pt) {
   // TODO(glen): when you change the buttons around and what not, futz with
   // this to make it look good. If you end up keeping padding numbers make them
   // constants.
@@ -534,10 +577,10 @@ void BookmarkManagerView::RunMenu(views::View* source,
   menu_x += UILayoutIsRightToLeft() ? (source->width() - 5) :
                                       (-source->width() + 5);
   if (source->GetID() == kOrganizeMenuButtonID) {
-    ShowMenu(hwnd, menu_x, pt.y() + 2,
+    ShowMenu(menu_x, pt.y() + 2,
              BookmarkContextMenuController::BOOKMARK_MANAGER_ORGANIZE_MENU);
   } else if (source->GetID() == kToolsMenuButtonID) {
-    ShowToolsMenu(hwnd, menu_x, pt.y() + 2);
+    ShowToolsMenu(menu_x, pt.y() + 2);
   } else {
     NOTREACHED();
   }
@@ -578,7 +621,7 @@ void BookmarkManagerView::FileSelected(const FilePath& path,
     if (g_browser_process->io_thread()) {
       bookmark_html_writer::WriteBookmarks(
           g_browser_process->io_thread()->message_loop(), GetBookmarkModel(),
-          path.ToWStringHack());
+          path);
     }
   } else {
     NOTREACHED();
@@ -684,15 +727,13 @@ BookmarkModel* BookmarkManagerView::GetBookmarkModel() const {
 }
 
 void BookmarkManagerView::ShowMenu(
-    HWND host,
-    int x,
-    int y,
-    BookmarkContextMenuController::ConfigurationType config) {
+    int x, int y, BookmarkContextMenuController::ConfigurationType config) {
   if (!GetBookmarkModel()->IsLoaded())
     return;
 
   if (config == BookmarkContextMenuController::BOOKMARK_MANAGER_TABLE ||
-      (config == BookmarkContextMenuController::BOOKMARK_MANAGER_ORGANIZE_MENU &&
+      (config ==
+          BookmarkContextMenuController::BOOKMARK_MANAGER_ORGANIZE_MENU &&
        table_view_->HasFocus())) {
     std::vector<const BookmarkNode*> nodes = GetSelectedTableNodes();
     const BookmarkNode* parent = GetSelectedFolder();
@@ -704,7 +745,8 @@ void BookmarkManagerView::ShowMenu(
             BookmarkContextMenuController::BOOKMARK_MANAGER_ORGANIZE_MENU_OTHER;
       }
     }
-    BookmarkContextMenu menu(host, profile_, NULL, parent, nodes, config);
+    BookmarkContextMenu menu(GetWindow()->GetNativeWindow(), profile_, NULL,
+                             parent, nodes, config);
     menu.RunMenuAt(gfx::Point(x, y));
   } else {
     const BookmarkNode* node = GetSelectedFolder();
@@ -742,7 +784,7 @@ void BookmarkManagerView::OnCutCopyPaste(CutCopyPasteType type,
   }
 }
 
-void BookmarkManagerView::ShowToolsMenu(HWND host, int x, int y) {
+void BookmarkManagerView::ShowToolsMenu(int x, int y) {
   views::MenuItemView menu(this);
   menu.AppendMenuItemWithLabel(
           IDS_BOOKMARK_MANAGER_IMPORT_MENU,
@@ -789,3 +831,35 @@ void BookmarkManagerView::ShowExportBookmarksFileChooser() {
       L"html", GetWidget()->GetNativeView(),
       reinterpret_cast<void*>(IDS_BOOKMARK_MANAGER_EXPORT_MENU));
 }
+
+#if defined(BROWSER_SYNC)
+void BookmarkManagerView::UpdateSyncStatus() {
+  DCHECK(sync_service_);
+  std::wstring status_label;
+  std::wstring link_label;
+  bool synced = SyncStatusUIHelper::GetLabels(sync_service_,
+      &status_label, &link_label) == SyncStatusUIHelper::SYNCED;
+
+  if (sync_service_->HasSyncSetupCompleted()) {
+    std::wstring username = UTF16ToWide(
+        sync_service_->GetAuthenticatedUsername());
+    status_label = l10n_util::GetStringF(IDS_SYNC_NTP_SYNCED_TO, username);
+  } else if (!sync_service_->SetupInProgress() && !synced) {
+    status_label = l10n_util::GetString(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+  }
+  sync_status_button_->SetText(status_label);
+  sync_status_button_->GetParent()->Layout();
+}
+
+void BookmarkManagerView::OpenSyncMyBookmarksDialog() {
+  if (!sync_service_)
+    return;
+  if (sync_service_->HasSyncSetupCompleted()) {
+    ShowOptionsWindow(OPTIONS_PAGE_CONTENT, OPTIONS_GROUP_NONE, profile_);
+  } else {
+    sync_service_->EnableForUser();
+    ProfileSyncService::SyncEvent(
+        ProfileSyncService::START_FROM_BOOKMARK_MANAGER);
+  }
+}
+#endif  // defined(BROWSER_SYNC)

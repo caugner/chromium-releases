@@ -74,7 +74,8 @@ const std::string TWO_SECOND_BEFORE_UNLOAD_ALERT_HTML =
 
 const std::string CLOSE_TAB_WHEN_OTHER_TAB_HAS_LISTENER =
     "<html><head><title>only_one_unload</title></head>"
-    "<body onload=\"window.open('data:text/html,<html><head><title>popup</title></head></body>')\" "
+    "<body onload=\"window.open('data:text/html,"
+    "<html><head><title>popup</title></head></body>')\" "
     "onbeforeunload='return;'"
     "</body></html>";
 
@@ -122,9 +123,11 @@ class UnloadTest : public UITest {
   }
 
   void NavigateToNolistenersFileTwice() {
-    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(L"title2.html"));
+    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
+                      FilePath(FILE_PATH_LITERAL("title2.html"))));
     CheckTitle(L"Title Of Awesomeness");
-    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(L"title2.html"));
+    NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
+                      FilePath(FILE_PATH_LITERAL("title2.html"))));
     CheckTitle(L"Title Of Awesomeness");
   }
 
@@ -136,10 +139,12 @@ class UnloadTest : public UITest {
     // if we don't sleep here.
     PlatformThread::Sleep(400);
     NavigateToURLAsync(
-        URLRequestMockHTTPJob::GetMockUrl(L"title2.html"));
+        URLRequestMockHTTPJob::GetMockUrl(
+            FilePath(FILE_PATH_LITERAL("title2.html"))));
     PlatformThread::Sleep(400);
     NavigateToURL(
-        URLRequestMockHTTPJob::GetMockUrl(L"title2.html"));
+        URLRequestMockHTTPJob::GetMockUrl(
+            FilePath(FILE_PATH_LITERAL("title2.html"))));
 
     CheckTitle(L"Title Of Awesomeness");
   }
@@ -156,7 +161,7 @@ class UnloadTest : public UITest {
 #if defined(OS_WIN) || defined(OS_LINUX)
     bool modal_dialog_showing = false;
     MessageBoxFlags::DialogButton available_buttons;
-    EXPECT_TRUE(automation()->WaitForAppModalDialog(3000));
+    EXPECT_TRUE(automation()->WaitForAppModalDialog(action_timeout_ms()));
     EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
         &available_buttons));
     ASSERT_TRUE(modal_dialog_showing);
@@ -238,6 +243,7 @@ TEST_F(UnloadTest, BrowserCloseUnload) {
 
 // Tests closing the browser with a beforeunload handler and clicking
 // OK in the beforeunload confirm dialog.
+#if !defined(OS_LINUX)
 TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   NavigateToDataURL(BEFORE_UNLOAD_HTML, L"beforeunload");
@@ -264,6 +270,7 @@ TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
   WaitForBrowserClosed();
   EXPECT_FALSE(IsBrowserRunning());
 }
+#endif  // !defined(OS_LINUX)
 
 // Tests closing the browser with a beforeunload handler that takes
 // two seconds to run.

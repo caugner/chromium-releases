@@ -4,6 +4,8 @@
 
 #include "views/controls/button/text_button.h"
 
+#include <algorithm>
+
 #include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/throb_animation.h"
@@ -21,9 +23,12 @@ static const int kIconTextPadding = 5;
 static const int kPreferredPaddingHorizontal = 6;
 static const int kPreferredPaddingVertical = 5;
 
-static const SkColor kEnabledColor = SkColorSetRGB(6, 45, 117);
-static const SkColor kHighlightColor = SkColorSetARGB(200, 255, 255, 255);
-static const SkColor kDisabledColor = SkColorSetRGB(161, 161, 146);
+// static
+const SkColor TextButton::kEnabledColor = SkColorSetRGB(6, 45, 117);
+// static
+const SkColor TextButton::kHighlightColor = SkColorSetARGB(200, 255, 255, 255);
+// static
+const SkColor TextButton::kDisabledColor = SkColorSetRGB(161, 161, 146);
 
 // How long the hover fade animation should last.
 static const int kHoverAnimationDurationMs = 170;
@@ -181,6 +186,10 @@ void TextButton::SetIcon(const SkBitmap& icon) {
   icon_ = icon;
 }
 
+void TextButton::SetFont(const gfx::Font& font) {
+  font_ = font;
+}
+
 void TextButton::SetEnabledColor(SkColor color) {
   color_enabled_ = color;
   UpdateColor();
@@ -327,6 +336,7 @@ void TextButton::SetEnabled(bool enabled) {
 }
 
 bool TextButton::OnMousePressed(const MouseEvent& e) {
+  RequestFocus();
   return true;
 }
 

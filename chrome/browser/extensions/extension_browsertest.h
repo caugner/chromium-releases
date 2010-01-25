@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSER_TEST_H_
-#define CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSER_TEST_H_
+#ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSERTEST_H_
+#define CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSERTEST_H_
 
 #include <string>
 
@@ -22,23 +22,56 @@ class ExtensionBrowserTest
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line);
   bool LoadExtension(const FilePath& path);
-  bool InstallExtension(const FilePath& path);
+
+  // |expected_change| indicates how many extensions should be installed (or
+  // disabled, if negative).
+  // 1 means you expect a new install, 0 means you expect an upgrade, -1 means
+  // you expect a failed upgrade.
+  bool InstallExtension(const FilePath& path, int expected_change) {
+    return InstallOrUpdateExtension("", path, expected_change);
+  }
+
+  // Same as above but calls ExtensionsService::UpdateExtension instead of
+  // InstallExtension().
+  bool UpdateExtension(const std::string& id, const FilePath& path,
+                       int expected_change) {
+    return InstallOrUpdateExtension(id, path, expected_change);
+  }
+
+  void UnloadExtension(const std::string& extension_id);
+
   void UninstallExtension(const std::string& extension_id);
+
+  // Wait for the total number of page actions to change to |count|.
+  bool WaitForPageActionCountChangeTo(int count);
 
   // Wait for the number of visible page actions to change to |count|.
   bool WaitForPageActionVisibilityChangeTo(int count);
 
-  bool loaded_;
-  bool installed_;
-  FilePath test_data_dir_;
+  // Waits until an extension is installed and loaded. Returns true if an
+  // install happened before timeout.
+  bool WaitForExtensionInstall();
 
- private:
+  // Wait for an extension install error to be raised. Returns true if an
+  // error was raised.
+  bool WaitForExtensionInstallError();
+
+  // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-  bool WaitForExtensionHostsToLoad();
 
-  NotificationRegistrar registrar_;
+  bool loaded_;
+  bool installed_;
+  FilePath test_data_dir_;
+  std::string last_loaded_extension_id_;
+  int extension_installs_observed_;
+
+ private:
+  bool InstallOrUpdateExtension(const std::string& id, const FilePath& path,
+                                int expected_change);
+
+  bool WaitForExtensionHostsToLoad();
 };
 
-#endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSER_TEST_H_
+#endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_BROWSERTEST_H_

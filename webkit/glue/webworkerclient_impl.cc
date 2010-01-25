@@ -8,17 +8,19 @@
 
 #include "base/compiler_specific.h"
 
+#include "DedicatedWorkerThread.h"
+#include "ErrorEvent.h"
 #include "Frame.h"
 #include "FrameLoaderClient.h"
 #include "GenericWorkerTask.h"
+#include "MessageEvent.h"
 #include "MessagePort.h"
 #include "MessagePortChannel.h"
 #include "ScriptExecutionContext.h"
-#include "WorkerContextExecutionProxy.h"
-#include "WorkerMessagingProxy.h"
 #include "Worker.h"
 #include "WorkerContext.h"
-#include "WorkerThread.h"
+#include "WorkerContextExecutionProxy.h"
+#include "WorkerMessagingProxy.h"
 #include <wtf/Threading.h>
 
 #undef LOG
@@ -26,18 +28,24 @@
 #include "webkit/glue/webworkerclient_impl.h"
 
 #include "base/command_line.h"
+#include "webkit/api/public/WebFrameClient.h"
 #include "webkit/api/public/WebKit.h"
 #include "webkit/api/public/WebKitClient.h"
+#include "webkit/api/public/WebMessagePortChannel.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebWorker.h"
+#include "webkit/api/src/PlatformMessagePortChannel.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webframeloaderclient_impl.h"
 #include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/webview_delegate.h"
+#include "webkit/glue/webkitclient_impl.h"
 #include "webkit/glue/webview_impl.h"
 #include "webkit/glue/webworker_impl.h"
 
+using WebKit::WebFrameClient;
+using WebKit::WebMessagePortChannel;
+using WebKit::WebMessagePortChannelArray;
 using WebKit::WebString;
 using WebKit::WebWorker;
 using WebKit::WebWorkerClient;
@@ -53,11 +61,13 @@ using WebKit::WebWorkerClient;
 //
 // Note that if we're running each worker in a separate process, then nested
 // workers end up using the same codepath as the renderer process.
-WebCore::WorkerContextProxy* WebCore::WorkerContextProxy::create(
+
+// static
+WebCore::WorkerContextProxy* WebWorkerClientImpl::createWorkerContextProxy(
     WebCore::Worker* worker) {
   if (!worker->scriptExecutionContext()->isDocument() &&
       CommandLine::ForCurrentProcess()->HasSwitch(
-            L"web-worker-share-processes")) {
+            "web-worker-share-processes")) {
     return new WebCore::WorkerMessagingProxy(worker);
   }
 
@@ -65,16 +75,10 @@ WebCore::WorkerContextProxy* WebCore::WorkerContextProxy::create(
   WebWorkerClientImpl* proxy = new WebWorkerClientImpl(worker);
 
   if (worker->scriptExecutionContext()->isDocument()) {
-    // Get to the RenderView, so that we can tell the browser to create a
-    // worker process if necessary.
     WebCore::Document* document = static_cast<WebCore::Document*>(
         worker->scriptExecutionContext());
-    WebFrameLoaderClient* frame_loader_client =
-        static_cast<WebFrameLoaderClient*>(
-            document->frame()->loader()->client());
-    WebViewDelegate* webview_delegate =
-        frame_loader_client->webframe()->GetWebViewImpl()->delegate();
-    webworker = webview_delegate->CreateWebWorker(proxy);
+    WebFrameImpl* webframe = WebFrameImpl::FromFrame(document->frame());
+    webworker = webframe->client()->createWorker(webframe, proxy);
   } else {
     WebCore::WorkerContextExecutionProxy* current_context =
         WebCore::WorkerContextExecutionProxy::retrieve();
@@ -83,8 +87,11 @@ WebCore::WorkerContextProxy* WebCore::WorkerContextProxy::create(
       return NULL;
     }
 
+    WebCore::DedicatedWorkerThread* thread =
+        static_cast<WebCore::DedicatedWorkerThread*>(
+            current_context->workerContext()->thread());
     WebCore::WorkerObjectProxy* worker_object_proxy =
-        &current_context->workerContext()->thread()->workerObjectProxy();
+        &thread->workerObjectProxy();
     WebWorkerImpl* impl = reinterpret_cast<WebWorkerImpl*>(worker_object_proxy);
     webworker = impl->client()->createWorker(proxy);
   }
@@ -92,7 +99,6 @@ WebCore::WorkerContextProxy* WebCore::WorkerContextProxy::create(
   proxy->set_webworker(webworker);
   return proxy;
 }
-
 
 WebWorkerClientImpl::WebWorkerClientImpl(WebCore::Worker* worker)
     : script_execution_context_(worker->scriptExecutionContext()),
@@ -147,8 +153,8 @@ void WebWorkerClientImpl::terminateWorkerContext() {
 }
 
 void WebWorkerClientImpl::postMessageToWorkerContext(
-    const WebCore::String& message,
-    WTF::PassOwnPtr<WebCore::MessagePortChannel> port) {
+    WTF::PassRefPtr<WebCore::SerializedScriptValue> message,
+    WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels) {
   // Worker.terminate() could be called from JS before the context is started.
   if (asked_to_terminate_)
     return;
@@ -158,14 +164,24 @@ void WebWorkerClientImpl::postMessageToWorkerContext(
   if (!WTF::isMainThread()) {
     WebWorkerImpl::DispatchTaskToMainThread(
         WebCore::createCallbackTask(
-            &PostMessageToWorkerContextTask, this, message, port));
+            &PostMessageToWorkerContextTask,
+            this,
+            message->toString(),
+            channels));
     return;
   }
 
-  // TODO(jam): Update to pass a MessagePortChannel or
-  // PlatformMessagePortChannel when we add MessagePort support to Chrome.
+  WebMessagePortChannelArray webchannels(channels.get() ? channels->size() : 0);
+
+  for (size_t i = 0; i < webchannels.size(); ++i) {
+    WebMessagePortChannel* webchannel =
+        (*channels)[i]->channel()->webChannelRelease();
+    webchannel->setClient(0);
+    webchannels[i] = webchannel;
+  }
+
   webworker_->postMessageToWorkerContext(
-      webkit_glue::StringToWebString(message));
+      webkit_glue::StringToWebString(message->toString()), webchannels);
 }
 
 bool WebWorkerClientImpl::hasPendingActivity() const {
@@ -185,18 +201,30 @@ void WebWorkerClientImpl::workerObjectDestroyed() {
       WebCore::createCallbackTask(&WorkerObjectDestroyedTask, this));
 }
 
-void WebWorkerClientImpl::postMessageToWorkerObject(const WebString& message) {
-  // TODO(jam): Add support for passing MessagePorts when they are supported
-  // in Chrome.
+void WebWorkerClientImpl::postMessageToWorkerObject(
+    const WebString& message,
+    const WebMessagePortChannelArray& channels) {
+  WebCore::String message2 = webkit_glue::WebStringToString(message);
+  OwnPtr<WebCore::MessagePortChannelArray> channels2;
+  if (channels.size()) {
+    channels2 = new WebCore::MessagePortChannelArray(channels.size());
+    for (size_t i = 0; i < channels.size(); ++i) {
+      RefPtr<WebCore::PlatformMessagePortChannel> platform_channel =
+          WebCore::PlatformMessagePortChannel::create(channels[i]);
+      channels[i]->setClient(platform_channel.get());
+      (*channels2)[i] = WebCore::MessagePortChannel::create(platform_channel);
+    }
+  }
+
   if (WTF::currentThread() != worker_thread_id_) {
     script_execution_context_->postTask(
         WebCore::createCallbackTask(&PostMessageToWorkerObjectTask, this,
-            webkit_glue::WebStringToString(message),
-            WTF::PassOwnPtr<WebCore::MessagePortChannel>(0)));
+            message2, channels2.release()));
     return;
   }
 
-  worker_->dispatchMessage(webkit_glue::WebStringToString(message), 0);
+  PostMessageToWorkerObjectTask(
+      script_execution_context_.get(), this, message2, channels2.release());
 }
 
 void WebWorkerClientImpl::postExceptionToWorkerObject(
@@ -212,10 +240,16 @@ void WebWorkerClientImpl::postExceptionToWorkerObject(
     return;
   }
 
-  script_execution_context_->reportException(
-      webkit_glue::WebStringToString(error_message),
-      line_number,
-      webkit_glue::WebStringToString(source_url));
+  bool handled = false;
+  handled = worker_->dispatchEvent(
+      WebCore::ErrorEvent::create(webkit_glue::WebStringToString(error_message),
+                                  webkit_glue::WebStringToString(source_url),
+                                  line_number));
+  if (!handled)
+    script_execution_context_->reportException(
+        webkit_glue::WebStringToString(error_message),
+        line_number,
+        webkit_glue::WebStringToString(source_url));
 }
 
 void WebWorkerClientImpl::postConsoleMessageToWorkerObject(
@@ -272,7 +306,8 @@ void WebWorkerClientImpl::StartWorkerContextTask(
     const WebCore::String& user_agent,
     const WebCore::String& source_code) {
   this_ptr->webworker_->startWorkerContext(
-      webkit_glue::KURLToWebURL(WebCore::KURL(script_url)),
+      webkit_glue::KURLToWebURL(
+          WebCore::KURL(WebCore::ParsedURLString, script_url)),
       webkit_glue::StringToWebString(user_agent),
       webkit_glue::StringToWebString(source_code));
 }
@@ -287,11 +322,16 @@ void WebWorkerClientImpl::PostMessageToWorkerContextTask(
     WebCore::ScriptExecutionContext* context,
     WebWorkerClientImpl* this_ptr,
     const WebCore::String& message,
-    WTF::PassOwnPtr<WebCore::MessagePortChannel> channel) {
-  // TODO(jam): Update to pass a MessagePortChannel or
-  // PlatformMessagePortChannel when we add MessagePort support to Chrome.
+    WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels) {
+  WebMessagePortChannelArray web_channels(channels.get() ? channels->size() : 0);
+
+  for (size_t i = 0; i < web_channels.size(); ++i) {
+    web_channels[i] = (*channels)[i]->channel()->webChannelRelease();
+    web_channels[i]->setClient(0);
+  }
+
   this_ptr->webworker_->postMessageToWorkerContext(
-      webkit_glue::StringToWebString(message));
+      webkit_glue::StringToWebString(message), web_channels);
 }
 
 void WebWorkerClientImpl::WorkerObjectDestroyedTask(
@@ -306,16 +346,16 @@ void WebWorkerClientImpl::PostMessageToWorkerObjectTask(
     WebCore::ScriptExecutionContext* context,
     WebWorkerClientImpl* this_ptr,
     const WebCore::String& message,
-    WTF::PassOwnPtr<WebCore::MessagePortChannel> channel) {
+    WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels) {
 
   if (this_ptr->worker_) {
-    WTF::RefPtr<WebCore::MessagePort> port;
-    if (channel) {
-      port = WebCore::MessagePort::create(*context);
-      port->entangle(channel.release());
-    }
-
-    this_ptr->worker_->dispatchMessage(message, port.release());
+    WTF::OwnPtr<WebCore::MessagePortArray> ports =
+        WebCore::MessagePort::entanglePorts(*context, channels.release());
+    WTF::RefPtr<WebCore::SerializedScriptValue> serialized_message =
+        WebCore::SerializedScriptValue::create(message);
+    this_ptr->worker_->dispatchEvent(
+        WebCore::MessageEvent::create(ports.release(),
+                                      serialized_message.release()));
   }
 }
 
@@ -325,8 +365,13 @@ void WebWorkerClientImpl::PostExceptionToWorkerObjectTask(
     const WebCore::String& error_message,
     int line_number,
     const WebCore::String& source_url) {
-  this_ptr->script_execution_context_->reportException(
-      error_message, line_number, source_url);
+  bool handled = false;
+  if (this_ptr->worker_)
+    handled = this_ptr->worker_->dispatchEvent(
+        WebCore::ErrorEvent::create(error_message, source_url, line_number));
+  if (!handled)
+    this_ptr->script_execution_context_->reportException(
+        error_message, line_number, source_url);
 }
 
 void WebWorkerClientImpl::PostConsoleMessageToWorkerObjectTask(

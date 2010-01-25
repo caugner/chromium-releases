@@ -7,13 +7,16 @@
 #include "app/l10n_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
+#include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/importer/mork_reader.h"
+#include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_parser.h"
 #include "chrome/common/time_format.h"
@@ -34,53 +37,53 @@ Firefox2Importer::~Firefox2Importer() {
 }
 
 void Firefox2Importer::StartImport(ProfileInfo profile_info,
-                                   uint16 items, ProfileWriter* writer,
-                                   MessageLoop* delagate_loop,
-                                   ImporterHost* host) {
-  writer_ = writer;
+                                   uint16 items,
+                                   ImporterBridge* bridge) {
+  bridge_ = bridge;
   source_path_ = profile_info.source_path;
   app_path_ = profile_info.app_path;
-  importer_host_ = host;
 
   parsing_bookmarks_html_file_ = (profile_info.browser_type == BOOKMARKS_HTML);
 
   // The order here is important!
-  NotifyStarted();
+  bridge_->NotifyStarted();
   if ((items & HOME_PAGE) && !cancelled())
     ImportHomepage();  // Doesn't have a UI item.
+
+  // Note history should be imported before bookmarks because bookmark import
+  // will also import favicons and we store favicon for a URL only if the URL
+  // exist in history or bookmarks.
+  if ((items & HISTORY) && !cancelled()) {
+    bridge_->NotifyItemStarted(HISTORY);
+    ImportHistory();
+    bridge_->NotifyItemEnded(HISTORY);
+  }
+
   if ((items & FAVORITES) && !cancelled()) {
-    NotifyItemStarted(FAVORITES);
+    bridge_->NotifyItemStarted(FAVORITES);
     ImportBookmarks();
-    NotifyItemEnded(FAVORITES);
+    bridge_->NotifyItemEnded(FAVORITES);
   }
   if ((items & SEARCH_ENGINES) && !cancelled()) {
-    NotifyItemStarted(SEARCH_ENGINES);
+    bridge_->NotifyItemStarted(SEARCH_ENGINES);
     ImportSearchEngines();
-    NotifyItemEnded(SEARCH_ENGINES);
+    bridge_->NotifyItemEnded(SEARCH_ENGINES);
   }
   if ((items & PASSWORDS) && !cancelled()) {
-    NotifyItemStarted(PASSWORDS);
+    bridge_->NotifyItemStarted(PASSWORDS);
     ImportPasswords();
-    NotifyItemEnded(PASSWORDS);
+    bridge_->NotifyItemEnded(PASSWORDS);
   }
-  if ((items & HISTORY) && !cancelled()) {
-    NotifyItemStarted(HISTORY);
-    ImportHistory();
-    NotifyItemEnded(HISTORY);
-  }
-  NotifyEnded();
+  bridge_->NotifyEnded();
 }
 
 // static
 void Firefox2Importer::LoadDefaultBookmarks(const std::wstring& app_path,
                                             std::set<GURL> *urls) {
-  // TODO(port): Code below is correct only on Windows.
-  // Firefox keeps its default bookmarks in a bookmarks.html file that
-  // lives at: <Firefox install dir>\defaults\profile\bookmarks.html
   FilePath file = FilePath::FromWStringHack(app_path);
-  file.AppendASCII("defaults");
-  file.AppendASCII("profile");
-  file.AppendASCII("bookmarks.html");
+  file = file.AppendASCII("defaults");
+  file = file.AppendASCII("profile");
+  file = file.AppendASCII("bookmarks.html");
 
   urls->clear();
 
@@ -261,21 +264,19 @@ void Firefox2Importer::ImportBookmarks() {
 
   // Write data into profile.
   if (!bookmarks.empty() && !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddBookmarkEntry, bookmarks,
-        first_folder_name,
-        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
+    int options = 0;
+    if (import_to_bookmark_bar())
+      options = ProfileWriter::IMPORT_TO_BOOKMARK_BAR;
+    bridge_->AddBookmarkEntries(bookmarks, first_folder_name, options);
   }
   if (!parsing_bookmarks_html_file_ && !template_urls.empty() &&
       !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddKeywords, template_urls, -1, false));
+    bridge_->SetKeywords(template_urls, -1, false);
   } else {
     STLDeleteContainerPointers(template_urls.begin(), template_urls.end());
   }
   if (!favicons.empty()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddFavicons, favicons));
+    bridge_->SetFavIcons(favicons);
   }
 }
 
@@ -290,7 +291,7 @@ void Firefox2Importer::ImportPasswords() {
   // exist, we try to find its older version.
   std::wstring file = source_path_;
   file_util::AppendToPath(&file, L"signons2.txt");
-  if (!file_util::PathExists(file)) {
+  if (!file_util::PathExists(FilePath::FromWStringHack(file))) {
     file = source_path_;
     file_util::AppendToPath(&file, L"signons.txt");
   }
@@ -302,8 +303,7 @@ void Firefox2Importer::ImportPasswords() {
 
   if (!cancelled()) {
     for (size_t i = 0; i < forms.size(); ++i) {
-      main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-          &ProfileWriter::AddPasswordForm, forms[i]));
+      bridge_->SetPasswordForm(forms[i]);
     }
   }
 }
@@ -311,7 +311,7 @@ void Firefox2Importer::ImportPasswords() {
 void Firefox2Importer::ImportHistory() {
   std::wstring file = source_path_;
   file_util::AppendToPath(&file, L"history.dat");
-  ImportHistoryFromFirefox2(file, main_loop_, writer_);
+  ImportHistoryFromFirefox2(file, bridge_);
 }
 
 void Firefox2Importer::ImportSearchEngines() {
@@ -320,17 +320,16 @@ void Firefox2Importer::ImportSearchEngines() {
 
   std::vector<TemplateURL*> search_engines;
   ParseSearchEnginesFromXMLFiles(files, &search_engines);
-  main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-      &ProfileWriter::AddKeywords, search_engines,
-      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_),
-      true));
+
+  int default_index =
+      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_);
+  bridge_->SetKeywords(search_engines, default_index, true);
 }
 
 void Firefox2Importer::ImportHomepage() {
-  GURL homepage = GetHomepage(source_path_);
-  if (homepage.is_valid() && !IsDefaultHomepage(homepage, app_path_)) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddHomepage, homepage));
+  GURL home_page = GetHomepage(source_path_);
+  if (home_page.is_valid() && !IsDefaultHomepage(home_page, app_path_)) {
+    bridge_->AddHomePage(home_page);
   }
 }
 
@@ -384,8 +383,8 @@ bool Firefox2Importer::ParseFolderNameFromLine(const std::string& line,
   if (end == std::string::npos || tag_end < arraysize(kFolderOpen))
     return false;
 
-  CodepageToWide(line.substr(tag_end, end - tag_end), charset.c_str(),
-                 OnStringUtilConversionError::SKIP, folder_name);
+  base::CodepageToWide(line.substr(tag_end, end - tag_end), charset.c_str(),
+                       base::OnStringConversionError::SKIP, folder_name);
   HTMLUnescape(folder_name);
 
   std::string attribute_list = line.substr(arraysize(kFolderOpen),
@@ -444,15 +443,15 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
     return false;
 
   // Title
-  CodepageToWide(line.substr(tag_end, end - tag_end), charset.c_str(),
-                 OnStringUtilConversionError::SKIP, title);
+  base::CodepageToWide(line.substr(tag_end, end - tag_end), charset.c_str(),
+                       base::OnStringConversionError::SKIP, title);
   HTMLUnescape(title);
 
   // URL
   if (GetAttribute(attribute_list, kHrefAttribute, &value)) {
     std::wstring w_url;
-    CodepageToWide(value, charset.c_str(), OnStringUtilConversionError::SKIP,
-      &w_url);
+    base::CodepageToWide(value, charset.c_str(),
+                         base::OnStringConversionError::SKIP, &w_url);
     HTMLUnescape(&w_url);
 
     string16 url16 = WideToUTF16Hack(w_url);
@@ -466,8 +465,8 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
 
   // Keyword
   if (GetAttribute(attribute_list, kShortcutURLAttribute, &value)) {
-    CodepageToWide(value, charset.c_str(), OnStringUtilConversionError::SKIP,
-                   shortcut);
+    base::CodepageToWide(value, charset.c_str(),
+                         base::OnStringConversionError::SKIP, shortcut);
     HTMLUnescape(shortcut);
   }
 
@@ -481,8 +480,8 @@ bool Firefox2Importer::ParseBookmarkFromLine(const std::string& line,
 
   // Post data.
   if (GetAttribute(attribute_list, kPostDataAttribute, &value)) {
-    CodepageToWide(value, charset.c_str(),
-                   OnStringUtilConversionError::SKIP, post_data);
+    base::CodepageToWide(value, charset.c_str(),
+                         base::OnStringConversionError::SKIP, post_data);
     HTMLUnescape(post_data);
   }
 

@@ -33,11 +33,11 @@
 // This file contains the definitions for the Buffer, VertexBuffer and
 // IndexBuffer.
 
-#include "core/cross/precompile.h"
 #include <vector>
 #include "core/cross/field.h"
 #include "core/cross/error.h"
 #include "core/cross/buffer.h"
+#include "core/cross/pointer_utils.h"
 #include "core/cross/types.h"
 #include "core/cross/renderer.h"
 #include "import/cross/memory_stream.h"

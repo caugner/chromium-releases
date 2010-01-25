@@ -48,7 +48,9 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
 
   // Overridden from views::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const {
-    return false;
+    if (!tab_ || command_id != TabStripModel::CommandTogglePinned)
+      return false;
+    return tab_->pinned();
   }
   virtual bool IsCommandIdEnabled(int command_id) const {
     return tab_ && tab_->delegate()->IsCommandEnabledForTab(
@@ -83,6 +85,8 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
     AddItemWithStringId(TabStripModel::CommandReload, IDS_TAB_CXMENU_RELOAD);
     AddItemWithStringId(TabStripModel::CommandDuplicate,
                         IDS_TAB_CXMENU_DUPLICATE);
+    AddCheckItemWithStringId(TabStripModel::CommandTogglePinned,
+                             IDS_TAB_CXMENU_PIN_TAB);
     AddSeparator();
     AddItemWithStringId(TabStripModel::CommandCloseTab,
                         IDS_TAB_CXMENU_CLOSETAB);
@@ -92,7 +96,10 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
                         IDS_TAB_CXMENU_CLOSETABSTORIGHT);
     AddItemWithStringId(TabStripModel::CommandCloseTabsOpenedBy,
                         IDS_TAB_CXMENU_CLOSETABSOPENEDBY);
+    AddSeparator();
     AddItemWithStringId(TabStripModel::CommandRestoreTab, IDS_RESTORE_TAB);
+    AddItemWithStringId(TabStripModel::CommandBookmarkAllTabs,
+                        IDS_TAB_CXMENU_BOOKMARK_ALL_TABS);
     menu_.reset(new views::Menu2(this));
   }
 
@@ -221,7 +228,7 @@ void Tab::ShowContextMenu(views::View* source, int x, int y,
 ///////////////////////////////////////////////////////////////////////////////
 // views::ButtonListener implementation:
 
-void Tab::ButtonPressed(views::Button* sender) {
+void Tab::ButtonPressed(views::Button* sender, const views::Event& event) {
   if (sender == close_button())
     delegate_->CloseTab(this);
 }

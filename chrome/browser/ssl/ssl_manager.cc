@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
 #include "chrome/browser/load_from_memory_cache_details.h"
+#include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/renderer_host/resource_request_details.h"
 #include "chrome/browser/ssl/ssl_cert_error_handler.h"
-#include "chrome/browser/ssl/ssl_mixed_content_handler.h"
 #include "chrome/browser/ssl/ssl_policy.h"
 #include "chrome/browser/ssl/ssl_request_info.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
@@ -68,8 +68,8 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
   DLOG(INFO) << "OnSSLCertificateError() cert_error: " << cert_error <<
                 " url: " << request->url().spec();
 
-  ResourceDispatcherHost::ExtraRequestInfo* info =
-      ResourceDispatcherHost::ExtraInfoForRequest(request);
+  ResourceDispatcherHostRequestInfo* info =
+      ResourceDispatcherHost::InfoForRequest(request);
   DCHECK(info);
 
   // A certificate error occurred.  Construct a SSLCertErrorHandler object and
@@ -77,42 +77,22 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
   ui_loop->PostTask(FROM_HERE,
       NewRunnableMethod(new SSLCertErrorHandler(rdh,
                                                 request,
-                                                info->resource_type,
-                                                info->frame_origin,
-                                                info->main_frame_origin,
+                                                info->resource_type(),
+                                                info->frame_origin(),
+                                                info->main_frame_origin(),
                                                 cert_error,
                                                 cert,
                                                 ui_loop),
                         &SSLCertErrorHandler::Dispatch));
 }
 
-// static
-bool SSLManager::ShouldStartRequest(ResourceDispatcherHost* rdh,
-                                    URLRequest* request,
-                                    MessageLoop* ui_loop) {
-  ResourceDispatcherHost::ExtraRequestInfo* info =
-      ResourceDispatcherHost::ExtraInfoForRequest(request);
-  DCHECK(info);
+void SSLManager::DidDisplayInsecureContent() {
+  policy()->DidDisplayInsecureContent(controller_->GetActiveEntry());
+}
 
-  // We cheat here and talk to the SSLPolicy on the IO thread because we need
-  // to respond synchronously to avoid delaying all network requests...
-  if (!SSLPolicy::IsMixedContent(request->url(),
-                                 info->resource_type,
-                                 info->filter_policy,
-                                 info->frame_origin))
-    return true;
-
-
-  ui_loop->PostTask(FROM_HERE,
-      NewRunnableMethod(new SSLMixedContentHandler(rdh,
-                                                   request,
-                                                   info->resource_type,
-                                                   info->frame_origin,
-                                                   info->main_frame_origin,
-                                                   info->process_id,
-                                                   ui_loop),
-                        &SSLMixedContentHandler::Dispatch));
-  return false;
+void SSLManager::DidRunInsecureContent(const std::string& security_origin) {
+  policy()->DidRunInsecureContent(controller_->GetActiveEntry(),
+                                  security_origin);
 }
 
 void SSLManager::Observe(NotificationType type,
@@ -241,7 +221,7 @@ void SSLManager::DidStartResourceResponse(ResourceRequestDetails* details) {
       details->frame_origin(),
       details->main_frame_origin(),
       details->filter_policy(),
-      details->origin_pid(),
+      details->origin_child_id(),
       details->ssl_cert_id(),
       details->ssl_cert_status());
 

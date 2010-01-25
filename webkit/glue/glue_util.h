@@ -11,6 +11,7 @@
 class GURL;
 
 namespace WebCore {
+class AccessibilityObject;
 class ChromiumDataObject;
 class CString;
 class Cursor;
@@ -21,20 +22,25 @@ class IntRect;
 class IntSize;
 class KURL;
 class Node;
+class Range;
 class ResourceError;
 class ResourceResponse;
+class SecurityOrigin;
 class SharedBuffer;
 class String;
 struct ResourceRequest;
 }
 
 namespace WebKit {
+class WebAccessibilityObject;
 class WebCString;
 class WebData;
 class WebDragData;
 class WebForm;
 class WebHistoryItem;
 class WebNode;
+class WebRange;
+class WebSecurityOrigin;
 class WebString;
 class WebURL;
 class WebURLRequest;
@@ -144,6 +150,16 @@ WebKit::WebHistoryItem HistoryItemToWebHistoryItem(
 WTF::PassRefPtr<WebCore::HistoryItem> WebHistoryItemToHistoryItem(
     const WebKit::WebHistoryItem&);
 
+// WebRange <-> Range
+WebKit::WebRange RangeToWebRange(
+    const WTF::PassRefPtr<WebCore::Range>&);
+WTF::PassRefPtr<WebCore::Range> WebRangeToRange(
+    const WebKit::WebRange&);
+
+// WebSecurityOrigin <-> SecurityOrigin
+WebKit::WebSecurityOrigin SecurityOriginToWebSecurityOrigin(
+    const WTF::PassRefPtr<WebCore::SecurityOrigin>&);
+
 // WebURLError <-> ResourceError
 WebKit::WebURLError ResourceErrorToWebURLError(
     const WebCore::ResourceError& error);
@@ -161,6 +177,12 @@ WebCore::ResourceResponse* WebURLResponseToMutableResourceResponse(
     WebKit::WebURLResponse* resp);
 const WebCore::ResourceResponse* WebURLResponseToResourceResponse(
     const WebKit::WebURLResponse* resp);
+
+// WebAccessibilityObject <-> AccessibilityObject
+WebKit::WebAccessibilityObject AccessibilityObjectToWebAccessibilityObject(
+    const WTF::PassRefPtr<WebCore::AccessibilityObject>& o);
+WTF::PassRefPtr<WebCore::AccessibilityObject> WebAccessibilityObjectToAccessibilityObject(
+    const WebKit::WebAccessibilityObject&);
 
 }  // namespace webkit_glue
 

@@ -3,27 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>English</string>
-	<key>UTExportedTypeDeclarations</key>
-	<array>
-		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>org.chromium.extension</string>
-			<key>UTTypeDescription</key>
-			<string>Chromium Extra</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.data</string>
-			</array>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>crx</string>
-				</array>
-			</dict>
-		</dict>
-	</array>
+	<string>en-US</string>
+	<key>CFBundleDisplayName</key>
+	<string>${EXECUTABLE_NAME}</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -31,6 +13,8 @@
 			<array>
 				<string>gif</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>image/gif</string>
@@ -50,6 +34,8 @@
 				<string>html</string>
 				<string>htm</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>text/html</string>
@@ -68,6 +54,8 @@
 			<array>
 				<string>js</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>application/x-javascript</string>
@@ -83,6 +71,8 @@
 				<string>jpg</string>
 				<string>jpeg</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>image/jpeg</string>
@@ -102,6 +92,8 @@
 				<string>txt</string>
 				<string>text</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>text/plain</string>
@@ -120,6 +112,8 @@
 			<array>
 				<string>png</string>
 			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>document.icns</string>
 			<key>CFBundleTypeMIMETypes</key>
 			<array>
 				<string>image/png</string>
@@ -134,12 +128,12 @@
 			<string>Viewer</string>
 		</dict>
 		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>org.chromium.extension</string>
 			</array>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
 		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
@@ -155,7 +149,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
-	<string>????</string>
+	<string>${CHROMIUM_CREATOR}</string>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -184,17 +180,33 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleVersion</key>
-	<string>0.1</string>
 	<key>LSFileQuarantineEnabled</key>
 	<true/>
+	<key>LSHasLocalizedDisplayName</key>
+	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>10.5.0</string>
-	<key>LSUIElement</key>
-	<string>1</string>
-	<key>NSMainNibFile</key>
-	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
+	<string>CrApplication</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Chromium Extra</string>
+			<key>UTTypeIdentifier</key>
+			<string>org.chromium.extension</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>crx</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

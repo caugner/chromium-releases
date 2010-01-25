@@ -34,8 +34,11 @@ class WebWorkerProxy : public WebKit::WebWorker,
                                   const WebKit::WebString& user_agent,
                                   const WebKit::WebString& source_code);
   virtual void terminateWorkerContext();
-  virtual void postMessageToWorkerContext(const WebKit::WebString& message);
+  virtual void postMessageToWorkerContext(
+      const WebKit::WebString& message,
+      const WebKit::WebMessagePortChannelArray& channel_array);
   virtual void workerObjectDestroyed();
+  virtual void clientDestroyed();
 
   // IPC::Channel::Listener implementation.
   void OnMessageReceived(const IPC::Message& message);
@@ -44,6 +47,9 @@ class WebWorkerProxy : public WebKit::WebWorker,
   bool Send(IPC::Message* message);
 
   void OnDedicatedWorkerCreated();
+  void OnPostMessage(const string16& message,
+                     const std::vector<int>& sent_message_port_ids,
+                     const std::vector<int>& new_routing_ids);
   void OnPostConsoleMessageToWorkerObject(
       const WorkerHostMsg_PostConsoleMessageToWorkerObject_Params& params);
 

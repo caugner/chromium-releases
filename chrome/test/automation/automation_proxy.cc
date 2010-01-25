@@ -33,7 +33,7 @@ namespace {
 // properly triaged.
 class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
  public:
-  AutomationMessageFilter(AutomationProxy* server) : server_(server) {}
+  explicit AutomationMessageFilter(AutomationProxy* server) : server_(server) {}
 
   // Return true to indicate that the message was handled, or false to let
   // the message be handled in the default way.
@@ -88,6 +88,10 @@ AutomationProxy::AutomationProxy(int command_execution_timeout_ms)
       perform_version_check_(false),
       command_execution_timeout_(
           TimeDelta::FromMilliseconds(command_execution_timeout_ms)) {
+  // base::WaitableEvent::TimedWait() will choke if we give it a negative value.
+  // Zero also seems unreasonable, since we need to wait for IPC, but at
+  // least it is legal... ;-)
+  DCHECK_GE(command_execution_timeout_ms, 0);
   InitializeChannelID();
   InitializeHandleTracker();
   InitializeThread();
@@ -259,21 +263,12 @@ bool AutomationProxy::GetNormalBrowserWindowCount(int* num_windows) {
 
 bool AutomationProxy::WaitForWindowCountToBecome(int count,
                                                  int wait_timeout) {
-  const TimeTicks start = TimeTicks::Now();
-  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
-  while (TimeTicks::Now() - start < timeout) {
-    int new_count;
-    bool succeeded = GetBrowserWindowCount(&new_count);
-    if (!succeeded) {
-      // Try again next round, but log it.
-      DLOG(ERROR) << "GetBrowserWindowCount returned false";
-    } else if (count == new_count) {
-      return true;
-    }
-    PlatformThread::Sleep(automation::kSleepTime);
-  }
-  // Window count never reached the value we sought.
-  return false;
+  bool wait_success = false;
+  bool send_success = SendWithTimeout(
+      new AutomationMsg_WaitForBrowserWindowCountToBecome(0, count,
+                                                          &wait_success),
+      wait_timeout, NULL);
+  return wait_success && send_success;
 }
 
 bool AutomationProxy::GetShowingAppModalDialog(
@@ -313,58 +308,48 @@ bool AutomationProxy::ClickAppModalDialogButton(
 }
 
 bool AutomationProxy::WaitForAppModalDialog(int wait_timeout) {
-  const TimeTicks start = TimeTicks::Now();
-  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
-  while (TimeTicks::Now() - start < timeout) {
-    bool dialog_shown = false;
-    MessageBoxFlags::DialogButton button = MessageBoxFlags::DIALOGBUTTON_NONE;
-    bool succeeded = GetShowingAppModalDialog(&dialog_shown, &button);
-    if (!succeeded) {
-      // Try again next round, but log it.
-      DLOG(ERROR) << "GetShowingAppModalDialog returned false";
-    } else if (dialog_shown) {
-      return true;
+  bool wait_success = false;
+  bool send_success = SendWithTimeout(
+      new AutomationMsg_WaitForAppModalDialogToBeShown(0, &wait_success),
+      wait_timeout, NULL);
+  return wait_success && send_success;
+}
+
+bool AutomationProxy::IsURLDisplayed(GURL url) {
+  int window_count;
+  if (!GetBrowserWindowCount(&window_count))
+    return false;
+
+  for (int i = 0; i < window_count; i++) {
+    scoped_refptr<BrowserProxy> window = GetBrowserWindow(i);
+    if (!window.get())
+      break;
+
+    int tab_count;
+    if (!window->GetTabCount(&tab_count))
+      continue;
+
+    for (int j = 0; j < tab_count; j++) {
+      scoped_refptr<TabProxy> tab = window->GetTab(j);
+      if (!tab.get())
+        break;
+
+      GURL tab_url;
+      if (!tab->GetCurrentURL(&tab_url))
+        continue;
+
+      if (tab_url == url)
+        return true;
     }
-    PlatformThread::Sleep(automation::kSleepTime);
   }
-  // Dialog never shown.
+
   return false;
 }
 
-bool AutomationProxy::WaitForURLDisplayed(GURL url, int wait_timeout) {
-  const TimeTicks start = TimeTicks::Now();
-  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
-  while (TimeTicks::Now() - start < timeout) {
-    int window_count;
-    if (!GetBrowserWindowCount(&window_count))
-      return false;
-
-    for (int i = 0; i < window_count; i++) {
-      scoped_refptr<BrowserProxy> window = GetBrowserWindow(i);
-      if (!window.get())
-        break;
-
-      int tab_count;
-      if (!window->GetTabCount(&tab_count))
-        continue;
-
-      for (int j = 0; j < tab_count; j++) {
-        scoped_refptr<TabProxy> tab = window->GetTab(j);
-        if (!tab.get())
-          break;
-
-        GURL tab_url;
-        if (!tab->GetCurrentURL(&tab_url))
-          continue;
-
-        if (tab_url == url)
-          return true;
-      }
-    }
-    PlatformThread::Sleep(automation::kSleepTime);
-  }
-
-  return false;
+bool AutomationProxy::GetMetricEventDuration(const std::string& event_name,
+                                             int* duration_ms) {
+  return Send(new AutomationMsg_GetMetricEventDuration(0, event_name,
+                                                       duration_ms));
 }
 
 bool AutomationProxy::SetFilteredInet(bool enabled) {

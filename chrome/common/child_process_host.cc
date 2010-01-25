@@ -4,22 +4,41 @@
 
 #include "chrome/common/child_process_host.h"
 
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/singleton.h"
+#include "base/string_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/process_watcher.h"
 #include "chrome/common/result_codes.h"
-#include "ipc/ipc_logging.h"
+#include "chrome/installer/util/google_update_settings.h"
+
+#if defined(OS_LINUX)
+#include "base/linux_util.h"
+
+// This is defined in chrome/browser/google_update_settings_linux.cc.  It's the
+// static string containing the user's unique GUID.  We send this in the crash
+// report.
+namespace google_update {
+extern std::string linux_guid;
+}  // namespace google_update
+#endif  // OS_LINUX
 
 
 namespace {
+
 typedef std::list<ChildProcessHost*> ChildProcessList;
 
 // The NotificationTask is used to notify about plugin process connection/
@@ -45,10 +64,9 @@ class ChildNotificationTask : public Task {
 }  // namespace
 
 
-
 ChildProcessHost::ChildProcessHost(
     ProcessType type, ResourceDispatcherHost* resource_dispatcher_host)
-    : Receiver(type),
+    : Receiver(type, -1),
       ALLOW_THIS_IN_INITIALIZER_LIST(listener_(this)),
       resource_dispatcher_host_(resource_dispatcher_host),
       opening_channel_(false) {
@@ -59,10 +77,49 @@ ChildProcessHost::ChildProcessHost(
 ChildProcessHost::~ChildProcessHost() {
   Singleton<ChildProcessList>::get()->remove(this);
 
-  resource_dispatcher_host_->CancelRequestsForProcess(GetProcessId());
+  resource_dispatcher_host_->CancelRequestsForProcess(id());
 
   if (handle())
     ProcessWatcher::EnsureProcessTerminated(handle());
+}
+
+// static
+FilePath ChildProcessHost::GetChildPath() {
+  FilePath child_path;
+
+  child_path = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+      switches::kBrowserSubprocessPath);
+  if (!child_path.empty())
+    return child_path;
+
+#if !defined(OS_MACOSX)
+  // On most platforms, the child executable is the same as the current
+  // executable.
+  PathService::Get(base::FILE_EXE, &child_path);
+#else
+  // On the Mac, the child executable lives at a predefined location within
+  // the app bundle's versioned directory.
+  child_path = chrome::GetVersionedDirectory().
+      Append(chrome::kHelperProcessExecutablePath);
+#endif  // OS_MACOSX
+
+  return child_path;
+}
+
+// static
+void ChildProcessHost::SetCrashReporterCommandLine(CommandLine* command_line) {
+#if defined(USE_LINUX_BREAKPAD)
+  const bool unattended = (getenv("CHROME_HEADLESS") != NULL);
+  if (unattended || GoogleUpdateSettings::GetCollectStatsConsent()) {
+    command_line->AppendSwitchWithValue(switches::kEnableCrashReporter,
+                                        ASCIIToWide(google_update::linux_guid +
+                                                    "," +
+                                                    base::GetLinuxDistro()));
+  }
+#elif defined(OS_MACOSX)
+  if (GoogleUpdateSettings::GetCollectStatsConsent())
+    command_line->AppendSwitch(switches::kEnableCrashReporter);
+#endif  // OS_MACOSX
 }
 
 bool ChildProcessHost::CreateChannel() {
@@ -112,7 +169,7 @@ void ChildProcessHost::OnChildDied() {
 
   // On POSIX, once we've called DidProcessCrash, handle() is no longer
   // valid.  Ensure the destructor doesn't try to use it.
-  set_handle(NULL);
+  set_handle(base::kNullProcessHandle);
 
   delete this;
 }
@@ -162,6 +219,12 @@ void ChildProcessHost::ListenerHook::OnMessageReceived(
 void ChildProcessHost::ListenerHook::OnChannelConnected(int32 peer_pid) {
   host_->opening_channel_ = false;
   host_->OnChannelConnected(peer_pid);
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+  bool enabled = IPC::Logging::current()->Enabled();
+  host_->Send(new PluginProcessMsg_SetIPCLoggingEnabled(enabled));
+#endif
+
   host_->Send(new PluginProcessMsg_AskBeforeShutdown());
 
   // Notify in the main loop of the connection.
@@ -177,7 +240,8 @@ void ChildProcessHost::ListenerHook::OnChannelError() {
 }
 
 
-ChildProcessHost::Iterator::Iterator() : all_(true) {
+ChildProcessHost::Iterator::Iterator()
+    : all_(true), type_(UNKNOWN_PROCESS) {
   DCHECK(MessageLoop::current() ==
       ChromeThread::GetMessageLoop(ChromeThread::IO)) <<
           "ChildProcessInfo::Iterator must be used on the IO thread.";
@@ -186,8 +250,10 @@ ChildProcessHost::Iterator::Iterator() : all_(true) {
 
 ChildProcessHost::Iterator::Iterator(ProcessType type)
     : all_(false), type_(type) {
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::IO)) <<
+  // IO loop can be NULL in unit tests.
+  DCHECK(!ChromeThread::GetMessageLoop(ChromeThread::IO) ||
+         MessageLoop::current() ==
+             ChromeThread::GetMessageLoop(ChromeThread::IO)) <<
           "ChildProcessInfo::Iterator must be used on the IO thread.";
   iterator_ = Singleton<ChildProcessList>::get()->begin();
   if (!Done() && (*iterator_)->type() != type_)

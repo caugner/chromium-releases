@@ -7,8 +7,8 @@
 
 #include <map>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
 #if defined(OS_LINUX)
@@ -16,8 +16,11 @@
 #endif
 
 struct WebPreferences;
+class TestWebViewDelegate;
+
+namespace WebKit {
 class WebView;
-class WebViewDelegate;
+}
 
 // This class is a simple NativeView-based host for a WebView
 class WebViewHost : public WebWidgetHost {
@@ -26,18 +29,17 @@ class WebViewHost : public WebWidgetHost {
   // The newly created window should be resized after it is created, using the
   // MoveWindow (or equivalent) function.
   static WebViewHost* Create(gfx::NativeView parent_view,
-                             WebViewDelegate* delegate,
+                             TestWebViewDelegate* delegate,
                              const WebPreferences& prefs);
 
-  WebView* webview() const;
+  WebKit::WebView* webview() const;
 
 #if defined(OS_LINUX)
-  // Create a new plugin parent container, returning its X window id for
-  // embedders to use.
-  GdkNativeWindow CreatePluginContainer();
+  // Create a new plugin parent container for a given plugin XID.
+  void CreatePluginContainer(gfx::PluginWindowHandle id);
 
-  // Called when a plugin has been destroyed.  Lets us clean up our side.
-  void OnPluginWindowDestroyed(GdkNativeWindow id);
+  // Destroy the plugin parent container when a plugin has been destroyed.
+  void DestroyPluginContainer(gfx::PluginWindowHandle id);
 
   GtkPluginContainerManager* plugin_container_manager() {
     return &plugin_container_manager_;

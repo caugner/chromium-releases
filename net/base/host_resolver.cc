@@ -27,7 +27,8 @@ SingleRequestHostResolver::~SingleRequestHostResolver() {
 
 int SingleRequestHostResolver::Resolve(const HostResolver::RequestInfo& info,
                                        AddressList* addresses,
-                                       CompletionCallback* callback) {
+                                       CompletionCallback* callback,
+                                       LoadLog* load_log) {
   DCHECK(!cur_request_ && !cur_request_callback_) << "resolver already in use";
 
   HostResolver::RequestHandle request = NULL;
@@ -36,7 +37,8 @@ int SingleRequestHostResolver::Resolve(const HostResolver::RequestInfo& info,
   // we can clear out |cur_request_*|.
   CompletionCallback* transient_callback = callback ? &callback_ : NULL;
 
-  int rv = resolver_->Resolve(info, addresses, transient_callback, &request);
+  int rv = resolver_->Resolve(
+      info, addresses, transient_callback, &request, load_log);
 
   if (rv == ERR_IO_PENDING) {
     // Cleared in OnResolveCompletion().

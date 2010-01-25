@@ -4,49 +4,34 @@
 
 // Stand alone media player application used for testing the media library.
 
-// ATL compatibility with Chrome build settings.
-#undef NOMINMAX
-#undef WIN32_LEAN_AND_MEAN
+#include "media/player/player_wtl.h"
 
-#undef min
-#undef max
-#define NOMINMAX
-
-// Note this header must come before other ATL headers.
-#include "media/player/stdafx.h"
-#include <atlcrack.h>   // NOLINT
-#include <atlctrls.h>   // NOLINT
-#include <atlctrlw.h>   // NOLINT
-#include <atldlgs.h>    // NOLINT
-#include <atlframe.h>   // NOLINT
-#include <atlmisc.h>    // NOLINT
-#include <atlprint.h>   // NOLINT
-#include <atlscrl.h>    // NOLINT
-
-// Note these headers are order sensitive.
 #include "base/at_exit.h"
-#include "media/base/factory.h"
+#include "base/command_line.h"
 #include "media/base/pipeline_impl.h"
-#include "media/player/movie.h"
-#include "media/player/resource.h"
-#include "media/player/wtl_renderer.h"
-#include "media/player/view.h"
-#include "media/player/props.h"
-#include "media/player/seek.h"
-#include "media/player/list.h"
-#include "media/player/mainfrm.h"
-
-// Note these headers are NOT order sensitive.
 #include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/file_data_source.h"
+#include "media/player/mainfrm.h"
+
+// See player_wtl.h to enable timing code by turning on TESTING macro.
+
+namespace switches {
+const wchar_t* const kExit = L"exit";
+}  // namespace switches
 
 CAppModule g_module;
 
-int Run(wchar_t* cmd_line, int cmd_show) {
+int Run(wchar_t* win_cmd_line, int cmd_show) {
   base::AtExitManager exit_manager;
+
+  // Windows version of Init uses OS to fetch command line.
+  CommandLine::Init(0, NULL);
+  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+
+  std::vector<std::wstring> filenames(cmd_line->GetLooseValues());
 
   CMessageLoop the_loop;
   g_module.AddMessageLoop(&the_loop);
@@ -59,13 +44,13 @@ int Run(wchar_t* cmd_line, int cmd_show) {
 
   wnd_main.ShowWindow(cmd_show);
 
-  wchar_t* url = NULL;
-  if (cmd_line && *cmd_line) {
-    url = cmd_line;
+  if (!filenames.empty()) {
+    const wchar_t* url = filenames[0].c_str();
+    wnd_main.MovieOpenFile(url);
   }
 
-  if (url) {
-    wnd_main.MovieOpenFile(url);
+  if (cmd_line->HasSwitch(switches::kExit)) {
+    wnd_main.OnOptionsExit(0, 0, 0);
   }
 
   int result = the_loop.Run();
@@ -78,6 +63,9 @@ int Run(wchar_t* cmd_line, int cmd_show) {
 
 int WINAPI _tWinMain(HINSTANCE instance, HINSTANCE /*previous_instance*/,
                      wchar_t* cmd_line, int cmd_show) {
+#ifdef TESTING
+  double player_time_start = GetTime();
+#endif
   INITCOMMONCONTROLSEX iccx;
   iccx.dwSize = sizeof(iccx);
   iccx.dwICC = ICC_COOL_CLASSES | ICC_BAR_CLASSES;
@@ -92,6 +80,14 @@ int WINAPI _tWinMain(HINSTANCE instance, HINSTANCE /*previous_instance*/,
   int result = Run(cmd_line, cmd_show);
 
   g_module.Term();
+#ifdef TESTING
+  double player_time_end = GetTime();
+  char outputbuf[512];
+  _snprintf_s(outputbuf, sizeof(outputbuf),
+              "player time %5.2f ms\n",
+              player_time_end - player_time_start);
+  OutputDebugStringA(outputbuf);
+  printf("%s", outputbuf);
+#endif
   return result;
 }
-

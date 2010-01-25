@@ -30,7 +30,6 @@
  */
 
 
-#include "core/cross/precompile.h"
 #include "core/cross/stream.h"
 #include "core/cross/types.h"
 #include "core/cross/gl/utils_gl.h"
@@ -194,7 +193,7 @@ Stream::Semantic GLVertexAttributeToStream(const unsigned int attr,
   //
   // TODO: make this a runtime provided value discovered during
   // Renderer creation.
-  const int kMaxAttrIndex = 15;
+  const unsigned int kMaxAttrIndex = 15u;
   if (attr > kMaxAttrIndex) {
     //TODO: Figure out how to get errors out of here to the client.
     DLOG(ERROR) << "Invalid vertex attribute index.";

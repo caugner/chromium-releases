@@ -30,7 +30,6 @@
  */
 
 
-#include "core/cross/client.h"
 #include "import/cross/targz_processor.h"
 #include "tests/common/win/testing_common.h"
 #include "tests/common/cross/test_utils.h"
@@ -42,17 +41,22 @@ class TarProcessorTest : public testing::Test {
 
 // We verify that the tar file contains exactly these filenames
 static const char *kFilename1 = "test/file1";
-static const char *kFilename2 = "test/file2";
-static const char *kFilename3 = "test/file3";
+static const char *kFilename2 =
+    "test/file1ThisIsAFilenameLongerThen100Chars"
+    "ThisIsAFilenameLongerThen100Chars"
+    "ThisIsAFilenameLongerThen100CharsThisIsAFilenameLongerThen100Chars";
+static const char *kFilename3 = "test/file2";
+static const char *kFilename4 = "test/file3";
 
 // With each file having these exact contents
-#define kFileContents1 "the cat in the hat\n"
-#define kFileContents2 "abracadabra\n"
-#define kFileContents3 "I think therefore I am\n"
 
 // we should receive these (and exactly these bytes in this order)
 static const char *kConcatenatedContents =
-    kFileContents1  kFileContents2  kFileContents3;
+  "the cat in the hat\n"       // file 1 contents.
+  "this file has a long name"  // file 2 contents.
+  "abracadabra\n"              // file 3 contents.
+  "I think therefore I am\n"   // file 4 contents.
+  "";                          // end
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class TarTestClient : public ArchiveCallbackClient {
@@ -62,12 +66,27 @@ class TarTestClient : public ArchiveCallbackClient {
   virtual void ReceiveFileHeader(const ArchiveFileInfo &file_info);
   virtual bool ReceiveFileData(MemoryReadStream *stream, size_t nbytes);
 
+  virtual void Close(bool success) {
+    closed_ = true;
+    success_ = success;
+  }
+
   int GetFileCount() const { return file_count_; }
   size_t GetNumTotalBytesReceived() const { return index_; }
+
+  bool closed() const {
+    return closed_;
+  }
+
+  bool success() const {
+    return success_;
+  }
 
  private:
   int file_count_;
   int index_;
+  bool closed_;
+  bool success_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,6 +103,9 @@ void TarTestClient::ReceiveFileHeader(const ArchiveFileInfo &file_info) {
       break;
     case 2:
       EXPECT_TRUE(!strcmp(kFilename3, file_info.GetFileName().c_str()));
+      break;
+    case 3:
+      EXPECT_TRUE(!strcmp(kFilename4, file_info.GetFileName().c_str()));
       break;
   }
 
@@ -132,20 +154,33 @@ TEST_F(TarProcessorTest, LoadTarFile) {
   const int kChunkSize = 32;
 
   MemoryReadStream tar_stream(tar_data, file_size);
-  size_t bytes_to_process = file_size;
+  int bytes_to_process = file_size;
 
-  int result = Z_OK;
   while (bytes_to_process > 0) {
-    size_t bytes_this_time =
+    int bytes_this_time =
         bytes_to_process < kChunkSize ? bytes_to_process : kChunkSize;
 
-    result = tar_processor.ProcessBytes(&tar_stream, bytes_this_time);
-    EXPECT_TRUE(result == Z_OK);
+    StreamProcessor::Status status = tar_processor.ProcessBytes(
+        &tar_stream, bytes_this_time);
+    EXPECT_TRUE(status != StreamProcessor::FAILURE);
 
     bytes_to_process -= bytes_this_time;
   }
+  tar_processor.Close(true);
+
+  EXPECT_TRUE(callback_client.closed());
+  EXPECT_TRUE(callback_client.success());
 
   free(tar_data);
+}
+
+TEST_F(TarProcessorTest, PassesThroughFailure) {
+  TarTestClient callback_client;
+  TarProcessor tar_processor(&callback_client);
+  tar_processor.Close(false);
+
+  EXPECT_TRUE(callback_client.closed());
+  EXPECT_FALSE(callback_client.success());
 }
 
 }  // namespace

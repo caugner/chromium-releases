@@ -5,7 +5,7 @@
 #include "chrome/browser/autocomplete/search_provider.h"
 
 #include "app/l10n_util.h"
-#include "base/command_line.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
@@ -15,7 +15,6 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
@@ -167,8 +166,9 @@ void SearchProvider::OnURLFetchComplete(const URLFetcher* source,
     if (response_headers->GetCharset(&charset)) {
       std::wstring wide_data;
       // TODO(jungshik): Switch to CodePageToUTF8 after it's added.
-      if (CodepageToWide(data, charset.c_str(),
-                         OnStringUtilConversionError::FAIL, &wide_data))
+      if (base::CodepageToWide(data, charset.c_str(),
+                               base::OnStringConversionError::FAIL,
+                               &wide_data))
         json_data = WideToUTF8(wide_data);
     }
   }
@@ -521,10 +521,11 @@ void SearchProvider::AddNavigationResultsToMatches(
     // TODO(kochi): http://b/1170574  We add only one results for navigational
     // suggestions. If we can get more useful information about the score,
     // consider adding more results.
-    matches_.push_back(
-        NavigationToMatch(navigation_results.front(),
-                          CalculateRelevanceForNavigation(0, is_keyword),
-                          is_keyword));
+    const size_t num_results = is_keyword ?
+        keyword_navigation_results_.size() : default_navigation_results_.size();
+    matches_.push_back(NavigationToMatch(navigation_results.front(),
+        CalculateRelevanceForNavigation(num_results, 0, is_keyword),
+        is_keyword));
   }
 }
 
@@ -547,7 +548,7 @@ void SearchProvider::AddSuggestResultsToMap(
     MatchMap* map) {
   for (size_t i = 0; i < suggest_results.size(); ++i) {
     AddMatchToMap(suggest_results[i],
-                  CalculateRelevanceForSuggestion(suggest_results, i,
+                  CalculateRelevanceForSuggestion(suggest_results.size(), i,
                                                   is_keyword),
                   AutocompleteMatch::SEARCH_SUGGEST,
                   static_cast<int>(i), is_keyword, map);
@@ -555,21 +556,20 @@ void SearchProvider::AddSuggestResultsToMap(
 }
 
 int SearchProvider::CalculateRelevanceForWhatYouTyped() const {
+  if (providers_.valid_keyword_provider())
+    return 250;
+
   switch (input_.type()) {
     case AutocompleteInput::UNKNOWN:
-      return providers_.valid_keyword_provider() ? 250 : 1300;
+    case AutocompleteInput::QUERY:
+    case AutocompleteInput::FORCED_QUERY:
+      return 1300;
 
     case AutocompleteInput::REQUESTED_URL:
-      return providers_.valid_keyword_provider() ? 250 : 1200;
+      return 1150;
 
     case AutocompleteInput::URL:
-      return providers_.valid_keyword_provider() ? 250 : 850;
-
-    case AutocompleteInput::QUERY:
-      return providers_.valid_keyword_provider() ? 250 : 1300;
-
-    case AutocompleteInput::FORCED_QUERY:
-      return providers_.valid_keyword_provider() ? 250 : 1500;
+      return 850;
 
     default:
       NOTREACHED();
@@ -589,73 +589,34 @@ int SearchProvider::CalculateRelevanceForHistory(const Time& time,
   // Don't let scores go below 0.  Negative relevance scores are meaningful in
   // a different way.
   int base_score;
-  bool is_primary = providers_.is_primary_provider(is_keyword);
-  switch (input_.type()) {
-    case AutocompleteInput::UNKNOWN:
-    case AutocompleteInput::REQUESTED_URL:
-      base_score = is_primary ? 1050 : 200;
-      break;
-
-    case AutocompleteInput::URL:
-      base_score = is_primary ? 750 : 200;
-      break;
-
-    case AutocompleteInput::QUERY:
-    case AutocompleteInput::FORCED_QUERY:
-      base_score = is_primary ? 1250 : 200;
-      break;
-
-    default:
-      NOTREACHED();
-      base_score = 0;
-      break;
-  }
+  if (!providers_.is_primary_provider(is_keyword))
+    base_score = 200;
+  else
+    base_score = (input_.type() == AutocompleteInput::URL) ? 750 : 1050;
   return std::max(0, base_score - score_discount);
 }
 
-int SearchProvider::CalculateRelevanceForSuggestion(
-    const SuggestResults& suggest_results,
-    size_t suggestion_number,
-    bool is_keyword) const {
-  DCHECK(suggestion_number < suggest_results.size());
-  bool is_primary = providers_.is_primary_provider(is_keyword);
-  const int suggestion_value =
-      static_cast<int>(suggest_results.size() - 1 - suggestion_number);
-  switch (input_.type()) {
-    case AutocompleteInput::UNKNOWN:
-    case AutocompleteInput::REQUESTED_URL:
-      return suggestion_value + (is_primary ? 600 : 100);
-
-    case AutocompleteInput::URL:
-      return suggestion_value + (is_primary ? 300 : 100);
-
-    case AutocompleteInput::QUERY:
-    case AutocompleteInput::FORCED_QUERY:
-      return suggestion_value + (is_primary ? 800 : 100);
-
-    default:
-      NOTREACHED();
-      return 0;
-  }
+int SearchProvider::CalculateRelevanceForSuggestion(size_t num_results,
+                                                    size_t result_number,
+                                                    bool is_keyword) const {
+  DCHECK(result_number < num_results);
+  int base_score;
+  if (!providers_.is_primary_provider(is_keyword))
+    base_score = 100;
+  else
+    base_score = (input_.type() == AutocompleteInput::URL) ? 300 : 600;
+  return base_score +
+      static_cast<int>(num_results - 1 - result_number);
 }
 
-int SearchProvider::CalculateRelevanceForNavigation(
-    size_t suggestion_number,
-    bool is_keyword) const {
-  DCHECK(
-      (is_keyword && suggestion_number < keyword_navigation_results_.size()) ||
-      (!is_keyword && suggestion_number < default_navigation_results_.size()));
+int SearchProvider::CalculateRelevanceForNavigation(size_t num_results,
+                                                    size_t result_number,
+                                                    bool is_keyword) const {
+  DCHECK(result_number < num_results);
   // TODO(kochi): http://b/784900  Use relevance score from the NavSuggest
   // server if possible.
-  bool is_primary = providers_.is_primary_provider(is_keyword);
-  switch (input_.type()) {
-    case AutocompleteInput::QUERY:
-    case AutocompleteInput::FORCED_QUERY:
-      return static_cast<int>(suggestion_number) + (is_primary ? 1000 : 150);
-
-    default:
-      return static_cast<int>(suggestion_number) + (is_primary ? 800 : 150);
-  }
+  return (providers_.is_primary_provider(is_keyword) ? 800 : 150) +
+      static_cast<int>(num_results - 1 - result_number);
 }
 
 void SearchProvider::AddMatchToMap(const std::wstring& query_string,
@@ -670,75 +631,50 @@ void SearchProvider::AddMatchToMap(const std::wstring& query_string,
   std::vector<size_t> content_param_offsets;
   const TemplateURL& provider = is_keyword ? providers_.keyword_provider() :
                                              providers_.default_provider();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableOmnibox2)) {
-    match.contents.assign(l10n_util::GetStringF(
-        IDS_AUTOCOMPLETE_SEARCH_CONTENTS,
-        provider.short_name(),
-        query_string,
-        &content_param_offsets));
-    if (content_param_offsets.size() == 2) {
-      AutocompleteMatch::ClassifyLocationInString(content_param_offsets[1],
-                                                  query_string.length(),
-                                                  match.contents.length(),
-                                                  ACMatchClassification::NONE,
-                                                  &match.contents_class);
+  // We do intra-string highlighting for suggestions - the suggested segment
+  // will be highlighted, e.g. for input_text = "you" the suggestion may be
+  // "youtube", so we'll bold the "tube" section: you*tube*.
+  if (input_text != query_string) {
+    match.contents.assign(query_string);
+    size_t input_position = match.contents.find(input_text);
+    if (input_position == std::wstring::npos) {
+      // The input text is not a substring of the query string, e.g. input
+      // text is "slasdot" and the query string is "slashdot", so we bold the
+      // whole thing.
+      match.contents_class.push_back(
+          ACMatchClassification(0, ACMatchClassification::MATCH));
     } else {
-      // |content_param_offsets| should only not be 2 if:
-      // (a) A translator screws up
-      // (b) The strings have been changed and we haven't been rebuilt properly
-      // (c) Some sort of crazy installer error/DLL version mismatch problem
-      //     that gets the wrong data out of the locale DLL?
-      // While none of these are supposed to happen, we've seen this get hit in
-      // the wild, so avoid the vector access in the conditional arm above,
-      // which will crash.
-      NOTREACHED();
+      // TODO(beng): ACMatchClassification::MATCH now seems to just mean
+      //             "bold" this. Consider modifying the terminology.
+      // We don't iterate over the string here annotating all matches because
+      // it looks odd to have every occurrence of a substring that may be as
+      // short as a single character highlighted in a query suggestion result,
+      // e.g. for input text "s" and query string "southwest airlines", it
+      // looks odd if both the first and last s are highlighted.
+      if (input_position != 0) {
+        match.contents_class.push_back(
+            ACMatchClassification(0, ACMatchClassification::NONE));
+      }
+      match.contents_class.push_back(
+          ACMatchClassification(input_position, ACMatchClassification::DIM));
+      size_t next_fragment_position = input_position + input_text.length();
+      if (next_fragment_position < query_string.length()) {
+        match.contents_class.push_back(
+            ACMatchClassification(next_fragment_position,
+                                  ACMatchClassification::NONE));
+      }
     }
   } else {
-    // We do intra-string highlighting for suggestions - the suggested segment
-    // will be highlighted, e.g. for input_text = "you" the suggestion may be
-    // "youtube", so we'll bold the "tube" section: you*tube*.
-    if (input_text != query_string) {
-      match.contents.assign(query_string);
-      size_t input_position = match.contents.find(input_text);
-      if (input_position == std::wstring::npos) {
-        // The input text is not a substring of the query string, e.g. input
-        // text is "slasdot" and the query string is "slashdot", so we bold the
-        // whole thing.
-        match.contents_class.push_back(
-            ACMatchClassification(0, ACMatchClassification::MATCH));
-      } else {
-        // TODO(beng): ACMatchClassification::MATCH now seems to just mean
-        //             "bold" this. Consider modifying the terminology.
-        // We don't iterate over the string here annotating all matches because
-        // it looks odd to have every occurrence of a substring that may be as
-        // short as a single character highlighted in a query suggestion result,
-        // e.g. for input text "s" and query string "southwest airlines", it
-        // looks odd if both the first and last s are highlighted.
-        if (input_position != 0) {
-          match.contents_class.push_back(
-              ACMatchClassification(0, ACMatchClassification::NONE));
-        }
-        match.contents_class.push_back(
-            ACMatchClassification(input_position, ACMatchClassification::DIM));
-        size_t next_fragment_position = input_position + input_text.length();
-        if (next_fragment_position < query_string.length()) {
-          match.contents_class.push_back(
-              ACMatchClassification(next_fragment_position,
-                                    ACMatchClassification::NONE));
-        }
-      }
-    } else {
-      // Otherwise, we're dealing with the "default search" result which has no
-      // completion, but has the search provider name as the description.
-      match.contents.assign(query_string);
-      match.contents_class.push_back(
-          ACMatchClassification(0, ACMatchClassification::NONE));
-      match.description.assign(l10n_util::GetStringF(
-          IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
-          provider.short_name()));
-      match.description_class.push_back(
-          ACMatchClassification(0, ACMatchClassification::DIM));
-    }
+    // Otherwise, we're dealing with the "default search" result which has no
+    // completion, but has the search provider name as the description.
+    match.contents.assign(query_string);
+    match.contents_class.push_back(
+        ACMatchClassification(0, ACMatchClassification::NONE));
+    match.description.assign(l10n_util::GetStringF(
+        IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
+        provider.short_name()));
+    match.description_class.push_back(
+        ACMatchClassification(0, ACMatchClassification::DIM));
   }
 
   // When the user forced a query, we need to make sure all the fill_into_edit

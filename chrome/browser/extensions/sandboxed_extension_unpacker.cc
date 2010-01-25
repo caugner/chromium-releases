@@ -6,15 +6,16 @@
 
 #include <set>
 
+#include "app/gfx/codec/png_codec.h"
 #include "base/crypto/signature_verifier.h"
 #include "base/file_util.h"
-#include "base/gfx/png_encoder.h"
 #include "base/message_loop.h"
 #include "base/scoped_handle.h"
 #include "base/task.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_unpacker.h"
@@ -59,7 +60,19 @@ void SandboxedExtensionUnpacker::Start() {
 
   // If we are supposed to use a subprocess, copy the crx to the temp directory
   // and kick off the subprocess.
-  if (rdh_) {
+  //
+  // TODO(asargent) we shouldn't need to do this branch here - instead
+  // UtilityProcessHost should handle it for us. (http://crbug.com/19192)
+  bool use_utility_process = rdh_ &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
+
+#if defined(OS_POSIX)
+    // TODO(port): Don't use a utility process on linux (crbug.com/22703) or
+    // MacOS (crbug.com/8102) until problems related to autoupdate are fixed.
+    use_utility_process = false;
+#endif
+
+  if (use_utility_process) {
     ChromeThread::GetMessageLoop(ChromeThread::IO)->PostTask(FROM_HERE,
         NewRunnableMethod(this,
             &SandboxedExtensionUnpacker::StartProcessOnIOThread,
@@ -114,18 +127,13 @@ void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
     return;
   }
 
-  // Delete any images that may be used by the browser.  We're going to write
-  // out our own versions of the parsed images, and we want to make sure the
-  // originals are gone for good.
-  extension_.reset(new Extension);
+  // Create an extension object that refers to the temporary location the
+  // extension was unpacked to. We use this until the extension is finally
+  // installed. For example, the install UI shows images from inside the
+  // extension.
+  extension_.reset(new Extension(extension_root_));
+
   std::string manifest_error;
-
-  // Update the path to refer to the temporary location. We do this because
-  // clients may want to use resources inside the extension before it is
-  // installed and they need the correct path. For example, the install UI shows
-  // one of the icons from the extension.
-  extension_->set_path(extension_root_);
-
   if (!extension_->InitFromValue(*final_manifest, true,  // require id
                                  &manifest_error)) {
     ReportFailure(std::string("Manifest is invalid: ") +
@@ -133,6 +141,9 @@ void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
     return;
   }
 
+  // Delete any images that may be used by the browser.  We're going to write
+  // out our own versions of the parsed images, and we want to make sure the
+  // originals are gone for good.
   std::set<FilePath> image_paths = extension_->GetBrowserImages();
   if (image_paths.size() != images.size()) {
     ReportFailure("Decoded images don't match what's in the manifest.");
@@ -166,7 +177,7 @@ void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
     // TODO(mpcomplete): It's lame that we're encoding all images as PNG, even
     // though they may originally be .jpg, etc.  Figure something out.
     // http://code.google.com/p/chromium/issues/detail?id=12459
-    if (!PNGEncoder::EncodeBGRASkBitmap(image, false, &image_data)) {
+    if (!gfx::PNGCodec::EncodeBGRASkBitmap(image, false, &image_data)) {
       ReportFailure("Error re-encoding theme image.");
       return;
     }

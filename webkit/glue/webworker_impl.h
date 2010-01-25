@@ -16,12 +16,12 @@
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-class Strng;
-class MessagePortChannel;
 class WorkerThread;
-};
+}
 
+namespace WebKit {
 class WebView;
+}
 
 // This class is used by the worker process code to talk to the WebCore::Worker
 // implementation.  It can't use it directly since it uses WebKit types, so this
@@ -36,8 +36,8 @@ class WebWorkerImpl: public WebCore::WorkerObjectProxy,
 
   // WebCore::WorkerObjectProxy methods:
   virtual void postMessageToWorkerObject(
-      const WebCore::String& message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassRefPtr<WebCore::SerializedScriptValue> message,
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
   virtual void postExceptionToWorkerObject(
       const WebCore::String& error_message,
       int line_number,
@@ -66,8 +66,11 @@ class WebWorkerImpl: public WebCore::WorkerObjectProxy,
                                   const WebKit::WebString& user_agent,
                                   const WebKit::WebString& source_code);
   virtual void terminateWorkerContext();
-  virtual void postMessageToWorkerContext(const WebKit::WebString& message);
+  virtual void postMessageToWorkerContext(
+      const WebKit::WebString& message,
+      const WebKit::WebMessagePortChannelArray& channel);
   virtual void workerObjectDestroyed();
+  virtual void clientDestroyed();
 
   WebKit::WebWorkerClient* client() { return client_; }
 
@@ -83,7 +86,7 @@ class WebWorkerImpl: public WebCore::WorkerObjectProxy,
       WebCore::ScriptExecutionContext* context,
       WebWorkerImpl* this_ptr,
       const WebCore::String& message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
 
   // Function used to invoke tasks on the main thread.
   static void InvokeTaskMethod(void* param);
@@ -93,7 +96,7 @@ class WebWorkerImpl: public WebCore::WorkerObjectProxy,
       WebCore::ScriptExecutionContext* context,
       WebWorkerImpl* this_ptr,
       WebCore::String message,
-      WTF::PassOwnPtr<WebCore::MessagePortChannel> channel);
+      WTF::PassOwnPtr<WebCore::MessagePortChannelArray> channels);
   static void PostExceptionTask(
       WebCore::ScriptExecutionContext* context,
       WebWorkerImpl* this_ptr,
@@ -126,7 +129,7 @@ class WebWorkerImpl: public WebCore::WorkerObjectProxy,
 
   // 'shadow page' - created to proxy loading requests from the worker.
   WTF::RefPtr<WebCore::ScriptExecutionContext> loading_document_;
-  WebView* web_view_;
+  WebKit::WebView* web_view_;
   bool asked_to_terminate_;
 
   WTF::RefPtr<WebCore::WorkerThread> worker_thread_;

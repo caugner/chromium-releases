@@ -46,6 +46,7 @@ class SlideAnimatorGtk : public AnimationDelegate {
                    Direction direction,
                    int duration,
                    bool linear,
+                   bool control_child_size,
                    Delegate* delegate);
 
   virtual ~SlideAnimatorGtk();
@@ -61,6 +62,9 @@ class SlideAnimatorGtk : public AnimationDelegate {
   // Slide shut.
   void Close();
 
+  // End the current animation.
+  void End();
+
   // Immediately hide the widget.
   void CloseWithoutAnimation();
 
@@ -69,6 +73,10 @@ class SlideAnimatorGtk : public AnimationDelegate {
 
   // Returns whether the widget is currently showing the close animation.
   bool IsClosing();
+
+  // Returns whether the widget is currently showing the open or close
+  // animation.
+  bool IsAnimating();
 
   // AnimationDelegate implementation.
   void AnimationProgressed(const Animation* animation);
@@ -93,10 +101,6 @@ class SlideAnimatorGtk : public AnimationDelegate {
 
   // The object to inform about certain events. It may be NULL.
   Delegate* delegate_;
-
-  // If true, we should resize |widget_| on the next "size-allocate" event that
-  // is received by |child_|. See the comment in SlideAnimatorGtk constructor.
-  bool fixed_needs_resize_;
 
   // We need to move the child widget to (0, -height), but we don't know its
   // height until it has been allocated. This variable will be true until the

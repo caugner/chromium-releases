@@ -37,7 +37,7 @@ class GoButton : public views::ToggleImageButton,
   void ChangeMode(Mode mode, bool force);
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* button);
+  virtual void ButtonPressed(views::Button* button, const views::Event& event);
 
   // Overridden from views::View:
   virtual void OnMouseExited(const views::MouseEvent& e);
@@ -46,7 +46,6 @@ class GoButton : public views::ToggleImageButton,
  private:
   void OnButtonTimer();
 
-  int button_delay_;
   ScopedRunnableMethodFactory<GoButton> stop_timer_;
 
   LocationBarView* location_bar_;

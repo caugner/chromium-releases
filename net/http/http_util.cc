@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "net/base/net_util.h"
 
 using std::string;
 
@@ -51,24 +52,6 @@ static size_t FindStringEnd(const string& line, size_t start, char delim) {
 }
 
 //-----------------------------------------------------------------------------
-
-// static
-std::string HttpUtil::PathForRequest(const GURL& url) {
-  DCHECK(url.is_valid() && (url.SchemeIs("http") || url.SchemeIs("https")));
-  if (url.has_query())
-    return url.path() + "?" + url.query();
-  return url.path();
-}
-
-// static
-std::string HttpUtil::SpecForRequest(const GURL& url) {
-  DCHECK(url.is_valid() && (url.SchemeIs("http") || url.SchemeIs("https")));
-  GURL::Replacements replacements;
-  replacements.ClearUsername();
-  replacements.ClearPassword();
-  replacements.ClearRef();
-  return url.ReplaceComponents(replacements).spec();
-}
 
 // static
 size_t HttpUtil::FindDelimiter(const string& line, size_t search_start,
@@ -456,7 +439,7 @@ int HttpUtil::LocateStartOfStatusLine(const char* buf, int buf_len) {
         return i;
     }
   }
-  return -1; // Not found
+  return -1;  // Not found
 }
 
 int HttpUtil::LocateEndOfHeaders(const char* buf, int buf_len, int i) {
@@ -503,8 +486,8 @@ static bool IsLineSegmentContinuable(const char* begin, const char* end) {
 
 // Helper used by AssembleRawHeaders, to find the end of the status line.
 static const char* FindStatusLineEnd(const char* begin, const char* end) {
-  size_t i = StringPiece(begin, end - begin).find_first_of("\r\n");
-  if (i == StringPiece::npos)
+  size_t i = base::StringPiece(begin, end - begin).find_first_of("\r\n");
+  if (i == base::StringPiece::npos)
     return end;
   return begin + i;
 }
@@ -515,7 +498,7 @@ static const char* FindFirstNonLWS(const char* begin, const char* end) {
     if (!HttpUtil::IsLWS(*cur))
       return cur;
   }
-  return end; // Not found.
+  return end;  // Not found.
 }
 
 std::string HttpUtil::AssembleRawHeaders(const char* input_begin,
@@ -656,6 +639,20 @@ bool HttpUtil::HeadersIterator::GetNext() {
     // if we got a header name, then we are done.
     return true;
   }
+  return false;
+}
+
+bool HttpUtil::HeadersIterator::AdvanceTo(const char* name) {
+  DCHECK(name != NULL);
+  DCHECK_EQ(0, StringToLowerASCII<std::string>(name).compare(name))
+      << "the header name must be in all lower case";
+
+  while (GetNext()) {
+    if (LowerCaseEqualsASCII(name_begin_, name_end_, name)) {
+      return true;
+    }
+  }
+
   return false;
 }
 

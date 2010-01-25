@@ -11,19 +11,29 @@
 #include "base/logging.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/cocoa/tab_window_controller.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 
 namespace platform_util {
 
 void ShowItemInFolder(const FilePath& full_path) {
+  DCHECK_EQ([NSThread currentThread], [NSThread mainThread]);
   NSString* path_string = base::SysUTF8ToNSString(full_path.value());
   [[NSWorkspace sharedWorkspace] selectFile:path_string
                    inFileViewerRootedAtPath:nil];
 }
 
 void OpenItem(const FilePath& full_path) {
+  DCHECK_EQ([NSThread currentThread], [NSThread mainThread]);
   NSString* path_string = base::SysUTF8ToNSString(full_path.value());
   [[NSWorkspace sharedWorkspace] openFile:path_string];
+}
+
+void OpenExternal(const GURL& url) {
+  DCHECK_EQ([NSThread currentThread], [NSThread mainThread]);
+  NSString* url_string = base::SysUTF8ToNSString(url.spec());
+  NSURL* ns_url = [NSURL URLWithString:url_string];
+  [[NSWorkspace sharedWorkspace] openURL:ns_url];
 }
 
 gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
@@ -32,10 +42,13 @@ gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
 
 string16 GetWindowTitle(gfx::NativeWindow window) {
   NSString* title = nil;
-  if ([[window delegate] isKindOfClass:[TabWindowController class]])
-    title = [[window delegate] selectedTabTitle];
-  else
+  if ([[window delegate] isKindOfClass:[TabWindowController class]]) {
+    TabWindowController* delegate =
+        reinterpret_cast<TabWindowController*>([window delegate]);
+    title = [delegate selectedTabTitle];
+  } else {
     title = [window title];
+  }
   // If we don't yet have a title, use "Untitled".
   if (![title length])
     return WideToUTF16(l10n_util::GetString(
@@ -45,13 +58,15 @@ string16 GetWindowTitle(gfx::NativeWindow window) {
 }
 
 bool IsWindowActive(gfx::NativeWindow window) {
-  NOTIMPLEMENTED();
-  return false;
+  return [window isKeyWindow] || [window isMainWindow];
 }
 
 bool IsVisible(gfx::NativeView view) {
-  NOTIMPLEMENTED();
-  return true;
+  // A reasonable approximation of how you'd expect this to behave.
+  return (view &&
+          ![view isHiddenOrHasHiddenAncestor] &&
+          [view window] &&
+          [[view window] isVisible]);
 }
 
 }  // namespace platform_util

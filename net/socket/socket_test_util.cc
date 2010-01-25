@@ -4,6 +4,8 @@
 
 #include "net/socket/socket_test_util.h"
 
+#include <algorithm>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
@@ -15,7 +17,6 @@ namespace net {
 
 MockClientSocket::MockClientSocket()
     : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      callback_(NULL),
       connected_(false) {
 }
 
@@ -30,7 +31,6 @@ void MockClientSocket::GetSSLCertRequestInfo(
 
 void MockClientSocket::Disconnect() {
   connected_ = false;
-  callback_ = NULL;
 }
 
 bool MockClientSocket::IsConnected() const {
@@ -50,22 +50,21 @@ int MockClientSocket::GetPeerName(struct sockaddr *name, socklen_t *namelen) {
 
 void MockClientSocket::RunCallbackAsync(net::CompletionCallback* callback,
                                         int result) {
-  callback_ = callback;
   MessageLoop::current()->PostTask(FROM_HERE,
       method_factory_.NewRunnableMethod(
-          &MockClientSocket::RunCallback, result));
+          &MockClientSocket::RunCallback, callback, result));
 }
 
-void MockClientSocket::RunCallback(int result) {
-  net::CompletionCallback* c = callback_;
-  callback_ = NULL;
-  if (c)
-    c->Run(result);
+void MockClientSocket::RunCallback(net::CompletionCallback* callback,
+                                   int result) {
+  if (callback)
+    callback->Run(result);
 }
 
 MockTCPClientSocket::MockTCPClientSocket(const net::AddressList& addresses,
                                          net::MockSocket* socket)
-    : data_(socket),
+    : addresses_(addresses),
+      data_(socket),
       read_offset_(0),
       read_data_(true, net::ERR_UNEXPECTED),
       need_read_data_(true) {
@@ -74,7 +73,6 @@ MockTCPClientSocket::MockTCPClientSocket(const net::AddressList& addresses,
 }
 
 int MockTCPClientSocket::Connect(net::CompletionCallback* callback) {
-  DCHECK(!callback_);
   if (connected_)
     return net::OK;
   connected_ = true;
@@ -87,8 +85,6 @@ int MockTCPClientSocket::Connect(net::CompletionCallback* callback) {
 
 int MockTCPClientSocket::Read(net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* callback) {
-  DCHECK(!callback_);
-
   if (!IsConnected())
     return net::ERR_UNEXPECTED;
 
@@ -120,8 +116,7 @@ int MockTCPClientSocket::Read(net::IOBuffer* buf, int buf_len,
 int MockTCPClientSocket::Write(net::IOBuffer* buf, int buf_len,
                                net::CompletionCallback* callback) {
   DCHECK(buf);
-  DCHECK(buf_len > 0);
-  DCHECK(!callback_);
+  DCHECK_GT(buf_len, 0);
 
   if (!IsConnected())
     return net::ERR_UNEXPECTED;
@@ -182,7 +177,6 @@ void MockSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
 }
 
 int MockSSLClientSocket::Connect(net::CompletionCallback* callback) {
-  DCHECK(!callback_);
   ConnectCallback* connect_callback = new ConnectCallback(
       this, callback, data_->connect.result);
   int rv = transport_->Connect(connect_callback);
@@ -207,13 +201,11 @@ void MockSSLClientSocket::Disconnect() {
 
 int MockSSLClientSocket::Read(net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* callback) {
-  DCHECK(!callback_);
   return transport_->Read(buf, buf_len, callback);
 }
 
 int MockSSLClientSocket::Write(net::IOBuffer* buf, int buf_len,
                                net::CompletionCallback* callback) {
-  DCHECK(!callback_);
   return transport_->Write(buf, buf_len, callback);
 }
 
@@ -290,17 +282,101 @@ void MockClientSocketFactory::ResetNextMockIndexes() {
   mock_ssl_sockets_.ResetNextIndex();
 }
 
+MockTCPClientSocket* MockClientSocketFactory::GetMockTCPClientSocket(
+    int index) const {
+  return tcp_client_sockets_[index];
+}
+
+MockSSLClientSocket* MockClientSocketFactory::GetMockSSLClientSocket(
+    int index) const {
+  return ssl_client_sockets_[index];
+}
+
 ClientSocket* MockClientSocketFactory::CreateTCPClientSocket(
     const AddressList& addresses) {
-  return new MockTCPClientSocket(addresses, mock_sockets_.GetNext());
+  MockTCPClientSocket* socket =
+      new MockTCPClientSocket(addresses, mock_sockets_.GetNext());
+  tcp_client_sockets_.push_back(socket);
+  return socket;
 }
 
 SSLClientSocket* MockClientSocketFactory::CreateSSLClientSocket(
     ClientSocket* transport_socket,
     const std::string& hostname,
     const SSLConfig& ssl_config) {
-  return new MockSSLClientSocket(transport_socket, hostname, ssl_config,
-                                 mock_ssl_sockets_.GetNext());
+  MockSSLClientSocket* socket =
+      new MockSSLClientSocket(transport_socket, hostname, ssl_config,
+                              mock_ssl_sockets_.GetNext());
+  ssl_client_sockets_.push_back(socket);
+  return socket;
+}
+
+int TestSocketRequest::WaitForResult() {
+  return callback_.WaitForResult();
+}
+
+void TestSocketRequest::RunWithParams(const Tuple1<int>& params) {
+  callback_.RunWithParams(params);
+  (*completion_count_)++;
+  request_order_->push_back(this);
+}
+
+// static
+const int ClientSocketPoolTest::kIndexOutOfBounds = -1;
+
+// static
+const int ClientSocketPoolTest::kRequestNotFound = -2;
+
+void ClientSocketPoolTest::SetUp() {
+  completion_count_ = 0;
+}
+
+void ClientSocketPoolTest::TearDown() {
+  // The tests often call Reset() on handles at the end which may post
+  // DoReleaseSocket() tasks.
+  // Pending tasks created by client_socket_pool_base_unittest.cc are
+  // posted two milliseconds into the future and thus won't become
+  // scheduled until that time.
+  // We wait a few milliseconds to make sure that all such future tasks
+  // are ready to run, before calling RunAllPending(). This will work
+  // correctly even if Sleep() finishes late (and it should never finish
+  // early), as all we have to ensure is that actual wall-time has progressed
+  // past the scheduled starting time of the pending task.
+  PlatformThread::Sleep(10);
+  MessageLoop::current()->RunAllPending();
+}
+
+int ClientSocketPoolTest::GetOrderOfRequest(size_t index) {
+  index--;
+  if (index >= requests_.size())
+    return kIndexOutOfBounds;
+
+  for (size_t i = 0; i < request_order_.size(); i++)
+    if (requests_[index] == request_order_[i])
+      return i + 1;
+
+  return kRequestNotFound;
+}
+
+bool ClientSocketPoolTest::ReleaseOneConnection(KeepAlive keep_alive) {
+  ScopedVector<TestSocketRequest>::iterator i;
+  for (i = requests_.begin(); i != requests_.end(); ++i) {
+    if ((*i)->handle()->is_initialized()) {
+      if (keep_alive == NO_KEEP_ALIVE)
+        (*i)->handle()->socket()->Disconnect();
+      (*i)->handle()->Reset();
+      MessageLoop::current()->RunAllPending();
+      return true;
+    }
+  }
+  return false;
+}
+
+void ClientSocketPoolTest::ReleaseAllConnections(KeepAlive keep_alive) {
+  bool released_one;
+  do {
+    released_one = ReleaseOneConnection(keep_alive);
+  } while (released_one);
 }
 
 }  // namespace net

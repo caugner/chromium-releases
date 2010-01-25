@@ -95,6 +95,7 @@ class URLRow {
     visit_count_ = visit_count;
   }
 
+  // Number of times the URL was typed in the Omnibox.
   int typed_count() const {
     return typed_count_;
   }
@@ -109,6 +110,7 @@ class URLRow {
     last_visit_ = last_visit;
   }
 
+  // If this is set, we won't autocomplete this URL.
   bool hidden() const {
     return hidden_;
   }
@@ -363,6 +365,8 @@ class URLResult : public URLRow {
 // a given URL appears in those results.
 class QueryResults {
  public:
+  typedef std::vector<URLResult*> URLResultVector;
+
   QueryResults();
   ~QueryResults();
 
@@ -386,9 +390,19 @@ class QueryResults {
   bool reached_beginning() { return reached_beginning_; }
 
   size_t size() const { return results_.size(); }
+  bool empty() const { return results_.empty(); }
 
   URLResult& operator[](size_t i) { return *results_[i]; }
   const URLResult& operator[](size_t i) const { return *results_[i]; }
+
+  URLResultVector::const_iterator begin() const { return results_.begin(); }
+  URLResultVector::const_iterator end() const { return results_.end(); }
+  URLResultVector::const_reverse_iterator rbegin() const {
+    return results_.rbegin();
+  }
+  URLResultVector::const_reverse_iterator rend() const {
+    return results_.rend();
+  }
 
   // Returns a pointer to the beginning of an array of all matching indices
   // for entries with the given URL. The array will be |*num_matches| long.
@@ -421,8 +435,6 @@ class QueryResults {
   void DeleteRange(size_t begin, size_t end);
 
  private:
-  typedef std::vector<URLResult*> URLResultVector;
-
   // Maps the given URL to a list of indices into results_ which identify each
   // time an entry with that URL appears. Normally, each URL will have one or
   // very few indices after it, so we optimize this to use statically allocated
@@ -504,6 +516,17 @@ struct KeywordSearchTermVisit {
 
   // The search term that was used.
   std::wstring term;
+};
+
+// MostVisitedURL --------------------------------------------------------------
+
+// Holds the per-URL information of the most visited query.
+struct MostVisitedURL {
+  GURL url;
+  GURL favicon_url;
+  std::wstring title;
+
+  RedirectList redirects;
 };
 
 }  // history

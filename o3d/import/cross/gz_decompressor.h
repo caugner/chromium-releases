@@ -49,12 +49,13 @@ class GzDecompressor : public StreamProcessor {
   explicit GzDecompressor(StreamProcessor *callback_client);
   virtual ~GzDecompressor();
 
-  virtual int     ProcessBytes(MemoryReadStream *stream,
+  virtual Status  ProcessBytes(MemoryReadStream *stream,
                                size_t bytes_to_process);
+  virtual void    Close(bool success);
 
  private:
   z_stream         strm_;  // low-level zlib state
-  int              init_result_;
+  bool             initialized_;
   StreamProcessor  *callback_client_;
 
   DISALLOW_COPY_AND_ASSIGN(GzDecompressor);

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_BROWSER_H_
 #define CHROME_BROWSER_BROWSER_H_
 
+#include <map>
 #include <set>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/extensions/extension_shelf_model.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -23,7 +25,6 @@
 #include "chrome/common/pref_member.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
-class BrowserIdleTimer;
 class BrowserWindow;
 class DebuggerWindow;
 class FindBarController;
@@ -102,6 +103,10 @@ class Browser : public TabStripModelDelegate,
   void set_maximized_state(MaximizedState state) {
     maximized_state_ = state;
   }
+  // Return true if the initial window bounds have been overridden.
+  bool bounds_overridden() const {
+    return !override_bounds_.IsEmpty();
+  }
 
   // Creates the Browser Window. Prefer to use the static helpers above where
   // possible. This does not show the window. You need to call window()->Show()
@@ -129,6 +134,9 @@ class Browser : public TabStripModelDelegate,
   const SessionID& session_id() const { return session_id_; }
   CommandUpdater* command_updater() { return &command_updater_; }
   FindBarController* find_bar() { return find_bar_controller_.get(); }
+  ExtensionShelfModel* extension_shelf_model() {
+    return extension_shelf_model_.get();
+  }
 
   // Setters /////////////////////////////////////////////////////////////////
 
@@ -226,10 +234,9 @@ class Browser : public TabStripModelDelegate,
                              bool force_index,
                              SiteInstance* instance);
 
-  // Add a new tab, given a NavigationController. A TabContents appropriate to
+  // Add a new tab, given a TabContents. A TabContents appropriate to
   // display the last committed entry is created and returned.
-  TabContents* AddTabWithNavigationController(NavigationController* ctrl,
-                                              PageTransition::Type type);
+  TabContents* AddTab(TabContents* tab_contents, PageTransition::Type type);
 
   // Add a tab with its session history restored from the SessionRestore
   // system. If select is true, the tab is selected. |tab_index| gives the index
@@ -265,6 +272,10 @@ class Browser : public TabStripModelDelegate,
   // part of an animation.
   void ToolbarSizeChanged(bool is_animating);
 
+  // Notification that the extension shelf has changed size (as a result of
+  // becoming detached or attached).
+  void ExtensionShelfSizeChanged();
+
   // Replaces the state of the currently selected tab with the session
   // history restored from the SessionRestore system.
   void ReplaceRestoredTab(
@@ -278,6 +289,12 @@ class Browser : public TabStripModelDelegate,
   // visible in this browser, it becomes selected. Otherwise a new tab is
   // created.
   void ShowSingleDOMUITab(const GURL& url);
+
+  // Update commands whose state depends on whether the window is in fullscreen
+  // mode. This is a public function because on Linux, fullscreen mode is an
+  // async call to X. Once we get the fullscreen callback, the browser window
+  // will call this method.
+  void UpdateCommandsForFullscreenMode(bool is_fullscreen);
 
   // Assorted browser commands ////////////////////////////////////////////////
 
@@ -301,10 +318,13 @@ class Browser : public TabStripModelDelegate,
   void CloseTab();
   void SelectNextTab();
   void SelectPreviousTab();
+  void MoveTabNext();
+  void MoveTabPrevious();
   void SelectNumberedTab(int index);
   void SelectLastTab();
   void DuplicateTab();
   void RestoreTab();
+  void WriteCurrentURLToClipboard();
   void ConvertPopupToTabbedBrowser();
   void ToggleFullscreenMode();
   void Exit();
@@ -322,16 +342,15 @@ class Browser : public TabStripModelDelegate,
 #if defined(OS_WIN)
   // Page-related commands.
   void ClosePopups();
-  void Print();
 #endif
+  void Print();
   void ToggleEncodingAutoDetect();
   void OverrideEncoding(int encoding_id);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
   // Clipboard commands
   void Cut();
   void Copy();
-  void CopyCurrentPageURL();
   void Paste();
 #endif
 
@@ -353,24 +372,31 @@ class Browser : public TabStripModelDelegate,
   // Show various bits of UI
   void OpenFile();
   void OpenCreateShortcutsDialog();
-  void ToggleJavaScriptConsole();
+  void ToggleDevToolsWindow();
   void OpenTaskManager();
   void OpenSelectProfileDialog();
   void OpenNewProfileDialog();
   void OpenBugReportDialog();
 
   void ToggleBookmarkBar();
+  void ToggleExtensionShelf();
 
   void OpenBookmarkManager();
+  void ShowAppMenu();
+  void ShowPageMenu();
   void ShowHistoryTab();
   void ShowDownloadsTab();
   void OpenClearBrowsingDataDialog();
   void OpenOptionsDialog();
   void OpenKeywordEditor();
   void OpenPasswordManager();
+#if defined(BROWSER_SYNC)
+  void OpenSyncMyBookmarksDialog();
+#endif
   void OpenImportSettingsDialog();
   void OpenAboutChromeDialog();
   void OpenHelpTab();
+  void OpenExtensionsTab();
 #if defined(OS_CHROMEOS)
   void ShowControlPanel();
 #endif
@@ -398,6 +424,9 @@ class Browser : public TabStripModelDelegate,
   static Browser* GetBrowserForController(
       const NavigationController* controller, int* index);
 
+  // Retrieve the last active tabbed browser with a profile matching |profile|.
+  // Creates a new Browser if none are available.
+  static Browser* GetOrCreateTabbedBrowser(Profile* profile);
 
   // Helper function to create a new popup window.
   static void BuildPopupWindowHelper(TabContents* source,
@@ -445,6 +474,8 @@ class Browser : public TabStripModelDelegate,
   virtual void CreateHistoricalTab(TabContents* contents);
   virtual bool RunUnloadListenerBeforeClosing(TabContents* contents);
   virtual bool CanCloseContentsAt(int index);
+  virtual bool CanBookmarkAllTabs() const;
+  virtual void BookmarkAllTabs();
 
   // Overridden from TabStripModelObserver:
   virtual void TabInsertedAt(TabContents* contents,
@@ -489,6 +520,7 @@ class Browser : public TabStripModelDelegate,
   virtual void ContentsMouseEvent(TabContents* source, bool motion);
   virtual void ContentsZoomChange(bool zoom_in);
   virtual void TabContentsFocused(TabContents* tab_content);
+  virtual bool TakeFocus(bool reverse);
   virtual bool IsApplication() const;
   virtual void ConvertContentsToApplication(TabContents* source);
   virtual bool ShouldDisplayURLField();
@@ -508,6 +540,8 @@ class Browser : public TabStripModelDelegate,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
+  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
 
   // Overridden from SelectFileDialog::Listener:
   virtual void FileSelected(const FilePath& path, int index, void* params);
@@ -525,10 +559,6 @@ class Browser : public TabStripModelDelegate,
   // Update commands whose state depends on the tab's state.
   void UpdateCommandsForTabState();
 
-  // Update commands whose state depends on whether the window is in fullscreen
-  // mode.
-  void UpdateCommandsForFullscreenMode(bool is_fullscreen);
-
   // Ask the Stop/Go button to change its icon, and update the Go and Stop
   // command states.  |is_loading| is true if the current TabContents is
   // loading.  |force| is true if the button should change its icon immediately.
@@ -543,12 +573,15 @@ class Browser : public TabStripModelDelegate,
   // well.
   void UpdateToolbar(bool should_restore_state);
 
-  // Adds an update to the update queue and schedules an update if necessary.
-  // These are subsequently processed by ProcessPendingUIUpdates.
-  // |changed_flags| is a bitfield of TabContents::INVALIDATE_* values.
+  // Does one or both of the following for each bit in |changed_flags|:
+  // . If the update should be processed immediately, it is.
+  // . If the update should processed asynchronously (to avoid lots of ui
+  //   updates), then scheduled_updates_ is updated for the |source| and update
+  //   pair and a task is scheduled (assuming it isn't running already)
+  //   that invokes ProcessPendingUIUpdates.
   void ScheduleUIUpdate(const TabContents* source, unsigned changed_flags);
 
-  // Processes all pending updates to the UI that have been queued by
+  // Processes all pending updates to the UI that have been scheduled by
   // ScheduleUIUpdate in scheduled_updates_.
   void ProcessPendingUIUpdates();
 
@@ -611,10 +644,6 @@ class Browser : public TabStripModelDelegate,
   bool CanCloseWithInProgressDownloads();
 
   // Assorted utility functions ///////////////////////////////////////////////
-
-  // Retrieve the last active tabbed browser with the same profile as the
-  // receiving Browser. Creates a new Browser if none are available.
-  Browser* GetOrCreateTabbedBrowser();
 
   // The low-level function that other OpenURL...() functions call.  This
   // determines the appropriate SiteInstance to pass to AddTabWithURL(), focuses
@@ -705,16 +734,18 @@ class Browser : public TabStripModelDelegate,
   // The model for the toolbar view.
   BrowserToolbarModel toolbar_model_;
 
+  // The model for the extension shelf.
+  scoped_ptr<ExtensionShelfModel> extension_shelf_model_;
+
   // UI update coalescing and handling ////////////////////////////////////////
 
-  // Tracks invalidates to the UI, see the declaration in the .cc file.
-  struct UIUpdate;
-  typedef std::vector<UIUpdate> UpdateVector;
+  typedef std::map<const TabContents*,int> UpdateMap;
 
-  // Lists all UI updates that are pending. We don't update things like the
-  // URL or tab title right away to avoid flickering and extra painting.
+  // Maps from TabContents to pending UI updates that need to be processed.
+  // We don't update things like the URL or tab title right away to avoid
+  // flickering and extra painting.
   // See ScheduleUIUpdate and ProcessPendingUIUpdates.
-  UpdateVector scheduled_updates_;
+  UpdateMap scheduled_updates_;
 
   // The following factory is used for chrome update coalescing.
   ScopedRunnableMethodFactory<Browser> chrome_updater_factory_;
@@ -765,9 +796,6 @@ class Browser : public TabStripModelDelegate,
 
   // Dialog box used for opening and saving files.
   scoped_refptr<SelectFileDialog> select_file_dialog_;
-
-  // The browser idle task helps cleanup unused memory resources when idle.
-  scoped_ptr<BrowserIdleTimer> idle_task_;
 
   // Keep track of the encoding auto detect pref.
   BooleanPrefMember encoding_auto_detect_;

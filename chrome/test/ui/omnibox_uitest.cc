@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <math.h>
 #include <stdio.h>
 
 #include "base/command_line.h"
@@ -18,7 +19,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 
-const wchar_t kRunOmniboxTest[] = L"run_omnibox_test";
+const char kRunOmniboxTest[] = "run_omnibox_test";
 
 class OmniboxTest : public UITest {
  public:
@@ -135,12 +136,12 @@ TEST_F(OmniboxTest, Measure) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunOmniboxTest))
     return;
 
-  std::wstring omnibox_tests_path;
+  FilePath omnibox_tests_path;
   PathService::Get(chrome::DIR_TEST_DATA, &omnibox_tests_path);
-  file_util::AppendToPath(&omnibox_tests_path, L"omnibox_tests.xml");
+  omnibox_tests_path = omnibox_tests_path.AppendASCII("omnibox_tests.xml");
 
   XmlReader reader;
-  ASSERT_TRUE(reader.LoadFile(WideToASCII(omnibox_tests_path)));
+  ASSERT_TRUE(reader.LoadFile(WideToASCII(omnibox_tests_path.ToWStringHack())));
   while (reader.SkipToElement()) {
     ASSERT_EQ("omnibox_tests", reader.NodeName());
     reader.Read();

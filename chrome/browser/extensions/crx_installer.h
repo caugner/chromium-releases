@@ -10,43 +10,13 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
+#include "base/task.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/common/extensions/extension.h"
 
-class CrxInstaller;
 class SkBitmap;
-
-// Classes that want to know about install completion, or that want to have an
-// opportunity to reject the unpacked extension before installation, should
-// implement this interface.
-class CrxInstallerClient
-    : public base::RefCountedThreadSafe<CrxInstallerClient> {
- public:
-  virtual ~CrxInstallerClient() {}
-
-  // This is called by the installer to verify whether the installation should
-  // proceed. Clients can use this time to put up UI, or to do any checks they
-  // need to on the unpacked extension.
-  //
-  // Clients *MUST* eventually call either ContinueInstall() or AbortInstall()
-  // on |installer|.
-  //
-  // Clients should not AddRef() |installer|.
-  virtual void ConfirmInstall(CrxInstaller* installer,
-                              Extension* extension,
-                              SkBitmap* icon) = 0;
-
-  // Installation was successful.
-  virtual void OnInstallSuccess(Extension* extension) = 0;
-
-  // Intallation failed.
-  virtual void OnInstallFailure(const std::string& error) = 0;
-
-  // The install was rejected because the same extension/version is already
-  // installed.
-  virtual void OnOverinstallAttempted(Extension* extension) = 0;
-};
 
 // This class installs a crx file into a profile.
 //
@@ -65,7 +35,9 @@ class CrxInstallerClient
 // long enough to receive the result of unpacking.
 //
 // TODO(aa): Pull out a frontend interface for testing?
-class CrxInstaller : public SandboxedExtensionUnpackerClient {
+class CrxInstaller :
+    public SandboxedExtensionUnpackerClient,
+    public ExtensionInstallUI::Delegate {
  public:
   // Starts the installation of the crx file in |crx_path| into
   // |install_directory|.
@@ -87,17 +59,19 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
                     Extension::Location install_source,
                     const std::string& expected_id,
                     bool delete_crx,
+                    bool allow_privilege_increase,
                     MessageLoop* file_loop,
                     ExtensionsService* frontend,
-                    CrxInstallerClient* client);
+                    ExtensionInstallUI* client);
 
-  // Clients should call this method after ConfirmInstall() if they want the
-  // installation to continue.
-  void ContinueInstall();
+  // Given the path to the large icon from an extension, read it if present and
+  // decode it into result.
+  static void DecodeInstallIcon(const FilePath& large_icon_path,
+                                scoped_ptr<SkBitmap>* result);
 
-  // Clients should call this method after ConfirmInstall() if they want the
-  // installation to stop.
-  void AbortInstall();
+  // ExtensionInstallUI::Delegate
+  virtual void ContinueInstall();
+  virtual void AbortInstall();
 
  private:
   CrxInstaller(const FilePath& crx_path,
@@ -105,9 +79,10 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
                Extension::Location install_source,
                const std::string& expected_id,
                bool delete_crx,
+               bool allow_privilege_increase,
                MessageLoop* file_loop,
                ExtensionsService* frontend,
-               CrxInstallerClient* client);
+               ExtensionInstallUI* client);
   ~CrxInstaller();
 
   // SandboxedExtensionUnpackerClient
@@ -116,11 +91,7 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
                                const FilePath& extension_dir,
                                Extension* extension);
 
-  // Read the icon from the extension if present and decode it into
-  // install_icon_.
-  void DecodeInstallIcon();
-
-  // Runs on the UI thread. Confirms with the user (via CrxInstallerClient) that
+  // Runs on the UI thread. Confirms with the user (via ExtensionInstallUI) that
   // it is OK to install this extension.
   void ConfirmInstall();
 
@@ -159,6 +130,10 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
   // Whether we're supposed to delete the source crx file on destruction.
   bool delete_crx_;
 
+  // Whether privileges should be allowed to silently increaes from any
+  // previously installed version of the extension.
+  bool allow_privilege_increase_;
+
   // The message loop to use for file IO.
   MessageLoop* file_loop_;
 
@@ -168,6 +143,10 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
   // The extension we're installing. We own this and either pass it off to
   // ExtensionsService on success, or delete it on failure.
   scoped_ptr<Extension> extension_;
+
+  // If non-empty, contains the current version of the extension we're
+  // installing (for upgrades).
+  std::string current_version_;
 
   // The icon we will display in the installation UI, if any.
   scoped_ptr<SkBitmap> install_icon_;
@@ -181,7 +160,7 @@ class CrxInstaller : public SandboxedExtensionUnpackerClient {
 
   // The client we will work with to do the installation. This can be NULL, in
   // which case the install is silent.
-  scoped_refptr<CrxInstallerClient> client_;
+  scoped_ptr<ExtensionInstallUI> client_;
 
   // The root of the unpacked extension directory. This is a subdirectory of
   // temp_dir_, so we don't have to delete it explicitly.

@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/gfx/png_encoder.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/dom_ui/dom_ui_theme_source.h"
 #include "chrome/browser/profile.h"
@@ -20,8 +19,8 @@ class MockThemeSource : public DOMUIThemeSource {
         result_data_size_(0) {
   }
 
-  virtual void SendResponse(int request_id, RefCountedBytes* data) {
-    result_data_size_ = data ? data->data.size() : 0;
+  virtual void SendResponse(int request_id, RefCountedMemory* data) {
+    result_data_size_ = data ? data->size() : 0;
     result_request_id_ = request_id;
   }
 
@@ -36,7 +35,7 @@ class DOMUISourcesTest : public testing::Test {
  private:
   virtual void SetUp() {
     profile_.reset(new TestingProfile());
-    profile_.get()->CreateThemeProvider();
+    profile_->InitThemes();
     theme_source_ = new MockThemeSource(profile_.get());
   }
 

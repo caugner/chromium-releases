@@ -14,6 +14,9 @@ namespace views {
 
 // A button with custom rendering. The common base class of ImageButton and
 // TextButton.
+// Note that this type of button is not focusable by default and will not be
+// part of the focus chain.  Call SetFocusable(true) to make it part of the
+// focus chain.
 class CustomButton : public Button,
                      public AnimationDelegate {
  public:
@@ -37,6 +40,9 @@ class CustomButton : public Button,
 
   // Set how long the hover animation will last for.
   void SetAnimationDuration(int duration);
+
+  // Sets whether or not to show the highlighed (i.e. hot) state. Default true.
+  void SetShowHighlighted(bool show_highlighted);
 
   // Overridden from View:
   virtual void SetEnabled(bool enabled);
@@ -72,9 +78,17 @@ class CustomButton : public Button,
   virtual void OnDragDone();
   virtual void ShowContextMenu(int x, int y, bool is_mouse_gesture);
   virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
+  virtual void SetHotTracked(bool flag);
+  virtual bool IsHotTracked() const;
+  virtual void WillLoseFocus();
 
   // Overridden from AnimationDelegate:
   virtual void AnimationProgressed(const Animation* animation);
+
+  // Returns true if the button should become pressed when the user
+  // holds the mouse down over the button. For this implementation,
+  // we simply return IsTriggerableEvent(e).
+  virtual bool ShouldEnterPushedState(const MouseEvent& e);
 
   // The button state (defined in implementation)
   ButtonState state_;
@@ -93,6 +107,9 @@ class CustomButton : public Button,
   // Should we animate when the state changes? Defaults to true, but false while
   // throbbing.
   bool animate_on_state_change_;
+
+  // Whether or not to show the highlighted (i.e. hot) state.
+  bool show_highlighted_;
 
   // Mouse event flags which can trigger button actions.
   int triggerable_event_flags_;

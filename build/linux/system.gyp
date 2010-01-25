@@ -3,21 +3,50 @@
 # found in the LICENSE file.
 
 {
+  'conditions': [
+    ['sysroot!=""', {
+      'variables': {
+        'pkg-config': './pkg-config-wrapper "<(sysroot)"',
+      },
+    }, {
+      'variables': {
+        'pkg-config': 'pkg-config'
+      },
+    }],
+  ],
+  
   'targets': [
     {
       'target_name': 'gtk',
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags gtk+-2.0)',
+          '<!@(<(pkg-config) --cflags gtk+-2.0 gthread-2.0)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other gtk+-2.0)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other gtk+-2.0 gthread-2.0)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l gtk+-2.0)',
+          '<!@(<(pkg-config) --libs-only-l gtk+-2.0 gthread-2.0)',
+        ],
+      },
+    },
+    {
+      'target_name': 'gtkprint',
+      'type': 'settings',
+      'direct_dependent_settings': {
+        'cflags': [
+          '<!@(<(pkg-config) --cflags gtk+-unix-print-2.0)',
+        ],
+      },
+      'link_settings': {
+        'ldflags': [
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other gtk+-unix-print-2.0)',
+        ],
+        'libraries': [
+          '<!@(<(pkg-config) --libs-only-l gtk+-unix-print-2.0)',
         ],
       },
     },
@@ -26,15 +55,15 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags nss)',
+          '<!@(<(pkg-config) --cflags nss)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other nss)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other nss)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l nss)',
+          '<!@(<(pkg-config) --libs-only-l nss)',
         ],
       },
     },
@@ -43,15 +72,15 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags freetype2)',
+          '<!@(<(pkg-config) --cflags freetype2)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other freetype2)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other freetype2)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l freetype2)',
+          '<!@(<(pkg-config) --libs-only-l freetype2)',
         ],
       },
     },
@@ -60,15 +89,15 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags fontconfig)',
+          '<!@(<(pkg-config) --cflags fontconfig)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other fontconfig)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other fontconfig)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l fontconfig)',
+          '<!@(<(pkg-config) --libs-only-l fontconfig)',
         ],
       },
     },
@@ -77,15 +106,15 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags gdk-2.0)',
+          '<!@(<(pkg-config) --cflags gdk-2.0)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other gdk-2.0)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other gdk-2.0)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l gdk-2.0)',
+          '<!@(<(pkg-config) --libs-only-l gdk-2.0)',
         ],
       },
     },
@@ -94,32 +123,15 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags gconf-2.0)',
+          '<!@(<(pkg-config) --cflags gconf-2.0)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other gconf-2.0)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other gconf-2.0)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l gconf-2.0)',
-        ],
-      },
-    },
-    {
-      'target_name': 'gthread',
-      'type': 'settings',
-      'direct_dependent_settings': {
-        'cflags': [
-          '<!@(pkg-config --cflags gthread-2.0)',
-        ],
-      },
-      'link_settings': {
-        'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other gthread-2.0)',
-        ],
-        'libraries': [
-          '<!@(pkg-config --libs-only-l gthread-2.0)',
+          '<!@(<(pkg-config) --libs-only-l gconf-2.0)',
         ],
       },
     },
@@ -128,15 +140,24 @@
       'type': 'settings',
       'direct_dependent_settings': {
         'cflags': [
-          '<!@(pkg-config --cflags x11)',
+          '<!@(<(pkg-config) --cflags x11)',
         ],
       },
       'link_settings': {
         'ldflags': [
-          '<!@(pkg-config --libs-only-L --libs-only-other x11)',
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other x11)',
         ],
         'libraries': [
-          '<!@(pkg-config --libs-only-l x11)',
+          '<!@(<(pkg-config) --libs-only-l x11)',
+        ],
+      },
+    },
+    {
+      'target_name': 'selinux',
+      'type': 'settings',
+      'link_settings': {
+        'libraries': [
+          '-lselinux',
         ],
       },
     },
@@ -148,15 +169,15 @@
 #       'type': 'settings',
 #       'direct_dependent_settings': {
 #         'cflags': [
-#           '<!@(pkg-config --cflags gnome-keyring-1)',
+#           '<!@(<(pkg-config) --cflags gnome-keyring-1)',
 #         ],
 #       },
 #       'link_settings': {
 #         'ldflags': [
-#           '<!@(pkg-config --libs-only-L --libs-only-other gnome-keyring-1)',
+#           '<!@(<(pkg-config) --libs-only-L --libs-only-other gnome-keyring-1)',
 #         ],
 #         'libraries': [
-#           '<!@(pkg-config --libs-only-l gnome-keyring-1)',
+#           '<!@(<(pkg-config) --libs-only-l gnome-keyring-1)',
 #         ],
 #       },
 #     },
@@ -165,17 +186,23 @@
 #       'type': 'settings',
 #       'direct_dependent_settings': {
 #         'cflags': [
-#           '<!@(pkg-config --cflags dbus-glib-1)',
+#           '<!@(<(pkg-config) --cflags dbus-glib-1)',
 #         ],
 #       },
 #       'link_settings': {
 #         'ldflags': [
-#           '<!@(pkg-config --libs-only-L --libs-only-other dbus-glib-1)',
+#           '<!@(<(pkg-config) --libs-only-L --libs-only-other dbus-glib-1)',
 #         ],
 #         'libraries': [
-#           '<!@(pkg-config --libs-only-l dbus-glib-1)',
+#           '<!@(<(pkg-config) --libs-only-l dbus-glib-1)',
 #         ],
 #       },
 #     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

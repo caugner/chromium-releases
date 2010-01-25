@@ -10,8 +10,10 @@
 #define Lock FOO_NSS_Lock
 #include <certt.h>
 #undef Lock
+#include <keyt.h>
 #include <nspr.h>
 #include <nss.h>
+
 #include <string>
 
 #include "base/scoped_ptr.h"
@@ -51,21 +53,31 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
   virtual int Write(IOBuffer* buf, int buf_len, CompletionCallback* callback);
+  virtual bool SetReceiveBufferSize(int32 size);
+  virtual bool SetSendBufferSize(int32 size);
 
  private:
   void InvalidateSessionIfBadCertificate();
   X509Certificate* UpdateServerCert();
-  void DoCallback(int result);
+  void DoReadCallback(int result);
+  void DoWriteCallback(int result);
   void DoConnectCallback(int result);
-  void OnIOComplete(int result);
+  void OnHandshakeIOComplete(int result);
+  void OnSendComplete(int result);
+  void OnRecvComplete(int result);
 
-  int DoLoop(int last_io_result);
-  int DoHandshakeRead();
+  int DoHandshakeLoop(int last_io_result);
+  int DoReadLoop(int result);
+  int DoWriteLoop(int result);
+
+  int DoHandshake();
   int DoVerifyCert(int result);
   int DoVerifyCertComplete(int result);
   int DoPayloadRead();
   int DoPayloadWrite();
   int Init();
+
+  bool DoTransportIO();
   int BufferSend(void);
   int BufferRecv(void);
   void BufferSendComplete(int result);
@@ -75,6 +87,12 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // argument.
   static SECStatus OwnAuthCertHandler(void* arg, PRFileDesc* socket,
                                       PRBool checksig, PRBool is_server);
+  // NSS calls this when client authentication is requested.
+  static SECStatus ClientAuthHandler(void* arg,
+                                     PRFileDesc* socket,
+                                     CERTDistNames* ca_names,
+                                     CERTCertificate** result_certificate,
+                                     SECKEYPrivateKey** result_private_key);
   // NSS calls this when handshake is completed.  We pass 'this' as the second
   // argument.
   static void HandshakeCallback(PRFileDesc* socket, void* arg);
@@ -85,21 +103,31 @@ class SSLClientSocketNSS : public SSLClientSocket {
   bool transport_recv_busy_;
   scoped_refptr<IOBuffer> recv_buffer_;
 
-  CompletionCallbackImpl<SSLClientSocketNSS> io_callback_;
+  CompletionCallbackImpl<SSLClientSocketNSS> handshake_io_callback_;
   scoped_ptr<ClientSocket> transport_;
   std::string hostname_;
   SSLConfig ssl_config_;
 
   CompletionCallback* user_connect_callback_;
-  CompletionCallback* user_callback_;
+  CompletionCallback* user_read_callback_;
+  CompletionCallback* user_write_callback_;
 
-  // Used by both Read and Write functions.
-  scoped_refptr<IOBuffer> user_buf_;
-  int user_buf_len_;
+  // Used by Read function.
+  scoped_refptr<IOBuffer> user_read_buf_;
+  int user_read_buf_len_;
+
+  // Used by Write function.
+  scoped_refptr<IOBuffer> user_write_buf_;
+  int user_write_buf_len_;
 
   // Set when handshake finishes.
   scoped_refptr<X509Certificate> server_cert_;
   CertVerifyResult server_cert_verify_result_;
+
+  // Stores client authentication information between ClientAuthHandler and
+  // GetSSLCertRequestInfo calls.
+  CERTDistNames* client_auth_ca_names_;
+  bool client_auth_cert_needed_;
 
   scoped_ptr<CertVerifier> verifier_;
 
@@ -107,13 +135,11 @@ class SSLClientSocketNSS : public SSLClientSocket {
 
   enum State {
     STATE_NONE,
-    STATE_HANDSHAKE_READ,
+    STATE_HANDSHAKE,
     STATE_VERIFY_CERT,
     STATE_VERIFY_CERT_COMPLETE,
-    STATE_PAYLOAD_WRITE,
-    STATE_PAYLOAD_READ,
   };
-  State next_state_;
+  State next_handshake_state_;
 
   // The NSS SSL state machine
   PRFileDesc* nss_fd_;

@@ -32,8 +32,8 @@
 
 // This file contains the GAPI decoder class.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H__
-#define O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H_
+#define O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H_
 
 #include "core/cross/types.h"
 #include "command_buffer/service/cross/cmd_parser.h"
@@ -48,66 +48,20 @@ class CommandBufferEngine;
 // commands and sending them to a GAPI interface.
 class GAPIDecoder : public AsyncAPIInterface {
  public:
-  typedef BufferSyncInterface::ParseError ParseError;
+  typedef parse_error::ParseError ParseError;
 
   explicit GAPIDecoder(GAPIInterface *gapi) : gapi_(gapi), engine_(NULL) {}
   virtual ~GAPIDecoder() {}
-  // Executes a command.
-  // Parameters:
-  //    command: the command index.
-  //    arg_count: the number of CommandBufferEntry arguments.
-  //    args: the arguments.
-  // Returns:
-  //   BufferSyncInterface::NO_ERROR if no error was found, one of
-  //   BufferSyncInterface::ParseError otherwise.
+
+  // Overridden from AsyncAPIInterface.
   virtual ParseError DoCommand(unsigned int command,
                                unsigned int arg_count,
-                               CommandBufferEntry *args);
+                               const void* args);
 
   // Sets the engine, to get shared memory buffers from, and to set the token
   // to.
   void set_engine(CommandBufferEngine *engine) { engine_ = engine; }
  private:
-  // Decodes the SET_VERTEX_INPUT command.
-  ParseError DecodeSetVertexInput(unsigned int arg_count,
-                                  CommandBufferEntry *args);
-
-  // Decodes the CREATE_TEXTURE_2D command.
-  ParseError DecodeCreateTexture2D(unsigned int arg_count,
-                                   CommandBufferEntry *args);
-
-  // Decodes the CREATE_TEXTURE_3D command.
-  ParseError DecodeCreateTexture3D(unsigned int arg_count,
-                                   CommandBufferEntry *args);
-
-  // Decodes the CREATE_TEXTURE_CUBE command.
-  ParseError DecodeCreateTextureCube(unsigned int arg_count,
-                                     CommandBufferEntry *args);
-
-  // Decodes the SET_TEXTURE_DATA command.
-  ParseError DecodeSetTextureData(unsigned int arg_count,
-                                  CommandBufferEntry *args);
-
-  // Decodes the SET_TEXTURE_DATA_IMMEDIATE command.
-  ParseError DecodeSetTextureDataImmediate(unsigned int arg_count,
-                                           CommandBufferEntry *args);
-
-  // Decodes the GET_TEXTURE_DATA command.
-  ParseError DecodeGetTextureData(unsigned int arg_count,
-                                  CommandBufferEntry *args);
-
-  // Decodes the SET_SAMPLER_STATES command.
-  ParseError DecodeSetSamplerStates(unsigned int arg_count,
-                                    CommandBufferEntry *args);
-
-  // Decodes the SET_STENCIL_TEST command.
-  ParseError DecodeSetStencilTest(unsigned int arg_count,
-                                  CommandBufferEntry *args);
-
-  // Decodes the SET_BLENDING command.
-  ParseError DecodeSetBlending(unsigned int arg_count,
-                               CommandBufferEntry *args);
-
   // Gets the address of shared memory data, given a shared memory ID and an
   // offset. Also checks that the size is consistent with the shared memory
   // size.
@@ -121,6 +75,18 @@ class GAPIDecoder : public AsyncAPIInterface {
   void *GetAddressAndCheckSize(unsigned int shm_id,
                                unsigned int offset,
                                unsigned int size);
+
+  // Generate a member function prototype for each command in an automated and
+  // typesafe way.
+  #define O3D_COMMAND_BUFFER_CMD_OP(name) \
+     ParseError Handle ## name(           \
+       unsigned int arg_count,            \
+       const cmd::name& args);            \
+
+  O3D_COMMAND_BUFFER_CMDS(O3D_COMMAND_BUFFER_CMD_OP)
+
+  #undef O3D_COMMAND_BUFFER_CMD_OP
+
   GAPIInterface *gapi_;
   CommandBufferEngine *engine_;
 };
@@ -128,4 +94,4 @@ class GAPIDecoder : public AsyncAPIInterface {
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_GAPI_DECODER_H_

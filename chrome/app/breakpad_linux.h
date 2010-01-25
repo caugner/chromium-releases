@@ -5,12 +5,13 @@
 #ifndef CHROME_APP_BREAKPAD_LINUX_H_
 #define CHROME_APP_BREAKPAD_LINUX_H_
 
+#include <stdlib.h>
+
 extern void InitCrashReporter();
 
-#if defined(GOOGLE_CHROME_BUILD)
-static const unsigned kMaxActiveURLSize = 1024;
-static const unsigned kGuidSize = 32;  // 128 bits = 32 chars in hex.
-static const unsigned kDistroSize = 128;
+static const size_t kMaxActiveURLSize = 1024;
+static const size_t kGuidSize = 32;  // 128 bits = 32 chars in hex.
+static const size_t kDistroSize = 128;
 
 struct BreakpadInfo {
   const char* filename;
@@ -22,9 +23,9 @@ struct BreakpadInfo {
   unsigned guid_length;
   const char* distro;
   unsigned distro_length;
+  bool upload;
 };
 
-extern int UploadCrashDump(const BreakpadInfo& info);
-#endif  // defined(GOOGLE_CHROME_BUILD)
+extern int HandleCrashDump(const BreakpadInfo& info);
 
 #endif  // CHROME_APP_BREAKPAD_LINUX_H_

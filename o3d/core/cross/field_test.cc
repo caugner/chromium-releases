@@ -32,10 +32,13 @@
 
 // Tests Field, FloatField, UInt32Field, UByteNField.
 
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
 #include "core/cross/error_status.h"
 #include "core/cross/field.h"
+#include "core/cross/buffer.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
+#include "core/cross/service_dependency.h"
 
 namespace o3d {
 
@@ -174,7 +177,7 @@ TEST_F(FieldTest, TestBasic) {
 
   // Check things are as expected.
   EXPECT_EQ(field_1->num_components(), kNumComponents);
-  EXPECT_EQ(field_1->offset(), 0);
+  EXPECT_EQ(field_1->offset(), 0U);
   EXPECT_EQ(field_1->size(),
             field_1->num_components() * field_1->GetFieldComponentSize());
   EXPECT_EQ(field_1->buffer(), buffer());
@@ -194,7 +197,7 @@ TEST_F(FieldTest, TestBasic) {
       buffer()->CreateField(FloatField::GetApparentClass(), kNumComponents));
   ASSERT_FALSE(field_2_ref.IsNull());
   Field* field_2 = field_2_ref.Get();
-  EXPECT_EQ(field_1->offset(), 0);
+  EXPECT_EQ(field_1->offset(), 0U);
   EXPECT_EQ(field_2->offset(), field_1->size());
   EXPECT_EQ(field_2->buffer(), buffer());
   EXPECT_EQ(buffer()->num_elements(), kNumElements);
@@ -202,7 +205,7 @@ TEST_F(FieldTest, TestBasic) {
   // Check if we remove the first field the second field gets updated correctly.
   buffer()->RemoveField(field_1);
   EXPECT_TRUE(field_1->buffer() == NULL);
-  EXPECT_EQ(field_2->offset(), 0);
+  EXPECT_EQ(field_2->offset(), 0U);
 
   // Check we can't create a field of 0 components.
   EXPECT_TRUE(buffer()->CreateField(FloatField::GetApparentClass(), 0) ==

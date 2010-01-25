@@ -1,24 +1,18 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(dumi): expose V8Proxy::processConsoleMessages() through
-// a function in WebKit.h and remove the next 2 includes
-// http://code.google.com/p/chromium/issues/detail?id=17300
-#include "config.h"
-#include "V8Proxy.h"
 #undef LOG
 
 #include "webkit/tools/test_shell/test_shell.h"
 
+#include "app/gfx/codec/png_codec.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/debug_on_start.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/gfx/png_encoder.h"
 #include "base/gfx/size.h"
-#include "base/icu_util.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
@@ -31,30 +25,38 @@
 #include "googleurl/src/url_util.h"
 #include "grit/webkit_strings.h"
 #include "net/base/mime_util.h"
+#include "net/base/net_util.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/api/public/WebAccessibilityObject.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebScriptController.h"
 #include "webkit/api/public/WebRect.h"
 #include "webkit/api/public/WebSize.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebURLRequest.h"
 #include "webkit/api/public/WebURLResponse.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
+#include "webkit/tools/test_shell/accessibility_controller.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
 
+using WebKit::WebCanvas;
+using WebKit::WebFrame;
 using WebKit::WebNavigationPolicy;
 using WebKit::WebRect;
 using WebKit::WebSize;
 using WebKit::WebURLRequest;
+using WebKit::WebView;
 
 namespace {
 
@@ -100,6 +102,8 @@ WindowList* TestShell::window_list_;
 WebPreferences* TestShell::web_prefs_ = NULL;
 bool TestShell::layout_test_mode_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
+bool TestShell::test_is_preparing_ = false;
+bool TestShell::test_is_pending_ = false;
 
 TestShell::TestShell()
     : m_mainWnd(NULL),
@@ -111,12 +115,11 @@ TestShell::TestShell()
       default_edit_wnd_proc_(0),
 #endif
       test_params_(NULL),
-      test_is_preparing_(false),
-      test_is_pending_(false),
       is_modal_(false),
       dump_stats_table_on_exit_(false) {
-    delegate_ = new TestWebViewDelegate(this);
-    popup_delegate_ = new TestWebViewDelegate(this);
+    accessibility_controller_.reset(new AccessibilityController(this));
+    delegate_.reset(new TestWebViewDelegate(this));
+    popup_delegate_.reset(new TestWebViewDelegate(this));
     layout_test_controller_.reset(new LayoutTestController(this));
     event_sending_controller_.reset(new EventSendingController(this));
     text_input_controller_.reset(new TextInputController(this));
@@ -129,15 +132,19 @@ TestShell::TestShell()
 }
 
 TestShell::~TestShell() {
+  delegate_->RevokeDragDrop();
+
   // Navigate to an empty page to fire all the destruction logic for the
   // current page.
-  LoadURL(L"about:blank");
+  LoadURL(GURL("about:blank"));
 
   // Call GC twice to clean up garbage.
   CallJSGC();
   CallJSGC();
 
-  webView()->SetDelegate(NULL);
+  // Destroy the WebView before the TestWebViewDelegate.
+  m_webViewHost.reset();
+
   PlatformCleanUp();
 
   StatsTable *table = StatsTable::current();
@@ -158,10 +165,10 @@ TestShell::~TestShell() {
   }
 }
 
-bool TestShell::CreateNewWindow(const std::wstring& startingURL,
+bool TestShell::CreateNewWindow(const GURL& starting_url,
                                 TestShell** result) {
   TestShell* shell = new TestShell();
-  bool rv = shell->Initialize(startingURL);
+  bool rv = shell->Initialize(starting_url);
   if (rv) {
     if (result)
       *result = shell;
@@ -188,12 +195,12 @@ void TestShell::Dump(TestShell* shell) {
   if ((shell == NULL) || ((params = shell->test_params()) == NULL))
     return;
 
-  WebCore::V8Proxy::processConsoleMessages();
+  WebKit::flushConsoleMessages();
   // Echo the url in the output so we know we're not getting out of sync.
   printf("#URL:%s\n", params->test_url.c_str());
 
   // Dump the requested representation.
-  WebFrame* frame = shell->webView()->GetMainFrame();
+  WebFrame* frame = shell->webView()->mainFrame();
   if (frame) {
     bool should_dump_as_text =
         shell->layout_test_controller_->ShouldDumpAsText();
@@ -205,7 +212,7 @@ void TestShell::Dump(TestShell* shell) {
       if (!should_dump_as_text) {
         // Plain text pages should be dumped as text
         const string16& mime_type =
-            frame->GetDataSource()->response().mimeType();
+            frame->dataSource()->response().mimeType();
         should_dump_as_text = EqualsASCII(mime_type, "text/plain");
       }
       if (should_dump_as_text) {
@@ -239,8 +246,11 @@ void TestShell::Dump(TestShell* shell) {
       // command line (for the dump pixels argument), and the MD5 sum to
       // stdout.
       dumped_anything = true;
-      std::string md5sum = DumpImage(shell->webView(), params->pixel_file_name,
-          params->pixel_hash);
+      WebViewHost* view_host = shell->webViewHost();
+      view_host->webview()->layout();
+      view_host->Paint();
+      std::string md5sum = DumpImage(view_host->canvas(),
+          params->pixel_file_name, params->pixel_hash);
       printf("#MD5:%s\n", md5sum.c_str());
     }
     if (dumped_anything)
@@ -250,24 +260,16 @@ void TestShell::Dump(TestShell* shell) {
 }
 
 // static
-std::string TestShell::DumpImage(WebView* view,
+std::string TestShell::DumpImage(skia::PlatformCanvas* canvas,
     const std::wstring& file_name, const std::string& pixel_hash) {
-  view->layout();
-  const WebSize& size = view->size();
-
-  skia::PlatformCanvas canvas;
-  if (!canvas.initialize(size.width, size.height, true))
-    return std::string();
-  view->paint(&canvas, WebRect(0, 0, size.width, size.height));
-
   skia::BitmapPlatformDevice& device =
-      static_cast<skia::BitmapPlatformDevice&>(canvas.getTopPlatformDevice());
+      static_cast<skia::BitmapPlatformDevice&>(canvas->getTopPlatformDevice());
   const SkBitmap& src_bmp = device.accessBitmap(false);
 
   // Encode image.
   std::vector<unsigned char> png;
   SkAutoLockPixels src_bmp_lock(src_bmp);
-  PNGEncoder::ColorFormat color_format = PNGEncoder::FORMAT_BGRA;
+  gfx::PNGCodec::ColorFormat color_format = gfx::PNGCodec::FORMAT_BGRA;
 
   // Fix the alpha. The expected PNGs on Mac have an alpha channel, so we want
   // to keep it. On Windows, the alpha channel is wrong since text/form control
@@ -299,7 +301,7 @@ std::string TestShell::DumpImage(WebView* view,
   // Only encode and dump the png if the hashes don't match. Encoding the image
   // is really expensive.
   if (md5hash.compare(pixel_hash) != 0) {
-    PNGEncoder::Encode(
+    gfx::PNGCodec::Encode(
         reinterpret_cast<const unsigned char*>(src_bmp.getPixels()),
         color_format, src_bmp.width(), src_bmp.height(),
         static_cast<int>(src_bmp.rowBytes()), discard_transparency, &png);
@@ -405,7 +407,7 @@ void TestShell::ResetWebPreferences() {
         web_prefs_->fixed_font_family = L"Courier";
         web_prefs_->sans_serif_font_family = L"Helvetica";
 
-        web_prefs_->default_encoding = L"ISO-8859-1";
+        web_prefs_->default_encoding = "ISO-8859-1";
         web_prefs_->default_font_size = 16;
         web_prefs_->default_fixed_font_size = 13;
         web_prefs_->minimum_font_size = 1;
@@ -422,6 +424,18 @@ void TestShell::ResetWebPreferences() {
         // It's off by default for Chrome, but we don't want to
         // lose the coverage of dynamic font tests in webkit test.
         web_prefs_->remote_fonts_enabled = true;
+        web_prefs_->local_storage_enabled = true;
+        web_prefs_->session_storage_enabled = true;
+        web_prefs_->application_cache_enabled = true;
+        web_prefs_->databases_enabled = true;
+        // LayoutTests were written with Safari Mac in mind which does not allow
+        // tabbing to links by default.
+        web_prefs_->tabs_to_links = false;
+
+        // Allow those layout tests running as local files, i.e. under
+        // LayoutTests/http/tests/local, to access http server.
+        if (layout_test_mode_)
+          web_prefs_->allow_universal_access_from_file_urls = true;
     }
 }
 
@@ -446,6 +460,8 @@ void TestShell::Show(WebNavigationPolicy policy) {
 void TestShell::BindJSObjectsToWindow(WebFrame* frame) {
   // Only bind the test classes if we're running tests.
   if (layout_test_mode_) {
+    accessibility_controller_->BindToJavascript(
+        frame, L"accessibilityController");
     layout_test_controller_->BindToJavascript(frame, L"layoutTestController");
     event_sending_controller_->BindToJavascript(frame, L"eventSender");
     text_input_controller_->BindToJavascript(frame, L"textInputController");
@@ -476,20 +492,24 @@ void TestShell::DumpBackForwardList(std::wstring* result) {
 }
 
 void TestShell::CallJSGC() {
-  webView()->GetMainFrame()->CallJSGC();
+  webView()->mainFrame()->collectGarbage();
 }
 
-WebView* TestShell::CreateWebView(WebView* webview) {
+WebView* TestShell::CreateWebView() {
   // If we're running layout tests, only open a new window if the test has
   // called layoutTestController.setCanOpenWindows()
   if (layout_test_mode_ && !layout_test_controller_->CanOpenWindows())
     return NULL;
 
   TestShell* new_win;
-  if (!CreateNewWindow(std::wstring(), &new_win))
+  if (!CreateNewWindow(GURL(), &new_win))
     return NULL;
 
   return new_win->webView();
+}
+
+bool TestShell::IsSVGTestURL(const GURL& url) {
+  return url.is_valid() && url.spec().find("W3C-SVG-1.1") != std::string::npos;
 }
 
 void TestShell::SizeToSVG() {
@@ -501,23 +521,27 @@ void TestShell::SizeToDefault() {
 }
 
 void TestShell::ResetTestController() {
+  accessibility_controller_->Reset();
   layout_test_controller_->Reset();
   event_sending_controller_->Reset();
-
-  // Reset state in the test webview delegate.
-  delegate_ = new TestWebViewDelegate(this);
-  webView()->SetDelegate(delegate_);
+  delegate_->Reset();
 }
 
-void TestShell::LoadURL(const wchar_t* url) {
-    LoadURLForFrame(url, NULL);
+void TestShell::LoadFile(const FilePath& file) {
+  LoadURLForFrame(net::FilePathToFileURL(file), std::wstring());
+}
+
+void TestShell::LoadURL(const GURL& url) {
+  LoadURLForFrame(url, std::wstring());
 }
 
 bool TestShell::Navigate(const TestNavigationEntry& entry, bool reload) {
   // Get the right target frame for the entry.
-  WebFrame* frame = webView()->GetMainFrame();
-  if (!entry.GetTargetFrame().empty())
-      frame = webView()->GetFrameWithName(entry.GetTargetFrame());
+  WebFrame* frame = webView()->mainFrame();
+  if (!entry.GetTargetFrame().empty()) {
+      frame = webView()->findFrameByName(
+          WideToUTF16Hack(entry.GetTargetFrame()));
+  }
   // TODO(mpcomplete): should we clear the target frame, or should
   // back/forward navigations maintain the target frame?
 
@@ -532,14 +556,14 @@ bool TestShell::Navigate(const TestNavigationEntry& entry, bool reload) {
   // If we are reloading, then WebKit will use the state of the current page.
   // Otherwise, we give it the state to navigate to.
   if (reload) {
-    frame->Reload();
+    frame->reload();
   } else if (!entry.GetContentState().empty()) {
     DCHECK(entry.GetPageID() != -1);
-    frame->LoadHistoryItem(
+    frame->loadHistoryItem(
         webkit_glue::HistoryItemFromString(entry.GetContentState()));
   } else {
     DCHECK(entry.GetPageID() == -1);
-    frame->LoadRequest(WebURLRequest(entry.GetURL()));
+    frame->loadRequest(WebURLRequest(entry.GetURL()));
   }
 
   // In case LoadRequest failed before DidCreateDataSource was called.
@@ -550,7 +574,7 @@ bool TestShell::Navigate(const TestNavigationEntry& entry, bool reload) {
   // iframe would keep focus when the SetFocus called immediately after
   // LoadRequest, thus making some tests fail (see http://b/issue?id=845337
   // for more details).
-  webView()->SetFocusedFrame(frame);
+  webView()->setFocusedFrame(frame);
   SetFocus(webViewHost(), true);
 
   return true;
@@ -566,7 +590,7 @@ void TestShell::DumpDocumentText() {
       return;
 
   const std::string data =
-      WideToUTF8(webkit_glue::DumpDocumentText(webView()->GetMainFrame()));
+      WideToUTF8(webkit_glue::DumpDocumentText(webView()->mainFrame()));
   file_util::WriteFile(file_path, data.c_str(), data.length());
 }
 
@@ -576,12 +600,12 @@ void TestShell::DumpRenderTree() {
     return;
 
   const std::string data =
-      WideToUTF8(webkit_glue::DumpRenderer(webView()->GetMainFrame()));
+      WideToUTF8(webkit_glue::DumpRenderer(webView()->mainFrame()));
   file_util::WriteFile(file_path, data.c_str(), data.length());
 }
 
 std::wstring TestShell::GetDocumentText() {
-  return webkit_glue::DumpDocumentText(webView()->GetMainFrame());
+  return webkit_glue::DumpDocumentText(webView()->mainFrame());
 }
 
 void TestShell::Reload() {
@@ -618,12 +642,8 @@ void AppendToLog(const char* file, int line, const char* msg) {
   logging::LogMessage(file, line).stream() << msg;
 }
 
-bool GetApplicationDirectory(std::wstring *path) {
-  bool r;
-  FilePath fp;
-  r = PathService::Get(base::DIR_EXE, &fp);
-  *path = fp.ToWStringHack();
-  return r;
+bool GetApplicationDirectory(FilePath* path) {
+  return PathService::Get(base::DIR_EXE, path);
 }
 
 GURL GetInspectorURL() {
@@ -634,16 +654,8 @@ std::string GetUIResourceProtocol() {
   return "test-shell-resource";
 }
 
-bool GetExeDirectory(std::wstring *path) {
+bool GetExeDirectory(FilePath* path) {
   return GetApplicationDirectory(path);
-}
-
-bool SpellCheckWord(const wchar_t* word, int word_len,
-                    int* misspelling_start, int* misspelling_len) {
-  // Report all words being correctly spelled.
-  *misspelling_start = 0;
-  *misspelling_len = 0;
-  return true;
 }
 
 bool IsPluginRunningInRendererProcess() {
@@ -665,6 +677,12 @@ bool IsDefaultPluginEnabled() {
       return true;
   }
 #endif  // OS_WIN
+  return false;
+}
+
+bool IsProtocolSupportedForMedia(const GURL& url) {
+  if (url.SchemeIsFile() || url.SchemeIs("http") || url.SchemeIs("https"))
+    return true;
   return false;
 }
 

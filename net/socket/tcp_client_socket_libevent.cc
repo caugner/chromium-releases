@@ -43,6 +43,8 @@ int MapPosixError(int err) {
     case EWOULDBLOCK:
 #endif
       return ERR_IO_PENDING;
+    case EACCES:
+      return ERR_ACCESS_DENIED;
     case ENETDOWN:
       return ERR_INTERNET_DISCONNECTED;
     case ETIMEDOUT:
@@ -64,6 +66,35 @@ int MapPosixError(int err) {
     default:
       LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
       return ERR_FAILED;
+  }
+}
+
+int MapConnectError(int err) {
+  switch (err) {
+    case ETIMEDOUT:
+      return ERR_CONNECTION_TIMED_OUT;
+    default:
+      return MapPosixError(err);
+  }
+}
+
+// Given err, an errno from a connect() attempt, returns true if connect()
+// should be retried with another address.
+bool ShouldTryNextAddress(int err) {
+  switch (err) {
+    case EADDRNOTAVAIL:
+    case EAFNOSUPPORT:
+    case ECONNREFUSED:
+    case ECONNRESET:
+    case EACCES:
+    case EPERM:
+    case ENETUNREACH:
+    case EHOSTUNREACH:
+    case ENETDOWN:
+    case ETIMEDOUT:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -94,29 +125,41 @@ int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
   DCHECK(!waiting_connect_);
 
   TRACE_EVENT_BEGIN("socket.connect", this, "");
-  const addrinfo* ai = current_ai_;
-  DCHECK(ai);
 
-  int rv = CreateSocket(ai);
-  if (rv != OK)
-    return rv;
+  while (true) {
+    DCHECK(current_ai_);
 
-  if (!HANDLE_EINTR(connect(socket_, ai->ai_addr,
-                            static_cast<int>(ai->ai_addrlen)))) {
-    TRACE_EVENT_END("socket.connect", this, "");
-    // Connected without waiting!
-    return OK;
+    int rv = CreateSocket(current_ai_);
+    if (rv != OK)
+      return rv;
+
+    if (!HANDLE_EINTR(connect(socket_, current_ai_->ai_addr,
+                              static_cast<int>(current_ai_->ai_addrlen)))) {
+      TRACE_EVENT_END("socket.connect", this, "");
+      // Connected without waiting!
+      return OK;
+    }
+
+    int error_code = errno;
+    if (error_code == EINPROGRESS)
+      break;
+
+    close(socket_);
+    socket_ = kInvalidSocket;
+
+    if (current_ai_->ai_next && ShouldTryNextAddress(error_code)) {
+      // connect() can fail synchronously for an address even on a
+      // non-blocking socket.  As an example, this can happen when there is
+      // no route to the host.  Retry using the next address in the list.
+      current_ai_ = current_ai_->ai_next;
+    } else {
+      DLOG(INFO) << "connect failed: " << error_code;
+      return MapConnectError(error_code);
+    }
   }
 
   // Synchronous operation not supported
   DCHECK(callback);
-
-  if (errno != EINPROGRESS) {
-    DLOG(INFO) << "connect failed: " << errno;
-    close(socket_);
-    socket_ = kInvalidSocket;
-    return MapPosixError(errno);
-  }
 
   // Initialize write_socket_watcher_ and link it to our MessagePump.
   // POLLOUT is set if the connection is established.
@@ -251,6 +294,23 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
   return ERR_IO_PENDING;
 }
 
+bool TCPClientSocketLibevent::SetReceiveBufferSize(int32 size) {
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+      reinterpret_cast<const char*>(&size),
+      sizeof(size));
+  DCHECK(!rv) << "Could not set socket receive buffer size: " << errno;
+  return rv == 0;
+}
+
+bool TCPClientSocketLibevent::SetSendBufferSize(int32 size) {
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
+      reinterpret_cast<const char*>(&size),
+      sizeof(size));
+  DCHECK(!rv) << "Could not set socket send buffer size: " << errno;
+  return rv == 0;
+}
+
+
 int TCPClientSocketLibevent::CreateSocket(const addrinfo* ai) {
   socket_ = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
   if (socket_ == kInvalidSocket)
@@ -296,20 +356,14 @@ void TCPClientSocketLibevent::DidCompleteConnect() {
   if (error_code == EINPROGRESS || error_code == EALREADY) {
     NOTREACHED();  // This indicates a bug in libevent or our code.
     result = ERR_IO_PENDING;
-  } else if (current_ai_->ai_next && (
-             error_code == EADDRNOTAVAIL ||
-             error_code == EAFNOSUPPORT ||
-             error_code == ECONNREFUSED ||
-             error_code == ENETUNREACH ||
-             error_code == EHOSTUNREACH ||
-             error_code == ETIMEDOUT)) {
+  } else if (current_ai_->ai_next && ShouldTryNextAddress(error_code)) {
     // This address failed, try next one in list.
     const addrinfo* next = current_ai_->ai_next;
     Disconnect();
     current_ai_ = next;
     result = Connect(write_callback_);
   } else {
-    result = MapPosixError(error_code);
+    result = MapConnectError(error_code);
     bool ok = write_socket_watcher_.StopWatchingFileDescriptor();
     DCHECK(ok);
     waiting_connect_ = false;

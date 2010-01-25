@@ -99,8 +99,10 @@
 //
 // --wait-after-action : waits the specified amount of time (1s by default)
 //                       after each action. Useful for debugging.
-//
 
+#include <string>
+
+#include "base/keyboard_codes.h"
 #include "chrome/test/automated_ui_tests/automated_ui_test_base.h"
 #include "chrome/test/ui/ui_test.h"
 
@@ -123,7 +125,7 @@ class AutomatedUITest : public AutomatedUITestBase {
 
   // Attempts to perform an action based on the input string. See below for
   // possible actions. Returns true if the action completes, false otherwise.
-  bool DoAction(const std::string &action);
+  bool DoAction(const std::string& action);
 
   // Actions ------------------------------------------------------------------
 
@@ -139,15 +141,6 @@ class AutomatedUITest : public AutomatedUITestBase {
   // Opens one of the dialogs (chosen randomly) and exercises it.
   // XML element: <Dialog/>
   bool ExerciseDialog();
-
-  // Activates "find in page" on the current page.
-  // XML element: <FindInPage/>
-  bool FindInPage();
-
-  // Navigates to the Home page.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <Home/>
-  bool Home();
 
   // Opens the JavaScriptConsole window. While it isn't modal, it takes focus
   // from the current browser window, so most of the test can't continue until
@@ -225,27 +218,6 @@ class AutomatedUITest : public AutomatedUITestBase {
   // XML element: <UpArrow/>
   bool PressUpArrow();
 
-  // Activates the next tab on the active browser window.
-  // XML element: <SelectNextTab/>
-  bool SelectNextTab();
-
-  // Activates the previous tab on the active browser window.
-  // XML element: <SelectPrevTab/>
-  bool SelectPreviousTab();
-
-  // Displays the bookmark bar.
-  // Returns true if call to activate the accelerator is successful.
-  // XML element: <ShowBookmarks/>
-  bool ShowBookmarkBar();
-
-  // Opens the Downloads page in the current active browser window.
-  // XML element: <Downloads/>
-  bool ShowDownloads();
-
-  // Opens the History page in the current active browser window.
-  // XML element: <History/>
-  bool ShowHistory();
-
   // Stars the current page. This opens a dialog that may or may not be
   // dismissed.
   // XML element: <Star/>
@@ -322,7 +294,7 @@ class AutomatedUITest : public AutomatedUITestBase {
   // Calls SimulateOSKeyPress on the active window. Simulates a key press at
   // the OS level. |key| is the key pressed  and |flags| specifies which
   // modifiers keys are also pressed (as defined in chrome/views/event.h).
-  bool SimulateKeyPressInActiveWindow(wchar_t key, int flags);
+  bool SimulateKeyPressInActiveWindow(base::KeyboardCode key, int flags);
 
   // Opens init file, reads it into the reader, and closes the file.
   // Returns false if there are any errors.
@@ -333,7 +305,7 @@ class AutomatedUITest : public AutomatedUITestBase {
   bool WriteReportToFile();
 
   // Appends the provided string to the output file.
-  void AppendToOutputFile(const std::string &append_string);
+  void AppendToOutputFile(const std::string& append_string);
 
   // Logs a crash to the xml_writer in the form of:
   // <result><crash crash_dump="|crash_dump|" command_completed="yes/no"/>
@@ -341,7 +313,8 @@ class AutomatedUITest : public AutomatedUITestBase {
   // crash_dump - Location of crash dump if applicable.
   // command_completed - True if all actions in the command were completed
   //                     before the crash occured.
-  void LogCrashResult(const std::string &crash_dump, bool command_completed);
+  void LogCrashResult(const FilePath& crash_dump,
+                      bool command_completed);
 
   // Logs a successful command to the xml_writer in the form of:
   // <result><success/><result/>
@@ -349,16 +322,16 @@ class AutomatedUITest : public AutomatedUITestBase {
 
   // Adds the attribute "reason=|reason|" to the current element.
   // Used to log the reason for a given failure while performing an action.
-  void LogActionFailureReason(const std::string &reason);
+  void LogActionFailureReason(const std::string& reason);
 
   // Adds the attribute 'info="|info|"' to the current element. Used when an
   // action could not complete for a non-serious issue. Usually because the
   // state of the test wouldn't allow for a particular action.
-  void AddInfoAttribute(const std::string &info);
+  void AddInfoAttribute(const std::string& info);
 
   // Adds the attribute "warning=|warning|" to the current element. Used when
   // an action could not complete because of a potentially troublesome issue.
-  void AddWarningAttribute(const std::string &warning);
+  void AddWarningAttribute(const std::string& warning);
 
   // Adds the attribute "error=|error|" to the current element. Used when an
   // action could not complete due to an unexpected problem which might
@@ -366,12 +339,12 @@ class AutomatedUITest : public AutomatedUITestBase {
   // This is usually used when the testing environment isn't acting as we'd
   // expect. For example, no chrome windows are focused, or key presses aren't
   // being registered.
-  void AddErrorAttribute(const std::string &error);
+  void AddErrorAttribute(const std::string& error);
 
   // Returns the full path of the crash dump. This is likely to be the
   // .txt file, not the actual crash dump. Although they do share
   // a common name.
-  std::wstring GetMostRecentCrashDump();
+  FilePath GetMostRecentCrashDump();
 
   // Returns true if the test has produced any new crash logs.
   // A "new" crash log is one that was produced since DidCrash was last called
@@ -379,9 +352,9 @@ class AutomatedUITest : public AutomatedUITestBase {
   bool DidCrash(bool update_total_crashes);
 
   // Override the message logging in AutomatedUITestBase.
-  virtual void LogErrorMessage(const std::string &error);
-  virtual void LogWarningMessage(const std::string &warning);
-  virtual void LogInfoMessage(const std::string &info);
+  virtual void LogErrorMessage(const std::string& error);
+  virtual void LogWarningMessage(const std::string& warning);
+  virtual void LogInfoMessage(const std::string& info);
 
   // Overridden so that UI Test doesn't set up when the tests start.
   // We use DoAction("SetUp") to set up, because it logs it and makes

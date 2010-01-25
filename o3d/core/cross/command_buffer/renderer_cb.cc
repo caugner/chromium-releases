@@ -42,123 +42,71 @@
 #include "core/cross/command_buffer/param_cache_cb.h"
 #include "core/cross/command_buffer/primitive_cb.h"
 #include "core/cross/command_buffer/renderer_cb.h"
+#include "core/cross/command_buffer/render_surface_cb.h"
 #include "core/cross/command_buffer/sampler_cb.h"
 #include "core/cross/command_buffer/states_cb.h"
 #include "core/cross/command_buffer/stream_bank_cb.h"
 #include "core/cross/command_buffer/texture_cb.h"
+#include "core/cross/command_buffer/display_window_cb.h"
 #include "core/cross/renderer_platform.h"
-
-#ifdef OS_WIN
-#include "core/win/command_buffer/win32_cb_server.h"
-#endif
+#include "gpu_plugin/command_buffer.h"
+#include "gpu_plugin/gpu_processor.h"
+#include "gpu_plugin/np_utils/np_browser.h"
+#include "gpu_plugin/np_utils/np_utils.h"
+#include "gpu_plugin/system_services/shared_memory.h"
 
 namespace o3d {
 using command_buffer::GAPIInterface;
 using command_buffer::CommandBufferHelper;
+using gpu_plugin::CommandBuffer;
+using gpu_plugin::GPUProcessor;
+using gpu_plugin::NPBrowser;
+using gpu_plugin::NPCreateObject;
+using gpu_plugin::NPGetProperty;
+using gpu_plugin::NPInvoke;
+using gpu_plugin::NPInvokeVoid;
+using gpu_plugin::NPObjectPointer;
+using gpu_plugin::SharedMemory;
 
 RendererCB::RendererCB(ServiceLocator* service_locator,
-                       unsigned int command_buffer_size,
-                       unsigned int transfer_memory_size)
+                       int32 transfer_memory_size)
     : Renderer(service_locator),
-      cmd_buffer_size_(command_buffer_size),
       transfer_memory_size_(transfer_memory_size),
-      transfer_shm_(command_buffer::kRPCInvalidHandle),
-      transfer_shm_id_(0),
+      transfer_shm_id_(command_buffer::kInvalidSharedMemoryId),
       transfer_shm_address_(NULL),
-      sync_interface_(NULL),
+      npp_(NULL),
       helper_(NULL),
       allocator_(NULL),
-      cb_server_(NULL),
       frame_token_(0),
       state_manager_(new StateManager) {
-  DCHECK_GT(command_buffer_size, 0);
   DCHECK_GT(transfer_memory_size, 0);
-  transfer_shm_ = command_buffer::CreateShm(transfer_memory_size);
-  transfer_shm_address_ = command_buffer::MapShm(transfer_shm_,
-                                                 transfer_memory_size);
   state_manager_->AddStateHandlers(this);
 }
 
 RendererCB::~RendererCB() {
   Destroy();
-  command_buffer::UnmapShm(transfer_shm_address_, transfer_memory_size_);
-  command_buffer::DestroyShm(transfer_shm_);
-}
-
-static const unsigned int kDefaultCommandBufferSize = 256 << 10;
-// This should be enough to hold the biggest possible buffer
-// (2048x2048xABGR16F texture = 32MB)
-static const unsigned int kDefaultTransferMemorySize = 32 << 20;
-
-RendererCB *RendererCB::CreateDefault(ServiceLocator* service_locator) {
-  return new RendererCB(service_locator, kDefaultCommandBufferSize,
-                        kDefaultTransferMemorySize);
-}
-
-Renderer::InitStatus RendererCB::InitPlatformSpecific(
-    const DisplayWindow& display,
-    bool off_screen) {
-  if (off_screen) {
-    // TODO: Off-screen support ?
-    return UNINITIALIZED;  // equivalent to 0/false
-  }
-
-#ifdef OS_WIN
-  const DisplayWindowWindows &display_platform =
-      static_cast<const DisplayWindowWindows&>(display);
-  // Creates a Win32CBServer based on the HWND, and creates the
-  // command buffer helper, and initializes it. Also, create the
-  // FencedAllocator for the transfer memory.
-  cb_server_ = new Win32CBServer(display_platform.hwnd());
-  sync_interface_ = cb_server_->GetInterface();
-
-  RECT windowRect;
-  ::GetWindowRect(display_platform.hwnd(), &windowRect);
-  int width = windowRect.right - windowRect.left;
-  int height = windowRect.bottom - windowRect.top;
-  InitCommon(width, height);
-  return SUCCESS;
-#else
-  // TODO: Implement Mac/Linux support before shipping
-  // command buffers.
-  return UNINITIALIZED;
-#endif
-}
-
-void RendererCB::InitCommon(unsigned int width, unsigned int height) {
-  sync_interface_->InitConnection();
-  transfer_shm_id_ = sync_interface_->RegisterSharedMemory(
-      transfer_shm_, transfer_memory_size_);
-  helper_ = new CommandBufferHelper(sync_interface_);
-  helper_->Init(cmd_buffer_size_);
-  frame_token_ = helper_->InsertToken();
-  allocator_ = new FencedAllocatorWrapper(transfer_memory_size_,
-                                          helper_,
-                                          transfer_shm_address_);
-  SetClientSize(width, height);
 }
 
 void RendererCB::Destroy() {
+  if (transfer_shm_id_ >= 0) {
+    NPInvokeVoid(npp_, command_buffer_, "unregisterObject", transfer_shm_id_);
+    transfer_shm_id_ = command_buffer::kInvalidSharedMemoryId;
+  }
+
+  transfer_shm_ = NPObjectPointer<NPObject>();
+
   if (allocator_) {
     delete allocator_;
     allocator_ = NULL;
   }
+
   if (helper_) {
     helper_->Finish();
-    if (sync_interface_) {
-      sync_interface_->CloseConnection();
-      sync_interface_->UnregisterSharedMemory(transfer_shm_id_);
-      sync_interface_ = NULL;
-    }
     delete helper_;
     helper_ = NULL;
   }
-#ifdef OS_WIN
-  if (cb_server_) {
-    delete cb_server_;
-    cb_server_ = NULL;
-  }
-#endif
+
+  npp_ = NULL;
 }
 
 void RendererCB::ApplyDirtyStates() {
@@ -172,89 +120,64 @@ void RendererCB::Resize(int width, int height) {
   SetClientSize(width, height);
 }
 
-// Adds the BEGIN_FRAME command to the command buffer.
-bool RendererCB::BeginDraw() {
-  ++render_frame_count_;
-  DCHECK(helper_);
-  helper_->AddCommand(command_buffer::BEGIN_FRAME, 0 , NULL);
-  // Clear the client if we need to.
-  if (clear_client_) {
-    clear_client_ = false;
-    Clear(Float4(0.5f, 0.5f, 0.5f, 1.0f), true, 1.0f, true, 0, true);
-  }
+bool RendererCB::PlatformSpecificBeginDraw() {
   return true;
 }
 
 // Adds the CLEAR command to the command buffer.
-void RendererCB::Clear(const Float4 &color,
-                       bool color_flag,
-                       float depth,
-                       bool depth_flag,
-                       int stencil,
-                       bool stencil_flag) {
-  ApplyDirtyStates();
-  uint32 buffers = (color_flag ? GAPIInterface::COLOR : 0) |
-      (depth_flag ? GAPIInterface::DEPTH : 0) |
-      (stencil_flag ? GAPIInterface::STENCIL : 0);
-  command_buffer::CommandBufferEntry args[7];
-  args[0].value_uint32 = buffers;
-  args[1].value_float = color[0];
-  args[2].value_float = color[1];
-  args[3].value_float = color[2];
-  args[4].value_float = color[3];
-  args[5].value_float = depth;
-  args[6].value_uint32 = stencil;
-  helper_->AddCommand(command_buffer::CLEAR, 7, args);
+void RendererCB::PlatformSpecificClear(const Float4 &color,
+                                       bool color_flag,
+                                       float depth,
+                                       bool depth_flag,
+                                       int stencil,
+                                       bool stencil_flag) {
+  uint32 buffers = (color_flag ? command_buffer::kColor : 0) |
+      (depth_flag ? command_buffer::kDepth : 0) |
+      (stencil_flag ? command_buffer::kStencil : 0);
+  helper_->Clear(buffers, color[0], color[1], color[2], color[3],
+                 depth, stencil);
 }
 
-// Adds the END_FRAME command to the command buffer, and flushes the commands.
-void RendererCB::EndDraw() {
-  ApplyDirtyStates();
-  helper_->AddCommand(command_buffer::END_FRAME, 0 , NULL);
+void RendererCB::PlatformSpecificEndDraw() {
+}
+
+// Adds the BeginFrame command to the command buffer.
+bool RendererCB::PlatformSpecificStartRendering() {
+  // Any device issues are handled in the command buffer backend
+  DCHECK(helper_);
+  helper_->BeginFrame();
+  return true;
+}
+
+// Adds the EndFrame command to the command buffer, and flushes the commands.
+void RendererCB::PlatformSpecificFinishRendering() {
+  // Any device issues are handled in the command buffer backend
+  helper_->EndFrame();
   helper_->WaitForToken(frame_token_);
   frame_token_ = helper_->InsertToken();
 }
 
-bool RendererCB::StartRendering() {
-  ++render_frame_count_;
-  transforms_culled_ = 0;
-  transforms_processed_ = 0;
-  draw_elements_culled_ = 0;
-  draw_elements_processed_ = 0;
-  draw_elements_rendered_ = 0;
-  primitives_rendered_ = 0;
-
-  // Any device issues are handled in the command buffer backend
-  return true;
-}
-
-void RendererCB::FinishRendering() {
-  // Any device issues are handled in the command buffer backend
-}
-
-void RendererCB::RenderElement(Element* element,
-                               DrawElement* draw_element,
-                               Material* material,
-                               ParamObject* override,
-                               ParamCache* param_cache) {
-  ++draw_elements_rendered_;
-  State *current_state = material ? material->state() : NULL;
-  PushRenderStates(current_state);
-  ApplyDirtyStates();
-  element->Render(this, draw_element, material, override, param_cache);
-  PopRenderStates();
+void RendererCB::PlatformSpecificPresent() {
+  // TODO(gman): The EndFrame command needs to be split into EndFrame
+  //     and PRESENT.
 }
 
 // Assign the surface arguments to the renderer, and update the stack
 // of pushed surfaces.
 void RendererCB::SetRenderSurfacesPlatformSpecific(
-    RenderSurface* surface,
-    RenderDepthStencilSurface* surface_depth) {
-  // TODO: Provide an implementation for this routine.
+    const RenderSurface* surface,
+    const RenderDepthStencilSurface* surface_depth) {
+  const RenderSurfaceCB* surface_cb =
+      down_cast<const RenderSurfaceCB*>(surface);
+  const RenderDepthStencilSurfaceCB* surface_depth_cb =
+      down_cast<const RenderDepthStencilSurfaceCB*>(surface_depth);
+  helper_->SetRenderSurface(
+      surface_cb->resource_id(),
+      surface_depth_cb->resource_id());
 }
 
 void RendererCB::SetBackBufferPlatformSpecific() {
-  // TODO: Provide an implementation for this routine.
+  helper_->SetBackSurfaces();
 }
 
 // Creates a StreamBank, returning a platform specific implementation class.
@@ -292,25 +215,6 @@ Effect::Ref RendererCB::CreateEffect() {
   return Effect::Ref(new EffectCB(service_locator(), this));
 }
 
-// Attempts to create a Texture with the given bitmap, automatically
-// determining whether the to create a 2D texture, cube texture, etc. If
-// creation fails the method returns NULL.
-// Parameters:
-//  bitmap: The bitmap specifying the dimensions, format and content of the
-//          new texture. The created texture takes ownership of the bitmap
-//          data.
-// Returns:
-//  A ref-counted pointer to the texture or NULL if it did not load.
-Texture::Ref RendererCB::CreatePlatformSpecificTextureFromBitmap(
-    Bitmap *bitmap) {
-  if (bitmap->is_cubemap()) {
-    return Texture::Ref(TextureCUBECB::Create(service_locator(), bitmap,
-                                              false));
-  } else {
-    return Texture::Ref(Texture2DCB::Create(service_locator(), bitmap, false));
-  }
-}
-
 // Creates and returns a platform-specific Texture2D object.  It allocates
 // the necessary resources to store texture data for the given image size
 // and format.
@@ -320,12 +224,8 @@ Texture2D::Ref RendererCB::CreatePlatformSpecificTexture2D(
     Texture::Format format,
     int levels,
     bool enable_render_surfaces) {
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(width);
-  bitmap->set_height(height);
-  bitmap->set_num_mipmaps(levels);
-  return Texture2D::Ref(Texture2DCB::Create(service_locator(), bitmap,
+  return Texture2D::Ref(Texture2DCB::Create(service_locator(), format, levels,
+                                            width, height,
                                             enable_render_surfaces));
 }
 
@@ -337,13 +237,8 @@ TextureCUBE::Ref RendererCB::CreatePlatformSpecificTextureCUBE(
     Texture::Format format,
     int levels,
     bool enable_render_surfaces) {
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(edge);
-  bitmap->set_height(edge);
-  bitmap->set_num_mipmaps(levels);
-  bitmap->set_is_cubemap(true);
-  return TextureCUBE::Ref(TextureCUBECB::Create(service_locator(), bitmap,
+  return TextureCUBE::Ref(TextureCUBECB::Create(service_locator(), format,
+                                                levels, edge,
                                                 enable_render_surfaces));
 }
 
@@ -358,19 +253,7 @@ void RendererCB::SetViewportInPixels(int left,
                                      int height,
                                      float min_z,
                                      float max_z) {
-  command_buffer::CommandBufferEntry args[6];
-  args[0].value_uint32 = left;
-  args[1].value_uint32 = top;
-  args[2].value_uint32 = width;
-  args[3].value_uint32 = height;
-  args[4].value_float = min_z;
-  args[5].value_float = max_z;
-  helper_->AddCommand(command_buffer::SET_VIEWPORT, 6, args);
-}
-
-bool RendererCB::SaveScreen(const String& file_name) {
-  // TODO
-  return false;
+  helper_->SetViewport(left, top, width, height, min_z, max_z);
 }
 
 const int* RendererCB::GetRGBAUByteNSwizzleTable() {
@@ -378,9 +261,194 @@ const int* RendererCB::GetRGBAUByteNSwizzleTable() {
   return swizzle_table;
 }
 
-// This is a factory function for creating Renderer objects.  Since
-// we're implementing command buffers, we only ever return a CB renderer.
-Renderer* Renderer::CreateDefaultRenderer(ServiceLocator* service_locator) {
-  return RendererCB::CreateDefault(service_locator);
+command_buffer::parse_error::ParseError RendererCB::GetParseError() {
+  return helper_->GetParseError();
 }
+
+// Creates and returns a platform specific RenderDepthStencilSurface object.
+RenderDepthStencilSurface::Ref RendererCB::CreateDepthStencilSurface(
+    int width,
+    int height) {
+  return RenderDepthStencilSurface::Ref(
+      new RenderDepthStencilSurfaceCB(service_locator(),
+                                      width,
+                                      height,
+                                      this));
+}
+
+Renderer::InitStatus RendererCB::InitPlatformSpecific(
+    const DisplayWindow& display_window,
+    bool off_screen) {
+  if (off_screen) {
+    // TODO: Off-screen support ?
+    return UNINITIALIZED;  // equivalent to 0/false
+  }
+
+  const DisplayWindowCB& display_platform =
+      static_cast<const DisplayWindowCB&>(display_window);
+
+  npp_ = display_platform.npp();
+  command_buffer_ = display_platform.command_buffer();
+  DCHECK(command_buffer_.Get());
+
+  // Create and initialize a CommandBufferHelper.
+  helper_ = new CommandBufferHelper(npp_, command_buffer_);
+  if (!helper_->Initialize()) {
+    Destroy();
+    return INITIALIZATION_ERROR;
+  }
+
+  // Create and map a block of memory for the transfer buffer.
+  transfer_shm_ = CreateSharedMemory(transfer_memory_size_, npp_);
+  if (!transfer_shm_.Get()) {
+    Destroy();
+    return INITIALIZATION_ERROR;
+  }
+  size_t size_bytes;
+  transfer_shm_address_ = NPBrowser::get()->MapMemory(npp_,
+                                                      transfer_shm_.Get(),
+                                                      &size_bytes);
+  if (!transfer_shm_address_) {
+    Destroy();
+    return INITIALIZATION_ERROR;
+  }
+  DCHECK(size_bytes == transfer_memory_size_);
+
+  // Register the transfer buffer so it can be identified with an integer
+  // in future commands.
+  if (!NPInvoke(npp_, command_buffer_, "registerObject", transfer_shm_,
+                &transfer_shm_id_)) {
+    Destroy();
+    return INITIALIZATION_ERROR;
+  }
+  DCHECK_GE(transfer_shm_id_, 0);
+
+  // Insert a token.
+  frame_token_ = helper_->InsertToken();
+  if (frame_token_ < 0) {
+    Destroy();
+    return INITIALIZATION_ERROR;
+  }
+
+  // Create a fenced allocator.
+  allocator_ = new FencedAllocatorWrapper(transfer_memory_size_,
+                                          helper_,
+                                          transfer_shm_address_);
+
+  SetClientSize(display_platform.width(), display_platform.height());
+
+  return SUCCESS;
+}
+
+static const unsigned int kDefaultCommandBufferSize = 256 << 10;
+
+// This should be enough to hold the biggest possible buffer
+// (2048x2048xABGR16F texture = 32MB)
+static const int32 kDefaultTransferMemorySize = 32 << 20;
+
+RendererCBLocal *RendererCBLocal::CreateDefault(
+    ServiceLocator* service_locator) {
+  return new RendererCBLocal(service_locator,
+                             kDefaultTransferMemorySize);
+}
+
+RendererCBLocal::RendererCBLocal(ServiceLocator* service_locator,
+                                 int32 transfer_memory_size)
+    : RendererCB(service_locator, transfer_memory_size) {
+}
+
+RendererCBLocal::~RendererCBLocal() {
+}
+
+NPObjectPointer<CommandBuffer> RendererCBLocal::CreateCommandBuffer(
+    NPP npp, void* hwnd, int32 size) {
+#if defined(OS_WIN)
+  NPObjectPointer<SharedMemory> ring_buffer =
+      NPCreateObject<SharedMemory>(npp);
+  if (!ring_buffer->Initialize(size))
+    return NPObjectPointer<CommandBuffer>();
+
+  size_t mapped_size;
+  if (!NPBrowser::get()->MapMemory(npp,
+                                   ring_buffer.Get(),
+                                   &mapped_size)) {
+    return NPObjectPointer<CommandBuffer>();
+  }
+
+  DCHECK(mapped_size == size);
+
+  NPObjectPointer<CommandBuffer> command_buffer =
+      NPCreateObject<CommandBuffer>(npp);
+  if (!command_buffer->Initialize(ring_buffer))
+    return NPObjectPointer<CommandBuffer>();
+
+  scoped_refptr<GPUProcessor> gpu_processor(
+      new GPUProcessor(npp, command_buffer.Get()));
+  if (!gpu_processor->Initialize(reinterpret_cast<HWND>(hwnd)))
+    return NPObjectPointer<CommandBuffer>();
+
+  command_buffer->SetPutOffsetChangeCallback(
+      NewCallback(gpu_processor.get(), &GPUProcessor::ProcessCommands));
+
+  return command_buffer;
+
+#else
+  return NPObjectPointer<CommandBuffer>();
+#endif
+}
+
+NPObjectPointer<NPObject> RendererCBLocal::CreateSharedMemory(int32 size,
+                                                              NPP npp) {
+  NPObjectPointer<SharedMemory> shared_memory =
+      NPCreateObject<SharedMemory>(npp);
+
+  if (!shared_memory->Initialize(size))
+    return NPObjectPointer<NPObject>();
+
+  return shared_memory;
+}
+
+RendererCBRemote *RendererCBRemote::CreateDefault(
+    ServiceLocator* service_locator) {
+  return new RendererCBRemote(service_locator,
+                              kDefaultTransferMemorySize);
+}
+
+RendererCBRemote::RendererCBRemote(ServiceLocator* service_locator,
+                                   int32 transfer_memory_size)
+    : RendererCB(service_locator, transfer_memory_size) {
+}
+
+RendererCBRemote::~RendererCBRemote() {
+}
+
+NPObjectPointer<NPObject> RendererCBRemote::CreateSharedMemory(int32 size,
+                                                               NPP npp) {
+  NPObjectPointer<NPObject> shared_memory;
+
+  NPObjectPointer<NPObject> window = NPObjectPointer<NPObject>::FromReturned(
+      NPBrowser::get()->GetWindowNPObject(npp));
+  if (!window.Get())
+    return shared_memory;
+
+  NPObjectPointer<NPObject> chromium;
+  if (!NPGetProperty(npp, window, "chromium", &chromium) || !chromium.Get())
+    return shared_memory;
+
+  NPObjectPointer<NPObject> system;
+  if (!NPGetProperty(npp, chromium, "system", &system) || !system.Get())
+    return shared_memory;
+
+  if (!NPInvoke(npp, system, "createSharedMemory", size,
+                &shared_memory)) {
+    return shared_memory;
+  }
+
+  return shared_memory;
+}
+
+Renderer* Renderer::CreateDefaultRenderer(ServiceLocator* service_locator) {
+  return RendererCBLocal::CreateDefault(service_locator);
+}
+
 }  // namespace o3d

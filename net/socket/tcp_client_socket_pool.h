@@ -10,6 +10,9 @@
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
+#include "base/timer.h"
+#include "net/base/host_resolver.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool.h"
 
@@ -24,17 +27,15 @@ class TCPConnectJob : public ConnectJob {
   TCPConnectJob(const std::string& group_name,
                 const HostResolver::RequestInfo& resolve_info,
                 const ClientSocketHandle* handle,
+                base::TimeDelta timeout_duration,
                 ClientSocketFactory* client_socket_factory,
                 HostResolver* host_resolver,
-                Delegate* delegate);
+                Delegate* delegate,
+                LoadLog* load_log);
   virtual ~TCPConnectJob();
 
   // ConnectJob methods.
-
-  // Begins the host resolution and the TCP connect.  Returns OK on success
-  // and ERR_IO_PENDING if it cannot immediately service the request.
-  // Otherwise, it returns a net error code.
-  virtual int Connect();
+  virtual LoadState GetLoadState() const;
 
  private:
   enum State {
@@ -44,6 +45,11 @@ class TCPConnectJob : public ConnectJob {
     kStateTCPConnectComplete,
     kStateNone,
   };
+
+  // Begins the host resolution and the TCP connect.  Returns OK on success
+  // and ERR_IO_PENDING if it cannot immediately service the request.
+  // Otherwise, it returns a net error code.
+  virtual int ConnectInternal();
 
   void OnIOComplete(int result);
 
@@ -78,10 +84,11 @@ class TCPClientSocketPool : public ClientSocketPool {
   // ClientSocketPool methods:
 
   virtual int RequestSocket(const std::string& group_name,
-                            const HostResolver::RequestInfo& resolve_info,
+                            const void* resolve_info,
                             int priority,
                             ClientSocketHandle* handle,
-                            CompletionCallback* callback);
+                            CompletionCallback* callback,
+                            LoadLog* load_log);
 
   virtual void CancelRequest(const std::string& group_name,
                              const ClientSocketHandle* handle);
@@ -92,7 +99,7 @@ class TCPClientSocketPool : public ClientSocketPool {
   virtual void CloseIdleSockets();
 
   virtual int IdleSocketCount() const {
-    return base_->idle_socket_count();
+    return base_.idle_socket_count();
   }
 
   virtual int IdleSocketCountInGroup(const std::string& group_name) const;
@@ -100,11 +107,14 @@ class TCPClientSocketPool : public ClientSocketPool {
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
 
- private:
+ protected:
   virtual ~TCPClientSocketPool();
 
+ private:
+  typedef ClientSocketPoolBase<HostResolver::RequestInfo> PoolBase;
+
   class TCPConnectJobFactory
-      : public ClientSocketPoolBase::ConnectJobFactory {
+      : public PoolBase::ConnectJobFactory {
    public:
     TCPConnectJobFactory(ClientSocketFactory* client_socket_factory,
                          HostResolver* host_resolver)
@@ -117,8 +127,9 @@ class TCPClientSocketPool : public ClientSocketPool {
 
     virtual ConnectJob* NewConnectJob(
         const std::string& group_name,
-        const ClientSocketPoolBase::Request& request,
-        ConnectJob::Delegate* delegate) const;
+        const PoolBase::Request& request,
+        ConnectJob::Delegate* delegate,
+        LoadLog* load_log) const;
 
    private:
     ClientSocketFactory* const client_socket_factory_;
@@ -127,15 +138,12 @@ class TCPClientSocketPool : public ClientSocketPool {
     DISALLOW_COPY_AND_ASSIGN(TCPConnectJobFactory);
   };
 
-  // One might ask why ClientSocketPoolBase is also refcounted if its
-  // containing ClientSocketPool is already refcounted.  The reason is because
-  // DoReleaseSocket() posts a task.  If ClientSocketPool gets deleted between
-  // the posting of the task and the execution, then we'll hit the DCHECK that
-  // |ClientSocketPoolBase::group_map_| is empty.
-  scoped_refptr<ClientSocketPoolBase> base_;
+  PoolBase base_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPClientSocketPool);
 };
+
+REGISTER_SOCKET_PARAMS_FOR_POOL(TCPClientSocketPool, HostResolver::RequestInfo)
 
 }  // namespace net
 

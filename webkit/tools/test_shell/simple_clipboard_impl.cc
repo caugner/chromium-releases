@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/clipboard.h"
+#include "app/clipboard/clipboard.h"
 #include "base/lazy_instance.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
@@ -33,21 +33,22 @@ Clipboard* ClipboardGetClipboard() {
   return clipboard.Pointer();
 }
 
-bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format) {
-  return ClipboardGetClipboard()->IsFormatAvailable(format);
+bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format,
+                                Clipboard::Buffer buffer) {
+  return ClipboardGetClipboard()->IsFormatAvailable(format, buffer);
 }
 
-void ClipboardReadText(string16* result) {
-  ClipboardGetClipboard()->ReadText(result);
+void ClipboardReadText(Clipboard::Buffer buffer, string16* result) {
+  ClipboardGetClipboard()->ReadText(buffer, result);
 }
 
-void ClipboardReadAsciiText(std::string* result) {
-  ClipboardGetClipboard()->ReadAsciiText(result);
+void ClipboardReadAsciiText(Clipboard::Buffer buffer, std::string* result) {
+  ClipboardGetClipboard()->ReadAsciiText(buffer, result);
 }
 
-void ClipboardReadHTML(string16* markup, GURL* url) {
+void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url) {
   std::string url_str;
-  ClipboardGetClipboard()->ReadHTML(markup, url ? &url_str : NULL);
+  ClipboardGetClipboard()->ReadHTML(buffer, markup, url ? &url_str : NULL);
   if (url)
     *url = GURL(url_str);
 }

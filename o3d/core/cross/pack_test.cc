@@ -32,8 +32,11 @@
 
 // Tests for functionality in pack.cc/.h.
 
-#include "core/cross/client.h"
 #include "core/cross/pack.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/error_status.h"
+#include "core/cross/service_dependency.h"
+#include "core/cross/transform.h"
 #include "tests/common/win/testing_common.h"
 
 namespace o3d {
@@ -42,12 +45,22 @@ class PackTest : public testing::Test {
  public:
 
   PackTest()
-      : object_manager_(g_service_locator) {}
+      : object_manager_(g_service_locator),
+        error_status_(g_service_locator) {
+  }
 
   ObjectManager* object_manager() { return object_manager_.Get(); }
 
+  // Checks if an error has occured on the client then clears the error.
+  bool CheckErrorExists() {
+    bool have_error = !error_status_.GetLastError().empty();
+    error_status_.ClearLastError();
+    return have_error;
+  }
+
  private:
   ServiceDependency<ObjectManager> object_manager_;
+  ErrorStatus error_status_;
 };
 
 // Test basic Pack creation and destruction.
@@ -113,9 +126,12 @@ TEST_F(PackTest, PackLookup) {
 // Validate the semantics of removal of objects from a Pack.
 TEST_F(PackTest, RemoveObject) {
   Pack* pack = object_manager()->CreatePack();
+  ASSERT_TRUE(pack != NULL);
   Transform* transform = pack->Create<Transform>();
+  ASSERT_TRUE(transform != NULL);
   transform->set_name("Transform");
   Transform* transform2 = pack->Create<Transform>();
+  ASSERT_TRUE(transform2 != NULL);
 
   const String transform_name(transform->name());
   const Id id(transform->id());
@@ -132,7 +148,34 @@ TEST_F(PackTest, RemoveObject) {
   EXPECT_TRUE(pack->Get<Transform>(
       transform2->name())[0] == transform2);
 
+  Pack* pack2 = object_manager()->CreatePack();
+  ASSERT_TRUE(pack2 != NULL);
+  Transform* transform3 = pack2->Create<Transform>();
+  ASSERT_TRUE(transform3 != NULL);
+
+  // Check that trying to remove something not in the pack returns false but
+  // does NOT generate an error.
+  EXPECT_FALSE(pack->RemoveObject(transform3));
+  EXPECT_FALSE(CheckErrorExists());
+
+  EXPECT_TRUE(pack2->Destroy());
   EXPECT_TRUE(pack->Destroy());
+}
+
+TEST_F(PackTest, CreateRawDataFromDataURL) {
+  Pack* pack = object_manager()->CreatePack();
+  RawData* raw_data = pack->CreateRawDataFromDataURL("data:;base64,YWJj");
+
+  EXPECT_FALSE(raw_data == NULL);
+  EXPECT_FALSE(CheckErrorExists());
+}
+
+TEST_F(PackTest, CreateRawDataFromDataURLFail) {
+  Pack* pack = object_manager()->CreatePack();
+  RawData* raw_data = pack->CreateRawDataFromDataURL("data:;base64,Y");
+
+  EXPECT_TRUE(raw_data == NULL);
+  EXPECT_TRUE(CheckErrorExists());
 }
 
 }  // namespace o3d

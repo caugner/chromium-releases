@@ -8,27 +8,35 @@
 #include <string>
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
 #include "build/build_config.h"
 #include "chrome/common/child_thread.h"
+#include "chrome/common/css_colors.h"
+#include "chrome/common/dom_storage_type.h"
 #include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/visitedlink_slave.h"
 
 class AppCacheDispatcher;
+class DBMessageFilter;
 class DevToolsAgentFilter;
 class FilePath;
 class ListValue;
-class NotificationService;
+class NullableString16;
 class RenderDnsMaster;
 class RendererHistogram;
 class RendererWebKitClientImpl;
 class SkBitmap;
 class UserScriptSlave;
-struct ModalDialogEvent;
+class URLPattern;
+
 struct RendererPreferences;
 struct WebPreferences;
+
+namespace WebKit {
+class WebStorageEventDispatcher;
+}
 
 // The RenderThreadBase is the minimal interface that a RenderView/Widget
 // expects from a render thread. The interface basically abstracts a way to send
@@ -46,6 +54,10 @@ class RenderThreadBase {
 
   virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) = 0;
   virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) = 0;
+
+  // Called by a RenderWidget when it is hidden or restored.
+  virtual void WidgetHidden() = 0;
+  virtual void WidgetRestored() = 0;
 };
 
 // The RenderThread class represents a background thread where RenderView
@@ -76,14 +88,19 @@ class RenderThread : public RenderThreadBase,
   }
 
   virtual void AddRoute(int32 routing_id, IPC::Channel::Listener* listener) {
+    widget_count_++;
     return ChildThread::AddRoute(routing_id, listener);
   }
   virtual void RemoveRoute(int32 routing_id) {
+    widget_count_--;
     return ChildThread::RemoveRoute(routing_id);
   }
 
   virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter);
   virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter);
+
+  virtual void WidgetHidden();
+  virtual void WidgetRestored();
 
   VisitedLinkSlave* visited_link_slave() const {
     return visited_link_slave_.get();
@@ -91,6 +108,10 @@ class RenderThread : public RenderThreadBase,
 
   UserScriptSlave* user_script_slave() const {
     return user_script_slave_.get();
+  }
+
+  AppCacheDispatcher* appcache_dispatcher() const {
+    return appcache_dispatcher_.get();
   }
 
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
@@ -114,9 +135,7 @@ class RenderThread : public RenderThreadBase,
  private:
   virtual void OnControlMessageReceived(const IPC::Message& msg);
 
-  // Called by the thread base class.
-  virtual void Init();
-  virtual void CleanUp();
+  void Init();
 
   void OnUpdateVisitedLinks(base::SharedMemoryHandle table);
   void OnAddVisitedLinks(const VisitedLinkSlave::Fingerprints& fingerprints);
@@ -125,10 +144,22 @@ class RenderThread : public RenderThreadBase,
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
   void OnSetExtensionFunctionNames(const std::vector<std::string>& names);
   void OnPageActionsUpdated(const std::string& extension_id,
-                            const std::vector<std::string>& page_actions);
+      const std::vector<std::string>& page_actions);
+  void OnDOMStorageEvent(const string16& key, const NullableString16& old_value,
+      const NullableString16& new_value, const string16& origin,
+      DOMStorageType dom_storage_type);
+  void OnExtensionSetAPIPermissions(
+      const std::string& extension_id,
+      const std::vector<std::string>& permissions);
+  void OnExtensionSetHostPermissions(
+      const GURL& extension_url,
+      const std::vector<URLPattern>& permissions);
+  void OnExtensionSetL10nMessages(
+      const std::string& extension_id,
+      const std::map<std::string, std::string>& l10n_messages);
   void OnSetNextPageID(int32 next_page_id);
+  void OnSetCSSColors(const std::vector<CSSColors::CSSColorMapping>& colors);
   void OnCreateNewView(gfx::NativeViewId parent_hwnd,
-                       ModalDialogEvent modal_dialog_event,
                        const RendererPreferences& renderer_prefs,
                        const WebPreferences& webkit_prefs,
                        int32 view_id);
@@ -141,9 +172,13 @@ class RenderThread : public RenderThreadBase,
   // Send all histograms to browser.
   void OnGetRendererHistograms(int sequence_number);
 
+  // Send tcmalloc info to browser.
+  void OnGetRendererTcmalloc();
+
   void OnExtensionMessageInvoke(const std::string& function_name,
                                 const ListValue& args);
-  void OnPurgePluginListCache();
+  void OnPurgeMemory();
+  void OnPurgePluginListCache(bool reload_pages);
 
   // Gather usage statistics from the in-memory cache and inform our host.
   // These functions should be call periodically so that the host can make
@@ -153,24 +188,21 @@ class RenderThread : public RenderThreadBase,
   // We initialize WebKit as late as possible.
   void EnsureWebKitInitialized();
 
+  // A task we invoke periodically to assist with idle cleanup.
+  void IdleHandler();
+
   // These objects live solely on the render thread.
+  scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
-
   scoped_ptr<UserScriptSlave> user_script_slave_;
-
   scoped_ptr<RenderDnsMaster> dns_master_;
-
-  scoped_ptr<RendererHistogramSnapshots> histogram_snapshots_;
-
-  scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > cache_stats_factory_;
-
-  scoped_ptr<NotificationService> notification_service_;
-
-  scoped_ptr<RendererWebKitClientImpl> webkit_client_;
-
-  scoped_ptr<AppCacheDispatcher> app_cache_dispatcher_;
-
+  scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
   scoped_refptr<DevToolsAgentFilter> devtools_agent_filter_;
+  scoped_ptr<RendererHistogramSnapshots> histogram_snapshots_;
+  scoped_ptr<RendererWebKitClientImpl> webkit_client_;
+  scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
+
+  scoped_refptr<DBMessageFilter> db_message_filter_;
 
 #if defined(OS_POSIX)
   scoped_refptr<IPC::ChannelProxy::MessageFilter>
@@ -179,6 +211,18 @@ class RenderThread : public RenderThreadBase,
 
   // If true, then a GetPlugins call is allowed to rescan the disk.
   bool plugin_refresh_allowed_;
+
+  // Is there a pending task for doing CacheStats.
+  bool cache_stats_task_pending_;
+
+  // The count of RenderWidgets running through this thread.
+  int widget_count_;
+
+  // The count of hidden RenderWidgets running through this thread.
+  int hidden_widget_count_;
+
+  // The current value of the idle notification timer delay.
+  double idle_notification_delay_in_s_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThread);
 };

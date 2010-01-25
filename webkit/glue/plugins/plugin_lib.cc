@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "webkit/glue/plugins/plugin_lib.h"
 
 #include "base/logging.h"
@@ -38,7 +36,7 @@ PluginLib* PluginLib::CreatePluginLib(const FilePath& filename) {
 
   WebPluginInfo info;
   const PluginEntryPoints* entry_points = NULL;
-  if (!PluginList::ReadPluginInfo(filename, &info, &entry_points))
+  if (!PluginList::Singleton()->ReadPluginInfo(filename, &info, &entry_points))
     return NULL;
 
   return new PluginLib(info, entry_points);
@@ -106,7 +104,7 @@ NPError PluginLib::NP_Initialize() {
   if (host == 0)
     return NPERR_GENERIC_ERROR;
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_FREEBSD)
   NPError rv = entry_points_.np_initialize(host->host_functions(),
                                            &plugin_funcs_);
 #else
@@ -172,7 +170,7 @@ bool PluginLib::Load() {
     if (entry_points_.np_initialize == 0)
       rv = false;
 
-#if !defined(OS_LINUX)
+#if !defined(OS_LINUX) && !defined(OS_FREEBSD)
     entry_points_.np_getentrypoints =
         (NP_GetEntryPointsFunc)base::GetFunctionPointerFromNativeLibrary(
             library, "NP_GetEntryPoints");
@@ -192,7 +190,7 @@ bool PluginLib::Load() {
   if (rv) {
     plugin_funcs_.size = sizeof(plugin_funcs_);
     plugin_funcs_.version = (NP_VERSION_MAJOR << 8) | NP_VERSION_MINOR;
-#if !defined(OS_LINUX)
+#if !defined(OS_LINUX) && !defined(OS_FREEBSD)
     if (entry_points_.np_getentrypoints(&plugin_funcs_) != NPERR_NO_ERROR)
       rv = false;
 #else
@@ -244,12 +242,14 @@ void PluginLib::Unload() {
     // so that the plugin will have a chance to unwind.
     bool defer_unload = webkit_glue::IsPluginRunningInRendererProcess();
 
+/* TODO(dglazkov): Revisit when re-enabling the JSC build.
 #if USE(JSC)
     // The plugin NPAPI instances may still be around. Delay the
     // NP_Shutdown and FreeLibrary calls at least till the next
     // peek message.
     defer_unload = true;
 #endif
+*/
 
     if (defer_unload) {
       FreePluginLibraryTask* free_library_task =

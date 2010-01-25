@@ -15,13 +15,18 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
 
+static void CreateBackgroundHost(
+    ExtensionProcessManager* manager, Extension* extension) {
+  // Start the process for the master page, if it exists.
+  if (extension->background_url().is_valid())
+    manager->CreateBackgroundHost(extension, extension->background_url());
+}
+
 static void CreateBackgroundHosts(
     ExtensionProcessManager* manager, const ExtensionList* extensions) {
   for (ExtensionList::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
-    // Start the process for the master page, if it exists.
-    if ((*extension)->background_url().is_valid())
-      manager->CreateBackgroundHost(*extension, (*extension)->background_url());
+    CreateBackgroundHost(manager, *extension);
   }
 }
 
@@ -29,7 +34,7 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
     : browsing_instance_(new BrowsingInstance(profile)) {
   registrar_.Add(this, NotificationType::EXTENSIONS_READY,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
+  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
@@ -52,34 +57,59 @@ ExtensionProcessManager::~ExtensionProcessManager() {
 
 ExtensionHost* ExtensionProcessManager::CreateView(Extension* extension,
                                                    const GURL& url,
-                                                   Browser* browser) {
+                                                   Browser* browser,
+                                                   ViewType::Type view_type) {
   DCHECK(extension);
   DCHECK(browser);
   ExtensionHost* host =
-      new ExtensionHost(extension, GetSiteInstanceForURL(url), url);
+      new ExtensionHost(extension, GetSiteInstanceForURL(url), url, view_type);
   host->CreateView(browser);
   OnExtensionHostCreated(host, false);
   return host;
 }
 
 ExtensionHost* ExtensionProcessManager::CreateView(const GURL& url,
-                                                   Browser* browser) {
+                                                   Browser* browser,
+                                                   ViewType::Type view_type) {
   DCHECK(browser);
   ExtensionsService* service =
     browsing_instance_->profile()->GetExtensionsService();
   if (service) {
     Extension* extension = service->GetExtensionByURL(url);
     if (extension)
-      return CreateView(extension, url, browser);
+      return CreateView(extension, url, browser, view_type);
   }
   return NULL;
+}
+
+ExtensionHost* ExtensionProcessManager::CreateToolstrip(Extension* extension,
+                                                        const GURL& url,
+                                                        Browser* browser) {
+  return CreateView(extension, url, browser, ViewType::EXTENSION_TOOLSTRIP);
+}
+
+ExtensionHost* ExtensionProcessManager::CreateToolstrip(const GURL& url,
+                                                        Browser* browser) {
+  return CreateView(url, browser, ViewType::EXTENSION_TOOLSTRIP);
+}
+
+ExtensionHost* ExtensionProcessManager::CreatePopup(Extension* extension,
+                                                    const GURL& url,
+                                                    Browser* browser) {
+  return CreateView(extension, url, browser, ViewType::EXTENSION_POPUP);
+}
+
+ExtensionHost* ExtensionProcessManager::CreatePopup(const GURL& url,
+                                                    Browser* browser) {
+  return CreateView(url, browser, ViewType::EXTENSION_POPUP);
 }
 
 ExtensionHost* ExtensionProcessManager::CreateBackgroundHost(
     Extension* extension, const GURL& url) {
   ExtensionHost* host =
-      new ExtensionHost(extension, GetSiteInstanceForURL(url), url);
-  host->CreateRenderView(NULL);  // create a RenderViewHost with no view
+      new ExtensionHost(extension, GetSiteInstanceForURL(url), url,
+                        ViewType::EXTENSION_BACKGROUND_PAGE);
+  host->CreateRenderViewSoon(NULL);  // create a RenderViewHost with no view
   OnExtensionHostCreated(host, true);
   return host;
 }
@@ -90,6 +120,9 @@ void ExtensionProcessManager::RegisterExtensionProcess(
   if (it != process_ids_.end() && (*it).second == process_id)
     return;
 
+  // Extension ids should get removed from the map before the process ids get
+  // reused from a dead renderer.
+  DCHECK(it == process_ids_.end());
   process_ids_[extension_id] = process_id;
 
   ExtensionsService* extension_service =
@@ -97,14 +130,18 @@ void ExtensionProcessManager::RegisterExtensionProcess(
 
   std::vector<std::string> page_action_ids;
   Extension* extension = extension_service->GetExtensionById(extension_id);
-  for (PageActionMap::const_iterator i = extension->page_actions().begin();
-       i != extension->page_actions().end(); ++i) {
-    page_action_ids.push_back(i->first);
-  }
+  if (extension->page_action())
+    page_action_ids.push_back(extension->page_action()->id());
 
   RenderProcessHost* rph = RenderProcessHost::FromID(process_id);
   rph->Send(new ViewMsg_Extension_UpdatePageActions(extension_id,
                                                     page_action_ids));
+
+  // Send l10n messages to the renderer - if there are any.
+  if (extension->message_bundle()) {
+    rph->Send(new ViewMsg_Extension_SetL10nMessages(
+        extension_id, *extension->message_bundle()->dictionary()));
+  }
 }
 
 void ExtensionProcessManager::UnregisterExtensionProcess(int process_id) {
@@ -141,11 +178,11 @@ void ExtensionProcessManager::Observe(NotificationType type,
           Source<ExtensionsService>(source).ptr()->extensions());
       break;
 
-    case NotificationType::EXTENSIONS_LOADED: {
+    case NotificationType::EXTENSION_LOADED: {
       ExtensionsService* service = Source<ExtensionsService>(source).ptr();
       if (service->is_ready()) {
-        const ExtensionList* extensions = Details<ExtensionList>(details).ptr();
-        CreateBackgroundHosts(this, extensions);
+        Extension* extension = Details<Extension>(details).ptr();
+        ::CreateBackgroundHost(this, extension);
       }
       break;
     }
@@ -175,7 +212,7 @@ void ExtensionProcessManager::Observe(NotificationType type,
     case NotificationType::RENDERER_PROCESS_TERMINATED:
     case NotificationType::RENDERER_PROCESS_CLOSED: {
       RenderProcessHost* host = Source<RenderProcessHost>(source).ptr();
-      UnregisterExtensionProcess(host->pid());
+      UnregisterExtensionProcess(host->id());
       break;
     }
 

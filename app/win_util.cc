@@ -1,28 +1,30 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "app/win_util.h"
 
-#include <atlbase.h>
-#include <atlapp.h>
 #include <commdlg.h>
 #include <dwmapi.h>
 #include <propvarutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <algorithm>
+
+#include "app/gfx/codec/png_codec.h"
+#include "app/gfx/gdi_util.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/gfx/gdi_util.h"
-#include "base/gfx/png_encoder.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/registry.h"
+#include "base/scoped_comptr_win.h"
 #include "base/scoped_handle.h"
+#include "base/scoped_handle_win.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
 #include "grit/app_strings.h"
@@ -242,14 +244,14 @@ std::wstring FormatFilterForExtensions(
   const std::wstring all_ext = L"*.*";
   const std::wstring all_desc = l10n_util::GetString(IDS_APP_SAVEAS_ALL_FILES);
 
-  DCHECK(file_ext.size()>=ext_desc.size());
+  DCHECK(file_ext.size() >= ext_desc.size());
 
   std::wstring result;
 
-  for (size_t i=0; i<file_ext.size(); ++i) {
+  for (size_t i = 0; i < file_ext.size(); ++i) {
     std::wstring ext = file_ext[i];
     std::wstring desc;
-    if (i<ext_desc.size())
+    if (i < ext_desc.size())
       desc = ext_desc[i];
 
     if (ext.empty()) {
@@ -265,23 +267,33 @@ std::wstring FormatFilterForExtensions(
       size_t first_separator_index = first_extension.find(L';');
       if (first_separator_index != std::wstring::npos)
         first_extension = first_extension.substr(0, first_separator_index);
+
+      // Find the extension name without the preceeding '.' character.
+      std::wstring ext_name = first_extension;
+      size_t ext_index = ext_name.find_first_not_of(L'.');
+      if (ext_index != std::wstring::npos)
+        ext_name = ext_name.substr(ext_index);
+
       if (!GetRegistryDescriptionFromExtension(first_extension, &desc)) {
-        // The extension doesn't exist in the registry. It's likely bogus, so
-        // just drop it.
+        // The extension doesn't exist in the registry. Create a description
+        // based on the unknown extension type (i.e. if the extension is .qqq,
+        // the we create a description "QQQ File (.qqq)").
         include_all_files = true;
-        continue;
+        desc = l10n_util::GetStringF(IDS_APP_SAVEAS_EXTENSION_FORMAT,
+                                     l10n_util::ToUpper(ext_name),
+                                     ext_name);
       }
       if (desc.empty())
-        desc = L"*." + first_extension;
+        desc = L"*." + ext_name;
     }
 
-    result.append(desc.c_str(), desc.size()+1);  // Append NULL too.
-    result.append(ext.c_str(), ext.size()+1);
+    result.append(desc.c_str(), desc.size() + 1);  // Append NULL too.
+    result.append(ext.c_str(), ext.size() + 1);
   }
 
   if (include_all_files) {
-    result.append(all_desc.c_str(), all_desc.size()+1);
-    result.append(all_ext.c_str(), all_ext.size()+1);
+    result.append(all_desc.c_str(), all_desc.size() + 1);
+    result.append(all_ext.c_str(), all_ext.size() + 1);
   }
 
   result.append(1, '\0');  // Double NULL required.
@@ -689,8 +701,8 @@ bool IsNumPadDigit(int key_code, bool extended_key) {
 void GrabWindowSnapshot(HWND window_handle,
                         std::vector<unsigned char>* png_representation) {
   // Create a memory DC that's compatible with the window.
-  CWindowDC window_hdc(window_handle);
-  CDC mem_hdc(::CreateCompatibleDC(window_hdc));
+  HDC window_hdc = GetWindowDC(window_handle);
+  ScopedHDC mem_hdc(CreateCompatibleDC(window_hdc));
 
   // Create a DIB that's the same size as the window.
   RECT content_rect = {0, 0, 0, 0};
@@ -701,18 +713,18 @@ void GrabWindowSnapshot(HWND window_handle,
   BITMAPINFOHEADER hdr;
   gfx::CreateBitmapHeader(width, height, &hdr);
   unsigned char *bit_ptr = NULL;
-  CBitmap bitmap(::CreateDIBSection(mem_hdc,
-                                    reinterpret_cast<BITMAPINFO*>(&hdr),
-                                    DIB_RGB_COLORS,
-                                    reinterpret_cast<void **>(&bit_ptr),
-                                    NULL, 0));
+  ScopedBitmap bitmap(CreateDIBSection(mem_hdc,
+                                       reinterpret_cast<BITMAPINFO*>(&hdr),
+                                       DIB_RGB_COLORS,
+                                       reinterpret_cast<void **>(&bit_ptr),
+                                       NULL, 0));
 
-  mem_hdc.SelectBitmap(bitmap);
+  SelectObject(mem_hdc, bitmap);
   // Clear the bitmap to white (so that rounded corners on windows
   // show up on a white background, and strangely-shaped windows
   // look reasonable). Not capturing an alpha mask saves a
   // bit of space.
-  mem_hdc.PatBlt(0, 0, width, height, WHITENESS);
+  PatBlt(mem_hdc, 0, 0, width, height, WHITENESS);
   // Grab a copy of the window
   // First, see if PrintWindow is defined (it's not in Windows 2000).
   typedef BOOL (WINAPI *PrintWindowPointer)(HWND, HDC, UINT);
@@ -728,14 +740,16 @@ void GrabWindowSnapshot(HWND window_handle,
   if (print_window)
     (*print_window)(window_handle, mem_hdc, 0);
   else
-    mem_hdc.BitBlt(0, 0, width, height, window_hdc, 0, 0, SRCCOPY);
+    BitBlt(mem_hdc, 0, 0, width, height, window_hdc, 0, 0, SRCCOPY);
 
   // We now have a copy of the window contents in a DIB, so
   // encode it into a useful format for posting to the bug report
   // server.
-  PNGEncoder::Encode(bit_ptr, PNGEncoder::FORMAT_BGRA,
-                     width, height, width * 4, true,
-                     png_representation);
+  gfx::PNGCodec::Encode(bit_ptr, gfx::PNGCodec::FORMAT_BGRA,
+                        width, height, width * 4, true,
+                        png_representation);
+
+  ReleaseDC(window_handle, window_hdc);
 }
 
 bool IsWindowActive(HWND hwnd) {
@@ -868,14 +882,17 @@ void SetAppIdForWindow(const std::wstring& app_id, HWND hwnd) {
   PROPVARIANT pv;
   InitPropVariantFromString(app_id.c_str(), &pv);
 
-  IPropertyStore* pps;
+  ScopedComPtr<IPropertyStore> pps;
   SHGPSFW SHGetPropertyStoreForWindow = static_cast<SHGPSFW>(function);
-  if (S_OK == SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&pps)) &&
-      S_OK == pps->SetValue(PKEY_AppUserModel_ID, pv)) {
-    pps->Commit();
+  HRESULT result = SHGetPropertyStoreForWindow(
+      hwnd, __uuidof(*pps), reinterpret_cast<void**>(pps.Receive()));
+  if (S_OK == result) {
+    if (S_OK == pps->SetValue(PKEY_AppUserModel_ID, pv))
+      pps->Commit();
   }
 
   // Cleanup.
+  PropVariantClear(&pv);
   base::UnloadNativeLibrary(shell32_library);
 }
 

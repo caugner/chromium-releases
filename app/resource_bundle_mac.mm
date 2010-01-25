@@ -17,6 +17,7 @@
 #include "base/path_service.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "skia/ext/skia_utils_mac.h"
 
 ResourceBundle::~ResourceBundle() {
   FreeImages();
@@ -70,25 +71,23 @@ void ResourceBundle::LoadThemeResources() {
   DCHECK(theme_data_) << "failed to load theme.pak";
 }
 
-/* static */
-bool ResourceBundle::LoadResourceBytes(DataHandle module, int resource_id,
-                                       std::vector<unsigned char>* bytes) {
+// static
+RefCountedStaticMemory* ResourceBundle::LoadResourceBytes(
+    DataHandle module, int resource_id) {
   DCHECK(module);
-  StringPiece data;
-  if (!module->Get(resource_id, &data))
-    return false;
+  base::StringPiece bytes;
+  if (!module->Get(resource_id, &bytes))
+    return NULL;
 
-  bytes->resize(data.length());
-  memcpy(&(bytes->front()), data.data(), data.length());
-
-  return true;
+  return new RefCountedStaticMemory(
+      reinterpret_cast<const unsigned char*>(bytes.data()), bytes.length());
 }
 
-StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
+base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
   DCHECK(resources_data_);
-  StringPiece data;
+  base::StringPiece data;
   if (!resources_data_->Get(resource_id, &data))
-    return StringPiece();
+    return base::StringPiece();
   return data;
 }
 
@@ -100,7 +99,7 @@ string16 ResourceBundle::GetLocalizedString(int message_id) {
     return string16();
   }
 
-  StringPiece data;
+  base::StringPiece data;
   if (!locale_resources_data_->Get(message_id, &data)) {
     // Fall back on the main data pack (shouldn't be any strings here except in
     // unittests).
@@ -115,4 +114,15 @@ string16 ResourceBundle::GetLocalizedString(int message_id) {
   string16 msg(reinterpret_cast<const char16*>(data.data()),
                data.length() / 2);
   return msg;
+}
+
+NSImage* ResourceBundle::GetNSImageNamed(int resource_id) {
+  // Currently this doesn't make a cache holding these as NSImages because
+  // GetBitmapNamed has a cache, and we don't want to double cache.
+  SkBitmap* bitmap = GetBitmapNamed(resource_id);
+  if (!bitmap)
+    return nil;
+
+  NSImage* nsimage = gfx::SkBitmapToNSImage(*bitmap);
+  return nsimage;
 }

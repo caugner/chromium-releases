@@ -11,7 +11,7 @@
 #include "base/perftimer.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
-#include "base/test_file_util.h"
+#include "base/test/test_file_util.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -151,8 +151,7 @@ TEST_F(VisitedLink, TestLoad) {
   const int load_count = 5;
   std::vector<double> cold_load_times;
   std::vector<double> hot_load_times;
-  for (int i = 0; i < load_count; i++)
-  {
+  for (int i = 0; i < load_count; i++) {
     // make sure the file has to be re-loaded
     file_util::EvictFileFromSystemCache(
         FilePath::FromWStringHack(std::wstring(db_name_)));

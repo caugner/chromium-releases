@@ -34,7 +34,27 @@ PluginGetURLTest::PluginGetURLTest(NPP id, NPNetscapeFuncs *host_functions)
   : PluginTest(id, host_functions),
     tests_started_(false),
     tests_in_progress_(0),
-    test_file_(NULL) {
+    test_file_(NULL),
+    expect_404_response_(false),
+    npn_evaluate_context_(false) {
+}
+
+NPError PluginGetURLTest::New(uint16 mode, int16 argc, const char* argn[],
+                              const char* argv[], NPSavedData* saved) {
+  const char* page_not_found_url = GetArgValue("page_not_found_url", argc,
+                                               argn, argv);
+  if (page_not_found_url) {
+    page_not_found_url_ = page_not_found_url;
+    expect_404_response_ = true;
+  } else {
+    const char* fail_write_url = GetArgValue("fail_write_url", argc,
+                                             argn, argv);
+    if (fail_write_url) {
+      fail_write_url_ = fail_write_url;
+    }
+  }
+
+  return PluginTest::New(mode, argc, argn, argv, saved);
 }
 
 NPError PluginGetURLTest::SetWindow(NPWindow* pNPWindow) {
@@ -42,6 +62,14 @@ NPError PluginGetURLTest::SetWindow(NPWindow* pNPWindow) {
     tests_started_ = true;
 
     tests_in_progress_++;
+
+    if (expect_404_response_) {
+      HostFunctions()->geturl(id(), page_not_found_url_.c_str(), NULL);
+      return NPERR_NO_ERROR;
+    } else if (!fail_write_url_.empty()) {
+      HostFunctions()->geturl(id(), fail_write_url_.c_str(), NULL);
+      return NPERR_NO_ERROR;
+    }
 
     std::string url = SELF_URL;
     HostFunctions()->geturlnotify(id(), url.c_str(), NULL,
@@ -57,13 +85,47 @@ NPError PluginGetURLTest::SetWindow(NPWindow* pNPWindow) {
 
 NPError PluginGetURLTest::NewStream(NPMIMEType type, NPStream* stream,
                               NPBool seekable, uint16* stype) {
-  if (stream == NULL)
+  if (stream == NULL) {
     SetError("NewStream got null stream");
+    return NPERR_INVALID_PARAM;
+  }
+
+  if (test_completed()) {
+    return PluginTest::NewStream(type, stream, seekable, stype);
+  }
 
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);
+
+  if (expect_404_response_) {
+    NPObject *window_obj = NULL;
+    HostFunctions()->getvalue(id(), NPNVWindowNPObject, &window_obj);
+    if (!window_obj) {
+      SetError("Failed to get NPObject for plugin instance2");
+      SignalTestCompleted();
+      return NPERR_NO_ERROR;
+    }
+
+    std::string script = "javascript:alert('Hi there from plugin');";
+    NPString script_string;
+    script_string.UTF8Characters = script.c_str();
+    script_string.UTF8Length = static_cast<unsigned int>(script.length());
+    NPVariant result_var;
+
+    npn_evaluate_context_ = true;
+    HostFunctions()->evaluate(id(), window_obj, &script_string, &result_var);
+    npn_evaluate_context_ = false;
+    return NPERR_NO_ERROR;
+  }
+
+  if (!fail_write_url_.empty()) {
+    return NPERR_NO_ERROR;
+  }
+
+
   unsigned long stream_id = reinterpret_cast<unsigned long>(
       stream->notifyData);
+
   switch (stream_id) {
     case SELF_URL_STREAM_ID:
       break;
@@ -94,6 +156,10 @@ NPError PluginGetURLTest::NewStream(NPMIMEType type, NPStream* stream,
 }
 
 int32 PluginGetURLTest::WriteReady(NPStream *stream) {
+  if (test_completed()) {
+    return PluginTest::WriteReady(stream);
+  }
+
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);
   unsigned long stream_id = reinterpret_cast<unsigned long>(
@@ -106,10 +172,23 @@ int32 PluginGetURLTest::WriteReady(NPStream *stream) {
 
 int32 PluginGetURLTest::Write(NPStream *stream, int32 offset, int32 len,
                               void *buffer) {
-  if (stream == NULL)
+  if (test_completed()) {
+    return PluginTest::Write(stream, offset, len, buffer);
+  }
+
+  if (!fail_write_url_.empty()) {
+    SignalTestCompleted();
+    return -1;
+  }
+
+  if (stream == NULL) {
     SetError("Write got null stream");
-  if (len < 0 || len > STREAM_CHUNK)
+    return -1;
+  }
+  if (len < 0 || len > STREAM_CHUNK) {
     SetError("Write got bogus stream chunk size");
+    return -1;
+  }
 
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);
@@ -144,11 +223,27 @@ int32 PluginGetURLTest::Write(NPStream *stream, int32 offset, int32 len,
 
 
 NPError PluginGetURLTest::DestroyStream(NPStream *stream, NPError reason) {
-  if (stream == NULL)
+  if (test_completed()) {
+    return PluginTest::DestroyStream(stream, reason);
+  }
+
+  if (stream == NULL) {
     SetError("NewStream got null stream");
+    return NPERR_INVALID_PARAM;
+  }
 
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);
+
+  if (expect_404_response_) {
+    if (npn_evaluate_context_) {
+      SetError("Received destroyStream in the context of NPN_Evaluate.");
+    }
+
+    SignalTestCompleted();
+    return NPERR_NO_ERROR;
+  }
+
   unsigned long stream_id =
       reinterpret_cast<unsigned long>(stream->notifyData);
   switch (stream_id) {
@@ -172,8 +267,10 @@ NPError PluginGetURLTest::DestroyStream(NPStream *stream, NPError reason) {
 }
 
 void PluginGetURLTest::StreamAsFile(NPStream* stream, const char* fname) {
-  if (stream == NULL)
+  if (stream == NULL) {
     SetError("NewStream got null stream");
+    return;
+  }
 
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);

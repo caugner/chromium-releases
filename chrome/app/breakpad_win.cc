@@ -134,6 +134,9 @@ struct CrashReporterInfo {
   std::wstring process_type;
 };
 
+// flag to indicate that we are already handling an exception.
+volatile LONG handling_exception = 0;
+
 // This callback is executed when the browser process has crashed, after
 // the crash dump has been created. We need to minimize the amount of work
 // done here since we have potentially corrupted process. Our job is to
@@ -143,6 +146,12 @@ struct CrashReporterInfo {
 bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       EXCEPTION_POINTERS* ex_info,
                       MDRawAssertionInfo*, bool) {
+  // Capture every thread except the first one in the sleep. We don't
+  // want multiple threads to concurrently execute the rest of the code.
+  if (::InterlockedCompareExchange(&handling_exception, 1, 0) == 1) {
+    ::Sleep(INFINITE);
+  }
+
   // If the exception is because there was a problem loading a delay-loaded
   // module, then show the user a dialog explaining the problem and then exit.
   if (DelayLoadFailureExceptionMessageBox(ex_info))
@@ -266,18 +275,16 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   // we do it here so it can run in a separate thread.
   info->custom_info = GetCustomInfo(info->dll_path, info->process_type);
 
-  const CommandLine& command = *CommandLine::ForCurrentProcess();
-  bool full_dump = command.HasSwitch(switches::kFullMemoryCrashReport);
-  bool use_crash_service = command.HasSwitch(switches::kNoErrorDialogs) ||
-                           GetEnvironmentVariable(L"CHROME_HEADLESS", NULL, 0);
-
   google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
-
   if (info->process_type == L"browser") {
     // We install the post-dump callback only for the browser process. It
     // spawns a new browser process.
     callback = &DumpDoneCallback;
   }
+
+  const CommandLine& command = *CommandLine::ForCurrentProcess();
+  bool use_crash_service = command.HasSwitch(switches::kNoErrorDialogs) ||
+                           GetEnvironmentVariable(L"CHROME_HEADLESS", NULL, 0);
 
   std::wstring pipe_name;
   if (use_crash_service) {
@@ -299,8 +306,11 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
     // Per-user install: "NamedPipe\GoogleCrashServices\<user SID>"
     std::wstring user_sid;
     if (InstallUtil::IsPerUserInstall(info->dll_path.c_str())) {
-      if (!win_util::GetUserSidString(&user_sid))
+      if (!win_util::GetUserSidString(&user_sid)) {
+        if (callback)
+          InitDefaultCrashCallback();
         return -1;
+      }
     } else {
       user_sid = kSystemPrincipalSid;
     }
@@ -313,6 +323,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   wchar_t temp_dir[MAX_PATH] = {0};
   ::GetTempPathW(MAX_PATH, temp_dir);
 
+  bool full_dump = command.HasSwitch(switches::kFullMemoryCrashReport);
   MINIDUMP_TYPE dump_type = full_dump ? MiniDumpWithFullMemory : MiniDumpNormal;
 
   g_breakpad = new google_breakpad::ExceptionHandler(temp_dir, NULL, callback,

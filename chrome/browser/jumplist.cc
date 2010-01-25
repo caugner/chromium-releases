@@ -12,17 +12,18 @@
 #include <string>
 #include <vector>
 
+#include "app/gfx/codec/png_codec.h"
 #include "app/gfx/icon_util.h"
 #include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/gfx/png_decoder.h"
 #include "base/path_service.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/profile.h"
@@ -243,18 +244,18 @@ bool CreateIconFile(const SkBitmap& bitmap,
   // Retrieve the path to a temporary file.
   // We don't have to care about the extension of this temporary file because
   // JumpList does not care about it.
-  std::wstring path;
-  if (!file_util::CreateTemporaryFileNameInDir(icon_dir, &path))
+  FilePath path;
+  if (!file_util::CreateTemporaryFileInDir(FilePath(icon_dir), &path))
     return false;
 
   // Create an icon file from the favicon attached to the given |page|, and
   // save it as the temporary file.
-  if (!IconUtil::CreateIconFileFromSkBitmap(bitmap, path))
+  if (!IconUtil::CreateIconFileFromSkBitmap(bitmap, path.value()))
     return false;
 
   // Add this icon file to the list and return its absolute path.
   // The IShellLink::SetIcon() function needs the absolute path to an icon.
-  icon_path->assign(path);
+  icon_path->assign(path.value());
   return true;
 }
 
@@ -485,9 +486,10 @@ void JumpListUpdateTask::Run() {
   // icon directory, and create a new directory which contains new JumpList
   // icon files.
   std::wstring icon_dir_old(icon_dir_ + L"Old");
-  if (file_util::PathExists(icon_dir_old))
+  if (file_util::PathExists(FilePath::FromWStringHack(icon_dir_old)))
     file_util::Delete(icon_dir_old, true);
-  file_util::Move(icon_dir_, icon_dir_old);
+  file_util::Move(FilePath::FromWStringHack(icon_dir_),
+                  FilePath::FromWStringHack(icon_dir_old));
   file_util::CreateDirectory(icon_dir_);
 
   // Create temporary icon files for shortcuts in the "Most Visited" category.
@@ -495,7 +497,7 @@ void JumpListUpdateTask::Run() {
        item != most_visited_pages_.end(); ++item) {
     SkBitmap icon_bitmap;
     if ((*item)->data().get() &&
-        PNGDecoder::Decode(&(*item)->data()->data, &icon_bitmap)) {
+        gfx::PNGCodec::Decode(&(*item)->data()->data, &icon_bitmap)) {
       std::wstring icon_path;
       if (CreateIconFile(icon_bitmap, icon_dir_, &icon_path))
         (*item)->SetIcon(icon_path, 0, true);
@@ -508,7 +510,7 @@ void JumpListUpdateTask::Run() {
        item != recently_closed_pages_.end(); ++item) {
     SkBitmap icon_bitmap;
     if ((*item)->data().get() &&
-        PNGDecoder::Decode(&(*item)->data()->data, &icon_bitmap)) {
+        gfx::PNGCodec::Decode(&(*item)->data()->data, &icon_bitmap)) {
       std::wstring icon_path;
       if (CreateIconFile(icon_bitmap, icon_dir_, &icon_path))
         (*item)->SetIcon(icon_path, 0, true);
@@ -636,12 +638,12 @@ bool JumpList::StartLoadingFavIcon() {
   if (icon_urls_.empty())
     return false;
 
-  // Ask HistoryService if it has a fav icon of a URL.
-  // When HistoryService has one, it will call OnFavIconDataAvailable().
+  // Ask FaviconService if it has a fav icon of a URL.
+  // When FaviocnService has one, it will call OnFavIconDataAvailable().
   GURL url(icon_urls_.front().first);
-  HistoryService* history_service =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  HistoryService::Handle handle = history_service->GetFavIconForURL(
+  FaviconService* favicon_service =
+      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
       url, &fav_icon_consumer_,
       NewCallback(this, &JumpList::OnFavIconDataAvailable));
   return true;
@@ -705,7 +707,7 @@ void JumpList::OnSegmentUsageAvailable(
 }
 
 void JumpList::OnFavIconDataAvailable(
-    HistoryService::Handle handle,
+    FaviconService::Handle handle,
     bool know_favicon,
     scoped_refptr<RefCountedBytes> data,
     bool expired,

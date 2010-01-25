@@ -32,9 +32,12 @@
 
 // This file implements unit tests for class StreamBank.
 
-#include "core/cross/client.h"
 #include "core/cross/skin.h"
 #include "core/cross/stream_bank.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
+#include "core/cross/service_dependency.h"
+#include "core/cross/pointer_utils.h"
 #include "core/cross/fake_vertex_source.h"
 #include "tests/common/win/testing_common.h"
 
@@ -127,6 +130,9 @@ TEST_F(StreamBankTest, Basic) {
   StreamBank* stream_bank = pack()->Create<StreamBank>();
   // Check that StreamBank got created.
   ASSERT_TRUE(stream_bank != NULL);
+  EXPECT_TRUE(stream_bank->IsA(StreamBank::GetApparentClass()));
+  EXPECT_TRUE(stream_bank->IsA(VertexSource::GetApparentClass()));
+  EXPECT_TRUE(stream_bank->renderable());
 
   // Check Setting Vertex Streams.
   VertexBuffer* vertex_buffer = pack()->Create<VertexBuffer>();
@@ -151,6 +157,36 @@ TEST_F(StreamBankTest, Basic) {
   EXPECT_EQ(vertex_stream->semantic_index(), 0);
 
   // Check removing the streams.
+  EXPECT_FALSE(stream_bank->RemoveVertexStream(Stream::POSITION, 1));
+  EXPECT_FALSE(stream_bank->RemoveVertexStream(Stream::BINORMAL, 0));
+  EXPECT_TRUE(stream_bank->RemoveVertexStream(Stream::POSITION, 0));
+  EXPECT_FALSE(stream_bank->RemoveVertexStream(Stream::POSITION, 0));
+}
+
+TEST_F(StreamBankTest, Renderable) {
+  StreamBank* stream_bank = pack()->Create<StreamBank>();
+  ASSERT_TRUE(stream_bank != NULL);
+
+  VertexBuffer* vertex_buffer = pack()->Create<VertexBuffer>();
+  ASSERT_TRUE(vertex_buffer != NULL);
+  SourceBuffer* source_buffer = pack()->Create<SourceBuffer>();
+  ASSERT_TRUE(source_buffer != NULL);
+
+  Field* field1 = vertex_buffer->CreateField(FloatField::GetApparentClass(), 1);
+  Field* field2 = source_buffer->CreateField(FloatField::GetApparentClass(), 1);
+  ASSERT_TRUE(field1 != NULL);
+  ASSERT_TRUE(field2 != NULL);
+
+  EXPECT_TRUE(stream_bank->SetVertexStream(Stream::POSITION, 0, field1, 0));
+  EXPECT_TRUE(stream_bank->renderable());
+  EXPECT_TRUE(stream_bank->SetVertexStream(Stream::POSITION, 1, field2, 0));
+  EXPECT_FALSE(stream_bank->renderable());
+  EXPECT_TRUE(stream_bank->RemoveVertexStream(Stream::POSITION, 1));
+  EXPECT_TRUE(stream_bank->renderable());
+  EXPECT_TRUE(stream_bank->SetVertexStream(Stream::POSITION, 0, field2, 0));
+  EXPECT_FALSE(stream_bank->renderable());
+  EXPECT_TRUE(stream_bank->SetVertexStream(Stream::POSITION, 0, field1, 0));
+  EXPECT_TRUE(stream_bank->renderable());
   EXPECT_FALSE(stream_bank->RemoveVertexStream(Stream::POSITION, 1));
   EXPECT_FALSE(stream_bank->RemoveVertexStream(Stream::BINORMAL, 0));
   EXPECT_TRUE(stream_bank->RemoveVertexStream(Stream::POSITION, 0));
@@ -254,7 +290,7 @@ TEST_F(StreamBankTest, BindStream) {
                               3.0f));
 
   // Check that UpdateOutputs only got called once.
-  EXPECT_EQ(source->update_outputs_call_count(), 1);
+  EXPECT_EQ(source->update_outputs_call_count(), 1U);
 }
 
 }  // namespace o3d

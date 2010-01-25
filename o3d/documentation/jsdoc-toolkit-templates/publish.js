@@ -40,14 +40,20 @@ var g_symbolArray;
 var g_filePrefix;
 var g_skipRE;
 var g_validJSDOCTypes = {
+  'boolean': true,
+  'Event': true,
+  'Element': true,
+  'null': true,
   'number': true,
   'Number': true,
   'object': true,
   'Object': true,
   '*': true,
   '...': true,
+  'RegExp': true,
   'string': true,
   'String': true,
+  'XMLHttpRequest': true,
   'void': true,
   'undefined': true};
 var g_unknownTypes = { };
@@ -58,6 +64,20 @@ var g_baseURL;
 var g_topURL;
 var g_templates = [];
 var g_o3dPropertyRE = /^(\w+)\s+(\w+)\s+/;
+var g_startContainerRE = /^(?:function\(|!function\(|[\(<{[])/;
+var g_containerRE = /function\(|!function\(|[\(<{[]/;
+var g_openCloseMap = {
+  'function(': ')',
+  '!function(': ')',
+  '(': ')',
+  '<': '>',
+  '[': ']',
+  '{': '}'};
+var g_closeMap = {
+  ')': true,
+  '>': true,
+  ']': true,
+  '}': true};
 
 /**
  * Called automatically by JsDoc Toolkit.
@@ -140,6 +160,7 @@ function publishInternal(symbolSet) {
     var annotatedTemplate = new JSDOC.JsPlate(templatesDir + 'annotated.tmpl');
     var namespacesTemplate = new JSDOC.JsPlate(templatesDir +
                                                'namespaces.tmpl');
+    var dotTemplate = new JSDOC.JsPlate(templatesDir + 'dot.tmpl');
   } catch(e) {
     generateError('Couldn\'t create the required templates: ' + e);
     System.exit(1);
@@ -194,7 +215,7 @@ function publishInternal(symbolSet) {
     filteredClasses.push(symbol);
 
     // Comment these lines in to see what data is available to the templates.
-    //if (symbol.name == 'Client' || symbol.name == 'particles') {
+    //if (symbol.name == 'Canvas') {
     //  print('------[' + symbol.name + ']-----------------------------------');
     //  dumpObject(symbol, 5);
     //}
@@ -246,6 +267,9 @@ function publishInternal(symbolSet) {
   var namespaces = namespacesTemplate.process(filteredClasses);
   IO.saveFile(publish.conf.outDir, 'namespaces' + publish.conf.ext, namespaces);
   IO.saveFile(publish.conf.htmlDir, 'namespaces.html', namespaces);
+
+  var dot = dotTemplate.process(filteredClasses);
+  IO.saveFile(publish.conf.htmlDir, 'class_hierarchy.dot', dot);
 
   if (publish.conf.exportsFile) {
     print("Writing exports: " + publish.conf.exportsFile);
@@ -536,6 +560,18 @@ function getParameters(symbol) {
 }
 
 /**
+ * Returns whether or not the symbol is deprecated.  Apparently jsdoctoolkit is
+ * supposed to extract this info for us but it's not so we have to do it
+ * manually.
+ * @param {!Symbol} symbol The symbol to check.
+ * @return {boolean} True if the symbol is deprecated.
+ */
+function isDeprecated(symbol) {
+  var tags = symbol.comment.getTag('deprecated');
+  return tags.length > 0;
+}
+
+/**
  * Converts [ to [[] for ezt files.
  * Also converts '\n\n' to <br/></br>
  * @param {string} str to sanitize.
@@ -564,6 +600,15 @@ function startsWith(str, prefix) {
  */
 function endsWith(str, suffix) {
   return str.substring(str.length - suffix.length) === suffix;
+}
+
+/**
+ * Returns a string stripped of leading and trailing whitespace.
+ * @param {string} str String to strip.
+ * @return {string} stripped string.
+ */
+function stripWhitespace(str) {
+  return str.replace(/^\s+/, '').replace(/\s+$/, '');
 }
 
 /**
@@ -600,29 +645,18 @@ function reportUnknownType(place, type) {
  * @return {number} Index of closing character or (-1) if not found.
  */
 function getIndexOfClosingCharacter(str, startIndex) {
-  var openCloseMap = {
-    '(': ')',
-    '<': '>',
-    '[': ']',
-    '{': '}'};
-  var closeMap = {
-    ')': true,
-    '>': true,
-    ']': true,
-    '}': true,
-  };
   var stack = [];
-  if (!openCloseMap[str[startIndex]]) {
+  if (!g_openCloseMap[str[startIndex]]) {
     throw 'startIndex does not point to opening character.';
   }
   var endIndex = str.length;
   while (startIndex < endIndex) {
     var c = str[startIndex];
-    var closing = openCloseMap[c];
+    var closing = g_openCloseMap[c];
     if (closing) {
       stack.unshift(closing);
     } else {
-      closing = closeMap[c];
+      closing = g_closeMap[c];
       if (closing) {
         var expect = stack.shift()
         if (c != expect) {
@@ -679,6 +713,11 @@ function generatePlaceError(place, msg) {
  * @return {string} linkified string.
  */
 function linkifySingleType(place, type) {
+  if (!type) {
+    generatePlaceError(place, 'type is empty');
+    return '';
+  }
+  type = stripWhitespace(type);
   var not = '';
   var equals = '';
   // Remove ! if it exists.
@@ -702,6 +741,20 @@ function linkifySingleType(place, type) {
       link = 'Array.&lt;' +
         linkifySingleType(place, type.substring(7, closingAngle)) + '>';
     }
+  } else if (startsWith(type, 'Object.<')) {
+      var closingAngle = getIndexOfClosingCharacter(type, 6);
+      if (closingAngle < 0) {
+        generatePlaceError(place, 'Unmatched "<" in Object type : ' + type);
+      } else {
+        var objectSpec = type.substring(8, closingAngle);
+        var elements = objectSpec.split(/\s*,\s*/);
+        if (elements.length != 2) {
+          generatePlaceError(place, 'An Object spec must have exactly 2 types');
+        }
+        link = 'Object.&lt;' +
+            linkifySingleType(place, elements[0]) + ', ' +
+            linkifySingleType(place, elements[1]) + '>';
+      }
   } else if (startsWith(type, 'function(')) {
     var closingParen = getIndexOfClosingCharacter(type, 8);
     if (closingParen < 0) {
@@ -716,6 +769,8 @@ function linkifySingleType(place, type) {
         var output = '';
         var argsStr = type.substring(9, closingParen);
         if (argsStr) {
+          // TODO(gman): This needs to split taking parens, brackets and angle
+          //    brackets into account.
           var args = argsStr.split(/ *, */);
           for (var ii = 0; ii < args.length; ++ii) {
             if (ii > 0) {
@@ -728,33 +783,28 @@ function linkifySingleType(place, type) {
                linkifyTypeSpec(place, end.substring(2));
       }
     }
-  } else if (type.indexOf(':') >= 0) { // check for records.
-    if (type.indexOf('::') >= 0) { // check for CPP scope
-      generatePlaceError(place,
-                         'CPP "::" scope operator found for type "' + type +
-                         '" must be Javascript "." scope operator.');
-    } else {
-      var elements = type.split(/\s*,\s*/);
-      var output = '{';
-      for (var ii = 0; ii < elements.length; ++ii) {
-        if (ii > 0) {
-          output += ', ';
-        }
-        var element = elements[ii];
-        var colon = element.indexOf(': ');
-        if (colon < 0) {
-          generatePlaceError(place,
-                             'Malformed record specification. Format must be ' +
-                             '{id1: type1, id2: type2, ...}.');
-          output += element;
-        } else {
-          var name = element.substring(0, colon);
-          var subType = element.substring(colon + 2);
-          output += name + ':&nbsp;' + linkifyTypeSpec(place, subType)
-        }
+  } else if (startsWith(type, '{') && endsWith(type, '}')) {
+    // found a record.
+    var elements = type.substr(1, type.length - 2).split(/\s*,\s*/);
+    var output = '{';
+    for (var ii = 0; ii < elements.length; ++ii) {
+      if (ii > 0) {
+        output += ', ';
       }
-      link = output + '}';
+      var element = elements[ii];
+      var colon = element.indexOf(': ');
+      if (colon < 0) {
+        generatePlaceError(place,
+                           'Malformed record specification. Format must be ' +
+                           '{id1: type1, id2: type2, ...}.');
+        output += element;
+      } else {
+        var name = element.substring(0, colon);
+        var subType = element.substring(colon + 2);
+        output += name + ':&nbsp;' + linkifyTypeSpec(place, subType);
+      }
     }
+    link = output + '}';
   } else {
     var symbol = getSymbol(type);
     if (symbol) {
@@ -762,21 +812,26 @@ function linkifySingleType(place, type) {
           type + '</a>';
     } else {
       // See if the symbol is a property or field.
+      var found = false;
       var period = type.lastIndexOf('.');
       if (period >= 0 && type != '...') {
         var subType = type.substring(0, period);
+        var member = type.substring(period + 1);
         symbol = getSymbol(subType);
-        if (symbol) {
+        if (symbol && symbol.hasMember(member)) {
           var field = type.substring(period + 1);
           link = '<a class="el" href="' + getLinkToSymbol(symbol) + '#' +
               field + '">' +  type + '</a>';
-        } else {
-          if (subType[0] == '?') {
-            subType = subType.substring(1);
-          }
-          if (!g_validJSDOCTypes[subType]) {
-            reportUnknownType(place, type);
-          }
+          found = true;
+        }
+      }
+
+      if (!found) {
+        if (type[0] == '?') {
+          type = type.substring(1);
+        }
+        if (!g_validJSDOCTypes[type]) {
+          reportUnknownType(place, type);
         }
       }
     }
@@ -786,30 +841,85 @@ function linkifySingleType(place, type) {
 }
 
 /**
+ * Splits a string by containers. A string like "ab(cd,ef)gh" will
+ * be returned as ['ab', '(cd,ef)', 'gh']
+ * @param {string} str String to split.
+ * @return {!Array.<string>} The split string parts.
+ */
+function splitByContainers(str) {
+  var parts = [];
+  for (;;) {
+    var match = str.match(g_containerRE);
+    if (!match) {
+      if (str.length > 0) {
+        parts.push(str);
+      }
+      return parts;
+    }
+    var startIndex = str.indexOf(match);
+    if (startIndex != 0) {
+      parts.push(str.substring(0, startIndex));
+    }
+    var endIndex = getIndexOfClosingCharacter(
+        str, startIndex + match.toString().length - 1);
+    if (endIndex < 0) {
+      throw 'no closing character for "' + str[startIndex] + '" in "' + str +
+            '"';
+    }
+    var piece = str.substring(startIndex, endIndex + 1);
+    parts.push(piece);
+    str = str.substring(endIndex + 1);
+  }
+}
+
+/**
  * Fix function specs.
  * The jsdoctoolkit wrongly converts ',' to | as in 'function(a, b)' to
  * 'function(a|b)' and '{id1: type1, id2: type2}' to '{id1: type1|id2: type2}'
  * so we need to put those back here (or fix jsdoctoolkit, the proper solution).
+ * Worse, we have to distinguish between 'function(a|b)' and '(a|b)'. The former
+ * needs to become 'function(a, b)' while the later needs to stay the same.
+ *
  * @param {string} str JSDOC type specification string .
+ * @param {boolean} opt_paren True if we are inside a paren.
  * @return {string} str with '|' converted back to ', ' unless the specification
  *     starts with '(' and ends with ')'. That's not a very good check beacuse
  *     you could 'function((string|number)) and this would fail to do the right
  *     thing.
- *
  */
-function fixSpecCommas(str) {
-  // TODO: This is really a complete hack and we should fix the
-  // jsdoctoolkit.
-  if (startsWith(str, '(') && endsWith(str, ')')) {
-    return str;
+function fixSpecCommas(str, opt_paren) {
+  var start = str.match(g_startContainerRE);
+  if (start) {
+    var startStr = start.toString();
+    var closing = g_openCloseMap[startStr];
+    if (closing) {
+      var lastChar = str[str.length - 1];
+      if (lastChar == closing) {
+        var middle = str.substring(startStr.length, str.length - 1);
+        return startStr +
+          fixSpecCommas(middle, startStr === '(') +
+          lastChar;
+      }
+    }
+  }
+
+  if (str.match(g_containerRE)) {
+    var parts = splitByContainers(str);
+    for (var ii = 0; ii < parts.length; ++ii) {
+      parts[ii] = fixSpecCommas(parts[ii], opt_paren);
+    }
+    return parts.join('');
   } else {
+    if (opt_paren) {
+      return str;
+    }
     return str.replace(/\|/g, ', ');
   }
 }
 
 /**
  * Converts a JSDOC type specification into html links. For example
- * '(!o3djs.math.Vector3|!O3D.math.Vector4)' would change to
+ * '(!o3djs.math.Vector3|!o3djs.math.Vector4)' would change to
  * '(!<a href="??">o3djs.math.Vector3</a>
  * |!<a href="??">o3djs.math.Vector4</a>)'.
  * @param {string} place Use to print error message if type not found.
@@ -819,7 +929,11 @@ function fixSpecCommas(str) {
 function linkifyTypeSpec(place, str) {
   var output = '';
   if (str) {
-    var fixed = fixSpecCommas(str);
+    try {
+      var fixed = fixSpecCommas(str);
+    } catch (e) {
+      generatePlaceError(place, e);
+    }
     // TODO: needs to split outside of parens and angle brackets.
     if (startsWith(fixed, '(') && endsWith(fixed, ')')) {
       var types = fixed.substring(1, fixed.length - 1).split('|');

@@ -1,4 +1,4 @@
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,28 +14,32 @@ import time
 import path_utils
 import compare_failures
 
+sys.path.append(path_utils.PathFromBase('third_party'))
+import simplejson
 
 # Test expectation and modifier constants.
-(PASS, FAIL, TIMEOUT, CRASH, SKIP, WONTFIX, DEFER, SLOW, REBASELINE, NONE) = \
-    range(10)
+(PASS, FAIL, TEXT, IMAGE, IMAGE_PLUS_TEXT, TIMEOUT, CRASH, SKIP, WONTFIX,
+ DEFER, SLOW, REBASELINE, NONE) = range(13)
 
 # Test expectation file update action constants
 (NO_CHANGE, REMOVE_TEST, REMOVE_PLATFORM, ADD_PLATFORMS_EXCEPT_THIS) = range(4)
 
-
 class TestExpectations:
   TEST_LIST = "test_expectations.txt"
 
-  def __init__(self, tests, directory, platform, is_debug_mode):
+  def __init__(self, tests, directory, platform, is_debug_mode, is_lint_mode):
     """Reads the test expectations files from the given directory."""
     path = os.path.join(directory, self.TEST_LIST)
     self._expected_failures = TestExpectationsFile(path, tests, platform,
-        is_debug_mode)
+        is_debug_mode, is_lint_mode)
 
   # TODO(ojan): Allow for removing skipped tests when getting the list of tests
   # to run, but not when getting metrics.
   # TODO(ojan): Replace the Get* calls here with the more sane API exposed
   # by TestExpectationsFile below. Maybe merge the two classes entirely?
+
+  def GetExpectationsJsonForAllPlatforms(self):
+    return self._expected_failures.GetExpectationsJsonForAllPlatforms()
 
   def GetFixable(self):
     return self._expected_failures.GetTestSet(NONE)
@@ -56,10 +60,10 @@ class TestExpectations:
   def GetFixableCrashes(self):
     return self._expected_failures.GetTestSet(NONE, CRASH)
 
-  def GetSkipped(self):
-    # TODO(ojan): It's confusing that this includes deferred tests.
+  def GetFixableSkipped(self):
     return (self._expected_failures.GetTestSet(SKIP) -
-            self._expected_failures.GetTestSet(WONTFIX))
+            self._expected_failures.GetTestSet(WONTFIX) -
+            self._expected_failures.GetTestSet(DEFER))
 
   def GetDeferred(self):
     return self._expected_failures.GetTestSet(DEFER, include_skips=False)
@@ -112,6 +116,11 @@ class TestExpectations:
     # we expect it to pass (and nothing else).
     return set([PASS])
 
+  def GetModifiers(self, test):
+    if self._expected_failures.Contains(test):
+      return self._expected_failures.GetModifiers(test)
+    return []
+
   def IsDeferred(self, test):
     return self._expected_failures.HasModifier(test, DEFER)
 
@@ -145,6 +154,22 @@ def StripComments(line):
   if line == '': return None
   else: return line
 
+class ModifiersAndExpectations:
+  """A holder for modifiers and expectations on a test that serializes to JSON.
+  """
+  def __init__(self, modifiers, expectations):
+    self.modifiers = modifiers
+    self.expectations = expectations
+
+class ExpectationsJsonEncoder(simplejson.JSONEncoder):
+  """JSON encoder that can handle ModifiersAndExpectations objects.
+  """
+  def default(self, obj):
+    if isinstance(obj, ModifiersAndExpectations):
+      return {"modifiers": obj.modifiers, "expectations": obj.expectations}
+    else:
+      return JSONEncoder.default(self, obj)
+
 class TestExpectationsFile:
   """Test expectation files consist of lines with specifications of what
   to expect from layout test cases. The test cases can be directories
@@ -170,11 +195,15 @@ class TestExpectationsFile:
   DEFER: Test does not count in our statistics for the current release.
   DEBUG: Expectations apply only to the debug build.
   RELEASE: Expectations apply only to release build.
-  LINUX/WIN/MAC: Expectations apply only to these platforms.
+  LINUX/WIN/WIN-XP/WIN-VISTA/MAC: Expectations apply only to these platforms.
 
   Notes:
     -A test cannot be both SLOW and TIMEOUT
     -A test cannot be both DEFER and WONTFIX
+    -A test should only be one of IMAGE, TEXT, IMAGE+TEXT, or FAIL. FAIL is
+     a migratory state that currently means either IMAGE, TEXT, or IMAGE+TEXT.
+     Once we have finished migrating the expectations, we will change FAIL
+     to have the meaning of IMAGE+TEXT and remove the IMAGE+TEXT identifier.
     -A test can be included twice, but not via the same path.
     -If a test is included twice, then the more precise path wins.
     -CRASH tests cannot be DEFER or WONTFIX
@@ -182,10 +211,13 @@ class TestExpectationsFile:
 
   EXPECTATIONS = { 'pass': PASS,
                    'fail': FAIL,
+                   'text': TEXT,
+                   'image': IMAGE,
+                   'image+text': IMAGE_PLUS_TEXT,
                    'timeout': TIMEOUT,
                    'crash': CRASH }
 
-  PLATFORMS = [ 'mac', 'linux', 'win' ]
+  PLATFORMS = [ 'mac', 'linux', 'win', 'win-xp', 'win-vista' ]
 
   BUILD_TYPES = [ 'debug', 'release' ]
 
@@ -196,7 +228,8 @@ class TestExpectationsFile:
                 'rebaseline': REBASELINE,
                 'none': NONE }
 
-  def __init__(self, path, full_test_list, platform, is_debug_mode):
+  def __init__(self, path, full_test_list, platform, is_debug_mode,
+      is_lint_mode):
     """
     path: The path to the expectation file. An error is thrown if a test is
         listed more than once.
@@ -204,17 +237,29 @@ class TestExpectationsFile:
         expections for those tests.
     platform: Which platform from self.PLATFORMS to filter tests for.
     is_debug_mode: Whether we testing a test_shell built debug mode.
+    is_lint_mode: Whether this is just linting test_expecatations.txt.
     """
 
     self._path = path
+    self._is_lint_mode = is_lint_mode
     self._full_test_list = full_test_list
     self._errors = []
     self._non_fatal_errors = []
-    self._platform = platform
+    self._platform = self.ToTestPlatformName(platform)
+    if self._platform is None:
+      raise Exception("Unknown platform '%s'" % (platform))
     self._is_debug_mode = is_debug_mode
+
+    # Maps relative test paths as listed in the expectations file to a list of
+    # maps containing modifiers and expectations for each time the test is
+    # listed in the expectations file.
+    self._all_expectations = {}
 
     # Maps a test to its list of expectations.
     self._test_to_expectations = {}
+
+    # Maps a test to its list of modifiers.
+    self._test_to_modifiers = {}
 
     # Maps a test to the base path that it was listed with in the test list.
     self._test_list_paths = {}
@@ -231,6 +276,17 @@ class TestExpectationsFile:
 
     self._Read(path)
 
+  def ToTestPlatformName(self, name):
+    """Returns the test expectation platform that will be used for a
+    given platform name, or None if there is no match."""
+    chromium_prefix = 'chromium-'
+    name = name.lower()
+    if name.startswith(chromium_prefix):
+      name = name[len(chromium_prefix):]
+    if name in self.PLATFORMS:
+      return name
+    return None
+
   def GetTestSet(self, modifier, expectation=None, include_skips=True):
     if expectation is None:
       tests = self._modifier_to_tests[modifier]
@@ -246,8 +302,16 @@ class TestExpectationsFile:
   def HasModifier(self, test, modifier):
     return test in self._modifier_to_tests[modifier]
 
+  def GetModifiers(self, test):
+    return self._test_to_modifiers[test]
+
   def GetExpectations(self, test):
     return self._test_to_expectations[test]
+
+  def GetExpectationsJsonForAllPlatforms(self):
+    # Specify separators in order to get compact encoding.
+    return ExpectationsJsonEncoder(separators=(',', ':')).encode(
+        self._all_expectations)
 
   def Contains(self, test):
     return test in self._test_to_expectations
@@ -352,13 +416,13 @@ class TestExpectationsFile:
 
     options = []
     if line.find(':') is -1:
-      test_and_expecation = line.split('=')
+      test_and_expectation = line.split('=')
     else:
       parts = line.split(':')
       options = self._GetOptionsList(parts[0])
-      test_and_expecation = parts[1].split('=')
+      test_and_expectation = parts[1].split('=')
 
-    test = test_and_expecation[0].strip()
+    test = test_and_expectation[0].strip()
     if not test in tests:
       return NO_CHANGE
 
@@ -400,7 +464,7 @@ class TestExpectationsFile:
         self._AddError(lineno, 'Invalid modifier for test: %s' % option,
             test_and_expectations)
 
-    if has_any_platform and not self._platform in options:
+    if has_any_platform and not self._MatchPlatform(options):
       return False
 
     if not has_bug_id and 'wontfix' not in options:
@@ -419,7 +483,32 @@ class TestExpectationsFile:
       self._AddError(lineno, 'Test cannot be both DEFER and WONTFIX.',
           test_and_expectations)
 
+    if self._is_lint_mode and 'rebaseline' in options:
+      self._AddError(lineno, 'REBASELINE should only be used for running'
+          'rebaseline.py. Cannot be checked in.', test_and_expectations)
+
     return True
+
+  def _MatchPlatform(self, options):
+    """Match the list of options against our specified platform. If any
+    of the options prefix-match self._platform, return True. This handles
+    the case where a test is marked WIN and the platform is WIN-VISTA.
+
+    Args:
+      options: list of options
+    """
+    for opt in options:
+      if self._platform.startswith(opt):
+        return True
+    return False
+
+  def _AddToAllExpectations(self, test, options, expectations):
+    # Make all paths unix-style so the dashboard doesn't need to.
+    test = test.replace('\\', '/')
+    if not test in self._all_expectations:
+      self._all_expectations[test] = []
+    self._all_expectations[test].append(
+        ModifiersAndExpectations(options, expectations))
 
   def _Read(self, path):
     """For each test in an expectations file, generate the expectations for it.
@@ -430,29 +519,41 @@ class TestExpectationsFile:
       line = StripComments(line)
       if not line: continue
 
-      modifiers = set()
-      if line.find(':') is -1:
-        test_and_expectations = line
-      else:
-        parts = line.split(':')
-        test_and_expectations = parts[1]
-        options = self._GetOptionsList(parts[0])
-        if not self._HasValidModifiersForCurrentPlatform(options, lineno,
-            test_and_expectations, modifiers):
-          continue
+      options_string = None
+      expectations_string = None
 
-      tests_and_expecation_parts = test_and_expectations.split('=')
-      if (len(tests_and_expecation_parts) is not 2):
+      if line.find(':') is -1:
+        self._AddError(lineno, 'Must have some modifier (e.g. bug number).',
+            line)
+        continue
+
+      parts = line.split(':')
+      test_and_expectations = parts[1]
+      options_string = parts[0]
+
+      tests_and_expectation_parts = test_and_expectations.split('=')
+      if (len(tests_and_expectation_parts) is not 2):
         self._AddError(lineno, 'Missing expectations.', test_and_expectations)
         continue
 
-      test_list_path = tests_and_expecation_parts[0].strip()
-      expectations = self._ParseExpectations(tests_and_expecation_parts[1],
-          lineno, test_list_path)
+      test_list_path = tests_and_expectation_parts[0].strip()
+      expectations_string = tests_and_expectation_parts[1]
+
+      self._AddToAllExpectations(test_list_path, options_string,
+          expectations_string)
+
+      modifiers = set()
+      options = self._GetOptionsList(options_string)
+      if options and not self._HasValidModifiersForCurrentPlatform(options,
+          lineno, test_and_expectations, modifiers):
+        continue
+
+      expectations = self._ParseExpectations(expectations_string, lineno,
+          test_list_path)
 
       if 'slow' in options and TIMEOUT in expectations:
-        self._AddError(lineno, 'A test cannot be both slow and timeout. If the '
-            'test times out indefinitely, the it should be listed as timeout.',
+        self._AddError(lineno, 'A test should not be both slow and timeout. '
+            'If it times out indefinitely, then it should be just timeout.',
             test_and_expectations)
 
       full_path = os.path.join(path_utils.LayoutTestsDir(test_list_path),
@@ -474,7 +575,8 @@ class TestExpectationsFile:
       else:
         tests = self._ExpandTests(test_list_path)
 
-      self._AddTests(tests, expectations, test_list_path, lineno, modifiers)
+      self._AddTests(tests, expectations, test_list_path, lineno,
+          modifiers, options)
 
     if len(self._errors) or len(self._non_fatal_errors):
       if self._is_debug_mode:
@@ -518,13 +620,15 @@ class TestExpectationsFile:
       if test.startswith(path): result.append(test)
     return result
 
-  def _AddTests(self, tests, expectations, test_list_path, lineno, modifiers):
+  def _AddTests(self, tests, expectations, test_list_path, lineno, modifiers,
+      options):
     for test in tests:
       if self._AlreadySeenTest(test, test_list_path, lineno):
         continue
 
       self._ClearExpectationsForTest(test, test_list_path)
       self._test_to_expectations[test] = expectations
+      self._test_to_modifiers[test] = options
 
       if len(modifiers) is 0:
         self._AddTest(test, NONE, expectations)

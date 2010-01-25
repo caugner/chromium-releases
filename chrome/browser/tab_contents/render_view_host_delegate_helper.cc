@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "render_view_host_delegate_helper.h"
+#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 
 #include "base/command_line.h"
+#include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/profile.h"
@@ -19,16 +20,20 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 
-void RenderViewHostDelegateViewHelper::CreateNewWindow(int route_id,
-    base::WaitableEvent* modal_dialog_event, Profile* profile,
-    SiteInstance* site) {
+void RenderViewHostDelegateViewHelper::CreateNewWindow(
+    int route_id,
+    Profile* profile,
+    SiteInstance* site,
+    DOMUITypeID domui_type,
+    TabContents* old_tab_contents) {
   // Create the new web contents. This will automatically create the new
   // TabContentsView. In the future, we may want to create the view separately.
   TabContents* new_contents =
       new TabContents(profile,
                       site,
                       route_id,
-                      modal_dialog_event);
+                      old_tab_contents);
+  new_contents->set_opener_dom_ui_type(domui_type);
   TabContentsView* new_view = new_contents->view();
 
   // TODO(brettw) it seems bogus that we have to call this function on the
@@ -134,7 +139,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
   web_prefs.minimum_logical_font_size =
       prefs->GetInteger(prefs::kWebKitMinimumLogicalFontSize);
 
-  web_prefs.default_encoding = prefs->GetString(prefs::kDefaultCharset);
+  web_prefs.default_encoding =
+      WideToASCII(prefs->GetString(prefs::kDefaultCharset));
 
   web_prefs.javascript_can_open_windows_automatically =
       prefs->GetBoolean(prefs::kWebKitJavascriptCanOpenWindowsAutomatically);
@@ -142,8 +148,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
       prefs->GetBoolean(prefs::kWebKitDomPasteEnabled);
   web_prefs.shrinks_standalone_images_to_fit =
       prefs->GetBoolean(prefs::kWebKitShrinksStandaloneImagesToFit);
-  web_prefs.inspector_settings =
-      prefs->GetString(prefs::kWebKitInspectorSettings);
+  web_prefs.inspector_settings = WideToUTF8(
+      prefs->GetString(prefs::kWebKitInspectorSettings));
 
   {  // Command line switches are used for preferences with no user interface.
     const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -155,15 +161,9 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.web_security_enabled =
         !command_line.HasSwitch(switches::kDisableWebSecurity) &&
         prefs->GetBoolean(prefs::kWebKitWebSecurityEnabled);
-#if defined(OS_WIN)
     web_prefs.plugins_enabled =
         !command_line.HasSwitch(switches::kDisablePlugins) &&
         prefs->GetBoolean(prefs::kWebKitPluginsEnabled);
-#else
-    web_prefs.plugins_enabled =
-        command_line.HasSwitch(switches::kEnablePlugins) &&
-        prefs->GetBoolean(prefs::kWebKitPluginsEnabled);
-#endif
     web_prefs.java_enabled =
         !command_line.HasSwitch(switches::kDisableJava) &&
         prefs->GetBoolean(prefs::kWebKitJavaEnabled);
@@ -175,11 +175,20 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.remote_fonts_enabled =
         command_line.HasSwitch(switches::kEnableRemoteFonts);
     web_prefs.xss_auditor_enabled =
-        command_line.HasSwitch(switches::kEnableXSSAuditor);
+        !command_line.HasSwitch(switches::kDisableXSSAuditor);
+    web_prefs.application_cache_enabled =
+        command_line.HasSwitch(switches::kEnableApplicationCache);
+
     web_prefs.local_storage_enabled =
       command_line.HasSwitch(switches::kEnableLocalStorage);
+    web_prefs.databases_enabled =
+      command_line.HasSwitch(switches::kEnableDatabases);
     web_prefs.session_storage_enabled =
       command_line.HasSwitch(switches::kEnableSessionStorage);
+    web_prefs.experimental_webgl_enabled =
+      command_line.HasSwitch(switches::kEnableExperimentalWebGL);
+    web_prefs.experimental_notifications_enabled =
+      command_line.HasSwitch(switches::kEnableDesktopNotifications);
   }
 
   web_prefs.uses_universal_detector =
@@ -196,8 +205,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
           web_prefs.default_encoding);
   if (web_prefs.default_encoding.empty()) {
     prefs->ClearPref(prefs::kDefaultCharset);
-    web_prefs.default_encoding = prefs->GetString(
-        prefs::kDefaultCharset);
+    web_prefs.default_encoding = WideToASCII(
+        prefs->GetString(prefs::kDefaultCharset));
   }
   DCHECK(!web_prefs.default_encoding.empty());
 

@@ -29,6 +29,8 @@ MSVC_POP_WARNING();
 #undef LOG
 
 #include "base/string_util.h"
+// TODO(yaar) Eventually should not depend on api/src.
+#include "webkit/api/src/DOMUtilitiesPrivate.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/dom_operations_private.h"
 #include "webkit/glue/form_data.h"
@@ -38,6 +40,8 @@ MSVC_POP_WARNING();
 #include "webkit/glue/webview_impl.h"
 
 using WebCore::String;
+using WebKit::WebFrame;
+using WebKit::WebView;
 
 namespace {
 
@@ -103,7 +107,8 @@ void GetSavableResourceLinkForElement(WebCore::Element* element,
   // Insert referrer for above new resource link.
   if (current_doc->frame()) {
     GURL u(webkit_glue::KURLToGURL(
-        WebCore::KURL(current_doc->frame()->loader()->outgoingReferrer())));
+        WebCore::KURL(WebCore::ParsedURLString,
+                      current_doc->frame()->loader()->outgoingReferrer())));
     result->referrers_list->push_back(u);
   } else {
     // Insert blank referrer.
@@ -114,20 +119,28 @@ void GetSavableResourceLinkForElement(WebCore::Element* element,
 // Get all savable resource links from current WebFrameImpl object pointer.
 void GetAllSavableResourceLinksForFrame(WebFrameImpl* current_frame,
     SavableResourcesUniqueCheck* unique_check,
-    webkit_glue::SavableResourcesResult* result) {
+    webkit_glue::SavableResourcesResult* result,
+    const char** savable_schemes) {
   // Get current frame's URL.
   const WebCore::KURL& current_frame_kurl =
       current_frame->frame()->loader()->url();
   GURL current_frame_gurl(webkit_glue::KURLToGURL(current_frame_kurl));
 
-  // If url of current frame is invalid or not standard protocol, ignore it.
+  // If url of current frame is invalid, ignore it.
   if (!current_frame_gurl.is_valid())
     return;
-  if (!current_frame_gurl.SchemeIs("http") &&
-      !current_frame_gurl.SchemeIs("https") &&
-      !current_frame_gurl.SchemeIs("ftp") &&
-      !current_frame_gurl.SchemeIs("file"))
+
+  // If url of current frame is not a savable protocol, ignore it.
+  bool is_valid_protocol = false;
+  for (int i = 0; savable_schemes[i] != NULL; ++i) {
+    if (current_frame_gurl.SchemeIs(savable_schemes[i])) {
+      is_valid_protocol = true;
+      break;
+    }
+  }
+  if (!is_valid_protocol)
     return;
+
   // If find same frame we have recorded, ignore it.
   if (!unique_check->frames_set->insert(current_frame_gurl).second)
     return;
@@ -183,109 +196,12 @@ struct FormElements {
 
 typedef std::vector<FormElements*> FormElementsList;
 
-static bool FillFormToUploadFileImpl(WebCore::HTMLFormElement* fe,
-                                     const FileUploadData& data) {
-  std::vector<WebCore::HTMLInputElement*> changed;
-  PassRefPtr<WebCore::HTMLCollection> elements = fe->elements();
-  int i, c;
-
-  bool file_found = false;
-  bool submit_found = false;
-
-  // We reference the form element itself just in case it is destroyed by one
-  // of the onLoad() handler.
-  fe->ref();
-
-  for (i = 0, c = elements->length(); i < c; ++i) {
-    WebCore::HTMLInputElement* ie =
-        static_cast<WebCore::HTMLInputElement*>(elements->item(i));
-
-    std::wstring name = StringToStdWString(ie->name());
-    std::wstring id = StringToStdWString(ie->id());
-
-    if (!file_found &&
-        ie->inputType() == WebCore::HTMLInputElement::FILE &&
-        (name == data.file_name || id == data.file_name)) {
-      ie->setValueFromRenderer(StdWStringToString(data.file_path));
-      ie->ref();
-      changed.push_back(ie);
-      file_found = true;
-    } else if (!submit_found &&
-               ie->inputType() == WebCore::HTMLInputElement::SUBMIT &&
-               (name == data.submit_name || id == data.submit_name)) {
-      ie->setActivatedSubmit(true);
-      submit_found = true;
-    } else {
-      FormValueMap::const_iterator val = data.other_form_values.find(name);
-      if (val != data.other_form_values.end()) {
-        ie->setValueFromRenderer(StdWStringToString(val->second));
-        ie->ref();
-        changed.push_back(ie);
-      } else {
-        val = data.other_form_values.find(id);
-        if (val != data.other_form_values.end()) {
-          ie->setValueFromRenderer(StdWStringToString(val->second));
-          ie->ref();
-          changed.push_back(ie);
-        }
-      }
-    }
-  }
-
-  // Call all the onChange functions.
-  std::vector<WebCore::HTMLInputElement*>::iterator changed_ie;
-  for (changed_ie = changed.begin(); changed_ie != changed.end();
-       ++changed_ie) {
-    (*changed_ie)->dispatchFormControlChangeEvent();
-    (*changed_ie)->deref();
-  }
-
-  // If we found both the file and the submit button, let's submit.
-  if (file_found && submit_found) {
-    fe->submit(0, false, false);
-  }
-
-  fe->deref();
-
-  // This operation is successful if the file input has been
-  // configured.
-  return file_found;
-}
-
-bool FillFormToUploadFile(WebView* view, const FileUploadData& data) {
-  WebFrame* main_frame = view->GetMainFrame();
-  if (!main_frame)
-    return false;
-  WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
-  WebCore::Frame* frame = main_frame_impl->frame();
-  WebCore::Frame* f;
-  for (f = frame; f; f = f->tree()->traverseNext()) {
-    WebCore::Document* doc = f->document();
-    if (doc->isHTMLDocument()) {
-      PassRefPtr<WebCore::HTMLCollection> forms = doc->forms();
-      int i, c;
-      for (i = 0, c = forms->length(); i < c; ++i) {
-        WebCore::HTMLFormElement* fe =
-            static_cast<WebCore::HTMLFormElement*>(forms->item(i));
-        std::wstring name = StringToStdWString(fe->name());
-        std::wstring id = StringToStdWString(fe->id());
-        if (data.form_name.empty() ||
-            id == data.form_name || name == data.form_name) {
-          if (FillFormToUploadFileImpl(fe, data))
-            return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 // Internal implementation of FillForm API.
 static bool FillFormImpl(FormElements* fe, const FormData& data, bool submit) {
   if (!fe->form_element->autoComplete())
     return false;
 
-  FormValueMap data_map;
+  std::map<std::wstring, std::wstring> data_map;
   for (unsigned int i = 0; i < data.elements.size(); i++) {
     data_map[data.elements[i]] = data.values[i];
   }
@@ -338,7 +254,7 @@ static bool FindFormInputElements(WebCore::HTMLFormElement* fe,
     // matching elements it can get at them through the FormElement*.
     // Note: This assignment adds a reference to the InputElement.
     result->input_elements[data.elements[j]] =
-        NodeToHTMLInputElement(temp_elements[0].get());
+        WebKit::nodeToHTMLInputElement(temp_elements[0].get());
     DCHECK(result->input_elements[data.elements[j]].get());
   }
   return true;
@@ -350,7 +266,7 @@ static void FindFormElements(WebView* view,
                              FormElementsList* results) {
   DCHECK(view);
   DCHECK(results);
-  WebFrame* main_frame = view->GetMainFrame();
+  WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return;
 
@@ -477,7 +393,7 @@ WebFrameImpl* GetWebFrameImplFromElement(WebCore::Element* element,
       WebCore::HTMLFrameOwnerElement* frame_element =
           static_cast<WebCore::HTMLFrameOwnerElement*>(element);
       WebCore::Frame* content_frame = frame_element->contentFrame();
-      return content_frame ? WebFrameImpl::FromFrame(content_frame) : NULL;
+      return WebFrameImpl::FromFrame(content_frame);
     }
   }
   return NULL;
@@ -583,7 +499,7 @@ bool ElementHasLegalLinkAttribute(const WebCore::Element* element,
 
 WebFrameImpl* GetWebFrameImplFromWebViewForSpecificURL(WebView* view,
                                                        const GURL& page_url) {
-  WebFrame* main_frame = view->GetMainFrame();
+  WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return NULL;
   WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
@@ -624,8 +540,9 @@ WebFrameImpl* GetWebFrameImplFromWebViewForSpecificURL(WebView* view,
 // Get all savable resource links from current webview, include main
 // frame and sub-frame
 bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
-    const GURL& page_url, SavableResourcesResult* result) {
-  WebFrame* main_frame = view->GetMainFrame();
+    const GURL& page_url, SavableResourcesResult* result,
+    const char** savable_schemes) {
+  WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return false;
   WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
@@ -651,7 +568,8 @@ bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
   // Check all resource in this page, include sub-frame.
   for (int i = 0; i < static_cast<int>(frames.size()); ++i) {
     // Get current frame's all savable resource links.
-    GetAllSavableResourceLinksForFrame(frames[i], &unique_check, result);
+    GetAllSavableResourceLinksForFrame(frames[i], &unique_check, result,
+                                       savable_schemes);
   }
 
   // Since frame's src can also point to sub-resources link, so it is possible
@@ -749,7 +667,7 @@ static void AddInstallIcon(WebCore::HTMLLinkElement* link,
 }
 
 void GetApplicationInfo(WebView* view, WebApplicationInfo* app_info) {
-  WebFrame* main_frame = view->GetMainFrame();
+  WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return;
   WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
@@ -780,7 +698,7 @@ void GetApplicationInfo(WebView* view, WebApplicationInfo* app_info) {
               webkit_glue::StringToStdWString(meta->content());
         } else if (meta->name() == String("application-url")) {
           std::string url = webkit_glue::StringToStdString(meta->content());
-          GURL main_url = main_frame->GetURL();
+          GURL main_url = main_frame->url();
           app_info->app_url = main_url.is_valid() ?
               main_url.Resolve(url) : GURL(url);
           if (!app_info->app_url.is_valid())
@@ -795,7 +713,7 @@ bool PauseAnimationAtTimeOnElementWithId(WebView* view,
                                          const std::string& animation_name,
                                          double time,
                                          const std::string& element_id) {
-  WebFrame* web_frame = view->GetMainFrame();
+  WebFrame* web_frame = view->mainFrame();
   if (!web_frame)
     return false;
 
@@ -818,7 +736,7 @@ bool PauseTransitionAtTimeOnElementWithId(WebView* view,
                                           const std::string& property_name,
                                           double time,
                                           const std::string& element_id) {
-  WebFrame* web_frame = view->GetMainFrame();
+  WebFrame* web_frame = view->mainFrame();
   if (!web_frame)
     return false;
 
@@ -839,7 +757,7 @@ bool PauseTransitionAtTimeOnElementWithId(WebView* view,
 
 bool ElementDoesAutoCompleteForElementWithId(WebView* view,
                                              const std::string& element_id) {
-  WebFrame* web_frame = view->GetMainFrame();
+  WebFrame* web_frame = view->mainFrame();
   if (!web_frame)
     return false;
 
@@ -855,7 +773,7 @@ bool ElementDoesAutoCompleteForElementWithId(WebView* view,
 }
 
 int NumberOfActiveAnimations(WebView* view) {
-  WebFrame* web_frame = view->GetMainFrame();
+  WebFrame* web_frame = view->mainFrame();
   if (!web_frame)
     return -1;
 
@@ -867,17 +785,5 @@ int NumberOfActiveAnimations(WebView* view) {
   return controller->numberOfActiveAnimations();
 }
 
-WebCore::HTMLInputElement* ElementToHTMLInputElement(
-    WebCore::Element* element) {
-  if (!element->hasLocalName(WebCore::HTMLNames::inputTag))
-    return NULL;
-  return static_cast<WebCore::HTMLInputElement*>(element);
-}
-
-WebCore::HTMLInputElement* NodeToHTMLInputElement(WebCore::Node* node) {
-  if (node->nodeType() != WebCore::Node::ELEMENT_NODE)
-    return NULL;
-  return ElementToHTMLInputElement(static_cast<WebCore::Element*>(node));
-}
 
 } // webkit_glue

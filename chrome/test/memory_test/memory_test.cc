@@ -18,11 +18,10 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/chrome_process_util.h"
 #include "chrome/test/ui/ui_test.h"
-#if defined(OS_WIN)
 #include "chrome/test/perf/mem_usage.h"
-#endif
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
@@ -50,9 +49,7 @@ class MemoryTest : public UITest {
 
     if (profile_dir.empty()) {
       // Compute the user-data-dir which contains our test cache.
-      PathService::Get(base::DIR_EXE, &profile_dir);
-      profile_dir = profile_dir.DirName();
-      profile_dir = profile_dir.DirName();
+      PathService::Get(base::DIR_SOURCE_ROOT, &profile_dir);
       profile_dir = profile_dir.AppendASCII("data");
       profile_dir = profile_dir.AppendASCII("memory_test");
       profile_dir = profile_dir.AppendASCII("general_mix");
@@ -74,7 +71,7 @@ class MemoryTest : public UITest {
   ~MemoryTest() {
     // Cleanup our temporary directory.
     if (cleanup_temp_dir_on_exit_)
-      file_util::Delete(user_data_dir_, true);
+      file_util::Delete(temp_dir_, true);
   }
 
   // TODO(mbelshe): Separate this data to an external file.
@@ -214,9 +211,7 @@ class MemoryTest : public UITest {
     // Record the initial CommitCharge.  This is a system-wide measurement,
     // so if other applications are running, they can create variance in this
     // test.
-#if defined(OS_WIN)
     size_t start_size = GetSystemCommitCharge();
-#endif
 
     // Cycle through the URLs.
     scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
@@ -249,7 +244,7 @@ class MemoryTest : public UITest {
 
       const int kMaxWaitTime = 5000;
       bool timed_out = false;
-      tab->NavigateToURLWithTimeout(GURL(urls[counter]), kMaxWaitTime,
+      tab->NavigateToURLWithTimeout(GURL(urls[counter]), 1, kMaxWaitTime,
                                     &timed_out);
       if (timed_out)
         printf("warning: %s timed out!\n", urls[counter].c_str());
@@ -259,14 +254,9 @@ class MemoryTest : public UITest {
       // To make these tests more reliable, slowing them down a bit.
       PlatformThread::Sleep(100);
     }
-#if defined(OS_WIN)
-    size_t stop_size = GetSystemCommitCharge();
 
+    size_t stop_size = GetSystemCommitCharge();
     PrintResults(test_name, stop_size - start_size);
-#else
-    NOTIMPLEMENTED() << "need to map SystemCommitCharge";
-    PrintResults(test_name, 0);
-#endif
   }
 
   void PrintResults(const char* test_name, size_t commit_size) {
@@ -281,9 +271,11 @@ class MemoryTest : public UITest {
   void PrintIOPerfInfo(const char* test_name) {
     printf("\n");
 
-    FilePath data_dir(user_data_dir());
-    int browser_process_pid = ChromeBrowserProcessId(data_dir);
-    ChromeProcessList chrome_processes(GetRunningChromeProcesses(data_dir));
+    int browser_process_pid = ChromeBrowserProcessId(user_data_dir_);
+    ASSERT_NE(browser_process_pid, -1);
+
+    ChromeProcessList chrome_processes(
+                          GetRunningChromeProcesses(user_data_dir_));
 
     ChromeProcessList::const_iterator it;
     for (it = chrome_processes.begin(); it != chrome_processes.end(); ++it) {
@@ -329,11 +321,11 @@ class MemoryTest : public UITest {
   void PrintMemoryUsageInfo(const char* test_name) {
     printf("\n");
 
-    FilePath data_dir(user_data_dir());
-#if defined(OS_WIN)
-    int browser_process_pid = ChromeBrowserProcessId(data_dir);
-#endif
-    ChromeProcessList chrome_processes(GetRunningChromeProcesses(data_dir));
+    int browser_process_pid = ChromeBrowserProcessId(user_data_dir_);
+    ASSERT_NE(browser_process_pid, -1);
+
+    ChromeProcessList chrome_processes(
+                          GetRunningChromeProcesses(user_data_dir_));
 
     size_t browser_virtual_size = 0;
     size_t browser_working_set_size = 0;
@@ -342,7 +334,6 @@ class MemoryTest : public UITest {
     size_t num_chrome_processes = 0;
     ChromeProcessList::const_iterator it;
     for (it = chrome_processes.begin(); it != chrome_processes.end(); ++it) {
-#if defined(OS_WIN)
       size_t peak_virtual_size;
       size_t current_virtual_size;
       size_t peak_working_set_size;
@@ -357,11 +348,6 @@ class MemoryTest : public UITest {
         working_set_size += current_working_set_size;
         num_chrome_processes++;
       }
-#else
-      // TODO(port)
-      NOTIMPLEMENTED()
-        << "need to port GetMemoryInfo or map it to the existing primitives";
-#endif
     }
 
     std::string trace_name(test_name);
@@ -389,30 +375,33 @@ class MemoryTest : public UITest {
   //   src_dir is set to the source directory
   // Output:
   //   On success, modifies user_data_dir_ to be a new profile directory
+  //   sets temp_dir_ to the containing temporary directory,
   //   and sets cleanup_temp_dir_on_exit_ to true.
-  bool SetupTempDirectory(const FilePath &src_dir) {
+  bool SetupTempDirectory(const FilePath& src_dir) {
     LOG(INFO) << "Setting up temp directory in " << src_dir.value();
     // We create a copy of the test dir and use it so that each
     // run of this test starts with the same data.  Running this
     // test has the side effect that it will change the profile.
-    FilePath temp_dir;
-    if (!file_util::CreateNewTempDirectory(kTempDirName, &temp_dir)) {
+    if (!file_util::CreateNewTempDirectory(kTempDirName, &temp_dir_)) {
       LOG(ERROR) << "Could not create temp directory:" << kTempDirName;
       return false;
     }
 
-    if (!file_util::CopyDirectory(src_dir, temp_dir, true)) {
+    if (!file_util::CopyDirectory(src_dir, temp_dir_, true)) {
       LOG(ERROR) << "Could not copy temp directory";
       return false;
     }
 
-    user_data_dir_ = temp_dir;
+    // The profile directory was copied in to the containing temp
+    // directory as its base name, so point user_data_dir_ there.
+    user_data_dir_ = temp_dir_.Append(src_dir.BaseName());
     cleanup_temp_dir_on_exit_ = true;
     LOG(INFO) << "Finished temp directory setup.";
     return true;
   }
 
   bool cleanup_temp_dir_on_exit_;
+  FilePath temp_dir_;
   FilePath user_data_dir_;
 };
 

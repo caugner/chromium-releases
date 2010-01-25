@@ -46,8 +46,9 @@
 
 namespace o3d {
 
-static char *kTestString =
-    "Tests functionality of the MemoryReadStream and MemoryWriteStream classes";
+static char *kTestString = const_cast<char*>
+  ("Tests functionality of the MemoryReadStream and MemoryWriteStream classes");
+
 
 // Test fixture for MemoryReadStream and MemoryWriteStream.
 class MemoryStreamTest : public testing::Test {
@@ -70,7 +71,8 @@ TEST_F(MemoryStreamTest, Read) {
   MemoryReadStream read_stream(buffer, buffer.GetLength());
 
   EXPECT_EQ(buffer.GetLength(), read_stream.GetTotalStreamLength());
-  EXPECT_EQ(kStringLength, read_stream.GetTotalStreamLength());
+  EXPECT_EQ(kStringLength,
+            static_cast<int>(read_stream.GetTotalStreamLength()));
 
   // Read one byte at a time and verify
   uint8 c;
@@ -96,8 +98,9 @@ TEST_F(MemoryStreamTest, Read) {
 
   // Verify bytes read, stream position and remaining byte count
   EXPECT_EQ(5, bytes_read);
-  EXPECT_EQ(5, read_stream2.GetStreamPosition());
-  EXPECT_EQ(kStringLength - 5, read_stream2.GetRemainingByteCount());
+  EXPECT_EQ(5U, read_stream2.GetStreamPosition());
+  EXPECT_EQ(kStringLength - 5,
+            static_cast<int>(read_stream2.GetRemainingByteCount()));
 
   // Next read the remaining bytes
   bytes_read = read_stream2.Read(read_buffer + 5, kStringLength - 5);
@@ -131,7 +134,7 @@ TEST_F(MemoryStreamTest, Write) {
   MemoryWriteStream empty_stream;
 
   // Verfify length is zero
-  EXPECT_EQ(0, empty_stream.GetTotalStreamLength());
+  EXPECT_EQ(0U, empty_stream.GetTotalStreamLength());
 
   // Now, assign it to the string (OK, we can't really write to
   // this memory, but we're just checking the API here
@@ -139,27 +142,30 @@ TEST_F(MemoryStreamTest, Write) {
   empty_stream.Assign(reinterpret_cast<uint8*>(kTestString), kStringLength);
 
   // Sanity check on length, position, remaining
-  EXPECT_EQ(kStringLength, empty_stream.GetTotalStreamLength());
-  EXPECT_EQ(0, empty_stream.GetStreamPosition());
-  EXPECT_EQ(kStringLength, empty_stream.GetRemainingByteCount());
+  EXPECT_EQ(kStringLength,
+            static_cast<int>(empty_stream.GetTotalStreamLength()));
+  EXPECT_EQ(0U, empty_stream.GetStreamPosition());
+  EXPECT_EQ(kStringLength,
+            static_cast<int>(empty_stream.GetRemainingByteCount()));
 
   // Create a write stream on a buffer we can write to
   MemoryBuffer<uint8> buffer(kStringLength);
   MemoryWriteStream write_stream(buffer, buffer.GetLength());
-  EXPECT_EQ(buffer.GetLength(), kStringLength);
+  EXPECT_EQ(static_cast<int>(buffer.GetLength()), kStringLength);
 
   // Write 5 bytes
   uint8 *p = reinterpret_cast<uint8*>(kTestString);
   int bytes_written = write_stream.Write(p, 5);
   EXPECT_EQ(5, bytes_written);
-  EXPECT_EQ(5, write_stream.GetStreamPosition());
-  EXPECT_EQ(kStringLength - 5, write_stream.GetRemainingByteCount());
+  EXPECT_EQ(5U, write_stream.GetStreamPosition());
+  EXPECT_EQ(kStringLength - 5,
+            static_cast<int>(write_stream.GetRemainingByteCount()));
 
   // Write the remaining bytes in the string
   bytes_written = write_stream.Write(p + 5, kStringLength - 5);
   EXPECT_EQ(kStringLength - 5, bytes_written);
-  EXPECT_EQ(kStringLength, write_stream.GetStreamPosition());
-  EXPECT_EQ(0, write_stream.GetRemainingByteCount());
+  EXPECT_EQ(kStringLength, static_cast<int>(write_stream.GetStreamPosition()));
+  EXPECT_EQ(0U, write_stream.GetRemainingByteCount());
 
   // Verify we wrote the correct data
   EXPECT_EQ(0, memcmp(buffer, kTestString, kStringLength));
@@ -233,16 +239,19 @@ TEST_F(MemoryStreamTest, EndianSanityFloat32) {
   uint8 *p8 = reinterpret_cast<uint8*>(p);
   MemoryWriteStream write_stream(p8, sizeof(int32) * 2);
 
-  float value = 3.14159f;
-  write_stream.WriteLittleEndianFloat32(value);
-  write_stream.WriteBigEndianFloat32(value);
+  union {
+    int32 ivalue;
+    float fvalue;
+  } value;
+  value.fvalue = 3.14159f;
+  write_stream.WriteLittleEndianFloat32(value.fvalue);
+  write_stream.WriteBigEndianFloat32(value.fvalue);
 
   // Verify that the bytes are in the correct order
-  int32 ivalue = *reinterpret_cast<int32*>(&value);  // interpret float as int32
-  uint8 byte1 = ivalue & 0xff;
-  uint8 byte2 = (ivalue >> 8) & 0xff;
-  uint8 byte3 = (ivalue >> 16) & 0xff;
-  uint8 byte4 = (ivalue >> 24) & 0xff;
+  uint8 byte1 = value.ivalue & 0xff;
+  uint8 byte2 = (value.ivalue >> 8) & 0xff;
+  uint8 byte3 = (value.ivalue >> 16) & 0xff;
+  uint8 byte4 = (value.ivalue >> 24) & 0xff;
 
   // validate little-endian
   EXPECT_EQ(byte1, p8[0]);

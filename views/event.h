@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/gfx/point.h"
+#include "base/keyboard_codes.h"
 
 #if defined(OS_LINUX)
 typedef struct _GdkEventKey GdkEventKey;
@@ -85,6 +86,16 @@ class Event {
   // Return whether the alt modifier is down
   bool IsAltDown() const {
     return (flags_ & EF_ALT_DOWN) != 0;
+  }
+
+  bool IsMouseEvent() const {
+    return type_ == ET_MOUSE_PRESSED ||
+           type_ == ET_MOUSE_DRAGGED ||
+           type_ == ET_MOUSE_RELEASED ||
+           type_ == ET_MOUSE_MOVED ||
+           type_ == ET_MOUSE_ENTERED ||
+           type_ == ET_MOUSE_EXITED ||
+           type_ == ET_MOUSEWHEEL;
   }
 
 #if defined(OS_WIN)
@@ -230,15 +241,22 @@ class MouseEvent : public LocatedEvent {
 ////////////////////////////////////////////////////////////////////////////////
 class KeyEvent : public Event {
  public:
-#if defined(OS_WIN)
   // Create a new key event
-  KeyEvent(EventType type, int ch, int repeat_count, int message_flags);
-#elif defined(OS_LINUX)
+  KeyEvent(EventType type,
+           base::KeyboardCode key_code,
+           int event_flags,
+           int repeat_count,
+           int message_flags);
+#if defined(OS_LINUX)
   explicit KeyEvent(GdkEventKey* event);
 #endif
 
-  int GetCharacter() const {
-    return character_;
+  // This returns a VKEY_ value as defined in base/keyboard_codes.h which is
+  // the Windows value.
+  // On GTK, you can use the methods in keyboard_code_conversion_gtk.cc to
+  // convert this value back to a GDK value if needed.
+  base::KeyboardCode GetKeyCode() const {
+    return key_code_;
   }
 
 #if defined(OS_WIN)
@@ -249,12 +267,14 @@ class KeyEvent : public Event {
     return repeat_count_;
   }
 
- private:
 #if defined(OS_WIN)
-  int GetKeyStateFlags() const;
+  // Returns the current state of the KeyState.
+  static int GetKeyStateFlags();
 #endif
 
-  int character_;
+ private:
+
+  base::KeyboardCode key_code_;
   int repeat_count_;
   int message_flags_;
 

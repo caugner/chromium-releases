@@ -4,16 +4,25 @@
 
 #include "chrome/renderer/devtools_client.h"
 
+#include "app/app_switches.h"
+#include "base/command_line.h"
 #include "chrome/common/devtools_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
+#include "webkit/api/public/WebString.h"
 #include "webkit/glue/webdevtoolsclient.h"
+
+using WebKit::WebString;
 
 DevToolsClient::DevToolsClient(RenderView* view)
     : render_view_(view) {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   web_tools_client_.reset(
-      WebDevToolsClient::Create(view->webview(), this));
+      WebDevToolsClient::Create(
+          view->webview(),
+          this,
+          WideToUTF16Hack(command_line.GetSwitchValue(switches::kLang))));
 }
 
 DevToolsClient::~DevToolsClient() {
@@ -37,14 +46,21 @@ bool DevToolsClient::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void DevToolsClient::SendMessageToAgent(const std::string& class_name,
-                                        const std::string& method_name,
-                                        const std::string& raw_msg) {
-  Send(DevToolsAgentMsg_RpcMessage(class_name, method_name, raw_msg));
+void DevToolsClient::SendMessageToAgent(const WebString& class_name,
+                                        const WebString& method_name,
+                                        const WebString& param1,
+                                        const WebString& param2,
+                                        const WebString& param3) {
+  Send(DevToolsAgentMsg_RpcMessage(
+      class_name.utf8(),
+      method_name.utf8(),
+      param1.utf8(),
+      param2.utf8(),
+      param3.utf8()));
 }
 
-void DevToolsClient::SendDebuggerCommandToAgent(const std::string& command) {
-  Send(DevToolsAgentMsg_DebuggerCommand(command));
+void DevToolsClient::SendDebuggerCommandToAgent(const WebString& command) {
+  Send(DevToolsAgentMsg_DebuggerCommand(command.utf8()));
 }
 
 void DevToolsClient::ActivateWindow() {
@@ -75,6 +91,13 @@ void DevToolsClient::ToggleInspectElementMode(bool enabled) {
 
 void DevToolsClient::OnRpcMessage(const std::string& class_name,
                                   const std::string& method_name,
-                                  const std::string& raw_msg) {
-  web_tools_client_->DispatchMessageFromAgent(class_name, method_name, raw_msg);
+                                  const std::string& param1,
+                                  const std::string& param2,
+                                  const std::string& param3) {
+  web_tools_client_->DispatchMessageFromAgent(
+      WebString::fromUTF8(class_name),
+      WebString::fromUTF8(method_name),
+      WebString::fromUTF8(param1),
+      WebString::fromUTF8(param2),
+      WebString::fromUTF8(param3));
 }

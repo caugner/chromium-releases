@@ -32,7 +32,7 @@
 
 
 #include "plugin_mac.h"
-#include <Breakpad/Breakpad.h>
+#include "Breakpad.h"
 #include <Cocoa/Cocoa.h>
 #include <QuickTime/QuickTime.h>
 #include "plugin/cross/o3d_glue.h"
@@ -213,7 +213,8 @@ void RenderTimer::RemoveInstance(NPP instance) {
 
 void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
   HANDLE_CRASHES;
-  for (int i = 0; i < instances_.size(); ++i) {
+  int instance_count = instances_.size();
+  for (int i = 0; i < instance_count; ++i) {
     NPP instance = instances_[i];
     PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
 
@@ -246,7 +247,7 @@ void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
           aglSetInteger(obj->mac_agl_context_, AGL_SWAP_INTERVAL, &sync);
         }
 
-        obj->client()->RenderClient();
+        obj->client()->RenderClient(true);
       }
     }
   }
@@ -256,7 +257,8 @@ void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
 
 bool ExceptionCallback(int exception_type,
                        int exception_code,
-                       mach_port_t crashing_thread) {
+                       mach_port_t crashing_thread,
+                       void* context) {
   return BreakpadEnabler::IsEnabled();
 }
 
@@ -266,7 +268,7 @@ void InitializeBreakpad() {
     NSDictionary* info = [bundle infoDictionary];
 
     gBreakpadRef = BreakpadCreate(info);
-    BreakpadSetFilterCallback(gBreakpadRef, ExceptionCallback);
+    BreakpadSetFilterCallback(gBreakpadRef, ExceptionCallback, NULL);
   }
 }
 
@@ -382,10 +384,7 @@ static UniChar * GetFullscreenDisplayText(int *returned_length) {
 
 static void DrawToOverlayWindow(WindowRef overlayWindow) {
   CGContextRef overlayContext = NULL;
-  OSStatus     result = noErr;
   CGFloat kWhiteOpaque[]  = {1.0, 1.0, 1.0, 1.0};
-  CGFloat kBlackOpaque[]  = {0.0, 0.0, 0.0, 1.0};
-  CGFloat kGreyNotOpaque[]  = {0.5, 0.5, 0.5, 0.5};
   CGFloat kBlackNotOpaque[]  = {0.0, 0.0, 0.0, 0.5};
   Rect bounds = {0, 0, 0, 0};
   const char* kOverlayWindowFontName = "Arial";
@@ -535,8 +534,8 @@ static WindowRef CreateOverlayWindow(void) {
                                         kWindowNoActivatesAttribute |
                                         kWindowStandardHandlerAttribute;
   EventTypeSpec  eventTypes[] = {
-    kEventClassWindow, kEventWindowPaint,
-    kEventClassWindow, kEventWindowShown
+    {kEventClassWindow, kEventWindowPaint},
+    {kEventClassWindow, kEventWindowShown}
   };
 
   err = CreateNewWindow(wClass,
@@ -591,7 +590,6 @@ o3d::Event::Button MacOSMouseButtonNumberToO3DButton(int inButton) {
 static OSStatus HandleFullscreenWindow(EventHandlerCallRef inHandlerCallRef,
                                        EventRef inEvent,
                                        void *inUserData) {
-  OSStatus err = noErr;
   OSType event_class = GetEventClass(inEvent);
   OSType event_kind = GetEventKind(inEvent);
   NPP instance = (NPP)inUserData;
@@ -716,6 +714,7 @@ static OSStatus HandleFullscreenWindow(EventHandlerCallRef inHandlerCallRef,
       return eventNotHandledErr;
     }
   }
+  return noErr;
 }
 
 
@@ -725,15 +724,15 @@ static WindowRef CreateFullscreenWindow(WindowRef window,
   Rect        bounds = CGRect2Rect(CGDisplayBounds(CGMainDisplayID()));
   OSStatus    err = noErr;
   EventTypeSpec  eventTypes[] = {
-    kEventClassKeyboard, kEventRawKeyDown,
-    kEventClassKeyboard, kEventRawKeyRepeat,
-    kEventClassKeyboard, kEventRawKeyUp,
-    kEventClassMouse,    kEventMouseDown,
-    kEventClassMouse,    kEventMouseUp,
-    kEventClassMouse,    kEventMouseMoved,
-    kEventClassMouse,    kEventMouseDragged,
-    kEventClassMouse,    kEventMouseScroll,
-    kEventClassMouse,    kEventMouseWheelMoved
+    {kEventClassKeyboard, kEventRawKeyDown},
+    {kEventClassKeyboard, kEventRawKeyRepeat},
+    {kEventClassKeyboard, kEventRawKeyUp},
+    {kEventClassMouse,    kEventMouseDown},
+    {kEventClassMouse,    kEventMouseUp},
+    {kEventClassMouse,    kEventMouseMoved},
+    {kEventClassMouse,    kEventMouseDragged},
+    {kEventClassMouse,    kEventMouseScroll},
+    {kEventClassMouse,    kEventMouseWheelMoved}
   };
 
   if (window == NULL)
@@ -873,6 +872,10 @@ static void GetCurrentDisplayMode(o3d::DisplayMode *mode) {
 }
 
 
+
+}  // namespace o3d
+
+
 bool PluginObject::GetDisplayMode(int id, o3d::DisplayMode *mode) {
   if (id == o3d::Renderer::DISPLAY_MODE_DEFAULT) {
     GetCurrentDisplayMode(mode);
@@ -895,10 +898,10 @@ void PluginObject::GetDisplayModes(std::vector<o3d::DisplayMode> *modes) {
     int bpp = 0;
 
     if (o3d::ExtractDisplayModeData([mac_modes objectAtIndex:i],
-        &width,
-        &height,
-        &refresh_rate,
-        &bpp) && bpp == 32)
+                                    &width,
+                                    &height,
+                                    &refresh_rate,
+                                    &bpp) && bpp == 32)
       modes_found.push_back(o3d::DisplayMode(width, height, refresh_rate,
                                              i + o3d::kO3D_MODE_OFFSET));
   }
@@ -910,6 +913,9 @@ void PluginObject::GetDisplayModes(std::vector<o3d::DisplayMode> *modes) {
 #pragma mark ____FULLSCREEN_SWITCHING
 
 #define kTransitionTime 1.0
+
+namespace glue {
+namespace _o3d {
 
 bool PluginObject::RequestFullscreenDisplay() {
   // If already in fullscreen mode, do nothing.
@@ -942,7 +948,7 @@ bool PluginObject::RequestFullscreenDisplay() {
     short short_target_width = target_width;
     short short_target_height = target_height;
     BeginFullScreen(&mac_fullscreen_state_,
-                    GetMainDevice(),
+                    nil,  // Value of nil selects the main screen.
                     &short_target_width,
                     &short_target_height,
                     &fullscreen_window,
@@ -1024,4 +1030,5 @@ void PluginObject::FullscreenIdle() {
   }
 }
 
+}  // namespace glue
 }  // namespace o3d

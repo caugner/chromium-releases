@@ -4,7 +4,6 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "config.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
 #include <string>
@@ -13,12 +12,14 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/default_plugin/plugin_impl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/fake_plugin_window_tracker_mac.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -26,6 +27,17 @@
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/webkit_glue.h"
 
+// If we're compiling support for the QuickDraw drawing model, turn off GCC
+// warnings about deprecated functions (since QuickDraw is a deprecated API).
+// According to the GCC documentation, this can only be done per file, not
+// pushed and popped like some options can be.
+#ifndef NP_NO_QUICKDRAW
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+using webkit_glue::WebPlugin;
+using webkit_glue::WebPluginDelegate;
+using webkit_glue::WebPluginResourceClient;
 using WebKit::WebCursorInfo;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebInputEvent;
@@ -48,12 +60,20 @@ namespace {
 // this seems to work well enough.
 const int kPluginIdleThrottleDelayMs = 20;  // 20ms (50Hz)
 
-// The current instance of the plugin which entered the modal loop.
-WebPluginDelegateImpl* g_current_plugin_instance = NULL;
+// The most recently seen offset between global and local coordinates.  We use
+// this to keep the placeholder Carbon WindowRef's origin in sync with the
+// actual browser window, without having to pass that geometry over IPC.  If we
+// end up needing to interpose on Carbon APIs in the plugin process (in order
+// to simulate window activation, for example), this could be replaced by
+// interposing on GlobalToLocal and/or LocalToGlobal (see related TODO comments
+// below in WebPluginDelegateImpl::OnNullEvent()).
+
+int g_current_x_offset = 0;
+int g_current_y_offset = 0;
 
 }  // namespace
 
-WebPluginDelegate* WebPluginDelegate::Create(
+WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
     const FilePath& filename,
     const std::string& mime_type,
     gfx::PluginWindowHandle containing_view) {
@@ -74,25 +94,36 @@ WebPluginDelegate* WebPluginDelegate::Create(
 WebPluginDelegateImpl::WebPluginDelegateImpl(
     gfx::PluginWindowHandle containing_view,
     NPAPI::PluginInstance *instance)
-    : parent_(containing_view),
-      instance_(instance),
-      quirks_(0),
-      plugin_(NULL),
+    : windowless_needs_set_window_(true),
       // all Mac plugins are "windowless" in the Windows/X11 sense
       windowless_(true),
-      windowless_needs_set_window_(true),
+      plugin_(NULL),
+      instance_(instance),
+      parent_(containing_view),
+      qd_world_(0),
+      quirks_(0),
       handle_event_depth_(0),
       user_gesture_message_posted_(this),
       user_gesture_msg_factory_(this),
-      null_event_factory_(this) {
+      null_event_factory_(this),
+      last_mouse_x_(0),
+      last_mouse_y_(0) {
   memset(&window_, 0, sizeof(window_));
+#ifndef NP_NO_QUICKDRAW
+  memset(&qd_port_, 0, sizeof(qd_port_));
+#endif
 }
 
 WebPluginDelegateImpl::~WebPluginDelegateImpl() {
+#ifndef NP_NO_QUICKDRAW
+  if (qd_port_.port) {
+    DisposeGWorld(qd_port_.port);
+    DisposeGWorld(qd_world_);
+  }
+#endif
+  FakePluginWindowTracker::SharedInstance()->RemoveFakeWindowForDelegate(
+      this, reinterpret_cast<WindowRef>(cg_context_.window));
   DestroyInstance();
-
-  if (cg_context_.window)
-    DisposeWindow(cg_context_.window);
 }
 
 void WebPluginDelegateImpl::PluginDestroyed() {
@@ -100,28 +131,55 @@ void WebPluginDelegateImpl::PluginDestroyed() {
 }
 
 bool WebPluginDelegateImpl::Initialize(const GURL& url,
-                                       char** argn,
-                                       char** argv,
-                                       int argc,
+                                       const std::vector<std::string>& arg_names,
+                                       const std::vector<std::string>& arg_values,
                                        WebPlugin* plugin,
                                        bool load_manually) {
   plugin_ = plugin;
 
   instance_->set_web_plugin(plugin);
-  NPAPI::PluginInstance* old_instance =
-      NPAPI::PluginInstance::SetInitializingInstance(instance_);
 
+  int argc = 0;
+  scoped_array<char*> argn(new char*[arg_names.size()]);
+  scoped_array<char*> argv(new char*[arg_names.size()]);
+  for (size_t i = 0; i < arg_names.size(); ++i) {
+    if (quirks_ & PLUGIN_QUIRK_NO_WINDOWLESS &&
+        LowerCaseEqualsASCII(arg_names[i], "windowlessvideo")) {
+      continue;
+    }
+    argn[argc] = const_cast<char*>(arg_names[i].c_str());
+    argv[argc] = const_cast<char*>(arg_values[i].c_str());
+    argc++;
+  }
 
-  bool start_result = instance_->Start(url, argn, argv, argc, load_manually);
-
-  NPAPI::PluginInstance::SetInitializingInstance(old_instance);
-
+  bool start_result = instance_->Start(
+      url, argn.get(), argv.get(), argc, load_manually);
   if (!start_result)
     return false;
 
-  cg_context_.window = NULL;
-  window_.window = &cg_context_;
-  window_.type = NPWindowTypeDrawable;
+  FakePluginWindowTracker* window_tracker =
+      FakePluginWindowTracker::SharedInstance();
+  cg_context_.window = window_tracker->GenerateFakeWindowForDelegate(this);
+  cg_context_.context = NULL;
+  Rect window_bounds = { 0, 0, window_rect_.height(), window_rect_.width() };
+  SetWindowBounds(reinterpret_cast<WindowRef>(cg_context_.window),
+                  kWindowContentRgn, &window_bounds);
+
+  switch (instance_->drawing_model()) {
+#ifndef NP_NO_QUICKDRAW
+    case NPDrawingModelQuickDraw:
+      window_.window = &qd_port_;
+      window_.type = NPWindowTypeDrawable;
+      break;
+#endif
+    case NPDrawingModelCoreGraphics:
+      window_.window = &cg_context_;
+      window_.type = NPWindowTypeDrawable;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
 
   plugin->SetWindow(NULL);
   plugin_url_ = url.spec();
@@ -146,44 +204,61 @@ void WebPluginDelegateImpl::DestroyInstance() {
   }
 }
 
+void WebPluginDelegateImpl::PlatformInitialize() {
+  // TODO(port): implement these after unforking.
+}
+
+void WebPluginDelegateImpl::PlatformDestroyInstance() {
+  // TODO(port): implement these after unforking.
+}
+
 void WebPluginDelegateImpl::UpdateGeometry(
     const gfx::Rect& window_rect,
     const gfx::Rect& clip_rect) {
-
-  if (!window_rect.IsEmpty()) {
-    NSPoint windowOffset = {0.0, 0.0};
-    Rect window_bounds;
-    window_bounds.top = window_rect.y() + windowOffset.y;
-    window_bounds.left = window_rect.x() + windowOffset.x;
-    window_bounds.bottom = window_rect.y() + window_rect.height();
-    window_bounds.right = window_rect.x() + window_rect.width();
-
-    if (!cg_context_.window) {
-      // For all plugins we create a placeholder offscreen window for the use
-      // of NPWindow.  NPAPI on the Mac requires a Carbon WindowRef for the
-      // "browser window", even if we're not using the Quickdraw drawing model.
-      // Not having a valid window reference causes subtle bugs with plugins
-      // which retreive the NPWindow and validate the same. The NPWindow
-      // can be retreived via NPN_GetValue of NPNVnetscapeWindow.
-
-      WindowRef window_ref;
-      if (CreateNewWindow(kDocumentWindowClass,
-                          kWindowStandardDocumentAttributes,
-                          &window_bounds,
-                          &window_ref) == noErr) {
-        cg_context_.window = window_ref;
-      }
-    } else {
-      SetWindowBounds(cg_context_.window, kWindowContentRgn, &window_bounds);
-    }
-  }
-
+  DCHECK(windowless_);
   WindowlessUpdateGeometry(window_rect, clip_rect);
 }
 
+void WebPluginDelegateImpl::UpdateContext(CGContextRef context) {
+  // Flash on the Mac apparently caches the context from the struct it recieves
+  // in NPP_SetWindow, and continue to use it even when the contents of the
+  // struct have changed, so we need to call NPP_SetWindow again if the context
+  // changes.
+  if (context != cg_context_.context) {
+    cg_context_.context = context;
+#ifndef NP_NO_QUICKDRAW
+    if (instance()->drawing_model() == NPDrawingModelQuickDraw) {
+      if (qd_port_.port) {
+        DisposeGWorld(qd_port_.port);
+        DisposeGWorld(qd_world_);
+        qd_port_.port = NULL;
+        qd_world_ = NULL;
+      }
+      Rect window_bounds = {
+        0, 0, window_rect_.height(), window_rect_.width()
+      };
+      // Create a GWorld pointing at the same bits as our CGContextRef
+      NewGWorldFromPtr(&qd_world_, k32BGRAPixelFormat, &window_bounds,
+          NULL, NULL, 0,
+          static_cast<Ptr>(CGBitmapContextGetData(context)),
+          static_cast<SInt32>(CGBitmapContextGetBytesPerRow(context)));
+      // Create a GWorld for the plugin to paint into whenever it wants
+      NewGWorld(&qd_port_.port, k32ARGBPixelFormat, &window_bounds,
+          NULL, NULL, kNativeEndianPixMap);
+      SetGWorld(qd_port_.port, NULL);
+      // Fill with black
+      ForeColor(blackColor);
+      BackColor(whiteColor);
+      PaintRect(&window_bounds);
+    }
+#endif
+    WindowlessSetWindow(true);
+  }
+}
+
 void WebPluginDelegateImpl::Paint(CGContextRef context, const gfx::Rect& rect) {
-  if (windowless_)
-    WindowlessPaint(context, rect);
+  DCHECK(windowless_);
+  WindowlessPaint(context, rect);
 }
 
 void WebPluginDelegateImpl::Print(CGContextRef context) {
@@ -198,8 +273,10 @@ NPObject* WebPluginDelegateImpl::GetPluginScriptableObject() {
   return instance_->GetPluginScriptableObject();
 }
 
-void WebPluginDelegateImpl::DidFinishLoadWithReason(NPReason reason) {
-  instance()->DidFinishLoadWithReason(reason);
+void WebPluginDelegateImpl::DidFinishLoadWithReason(
+    const GURL& url, NPReason reason, intptr_t notify_data) {
+  instance()->DidFinishLoadWithReason(
+      url, reason, reinterpret_cast<void*>(notify_data));
 }
 
 int WebPluginDelegateImpl::GetProcessId() {
@@ -207,8 +284,8 @@ int WebPluginDelegateImpl::GetProcessId() {
   return getpid();
 }
 
-void WebPluginDelegateImpl::SendJavaScriptStream(const std::string& url,
-                                                 const std::wstring& result,
+void WebPluginDelegateImpl::SendJavaScriptStream(const GURL& url,
+                                                 const std::string& result,
                                                  bool success,
                                                  bool notify_needed,
                                                  intptr_t notify_data) {
@@ -217,7 +294,7 @@ void WebPluginDelegateImpl::SendJavaScriptStream(const std::string& url,
 }
 
 void WebPluginDelegateImpl::DidReceiveManualResponse(
-    const std::string& url, const std::string& mime_type,
+    const GURL& url, const std::string& mime_type,
     const std::string& headers, uint32 expected_length, uint32 last_modified) {
   instance()->DidReceiveManualResponse(url, mime_type, headers,
                                        expected_length, last_modified);
@@ -236,10 +313,6 @@ void WebPluginDelegateImpl::DidManualLoadFail() {
   instance()->DidManualLoadFail();
 }
 
-FilePath WebPluginDelegateImpl::GetPluginPath() {
-  return instance()->plugin_lib()->plugin_info().path;
-}
-
 void WebPluginDelegateImpl::InstallMissingPlugin() {
   NPEvent evt;
   instance()->NPP_HandleEvent(&evt);
@@ -254,77 +327,106 @@ void WebPluginDelegateImpl::WindowlessUpdateGeometry(
 
   // We will inform the instance of this change when we call NPP_SetWindow.
   clip_rect_ = clip_rect;
-  cutout_rects_.clear();
 
   if (window_rect_ != window_rect) {
     window_rect_ = window_rect;
 
-    window_.clipRect.top = clip_rect_.y();
-    window_.clipRect.left = clip_rect_.x();
-    window_.clipRect.bottom = clip_rect_.y() + clip_rect_.height();
-    window_.clipRect.right = clip_rect_.x() + clip_rect_.width();
-    window_.height = window_rect_.height();
-    window_.width = window_rect_.width();
-    window_.x = window_rect_.x();
-    window_.y = window_rect_.y();
-    window_.type = NPWindowTypeDrawable;
-    windowless_needs_set_window_ = true;
+    WindowlessSetWindow(true);
   }
 }
 
 void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
                                             const gfx::Rect& damage_rect) {
+  // If we somehow get a paint before we've set up the plugin window, bail.
+  if (!cg_context_.context)
+    return;
+  DCHECK(cg_context_.context == context);
+
   static StatsRate plugin_paint("Plugin.Paint");
   StatsScope<StatsRate> scope(plugin_paint);
 
-  // We save and restore the NSGraphicsContext state in case the plugin uses
-  // Cocoa drawing.
-  [NSGraphicsContext saveGraphicsState];
-  [NSGraphicsContext setCurrentContext:[NSGraphicsContext
-                                        graphicsContextWithGraphicsPort:context
-                                        flipped:NO]];
-
-  CGContextSaveGState(context);
-  cg_context_.context = context;
-  window_.window = &cg_context_;
-  window_.type = NPWindowTypeDrawable;
-  if (windowless_needs_set_window_) {
-    Rect window_bounds;
-    window_bounds.top = window_rect_.y();
-    window_bounds.left = window_rect_.x();
-    window_bounds.bottom = window_rect_.y() + window_rect_.height();
-    window_bounds.right = window_rect_.x() + window_rect_.width();
-    if (!cg_context_.window) {
-      // For all plugins we create a placeholder offscreen window for the use
-      // of NPWindow.  NPAPI on the Mac requires a Carbon WindowRef for the
-      // "browser window", even if we're not using the Quickdraw drawing model.
-      // Not having a valid window reference causes subtle bugs with plugins
-      // which retreive the NPWindow and validate the same. The NPWindow
-      // can be retreived via NPN_GetValue of NPNVnetscapeWindow.
-
-      WindowRef window_ref;
-      if (CreateNewWindow(kDocumentWindowClass,
-                          kWindowStandardDocumentAttributes,
-                          &window_bounds,
-                          &window_ref) == noErr) {
-        cg_context_.window = window_ref;
+  switch (instance()->drawing_model()) {
+#ifndef NP_NO_QUICKDRAW
+    case NPDrawingModelQuickDraw:
+    {
+      // Plugins using the QuickDraw drawing model do not restrict their
+      // drawing to update events the way that CoreGraphics-based plugins
+      // do.  When we are asked to paint, we therefore just copy from the
+      // plugin's persistent offscreen GWorld into our shared memory bitmap
+      // context.
+      Rect window_bounds = {
+        0, 0, window_rect_.height(), window_rect_.width()
+      };
+      PixMapHandle plugin_pixmap = GetGWorldPixMap(qd_port_.port);
+      if (LockPixels(plugin_pixmap)) {
+        PixMapHandle shared_pixmap = GetGWorldPixMap(qd_world_);
+        if (LockPixels(shared_pixmap)) {
+          SetGWorld(qd_world_, NULL);
+          // Set foreground and background colors to avoid "colorizing" the
+          // image.
+          ForeColor(blackColor);
+          BackColor(whiteColor);
+          CopyBits(reinterpret_cast<BitMap*>(*plugin_pixmap),
+                   reinterpret_cast<BitMap*>(*shared_pixmap),
+                   &window_bounds, &window_bounds, srcCopy, NULL);
+          UnlockPixels(shared_pixmap);
+        }
+        UnlockPixels(plugin_pixmap);
       }
-    } else {
-      SetWindowBounds(cg_context_.window, kWindowContentRgn, &window_bounds);
+      break;
     }
-    instance()->NPP_SetWindow(&window_);
-    windowless_needs_set_window_ = false;
+#endif
+    case NPDrawingModelCoreGraphics:
+    {
+      NPEvent paint_event;
+
+      // Save and restore the NSGraphicsContext state in case the plugin uses
+      // Cocoa drawing.
+      [NSGraphicsContext saveGraphicsState];
+      [NSGraphicsContext setCurrentContext:
+           [NSGraphicsContext graphicsContextWithGraphicsPort:context
+                                                      flipped:YES]];
+      CGContextSaveGState(context);
+
+      paint_event.what = updateEvt;
+      paint_event.message = reinterpret_cast<uint32>(cg_context_.window);
+      paint_event.when = TickCount();
+      paint_event.where.h = 0;
+      paint_event.where.v = 0;
+      paint_event.modifiers = 0;
+      instance()->NPP_HandleEvent(&paint_event);
+
+      CGContextRestoreGState(context);
+      [NSGraphicsContext restoreGraphicsState];
+      break;
+    }
   }
-  NPEvent paint_event;
-  paint_event.what = updateEvt;
-  paint_event.message = reinterpret_cast<uint32>(cg_context_.window);
-  paint_event.when = TickCount();
-  paint_event.where.h = 0;
-  paint_event.where.v = 0;
-  paint_event.modifiers = 0;
-  instance()->NPP_HandleEvent(&paint_event);
-  CGContextRestoreGState(context);
-  [NSGraphicsContext restoreGraphicsState];
+}
+
+// Moves our dummy window to the given offset relative to the last known
+// location of the real renderer window's content view.
+// If new_width or new_height is non-zero, the window size (content region)
+// will be updated accordingly; if they are zero, the existing size will be
+// preserved.
+static void UpdateDummyWindowBoundsWithOffset(WindowRef window,
+                                              int x_offset, int y_offset,
+                                              int new_width, int new_height) {
+  int target_x = g_current_x_offset + x_offset;
+  int target_y = g_current_y_offset + y_offset;
+  Rect window_bounds;
+  GetWindowBounds(window, kWindowContentRgn, &window_bounds);
+  if ((window_bounds.left != target_x) ||
+      (window_bounds.top != target_y)) {
+    int height = new_height ? new_height
+                            : window_bounds.bottom - window_bounds.top;
+    int width = new_width ? new_width
+                          : window_bounds.right - window_bounds.left;
+    window_bounds.left = target_x;
+    window_bounds.top = target_y;
+    window_bounds.right = window_bounds.left + width;
+    window_bounds.bottom = window_bounds.top + height;
+    SetWindowBounds(window, kWindowContentRgn, &window_bounds);
+  }
 }
 
 void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
@@ -334,45 +436,21 @@ void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
   if (window_rect_.IsEmpty())  // wait for geometry to be set.
     return;
 
-  window_.clipRect.top = clip_rect_.y();
-  window_.clipRect.left = clip_rect_.x();
-  window_.clipRect.bottom = clip_rect_.y() + clip_rect_.height();
-  window_.clipRect.right = clip_rect_.x() + clip_rect_.width();
+  window_.clipRect.top = 0;
+  window_.clipRect.left = 0;
+  window_.clipRect.bottom = window_rect_.height();
+  window_.clipRect.right = window_rect_.width();
   window_.height = window_rect_.height();
   window_.width = window_rect_.width();
-  window_.x = window_rect_.x();
-  window_.y = window_rect_.y();
-  window_.type = NPWindowTypeDrawable;
+  window_.x = 0;
+  window_.y = 0;
 
-  if (!force_set_window)
-    // Reset this flag before entering the instance in case of side-effects.
-    windowless_needs_set_window_ = false;
-
-  Rect window_bounds;
-  window_bounds.top = window_rect_.y();
-  window_bounds.left = window_rect_.x();
-  window_bounds.bottom = window_rect_.y() + window_rect_.height();
-  window_bounds.right = window_rect_.x() + window_rect_.width();
-  if (!cg_context_.window) {
-    // For all plugins we create a placeholder offscreen window for the use
-    // of NPWindow.  NPAPI on the Mac requires a Carbon WindowRef for the
-    // "browser window", even if we're not using the Quickdraw drawing model.
-    // Not having a valid window reference causes subtle bugs with plugins
-    // which retreive the NPWindow and validate the same. The NPWindow
-    // can be retreived via NPN_GetValue of NPNVnetscapeWindow.
-
-    WindowRef window_ref;
-    if (CreateNewWindow(kDocumentWindowClass,
-                        kWindowStandardDocumentAttributes,
-                        &window_bounds,
-                        &window_ref) == noErr) {
-      cg_context_.window = window_ref;
-    }
-  } else {
-    SetWindowBounds(cg_context_.window, kWindowContentRgn, &window_bounds);
-  }
+  UpdateDummyWindowBoundsWithOffset(
+      reinterpret_cast<WindowRef>(cg_context_.window), window_rect_.x(),
+      window_rect_.y(), window_rect_.width(), window_rect_.height());
 
   NPError err = instance()->NPP_SetWindow(&window_);
+
   DCHECK(err == NPERR_NO_ERROR);
 }
 
@@ -383,39 +461,76 @@ void WebPluginDelegateImpl::SetFocus() {
   instance()->NPP_HandleEvent(&focus_event);
 }
 
+static bool WebInputEventIsWebMouseEvent(const WebInputEvent& event) {
+  switch (event.type) {
+    case WebInputEvent::MouseMove:
+    case WebInputEvent::MouseLeave:
+    case WebInputEvent::MouseEnter:
+    case WebInputEvent::MouseDown:
+    case WebInputEvent::MouseUp:
+      if (event.size < sizeof(WebMouseEvent)) {
+        NOTREACHED();
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool WebInputEventIsWebKeyboardEvent(const WebInputEvent& event) {
+  switch (event.type) {
+    case WebInputEvent::KeyDown:
+    case WebInputEvent::KeyUp:
+      if (event.size < sizeof(WebKeyboardEvent)) {
+        NOTREACHED();
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
                                      NPEvent *np_event) {
-  np_event->where.h = event.windowX;
-  np_event->where.v = event.windowY;
+  np_event->where.h = event.globalX;
+  np_event->where.v = event.globalY;
 
   if (event.modifiers & WebInputEvent::ControlKey)
     np_event->modifiers |= controlKey;
   if (event.modifiers & WebInputEvent::ShiftKey)
     np_event->modifiers |= shiftKey;
 
+  // default to "button up"; override this for mouse down events below.
+  np_event->modifiers |= btnState;
+
+  switch (event.button) {
+    case WebMouseEvent::ButtonLeft:
+      break;
+    case WebMouseEvent::ButtonMiddle:
+      np_event->modifiers |= cmdKey;
+      break;
+    case WebMouseEvent::ButtonRight:
+      np_event->modifiers |= controlKey;
+      break;
+    default:
+      NOTIMPLEMENTED();
+  }
   switch (event.type) {
     case WebInputEvent::MouseMove:
+      np_event->what = nullEvent;
+      return true;
     case WebInputEvent::MouseLeave:
     case WebInputEvent::MouseEnter:
       np_event->what = NPEventType_AdjustCursorEvent;
       return true;
     case WebInputEvent::MouseDown:
-      switch (event.button) {
-        case WebMouseEvent::ButtonLeft:
-        case WebMouseEvent::ButtonMiddle:
-        case WebMouseEvent::ButtonRight:
-          np_event->what = mouseDown;
-          break;
-      }
+      np_event->modifiers &= ~btnState;
+      np_event->what = mouseDown;
       return true;
     case WebInputEvent::MouseUp:
-      switch (event.button) {
-        case WebMouseEvent::ButtonLeft:
-        case WebMouseEvent::ButtonMiddle:
-        case WebMouseEvent::ButtonRight:
-          np_event->what = mouseUp;
-          break;
-      }
+      np_event->what = mouseUp;
       return true;
     default:
       NOTREACHED();
@@ -425,11 +540,26 @@ static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
 
 static bool NPEventFromWebKeyboardEvent(const WebKeyboardEvent& event,
                                         NPEvent *np_event) {
-  np_event->message = event.nativeKeyCode;
+  // TODO: figure out how to handle Unicode input to plugins, if that's
+  // even possible in the NPAPI Carbon event model.
+  np_event->message = (event.nativeKeyCode << 8) & keyCodeMask;
+  np_event->message |= event.text[0] & charCodeMask;
+  np_event->modifiers |= btnState;
+  if (event.modifiers & WebInputEvent::ControlKey)
+    np_event->modifiers |= controlKey;
+  if (event.modifiers & WebInputEvent::ShiftKey)
+    np_event->modifiers |= shiftKey;
+  if (event.modifiers & WebInputEvent::AltKey)
+    np_event->modifiers |= cmdKey;
+  if (event.modifiers & WebInputEvent::MetaKey)
+    np_event->modifiers |= optionKey;
 
   switch (event.type) {
     case WebInputEvent::KeyDown:
-      np_event->what = keyDown;
+      if (event.modifiers & WebInputEvent::IsAutoRepeat)
+        np_event->what = autoKey;
+      else
+        np_event->what = keyDown;
       return true;
     case WebInputEvent::KeyUp:
       np_event->what = keyUp;
@@ -442,46 +572,76 @@ static bool NPEventFromWebKeyboardEvent(const WebKeyboardEvent& event,
 
 static bool NPEventFromWebInputEvent(const WebInputEvent& event,
                                      NPEvent* np_event) {
-  switch (event.type) {
-    case WebInputEvent::MouseMove:
-    case WebInputEvent::MouseLeave:
-    case WebInputEvent::MouseEnter:
-    case WebInputEvent::MouseDown:
-    case WebInputEvent::MouseUp:
-      if (event.size < sizeof(WebMouseEvent)) {
-        NOTREACHED();
-        return false;
-      }
-      return NPEventFromWebMouseEvent(*static_cast<const WebMouseEvent*>(&event), np_event);
-    case WebInputEvent::KeyDown:
-    case WebInputEvent::KeyUp:
-      if (event.size < sizeof(WebKeyboardEvent)) {
-        NOTREACHED();
-        return false;
-      }
-      return NPEventFromWebKeyboardEvent(*static_cast<const WebKeyboardEvent*>(&event), np_event);
-    default:
-      DLOG(WARNING) << "unknown event type" << event.type;
-      return false;
+  if (WebInputEventIsWebMouseEvent(event)) {
+    return NPEventFromWebMouseEvent(*static_cast<const WebMouseEvent*>(&event),
+                                    np_event);
+  } else if (WebInputEventIsWebKeyboardEvent(event)) {
+    return NPEventFromWebKeyboardEvent(
+        *static_cast<const WebKeyboardEvent*>(&event), np_event);
   }
+  DLOG(WARNING) << "unknown event type" << event.type;
+  return false;
+}
+
+static void UpdateWindowLocation(WindowRef window, const WebMouseEvent& event) {
+  // TODO: figure out where the vertical offset of 22 comes from (and if 22 is
+  // exactly right) and replace with an appropriate calculation. It feels like
+  // window structure or the menu bar, but neither should be involved here.
+  g_current_x_offset = event.globalX - event.windowX;
+  g_current_y_offset = event.globalY - event.windowY + 22;
+
+  UpdateDummyWindowBoundsWithOffset(window, event.windowX - event.x,
+                                    event.windowY - event.y, 0, 0);
 }
 
 bool WebPluginDelegateImpl::HandleInputEvent(const WebInputEvent& event,
                                              WebCursorInfo* cursor) {
+  // If we somehow get an event before we've set up the plugin window, bail.
+  if (!cg_context_.context)
+    return false;
   DCHECK(windowless_) << "events should only be received in windowless mode";
   DCHECK(cursor != NULL);
 
   NPEvent np_event = {0};
   if (!NPEventFromWebInputEvent(event, &np_event)) {
+    LOG(WARNING) << "NPEventFromWebInputEvent failed";
     return false;
   }
   np_event.when = TickCount();
-  bool ret = instance()->NPP_HandleEvent(&np_event) != 0;
+  if (np_event.what == nullEvent) {
+    last_mouse_x_ = np_event.where.h;
+    last_mouse_y_ = np_event.where.v;
+    return true;  // Let the recurring task actually send the event.
+  }
+
+  // If this is a mouse event, we need to make sure our dummy window has the
+  // correct location before we send the event to the plugin, so that any
+  // coordinate conversion the plugin does will work out.
+  if (WebInputEventIsWebMouseEvent(event)) {
+    const WebMouseEvent* mouse_event =
+        static_cast<const WebMouseEvent*>(&event);
+    UpdateWindowLocation(reinterpret_cast<WindowRef>(cg_context_.window),
+                         *mouse_event);
+  }
+  bool ret = false;
+  switch (instance()->drawing_model()) {
+#ifndef NP_NO_QUICKDRAW
+    case NPDrawingModelQuickDraw:
+      SetGWorld(qd_port_.port, NULL);
+      ret = instance()->NPP_HandleEvent(&np_event) != 0;
+      break;
+#endif
+    case NPDrawingModelCoreGraphics:
+      CGContextSaveGState(cg_context_.context);
+      ret = instance()->NPP_HandleEvent(&np_event) != 0;
+      CGContextRestoreGState(cg_context_.context);
+      break;
+  }
   return ret;
 }
 
 WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
-    int resource_id, const std::string &url, bool notify_needed,
+    int resource_id, const GURL& url, bool notify_needed,
     intptr_t notify_data, intptr_t existing_stream) {
   // Stream already exists. This typically happens for range requests
   // initiated via NPN_RequestRead.
@@ -494,9 +654,6 @@ WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
     return plugin_stream->AsResourceClient();
   }
 
-  if (notify_needed) {
-    instance()->SetURLLoadData(GURL(url.c_str()), notify_data);
-  }
   std::string mime_type;
   NPAPI::PluginStreamUrl *stream = instance()->CreateStream(
       resource_id, url, mime_type, notify_needed,
@@ -504,19 +661,44 @@ WebPluginResourceClient* WebPluginDelegateImpl::CreateResourceClient(
   return stream;
 }
 
-void WebPluginDelegateImpl::URLRequestRouted(const std::string&url,
-                                             bool notify_needed,
-                                             intptr_t notify_data) {
-  if (notify_needed) {
-    instance()->SetURLLoadData(GURL(url.c_str()), notify_data);
-  }
-}
-
 void WebPluginDelegateImpl::OnNullEvent() {
+  if (!webkit_glue::IsPluginRunningInRendererProcess()) {
+    switch (instance_->event_model()) {
+      case NPEventModelCarbon:
+        // If the plugin is running in a subprocess, drain any pending system
+        // events so that the plugin's event handlers will get called on any
+        // windows it has created.  Filter out activate/deactivate events on
+        // the fake browser window, but pass everything else through.
+        EventRecord event;
+        while (GetNextEvent(everyEvent, &event)) {
+          if (event.what == activateEvt && cg_context_.window &&
+              reinterpret_cast<void *>(event.message) != cg_context_.window)
+            continue;
+          instance()->NPP_HandleEvent(&event);
+        }
+        break;
+    }
+  }
+
+  // Send an idle event so that the plugin can do background work
   NPEvent np_event = {0};
   np_event.what = nullEvent;
   np_event.when = TickCount();
+  np_event.modifiers = GetCurrentKeyModifiers();
+  if (!Button())
+    np_event.modifiers |= btnState;
+  np_event.where.h = last_mouse_x_;
+  np_event.where.v = last_mouse_y_;
   instance()->NPP_HandleEvent(&np_event);
+
+#ifndef NP_NO_QUICKDRAW
+  // Quickdraw-based plugins can draw at any time, so tell the renderer to
+  // repaint.
+  // TODO: only do this if the contents of the offscreen GWorld has changed,
+  // so as not to spam the renderer with an unchanging image.
+  if (instance_->drawing_model() == NPDrawingModelQuickDraw)
+    instance()->webplugin()->Invalidate();
+#endif
 
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       null_event_factory_.NewRunnableMethod(

@@ -1,31 +1,23 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__
-#define WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__
+#ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H_
+#define WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H_
 
 #include "FrameLoaderClient.h"
+#include "KURL.h"
+#include <wtf/PassOwnPtr.h>
 #include <wtf/RefPtr.h>
 
-#include "base/scoped_ptr.h"
-#include "googleurl/src/gurl.h"
 #include "webkit/api/public/WebNavigationPolicy.h"
-#include "webkit/glue/webview_delegate.h"
-
-namespace WebCore {
-class Frame;
-class HTMLFormElement;
-class Widget;
-}
-
-namespace webkit_glue {
-class AltErrorPageResourceFetcher;
-}
 
 class WebFrameImpl;
-class WebPluginContainer;
 
+namespace WebKit {
+class WebPluginContainerImpl;
+class WebPluginLoadObserver;
+}
 
 class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
  public:
@@ -133,6 +125,9 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
 
   virtual bool shouldGoToHistoryItem(WebCore::HistoryItem*) const;
 
+  virtual void didDisplayInsecureContent();
+  virtual void didRunInsecureContent(WebCore::SecurityOrigin*);
+
   virtual WebCore::ResourceError blockedError(const WebCore::ResourceRequest&);
   virtual WebCore::ResourceError cancelledError(const WebCore::ResourceRequest&);
   virtual WebCore::ResourceError cannotShowURLError(const WebCore::ResourceRequest&);
@@ -195,8 +190,8 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
       const WTF::Vector<WebCore::String>& paramNames,
       const WTF::Vector<WebCore::String>& paramValues);
 
-  virtual WebCore::ObjectContentType objectContentType(const WebCore::KURL& url,
-                                              const WebCore::String& mimeType);
+  virtual WebCore::ObjectContentType objectContentType(
+      const WebCore::KURL& url, const WebCore::String& mimeType);
   virtual WebCore::String overrideMediaType() const;
 
   virtual void didPerformFirstNavigation() const;
@@ -204,10 +199,6 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   virtual void registerForIconNotification(bool listen = true);
 
  private:
-  // Callback function for download of alternate 404 pages.  If the server is
-  // down or we take too long to download the page, |html| will be empty.
-  void Alt404PageFinished(const GURL& unreachable_url, const std::string& html);
-
   void makeDocumentView();
 
   // Given a NavigationAction, determine the associated WebNavigationPolicy.
@@ -216,25 +207,14 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
       const WebCore::NavigationAction& action,
       WebKit::WebNavigationPolicy* policy);
 
-  // Returns a valid GURL if we have an alt 404 server URL.
-  GURL GetAlt404PageUrl(WebCore::DocumentLoader* loader);
-
-  // Returns NavigationGestureAuto if the last load was not user initiated,
-  // otherwise returns NavigationGestureUnknown.
-  NavigationGesture NavigationGestureForLastLoad();
-
   // Called when a dummy back-forward navigation is intercepted.
-  void HandleBackForwardNavigation(const GURL&);
+  void HandleBackForwardNavigation(const WebCore::KURL&);
+
+  PassOwnPtr<WebKit::WebPluginLoadObserver> GetPluginLoadObserver();
 
   // The WebFrame that owns this object and manages its lifetime. Therefore,
   // the web frame object is guaranteed to exist.
   WebFrameImpl* webframe_;
-
-  // Resource fetcher for downloading an alternate 404 page.
-  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_404_page_fetcher_;
-
-  bool postpone_loading_data_;
-  std::string postponed_data_;
 
   // True if makeRepresentation was called.  We don't actually have a concept
   // of a "representation", but we need to know when we're expected to have one.
@@ -247,11 +227,11 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   // and the dest URL matches that load, we know that it was the result of a
   // previous client redirect and the source should be added as a redirect.
   // Both should be empty if unused.
-  GURL expected_client_redirect_src_;
-  GURL expected_client_redirect_dest_;
+  WebCore::KURL expected_client_redirect_src_;
+  WebCore::KURL expected_client_redirect_dest_;
 
   // Contains a pointer to the plugin widget.
-  WTF::RefPtr<WebPluginContainer> plugin_widget_;
+  WTF::RefPtr<WebKit::WebPluginContainerImpl> plugin_widget_;
 
   // Indicates if we need to send over the initial notification to the plugin
   // which specifies that the plugin should be ready to accept data.
@@ -261,4 +241,4 @@ class WebFrameLoaderClient : public WebCore::FrameLoaderClient {
   WebKit::WebNavigationPolicy next_navigation_policy_;
 };
 
-#endif  // #ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H__
+#endif  // #ifndef WEBKIT_GLUE_WEBFRAMELOADERCLIENT_IMPL_H_

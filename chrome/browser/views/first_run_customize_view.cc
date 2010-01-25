@@ -25,9 +25,11 @@ FirstRunCustomizeView::FirstRunCustomizeView(Profile* profile,
                                              ImporterHost* importer_host,
                                              CustomizeViewObserver* observer,
                                              bool default_browser_checked,
+                                             bool homepage_defined,
                                              int import_items,
                                              int dont_import_items)
-    : FirstRunViewBase(profile, import_items, dont_import_items),
+    : FirstRunViewBase(profile, homepage_defined, import_items,
+                       dont_import_items),
       main_label_(NULL),
       import_cbox_(NULL),
       import_from_combo_(NULL),
@@ -157,19 +159,19 @@ void FirstRunCustomizeView::Layout() {
   AdjustDialogWidth(quick_shortcut_cbox_);
 }
 
-void FirstRunCustomizeView::ButtonPressed(views::Button* sender) {
+void FirstRunCustomizeView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (import_cbox_ == sender) {
     // Disable the import combobox if the user unchecks the checkbox.
     import_from_combo_->SetEnabled(import_cbox_->checked());
   }
 }
 
-int FirstRunCustomizeView::GetItemCount(views::Combobox* source) {
+int FirstRunCustomizeView::GetItemCount() {
   return importer_host_->GetAvailableProfileCount();
 }
 
-std::wstring FirstRunCustomizeView::GetItemAt(views::Combobox* source,
-                                              int index) {
+std::wstring FirstRunCustomizeView::GetItemAt(int index) {
   return importer_host_->GetSourceProfileNameAt(index);
 }
 

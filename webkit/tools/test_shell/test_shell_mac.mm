@@ -15,7 +15,6 @@
 #include "base/debug_util.h"
 #include "base/file_util.h"
 #include "base/gfx/size.h"
-#include "base/icu_util.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
 #include "base/memory_debug.h"
@@ -29,10 +28,10 @@
 #include "net/base/mime_util.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/tools/test_shell/mac/test_shell_webview.h"
 #include "webkit/tools/test_shell/resource.h"
@@ -226,7 +225,7 @@ NSButton* MakeTestButton(NSRect* rect, NSString* title, NSView* parent) {
   return button;
 }
 
-bool TestShell::Initialize(const std::wstring& startingURL) {
+bool TestShell::Initialize(const GURL& starting_url) {
   // Perform application initialization:
   // send message to app controller?  need to work this out
 
@@ -265,7 +264,6 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
       WebViewHost::Create([m_mainWnd contentView],
                           delegate_.get(),
                           *TestShell::web_prefs_));
-  webView()->SetUseEditorDelegate(true);
   delegate_->RegisterDragDrop();
   TestShellWebView* web_view =
       static_cast<TestShellWebView*>(m_webViewHost->view_handle());
@@ -315,12 +313,10 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
   [m_mainWnd makeKeyAndOrderFront: nil];
 
   // Load our initial content.
-  if (!startingURL.empty())
-    LoadURL(startingURL.c_str());
+  if (starting_url.is_valid())
+    LoadURL(starting_url);
 
-  bool bIsSVGTest = startingURL.find(L"W3C-SVG-1.1") != std::wstring::npos;
-
-  if (bIsSVGTest) {
+  if (IsSVGTestURL(starting_url)) {
     SizeTo(kSVGTestWindowWidth, kSVGTestWindowHeight);
   } else {
     SizeToDefault();
@@ -410,7 +406,7 @@ void TestShell::WaitTestFinished() {
   // Windows multiplies by 2.5, but that causes us to run for far, far too
   // long. We use the passed value and let the scripts flag override
   // the value as needed.
-  NSTimeInterval timeout_seconds = GetLayoutTestTimeoutInSeconds();
+  NSTimeInterval timeout_seconds = GetLayoutTestTimeoutForWatchDog() / 1000;
   WatchDogTarget* watchdog = [[[WatchDogTarget alloc]
                                 initWithTimeout:timeout_seconds] autorelease];
   NSThread* thread = [[NSThread alloc] initWithTarget:watchdog
@@ -457,7 +453,7 @@ void TestShell::DestroyWindow(gfx::NativeWindow windowHandle) {
   [windowHandle autorelease];
 }
 
-WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
+WebWidget* TestShell::CreatePopupWidget() {
   DCHECK(!m_popupHost);
   m_popupHost = WebWidgetHost::Create(webViewWnd(), popup_delegate_.get());
 
@@ -518,13 +514,13 @@ void TestShell::ResizeSubViews() {
   shell->m_focusedWidgetHost = NULL;
 
   // Make sure the previous load is stopped.
-  shell->webView()->StopLoading();
+  shell->webView()->mainFrame()->stopLoading();
   shell->navigation_controller()->Reset();
 
   // Clean up state between test runs.
   webkit_glue::ResetBeforeTestRun(shell->webView());
   ResetWebPreferences();
-  shell->webView()->SetPreferences(*web_prefs_);
+  web_prefs_->Apply(shell->webView());
 
   // Hide the window. We can't actually use NSWindow's |-setFrameTopLeftPoint:|
   // because it leaves a chunk of the window visible instead of moving it
@@ -538,8 +534,7 @@ void TestShell::ResizeSubViews() {
   shell->test_is_preparing_ = true;
 
   shell->set_test_params(&params);
-  std::wstring wstr = UTF8ToWide(params.test_url.c_str());
-  shell->LoadURL(wstr.c_str());
+  shell->LoadURL(GURL(params.test_url));
 
   shell->test_is_preparing_ = false;
   shell->WaitTestFinished();
@@ -548,16 +543,12 @@ void TestShell::ResizeSubViews() {
   return true;
 }
 
-void TestShell::LoadURLForFrame(const wchar_t* url,
-                                const wchar_t* frame_name) {
-  if (!url)
+void TestShell::LoadURLForFrame(const GURL& url,
+                                const std::wstring& frame_name) {
+  if (!url.is_valid())
     return;
 
-  std::string url8 = WideToUTF8(url);
-
-  bool bIsSVGTest = strstr(url8.c_str(), "W3C-SVG-1.1") > 0;
-
-  if (bIsSVGTest) {
+  if (IsSVGTestURL(url)) {
     SizeTo(kSVGTestWindowWidth, kSVGTestWindowHeight);
   } else {
     // only resize back to the default when running tests
@@ -565,18 +556,8 @@ void TestShell::LoadURLForFrame(const wchar_t* url,
       SizeToDefault();
   }
 
-  std::string urlString(url8);
-  struct stat stat_buf;
-  if (!urlString.empty() && stat(url8.c_str(), &stat_buf) == 0) {
-    urlString.insert(0, "file://");
-  }
-
-  std::wstring frame_string;
-  if (frame_name)
-    frame_string = frame_name;
-
-  navigation_controller_->LoadEntry(new TestNavigationEntry(
-      -1, GURL(urlString), std::wstring(), frame_string));
+  navigation_controller_->LoadEntry(
+      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
 }
 
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
@@ -628,10 +609,10 @@ void TestShell::ShowStartupDebuggingDialog() {
   [alert runModal];
 }
 
-StringPiece TestShell::NetResourceProvider(int key) {
-  // TODO(port): Return the requested resource.
-  NOTIMPLEMENTED();
-  return StringPiece();
+base::StringPiece TestShell::NetResourceProvider(int key) {
+  base::StringPiece res;
+  g_resource_data_pack->Get(key, &res);
+  return res;
 }
 
 //-----------------------------------------------------------------------------
@@ -639,7 +620,7 @@ StringPiece TestShell::NetResourceProvider(int key) {
 namespace webkit_glue {
 
 string16 GetLocalizedString(int message_id) {
-  StringPiece res;
+  base::StringPiece res;
   if (!g_resource_data_pack->Get(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;
   }
@@ -648,7 +629,7 @@ string16 GetLocalizedString(int message_id) {
                   res.length() / 2);
 }
 
-StringPiece GetDataResource(int resource_id) {
+base::StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -692,17 +673,25 @@ StringPiece GetDataResource(int resource_id) {
   case IDR_SEARCH_CANCEL_PRESSED:
   case IDR_SEARCH_MAGNIFIER:
   case IDR_SEARCH_MAGNIFIER_RESULTS:
+  case IDR_MEDIA_PAUSE_BUTTON:
+  case IDR_MEDIA_PLAY_BUTTON:
+  case IDR_MEDIA_PLAY_BUTTON_DISABLED:
+  case IDR_MEDIA_SOUND_FULL_BUTTON:
+  case IDR_MEDIA_SOUND_NONE_BUTTON:
+  case IDR_MEDIA_SOUND_DISABLED:
+  case IDR_MEDIA_SLIDER_THUMB:
+  case IDR_MEDIA_VOLUME_SLIDER_THUMB:
     return TestShell::NetResourceProvider(resource_id);
 
   default:
     break;
   }
 
-  return StringPiece();
+  return base::StringPiece();
 }
 
-bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  return NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 bool DownloadUrl(const std::string& url, NSWindow* caller_window) {

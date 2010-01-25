@@ -5,10 +5,8 @@
 {
   'variables': {
     'use_system_sqlite%': 0,
+    'required_sqlite_version': '3.6.1',
   },
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'target_defaults': {
     'defines': [
       'SQLITE_ENABLE_FTS2',
@@ -23,16 +21,34 @@
     {
       'target_name': 'sqlite',
       'conditions': [
+        ['OS=="linux" and not use_system_sqlite', {
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+            ],
+          },
+        }],
         ['OS=="linux" and use_system_sqlite', {
           'type': 'settings',
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --cflags sqlite)',
+              # This next command produces no output but it it will fail (and
+              # cause GYP to fail) if we don't have a recent enough version of
+              # sqlite.
+              '<!@(pkg-config --atleast-version=<(required_sqlite_version) sqlite3)',
+
+              '<!@(pkg-config --cflags sqlite3)',
+            ],
+            'defines': [
+              'USE_SYSTEM_SQLITE',
             ],
           },
           'link_settings': {
+            'ldflags': [
+              '<!@(pkg-config --libs-only-L --libs-only-other sqlite3)',
+            ],
             'libraries': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --libs sqlite)',
+              '<!@(pkg-config --libs-only-l sqlite3)',
             ],
           },
         }, { # else: OS != "linux" or ! use_system_sqlite
@@ -41,9 +57,11 @@
           'msvs_guid': '6EAD4A4B-2BBC-4974-8E45-BB5C16CC2AC9',
           'sources': [
             # This list contains all .h, .c, and .cc files in the directories
-            # ext, preprocessed, and src, with the exception of src/shell* and
-            # src/test*.  Exclusions are applied below in the sources/ and
-            # sources! sections.
+            # ext, preprocessed, and src, with the exception of src/lempar.c,
+            # src/shell*, and src/test*.  Exclusions are applied below in the
+            # sources/ and sources! sections.
+            'ext/async/sqlite3async.c',
+            'ext/async/sqlite3async.h',
             'ext/fts1/ft_hash.c',
             'ext/fts1/ft_hash.h',
             'ext/fts1/fts1.c',
@@ -68,6 +86,8 @@
             'ext/fts2/fts2_tokenizer1.c',
             'ext/fts3/fts3.c',
             'ext/fts3/fts3.h',
+            'ext/fts3/fts3_expr.c',
+            'ext/fts3/fts3_expr.h',
             'ext/fts3/fts3_hash.c',
             'ext/fts3/fts3_hash.h',
             'ext/fts3/fts3_icu.c',
@@ -76,6 +96,7 @@
             'ext/fts3/fts3_tokenizer.h',
             'ext/fts3/fts3_tokenizer1.c',
             'ext/icu/icu.c',
+            'ext/icu/sqliteicu.h',
             'ext/rtree/rtree.c',
             'ext/rtree/rtree.h',
             'preprocessed/keywordhash.h',
@@ -88,6 +109,7 @@
             'src/analyze.c',
             'src/attach.c',
             'src/auth.c',
+            'src/backup.c',
             'src/bitvec.c',
             'src/btmutex.c',
             'src/btree.c',
@@ -111,18 +133,19 @@
             'src/loadext.c',
             'src/main.c',
             'src/malloc.c',
-            'src/md5.c',
+            'src/mem0.c',
             'src/mem1.c',
             'src/mem2.c',
             'src/mem3.c',
-            'src/mem4.c',
             'src/mem5.c',
-            'src/mem6.c',
+            'src/memjournal.c',
             'src/mutex.c',
             'src/mutex.h',
+            'src/mutex_noop.c',
             'src/mutex_os2.c',
             'src/mutex_unix.c',
             'src/mutex_w32.c',
+            'src/notify.c',
             'src/os.c',
             'src/os.h',
             'src/os_common.h',
@@ -132,10 +155,15 @@
             'src/os_win.c',
             'src/pager.c',
             'src/pager.h',
+            'src/pcache.c',
+            'src/pcache.h',
+            'src/pcache1.c',
             'src/pragma.c',
             'src/prepare.c',
             'src/printf.c',
             'src/random.c',
+            'src/resolve.c',
+            'src/rowset.c',
             'src/select.c',
             'src/sqlite3ext.h',
             'src/sqliteInt.h',
@@ -155,33 +183,36 @@
             'src/vdbeapi.c',
             'src/vdbeaux.c',
             'src/vdbeblob.c',
-            'src/vdbefifo.c',
             'src/vdbemem.c',
             'src/vtab.c',
+            'src/walker.c',
             'src/where.c',
           ],
           'sources/': [
             ['exclude', '^ext/(fts[13]|rtree)/'],
-            ['exclude', '(symbian|os2)\\.cc?$'],
+            ['exclude', '(symbian|os2|noop)\\.cc?$'],
           ],
           'sources!': [
             'src/journal.c',
-            'src/md5.c',
             'src/tclsqlite.c',
           ],
           'include_dirs': [
+            'ext/icu',
             'preprocessed',
             'src',
           ],
           'dependencies': [
-            '../icu38/icu38.gyp:icui18n',
-            '../icu38/icu38.gyp:icuuc',
+            '../icu/icu.gyp:icui18n',
+            '../icu/icu.gyp:icuuc',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
               'preprocessed',
             ],
           },
+          'msvs_disabled_warnings': [
+              4018, 4244,
+          ],
           'conditions': [
             ['OS=="win"', {
               'sources/': [['exclude', '_unix\\.cc?$']],
@@ -200,7 +231,7 @@
           'target_name': 'sqlite_shell',
           'type': 'executable',
           'dependencies': [
-            '../icu38/icu38.gyp:icuuc',
+            '../icu/icu.gyp:icuuc',
             'sqlite',
           ],
           'sources': [
@@ -209,12 +240,15 @@
           ],
           'link_settings': {
             'link_languages': ['c++'],
-            'libraries': [
-              '-ldl',
-            ],
           },
         },
       ],
     },]
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -12,10 +12,14 @@
 
 #include "webkit/glue/webaccessibilitymanager_impl.h"
 
+#include "webkit/api/public/WebAccessibilityObject.h"
 #include "webkit/glue/glue_accessibility_object.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webframe_impl.h"
 #include "webkit/glue/webview_impl.h"
+
+using WebKit::WebAccessibilityObject;
+using WebKit::WebView;
 
 namespace webkit_glue {
 
@@ -198,7 +202,7 @@ bool WebAccessibilityManagerImpl::InitAccObjRoot(WebView* view) {
   // Enable accessibility and retrieve Document.
   WebCore::AXObjectCache::enableAccessibility();
   WebFrameImpl* main_frame_impl =
-      static_cast<WebFrameImpl*>(view->GetMainFrame());
+      static_cast<WebFrameImpl*>(view->mainFrame());
   if (!main_frame_impl || !main_frame_impl->frame())
     return false;
 
@@ -258,13 +262,16 @@ bool WebAccessibilityManagerImpl::ClearAccObjMap(int acc_obj_id,
 }
 
 int WebAccessibilityManagerImpl::FocusAccObj(
-    WebCore::AccessibilityObject* acc_obj) {
-  if (!acc_obj) {
+  const WebAccessibilityObject& object) {
+  if (object.isNull()) {
     // Return with failure.
     return -1;
   }
 
-  AccObjToIntMap::iterator it = acc_obj_to_int_map_.find(acc_obj);
+  RefPtr<WebCore::AccessibilityObject> acc_obj =
+      WebAccessibilityObjectToAccessibilityObject(object);
+
+  AccObjToIntMap::iterator it = acc_obj_to_int_map_.find(acc_obj.get());
 
   if (it != acc_obj_to_int_map_.end())
     return it->second;
@@ -272,8 +279,8 @@ int WebAccessibilityManagerImpl::FocusAccObj(
   // Insert new accessibility object in hashmaps and return its newly
   // assigned accessibility object id.
   int_to_glue_acc_obj_map_[acc_obj_id_] =
-      GlueAccessibilityObject::CreateInstance(acc_obj);
-  acc_obj_to_int_map_[acc_obj] = acc_obj_id_;
+      GlueAccessibilityObject::CreateInstance(acc_obj.get());
+  acc_obj_to_int_map_[acc_obj.get()] = acc_obj_id_;
 
   return acc_obj_id_++;
 }

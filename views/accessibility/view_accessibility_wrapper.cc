@@ -4,6 +4,8 @@
 
 #include "views/accessibility/view_accessibility_wrapper.h"
 
+#include "base/scoped_variant_win.h"
+
 #include "views/accessibility/view_accessibility.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,7 +31,7 @@ STDMETHODIMP ViewAccessibilityWrapper::CreateDefaultInstance(REFIID iid) {
       if (!SUCCEEDED(hr) || !instance)
         return E_FAIL;
 
-      CComPtr<IAccessible> accessibility_instance(instance);
+      ScopedComPtr<IAccessible> accessibility_instance(instance);
 
       if (!SUCCEEDED(instance->Initialize(view_)))
         return E_FAIL;
@@ -41,6 +43,18 @@ STDMETHODIMP ViewAccessibilityWrapper::CreateDefaultInstance(REFIID iid) {
   }
   // Interface not supported.
   return E_NOINTERFACE;
+}
+
+HRESULT ViewAccessibilityWrapper::Uninitialize() {
+  view_ = NULL;
+  if (accessibility_info_.get()) {
+    accessibility_info_->put_accValue(
+        ScopedVariant(kViewsUninitializeAccessibilityInstance), NULL);
+    ::CoDisconnectObject(accessibility_info_.get(), 0);
+    accessibility_info_ = NULL;
+  }
+
+  return S_OK;
 }
 
 STDMETHODIMP ViewAccessibilityWrapper::GetInstance(REFIID iid,

@@ -66,11 +66,12 @@ namespace o3d {
 namespace {
 void AddBinaryElements(const Collada& collada,
                        TarGzGenerator* archive_generator) {
-  std::vector<FilePath> paths = collada.GetOriginalDataFilenames();
+  const ColladaDataMap& data_map(collada.original_data_map());
+  std::vector<FilePath> paths = data_map.GetOriginalDataFilenames();
   for (std::vector<FilePath>::const_iterator iter = paths.begin();
        iter != paths.end();
        ++iter) {
-    const std::string& data = collada.GetOriginalData(*iter);
+    const std::string& data = data_map.GetOriginalData(*iter);
 
     archive_generator->AddFile(FilePathToUTF8(*iter), data.size());
     archive_generator->AddFileBytes(
@@ -120,6 +121,7 @@ bool Convert(const FilePath& in_filename,
   collada_options.condition_document = options.condition;
   collada_options.keep_original_data = true;
   collada_options.base_path = options.base_path;
+  collada_options.file_paths = options.file_paths;
   collada_options.up_axis = options.up_axis;
   Collada collada(pack.Get(), collada_options);
   bool result = collada.ImportFile(in_filename, root, param_float);
@@ -224,11 +226,11 @@ bool Convert(const FilePath& in_filename,
   FileOutputStreamProcessor stream_processor(out_file);
   TarGzGenerator archive_generator(&stream_processor);
 
-  archive_generator.AddFile(ArchiveRequest::O3D_MARKER,
-                            ArchiveRequest::O3D_MARKER_CONTENT_LENGTH);
+  archive_generator.AddFile(ArchiveRequest::kO3DMarker,
+                            ArchiveRequest::kO3DMarkerContentLength);
   archive_generator.AddFileBytes(
-      reinterpret_cast<const uint8*>(ArchiveRequest::O3D_MARKER_CONTENT),
-      ArchiveRequest::O3D_MARKER_CONTENT_LENGTH);
+      reinterpret_cast<const uint8*>(ArchiveRequest::kO3DMarkerContent),
+      ArchiveRequest::kO3DMarkerContentLength);
 
   // Serialize the created O3D scene graph to JSON.
   StringWriter out_writer(StringWriter::LF);
@@ -236,7 +238,11 @@ bool Convert(const FilePath& in_filename,
   if (!options.pretty_print) {
     json_writer.BeginCompacting();
   }
-  Serializer serializer(&service_locator, &json_writer, &archive_generator);
+  Serializer::Options serializer_options(
+      options.binary ? Serializer::Options::kBinaryOutputOn :
+                       Serializer::Options::kBinaryOutputOff);
+  Serializer serializer(
+      &service_locator, &json_writer, &archive_generator, serializer_options);
   serializer.SerializePack(pack.Get());
   json_writer.Close();
   out_writer.Close();
@@ -254,9 +260,7 @@ bool Convert(const FilePath& in_filename,
   // the loading process.
   AddBinaryElements(collada, &archive_generator);
 
-  archive_generator.Finalize();
-
-  file_util::CloseFile(out_file);
+  archive_generator.Close(true);
 
   pack->Destroy();
   if (error_messages) {

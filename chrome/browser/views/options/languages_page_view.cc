@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include <windows.h>
@@ -10,19 +10,18 @@
 
 #include "app/gfx/canvas.h"
 #include "app/gfx/font.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "app/table_model.h"
-#include "app/table_model_observer.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/string_util.h"
-#include "base/gfx/native_theme.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/language_combobox_model.h"
+#include "chrome/browser/language_order_table_model.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/spellchecker.h"
-#include "chrome/browser/views/options/language_combobox_model.h"
 #include "chrome/browser/views/restart_message_box.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -33,147 +32,12 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "unicode/uloc.h"
 #include "views/controls/button/radio_button.h"
-#include "views/controls/tabbed_pane.h"
+#include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/controls/table/table_view.h"
 #include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
-
-static const char* const accept_language_list[] = {
-  "af",     // Afrikaans
-  "am",     // Amharic
-  "ar",     // Arabic
-  "az",     // Azerbaijani
-  "be",     // Belarusian
-  "bg",     // Bulgarian
-  "bh",     // Bihari
-  "bn",     // Bengali
-  "br",     // Breton
-  "bs",     // Bosnian
-  "ca",     // Catalan
-  "co",     // Corsican
-  "cs",     // Czech
-  "cy",     // Welsh
-  "da",     // Danish
-  "de",     // German
-  "de-AT",  // German (Austria)
-  "de-CH",  // German (Switzerland)
-  "de-DE",  // German (Germany)
-  "el",     // Greek
-  "en",     // English
-  "en-AU",  // English (Austrailia)
-  "en-CA",  // English (Canada)
-  "en-GB",  // English (UK)
-  "en-NZ",  // English (New Zealand)
-  "en-US",  // English (US)
-  "en-ZA",  // English (South Africa)
-  "eo",     // Esperanto
-  // TODO(jungshik) : Do we want to list all es-Foo for Latin-American
-  // Spanish speaking countries?
-  "es",     // Spanish
-  "et",     // Estonian
-  "eu",     // Basque
-  "fa",     // Persian
-  "fi",     // Finnish
-  "fil",    // Filipino
-  "fo",     // Faroese
-  "fr",     // French
-  "fr-CA",  // French (Canada)
-  "fr-CH",  // French (Switzerland)
-  "fr-FR",  // French (France)
-  "fy",     // Frisian
-  "ga",     // Irish
-  "gd",     // Scots Gaelic
-  "gl",     // Galician
-  "gn",     // Guarani
-  "gu",     // Gujarati
-  "haw",    // Hawaiian
-  "he",     // Hebrew
-  "hi",     // Hindi
-  "hr",     // Croatian
-  "hu",     // Hungarian
-  "hy",     // Armenian
-  "ia",     // Interlingua
-  "id",     // Indonesian
-  "is",     // Icelandic
-  "it",     // Italian
-  "it-CH",  // Italian (Switzerland)
-  "it-IT",  // Italian (Italy)
-  "ja",     // Japanese
-  "jw",     // Javanese
-  "ka",     // Georgian
-  "kk",     // Kazakh
-  "km",     // Cambodian
-  "kn",     // Kannada
-  "ko",     // Korean
-  "ku",     // Kurdish
-  "ky",     // Kyrgyz
-  "la",     // Latin
-  "ln",     // Lingala
-  "lo",     // Laothian
-  "lt",     // Lithuanian
-  "lv",     // Latvian
-  "mk",     // Macedonian
-  "ml",     // Malayalam
-  "mn",     // Mongolian
-  "mo",     // Moldavian
-  "mr",     // Marathi
-  "ms",     // Malay
-  "mt",     // Maltese
-  "nb",     // Norwegian (Bokmal)
-  "ne",     // Nepali
-  "nl",     // Dutch
-  "nn",     // Norwegian (Nynorsk)
-  "no",     // Norwegian
-  "oc",     // Occitan
-  "or",     // Oriya
-  "pa",     // Punjabi
-  "pl",     // Polish
-  "ps",     // Pashto
-  "pt",     // Portuguese
-  "pt-BR",  // Portuguese (Brazil)
-  "pt-PT",  // Portuguese (Portugal)
-  "qu",     // Quechua
-  "rm",     // Romansh
-  "ro",     // Romanian
-  "ru",     // Russian
-  "sd",     // Sindhi
-  "sh",     // Serbo-Croatian
-  "si",     // Sinhalese
-  "sk",     // Slovak
-  "sl",     // Slovenian
-  "sn",     // Shona
-  "so",     // Somali
-  "sq",     // Albanian
-  "sr",     // Serbian
-  "st",     // Sesotho
-  "su",     // Sundanese
-  "sv",     // Swedish
-  "sw",     // Swahili
-  "ta",     // Tamil
-  "te",     // Telugu
-  "tg",     // Tajik
-  "th",     // Thai
-  "ti",     // Tigrinya
-  "tk",     // Turkmen
-  "to",     // Tonga
-  "tr",     // Turkish
-  "tt",     // Tatar
-  "tw",     // Twi
-  "ug",     // Uighur
-  "uk",     // Ukrainian
-  "ur",     // Urdu
-  "uz",     // Uzbek
-  "vi",     // Vietnamese
-  "xh",     // Xhosa
-  "yi",     // Yiddish
-  "yo",     // Yoruba
-  "zh",     // Chinese
-  "zh-CN",  // Chinese (Simplified)
-  "zh-TW",  // Chinese (Traditional)
-  "zu",     // Zulu
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 // AddLanguageWindowView
@@ -291,22 +155,10 @@ void AddLanguageWindowView::ViewHierarchyChanged(bool is_add,
 
 void AddLanguageWindowView::Init() {
   // Determine Locale Codes.
-  std::vector<std::string> locale_codes;
   const std::string app_locale = g_browser_process->GetApplicationLocale();
-  for (size_t i = 0; i < arraysize(accept_language_list); ++i) {
-    string16 display_name =
-        l10n_util::GetDisplayNameForLocale(accept_language_list[i],
-                                           app_locale, false);
-    // This is a hack. If ICU doesn't have a translated name for
-    // this language, GetDisplayNameForLocale will just return the
-    // language code. In that case, we skip it.
-    // TODO(jungshik) : Put them at the of the list with language codes
-    // enclosed by brackets.
-    if (IsStringASCII(display_name) &&
-        UTF16ToASCII(display_name) == accept_language_list[i])
-      continue;
-    locale_codes.push_back(accept_language_list[i]);
-  }
+  std::vector<std::string> locale_codes;
+  l10n_util::GetAcceptLanguagesForLocale(app_locale, &locale_codes);
+
   accept_language_combobox_model_.reset(new LanguageComboboxModel(
     profile_, locale_codes));
   accept_language_combobox_ = new views::Combobox(
@@ -314,158 +166,6 @@ void AddLanguageWindowView::Init() {
   accept_language_combobox_->SetSelectedItem(0);
   accept_language_combobox_->set_listener(this);
   AddChildView(accept_language_combobox_);
-}
-
-class LanguageOrderTableModel : public TableModel {
- public:
-  LanguageOrderTableModel();
-
-  // Set Language List.
-  void SetAcceptLanguagesString(const std::string& language_list);
-
-  // Add at the end.
-  void Add(const std::string& language);
-
-  // Removes the entry at the specified index.
-  void Remove(int index);
-
-  // Returns index corresponding to a given language. Returns -1 if the
-  // language is not found.
-  int GetIndex(const std::string& language);
-
-  // Move down the entry at the specified index.
-  void MoveDown(int index);
-
-  // Move up the entry at the specified index.
-  void MoveUp(int index);
-
-  // Returns the set of languagess this model contains.
-  std::string GetLanguageList() { return VectorToList(languages_); }
-
-  // TableModel overrides:
-  virtual int RowCount();
-  virtual std::wstring GetText(int row, int column_id);
-  virtual void SetObserver(TableModelObserver* observer);
-
- private:
-  // This method converts a comma separated list to a vector of strings.
-  void ListToVector(const std::string& list,
-                    std::vector<std::string>* vector);
-
-  // This method returns a comma separated string given a string vector.
-  std::string VectorToList(const std::vector<std::string>& vector);
-
-  // Set of entries we're showing.
-  std::vector<std::string> languages_;
-  std::string comma_separated_language_list_;
-
-  TableModelObserver* observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(LanguageOrderTableModel);
-};
-
-LanguageOrderTableModel::LanguageOrderTableModel()
-    : observer_(NULL) {
-}
-
-void LanguageOrderTableModel::SetAcceptLanguagesString(
-    const std::string& language_list) {
-  std::vector<std::string> languages_vector;
-  ListToVector(language_list, &languages_vector);
-  for (int i = 0; i < static_cast<int>(languages_vector.size()); i++) {
-    Add(languages_vector.at(i));
-  }
-}
-
-void LanguageOrderTableModel::SetObserver(TableModelObserver* observer) {
-  observer_ = observer;
-}
-
-std::wstring LanguageOrderTableModel::GetText(int row, int column_id) {
-  DCHECK(row >= 0 && row < RowCount());
-  const std::string app_locale = g_browser_process->GetApplicationLocale();
-  return l10n_util::GetDisplayNameForLocale(languages_.at(row),
-                                            app_locale,
-                                            true);
-}
-
-void LanguageOrderTableModel::Add(const std::string& language) {
-  if (language.empty())
-    return;
-  // Check for selecting duplicated language.
-  for (std::vector<std::string>::const_iterator cit = languages_.begin();
-       cit != languages_.end(); ++cit)
-    if (*cit == language)
-      return;
-  languages_.push_back(language);
-  if (observer_)
-    observer_->OnItemsAdded(RowCount() - 1, 1);
-}
-
-void LanguageOrderTableModel::Remove(int index) {
-  DCHECK(index >= 0 && index < RowCount());
-  languages_.erase(languages_.begin() + index);
-  if (observer_)
-    observer_->OnItemsRemoved(index, 1);
-}
-
-int LanguageOrderTableModel::GetIndex(const std::string& language) {
-  if (language.empty())
-    return -1;
-
-  int index = 0;
-  for (std::vector<std::string>::const_iterator cit = languages_.begin();
-      cit != languages_.end(); ++cit) {
-    if (*cit == language)
-      return index;
-
-    index++;
-  }
-
-  return -1;
-}
-
-void LanguageOrderTableModel::MoveDown(int index) {
-  if (index < 0 || index >= RowCount() - 1)
-    return;
-  std::string item = languages_.at(index);
-  languages_.erase(languages_.begin() + index);
-  if (index == RowCount() - 1)
-    languages_.push_back(item);
-  else
-    languages_.insert(languages_.begin() + index + 1, item);
-  if (observer_)
-    observer_->OnItemsChanged(0, RowCount());
-}
-
-void LanguageOrderTableModel::MoveUp(int index) {
-  if (index <= 0 || index >= static_cast<int>(languages_.size()))
-    return;
-  std::string item = languages_.at(index);
-  languages_.erase(languages_.begin() + index);
-  languages_.insert(languages_.begin() + index - 1, item);
-  if (observer_)
-    observer_->OnItemsChanged(0, RowCount());
-}
-
-int LanguageOrderTableModel::RowCount() {
-  return static_cast<int>(languages_.size());
-}
-
-void LanguageOrderTableModel::ListToVector(const std::string& list,
-                                           std::vector<std::string>* vector) {
-  SplitString(list, ',', vector);
-}
-
-std::string LanguageOrderTableModel::VectorToList(
-    const std::vector<std::string>& vector)  {
-  std::string list;
-  for (int i = 0 ; i < static_cast<int>(vector.size()) ; i++) {
-    list += vector.at(i);
-    if (i != vector.size() - 1)
-      list += ',';
-  }
-  return list;
 }
 
 LanguagesPageView::LanguagesPageView(Profile* profile)
@@ -505,7 +205,8 @@ LanguagesPageView::~LanguagesPageView() {
     language_order_table_->SetModel(NULL);
 }
 
-void LanguagesPageView::ButtonPressed(views::Button* sender) {
+void LanguagesPageView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == move_up_button_) {
     OnMoveUpLanguage();
     language_table_edited_ = true;
@@ -529,9 +230,10 @@ void LanguagesPageView::ButtonPressed(views::Button* sender) {
 }
 
 void LanguagesPageView::OnAddLanguage(const std::string& new_language) {
-  language_order_table_model_->Add(new_language);
-  language_order_table_->Select(language_order_table_model_->RowCount() - 1);
-  OnSelectionChanged();
+  if (language_order_table_model_->Add(new_language)) {
+    language_order_table_->Select(language_order_table_model_->RowCount() - 1);
+    OnSelectionChanged();
+  }
 }
 
 void LanguagesPageView::InitControlLayout() {
@@ -602,11 +304,7 @@ void LanguagesPageView::InitControlLayout() {
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
   button_stack_layout->StartRow(0, single_column_view_set_id);
-  button_stack_layout->AddView(move_up_button_, 1, 1, GridLayout::FILL,
-                               GridLayout::CENTER);
-  button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
-  button_stack_layout->StartRow(0, single_column_view_set_id);
-  button_stack_layout->AddView(move_down_button_, 1, 1, GridLayout::FILL,
+  button_stack_layout->AddView(add_button_, 1, 1, GridLayout::FILL,
                                GridLayout::CENTER);
   button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   button_stack_layout->StartRow(0, single_column_view_set_id);
@@ -614,7 +312,11 @@ void LanguagesPageView::InitControlLayout() {
                                GridLayout::CENTER);
   button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   button_stack_layout->StartRow(0, single_column_view_set_id);
-  button_stack_layout->AddView(add_button_, 1, 1, GridLayout::FILL,
+  button_stack_layout->AddView(move_up_button_, 1, 1, GridLayout::FILL,
+                               GridLayout::CENTER);
+  button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  button_stack_layout->StartRow(0, single_column_view_set_id);
+  button_stack_layout->AddView(move_down_button_, 1, 1, GridLayout::FILL,
                                GridLayout::CENTER);
 
   layout->AddView(button_stack_);
@@ -638,7 +340,7 @@ void LanguagesPageView::InitControlLayout() {
   enable_spellchecking_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_ENABLE_SPELLCHECK));
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kAutoSpellCorrect)) {
+  if (command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures)) {
     enable_autospellcorrect_checkbox_ = new views::Checkbox(
         l10n_util::GetString(IDS_OPTIONS_ENABLE_AUTO_SPELL_CORRECTION));
     enable_autospellcorrect_checkbox_->set_listener(this);
@@ -659,7 +361,7 @@ void LanguagesPageView::InitControlLayout() {
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(enable_spellchecking_checkbox_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
-  if (command_line.HasSwitch(switches::kAutoSpellCorrect)) {
+  if (command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures)) {
     layout->StartRow(0, single_column_view_set_id);
     layout->AddView(enable_autospellcorrect_checkbox_);
     layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
@@ -727,15 +429,8 @@ void LanguagesPageView::NotifyPrefChanged(const std::wstring* pref_name) {
     // dictionary language in the user profile now correctly stores "fr"
     // instead of "fr-FR".
     if (index < 0) {
-      PrefService* local_state;
-      if (!profile())
-        local_state = g_browser_process->local_state();
-      else
-        local_state = profile()->GetPrefs();
-
-      DCHECK(local_state);
       const std::string& lang_region = WideToASCII(
-          local_state->GetString(prefs::kSpellCheckDictionary));
+          dictionary_language_.GetValue());
       dictionary_language_.SetValue(ASCIIToWide(
           SpellChecker::GetLanguageFromLanguageRegion(lang_region)));
       index = dictionary_language_model_->GetSelectedLanguageIndex(
@@ -751,7 +446,7 @@ void LanguagesPageView::NotifyPrefChanged(const std::wstring* pref_name) {
   }
   if (!pref_name || *pref_name == prefs::kEnableAutoSpellCorrect) {
     const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    if (command_line.HasSwitch(switches::kAutoSpellCorrect)) {
+    if (command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures)) {
       enable_autospellcorrect_checkbox_->SetChecked(
           enable_autospellcorrect_.GetValue());
     }

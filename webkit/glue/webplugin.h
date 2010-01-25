@@ -1,16 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBPLUGIN_H__
-#define WEBKIT_GLUE_WEBPLUGIN_H__
+#ifndef WEBKIT_GLUE_WEBPLUGIN_H_
+#define WEBKIT_GLUE_WEBPLUGIN_H_
 
 #include <string>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/gfx/rect.h"
-#include "base/gfx/native_widget_types.h"
 
 // TODO(port): this typedef is obviously incorrect on non-Windows
 // platforms, but now a lot of code now accidentally depends on them
@@ -18,15 +18,23 @@
 typedef void* HANDLE;
 
 class GURL;
-class WebFrame;
-class WebPluginResourceClient;
-
 struct NPObject;
+
+namespace WebKit {
+class WebFrame;
+}
+
+namespace webkit_glue {
+
+class WebPluginDelegate;
+class WebPluginParentView;
+class WebPluginResourceClient;
 
 // Describes the new location for a plugin window.
 struct WebPluginGeometry {
   // On Windows, this is the plugin window in the plugin process.
-  // On X11, this is the browser process's hosting window (the GtkSocket).
+  // On X11, this is the XID of the plugin-side GtkPlug containing the
+  // GtkSocket hosting the actual plugin window.
   gfx::PluginWindowHandle window;
   gfx::Rect window_rect;
   // Clip rect (include) and cutouts (excludes), relative to
@@ -37,27 +45,11 @@ struct WebPluginGeometry {
   bool visible;
 };
 
-
-enum RoutingStatus {
-  ROUTED,
-  NOT_ROUTED,
-  INVALID_URL,
-  GENERAL_FAILURE
-};
-
 // The WebKit side of a plugin implementation.  It provides wrappers around
 // operations that need to interact with the frame and other WebCore objects.
 class WebPlugin {
  public:
-  WebPlugin() { }
-  virtual ~WebPlugin() { }
-
-#if defined(OS_LINUX)
-  // Called by the plugin delegate to request a container for a new
-  // windowed plugin.  This handle will later get destroyed with
-  // WillDestroyWindow.
-  virtual gfx::PluginWindowHandle CreatePluginContainer() = 0;
-#endif
+  virtual ~WebPlugin() {}
 
   // Called by the plugin delegate to let the WebPlugin know if the plugin is
   // windowed (i.e. handle is not NULL) or windowless (handle is NULL).  This
@@ -131,8 +123,14 @@ class WebPlugin {
   virtual void ResourceClientDeleted(
       WebPluginResourceClient* resource_client) {}
 
- private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebPlugin);
+  // Defers the loading of the resource identified by resource_id. This is
+  // controlled by the defer parameter.
+  virtual void SetDeferResourceLoading(int resource_id, bool defer) = 0;
+
+  // Gets the WebPluginDelegate that implements the interface.
+  // This API is only for use with Pepper, and hence only with
+  // in renderer process plugins.
+  virtual WebPluginDelegate* delegate() { return NULL; }
 };
 
 // Simpler version of ResourceHandleClient that lends itself to proxying.
@@ -146,8 +144,7 @@ class WebPluginResourceClient {
                                   const std::string& headers,
                                   uint32 expected_length,
                                   uint32 last_modified,
-                                  bool request_is_seekable,
-                                  bool* cancel) = 0;
+                                  bool request_is_seekable) = 0;
   virtual void DidReceiveData(const char* buffer, int length,
                               int data_offset) = 0;
   virtual void DidFinishLoading() = 0;
@@ -155,5 +152,6 @@ class WebPluginResourceClient {
   virtual bool IsMultiByteResponseExpected() = 0;
 };
 
+}  // namespace webkit_glue
 
-#endif  // #ifndef WEBKIT_GLUE_WEBPLUGIN_H__
+#endif  // #ifndef WEBKIT_GLUE_WEBPLUGIN_H_

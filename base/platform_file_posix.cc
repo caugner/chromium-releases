@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <errno.h>
 #include <sys/stat.h>
 
+#include "base/file_path.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace base {
 
 // TODO(erikkay): does it make sense to support PLATFORM_FILE_EXCLUSIVE_* here?
-PlatformFile CreatePlatformFile(const std::wstring& name,
-                                int flags,
+PlatformFile CreatePlatformFile(const FilePath& name, int flags,
                                 bool* created) {
   int open_flags = 0;
   if (flags & PLATFORM_FILE_CREATE)
@@ -43,8 +43,7 @@ PlatformFile CreatePlatformFile(const std::wstring& name,
 
   DCHECK(O_RDONLY == 0);
 
-  int descriptor = open(WideToUTF8(name).c_str(), open_flags,
-                        S_IRUSR | S_IWUSR);
+  int descriptor = open(name.value().c_str(), open_flags, S_IRUSR | S_IWUSR);
 
   if (flags & PLATFORM_FILE_OPEN_ALWAYS) {
     if (descriptor > 0) {
@@ -52,14 +51,30 @@ PlatformFile CreatePlatformFile(const std::wstring& name,
         *created = false;
     } else {
       open_flags |= O_CREAT;
-      descriptor = open(WideToUTF8(name).c_str(), open_flags,
-                        S_IRUSR | S_IWUSR);
+      if (flags & PLATFORM_FILE_EXCLUSIVE_READ ||
+          flags & PLATFORM_FILE_EXCLUSIVE_WRITE) {
+        open_flags |= O_EXCL;   // together with O_CREAT implies O_NOFOLLOW
+      }
+      descriptor = open(name.value().c_str(), open_flags, S_IRUSR | S_IWUSR);
       if (created && descriptor > 0)
         *created = true;
     }
   }
 
+  if ((descriptor > 0) && (flags & PLATFORM_FILE_DELETE_ON_CLOSE)) {
+    unlink(name.value().c_str());
+  }
+
   return descriptor;
+}
+
+PlatformFile CreatePlatformFile(const std::wstring& name, int flags,
+                                bool* created) {
+  return CreatePlatformFile(FilePath::FromWStringHack(name), flags, created);
+}
+
+bool ClosePlatformFile(PlatformFile file) {
+  return close(file);
 }
 
 }  // namespace base

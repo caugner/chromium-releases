@@ -8,17 +8,32 @@ namespace browser_defaults {
 
 #if defined(OS_CHROMEOS)
 
-const bool kForceAutocompleteEditFontSize = false;
+const double kAutocompleteEditFontPixelSize = 12.0;
+const double kAutocompleteEditFontPixelSizeInPopup = kAutocompletePopupFontSize;
+
 const int kAutocompletePopupFontSize = 7;
 const SessionStartupPref::Type kDefaultSessionStartupType =
     SessionStartupPref::LAST;
-const bool kSuppressCrashInfoBar = true;
-const bool kRestoreAfterCrash = true;
+const int kPinnedTabWidth = 64;
+const bool kCanToggleSystemTitleBar = false;
 
 #elif defined(OS_LINUX)
 
-const bool kForceAutocompleteEditFontSize = true;
+// 13.4px = 10pt @ 96dpi.
+const double kAutocompleteEditFontPixelSize = 13.4;
+
+// On Windows, popup windows' autocomplete box have a font 5/6 the size of a
+// regular window, which we duplicate here for GTK.
+const double kAutocompleteEditFontPixelSizeInPopup =
+    kAutocompleteEditFontPixelSize * 5.0 / 6.0;
+
 const int kAutocompletePopupFontSize = 10;
+
+#if defined(TOOLKIT_VIEWS)
+const bool kCanToggleSystemTitleBar = false;
+#else
+const bool kCanToggleSystemTitleBar = true;
+#endif
 
 #endif
 
@@ -26,8 +41,7 @@ const int kAutocompletePopupFontSize = 10;
 
 const SessionStartupPref::Type kDefaultSessionStartupType =
     SessionStartupPref::DEFAULT;
-const bool kSuppressCrashInfoBar = false;
-const bool kRestoreAfterCrash = false;
+const int kPinnedTabWidth = 56;
 
 #endif
 

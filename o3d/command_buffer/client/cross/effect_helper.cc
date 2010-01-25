@@ -43,7 +43,7 @@
 namespace o3d {
 namespace command_buffer {
 
-bool EffectHelper::CreateEffectParameters(ResourceID effect_id,
+bool EffectHelper::CreateEffectParameters(ResourceId effect_id,
                                           std::vector<EffectParamDesc> *descs) {
   using effect_param::Desc;
   DCHECK_NE(effect_id, kInvalidResource);
@@ -52,18 +52,13 @@ bool EffectHelper::CreateEffectParameters(ResourceID effect_id,
 
   // Get the param count.
   Uint32 *retval = shm_allocator_->AllocTyped<Uint32>(1);
-  CommandBufferEntry args[4];
-  args[0].value_uint32 = effect_id;
-  args[1].value_uint32 = sizeof(*retval);
-  args[2].value_uint32 = shm_id_;
-  args[3].value_uint32 = shm_allocator_->GetOffset(retval);
-  helper_->AddCommand(GET_PARAM_COUNT, 4, args);
+  helper_->GetParamCount(effect_id, sizeof(*retval),
+                         shm_id_, shm_allocator_->GetOffset(retval));
   // Finish has to be called to get the result.
   helper_->Finish();
 
   // We could have failed if the effect_id is invalid.
-  if (helper_->interface()->GetParseError() !=
-      BufferSyncInterface::PARSE_NO_ERROR) {
+  if (helper_->GetParseError() != parse_error::kParseNoError) {
     shm_allocator_->Free(retval);
     return false;
   }
@@ -79,16 +74,14 @@ bool EffectHelper::CreateEffectParameters(ResourceID effect_id,
   for (unsigned int i = 0; i < param_count; ++i) {
     EffectParamDesc *desc = &((*descs)[i]);
     desc->id = param_id_allocator_->AllocateID();
-    args[0].value_uint32 = desc->id;
-    args[1].value_uint32 = effect_id;
-    args[2].value_uint32 = i;
-    helper_->AddCommand(CREATE_PARAM, 3, args);
+    helper_->CreateParam(desc->id, effect_id, i);
   }
 
   // Read param descriptions in batches. We use as much shared memory as
   // possible so that we only call Finish as little as possible.
   unsigned int max_param_per_batch =
-      std::min(param_count, max_buffer_size / sizeof(Desc));  // NOLINT
+      std::min(static_cast<unsigned>(param_count),
+      static_cast<unsigned>(max_buffer_size / sizeof(Desc)));  // NOLINT
   Desc *raw_descs = shm_allocator_->AllocTyped<Desc>(max_param_per_batch);
   DCHECK(raw_descs);
   for (unsigned int i = 0; i < param_count; i += max_param_per_batch) {
@@ -96,21 +89,19 @@ bool EffectHelper::CreateEffectParameters(ResourceID effect_id,
     for (unsigned int j = 0 ; j < count; ++j) {
       EffectParamDesc *desc = &((*descs)[i + j]);
       Desc *raw_desc = raw_descs + j;
-      args[0].value_uint32 = desc->id;
-      args[1].value_uint32 = sizeof(*raw_desc);
-      args[2].value_uint32 = shm_id_;
-      args[3].value_uint32 = shm_allocator_->GetOffset(raw_desc);
-      helper_->AddCommand(GET_PARAM_DESC, 4, args);
+      helper_->GetParamDesc(desc->id, sizeof(*raw_desc),
+                            shm_id_,
+                            shm_allocator_->GetOffset(raw_desc));
     }
     // Finish to get the results.
     helper_->Finish();
-    DCHECK_EQ(helper_->interface()->GetParseError(),
-              BufferSyncInterface::PARSE_NO_ERROR);
+    DCHECK_EQ(helper_->GetParseError(), parse_error::kParseNoError);
     for (unsigned int j = 0 ; j < count; ++j) {
       EffectParamDesc *desc = &((*descs)[i + j]);
       Desc *raw_desc = raw_descs + j;
       desc->data_type = raw_desc->data_type;
       desc->data_size = raw_desc->data_size;
+      desc->num_elements = raw_desc->num_elements;
       desc->cmd_desc_size = raw_desc->size;
     }
   }
@@ -124,24 +115,22 @@ bool EffectHelper::GetParamStrings(EffectParamDesc *desc) {
   DCHECK_NE(desc->id, kInvalidResource);
   // desc may not have come directly from CreateEffectParameters, so it may be
   // less than the minimum required size.
-  unsigned int size = std::max(desc->cmd_desc_size, sizeof(Desc));  // NOLINT
+  unsigned int size = std::max(static_cast<unsigned>(desc->cmd_desc_size),
+      static_cast<unsigned>(sizeof(Desc)));  // NOLINT
   Desc *raw_desc = static_cast<Desc *>(shm_allocator_->Alloc(size));
   if (!raw_desc) {
     // Not enough memory to get the param desc.
     return false;
   }
-  CommandBufferEntry args[4];
-  args[0].value_uint32 = desc->id;
-  args[1].value_uint32 = size;
-  args[2].value_uint32 = shm_id_;
-  args[3].value_uint32 = shm_allocator_->GetOffset(raw_desc);
-  helper_->AddCommand(GET_PARAM_DESC, 4, args);
+  helper_->GetParamDesc(desc->id, size,
+                        shm_id_,
+                        shm_allocator_->GetOffset(raw_desc));
+
   // Finish to get the results.
   helper_->Finish();
 
   // We could have failed if the param ID is invalid.
-  if (helper_->interface()->GetParseError() !=
-      BufferSyncInterface::PARSE_NO_ERROR) {
+  if (helper_->GetParseError() != parse_error::kParseNoError) {
     shm_allocator_->Free(raw_desc);
     return false;
   }
@@ -159,20 +148,19 @@ bool EffectHelper::GetParamStrings(EffectParamDesc *desc) {
       // Not enough memory to get the param desc.
       return false;
     }
-    args[1].value_uint32 = size;
-    args[3].value_uint32 = shm_allocator_->GetOffset(raw_desc);
-    helper_->AddCommand(GET_PARAM_DESC, 4, args);
+    helper_->GetParamDesc(desc->id, size,
+                          shm_id_,
+                          shm_allocator_->GetOffset(raw_desc));
     // Finish to get the results.
     helper_->Finish();
-    DCHECK_EQ(helper_->interface()->GetParseError(),
-              BufferSyncInterface::PARSE_NO_ERROR);
+    DCHECK_EQ(helper_->GetParseError(), parse_error::kParseNoError);
     DCHECK_EQ(raw_desc->size, size);
   }
 
   const char *raw_desc_string = reinterpret_cast<char *>(raw_desc);
   if (raw_desc->name_offset) {
     DCHECK_LE(raw_desc->name_offset + raw_desc->name_size, raw_desc->size);
-    DCHECK_GT(raw_desc->name_size, 0);
+    DCHECK_GT(raw_desc->name_size, 0U);
     DCHECK_EQ(raw_desc_string[raw_desc->name_offset + raw_desc->name_size - 1],
               0);
     desc->name = String(raw_desc_string + raw_desc->name_offset,
@@ -183,7 +171,7 @@ bool EffectHelper::GetParamStrings(EffectParamDesc *desc) {
   if (raw_desc->semantic_offset) {
     DCHECK_LE(raw_desc->semantic_offset + raw_desc->semantic_size,
               raw_desc->size);
-    DCHECK_GT(raw_desc->semantic_size, 0);
+    DCHECK_GT(raw_desc->semantic_size, 0U);
     DCHECK_EQ(raw_desc_string[raw_desc->semantic_offset +
                               raw_desc->semantic_size - 1],
               0);
@@ -198,34 +186,28 @@ bool EffectHelper::GetParamStrings(EffectParamDesc *desc) {
 
 void EffectHelper::DestroyEffectParameters(
     const std::vector<EffectParamDesc> &descs) {
-  CommandBufferEntry args[1];
   for (unsigned int i = 0; i < descs.size(); ++i) {
     const EffectParamDesc &desc = descs[i];
-    args[0].value_uint32 = desc.id;
-    helper_->AddCommand(DESTROY_PARAM, 1, args);
+    helper_->DestroyParam(desc.id);
     param_id_allocator_->FreeID(desc.id);
   }
 }
 
-bool EffectHelper::GetEffectStreams(ResourceID effect_id,
+bool EffectHelper::GetEffectStreams(ResourceId effect_id,
                                     std::vector<EffectStreamDesc> *descs) {
   using effect_stream::Desc;
   DCHECK_NE(effect_id, kInvalidResource);
 
   // Get the param count.
   Uint32 *retval = shm_allocator_->AllocTyped<Uint32>(1);
-  CommandBufferEntry args[5];
-  args[0].value_uint32 = effect_id;
-  args[1].value_uint32 = sizeof(*retval);
-  args[2].value_uint32 = shm_id_;
-  args[3].value_uint32 = shm_allocator_->GetOffset(retval);
-  helper_->AddCommand(GET_STREAM_COUNT, 4, args);
+  helper_->GetStreamCount(effect_id, sizeof(*retval),
+                          shm_id_,
+                          shm_allocator_->GetOffset(retval));
   // Finish has to be called to get the result.
   helper_->Finish();
 
   // We could have failed if the effect_id is invalid.
-  if (helper_->interface()->GetParseError() !=
-      BufferSyncInterface::PARSE_NO_ERROR) {
+  if (helper_->GetParseError() != parse_error::kParseNoError) {
     shm_allocator_->Free(retval);
     return false;
   }
@@ -241,25 +223,21 @@ bool EffectHelper::GetEffectStreams(ResourceID effect_id,
   // Read stream descriptions in batches. We use as much shared memory as
   // possible so that we only call Finish as little as possible.
   unsigned int max_stream_per_batch =
-      std::min(stream_count, max_buffer_size / sizeof(Desc));  // NOLINT
+      std::min(static_cast<unsigned>(stream_count),
+      static_cast<unsigned>(max_buffer_size / sizeof(Desc)));  // NOLINT
   Desc *raw_descs = shm_allocator_->AllocTyped<Desc>(max_stream_per_batch);
   DCHECK(raw_descs);
   for (unsigned int i = 0; i < stream_count; i += max_stream_per_batch) {
     unsigned int count = std::min(stream_count - i, max_stream_per_batch);
     for (unsigned int j = 0 ; j < count; ++j) {
-      EffectStreamDesc *desc = &((*descs)[i + j]);
       Desc *raw_desc = raw_descs + j;
-      args[0].value_uint32 = effect_id;
-      args[1].value_uint32 = i+j;
-      args[2].value_uint32 = sizeof(*raw_desc);
-      args[3].value_uint32 = shm_id_;
-      args[4].value_uint32 = shm_allocator_->GetOffset(raw_desc);
-      helper_->AddCommand(GET_STREAM_DESC, 5, args);
+      helper_->GetStreamDesc(effect_id, i + j, sizeof(*raw_desc),
+                             shm_id_,
+                             shm_allocator_->GetOffset(raw_desc));
     }
     // Finish to get the results.
     helper_->Finish();
-    DCHECK_EQ(helper_->interface()->GetParseError(),
-              BufferSyncInterface::PARSE_NO_ERROR);
+    DCHECK_EQ(helper_->GetParseError(), parse_error::kParseNoError);
     for (unsigned int j = 0 ; j < count; ++j) {
       EffectStreamDesc *desc = &((*descs)[i + j]);
       Desc *raw_desc = raw_descs + j;

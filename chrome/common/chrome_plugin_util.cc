@@ -131,8 +131,9 @@ CPError CPB_GetCommandLineArgumentsCommon(const char* url,
   if (!user_data_dir.empty()) {
     // Make sure user_data_dir is an absolute path.
     if (file_util::AbsolutePath(&user_data_dir) &&
-        file_util::PathExists(user_data_dir)) {
-      arguments_w += std::wstring(L"--") + switches::kUserDataDir +
+        file_util::PathExists(FilePath::FromWStringHack(user_data_dir))) {
+      // TODO(evanm): use CommandLine APIs instead of this.
+      arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kUserDataDir) +
                      L"=\"" + user_data_dir + L"\" ";
     }
   }
@@ -140,8 +141,15 @@ CPError CPB_GetCommandLineArgumentsCommon(const char* url,
   // Use '--app=url' instead of just 'url' to launch the browser with minimal
   // chrome.
   // Note: Do not change this flag!  Old Gears shortcuts will break if you do!
-  std::wstring url_w = UTF8ToWide(url);
-  arguments_w += std::wstring(L"--") + switches::kApp + L'=' + url_w;
+  std::string url_string(url);
+  ReplaceSubstringsAfterOffset(&url_string, 0, "\"", "\\\"");
+  ReplaceSubstringsAfterOffset(&url_string, 0, "%", "%%");
+  ReplaceSubstringsAfterOffset(&url_string, 0, ";", "");
+  ReplaceSubstringsAfterOffset(&url_string, 0, "$", "");
+  std::wstring url_w = UTF8ToWide(url_string);
+  // TODO(evanm): use CommandLine APIs instead of this.
+  arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kApp) +
+      L"=\"" + url_w + L"\"";
 
   *arguments = WideToUTF8(arguments_w);
 

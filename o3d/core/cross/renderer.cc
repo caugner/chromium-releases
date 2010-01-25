@@ -34,10 +34,10 @@
 // creates and returns platform specific implementation for the abstract
 // Renderer class.
 
-#include "core/cross/precompile.h"
 
 #include "core/cross/renderer.h"
 
+#include "core/cross/client_info.h"
 #include "core/cross/display_window.h"
 #include "core/cross/error.h"
 #include "core/cross/features.h"
@@ -92,15 +92,22 @@ bool IsSupportedTextureFormat(Texture::Format format,
 
 }  // anonymous namespace
 
+// Returns whether to Force the Software Renderer by checking for the existence
+// of the environment variable O3D_FORCE_SOFTWARE_RENDERER.
+bool Renderer::IsForceSoftwareRenderer() {
+  return getenv("O3D_FORCE_SOFTWARE_RENDERER") != NULL;
+}
+
 Renderer::Renderer(ServiceLocator* service_locator)
     : service_locator_(service_locator),
       service_(service_locator, this),
       features_(service_locator),
-      supports_npot_(false),
-      clear_client_(true),
-      need_to_render_(true),
       current_render_surface_(NULL),
       current_depth_surface_(NULL),
+      current_render_surface_is_back_buffer_(true),
+      viewport_(0.0f, 0.0f, 1.0f, 1.0f),
+      depth_range_(0.0f, 1.0f),
+      write_mask_(0xf),
       render_frame_count_(0),
       transforms_processed_(0),
       transforms_culled_(0),
@@ -108,14 +115,20 @@ Renderer::Renderer(ServiceLocator* service_locator)
       draw_elements_culled_(0),
       draw_elements_rendered_(0),
       primitives_rendered_(0),
+      start_depth_(0),
+      clear_client_(true),
+      need_to_render_(true),
+      rendering_(false),
+      drawing_(false),
       width_(0),
       height_(0),
-      render_width_(0),
-      render_height_(0),
-      viewport_(0.0f, 0.0f, 1.0f, 1.0f),
-      depth_range_(0.0f, 1.0f),
+      display_width_(0),
+      display_height_(0),
       dest_x_offset_(0),
-      dest_y_offset_(0) {
+      dest_y_offset_(0),
+      supports_npot_(false),
+      back_buffer_cleared_(false),
+      presented_once_(false) {
 }
 
 Renderer::~Renderer() {
@@ -147,14 +160,9 @@ void Renderer::InitCommon() {
   DCHECK(!error_sampler_.IsNull());
   error_sampler_->set_name(O3D_STRING_CONSTANT("errorSampler"));
 
-  // TODO: remove ifdef when textures are implemented on CB
-#ifndef RENDERER_CB
   DCHECK(!texture.IsNull());
   texture->set_name(O3D_STRING_CONSTANT("errorTexture"));
   texture->set_alpha_is_one(true);
-  void* texture_data;
-  bool locked = texture->Lock(0, &texture_data);
-  DCHECK(locked);
   static unsigned char error_texture_data[] = {
     0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00,
     0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00,
@@ -189,14 +197,7 @@ void Renderer::InitCommon() {
     0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00,
     0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00,
   };
-  DCHECK(sizeof error_texture_data ==
-         Bitmap::GetBufferSize(texture->width(),
-                               texture->height(),
-                               texture->format()));
-  memcpy(texture_data, error_texture_data, sizeof error_texture_data);
-  bool unlocked = texture->Unlock(0);
-  DCHECK(unlocked);
-#endif
+  texture->SetRect(0, 0, 0, 8, 8, error_texture_data, 8 * 4);
 
   error_sampler_->set_mag_filter(Sampler::POINT);
   error_sampler_->set_min_filter(Sampler::POINT);
@@ -220,6 +221,13 @@ void Renderer::UninitCommon() {
   RemoveDefaultStates();
 }
 
+void Renderer::SetSupportsNPOT(bool supports_npot) {
+  supports_npot_ = supports_npot;
+  ClientInfoManager* client_info_manager =
+      service_locator()->GetService<ClientInfoManager>();
+  client_info_manager->SetNonPowerOfTwoTextures(supports_npot);
+}
+
 void Renderer::SetLostResourcesCallback(LostResourcesCallback* callback) {
   lost_resources_callback_manager_.Set(callback);
 }
@@ -237,11 +245,144 @@ void Renderer::SetErrorTexture(Texture* texture) {
 void Renderer::SetClientSize(int width, int height) {
   width_ = width;
   height_ = height;
-  render_width_ = width;
-  render_height_ = height;
+  display_width_ = width;
+  display_height_ = height;
   clear_client_ = true;
 }
 
+bool Renderer::StartRendering() {
+  DCHECK_GE(start_depth_, 0);
+  bool result = true;
+  if (start_depth_ == 0) {
+    ++render_frame_count_;
+    rendering_ = true;
+    transforms_culled_ = 0;
+    transforms_processed_ = 0;
+    draw_elements_culled_ = 0;
+    draw_elements_processed_ = 0;
+    draw_elements_rendered_ = 0;
+    primitives_rendered_ = 0;
+    back_buffer_cleared_ = 0;
+    current_render_surface_ = NULL;
+    current_depth_surface_ = NULL;
+    current_render_surface_is_back_buffer_ = true;
+
+    result = PlatformSpecificStartRendering();
+    if (result) {
+      set_need_to_render(true);
+      // Clear the client if we need to.
+      if (clear_client_) {
+        clear_client_ = false;
+        Clear(Float4(0.5f, 0.5f, 0.5f, 1.0f), true, 1.0f, true, 0, true);
+      }
+    }
+  }
+  if (result) {
+    ++start_depth_;
+  }
+  return result;
+}
+
+bool Renderer::BeginDraw() {
+  DCHECK(rendering_);
+  DCHECK(!drawing_);
+  bool result = PlatformSpecificBeginDraw();
+  if (result) {
+    drawing_ = true;
+    // Reset the viewport.
+    SetViewport(Float4(0.0f, 0.0f, 1.0f, 1.0f), Float2(0.0f, 1.0f));
+  }
+  return result;
+}
+
+void Renderer::EndDraw() {
+  DCHECK(rendering_);
+  DCHECK(drawing_);
+  ApplyDirtyStates();
+  PlatformSpecificEndDraw();
+  drawing_ = false;
+}
+
+void Renderer::FinishRendering() {
+  DCHECK(rendering_);
+  DCHECK(!drawing_);
+  DCHECK_GT(start_depth_, 0);
+  --start_depth_;
+  if (start_depth_ == 0) {
+    ApplyDirtyStates();
+    PlatformSpecificFinishRendering();
+    // Don't hold pointers to these when we are finished rendering.
+    current_render_surface_ = NULL;
+    current_depth_surface_ = NULL;
+    rendering_ = false;
+  }
+}
+
+void Renderer::Present() {
+  DCHECK(!rendering_);
+  DCHECK(!drawing_);
+  PlatformSpecificPresent();
+  presented_once_ = true;
+}
+
+void Renderer::Clear(const Float4 &color,
+                     bool color_flag,
+                     float depth,
+                     bool depth_flag,
+                     int stencil,
+                     bool stencil_flag) {
+  // If we are currently rendering to the backbuffer and it has not been cleared
+  // AND if we are not about to clear it entirely then clear it.
+  bool covers_everything = false;
+  if (!back_buffer_cleared_ && current_render_surface_is_back_buffer_) {
+    covers_everything =
+        !(viewport_[0] != 0.0f || viewport_[1] != 0.0f ||
+          viewport_[2] != 1.0f || viewport_[3] != 1.0f ||
+          depth_range_[0] != 0.0f || depth_range_[1] != 1.0f) &&
+        color_flag && depth_flag && stencil_flag && write_mask_ == 0xF;
+    if (!covers_everything) {
+      ClearBackBuffer();
+    }
+  }
+
+  ApplyDirtyStates();
+  PlatformSpecificClear(
+      color, color_flag, depth, depth_flag, stencil, stencil_flag);
+
+  // If we are currently rendering to the backbuffer and it has not been cleared
+  // and we just cleared everything then mark it as cleared.
+  if (!back_buffer_cleared_ && current_render_surface_is_back_buffer_ &&
+      covers_everything) {
+    back_buffer_cleared_ = true;
+  }
+}
+
+void Renderer::ClearBackBuffer() {
+  DCHECK(rendering_);
+  DCHECK(!back_buffer_cleared_);
+  DCHECK(current_render_surface_is_back_buffer_);
+
+  // Save all states that would effect clear the back buffer.
+  Float4 old_viewport;
+  Float2 old_depth_range;
+  GetViewport(&old_viewport, &old_depth_range);
+
+  // Set the states needed to clear the entire backbuffer.
+  SetViewport(Float4(0.0f, 0.0f, 1.0f, 1.0f), Float2(0.0f, 1.0f));
+  PushRenderStates(clear_back_buffer_state_);
+  ApplyDirtyStates();
+
+  // Clear the backbuffer.
+  PlatformSpecificClear(
+      Float4(0.5f, 0.5f, 0.5f, 1.0f), true,
+      0.0f, true,
+      0, true);
+  back_buffer_cleared_ = true;
+
+  // restore the states.
+  SetViewport(old_viewport, old_depth_range);
+  PopRenderStates();
+}
 
 void Renderer::GetViewport(Float4* viewport, Float2* depth_range) {
   DCHECK(viewport);
@@ -253,11 +394,10 @@ void Renderer::GetViewport(Float4* viewport, Float2* depth_range) {
 void Renderer::SetViewport(const Float4& rectangle, const Float2& depth_range) {
   viewport_ = rectangle;
   depth_range_ = depth_range;
-  int width = render_width();
-  int height = render_height();
+  int width = display_width();
+  int height = display_height();
   float float_width = static_cast<float>(width);
   float float_height = static_cast<float>(height);
-
 
   int viewport_left = static_cast<int>(float_width * rectangle[0] + 0.5f);
   int viewport_top = static_cast<int>(float_height * rectangle[1] + 0.5f);
@@ -312,15 +452,6 @@ void Renderer::SetViewport(const Float4& rectangle, const Float2& depth_range) {
                       viewport_height,
                       depth_range[0],
                       depth_range[1]);
-}
-
-Texture::Ref Renderer::CreateTextureFromBitmap(Bitmap* bitmap) {
-  if (!IsSupportedTextureFormat(bitmap->format(),
-                                features_.Get(),
-                                service_locator())) {
-    return Texture::Ref(NULL);
-  }
-  return CreatePlatformSpecificTextureFromBitmap(bitmap);
 }
 
 Texture2D::Ref Renderer::CreateTexture2D(int width,
@@ -391,7 +522,7 @@ void Renderer::SetInitialStates() {
        it != state_handler_map_.end(); ++it) {
     StateHandler *state_handler = it->second;
     ParamVector& param_stack = state_param_stacks_[state_handler->index()];
-    DCHECK_EQ(param_stack.size(), 1);
+    DCHECK_EQ(param_stack.size(), 1u);
     state_handler->SetState(this, param_stack[0]);
   }
 }
@@ -406,8 +537,12 @@ void CreateStateParam(State *state,
 }
 
 void Renderer::AddDefaultStates() {
+  // TODO(gman): It's possible for the user to get these out of the client
+  //     and then change them which could lead to inconsistent results.
   default_state_ = State::Ref(new State(service_locator_, this));
   default_state_->set_name(O3D_STRING_CONSTANT("defaultState"));
+  clear_back_buffer_state_ = State::Ref(new State(service_locator_, this));
+  clear_back_buffer_state_->set_name(O3D_STRING_CONSTANT("clearState"));
 
   CreateStateParam<ParamBoolean>(default_state_,
                                  State::kAlphaTestEnableParamName,
@@ -536,10 +671,14 @@ void Renderer::AddDefaultStates() {
     DCHECK(param_stack.empty());
     param_stack.push_back(param);
   }
+
+  CreateStateParam<ParamInteger>(clear_back_buffer_state_,
+                                 State::kColorWriteEnableParamName,
+                                 0xf);
 }
 
 void Renderer::RemoveDefaultStates() {
-  DCHECK_EQ(state_stack_.size(), 1);
+  DCHECK_EQ(state_stack_.size(), 1u);
   DCHECK(state_stack_[0] == default_state_);
   state_stack_.clear();
   const NamedParamRefMap& param_map = default_state_->params();
@@ -551,7 +690,7 @@ void Renderer::RemoveDefaultStates() {
     const StateHandler* state_handler = GetStateHandler(param);
     DCHECK(state_handler);
     ParamVector& param_stack = state_param_stacks_[state_handler->index()];
-    DCHECK_EQ(param_stack.size(), 1);
+    DCHECK_EQ(param_stack.size(), 1u);
     DCHECK(param_stack[0] == param);
     param_stack.clear();
   }
@@ -571,6 +710,20 @@ const Renderer::StateHandler* Renderer::GetStateHandler(Param* param) const {
     }
   }
   return NULL;
+}
+
+void Renderer::RenderElement(Element* element,
+                             DrawElement* draw_element,
+                             Material* material,
+                             ParamObject* override,
+                             ParamCache* param_cache) {
+  ClearBackBufferIfNotCleared();
+  IncrementDrawElementsRendered();
+  State *current_state = material ? material->state() : NULL;
+  PushRenderStates(current_state);
+  ApplyDirtyStates();
+  element->Render(this, draw_element, material, override, param_cache);
+  PopRenderStates();
 }
 
 // Pushes rendering states.
@@ -623,36 +776,45 @@ void Renderer::PopRenderStates() {
   state_stack_.pop_back();
 }
 
-void Renderer::SetRenderSurfaces(RenderSurface* surface,
-                                 RenderDepthStencilSurface* depth_surface) {
+void Renderer::SetRenderSurfaces(
+    const RenderSurface* surface,
+    const RenderDepthStencilSurface* depth_surface,
+    bool is_back_buffer) {
+  DCHECK(rendering_);
+  current_render_surface_is_back_buffer_ = is_back_buffer;
   if (surface != NULL || depth_surface != NULL) {
     SetRenderSurfacesPlatformSpecific(surface, depth_surface);
     current_render_surface_ = surface;
     current_depth_surface_ = depth_surface;
     if (surface) {
-      render_width_ = surface->width();
-      render_height_ = surface->height();
+      display_width_ = surface->clip_width();
+      display_height_ = surface->clip_height();
     } else {
-      render_width_ = depth_surface->width();
-      render_height_ = depth_surface->height();
+      display_width_ = depth_surface->clip_width();
+      display_height_ = depth_surface->clip_height();
     }
   } else {
     SetBackBufferPlatformSpecific();
     current_render_surface_ = NULL;
     current_depth_surface_ = NULL;
-    render_width_ = width();
-    render_height_ = height();
+    display_width_ = width();
+    display_height_ = height();
   }
   // We must reset the viewport after each change in surfaces.
   SetViewport(viewport_, depth_range_);
 }
 
-void Renderer::GetRenderSurfaces(RenderSurface** surface,
-                                 RenderDepthStencilSurface** depth_surface) {
+void Renderer::GetRenderSurfaces(
+    const RenderSurface** surface,
+    const RenderDepthStencilSurface** depth_surface,
+    bool* is_back_buffer) {
+  DCHECK(rendering_);
   DCHECK(surface);
   DCHECK(depth_surface);
+  DCHECK(is_back_buffer);
   *surface = current_render_surface_;
   *depth_surface = current_depth_surface_;
+  *is_back_buffer = current_render_surface_is_back_buffer_;
 }
 
 bool Renderer::SafeToBindTexture(Texture* texture) const {

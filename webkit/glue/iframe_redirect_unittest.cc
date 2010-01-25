@@ -11,14 +11,17 @@
 #include "base/file_util.h"
 #include "base/string_util.h"
 #include "webkit/api/public/WebDataSource.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebVector.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webframe.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
 using WebKit::WebDataSource;
+using WebKit::WebFrame;
+using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebVector;
 
@@ -32,14 +35,15 @@ TEST_F(IFrameRedirectTest, Test) {
   iframes_data_dir_ = iframes_data_dir_.AppendASCII("iframe_redirect");
   ASSERT_TRUE(file_util::PathExists(iframes_data_dir_));
 
-  std::wstring test_url = GetTestURL(iframes_data_dir_, "main.html");
+  GURL test_url = GetTestURL(iframes_data_dir_, "main.html");
 
-  test_shell_->LoadURL(test_url.c_str());
+  test_shell_->LoadURL(test_url);
   test_shell_->WaitTestFinished();
 
-  WebFrame* iframe = test_shell_->webView()->GetFrameWithName(L"ifr");
+  WebFrame* iframe =
+      test_shell_->webView()->findFrameByName(WebString::fromUTF8("ifr"));
   ASSERT_TRUE(iframe != NULL);
-  WebDataSource* iframe_ds = iframe->GetDataSource();
+  WebDataSource* iframe_ds = iframe->dataSource();
   ASSERT_TRUE(iframe_ds != NULL);
   WebVector<WebURL> redirects;
   iframe_ds->redirectChain(redirects);

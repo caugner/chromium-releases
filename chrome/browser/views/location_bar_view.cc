@@ -12,17 +12,18 @@
 
 #include "app/gfx/canvas.h"
 #include "app/gfx/color_utils.h"
-#include "app/gfx/favicon_size.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "app/theme_provider.h"
 #include "base/file_util.h"
+#include "base/keyboard_codes.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
@@ -34,15 +35,13 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/info_bubble.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/page_action.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "skia/ext/image_operations.h"
 #include "views/focus/focus_manager.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
-#include "webkit/glue/image_decoder.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
@@ -89,7 +88,7 @@ LocationBarView::LocationBarView(Profile* profile,
                                  ToolbarModel* model,
                                  Delegate* delegate,
                                  bool popup_window_mode,
-                                 AutocompletePopupPositioner* popup_positioner)
+                                 const BubblePositioner* bubble_positioner)
     : profile_(profile),
       command_updater_(command_updater),
       model_(model),
@@ -99,10 +98,10 @@ LocationBarView::LocationBarView(Profile* profile,
       selected_keyword_view_(profile),
       keyword_hint_view_(profile),
       type_to_search_view_(l10n_util::GetString(IDS_OMNIBOX_EMPTY_TEXT)),
-      security_image_view_(profile, model),
+      security_image_view_(profile, model, bubble_positioner),
       popup_window_mode_(popup_window_mode),
       first_run_bubble_(this),
-      popup_positioner_(popup_positioner) {
+      bubble_positioner_(bubble_positioner) {
   DCHECK(profile_);
   SetID(VIEW_ID_LOCATION_BAR);
   SetFocusable(true);
@@ -135,11 +134,12 @@ void LocationBarView::Init() {
                                                     widget->GetNativeView(),
                                                     profile_, command_updater_,
                                                     popup_window_mode_,
-                                                    popup_positioner_));
+                                                    bubble_positioner_));
 #else
   location_entry_.reset(new AutocompleteEditViewGtk(this, model_, profile_,
                                                     command_updater_,
-                                                    popup_positioner_));
+                                                    popup_window_mode_,
+                                                    bubble_positioner_));
   location_entry_->Init();
   // Make all the children of the widget visible. NOTE: this won't display
   // anything, it just toggles the visible flag.
@@ -225,7 +225,7 @@ SkColor LocationBarView::GetColor(bool is_secure, ColorKind kind) {
     colors[NOT_SECURE][SELECTED_TEXT] = SK_ColorWHITE;
 #endif
     colors[SECURE][BACKGROUND] = SkColorSetRGB(255, 245, 195);
-    colors[SECURE][TEXT] = SkColorSetRGB(0, 0, 0);
+    colors[SECURE][TEXT] = SK_ColorBLACK;
     colors[SECURE][SELECTED_TEXT] = 0;  // Unused
     colors[NOT_SECURE][DEEMPHASIZED_TEXT] =
         color_utils::AlphaBlend(colors[NOT_SECURE][TEXT],
@@ -233,32 +233,15 @@ SkColor LocationBarView::GetColor(bool is_secure, ColorKind kind) {
     colors[SECURE][DEEMPHASIZED_TEXT] =
         color_utils::AlphaBlend(colors[SECURE][TEXT],
                                 colors[SECURE][BACKGROUND], 128);
-    const SkColor kDarkNotSecureText = SkColorSetRGB(200, 0, 0);
-    const SkColor kLightNotSecureText = SkColorSetRGB(255, 55, 55);
-    colors[NOT_SECURE][SECURITY_TEXT] =
-        color_utils::PickMoreReadableColor(kDarkNotSecureText,
-                                           kLightNotSecureText,
-                                           colors[NOT_SECURE][BACKGROUND]);
+    colors[NOT_SECURE][SECURITY_TEXT] = color_utils::GetReadableColor(
+        SkColorSetRGB(200, 0, 0), colors[NOT_SECURE][BACKGROUND]);
     colors[SECURE][SECURITY_TEXT] = SkColorSetRGB(0, 150, 20);
-#if 0  // Info bubble background color is system theme window background color
     colors[NOT_SECURE][SECURITY_INFO_BUBBLE_TEXT] =
         colors[NOT_SECURE][SECURITY_TEXT];
-    const SkColor kDarkSecureInfoBubbleText = SkColorSetRGB(0, 153, 51);
-    const SkColor kLightSecureInfoBubbleText = SkColorSetRGB(102, 255, 152);
-    colors[SECURE][SECURITY_INFO_BUBBLE_TEXT] =
-        color_utils::PickMoreReadableColor(kDarkSecureInfoBubbleText,
-                                           kLightSecureInfoBubbleText,
-                                           colors[NOT_SECURE][BACKGROUND]);
-#else  // Info bubble background color is white
-    colors[NOT_SECURE][SECURITY_INFO_BUBBLE_TEXT] = kDarkNotSecureText;
-    colors[SECURE][SECURITY_INFO_BUBBLE_TEXT] = SkColorSetRGB(0, 153, 51);
-#endif
-    const SkColor kDarkSchemeStrikeout = SkColorSetRGB(210, 0, 0);
-    const SkColor kLightSchemeStrikeout = SkColorSetRGB(255, 45, 45);
-    colors[NOT_SECURE][SCHEME_STRIKEOUT] =
-        color_utils::PickMoreReadableColor(kDarkSchemeStrikeout,
-                                           kLightSchemeStrikeout,
-                                           colors[NOT_SECURE][BACKGROUND]);
+    colors[SECURE][SECURITY_INFO_BUBBLE_TEXT] = color_utils::GetReadableColor(
+        SkColorSetRGB(0, 153, 51), colors[NOT_SECURE][BACKGROUND]);
+    colors[NOT_SECURE][SCHEME_STRIKEOUT] = color_utils::GetReadableColor(
+        SkColorSetRGB(210, 0, 0), colors[NOT_SECURE][BACKGROUND]);
     colors[SECURE][SCHEME_STRIKEOUT] = 0;  // Unused
     initialized = true;
   }
@@ -285,12 +268,13 @@ void LocationBarView::UpdatePageActions() {
   SchedulePaint();
 }
 
+void LocationBarView::InvalidatePageActions() {
+  DeletePageActionViews();
+}
+
 void LocationBarView::Focus() {
-#if defined(OS_WIN)
-  ::SetFocus(location_entry_->m_hWnd);
-#else
-  gtk_widget_grab_focus(location_entry_->widget());
-#endif
+  // Focus the location entry native view.
+  location_entry_->SetFocus();
 }
 
 void LocationBarView::SetProfile(Profile* profile) {
@@ -416,6 +400,15 @@ void LocationBarView::OnChanged() {
   DoLayout(false);
 }
 
+void LocationBarView::OnSetFocus() {
+  views::FocusManager* focus_manager = GetFocusManager();
+  if (!focus_manager) {
+    NOTREACHED();
+    return;
+  }
+  focus_manager->SetFocusedView(this);
+}
+
 SkBitmap LocationBarView::GetFavIcon() const {
   DCHECK(delegate_);
   DCHECK(delegate_->GetTabContents());
@@ -537,8 +530,7 @@ int LocationBarView::AvailableWidth(int location_bar_width) {
   return std::max(
       location_bar_width - font_.GetStringWidth(location_entry_->GetText()), 0);
 #else
-  NOTIMPLEMENTED();
-  return location_bar_width;
+  return location_bar_width - location_entry_->TextWidth();
 #endif
 }
 
@@ -645,29 +637,10 @@ void LocationBarView::DeletePageActionViews() {
   }
 }
 
-std::vector<PageAction*> LocationBarView::GetPageActions() {
-  std::vector<PageAction*> result;
-  if (!profile_->GetExtensionsService())
-    return result;
-
-  // Query the extension system to see how many page actions we have.
-  // TODO(finnur): Sort the page icons in some meaningful way.
-  const ExtensionList* extensions =
-      profile_->GetExtensionsService()->extensions();
-  for (ExtensionList::const_iterator iter = extensions->begin();
-       iter != extensions->end(); ++iter) {
-    const PageActionMap& page_actions = (*iter)->page_actions();
-    for (PageActionMap::const_iterator i(page_actions.begin());
-         i != page_actions.end(); ++i) {
-      result.push_back(i->second);
-    }
-  }
-
-  return result;
-}
-
 void LocationBarView::RefreshPageActionViews() {
-  std::vector<PageAction*> page_actions = GetPageActions();
+  std::vector<ExtensionAction*> page_actions;
+  if (profile_->GetExtensionsService())
+    page_actions = profile_->GetExtensionsService()->GetPageActions();
 
   // On startup we sometimes haven't loaded any extensions. This makes sure
   // we catch up when the extensions (and any page actions) load.
@@ -677,8 +650,8 @@ void LocationBarView::RefreshPageActionViews() {
     page_action_image_views_.resize(page_actions.size());
 
     for (size_t i = 0; i < page_actions.size(); ++i) {
-      page_action_image_views_[i] =
-          new PageActionImageView(this, profile_, page_actions[i]);
+      page_action_image_views_[i] = new PageActionImageView(this, profile_,
+          page_actions[i], bubble_positioner_);
       page_action_image_views_[i]->SetVisible(false);
       page_action_image_views_[i]->SetParentOwned(false);
       AddChildView(page_action_image_views_[i]);
@@ -734,6 +707,16 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
 }
 #endif
 
+bool LocationBarView::GetAccessibleName(std::wstring* name) {
+  DCHECK(name);
+
+  if (!accessible_name_.empty()) {
+    name->assign(accessible_name_);
+    return true;
+  }
+  return false;
+}
+
 bool LocationBarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   DCHECK(role);
 
@@ -741,10 +724,14 @@ bool LocationBarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   return true;
 }
 
+void LocationBarView::SetAccessibleName(const std::wstring& name) {
+  accessible_name_.assign(name);
+}
+
 // SelectedKeywordView -------------------------------------------------------
 
-// The background is drawn using ImagePainter3. This is the left/center/right
-// image names.
+// The background is drawn using HorizontalPainter. This is the
+// left/center/right image names.
 static const int kBorderImages[] = {
     IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_L,
     IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_C,
@@ -776,6 +763,8 @@ LocationBarView::SelectedKeywordView::SelectedKeywordView(Profile* profile)
   partial_label_.set_border(
       views::Border::CreateEmptyBorder(kTopInset, kLeftInset, kBottomInset,
                                        kRightInset));
+  full_label_.SetColor(SK_ColorBLACK);
+  partial_label_.SetColor(SK_ColorBLACK);
 }
 
 LocationBarView::SelectedKeywordView::~SelectedKeywordView() {
@@ -966,6 +955,13 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
 #if defined(OS_WIN)
   return location_entry_->SkipDefaultKeyEventProcessing(e);
 #else
+  // TODO(jcampan): We need to refactor the code of
+  // AutocompleteEditViewWin::SkipDefaultKeyEventProcessing into this class so
+  // it can be shared between Windows and Linux.
+  // For now, we just override back-space as it is the accelerator for back
+  // navigation.
+  if (e.GetKeyCode() == base::VKEY_BACK)
+    return true;
   return false;
 #endif
 }
@@ -1044,26 +1040,25 @@ void LocationBarView::ShowFirstRunBubbleInternal(bool use_OEM_bubble) {
 #if defined(OS_WIN)
   FirstRunBubble::Show(profile_, GetWindow(), bounds, use_OEM_bubble);
 #else
-  NOTIMPLEMENTED();
+  // First run bubble doesn't make sense for Chrome OS.
 #endif
 }
 
 // LocationBarImageView---------------------------------------------------------
 
-LocationBarView::LocationBarImageView::LocationBarImageView()
-  : info_bubble_(NULL),
-    show_info_bubble_task_(NULL) {
+LocationBarView::LocationBarImageView::LocationBarImageView(
+    const BubblePositioner* bubble_positioner)
+    : info_bubble_(NULL),
+      show_info_bubble_task_(NULL),
+      bubble_positioner_(bubble_positioner) {
 }
 
 LocationBarView::LocationBarImageView::~LocationBarImageView() {
   if (show_info_bubble_task_)
     show_info_bubble_task_->Cancel();
 
-  if (info_bubble_) {
-    // We are going to be invalid, make sure the InfoBubble does not keep a
-    // pointer to us.
-    info_bubble_->SetDelegate(NULL);
-  }
+  if (info_bubble_)
+    info_bubble_->Close();
 }
 
 void LocationBarView::LocationBarImageView::OnMouseMoved(
@@ -1101,9 +1096,11 @@ void LocationBarView::LocationBarImageView::InfoBubbleClosing(
 
 void LocationBarView::LocationBarImageView::ShowInfoBubbleImpl(
     const std::wstring& text, SkColor text_color) {
+  gfx::Rect bounds(bubble_positioner_->GetLocationStackBounds());
   gfx::Point location;
   views::View::ConvertPointToScreen(this, &location);
-  gfx::Rect bounds(location.x(), location.y(), width(), height());
+  bounds.set_x(location.x());
+  bounds.set_width(width());
 
   views::Label* label = new views::Label(text);
   label->SetMultiLine(true);
@@ -1123,11 +1120,13 @@ void LocationBarView::LocationBarImageView::ShowInfoBubbleImpl(
 SkBitmap* LocationBarView::SecurityImageView::lock_icon_ = NULL;
 SkBitmap* LocationBarView::SecurityImageView::warning_icon_ = NULL;
 
-LocationBarView::SecurityImageView::SecurityImageView(Profile* profile,
-                                                      ToolbarModel* model)
-  : LocationBarImageView(),
-    profile_(profile),
-    model_(model) {
+LocationBarView::SecurityImageView::SecurityImageView(
+    Profile* profile,
+    ToolbarModel* model,
+    const BubblePositioner* bubble_positioner)
+    : LocationBarImageView(bubble_positioner),
+      profile_(profile),
+      model_(model) {
   if (!lock_icon_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     lock_icon_ = rb.GetBitmapNamed(IDR_LOCK);
@@ -1173,131 +1172,31 @@ void LocationBarView::SecurityImageView::ShowInfoBubble() {
       SECURITY_INFO_BUBBLE_TEXT));
 }
 
+void LocationBarView::PageActionImageView::Paint(gfx::Canvas* canvas) {
+  LocationBarImageView::Paint(canvas);
+
+  TabContents* contents = owner_->delegate_->GetTabContents();
+  if (!contents)
+    return;
+
+  const ExtensionActionState* state =
+      contents->GetPageActionState(page_action_);
+  state->PaintBadge(canvas, gfx::Rect(width(), height()));
+}
+
 // PageActionImageView----------------------------------------------------------
-
-// The views need to load their icons asynchronously but might be deleted before
-// the images have loaded. This class stays alive while the request is in
-// progress (manages its own lifetime) and keeps track of whether the view still
-// cares about the icon loading.
-class LocationBarView::PageActionImageView::ImageLoadingTracker
-  : public base::RefCountedThreadSafe<ImageLoadingTracker> {
- public:
-  explicit ImageLoadingTracker(PageActionImageView* view, int image_count)
-    : view_(view), image_count_(image_count) {
-    AddRef();  // We hold on to a reference to ourself to make sure we don't
-               // get deleted until we get a response from image loading (see
-               // ImageLoadingDone).
-  }
-  ~ImageLoadingTracker() {}
-
-  void StopTrackingImageLoad() {
-    view_ = NULL;
-  }
-
-  void OnImageLoaded(SkBitmap* image, int index) {
-    if (image == NULL) {
-      NOTREACHED() << "Image failed to decode.";
-      image = new SkBitmap();
-    }
-    if (view_)
-      view_->OnImageLoaded(image, index);
-    delete image;
-    if (--image_count_ == 0)
-      Release();  // We are no longer needed.
-  }
-
- private:
-
-  // The view that is waiting for the image to load.
-  PageActionImageView* view_;
-
-  // The number of images this ImageTracker should keep track of.
-  int image_count_;
-};
-
-// The LoadImageTask is for asynchronously loading the image on the file thread.
-// If the image is successfully loaded and decoded it will report back on the
-// |callback_loop| to let the caller know the image is done loading.
-class LocationBarView::PageActionImageView::LoadImageTask : public Task {
- public:
-  // Constructor for the LoadImageTask class. |tracker| is the object that
-  // we use to communicate back to the entity that wants the image after we
-  // decode it. |path| is the path to load the image from. |index| is an
-  // identifier for the image that we pass back to the caller.
-  LoadImageTask(ImageLoadingTracker* tracker,
-                const FilePath& path,
-                int index)
-    : callback_loop_(MessageLoop::current()),
-      tracker_(tracker),
-      path_(path),
-      index_(index) {}
-
-  void ReportBack(SkBitmap* image) {
-    DCHECK(image);
-    callback_loop_->PostTask(FROM_HERE, NewRunnableMethod(tracker_,
-        &PageActionImageView::ImageLoadingTracker::OnImageLoaded,
-        image,
-        index_));
-  }
-
-  virtual void Run() {
-    // Read the file from disk.
-    std::string file_contents;
-    if (!file_util::PathExists(path_) ||
-        !file_util::ReadFileToString(path_, &file_contents)) {
-      ReportBack(NULL);
-      return;
-    }
-
-    // Decode the image using WebKit's image decoder.
-    const unsigned char* data =
-        reinterpret_cast<const unsigned char*>(file_contents.data());
-    webkit_glue::ImageDecoder decoder(gfx::Size(kFavIconSize, kFavIconSize));
-    scoped_ptr<SkBitmap> decoded(new SkBitmap());
-    *decoded = decoder.Decode(data, file_contents.length());
-    if (decoded->empty()) {
-      ReportBack(NULL);
-      return;  // Unable to decode.
-    }
-
-    if (decoded->width() != kFavIconSize || decoded->height() != kFavIconSize) {
-      // The bitmap is not the correct size, re-sample.
-      int new_width = decoded->width();
-      int new_height = decoded->height();
-      // Calculate what dimensions to use within the constraints (16x16 max).
-      calc_favicon_target_size(&new_width, &new_height);
-      *decoded = skia::ImageOperations::Resize(
-          *decoded, skia::ImageOperations::RESIZE_LANCZOS3,
-          new_width, new_height);
-    }
-
-    ReportBack(decoded.release());
-  }
-
- private:
-  // The message loop that we need to call back on to report that we are done.
-  MessageLoop* callback_loop_;
-
-  // The object that is waiting for us to respond back.
-  ImageLoadingTracker* tracker_;
-
-  // The path to the image to load asynchronously.
-  FilePath path_;
-
-  // The index of the icon being loaded.
-  int index_;
-};
 
 LocationBarView::PageActionImageView::PageActionImageView(
     LocationBarView* owner,
     Profile* profile,
-    const PageAction* page_action)
-    : LocationBarImageView(),
+    const ExtensionAction* page_action,
+    const BubblePositioner* bubble_positioner)
+    : LocationBarImageView(bubble_positioner),
       owner_(owner),
       profile_(profile),
       page_action_(page_action),
       current_tab_id_(-1),
-      tooltip_(page_action_->name()) {
+      tooltip_(page_action_->title()) {
   Extension* extension = profile->GetExtensionsService()->GetExtensionById(
       page_action->extension_id());
   DCHECK(extension);
@@ -1308,13 +1207,13 @@ LocationBarView::PageActionImageView::PageActionImageView(
   DCHECK(!page_action->icon_paths().empty());
   const std::vector<std::string>& icon_paths = page_action->icon_paths();
   page_action_icons_.resize(icon_paths.size());
-  int index = 0;
-  MessageLoop* file_loop = g_browser_process->file_thread()->message_loop();
   tracker_ = new ImageLoadingTracker(this, icon_paths.size());
   for (std::vector<std::string>::const_iterator iter = icon_paths.begin();
        iter != icon_paths.end(); ++iter) {
-    FilePath path = extension->GetResourcePath(*iter);
-    file_loop->PostTask(FROM_HERE, new LoadImageTask(tracker_, path, index++));
+    tracker_->PostLoadImageTask(
+        extension->GetResource(*iter),
+        gfx::Size(Extension::kPageActionIconMaxSize,
+                  Extension::kPageActionIconMaxSize));
   }
 }
 
@@ -1325,44 +1224,22 @@ LocationBarView::PageActionImageView::~PageActionImageView() {
 
 bool LocationBarView::PageActionImageView::OnMousePressed(
     const views::MouseEvent& event) {
+  int button = -1;
+  if (event.IsLeftMouseButton())
+    button = 1;
+  else if (event.IsMiddleMouseButton())
+    button = 2;
+  else if (event.IsRightMouseButton())
+    button = 3;
   // Our PageAction icon was clicked on, notify proper authorities.
   ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
       profile_, page_action_->extension_id(), page_action_->id(),
-      current_tab_id_, current_url_.spec());
+      current_tab_id_, current_url_.spec(), button);
   return true;
 }
 
 void LocationBarView::PageActionImageView::ShowInfoBubble() {
-#if 0  // Info bubble background color is system theme window background color
   ShowInfoBubbleImpl(ASCIIToWide(tooltip_), GetColor(false, TEXT));
-#else  // Info bubble background color is white
-  ShowInfoBubbleImpl(ASCIIToWide(tooltip_), SK_ColorBLACK);
-#endif
-}
-
-void LocationBarView::PageActionImageView::UpdateVisibility(
-    TabContents* contents, GURL url) {
-  // Save this off so we can pass it back to the extension when the action gets
-  // executed. See PageActionImageView::OnMousePressed.
-  current_tab_id_ = ExtensionTabUtil::GetTabId(contents);
-  current_url_ = url;
-
-  const PageActionState* state = contents->GetPageActionState(page_action_);
-  bool visible = state != NULL;
-  if (visible) {
-    // Set the tooltip.
-    if (state->title().empty())
-      tooltip_ = page_action_->name();
-    else
-      tooltip_ = state->title();
-    // Set the image.
-    int index = state->icon_index();
-    // The image index (if not within bounds) will be set to the first image.
-    if (index < 0 || index >= static_cast<int>(page_action_icons_.size()))
-      index = 0;
-    ImageView::SetImage(page_action_icons_[index]);
-  }
-  SetVisible(visible);
 }
 
 void LocationBarView::PageActionImageView::OnImageLoaded(SkBitmap* image,
@@ -1372,6 +1249,37 @@ void LocationBarView::PageActionImageView::OnImageLoaded(SkBitmap* image,
     tracker_ = NULL;  // The tracker object will delete itself when we return.
   page_action_icons_[index] = *image;
   owner_->UpdatePageActions();
+}
+
+void LocationBarView::PageActionImageView::UpdateVisibility(
+    TabContents* contents, GURL url) {
+  // Save this off so we can pass it back to the extension when the action gets
+  // executed. See PageActionImageView::OnMousePressed.
+  current_tab_id_ = ExtensionTabUtil::GetTabId(contents);
+  current_url_ = url;
+
+  const ExtensionActionState* state =
+      contents->GetPageActionState(page_action_);
+  bool visible = state && !state->hidden();
+  if (visible) {
+    // Set the tooltip.
+    if (state->title().empty())
+      tooltip_ = page_action_->title();
+    else
+      tooltip_ = state->title();
+
+    // Set the image.
+    SkBitmap* icon = state->icon();
+    if (!icon) {
+      int index = state->icon_index();
+      // The image index (if not within bounds) will be set to the first image.
+      if (index < 0 || index >= static_cast<int>(page_action_icons_.size()))
+        index = 0;
+      icon = &page_action_icons_[index];
+    }
+    ImageView::SetImage(icon);
+  }
+  SetVisible(visible);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

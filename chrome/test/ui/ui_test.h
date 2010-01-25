@@ -19,9 +19,6 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
 #include <string>
 
 #include "base/command_line.h"
@@ -64,14 +61,6 @@ class UITest : public testing::Test {
 
   // ********* Utility functions *********
 
-  // Tries to delete the specified file/directory returning true on
-  // success.  This differs from file_util::Delete in that it
-  // repeatedly invokes Delete until successful, or a timeout is
-  // reached.  (This retrying is to work around Windows file locks
-  // and shouldn't be necessary on POSIX, but it can't hurt.)
-  // Returns true on success.
-  bool DieFileDie(const FilePath& file, bool recurse);
-
   // Launches the browser and IPC testing server.
   void LaunchBrowserAndServer();
 
@@ -82,7 +71,13 @@ class UITest : public testing::Test {
   void CloseBrowserAndServer();
 
   // Launches the browser with the given command line.
+  // TODO(phajdan.jr): Make LaunchBrowser private. Tests should use
+  // LaunchAnotherBrowserBlockUntilClosed.
   void LaunchBrowser(const CommandLine& cmdline, bool clear_profile);
+
+  // Launches an another browser process and waits for it to finish. Returns
+  // true on success.
+  bool LaunchAnotherBrowserBlockUntilClosed(const CommandLine& cmdline);
 
   // Exits out browser instance.
   void QuitBrowser();
@@ -96,6 +91,13 @@ class UITest : public testing::Test {
   // of the first app window.
   // This method doesn't return until the navigation is complete.
   void NavigateToURL(const GURL& url);
+
+  // Tells the browser to navigate to the given URL in the active tab
+  // of the first app window.
+  // This method doesn't return until the |number_of_navigations| navigations
+  // complete.
+  void NavigateToURLBlockUntilNavigationsComplete(const GURL& url,
+                                                  int number_of_navigations);
 
   // Returns the URL of the currently active tab. Only looks in the first
   // window, for backward compatibility. If there is no active tab, or some
@@ -264,14 +266,24 @@ class UITest : public testing::Test {
                        bool important);
 
   // Gets the directory for the currently active profile in the browser.
-  std::wstring GetDownloadDirectory();
+  FilePath GetDownloadDirectory();
 
   // Get the handle of browser process connected to the automation. This
   // function only retruns a reference to the handle so the caller does not
   // own the handle returned.
   base::ProcessHandle process() { return process_; }
 
- public:
+  // Wait for |generated_file| to be ready and then compare it with
+  // |original_file| to see if they're identical or not if |compare_file| is
+  // true. If |need_equal| is true, they need to be identical. Otherwise,
+  // they should be different. This function will delete the generated file if
+  // the parameter |delete_generated_file| is true.
+  void WaitForGeneratedFileAndCheck(const FilePath& generated_file,
+                                    const FilePath& original_file,
+                                    bool compare_files,
+                                    bool need_equal,
+                                    bool delete_generated_file);
+
   // Get/Set a flag to run the renderer in process when running the
   // tests.
   static bool in_process_renderer() { return in_process_renderer_; }
@@ -346,9 +358,18 @@ class UITest : public testing::Test {
     log_level_ = value;
   }
 
+  // Profile theme type choices.
+  typedef enum {
+    DEFAULT_THEME = 0,
+    COMPLEX_THEME = 1,
+    NATIVE_THEME = 2,
+    CUSTOM_FRAME = 3,
+    CUSTOM_FRAME_NATIVE_THEME = 4,
+  } ProfileType;
+
   // Returns the directory name where the "typical" user data is that we use
   // for testing.
-  static FilePath ComputeTypicalUserDataSource(int profile_type);
+  static FilePath ComputeTypicalUserDataSource(ProfileType profile_type);
 
   // Rewrite the preferences file to point to the proper image directory.
   static void RewritePreferencesFile(const FilePath& user_data_dir);
@@ -358,8 +379,8 @@ class UITest : public testing::Test {
   // copied into the user data directory for the test and the files will be
   // evicted from the OS cache. To start with a blank profile, supply an empty
   // string (the default).
-  std::wstring template_user_data() const { return template_user_data_; }
-  void set_template_user_data(const std::wstring& template_user_data) {
+  const FilePath& template_user_data() const { return template_user_data_; }
+  void set_template_user_data(const FilePath& template_user_data) {
     template_user_data_ = template_user_data;
   }
 
@@ -394,9 +415,17 @@ class UITest : public testing::Test {
   // error.
   DictionaryValue* GetDefaultProfilePreferences();
 
+  // Generate the file path for testing a particular test.
+  // The file for the tests is all located in
+  // test_root_directory\test_directory\<testcase>
+  // The returned path is FilePath format.
+  static FilePath GetTestFilePath(const std::wstring& test_directory,
+                                  const std::wstring& test_case);
+
   // Generate the URL for testing a particular test.
   // HTML for the tests is all located in
   // test_root_directory\test_directory\<testcase>
+  // The returned path is GURL format.
   static GURL GetTestUrl(const std::wstring& test_directory,
                          const std::wstring &test_case);
 
@@ -417,13 +446,11 @@ class UITest : public testing::Test {
 
   // Synchronously launches local http server normally used to run LayoutTests.
   void StartHttpServer(const FilePath& root_directory);
-  void StopHttpServer();
 
-  // Profile theme type choices.
-  enum {
-    DEFAULT_THEME = 0,
-    COMPLEX_THEME = 1
-  } ProfileType;
+  // Launches local http server on the specified port.
+  void StartHttpServerWithPort(const FilePath& root_directory,
+                               const std::wstring& port);
+  void StopHttpServer();
 
  private:
   // Check that no processes related to Chrome exist, displaying
@@ -476,8 +503,9 @@ class UITest : public testing::Test {
   base::TimeTicks browser_launch_time_; // Time when the browser was run.
   bool dom_automation_enabled_;         // This can be set to true to have the
                                         // test run the dom automation case.
-  std::wstring template_user_data_;     // See set_template_user_data().
+  FilePath template_user_data_;         // See set_template_user_data().
   base::ProcessHandle process_;         // Handle to the first Chrome process.
+  base::ProcessId process_id_;          // PID of |process_| (for debugging).
   FilePath user_data_dir_;              // User data directory used for the test
   static bool in_process_renderer_;     // true if we're in single process mode
   bool show_window_;                    // Determines if the window is shown or
@@ -490,10 +518,20 @@ class UITest : public testing::Test {
   bool use_existing_browser_;           // Duplicate of the static version.
                                         // Default value comes from static.
   bool enable_file_cookies_;            // Enable file cookies, default is true.
-  int profile_type_;                    // Are we using a profile with a
+  ProfileType profile_type_;            // Are we using a profile with a
                                         // complex theme?
 
  private:
+  bool LaunchBrowserHelper(const CommandLine& arguments,
+                           bool use_existing_browser,
+                           bool wait,
+                           base::ProcessHandle* process);
+
+  // We want to have a current history database when we start the browser so
+  // things like the NTP will have thumbnails.  This method updates the dates
+  // in the history to be more recent.
+  void UpdateHistoryDates();
+
   base::Time test_start_time_;          // Time the test was started
                                         // (so we can check for new crash dumps)
   static bool no_sandbox_;

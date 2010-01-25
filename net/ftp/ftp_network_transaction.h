@@ -8,11 +8,13 @@
 #include <string>
 #include <queue>
 #include <utility>
+#include <vector>
 
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/host_resolver.h"
+#include "net/ftp/ftp_ctrl_response_buffer.h"
 #include "net/ftp/ftp_response_info.h"
 #include "net/ftp/ftp_transaction.h"
 
@@ -30,7 +32,8 @@ class FtpNetworkTransaction : public FtpTransaction {
 
   // FtpTransaction methods:
   virtual int Start(const FtpRequestInfo* request_info,
-                    CompletionCallback* callback);
+                    CompletionCallback* callback,
+                    LoadLog* load_log);
   virtual int Stop(int error);
   virtual int RestartWithAuth(const std::wstring& username,
                               const std::wstring& password,
@@ -60,43 +63,56 @@ class FtpNetworkTransaction : public FtpTransaction {
   };
 
   enum ErrorClass {
-    ERROR_CLASS_INITIATED = 1,  // The requested action was initiated.
-    ERROR_CLASS_OK,             // The requested action successfully completed.
-    ERROR_CLASS_PENDING,        // The command accepted, but the
-                                // request on hold.
-    ERROR_CLASS_ERROR_RETRY,    // The command was not accepted and the
-                                // requested action did not take place,
-                                // but the error condition is temporary and the
-                                // action may be requested again.
-    ERROR_CLASS_ERROR,          // The command was not accepted and
-                                // the requested action did not take place.
+    // The requested action was initiated. The client should expect another
+    // reply before issuing the next command.
+    ERROR_CLASS_INITIATED,
+
+    // The requested action has been successfully completed.
+    ERROR_CLASS_OK,
+
+    // The command has been accepted, but to complete the operation, more
+    // information must be sent by the client.
+    ERROR_CLASS_INFO_NEEDED,
+
+    // The command was not accepted and the requested action did not take place.
+    // This condition is temporary, and the client is encouraged to restart the
+    // command sequence.
+    ERROR_CLASS_TRANSIENT_ERROR,
+
+    // The command was not accepted and the requested action did not take place.
+    // This condition is rather permanent, and the client is discouraged from
+    // repeating the exact request.
+    ERROR_CLASS_PERMANENT_ERROR,
   };
 
-  struct ResponseLine {
-    ResponseLine(int code, const std::string& text) : code(code), text(text) {
-    }
-
-    int code;  // Three-digit status code.
-    std::string text;  // Text after the code, without ending CRLF.
+  // Major categories of remote system types, as returned by SYST command.
+  enum SystemType {
+    SYSTEM_TYPE_UNKNOWN,
+    SYSTEM_TYPE_UNIX,
+    SYSTEM_TYPE_WINDOWS,
+    SYSTEM_TYPE_OS2,
+    SYSTEM_TYPE_VMS,
   };
+
+  // Resets the members of the transaction so it can be restarted.
+  void ResetStateForRestart();
 
   void DoCallback(int result);
   void OnIOComplete(int result);
 
   // Executes correct ProcessResponse + command_name function based on last
   // issued command. Returns error code.
-  int ProcessCtrlResponses();
-
-  // Parses as much as possible from response_message_buf_. Puts index of the
-  // first unparsed character in cut_pos. Returns error code.
-  int ParseCtrlResponse(int* cut_pos);
+  int ProcessCtrlResponse();
 
   int SendFtpCommand(const std::string& command, Command cmd);
 
-  // TODO(ibrar): Use C++ static_cast.
-  ErrorClass GetErrorClass(int response_code) {
-    return (ErrorClass)(response_code / 100);
-  }
+  // Return the error class for given response code. You should validate the
+  // code to be in range 100-599.
+  static ErrorClass GetErrorClass(int response_code);
+
+  // Returns request path suitable to be included in an FTP command. If the path
+  // will be used as a directory, |is_directory| should be true.
+  std::string GetRequestPathForFtpCommand(bool is_directory) const;
 
   // Runs the state transition loop.
   int DoLoop(int result);
@@ -113,35 +129,35 @@ class FtpNetworkTransaction : public FtpTransaction {
   int DoCtrlConnectComplete(int result);
   int DoCtrlRead();
   int DoCtrlReadComplete(int result);
+  int DoCtrlWrite();
+  int DoCtrlWriteComplete(int result);
   int DoCtrlWriteUSER();
-  int ProcessResponseUSER(const ResponseLine& response);
+  int ProcessResponseUSER(const FtpCtrlResponse& response);
   int DoCtrlWritePASS();
-  int ProcessResponsePASS(const ResponseLine& response);
+  int ProcessResponsePASS(const FtpCtrlResponse& response);
   int DoCtrlWriteACCT();
-  int ProcessResponseACCT(const ResponseLine& response);
+  int ProcessResponseACCT(const FtpCtrlResponse& response);
   int DoCtrlWriteSYST();
-  int ProcessResponseSYST(const ResponseLine& response);
+  int ProcessResponseSYST(const FtpCtrlResponse& response);
   int DoCtrlWritePWD();
-  int ProcessResponsePWD(const ResponseLine& response);
+  int ProcessResponsePWD(const FtpCtrlResponse& response);
   int DoCtrlWriteTYPE();
-  int ProcessResponseTYPE(const ResponseLine& response);
+  int ProcessResponseTYPE(const FtpCtrlResponse& response);
   int DoCtrlWritePASV();
-  int ProcessResponsePASV(const ResponseLine& response);
+  int ProcessResponsePASV(const FtpCtrlResponse& response);
   int DoCtrlWriteRETR();
-  int ProcessResponseRETR(const ResponseLine& response);
+  int ProcessResponseRETR(const FtpCtrlResponse& response);
   int DoCtrlWriteSIZE();
-  int ProcessResponseSIZE(const ResponseLine& response);
+  int ProcessResponseSIZE(const FtpCtrlResponse& response);
   int DoCtrlWriteCWD();
-  int ProcessResponseCWD(const ResponseLine& response);
+  int ProcessResponseCWD(const FtpCtrlResponse& response);
   int DoCtrlWriteLIST();
-  int ProcessResponseLIST(const ResponseLine& response);
+  int ProcessResponseLIST(const FtpCtrlResponse& response);
   int DoCtrlWriteMDTM();
-  int ProcessResponseMDTM(const ResponseLine& response);
+  int ProcessResponseMDTM(const FtpCtrlResponse& response);
   int DoCtrlWriteQUIT();
-  int ProcessResponseQUIT(const ResponseLine& response);
+  int ProcessResponseQUIT(const FtpCtrlResponse& response);
 
-  int DoDataResolveHost();
-  int DoDataResolveHostComplete(int result);
   int DoDataConnect();
   int DoDataConnectComplete(int result);
   int DoDataRead();
@@ -154,6 +170,7 @@ class FtpNetworkTransaction : public FtpTransaction {
 
   scoped_refptr<FtpNetworkSession> session_;
 
+  scoped_refptr<LoadLog> load_log_;
   const FtpRequestInfo* request_;
   FtpResponseInfo response_;
 
@@ -161,29 +178,37 @@ class FtpNetworkTransaction : public FtpTransaction {
   SingleRequestHostResolver resolver_;
   AddressList addresses_;
 
-  // As we read full response lines, we parse them and add to the queue.
-  std::queue<ResponseLine> ctrl_responses_;
+  // User buffer passed to the Read method for control socket.
+  scoped_refptr<IOBuffer> read_ctrl_buf_;
 
-  // Buffer holding not-yet-parsed control socket responses.
-  scoped_refptr<IOBufferWithSize> response_message_buf_;
-  int response_message_buf_len_;
-
-  // User buffer passed to the Read method. It actually writes to the
-  // response_message_buf_ at correct offset.
-  scoped_refptr<ReusedIOBuffer> read_ctrl_buf_;
+  scoped_ptr<FtpCtrlResponseBuffer> ctrl_response_buffer_;
 
   scoped_refptr<IOBuffer> read_data_buf_;
   int read_data_buf_len_;
   int file_data_len_;
 
-  scoped_refptr<IOBuffer> write_buf_;
+  // Buffer holding the command line to be written to the control socket.
+  scoped_refptr<IOBufferWithSize> write_command_buf_;
+
+  // Buffer passed to the Write method of control socket. It actually writes
+  // to the write_command_buf_ at correct offset.
+  scoped_refptr<DrainableIOBuffer> write_buf_;
 
   int last_error_;
 
-  bool is_anonymous_;
+  SystemType system_type_;
+
+  // We get username and password as wstrings in RestartWithAuth, so they are
+  // also kept as wstrings here.
+  std::wstring username_;
+  std::wstring password_;
+
+  // Current directory on the remote server, as returned by last PWD command,
+  // with any trailing slash removed.
+  std::string current_remote_directory_;
+
   bool retr_failed_;
 
-  std::string data_connection_ip_;
   int data_connection_port_;
 
   ClientSocketFactory* socket_factory_;
@@ -201,6 +226,8 @@ class FtpNetworkTransaction : public FtpTransaction {
     STATE_CTRL_CONNECT_COMPLETE,
     STATE_CTRL_READ,
     STATE_CTRL_READ_COMPLETE,
+    STATE_CTRL_WRITE,
+    STATE_CTRL_WRITE_COMPLETE,
     STATE_CTRL_WRITE_USER,
     STATE_CTRL_WRITE_PASS,
     STATE_CTRL_WRITE_ACCT,
@@ -215,8 +242,6 @@ class FtpNetworkTransaction : public FtpTransaction {
     STATE_CTRL_WRITE_MDTM,
     STATE_CTRL_WRITE_QUIT,
     // Data connection states:
-    STATE_DATA_RESOLVE_HOST,
-    STATE_DATA_RESOLVE_HOST_COMPLETE,
     STATE_DATA_CONNECT,
     STATE_DATA_CONNECT_COMPLETE,
     STATE_DATA_READ,

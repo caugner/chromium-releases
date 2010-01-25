@@ -3,12 +3,9 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'target_defaults': {
     'conditions': [
-      ['OS!="linux"', {'sources/': [['exclude', '/linux/']]}],
+      ['OS!="linux" and OS!="freebsd"', {'sources/': [['exclude', '/linux/']]}],
       ['OS!="mac"', {'sources/': [['exclude', '/mac/']]}],
       ['OS!="win"', {'sources/': [['exclude', '/win/']]}],
     ],
@@ -17,6 +14,7 @@
     # Allow overridding the selection of which ffmpeg binaries to copy via an
     # environment variable.  Affects the ffmpeg_binaries target.
     'ffmpeg_branding%': '<(branding)',
+    'ffmpeg_variant%': '<(target_arch)',
 
     'use_system_ffmpeg%': 0,
   },
@@ -25,9 +23,11 @@
       'variables': {
         'generate_stubs_script': 'generate_stubs.py',
         'sig_files': [
+          # Note that these must be listed in dependency order.
+          # (i.e. if A depends on B, then B must be listed before A.)
+          'avutil-50.sigs',
           'avcodec-52.sigs',
           'avformat-52.sigs',
-          'avutil-50.sigs',
         ],
         'extra_header': 'ffmpeg_stub_headers.fragment',
       },
@@ -172,9 +172,17 @@
                 'process_outputs_as_sources': 1,
               },
             ],
-          }
+          },
         ],
-      ],
+        ['OS=="linux" or OS=="freebsd"', {
+          'link_settings': {
+            'libraries': [
+              # We need dl for dlopen() and friends.
+              '-ldl',
+            ],
+          },
+        }],
+      ],  # conditions
     },
     {
       'target_name': 'ffmpeg_binaries',
@@ -183,9 +191,9 @@
       'variables': {
         'conditions': [
           [ 'ffmpeg_branding=="Chrome"', {
-               'branding_dir': 'chrome',
-          }, { # else ffmpeg_branding!="Chrome"
-               'branding_dir': 'chromium',
+            'ffmpeg_bin_dir': 'chrome/<(OS)/<(ffmpeg_variant)',
+          }, {  # else ffmpeg_branding!="Chrome", assume chromium.
+            'ffmpeg_bin_dir': 'chromium/<(OS)/<(ffmpeg_variant)',
           }],
         ],
       },
@@ -193,20 +201,20 @@
         ['OS=="win"', {
           'variables': {
             'source_files': [
-              'binaries/<(branding_dir)/avcodec-52.dll',
-              'binaries/<(branding_dir)/avformat-52.dll',
-              'binaries/<(branding_dir)/avutil-50.dll',
+              'binaries/<(ffmpeg_bin_dir)/avcodec-52.dll',
+              'binaries/<(ffmpeg_bin_dir)/avformat-52.dll',
+              'binaries/<(ffmpeg_bin_dir)/avutil-50.dll',
             ],
           },
           'dependencies': ['../../build/win/system.gyp:cygwin'],
-        }], ['OS=="linux"', {
+        }], ['OS=="linux" or OS=="freebsd"', {
           'conditions': [
             ['use_system_ffmpeg==0', {
               'variables': {
                 'source_files': [
-                  'binaries/<(branding_dir)/libavcodec.so.52',
-                  'binaries/<(branding_dir)/libavformat.so.52',
-                  'binaries/<(branding_dir)/libavutil.so.50',
+                  'binaries/<(ffmpeg_bin_dir)/libavcodec.so.52',
+                  'binaries/<(ffmpeg_bin_dir)/libavformat.so.52',
+                  'binaries/<(ffmpeg_bin_dir)/libavutil.so.50',
                 ],
               },
             }, {
@@ -216,11 +224,15 @@
             }],
           ]},
         ], ['OS=="mac"', {
+              # TODO(ajwong): These files are also copied in:
+              # webkit/tools/test_shell/test_shell.gyp and
+              # chrome/chrome.gyp
+              # Need to consolidate the copies in one place. (BUG=23602)
               'variables': {
                 'source_files': [
-                  'binaries/<(branding_dir)/libavcodec.52.dylib',
-                  'binaries/<(branding_dir)/libavformat.52.dylib',
-                  'binaries/<(branding_dir)/libavutil.50.dylib',
+                  'binaries/<(ffmpeg_bin_dir)/libavcodec.52.dylib',
+                  'binaries/<(ffmpeg_bin_dir)/libavformat.52.dylib',
+                  'binaries/<(ffmpeg_bin_dir)/libavutil.50.dylib',
                 ],
               },
         }],
@@ -236,3 +248,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

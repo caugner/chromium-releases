@@ -9,7 +9,7 @@
 #include <set>
 #include <string>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
@@ -49,6 +49,9 @@ class TabContentsContainer;
 class TabStripWrapper;
 class ToolbarView;
 class ZoomMenuModel;
+#if defined(OS_CHROMEOS)
+class BrowserExtender;
+#endif
 
 namespace views {
 class ExternalFocusTracker;
@@ -85,6 +88,9 @@ class BrowserView : public BrowserWindow,
   // instance of this object, typically) for a given native window, or NULL if
   // there is no such association.
   static BrowserView* GetBrowserViewForNativeWindow(gfx::NativeWindow window);
+
+  // Returns a Browser instance of this view.
+  Browser* browser() const { return browser_.get(); }
 
   // Returns the show flag that should be used to show the frame containing
   // this view.
@@ -208,12 +214,14 @@ class BrowserView : public BrowserWindow,
   virtual BrowserWindowTesting* GetBrowserWindowTesting();
   virtual StatusBubble* GetStatusBubble();
   virtual void SelectedTabToolbarSizeChanged(bool is_animating);
+  virtual void SelectedTabExtensionShelfSizeChanged();
   virtual void UpdateTitleBar();
+  virtual void ShelfVisibilityChanged();
   virtual void UpdateDevTools();
   virtual void FocusDevTools();
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
-  virtual gfx::Rect GetNormalBounds() const;
+  virtual gfx::Rect GetRestoredBounds() const;
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
@@ -229,6 +237,7 @@ class BrowserView : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                       Profile* profile);
   virtual void ToggleBookmarkBar();
+  virtual void ToggleExtensionShelf();
   virtual void ShowAboutChromeDialog();
   virtual void ShowTaskManager();
   virtual void ShowBookmarkManager();
@@ -243,6 +252,9 @@ class BrowserView : public BrowserWindow,
   virtual void ShowPasswordManager();
   virtual void ShowSelectProfileDialog();
   virtual void ShowNewProfileDialog();
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
+  virtual void ShowHistoryTooNewDialog();
+  virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
                               gfx::NativeWindow parent_window);
@@ -254,6 +266,9 @@ class BrowserView : public BrowserWindow,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
+  virtual void ShowAppMenu();
+  virtual void ShowPageMenu();
+  virtual int GetCommandId(const NativeWebKeyboardEvent& event);
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const;
@@ -308,6 +323,11 @@ class BrowserView : public BrowserWindow,
   virtual gfx::Size GetMinimumSize();
   virtual std::string GetClassName() const;
 
+  // Overridden from views::View:
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleName(std::wstring* name);
+  virtual void SetAccessibleName(const std::wstring& name);
+
  protected:
   // Overridden from views::View:
   virtual void Layout();
@@ -332,18 +352,20 @@ class BrowserView : public BrowserWindow,
   // of the bottom of the control, for laying out the next control.
   int LayoutToolbar(int top);
   int LayoutBookmarkAndInfoBars(int top);
-  int LayoutBookmarkBar(int top);
+  int LayoutTopBar(int top);
   int LayoutInfoBar(int top);
   // Layout the TabContents container, between the coordinates |top| and
   // |bottom|.
   void LayoutTabContents(int top, int bottom);
+  int LayoutExtensionAndDownloadShelves();
+  // Layout the Extension Shelf, returns the coordinate of the top of the
+  // control, for laying out the previous control.
+  int LayoutExtensionShelf(int bottom);
   // Layout the Download Shelf, returns the coordinate of the top of the
   // control, for laying out the previous control.
   int LayoutDownloadShelf(int bottom);
   // Layout the Status Bubble.
   void LayoutStatusBubble(int top);
-  // Layout the Extension Shelf
-  int LayoutExtensionShelf();
 
   // Prepare to show the Bookmark Bar for the specified TabContents. Returns
   // true if the Bookmark Bar can be shown (i.e. it's supported for this
@@ -442,7 +464,7 @@ class BrowserView : public BrowserWindow,
   scoped_ptr<StatusBubbleViews> status_bubble_;
 
   // A mapping between accelerators and commands.
-  scoped_ptr< std::map<views::Accelerator, int> > accelerator_table_;
+  std::map<views::Accelerator, int> accelerator_table_;
 
   // True if we have already been initialized.
   bool initialized_;
@@ -492,6 +514,13 @@ class BrowserView : public BrowserWindow,
 
   typedef std::set<BrowserBubble*> BubbleSet;
   BubbleSet browser_bubbles_;
+
+  // The accessible name of this view.
+  std::wstring accessible_name_;
+
+#if defined(OS_CHROMEOS)
+  scoped_ptr<BrowserExtender> browser_extender_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

@@ -13,7 +13,11 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <tlhelp32.h>
-#elif defined(OS_LINUX)
+#elif defined(OS_MACOSX)
+// kinfo_proc is defined in <sys/sysctl.h>, but this forward declaration
+// is sufficient for the vector<kinfo_proc> below.
+struct kinfo_proc;
+#elif defined(OS_POSIX)
 #include <dirent.h>
 #include <limits.h>
 #include <sys/types.h>
@@ -48,10 +52,6 @@ struct IoCounters {
 };
 
 #include "base/file_descriptor_shuffle.h"
-#endif
-
-#if defined(OS_MACOSX)
-struct kinfo_proc;
 #endif
 
 namespace base {
@@ -95,6 +95,11 @@ ProcessId GetParentProcessId(ProcessHandle process);
 
 // Returns the path to the executable of the given process.
 FilePath GetProcessExecutablePath(ProcessHandle process);
+
+// Parse the data found in /proc/<pid>/stat and return the sum of the
+// CPU-related ticks.  Returns -1 on parse error.
+// Exposed for testing.
+int ParseProcStatCPU(const std::string& input);
 #endif
 
 #if defined(OS_POSIX)
@@ -142,7 +147,7 @@ typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
 bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle);
-#if defined(OS_LINUX)
+
 // Similar to above, but also (un)set environment variables in child process
 // through |environ|.
 typedef std::vector<std::pair<const char*, const char*> > environment_vector;
@@ -150,7 +155,6 @@ bool LaunchApp(const std::vector<std::string>& argv,
                const environment_vector& environ,
                const file_handle_mapping_vector& fds_to_remap,
                bool wait, ProcessHandle* process_handle);
-#endif  // defined(OS_LINUX)
 #endif  // defined(OS_POSIX)
 
 // Executes the application specified by cl. This function delegates to one
@@ -274,11 +278,11 @@ class NamedProcessIterator {
 #if defined(OS_WIN)
   HANDLE snapshot_;
   bool started_iteration_;
-#elif defined(OS_LINUX)
-  DIR *procfs_dir_;
 #elif defined(OS_MACOSX)
   std::vector<kinfo_proc> kinfo_procs_;
   size_t index_of_kinfo_proc_;
+#elif defined(OS_POSIX)
+  DIR *procfs_dir_;
 #endif
   ProcessEntry entry_;
   const ProcessFilter* filter_;
@@ -287,12 +291,20 @@ class NamedProcessIterator {
 };
 
 // Working Set (resident) memory usage broken down by
+//
+// On Windows:
 // priv (private): These pages (kbytes) cannot be shared with any other process.
 // shareable:      These pages (kbytes) can be shared with other processes under
 //                 the right circumstances.
 // shared :        These pages (kbytes) are currently shared with at least one
 //                 other process.
+//
+// On Linux:
+// priv:           Pages mapped only by this process
+// shared:         PSS or 0 if the kernel doesn't support this
+// shareable:      0
 struct WorkingSetKBytes {
+  WorkingSetKBytes() : priv(0), shareable(0), shared(0) {}
   size_t priv;
   size_t shareable;
   size_t shared;
@@ -305,6 +317,7 @@ struct WorkingSetKBytes {
 // image:   These pages are mapped into the view of an image section (backed by
 //          file system)
 struct CommittedKBytes {
+  CommittedKBytes() : priv(0), mapped(0), image(0) {}
   size_t priv;
   size_t mapped;
   size_t image;
@@ -320,6 +333,9 @@ struct FreeMBytes {
   size_t largest;
   void* largest_ptr;
 };
+
+// Convert a POSIX timeval to microseconds.
+int64 TimeValToMicroseconds(const struct timeval& tv);
 
 // Provides performance metrics for a specified process (CPU usage, memory and
 // IO counters). To use it, invoke CreateProcessMetrics() to get an instance
@@ -383,9 +399,15 @@ class ProcessMetrics {
 
   int processor_count_;
 
-  // Used to store the previous times so we can compute the CPU usage.
+  // Used to store the previous times and CPU usage counts so we can
+  // compute the CPU usage between calls.
   int64 last_time_;
   int64 last_system_time_;
+
+#if defined(OS_LINUX)
+  // Jiffie count at the last_time_ we updated.
+  int last_cpu_;
+#endif
 
   DISALLOW_EVIL_CONSTRUCTORS(ProcessMetrics);
 };
@@ -405,6 +427,17 @@ void EnableTerminationOnHeapCorruption();
 // If supported on the platform, and the user has sufficent rights, increase
 // the current process's scheduling priority to a high priority.
 void RaiseProcessToHighPriority();
+
+#if defined(OS_MACOSX)
+// Restore the default exception handler, setting it to Apple Crash Reporter
+// (ReportCrash).  When forking and execing a new process, the child will
+// inherit the parent's exception ports, which may be set to the Breakpad
+// instance running inside the parent.  The parent's Breakpad instance should
+// not handle the child's exceptions.  Calling RestoreDefaultExceptionHandler
+// in the child after forking will restore the standard exception handler.
+// See http://crbug.com/20371/ for more details.
+void RestoreDefaultExceptionHandler();
+#endif
 
 }  // namespace base
 

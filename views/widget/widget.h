@@ -5,7 +5,7 @@
 #ifndef VIEWS_WIDGET_WIDGET_H_
 #define VIEWS_WIDGET_WIDGET_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 
 class ThemeProvider;
 
@@ -42,6 +42,25 @@ class Window;
 class Widget {
  public:
   virtual ~Widget() { }
+
+  // Creates a transparent popup widget specific to the current platform useful
+  // for transient status notifications.
+  static Widget* CreateTransparentPopupWidget(bool delete_on_destroy);
+
+  // Initialize the Widget with a parent and an initial desired size.
+  // |contents_view| is the view that will be the single child of RootView
+  // within this Widget. As contents_view is inserted into RootView's tree,
+  // RootView assumes ownership of this view and cleaning it up. If you remove
+  // this view, you are responsible for its destruction. If this value is NULL,
+  // the caller is responsible for populating the RootView, and sizing its
+  // contents as the window is sized.
+  virtual void Init(gfx::NativeView parent, const gfx::Rect& bounds) = 0;
+
+  // Sets the specified view as the contents of this Widget. There can only
+  // be one contnets view child of this Widget's RootView. This view is sized to
+  // fit the entire size of the RootView. The RootView takes ownership of this
+  // View, unless it is set as not being parent-owned.
+  virtual void SetContentsView(View* view) = 0;
 
   // Returns the bounds of this Widget in the screen coordinate system.
   // If the receiving Widget is a frame which is larger than its client area,
@@ -119,11 +138,15 @@ class Widget {
   // Gets the default theme provider; this is necessary for when a widget has
   // no profile (and ThemeProvider) associated with it. The default theme
   // provider provides a default set of bitmaps that such widgets can use.
-  virtual ThemeProvider* GetDefaultThemeProvider() { return NULL; }
+  virtual ThemeProvider* GetDefaultThemeProvider() const { return NULL; }
 
   // Returns the FocusManager for this widget.
   // Note that all widgets in a widget hierarchy share the same focus manager.
   virtual FocusManager* GetFocusManager() { return NULL; }
+
+  // Forwarded from the RootView so that the widget can do any cleanup.
+  virtual void ViewHierarchyChanged(bool is_add, View *parent,
+                                    View *child) = 0;
 };
 
 }  // namespace views

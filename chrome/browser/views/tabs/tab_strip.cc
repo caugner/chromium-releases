@@ -11,9 +11,6 @@
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
 #include "app/slide_animation.h"
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#endif
 #include "base/gfx/size.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/browser_theme_provider.h"
@@ -24,7 +21,6 @@
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/tabs/dragged_tab_controller.h"
 #include "chrome/browser/views/tabs/tab.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -34,14 +30,28 @@
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
 
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#include "views/widget/widget_win.h"
+#elif defined(OS_LINUX)
+#include "views/widget/widget_gtk.h"
+#endif
+
 #undef min
 #undef max
+
+#if defined(COMPILER_GCC)
+// Squash false positive signed overflow warning in GenerateStartAndEndWidths
+// when doing 'start_tab_count < end_tab_count'.
+#pragma GCC diagnostic ignored "-Wstrict-overflow"
+#endif
 
 using views::DropTargetEvent;
 
 static const int kDefaultAnimationDurationMs = 100;
 static const int kResizeLayoutAnimationDurationMs = 166;
 static const int kReorderAnimationDurationMs = 166;
+static const int kPinnedTabAnimationDurationMs = 166;
 
 static const int kNewTabButtonHOffset = -5;
 static const int kNewTabButtonVOffset = 5;
@@ -114,7 +124,9 @@ class TabStrip::TabAnimation : public AnimationDelegate {
     INSERT,
     REMOVE,
     MOVE,
-    RESIZE
+    RESIZE,
+    PIN,
+    PIN_MOVE
   };
 
   TabAnimation(TabStrip* tabstrip, Type type)
@@ -153,10 +165,15 @@ class TabStrip::TabAnimation : public AnimationDelegate {
   static double GetCurrentTabWidth(TabStrip* tabstrip,
                                    TabStrip::TabAnimation* animation,
                                    int index) {
-    double unselected, selected;
-    tabstrip->GetCurrentTabWidths(&unselected, &selected);
     Tab* tab = tabstrip->GetTabAt(index);
-    double tab_width = tab->IsSelected() ? selected : unselected;
+    double tab_width;
+    if (tab->pinned()) {
+      tab_width = Tab::GetPinnedWidth();
+    } else {
+      double unselected, selected;
+      tabstrip->GetCurrentTabWidths(&unselected, &selected);
+      tab_width = tab->IsSelected() ? selected : unselected;
+    }
     if (animation) {
       double specified_tab_width = animation->GetWidthForTab(index);
       if (specified_tab_width != -1)
@@ -179,6 +196,12 @@ class TabStrip::TabAnimation : public AnimationDelegate {
     AnimationEnded(animation);
   }
 
+  // Returns the gap before the tab at the specified index. Subclass if during
+  // an animation you need to insert a gap before a tab.
+  virtual double GetGapWidth(int index) {
+    return 0;
+  }
+
  protected:
   // Returns the duration of the animation.
   virtual int GetDuration() const {
@@ -194,8 +217,11 @@ class TabStrip::TabAnimation : public AnimationDelegate {
 
   // Figure out the desired start and end widths for the specified pre- and
   // post- animation tab counts.
-  void GenerateStartAndEndWidths(int start_tab_count, int end_tab_count) {
-    tabstrip_->GetDesiredTabWidths(start_tab_count, &start_unselected_width_,
+  void GenerateStartAndEndWidths(int start_tab_count, int end_tab_count,
+                                 int start_pinned_count,
+                                 int end_pinned_count) {
+    tabstrip_->GetDesiredTabWidths(start_tab_count, start_pinned_count,
+                                   &start_unselected_width_,
                                    &start_selected_width_);
     double standard_tab_width =
         static_cast<double>(TabRenderer::GetStandardSize().width());
@@ -206,9 +232,24 @@ class TabStrip::TabAnimation : public AnimationDelegate {
       start_unselected_width_ -= minimum_tab_width / start_tab_count;
     }
     tabstrip_->GenerateIdealBounds();
-    tabstrip_->GetDesiredTabWidths(end_tab_count,
+    tabstrip_->GetDesiredTabWidths(end_tab_count, end_pinned_count,
                                    &end_unselected_width_,
                                    &end_selected_width_);
+  }
+
+  // Returns a value between |start| and |target| based on the current
+  // animation.
+  // TODO(sky): move this to animation.
+  int AnimationPosition(int start, int target) const {
+    return static_cast<int>(AnimationPosition(static_cast<double>(start),
+                                              static_cast<double>(target)));
+  }
+
+  // Returns a value between |start| and |target| based on the current
+  // animation.
+  // TODO(sky): move this to animation.
+  double AnimationPosition(double start, double target) const {
+    return start + (target - start) * animation_.GetCurrentValue();
   }
 
   TabStrip* tabstrip_;
@@ -240,7 +281,12 @@ class TabStrip::InsertTabAnimation : public TabStrip::TabAnimation {
       : TabAnimation(tabstrip, INSERT),
         index_(index) {
     int tab_count = tabstrip->GetTabCount();
-    GenerateStartAndEndWidths(tab_count - 1, tab_count);
+    int end_pinned_count = tabstrip->GetPinnedTabCount();
+    int start_pinned_count = end_pinned_count;
+    if (index < end_pinned_count)
+      start_pinned_count--;
+    GenerateStartAndEndWidths(tab_count - 1, tab_count, start_pinned_count,
+                              end_pinned_count);
   }
   virtual ~InsertTabAnimation() {}
 
@@ -249,19 +295,31 @@ class TabStrip::InsertTabAnimation : public TabStrip::TabAnimation {
   virtual double GetWidthForTab(int index) const {
     if (index == index_) {
       bool is_selected = tabstrip_->model()->selected_index() == index;
-      double target_width =
-          is_selected ? end_unselected_width_ : end_selected_width_;
-      double start_width = is_selected ? Tab::GetMinimumSelectedSize().width() :
-          Tab::GetMinimumUnselectedSize().width();
+      double start_width, target_width;
+      if (index < tabstrip_->GetPinnedTabCount()) {
+        start_width = Tab::GetMinimumSelectedSize().width();
+        target_width = Tab::GetPinnedWidth();
+      } else {
+        target_width =
+            is_selected ? end_unselected_width_ : end_selected_width_;
+        start_width =
+            is_selected ? Tab::GetMinimumSelectedSize().width() :
+                          Tab::GetMinimumUnselectedSize().width();
+      }
       double delta = target_width - start_width;
       if (delta > 0)
         return start_width + (delta * animation_.GetCurrentValue());
       return start_width;
     }
+
+    if (tabstrip_->GetTabAt(index)->pinned())
+      return Tab::GetPinnedWidth();
+
     if (tabstrip_->GetTabAt(index)->IsSelected()) {
       double delta = end_selected_width_ - start_selected_width_;
       return start_selected_width_ + (delta * animation_.GetCurrentValue());
     }
+
     double delta = end_unselected_width_ - start_unselected_width_;
     return start_unselected_width_ + (delta * animation_.GetCurrentValue());
   }
@@ -281,7 +339,12 @@ class TabStrip::RemoveTabAnimation : public TabStrip::TabAnimation {
       : TabAnimation(tabstrip, REMOVE),
         index_(index) {
     int tab_count = tabstrip->GetTabCount();
-    GenerateStartAndEndWidths(tab_count, tab_count - 1);
+    int start_pinned_count = tabstrip->GetPinnedTabCount();
+    int end_pinned_count = start_pinned_count;
+    if (index < start_pinned_count)
+      end_pinned_count--;
+    GenerateStartAndEndWidths(tab_count, tab_count - 1, start_pinned_count,
+                              end_pinned_count);
   }
 
   // Returns the index of the tab being removed.
@@ -298,15 +361,21 @@ class TabStrip::RemoveTabAnimation : public TabStrip::TabAnimation {
       // The tab(s) being removed are gradually shrunken depending on the state
       // of the animation.
       // Removed animated Tabs are never selected.
+      if (tab->pinned())
+        return AnimationPosition(Tab::GetPinnedWidth(), -kTabHOffset);
+
       double start_width = start_unselected_width_;
       // Make sure target_width is at least abs(kTabHOffset), otherwise if
       // less than kTabHOffset during layout tabs get negatively offset.
       double target_width =
           std::max(abs(kTabHOffset),
                    Tab::GetMinimumUnselectedSize().width() + kTabHOffset);
-      double delta = start_width - target_width;
-      return start_width - (delta * animation_.GetCurrentValue());
+      return AnimationPosition(start_width, target_width);
     }
+
+    if (tab->pinned())
+      return Tab::GetPinnedWidth();
+
     if (tabstrip_->available_width_for_tabs_ != -1 &&
         index_ != tabstrip_->GetTabCount() - 1) {
       return TabStrip::TabAnimation::GetWidthForTab(index);
@@ -425,7 +494,9 @@ class TabStrip::ResizeLayoutAnimation : public TabStrip::TabAnimation {
   explicit ResizeLayoutAnimation(TabStrip* tabstrip)
       : TabAnimation(tabstrip, RESIZE) {
     int tab_count = tabstrip->GetTabCount();
-    GenerateStartAndEndWidths(tab_count, tab_count);
+    int pinned_tab_count = tabstrip->GetPinnedTabCount();
+    GenerateStartAndEndWidths(tab_count, tab_count, pinned_tab_count,
+                              pinned_tab_count);
     InitStartState();
   }
   virtual ~ResizeLayoutAnimation() {
@@ -444,12 +515,14 @@ class TabStrip::ResizeLayoutAnimation : public TabStrip::TabAnimation {
   }
 
   virtual double GetWidthForTab(int index) const {
-    if (tabstrip_->GetTabAt(index)->IsSelected()) {
-      double delta = end_selected_width_ - start_selected_width_;
-      return start_selected_width_ + (delta * animation_.GetCurrentValue());
-    }
-    double delta = end_unselected_width_ - start_unselected_width_;
-    return start_unselected_width_ + (delta * animation_.GetCurrentValue());
+    Tab* tab = tabstrip_->GetTabAt(index);
+    if (tab->pinned())
+      return Tab::GetPinnedWidth();
+
+    if (tab->IsSelected())
+      return AnimationPosition(start_selected_width_, end_selected_width_);
+
+    return AnimationPosition(start_unselected_width_, end_unselected_width_);
   }
 
  private:
@@ -460,10 +533,12 @@ class TabStrip::ResizeLayoutAnimation : public TabStrip::TabAnimation {
   void InitStartState() {
     for (int i = 0; i < tabstrip_->GetTabCount(); ++i) {
       Tab* current_tab = tabstrip_->GetTabAt(i);
-      if (current_tab->IsSelected()) {
-        start_selected_width_ = current_tab->width();
-      } else {
-        start_unselected_width_ = current_tab->width();
+      if (!current_tab->pinned()) {
+        if (current_tab->IsSelected()) {
+          start_selected_width_ = current_tab->width();
+        } else {
+          start_unselected_width_ = current_tab->width();
+        }
       }
     }
   }
@@ -471,8 +546,169 @@ class TabStrip::ResizeLayoutAnimation : public TabStrip::TabAnimation {
   DISALLOW_COPY_AND_ASSIGN(ResizeLayoutAnimation);
 };
 
+////////////////////////////////////////////////////////////////////////////////
+
+// Handles a tabs pinned state changing while the tab does not change position
+// in the model.
+class TabStrip::PinnedTabAnimation : public TabStrip::TabAnimation {
+ public:
+  explicit PinnedTabAnimation(TabStrip* tabstrip, int index)
+      : TabAnimation(tabstrip, PIN),
+        index_(index) {
+    int tab_count = tabstrip->GetTabCount();
+    int start_pinned_count = tabstrip->GetPinnedTabCount();
+    int end_pinned_count = start_pinned_count;
+    if (tabstrip->GetTabAt(index)->pinned())
+      start_pinned_count--;
+    else
+      start_pinned_count++;
+    tabstrip_->GetTabAt(index)->set_animating_pinned_change(true);
+    GenerateStartAndEndWidths(tab_count, tab_count, start_pinned_count,
+                              end_pinned_count);
+  }
+
+ protected:
+  // Overridden from TabStrip::TabAnimation:
+  virtual int GetDuration() const {
+    return kPinnedTabAnimationDurationMs;
+  }
+
+  virtual double GetWidthForTab(int index) const {
+    Tab* tab = tabstrip_->GetTabAt(index);
+
+    if (index == index_) {
+      if (tab->pinned()) {
+        return AnimationPosition(
+            start_selected_width_,
+            static_cast<double>(Tab::GetPinnedWidth()));
+      } else {
+        return AnimationPosition(static_cast<double>(Tab::GetPinnedWidth()),
+                                 end_selected_width_);
+      }
+    } else if (tab->pinned()) {
+      return Tab::GetPinnedWidth();
+    }
+
+    if (tab->IsSelected())
+      return AnimationPosition(start_selected_width_, end_selected_width_);
+
+    return AnimationPosition(start_unselected_width_, end_unselected_width_);
+  }
+
+ private:
+  // Index of the tab whose pinned state changed.
+  int index_;
+
+  DISALLOW_COPY_AND_ASSIGN(PinnedTabAnimation);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Handles the animation when a tabs pinned state changes and the tab moves as a
+// result.
+class TabStrip::PinAndMoveAnimation : public TabStrip::TabAnimation {
+ public:
+  explicit PinAndMoveAnimation(TabStrip* tabstrip,
+                               int from_index,
+                               int to_index,
+                               const gfx::Rect& start_bounds)
+      : TabAnimation(tabstrip, PIN_MOVE),
+        tab_(tabstrip->GetTabAt(to_index)),
+        start_bounds_(start_bounds),
+        from_index_(from_index),
+        to_index_(to_index) {
+    int tab_count = tabstrip->GetTabCount();
+    int start_pinned_count = tabstrip->GetPinnedTabCount();
+    int end_pinned_count = start_pinned_count;
+    if (tabstrip->GetTabAt(to_index)->pinned())
+      start_pinned_count--;
+    else
+      start_pinned_count++;
+    GenerateStartAndEndWidths(tab_count, tab_count, start_pinned_count,
+                              end_pinned_count);
+    target_bounds_ = tabstrip->GetIdealBounds(to_index);
+    tab_->set_animating_pinned_change(true);
+  }
+
+  // Overridden from AnimationDelegate:
+  virtual void AnimationProgressed(const Animation* animation) {
+    // Do the normal layout.
+    TabAnimation::AnimationProgressed(animation);
+
+    // Then special case the position of the tab being moved.
+    int x = AnimationPosition(start_bounds_.x(), target_bounds_.x());
+    int width = AnimationPosition(start_bounds_.width(),
+                                  target_bounds_.width());
+    gfx::Rect tab_bounds(x, start_bounds_.y(), width,
+                         start_bounds_.height());
+    tab_->SetBounds(tab_bounds);
+  }
+
+  virtual void AnimationEnded(const Animation* animation) {
+    tabstrip_->resize_layout_scheduled_ = false;
+    TabStrip::TabAnimation::AnimationEnded(animation);
+  }
+
+  virtual double GetGapWidth(int index) {
+    if (to_index_ < from_index_) {
+      // The tab was pinned.
+      if (index == to_index_) {
+        double current_size = AnimationPosition(0, target_bounds_.width());
+        if (current_size < -kTabHOffset)
+          return -(current_size + kTabHOffset);
+      } else if (index == from_index_ + 1) {
+        return AnimationPosition(start_bounds_.width(), 0);
+      }
+    } else {
+      // The tab was unpinned.
+      if (index == from_index_) {
+        return AnimationPosition(Tab::GetPinnedWidth() + kTabHOffset, 0);
+      }
+    }
+    return 0;
+  }
+
+ protected:
+  // Overridden from TabStrip::TabAnimation:
+  virtual int GetDuration() const { return kReorderAnimationDurationMs; }
+
+  virtual double GetWidthForTab(int index) const {
+    Tab* tab = tabstrip_->GetTabAt(index);
+
+    if (index == to_index_)
+      return AnimationPosition(0, target_bounds_.width());
+
+    if (tab->pinned())
+      return Tab::GetPinnedWidth();
+
+    if (tab->IsSelected())
+      return AnimationPosition(start_selected_width_, end_selected_width_);
+
+    return AnimationPosition(start_unselected_width_, end_unselected_width_);
+  }
+
+ private:
+  // The tab being moved.
+  Tab* tab_;
+
+  // Initial bounds of tab_.
+  gfx::Rect start_bounds_;
+
+  // Target bounds.
+  gfx::Rect target_bounds_;
+
+  // Start and end indices of the tab.
+  int from_index_;
+  int to_index_;
+
+  DISALLOW_COPY_AND_ASSIGN(PinAndMoveAnimation);
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, public:
+
+// static
+const int TabStrip::pinned_to_non_pinned_gap_ = 3;
 
 TabStrip::TabStrip(TabStripModel* model)
     : model_(model),
@@ -611,9 +847,11 @@ void TabStrip::Layout() {
 
   for (int i = 0; i < tab_count; ++i) {
     const gfx::Rect& bounds = tab_data_.at(i).ideal_bounds;
-    GetTabAt(i)->SetBounds(bounds.x(), bounds.y(), bounds.width(),
-                           bounds.height());
-    tab_right = bounds.right() + kTabHOffset;
+    Tab* tab = GetTabAt(i);
+    tab->set_animating_pinned_change(false);
+    tab->SetBounds(bounds.x(), bounds.y(), bounds.width(), bounds.height());
+    tab_right = bounds.right();
+    tab_right += GetTabHOffset(i + 1);
   }
   LayoutNewTabButton(static_cast<double>(tab_right), current_unselected_width_);
   SchedulePaint();
@@ -675,7 +913,7 @@ int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
 bool TabStrip::GetAccessibleRole(AccessibilityTypes::Role* role) {
   DCHECK(role);
 
-  *role = AccessibilityTypes::ROLE_GROUPING;
+  *role = AccessibilityTypes::ROLE_PAGETABLIST;
   return true;
 }
 
@@ -736,7 +974,10 @@ void TabStrip::TabInsertedAt(TabContents* contents,
                              bool foreground) {
   DCHECK(contents);
   DCHECK(index == TabStripModel::kNoTab || model_->ContainsIndex(index));
-
+  // This tab may be attached to another browser window, we should notify
+  // renderer.
+  contents->render_view_host()->UpdateBrowserWindowId(
+      contents->controller().window_id().id());
   if (active_animation_.get())
     active_animation_->Stop();
 
@@ -770,16 +1011,11 @@ void TabStrip::TabInsertedAt(TabContents* contents,
 
   // Only insert if we're not already in the list.
   if (!contains_tab) {
-    if (index == TabStripModel::kNoTab) {
-      TabData d = { tab, gfx::Rect() };
-      tab_data_.push_back(d);
-      tab->UpdateData(contents, false);
-    } else {
-      TabData d = { tab, gfx::Rect() };
-      tab_data_.insert(tab_data_.begin() + index, d);
-      tab->UpdateData(contents, false);
-    }
+    TabData d = { tab, gfx::Rect() };
+    tab_data_.insert(tab_data_.begin() + index, d);
+    tab->UpdateData(contents, false);
   }
+  tab->set_pinned(model_->IsTabPinned(index));
 
   // We only add the tab to the child list if it's not already - an invisible
   // tab maintained by the DraggedTabController will already be parented.
@@ -825,12 +1061,18 @@ void TabStrip::TabSelectedAt(TabContents* old_contents,
 
 void TabStrip::TabMoved(TabContents* contents, int from_index, int to_index,
                         bool pinned_state_changed) {
+  gfx::Rect start_bounds = GetIdealBounds(from_index);
   Tab* tab = GetTabAt(from_index);
   tab_data_.erase(tab_data_.begin() + from_index);
   TabData data = {tab, gfx::Rect()};
+  tab->set_pinned(model_->IsTabPinned(to_index));
   tab_data_.insert(tab_data_.begin() + to_index, data);
-  GenerateIdealBounds();
-  StartMoveTabAnimation(from_index, to_index);
+  if (pinned_state_changed) {
+    StartPinAndMoveTabAnimation(from_index, to_index, start_bounds);
+  } else {
+    GenerateIdealBounds();
+    StartMoveTabAnimation(from_index, to_index);
+  }
 }
 
 void TabStrip::TabChangedAt(TabContents* contents, int index,
@@ -840,6 +1082,11 @@ void TabStrip::TabChangedAt(TabContents* contents, int index,
   Tab* tab = GetTabAtAdjustForAnimation(index);
   tab->UpdateData(contents, loading_only);
   tab->UpdateFromModel();
+}
+
+void TabStrip::TabPinnedStateChanged(TabContents* contents, int index) {
+  GetTabAt(index)->set_pinned(model_->IsTabPinned(index));
+  StartPinnedTabAnimation(index);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -945,6 +1192,37 @@ void TabStrip::MaybeStartDrag(Tab* tab, const views::MouseEvent& event) {
   // the user is dragging.
   if (IsAnimating() || tab->closing() || !HasAvailableDragActions())
     return;
+  int index = GetIndexOfTab(tab);
+  if (!model_->ContainsIndex(index)) {
+    // It appears to be possible for a drag to start with an invalid tab.
+    // This records some extra information in hopes of tracking down why.
+    // The string contains the following, in order:
+    // . If a drag is already in progress, a 'D'.
+    // . Index of tab the user is dragging.
+    // . Number of tabs.
+    // . Size of the model.
+    // . Indices of any tabs that are being closed.
+    // . ! end marker.
+    std::string tmp;
+    if (drag_controller_.get())
+      tmp += "D";
+    tmp += " " + IntToString(index);
+    tmp += " " + IntToString(GetTabCount());
+    tmp += " " + IntToString(model_->count());
+    for (int i = 0; i < GetTabCount(); ++i) {
+      if (GetTabAt(i)->closing())
+        tmp += " " + IntToString(i);
+    }
+    tmp += "!";  // End marker so we know we got all closing tabs.
+
+    volatile char tab_state[128];
+    for (size_t i = 0; i < std::min(ARRAYSIZE_UNSAFE(tab_state),
+                                    tmp.size()); ++i) {
+      tab_state[i] = tmp[i];
+    }
+    CHECK(false);
+    return;
+  }
   drag_controller_.reset(new DraggedTabController(tab, this));
   drag_controller_->CaptureDragInfo(gfx::Point(event.x(), event.y()));
 }
@@ -968,7 +1246,7 @@ bool TabStrip::HasAvailableDragActions() const {
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, views::BaseButton::ButtonListener implementation:
 
-void TabStrip::ButtonPressed(views::Button* sender) {
+void TabStrip::ButtonPressed(views::Button* sender, const views::Event& event) {
   if (sender == newtab_button_) {
     UserMetrics::RecordAction(L"NewTab_Button", model_->profile());
     model_->delegate()->AddBlankTab(true);
@@ -1117,6 +1395,7 @@ TabStrip* TabStrip::AsTabStrip() {
 // TabStrip, private:
 
 void TabStrip::Init() {
+  SetID(VIEW_ID_TAB_STRIP);
   model_->AddObserver(this);
   newtab_button_size_.SetSize(kNewTabButtonWidth, kNewTabButtonHeight);
   if (drop_indicator_width == 0) {
@@ -1180,14 +1459,19 @@ void TabStrip::GetCurrentTabWidths(double* unselected_width,
 }
 
 void TabStrip::GetDesiredTabWidths(int tab_count,
+                                   int pinned_tab_count,
                                    double* unselected_width,
                                    double* selected_width) const {
+  DCHECK(tab_count >= 0 && pinned_tab_count >= 0 &&
+         pinned_tab_count <= tab_count);
   const double min_unselected_width = Tab::GetMinimumUnselectedSize().width();
   const double min_selected_width = Tab::GetMinimumSelectedSize().width();
+
+  *unselected_width = min_unselected_width;
+  *selected_width = min_selected_width;
+
   if (tab_count == 0) {
     // Return immediately to avoid divide-by-zero below.
-    *unselected_width = min_unselected_width;
-    *selected_width = min_selected_width;
     return;
   }
 
@@ -1207,6 +1491,18 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
     // their mouse for a few tabs' worth of closing.  We choose visual
     // imperfection over behavioral imperfection and select the first option.
     available_width = available_width_for_tabs_;
+  }
+
+  if (pinned_tab_count > 0) {
+    available_width -= pinned_tab_count * (Tab::GetPinnedWidth() +
+                                           kTabHOffset);
+    tab_count -= pinned_tab_count;
+    if (tab_count == 0) {
+      *selected_width = *unselected_width = Tab::GetStandardSize().width();
+      return;
+    }
+    // Account for gap between the last pinned tab and first non-pinned tab.
+    available_width -= pinned_to_non_pinned_gap_;
   }
 
   // Calculate the desired tab widths by dividing the available space into equal
@@ -1244,6 +1540,14 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
   }
 }
 
+int TabStrip::GetTabHOffset(int tab_index) {
+  if (tab_index < GetTabCount() && GetTabAt(tab_index - 1)->pinned() &&
+      !GetTabAt(tab_index)->pinned()) {
+    return pinned_to_non_pinned_gap_ + kTabHOffset;
+  }
+  return kTabHOffset;
+}
+
 void TabStrip::ResizeLayoutTabs() {
   // We've been called back after the TabStrip has been emptied out (probably
   // just prior to the window being destroyed). We need to do nothing here or
@@ -1258,9 +1562,15 @@ void TabStrip::ResizeLayoutTabs() {
   RemoveMessageLoopObserver();
 
   available_width_for_tabs_ = -1;
+  int pinned_tab_count = GetPinnedTabCount();
+  if (pinned_tab_count == GetTabCount()) {
+    // Only pinned tabs, we know the tab widths won't have changed (all pinned
+    // tabs have the same width), so there is nothing to do.
+    return;
+  }
+  Tab* first_tab  = GetTabAt(pinned_tab_count);
   double unselected, selected;
-  GetDesiredTabWidths(GetTabCount(), &unselected, &selected);
-  Tab* first_tab = GetTabAt(0);
+  GetDesiredTabWidths(GetTabCount(), pinned_tab_count, &unselected, &selected);
   int w = Round(first_tab->IsSelected() ? selected : selected);
 
   // We only want to run the animation if we're not already at the desired
@@ -1269,7 +1579,7 @@ void TabStrip::ResizeLayoutTabs() {
     StartResizeLayoutAnimation();
 }
 
-bool TabStrip::IsCursorInTabStripZone() {
+bool TabStrip::IsCursorInTabStripZone() const {
   gfx::Rect bounds = GetLocalBounds(true);
   gfx::Point tabstrip_topleft(bounds.origin());
   View::ConvertPointToScreen(this, &tabstrip_topleft);
@@ -1312,6 +1622,7 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
   int center_x;
   if (drop_index < GetTabCount()) {
     Tab* tab = GetTabAt(drop_index);
+    // TODO(sky): update these for pinned tabs.
     if (drop_before)
       center_x = tab->x() - (kTabHOffset / 2);
     else
@@ -1405,7 +1716,8 @@ void TabStrip::SetDropIndex(int index, bool drop_before) {
       HWND_TOPMOST, drop_bounds.x(), drop_bounds.y(), drop_bounds.width(),
       drop_bounds.height(), SWP_NOACTIVATE | SWP_SHOWWINDOW);
 #else
-  NOTIMPLEMENTED();
+  drop_info_->arrow_window->SetBounds(drop_bounds);
+  drop_info_->arrow_window->Show();
 #endif
 }
 
@@ -1430,29 +1742,30 @@ TabStrip::DropInfo::DropInfo(int drop_index, bool drop_before, bool point_down)
     : drop_index(drop_index),
       drop_before(drop_before),
       point_down(point_down) {
+  arrow_view = new views::ImageView;
+  arrow_view->SetImage(GetDropArrowImage(point_down));
+
 #if defined(OS_WIN)
   arrow_window = new views::WidgetWin;
   arrow_window->set_window_style(WS_POPUP);
   arrow_window->set_window_ex_style(WS_EX_TOPMOST | WS_EX_NOACTIVATE |
                                     WS_EX_LAYERED | WS_EX_TRANSPARENT);
-
-  arrow_view = new views::ImageView;
-  arrow_view->SetImage(GetDropArrowImage(point_down));
-
   arrow_window->Init(
       NULL,
       gfx::Rect(0, 0, drop_indicator_width, drop_indicator_height));
-  arrow_window->SetContentsView(arrow_view);
 #else
-  NOTIMPLEMENTED();
+  arrow_window = new views::WidgetGtk(views::WidgetGtk::TYPE_POPUP);
+  arrow_window->MakeTransparent();
+  arrow_window->Init(
+      NULL,
+      gfx::Rect(0, 0, drop_indicator_width, drop_indicator_height));
 #endif
+  arrow_window->SetContentsView(arrow_view);
 }
 
 TabStrip::DropInfo::~DropInfo() {
   // Close eventually deletes the window, which deletes arrow_view too.
-#if defined(OS_WIN)
   arrow_window->Close();
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1464,7 +1777,7 @@ TabStrip::DropInfo::~DropInfo() {
 void TabStrip::GenerateIdealBounds() {
   int tab_count = GetTabCount();
   double unselected, selected;
-  GetDesiredTabWidths(tab_count, &unselected, &selected);
+  GetDesiredTabWidths(tab_count, GetPinnedTabCount(), &unselected, &selected);
 
   current_unselected_width_ = unselected;
   current_selected_width_ = selected;
@@ -1476,14 +1789,16 @@ void TabStrip::GenerateIdealBounds() {
   for (int i = 0; i < tab_count; ++i) {
     Tab* tab = GetTabAt(i);
     double tab_width = unselected;
-    if (tab->IsSelected())
+    if (tab->pinned())
+      tab_width = Tab::GetPinnedWidth();
+    else if (tab->IsSelected())
       tab_width = selected;
     double end_of_tab = tab_x + tab_width;
     int rounded_tab_x = Round(tab_x);
     gfx::Rect state(rounded_tab_x, 0, Round(end_of_tab) - rounded_tab_x,
                     tab_height);
     tab_data_.at(i).ideal_bounds = state;
-    tab_x = end_of_tab + kTabHOffset;
+    tab_x = end_of_tab + GetTabHOffset(i + 1);
   }
 }
 
@@ -1513,13 +1828,15 @@ void TabStrip::AnimationLayout(double unselected_width) {
   double tab_x = 0;
   for (int i = 0; i < GetTabCount(); ++i) {
     TabAnimation* animation = active_animation_.get();
+    if (animation)
+      tab_x += animation->GetGapWidth(i);
     double tab_width = TabAnimation::GetCurrentTabWidth(this, animation, i);
     double end_of_tab = tab_x + tab_width;
     int rounded_tab_x = Round(tab_x);
     Tab* tab = GetTabAt(i);
     tab->SetBounds(rounded_tab_x, 0, Round(end_of_tab) - rounded_tab_x,
                    tab_height);
-    tab_x = end_of_tab + kTabHOffset;
+    tab_x = end_of_tab + GetTabHOffset(i + 1);
   }
   LayoutNewTabButton(tab_x, unselected_width);
   SchedulePaint();
@@ -1562,6 +1879,23 @@ void TabStrip::StartMoveTabAnimation(int from_index, int to_index) {
   active_animation_->Start();
 }
 
+void TabStrip::StartPinnedTabAnimation(int index) {
+  if (active_animation_.get())
+    active_animation_->Stop();
+  active_animation_.reset(new PinnedTabAnimation(this, index));
+  active_animation_->Start();
+}
+
+void TabStrip::StartPinAndMoveTabAnimation(int from_index,
+                                           int to_index,
+                                           const gfx::Rect& start_bounds) {
+  if (active_animation_.get())
+    active_animation_->Stop();
+  active_animation_.reset(
+      new PinAndMoveAnimation(this, from_index, to_index, start_bounds));
+  active_animation_->Start();
+}
+
 bool TabStrip::CanUpdateDisplay() {
   // Don't bother laying out/painting when we're closing all tabs.
   if (model_->closing_all()) {
@@ -1576,6 +1910,11 @@ bool TabStrip::CanUpdateDisplay() {
 void TabStrip::FinishAnimation(TabStrip::TabAnimation* animation,
                                bool layout) {
   active_animation_.reset(NULL);
+
+  // Reset the animation state of each tab.
+  for (int i = 0, count = GetTabCount(); i < count; ++i)
+    GetTabAt(i)->set_animating_pinned_change(false);
+
   if (layout)
     Layout();
 }
@@ -1590,6 +1929,17 @@ int TabStrip::GetIndexOfTab(const Tab* tab) const {
     }
   }
   return -1;
+}
+
+int TabStrip::GetPinnedTabCount() const {
+  int pinned_count = 0;
+  for (size_t i = 0; i < tab_data_.size(); ++i) {
+    if (tab_data_[i].tab->pinned())
+      pinned_count++;
+    else
+      return pinned_count;
+  }
+  return pinned_count;
 }
 
 int TabStrip::GetAvailableWidthForTabs(Tab* last_tab) const {

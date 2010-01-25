@@ -12,6 +12,7 @@
 #include "net/socket/client_socket.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
+#include "net/socket/socket_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -20,16 +21,7 @@ namespace {
 
 const int kMaxSockets = 32;
 const int kMaxSocketsPerGroup = 6;
-
-// Note that the first and the last are the same, the first should be handled
-// before the last, since it was inserted first.
-const int kPriorities[10] = { 1, 7, 9, 5, 6, 2, 8, 3, 4, 1 };
-
-// This is the number of extra requests beyond the first few that use up all
-// available sockets in the socket group.
-const int kNumPendingRequests = arraysize(kPriorities);
-
-const int kNumRequests = kMaxSocketsPerGroup + kNumPendingRequests;
+const int kDefaultPriority = 5;
 
 class MockClientSocket : public ClientSocket {
  public:
@@ -59,6 +51,8 @@ class MockClientSocket : public ClientSocket {
                     CompletionCallback* callback) {
     return ERR_FAILED;
   }
+  virtual bool SetReceiveBufferSize(int32 size) { return true; }
+  virtual bool SetSendBufferSize(int32 size) { return true; }
 
  private:
   bool connected_;
@@ -92,6 +86,8 @@ class MockFailingClientSocket : public ClientSocket {
                     CompletionCallback* callback) {
     return ERR_FAILED;
   }
+  virtual bool SetReceiveBufferSize(int32 size) { return true; }
+  virtual bool SetSendBufferSize(int32 size) { return true; }
 };
 
 class MockPendingClientSocket : public ClientSocket {
@@ -129,6 +125,8 @@ class MockPendingClientSocket : public ClientSocket {
                     CompletionCallback* callback) {
     return ERR_FAILED;
   }
+  virtual bool SetReceiveBufferSize(int32 size) { return true; }
+  virtual bool SetSendBufferSize(int32 size) { return true; }
 
  private:
   void DoCallback(CompletionCallback* callback) {
@@ -194,65 +192,33 @@ class MockClientSocketFactory : public ClientSocketFactory {
   ClientSocketType client_socket_type_;
 };
 
-class TestSocketRequest : public CallbackRunner< Tuple1<int> > {
- public:
-  TestSocketRequest(
-      ClientSocketPool* pool,
-      std::vector<TestSocketRequest*>* request_order)
-      : handle(pool), request_order_(request_order) {}
-
-  ClientSocketHandle handle;
-
-  int WaitForResult() {
-    return callback_.WaitForResult();
-  }
-
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    callback_.RunWithParams(params);
-    completion_count++;
-    request_order_->push_back(this);
-  }
-
-  static int completion_count;
-
- private:
-  std::vector<TestSocketRequest*>* request_order_;
-  TestCompletionCallback callback_;
-};
-
-int TestSocketRequest::completion_count = 0;
-
-class TCPClientSocketPoolTest : public testing::Test {
+class TCPClientSocketPoolTest : public ClientSocketPoolTest {
  protected:
   TCPClientSocketPoolTest()
-      : host_resolver_(new MockHostResolver),
+      : ignored_request_info_("ignored", 80),
+        host_resolver_(new MockHostResolver),
         pool_(new TCPClientSocketPool(kMaxSockets,
                                       kMaxSocketsPerGroup,
                                       host_resolver_,
                                       &client_socket_factory_)) {
   }
 
-  virtual void SetUp() {
-    TestSocketRequest::completion_count = 0;
+  int StartRequest(const std::string& group_name, int priority) {
+    return StartRequestUsingPool(
+        pool_.get(), group_name, priority, ignored_request_info_);
   }
 
-  virtual void TearDown() {
-    // The tests often call Reset() on handles at the end which may post
-    // DoReleaseSocket() tasks.
-    MessageLoop::current()->RunAllPending();
-  }
-
+  HostResolver::RequestInfo ignored_request_info_;
   scoped_refptr<MockHostResolver> host_resolver_;
   MockClientSocketFactory client_socket_factory_;
-  scoped_refptr<ClientSocketPool> pool_;
-  std::vector<TestSocketRequest*> request_order_;
+  scoped_refptr<TCPClientSocketPool> pool_;
 };
 
 TEST_F(TCPClientSocketPoolTest, Basic) {
   TestCompletionCallback callback;
-  ClientSocketHandle handle(pool_.get());
+  ClientSocketHandle handle;
   HostResolver::RequestInfo info("www.google.com", 80);
-  int rv = handle.Init("a", info, 0, &callback);
+  int rv = handle.Init("a", info, 0, &callback, pool_.get(), NULL);
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -266,189 +232,183 @@ TEST_F(TCPClientSocketPoolTest, Basic) {
 
 TEST_F(TCPClientSocketPoolTest, InitHostResolutionFailure) {
   host_resolver_->rules()->AddSimulatedFailure("unresolvable.host.name");
-  TestSocketRequest req(pool_.get(), &request_order_);
+  TestSocketRequest req(&request_order_, &completion_count_);
   HostResolver::RequestInfo info("unresolvable.host.name", 80);
-  EXPECT_EQ(ERR_IO_PENDING, req.handle.Init("a", info, 5, &req));
+  EXPECT_EQ(ERR_IO_PENDING,
+            req.handle()->Init(
+                "a", info, kDefaultPriority, &req, pool_.get(), NULL));
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, req.WaitForResult());
 }
 
 TEST_F(TCPClientSocketPoolTest, InitConnectionFailure) {
   client_socket_factory_.set_client_socket_type(
       MockClientSocketFactory::MOCK_FAILING_CLIENT_SOCKET);
-  TestSocketRequest req(pool_.get(), &request_order_);
+  TestSocketRequest req(&request_order_, &completion_count_);
   HostResolver::RequestInfo info("a", 80);
   EXPECT_EQ(ERR_IO_PENDING,
-            req.handle.Init("a", info, 5, &req));
+            req.handle()->Init(
+                "a", info, kDefaultPriority, &req, pool_.get(), NULL));
   EXPECT_EQ(ERR_CONNECTION_FAILED, req.WaitForResult());
 
   // Make the host resolutions complete synchronously this time.
   host_resolver_->set_synchronous_mode(true);
   EXPECT_EQ(ERR_CONNECTION_FAILED,
-            req.handle.Init("a", info, 5, &req));
+            req.handle()->Init(
+                "a", info, kDefaultPriority, &req, pool_.get(), NULL));
 }
 
 TEST_F(TCPClientSocketPoolTest, PendingRequests) {
-  scoped_ptr<TestSocketRequest> reqs[kNumRequests];
-
-  for (size_t i = 0; i < arraysize(reqs); ++i)
-    reqs[i].reset(new TestSocketRequest(pool_.get(), &request_order_));
-
-  // Create connections or queue up requests.
-
   // First request finishes asynchronously.
-  HostResolver::RequestInfo info("www.google.com", 80);
-  int rv = reqs[0]->handle.Init("a", info, 5, reqs[0].get());
-  EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, reqs[0]->WaitForResult());
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, requests_[0]->WaitForResult());
 
   // Make all subsequent host resolutions complete synchronously.
   host_resolver_->set_synchronous_mode(true);
 
-  // Rest of them finish synchronously.
-  for (int i = 1; i < kMaxSocketsPerGroup; ++i) {
-    rv = reqs[i]->handle.Init("a", info, 5, reqs[i].get());
-    EXPECT_EQ(OK, rv);
-    request_order_.push_back(reqs[i].get());
-  }
+  // Rest of them finish synchronously, until we reach the per-group limit.
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
 
   // The rest are pending since we've used all active sockets.
-  for (int i = 0; i < kNumPendingRequests; ++i) {
-    rv = reqs[kMaxSocketsPerGroup + i]->handle.Init(
-        "a", info, kPriorities[i], reqs[kMaxSocketsPerGroup + i].get());
-    EXPECT_EQ(ERR_IO_PENDING, rv);
-  }
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 1));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 7));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 9));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 5));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 6));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 2));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 8));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 3));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 4));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 1));
 
-  // Release any connections until we have no connections.
-  bool released_one;
-  do {
-    released_one = false;
-    for (size_t i = 0; i < arraysize(reqs); ++i) {
-      if (reqs[i]->handle.is_initialized()) {
-        reqs[i]->handle.Reset();
-        MessageLoop::current()->RunAllPending();
-        released_one = true;
-      }
-    }
-  } while (released_one);
+  ReleaseAllConnections(KEEP_ALIVE);
 
   EXPECT_EQ(kMaxSocketsPerGroup, client_socket_factory_.allocation_count());
-  EXPECT_EQ(kNumPendingRequests + 1, TestSocketRequest::completion_count);
 
-  for (int i = 0; i < kMaxSocketsPerGroup; ++i) {
-    EXPECT_EQ(request_order_[i], reqs[i].get()) <<
-        "Request " << i << " was not in order.";
-  }
+  // One initial asynchronous request and then 10 pending requests.
+  EXPECT_EQ(11U, completion_count_);
 
-  for (int i = 0; i < kNumPendingRequests - 1; ++i) {
-    int index_in_queue = (kNumPendingRequests - 1) - kPriorities[i];
-    EXPECT_EQ(request_order_[kMaxSocketsPerGroup + index_in_queue],
-              reqs[kMaxSocketsPerGroup + i].get()) <<
-        "Request " << kMaxSocketsPerGroup + i << " was not in order.";
-  }
+  // First part of requests, all with the same priority, finishes in FIFO order.
+  EXPECT_EQ(1, GetOrderOfRequest(1));
+  EXPECT_EQ(2, GetOrderOfRequest(2));
+  EXPECT_EQ(3, GetOrderOfRequest(3));
+  EXPECT_EQ(4, GetOrderOfRequest(4));
+  EXPECT_EQ(5, GetOrderOfRequest(5));
+  EXPECT_EQ(6, GetOrderOfRequest(6));
 
-  EXPECT_EQ(request_order_[arraysize(reqs) - 1],
-            reqs[arraysize(reqs) - 1].get()) <<
-      "The last request with priority 1 should not have been inserted "
-      "earlier into the queue.";
+  // Make sure that rest o the requests complete in the order of priority.
+  EXPECT_EQ(15, GetOrderOfRequest(7));
+  EXPECT_EQ(9, GetOrderOfRequest(8));
+  EXPECT_EQ(7, GetOrderOfRequest(9));
+  EXPECT_EQ(11, GetOrderOfRequest(10));
+  EXPECT_EQ(10, GetOrderOfRequest(11));
+  EXPECT_EQ(14, GetOrderOfRequest(12));
+  EXPECT_EQ(8, GetOrderOfRequest(13));
+  EXPECT_EQ(13, GetOrderOfRequest(14));
+  EXPECT_EQ(12, GetOrderOfRequest(15));
+  EXPECT_EQ(16, GetOrderOfRequest(16));
+
+  // Make sure we test order of all requests made.
+  EXPECT_EQ(kIndexOutOfBounds, GetOrderOfRequest(17));
 }
 
 TEST_F(TCPClientSocketPoolTest, PendingRequests_NoKeepAlive) {
-  scoped_ptr<TestSocketRequest> reqs[kNumRequests];
-  for (size_t i = 0; i < arraysize(reqs); ++i)
-    reqs[i].reset(new TestSocketRequest(pool_.get(), &request_order_));
-
-  // Create connections or queue up requests.
-
   // First request finishes asynchronously.
-  HostResolver::RequestInfo info("www.google.com", 80);
-  int rv = reqs[0]->handle.Init("a", info, 5, reqs[0].get());
-  EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, reqs[0]->WaitForResult());
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, requests_[0]->WaitForResult());
 
   // Make all subsequent host resolutions complete synchronously.
   host_resolver_->set_synchronous_mode(true);
 
-  // Rest of them finish synchronously.
-  for (int i = 1; i < kMaxSocketsPerGroup; ++i) {
-    rv = reqs[i]->handle.Init("a", info, 5, reqs[i].get());
-    EXPECT_EQ(OK, rv);
-    request_order_.push_back(reqs[i].get());
-  }
+  // Rest of them finish synchronously, until we reach the per-group limit.
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
 
   // The rest are pending since we've used all active sockets.
-  for (int i = 0; i < kNumPendingRequests; ++i) {
-    EXPECT_EQ(ERR_IO_PENDING, reqs[kMaxSocketsPerGroup + i]->handle.Init(
-        "a", info, 0, reqs[kMaxSocketsPerGroup + i].get()));
-  }
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
 
-  // Release any connections until we have no connections.
-  bool released_one;
-  do {
-    released_one = false;
-    for (size_t i = 0; i < arraysize(reqs); ++i) {
-      if (reqs[i]->handle.is_initialized()) {
-        reqs[i]->handle.socket()->Disconnect();  // No keep alive.
-        reqs[i]->handle.Reset();
-        MessageLoop::current()->RunAllPending();
-        released_one = true;
-      }
-    }
-  } while (released_one);
+  ReleaseAllConnections(NO_KEEP_ALIVE);
 
-  for (int i = kMaxSocketsPerGroup; i < kNumRequests; ++i)
-    EXPECT_EQ(OK, reqs[i]->WaitForResult());
+  // The pending requests should finish successfully.
+  EXPECT_EQ(OK, requests_[6]->WaitForResult());
+  EXPECT_EQ(OK, requests_[7]->WaitForResult());
+  EXPECT_EQ(OK, requests_[8]->WaitForResult());
+  EXPECT_EQ(OK, requests_[9]->WaitForResult());
+  EXPECT_EQ(OK, requests_[10]->WaitForResult());
 
-  EXPECT_EQ(kNumRequests, client_socket_factory_.allocation_count());
-  EXPECT_EQ(kNumPendingRequests + 1, TestSocketRequest::completion_count);
+  EXPECT_EQ(static_cast<int>(requests_.size()),
+            client_socket_factory_.allocation_count());
+
+  // First asynchronous request, and then last 5 pending requests.
+  EXPECT_EQ(6U, completion_count_);
 }
 
 // This test will start up a RequestSocket() and then immediately Cancel() it.
 // The pending host resolution will eventually complete, and destroy the
 // ClientSocketPool which will crash if the group was not cleared properly.
 TEST_F(TCPClientSocketPoolTest, CancelRequestClearGroup) {
-  TestSocketRequest req(pool_.get(), &request_order_);
+  TestSocketRequest req(&request_order_, &completion_count_);
   HostResolver::RequestInfo info("www.google.com", 80);
-  EXPECT_EQ(ERR_IO_PENDING, req.handle.Init("a", info, 5, &req));
-  req.handle.Reset();
-
-  PlatformThread::Sleep(100);
+  EXPECT_EQ(ERR_IO_PENDING,
+            req.handle()->Init(
+                "a", info, kDefaultPriority, &req, pool_.get(), NULL));
+  req.handle()->Reset();
 
   // There is a race condition here.  If the worker pool doesn't post the task
   // before we get here, then this might not run ConnectingSocket::OnIOComplete
   // and therefore leak the canceled ConnectingSocket.  However, other tests
   // after this will call MessageLoop::RunAllPending() which should prevent a
   // leak, unless the worker thread takes longer than all of them.
+  PlatformThread::Sleep(10);
   MessageLoop::current()->RunAllPending();
 }
 
 TEST_F(TCPClientSocketPoolTest, TwoRequestsCancelOne) {
-  TestSocketRequest req(pool_.get(), &request_order_);
-  TestSocketRequest req2(pool_.get(), &request_order_);
+  TestSocketRequest req(&request_order_, &completion_count_);
+  TestSocketRequest req2(&request_order_, &completion_count_);
 
   HostResolver::RequestInfo info("www.google.com", 80);
-  EXPECT_EQ(ERR_IO_PENDING, req.handle.Init("a", info, 5, &req));
-  EXPECT_EQ(ERR_IO_PENDING, req2.handle.Init("a", info, 5, &req2));
+  EXPECT_EQ(ERR_IO_PENDING,
+            req.handle()->Init(
+                "a", info, kDefaultPriority, &req, pool_.get(), NULL));
+  EXPECT_EQ(ERR_IO_PENDING,
+            req2.handle()->Init(
+                "a", info, kDefaultPriority, &req2, pool_.get(), NULL));
 
-  req.handle.Reset();
+  req.handle()->Reset();
 
   EXPECT_EQ(OK, req2.WaitForResult());
-  req2.handle.Reset();
+  req2.handle()->Reset();
 }
 
 TEST_F(TCPClientSocketPoolTest, ConnectCancelConnect) {
   client_socket_factory_.set_client_socket_type(
       MockClientSocketFactory::MOCK_PENDING_CLIENT_SOCKET);
-  ClientSocketHandle handle(pool_.get());
+  ClientSocketHandle handle;
   TestCompletionCallback callback;
-  TestSocketRequest req(pool_.get(), &request_order_);
+  TestSocketRequest req(&request_order_, &completion_count_);
 
   HostResolver::RequestInfo info("www.google.com", 80);
-  EXPECT_EQ(ERR_IO_PENDING, handle.Init("a", info, 5, &callback));
+  EXPECT_EQ(ERR_IO_PENDING,
+            handle.Init(
+                "a", info, kDefaultPriority, &callback, pool_.get(), NULL));
 
   handle.Reset();
 
   TestCompletionCallback callback2;
-  EXPECT_EQ(ERR_IO_PENDING, handle.Init("a", info, 5, &callback2));
+  EXPECT_EQ(ERR_IO_PENDING,
+            handle.Init(
+                "a", info, kDefaultPriority, &callback2, pool_.get(), NULL));
 
   host_resolver_->set_synchronous_mode(true);
   // At this point, handle has two ConnectingSockets out for it.  Due to the
@@ -467,81 +427,68 @@ TEST_F(TCPClientSocketPoolTest, ConnectCancelConnect) {
 }
 
 TEST_F(TCPClientSocketPoolTest, CancelRequest) {
-  scoped_ptr<TestSocketRequest> reqs[kNumRequests];
-
-  for (size_t i = 0; i < arraysize(reqs); ++i)
-    reqs[i].reset(new TestSocketRequest(pool_.get(), &request_order_));
-
-  // Create connections or queue up requests.
-  HostResolver::RequestInfo info("www.google.com", 80);
-
   // First request finishes asynchronously.
-  int rv = reqs[0]->handle.Init("a", info, 5, reqs[0].get());
-  EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, reqs[0]->WaitForResult());
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, requests_[0]->WaitForResult());
 
   // Make all subsequent host resolutions complete synchronously.
   host_resolver_->set_synchronous_mode(true);
 
-  // Rest of them finish synchronously.
-  for (int i = 1; i < kMaxSocketsPerGroup; ++i) {
-    rv = reqs[i]->handle.Init("a", info, 5, reqs[i].get());
-    EXPECT_EQ(OK, rv);
-    request_order_.push_back(reqs[i].get());
-  }
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(OK, StartRequest("a", kDefaultPriority));
 
-  // The rest are pending since we've used all active sockets.
-  for (int i = 0; i < kNumPendingRequests; ++i) {
-    EXPECT_EQ(ERR_IO_PENDING, reqs[kMaxSocketsPerGroup + i]->handle.Init(
-        "a", info, kPriorities[i], reqs[kMaxSocketsPerGroup + i].get()));
-  }
+  // Reached per-group limit, queue up requests.
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 1));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 7));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 9));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 5));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 6));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 2));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 8));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 3));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 4));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", 1));
 
   // Cancel a request.
   size_t index_to_cancel = kMaxSocketsPerGroup + 2;
-  EXPECT_TRUE(!reqs[index_to_cancel]->handle.is_initialized());
-  reqs[index_to_cancel]->handle.Reset();
+  EXPECT_FALSE(requests_[index_to_cancel]->handle()->is_initialized());
+  requests_[index_to_cancel]->handle()->Reset();
 
-  // Release any connections until we have no connections.
-  bool released_one;
-  do {
-    released_one = false;
-    for (size_t i = 0; i < arraysize(reqs); ++i) {
-      if (reqs[i]->handle.is_initialized()) {
-        reqs[i]->handle.Reset();
-        MessageLoop::current()->RunAllPending();
-        released_one = true;
-      }
-    }
-  } while (released_one);
+  ReleaseAllConnections(KEEP_ALIVE);
 
-  EXPECT_EQ(kMaxSocketsPerGroup, client_socket_factory_.allocation_count());
-  EXPECT_EQ(kNumPendingRequests, TestSocketRequest::completion_count);
+  EXPECT_EQ(kMaxSocketsPerGroup,
+            client_socket_factory_.allocation_count());
+  EXPECT_EQ(requests_.size() - kMaxSocketsPerGroup, completion_count_);
 
-  for (int i = 0; i < kMaxSocketsPerGroup; ++i) {
-    EXPECT_EQ(request_order_[i], reqs[i].get()) <<
-        "Request " << i << " was not in order.";
-  }
+  EXPECT_EQ(1, GetOrderOfRequest(1));
+  EXPECT_EQ(2, GetOrderOfRequest(2));
+  EXPECT_EQ(3, GetOrderOfRequest(3));
+  EXPECT_EQ(4, GetOrderOfRequest(4));
+  EXPECT_EQ(5, GetOrderOfRequest(5));
+  EXPECT_EQ(6, GetOrderOfRequest(6));
+  EXPECT_EQ(14, GetOrderOfRequest(7));
+  EXPECT_EQ(8, GetOrderOfRequest(8));
+  EXPECT_EQ(kRequestNotFound, GetOrderOfRequest(9));  // Canceled request.
+  EXPECT_EQ(10, GetOrderOfRequest(10));
+  EXPECT_EQ(9, GetOrderOfRequest(11));
+  EXPECT_EQ(13, GetOrderOfRequest(12));
+  EXPECT_EQ(7, GetOrderOfRequest(13));
+  EXPECT_EQ(12, GetOrderOfRequest(14));
+  EXPECT_EQ(11, GetOrderOfRequest(15));
+  EXPECT_EQ(15, GetOrderOfRequest(16));
 
-  for (int i = 0; i < kNumPendingRequests - 1; ++i) {
-    if (i == 2) continue;
-    int index_in_queue = (kNumPendingRequests - 1) - kPriorities[i];
-    if (kPriorities[i] < kPriorities[index_to_cancel - kMaxSocketsPerGroup])
-      index_in_queue--;
-    EXPECT_EQ(request_order_[kMaxSocketsPerGroup + index_in_queue],
-              reqs[kMaxSocketsPerGroup + i].get()) <<
-        "Request " << kMaxSocketsPerGroup + i << " was not in order.";
-  }
-
-  EXPECT_EQ(request_order_[arraysize(reqs) - 2],
-            reqs[arraysize(reqs) - 1].get()) <<
-      "The last request with priority 1 should not have been inserted "
-      "earlier into the queue.";
+  // Make sure we test order of all requests made.
+  EXPECT_EQ(kIndexOutOfBounds, GetOrderOfRequest(17));
 }
 
 class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
  public:
-  explicit RequestSocketCallback(ClientSocketHandle* handle)
+  RequestSocketCallback(ClientSocketHandle* handle, TCPClientSocketPool* pool)
       : handle_(handle),
+        pool_(pool),
         within_callback_(false) {}
 
   virtual void RunWithParams(const Tuple1<int>& params) {
@@ -552,7 +499,8 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
       handle_->Reset();
       within_callback_ = true;
       int rv = handle_->Init(
-          "a", HostResolver::RequestInfo("www.google.com", 80), 0, this);
+          "a", HostResolver::RequestInfo("www.google.com", 80), 0,
+          this, pool_.get(), NULL);
       EXPECT_EQ(OK, rv);
     }
   }
@@ -563,15 +511,17 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
 
  private:
   ClientSocketHandle* const handle_;
+  const scoped_refptr<TCPClientSocketPool> pool_;
   bool within_callback_;
   TestCompletionCallback callback_;
 };
 
 TEST_F(TCPClientSocketPoolTest, RequestTwice) {
-  ClientSocketHandle handle(pool_.get());
-  RequestSocketCallback callback(&handle);
+  ClientSocketHandle handle;
+  RequestSocketCallback callback(&handle, pool_.get());
   int rv = handle.Init(
-      "a", HostResolver::RequestInfo("www.google.com", 80), 0, &callback);
+      "a", HostResolver::RequestInfo("www.google.com", 80), 0,
+      &callback, pool_.get(), NULL);
   ASSERT_EQ(ERR_IO_PENDING, rv);
 
   // The callback is going to request "www.google.com". We want it to complete
@@ -589,29 +539,29 @@ TEST_F(TCPClientSocketPoolTest, CancelActiveRequestWithPendingRequests) {
   client_socket_factory_.set_client_socket_type(
       MockClientSocketFactory::MOCK_PENDING_CLIENT_SOCKET);
 
-  scoped_ptr<TestSocketRequest> reqs[kNumRequests];
-
   // Queue up all the requests
-
-  HostResolver::RequestInfo info("www.google.com", 80);
-  for (size_t i = 0; i < arraysize(reqs); ++i) {
-    reqs[i].reset(new TestSocketRequest(pool_.get(), &request_order_));
-    int rv = reqs[i]->handle.Init("a", info, 5, reqs[i].get());
-    EXPECT_EQ(ERR_IO_PENDING, rv);
-  }
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
 
   // Now, kMaxSocketsPerGroup requests should be active.  Let's cancel them.
-  for (int i = 0; i < kMaxSocketsPerGroup; ++i)
-    reqs[i]->handle.Reset();
+  ASSERT_LE(kMaxSocketsPerGroup, static_cast<int>(requests_.size()));
+  for (int i = 0; i < kMaxSocketsPerGroup; i++)
+    requests_[i]->handle()->Reset();
 
   // Let's wait for the rest to complete now.
-
-  for (size_t i = kMaxSocketsPerGroup; i < arraysize(reqs); ++i) {
-    EXPECT_EQ(OK, reqs[i]->WaitForResult());
-    reqs[i]->handle.Reset();
+  for (size_t i = kMaxSocketsPerGroup; i < requests_.size(); ++i) {
+    EXPECT_EQ(OK, requests_[i]->WaitForResult());
+    requests_[i]->handle()->Reset();
   }
 
-  EXPECT_EQ(kNumPendingRequests, TestSocketRequest::completion_count);
+  EXPECT_EQ(requests_.size() - kMaxSocketsPerGroup, completion_count_);
 }
 
 // Make sure that pending requests get serviced after active requests fail.
@@ -619,20 +569,15 @@ TEST_F(TCPClientSocketPoolTest, FailingActiveRequestWithPendingRequests) {
   client_socket_factory_.set_client_socket_type(
       MockClientSocketFactory::MOCK_PENDING_FAILING_CLIENT_SOCKET);
 
-  scoped_ptr<TestSocketRequest> reqs[kMaxSocketsPerGroup * 2 + 1];
-  ASSERT_LE(static_cast<int>(arraysize(reqs)), kMaxSockets);
+  const int kNumRequests = 2 * kMaxSocketsPerGroup + 1;
+  ASSERT_LE(kNumRequests, kMaxSockets);  // Otherwise the test will hang.
 
   // Queue up all the requests
+  for (int i = 0; i < kNumRequests; i++)
+    EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", kDefaultPriority));
 
-  HostResolver::RequestInfo info("www.google.com", 80);
-  for (size_t i = 0; i < arraysize(reqs); ++i) {
-    reqs[i].reset(new TestSocketRequest(pool_.get(), &request_order_));
-    int rv = reqs[i]->handle.Init("a", info, 5, reqs[i].get());
-    EXPECT_EQ(ERR_IO_PENDING, rv);
-  }
-
-  for (size_t i = 0; i < arraysize(reqs); ++i)
-    EXPECT_EQ(ERR_CONNECTION_FAILED, reqs[i]->WaitForResult());
+  for (int i = 0; i < kNumRequests; i++)
+    EXPECT_EQ(ERR_CONNECTION_FAILED, requests_[i]->WaitForResult());
 }
 
 }  // namespace

@@ -5,12 +5,10 @@
 #ifndef NET_FTP_FTP_AUTH_CACHE_H_
 #define NET_FTP_FTP_AUTH_CACHE_H_
 
+#include <list>
 #include <string>
-#include <map>
 
-#include "net/base/auth.h"
-
-class GURL;
+#include "googleurl/src/gurl.h"
 
 namespace net {
 
@@ -24,32 +22,45 @@ namespace net {
 //   GURL("ftp://myserver/PATH") -- WRONG, paths not allowed
 class FtpAuthCache {
  public:
+  // Maximum number of entries we allow in the cache.
+  static const size_t kMaxEntries;
+
+  struct Entry {
+   Entry(const GURL& origin, const std::wstring& username,
+         const std::wstring& password)
+        : origin(origin),
+          username(username),
+          password(password) {
+    }
+
+    const GURL origin;
+    std::wstring username;
+    std::wstring password;
+  };
+
   FtpAuthCache() {}
   ~FtpAuthCache() {}
 
-  // Check if we have authentication data for ftp server at |origin|.
-  // Returns the address of corresponding AuthData object (if found) or NULL
-  // (if not found).
-  AuthData* Lookup(const GURL& origin);
+  // Return Entry corresponding to given |origin| or NULL if not found.
+  Entry* Lookup(const GURL& origin);
 
-  // Add an entry for |origin| to the cache. If there is already an
-  // entry for |origin|, it will be overwritten. Both parameters are IN only.
-  void Add(const GURL& origin, AuthData* value);
+  // Add an entry for |origin| to the cache (consisting of |username| and
+  // |password|). If there is already an entry for |origin|, it will be
+  // overwritten.
+  void Add(const GURL& origin, const std::wstring& username,
+           const std::wstring& password);
 
-  // Remove the entry for |origin| from the cache, if one exists.
-  void Remove(const GURL& origin);
+  // Remove the entry for |origin| from the cache, if one exists and matches
+  // |username| and |password|.
+  void Remove(const GURL& origin, const std::wstring& username,
+              const std::wstring& password);
 
  private:
-  typedef std::string AuthCacheKey;
-  typedef scoped_refptr<AuthData> AuthCacheValue;
-  typedef std::map<AuthCacheKey, AuthCacheValue> AuthCacheMap;
+  typedef std::list<Entry> EntryList;
 
-  // Get the key in hash table |cache_| where entries for ftp server |origin|
-  // should be saved.
-  static AuthCacheKey MakeKey(const GURL& origin);
-
-  // internal representation of cache, an STL map.
-  AuthCacheMap cache_;
+  // Internal representation of cache, an STL list. This makes lookups O(n),
+  // but we expect n to be very low.
+  EntryList entries_;
 };
 
 }  // namespace net

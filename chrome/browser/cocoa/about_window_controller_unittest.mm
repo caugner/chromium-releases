@@ -18,13 +18,41 @@ class AboutWindowControllerTest : public PlatformTest {
   virtual void SetUp() {
     PlatformTest::SetUp();
     about_window_controller_.reset([[AboutWindowController alloc]
-                                    initWithWindowNibName:@"About"]);
+                                    initWithProfile:nil]);
     // make sure the nib is loaded
     [about_window_controller_ window];
   }
 
   scoped_nsobject<AboutWindowController> about_window_controller_;
 };
+
+TEST_F(AboutWindowControllerTest, TestCopyright) {
+  NSString* text = [BuildAboutWindowLegalTextBlock() string];
+
+  // Make sure we have the word "Copyright" in it, which is present in all
+  // locales.
+  NSRange range = [text rangeOfString:@"Copyright"];
+  EXPECT_NE(NSNotFound, range.location);
+}
+
+TEST_F(AboutWindowControllerTest, RemovesLinkAnchors) {
+  NSString* text = [BuildAboutWindowLegalTextBlock() string];
+
+  // Make sure that we removed the "BEGIN_LINK" and "END_LINK" anchors.
+  NSRange range = [text rangeOfString:@"BEGIN_LINK"];
+  EXPECT_EQ(NSNotFound, range.location);
+
+  range = [text rangeOfString:@"END_LINK"];
+  EXPECT_EQ(NSNotFound, range.location);
+}
+
+TEST_F(AboutWindowControllerTest, AwakeNibSetsString) {
+  NSAttributedString* legal_text = BuildAboutWindowLegalTextBlock();
+  NSAttributedString* text_storage =
+      [[about_window_controller_ legalText] textStorage];
+
+  EXPECT_TRUE([legal_text isEqualToAttributedString:text_storage]);
+}
 
 TEST_F(AboutWindowControllerTest, TestButton) {
   NSButton* button = [about_window_controller_ updateButton];
@@ -46,17 +74,16 @@ TEST_F(AboutWindowControllerTest, TestButton) {
 
 // Doesn't confirm correctness, but does confirm something happens.
 TEST_F(AboutWindowControllerTest, TestCallbacks) {
-  NSString *upToDate = [[about_window_controller_ upToDateTextField]
+  NSString *lastText = [[about_window_controller_ updateText]
                          stringValue];
   [about_window_controller_ upToDateCheckCompleted:NO latestVersion:@"foo"];
-  ASSERT_FALSE([upToDate isEqual:[[about_window_controller_ upToDateTextField]
+  ASSERT_FALSE([lastText isEqual:[[about_window_controller_ updateText]
                                    stringValue]]);
 
-  NSString *completed = [[about_window_controller_ updateCompletedTextField]
-                          stringValue];
+  lastText = [[about_window_controller_ updateText] stringValue];
   [about_window_controller_ updateCompleted:NO installs:0];
-  ASSERT_FALSE([completed isEqual:[[about_window_controller_
-                                     updateCompletedTextField] stringValue]]);
+  ASSERT_FALSE([lastText isEqual:[[about_window_controller_
+                                   updateText] stringValue]]);
 }
 
 }  // namespace

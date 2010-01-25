@@ -9,9 +9,9 @@
 
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/user_data_manager.h"
-#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/views/go_button.h"
 #include "chrome/browser/views/location_bar_view.h"
 #include "chrome/common/pref_member.h"
@@ -22,6 +22,7 @@
 #include "views/view.h"
 
 class BackForwardMenuModelViews;
+class BrowserActionsContainer;
 class Browser;
 class Profile;
 class ToolbarStarToggle;
@@ -72,7 +73,7 @@ class ToolbarView : public views::View,
                     public GetProfilesHelper::Delegate,
                     public CommandUpdater::CommandObserver,
                     public views::ButtonListener,
-                    public AutocompletePopupPositioner {
+                    public BubblePositioner {
  public:
   explicit ToolbarView(Browser* browser);
   virtual ~ToolbarView();
@@ -102,16 +103,18 @@ class ToolbarView : public views::View,
 
   // Accessors...
   Browser* browser() const { return browser_; }
+  BrowserActionsContainer* browser_actions() const { return browser_actions_; }
   ToolbarStarToggle* star_button() const { return star_; }
   GoButton* go_button() const { return go_; }
   LocationBarView* location_bar() const { return location_bar_; }
+  views::MenuButton* page_menu() const { return page_menu_; }
+  views::MenuButton* app_menu() const { return app_menu_; }
 
   // Overridden from Menu::BaseControllerDelegate:
   virtual bool GetAcceleratorInfo(int id, views::Accelerator* accel);
 
   // Overridden from views::MenuDelegate:
-  virtual void RunMenu(views::View* source, const gfx::Point& pt,
-                       gfx::NativeView hwnd);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt);
 
   // Overridden from GetProfilesHelper::Delegate:
   virtual void OnGetProfilesDone(const std::vector<std::wstring>& profiles);
@@ -124,10 +127,10 @@ class ToolbarView : public views::View,
   virtual void EnabledStateChangedForCommand(int id, bool enabled);
 
   // Overridden from views::BaseButton::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
-  // Overridden from AutocompletePopupPositioner:
-  virtual gfx::Rect GetPopupBounds() const;
+  // BubblePositioner:
+  virtual gfx::Rect GetLocationStackBounds() const;
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -149,6 +152,7 @@ class ToolbarView : public views::View,
   virtual void ShowContextMenu(int x, int y, bool is_mouse_gesture);
   virtual void DidGainFocus();
   virtual void WillLoseFocus();
+  virtual void RequestFocus();
   virtual bool OnKeyPressed(const views::KeyEvent& e);
   virtual bool OnKeyReleased(const views::KeyEvent& e);
   virtual bool GetAccessibleName(std::wstring* name);
@@ -176,8 +180,8 @@ class ToolbarView : public views::View,
   void LoadRightSideControlsImages();
 
   // Runs various menus.
-  void RunPageMenu(const gfx::Point& pt, gfx::NativeView hwnd);
-  void RunAppMenu(const gfx::Point& pt, gfx::NativeView hwnd);
+  void RunPageMenu(const gfx::Point& pt);
+  void RunAppMenu(const gfx::Point& pt);
 
   void CreatePageMenu();
   void CreateZoomMenuContents();
@@ -217,6 +221,7 @@ class ToolbarView : public views::View,
   ToolbarStarToggle* star_;
   LocationBarView* location_bar_;
   GoButton* go_;
+  BrowserActionsContainer* browser_actions_;
   views::MenuButton* page_menu_;
   views::MenuButton* app_menu_;
   // The bookmark menu button. This may be null.

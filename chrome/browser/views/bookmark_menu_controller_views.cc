@@ -21,7 +21,7 @@
 BookmarkMenuController::BookmarkMenuController(Browser* browser,
                                                Profile* profile,
                                                PageNavigator* navigator,
-                                               gfx::NativeView parent,
+                                               gfx::NativeWindow parent,
                                                const BookmarkNode* node,
                                                int start_child_index,
                                                bool show_other_folder)
@@ -71,6 +71,19 @@ void BookmarkMenuController::ExecuteCommand(int id, int mouse_event_flags) {
   page_navigator_->OpenURL(
       url, GURL(), event_utils::DispositionFromEventFlags(mouse_event_flags),
       PageTransition::AUTO_BOOKMARK);
+}
+
+bool BookmarkMenuController::GetDropFormats(
+      views::MenuItemView* menu,
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats) {
+  *formats = OSExchangeData::URL;
+  custom_formats->insert(BookmarkDragData::GetBookmarkCustomFormat());
+  return true;
+}
+
+bool BookmarkMenuController::AreDropTypesRequired(views::MenuItemView* menu) {
+  return true;
 }
 
 bool BookmarkMenuController::CanDrop(views::MenuItemView* menu,

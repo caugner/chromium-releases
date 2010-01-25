@@ -290,12 +290,15 @@ void FileStream::AsyncContext::RunAsynchronousCallback() {
 
 // FileStream ------------------------------------------------------------
 
-FileStream::FileStream() : file_(base::kInvalidPlatformFileValue) {
+FileStream::FileStream()
+    : file_(base::kInvalidPlatformFileValue),
+      open_flags_(0) {
   DCHECK(!IsOpen());
 }
 
 FileStream::FileStream(base::PlatformFile file, int flags)
-    : file_(file), open_flags_(flags) {
+    : file_(file),
+      open_flags_(flags) {
   // If the file handle is opened with base::PLATFORM_FILE_ASYNC, we need to
   // make sure we will perform asynchronous File IO to it.
   if (flags & base::PLATFORM_FILE_ASYNC) {
@@ -382,7 +385,7 @@ int FileStream::Read(
     return ERR_UNEXPECTED;
 
   // read(..., 0) will return 0, which indicates end-of-file.
-  DCHECK(buf_len > 0 && buf_len <= SSIZE_MAX);
+  DCHECK(buf_len > 0);
   DCHECK(open_flags_ & base::PLATFORM_FILE_READ);
 
   if (async_context_.get()) {
@@ -420,7 +423,7 @@ int FileStream::ReadUntilComplete(char *buf, int buf_len) {
 int FileStream::Write(
     const char* buf, int buf_len, CompletionCallback* callback) {
   // write(..., 0) will return 0, which indicates end-of-file.
-  DCHECK(buf_len > 0 && buf_len <= SSIZE_MAX);
+  DCHECK(buf_len > 0);
 
   if (!IsOpen())
     return ERR_UNEXPECTED;

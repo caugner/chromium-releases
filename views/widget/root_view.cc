@@ -8,15 +8,11 @@
 
 #include "app/drag_drop_types.h"
 #include "app/gfx/canvas.h"
-#if defined(OS_WIN)
-#include "base/base_drag_source.h"
-#endif
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "views/fill_layout.h"
 #include "views/focus/view_storage.h"
-#if defined(OS_WIN)
-#include "views/widget/root_view_drop_target.h"
-#endif
 #include "views/widget/widget.h"
 #include "views/window/window.h"
 
@@ -58,26 +54,26 @@ const char RootView::kViewClassName[] = "views/RootView";
 /////////////////////////////////////////////////////////////////////////////
 
 RootView::RootView(Widget* widget)
-  : mouse_pressed_handler_(NULL),
-    mouse_move_handler_(NULL),
-    last_click_handler_(NULL),
-    widget_(widget),
-    invalid_rect_urgent_(false),
-    pending_paint_task_(NULL),
-    paint_task_needed_(false),
-    explicit_mouse_handler_(false),
+    : mouse_pressed_handler_(NULL),
+      mouse_move_handler_(NULL),
+      last_click_handler_(NULL),
+      widget_(widget),
+      invalid_rect_urgent_(false),
+      pending_paint_task_(NULL),
+      paint_task_needed_(false),
+      explicit_mouse_handler_(false),
 #if defined(OS_WIN)
-    previous_cursor_(NULL),
+      previous_cursor_(NULL),
 #endif
-    default_keyboard_handler_(NULL),
-    focus_on_mouse_pressed_(false),
-    ignore_set_focus_calls_(false),
-    focus_traversable_parent_(NULL),
-    focus_traversable_parent_view_(NULL),
-    drag_view_(NULL)
+      default_keyboard_handler_(NULL),
+      focus_on_mouse_pressed_(false),
+      ignore_set_focus_calls_(false),
+      focus_traversable_parent_(NULL),
+      focus_traversable_parent_view_(NULL),
+      drag_view_(NULL)
 #ifndef NDEBUG
-    ,
-    is_processing_paint_(false)
+      ,
+      is_processing_paint_(false)
 #endif
 {
 }
@@ -90,6 +86,23 @@ RootView::~RootView() {
 
   if (pending_paint_task_)
     pending_paint_task_->Cancel();  // Ensure we're not called any more.
+}
+
+void RootView::SetContentsView(View* contents_view) {
+  DCHECK(contents_view && GetWidget()->GetNativeView()) <<
+      "Can't be called until after the native view is created!";
+  // The ContentsView must be set up _after_ the window is created so that its
+  // Widget pointer is valid.
+  SetLayoutManager(new FillLayout);
+  if (GetChildViewCount() != 0)
+    RemoveAllChildViews(true);
+  AddChildView(contents_view);
+
+  // Force a layout now, since the attached hierarchy won't be ready for the
+  // containing window's bounds. Note that we call Layout directly rather than
+  // calling the widget's size changed handler, since the RootView's bounds may
+  // not have changed, which will cause the Layout not to be done otherwise.
+  Layout();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -240,12 +253,8 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
       mouse_pressed_handler_ = NULL;
     }
 
-#if defined(OS_WIN)
-    if (drop_target_.get())
-      drop_target_->ResetTargetViewIfEquals(child);
-#else
-    NOTIMPLEMENTED();
-#endif
+    if (widget_)
+      widget_->ViewHierarchyChanged(is_add, parent, child);
 
     if (mouse_move_handler_ == child) {
       mouse_move_handler_ = NULL;
@@ -351,11 +360,12 @@ bool RootView::OnMousePressed(const MouseEvent& e) {
   if (focus_on_mouse_pressed_) {
 #if defined(OS_WIN)
     HWND hwnd = GetWidget()->GetNativeView();
-    if (::GetFocus() != hwnd) {
+    if (::GetFocus() != hwnd)
       ::SetFocus(hwnd);
-    }
 #else
-    NOTIMPLEMENTED();
+    GtkWidget* widget = GetWidget()->GetNativeView();
+    if (!gtk_widget_is_focus(widget))
+      gtk_widget_grab_focus(widget);
 #endif
   }
 
@@ -490,28 +500,6 @@ void RootView::SetMouseHandler(View *new_mh) {
   mouse_pressed_handler_ = new_mh;
 }
 
-void RootView::OnWidgetCreated() {
-#if defined(OS_WIN)
-  DCHECK(!drop_target_.get());
-  drop_target_ = new RootViewDropTarget(this);
-#else
-  // TODO(port): Port RootViewDropTarget and this goes away.
-  NOTIMPLEMENTED();
-#endif
-}
-
-void RootView::OnWidgetDestroyed() {
-#if defined(OS_WIN)
-  if (drop_target_.get()) {
-    RevokeDragDrop(GetWidget()->GetNativeView());
-    drop_target_ = NULL;
-  }
-#else
-  // TODO(port): Port RootViewDropTarget and this goes away.
-  NOTIMPLEMENTED();
-#endif
-}
-
 void RootView::ProcessMouseDragCanceled() {
   if (mouse_pressed_handler_) {
     // Synthesize a release event.
@@ -523,19 +511,17 @@ void RootView::ProcessMouseDragCanceled() {
 
 void RootView::FocusView(View* view) {
   if (view != GetFocusedView()) {
-#if defined(OS_WIN)
     FocusManager* focus_manager = GetFocusManager();
+    // TODO(jcampan): This fails under WidgetGtk with TYPE_CHILD.
+    // (see http://crbug.com/21335) Reenable DCHECK and
+    // verify GetFocusManager works as expecte.
+#if defined(OS_WIN)
     DCHECK(focus_manager) << "No Focus Manager for Window " <<
         (GetWidget() ? GetWidget()->GetNativeView() : 0);
+#endif
     if (!focus_manager)
       return;
-
-    View* prev_focused_view = focus_manager->GetFocusedView();
     focus_manager->SetFocusedView(view);
-#else
-    // TODO(port): Port the focus manager and this goes away.
-    NOTIMPLEMENTED();
-#endif
   }
 }
 
@@ -631,8 +617,13 @@ View* RootView::FindNextFocusableViewImpl(View* starting_view,
                                           FocusTraversable** focus_traversable,
                                           View** focus_traversable_view) {
   if (check_starting_view) {
-    if (IsViewFocusableCandidate(starting_view, skip_group_id))
-      return FindSelectedViewForGroup(starting_view);
+    if (IsViewFocusableCandidate(starting_view, skip_group_id)) {
+      View* v = FindSelectedViewForGroup(starting_view);
+      // The selected view might not be focusable (if it is disabled for
+      // example).
+      if (v && v->IsFocusable())
+        return v;
+    }
 
     *focus_traversable = starting_view->GetFocusTraversable();
     if (*focus_traversable) {
@@ -724,7 +715,11 @@ View* RootView::FindPreviousFocusableViewImpl(
   // a FocusTraversable, since we do not want to go down any more.
   if (check_starting_view &&
       IsViewFocusableCandidate(starting_view, skip_group_id)) {
-    return FindSelectedViewForGroup(starting_view);
+    View* v = FindSelectedViewForGroup(starting_view);
+    // The selected view might not be focusable (if it is disabled for
+    // example).
+    if (v && v->IsFocusable())
+      return v;
   }
 
   // Then try the left sibling.
@@ -794,20 +789,14 @@ bool RootView::ProcessKeyEvent(const KeyEvent& event) {
   bool consumed = false;
 
   View* v = GetFocusedView();
-#if defined(OS_WIN)
   // Special case to handle right-click context menus triggered by the
   // keyboard.
-  if (v && v->IsEnabled() && ((event.GetCharacter() == VK_APPS) ||
-      (event.GetCharacter() == VK_F10 && event.IsShiftDown()))) {
+  if (v && v->IsEnabled() && ((event.GetKeyCode() == base::VKEY_APPS) ||
+     (event.GetKeyCode() == base::VKEY_F10 && event.IsShiftDown()))) {
     gfx::Point screen_loc = v->GetKeyboardContextMenuLocation();
     v->ShowContextMenu(screen_loc.x(), screen_loc.y(), false);
     return true;
   }
-#else
-  // TODO(port): The above block needs the VK_* refactored out.
-  NOTIMPLEMENTED();
-#endif
-
   for (; v && v != this && !consumed; v = v->GetParent()) {
     consumed = (event.GetType() == Event::ET_KEY_PRESSED) ?
         v->OnKeyPressed(event) : v->OnKeyReleased(event);

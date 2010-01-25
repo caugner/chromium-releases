@@ -29,6 +29,15 @@ class Message;
 
 enum FindInPageDirection { BACK = 0, FWD = 1 };
 enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
+// Specifies the font size on a page which is requested by an automation
+// client.
+enum AutomationPageFontSize {
+  SMALLEST_FONT = 8,
+  SMALL_FONT = 12,
+  MEDIUM_FONT = 16,
+  LARGE_FONT = 24,
+  LARGEST_FONT = 36
+};
 
 class TabProxy : public AutomationResourceProxy {
  public:
@@ -77,19 +86,32 @@ class TabProxy : public AutomationResourceProxy {
   // Navigates to a url. This method accepts the same kinds of URL input that
   // can be passed to Chrome on the command line. This is a synchronous call and
   // hence blocks until the navigation completes.
-  AutomationMsg_NavigationResponseValues NavigateToURL(const GURL& url);
+  AutomationMsg_NavigationResponseValues NavigateToURL(
+      const GURL& url);
+
+  // Navigates to a url. This method accepts the same kinds of URL input that
+  // can be passed to Chrome on the command line. This is a synchronous call and
+  // hence blocks until the |number_of_navigations| navigations complete.
+  AutomationMsg_NavigationResponseValues
+      NavigateToURLBlockUntilNavigationsComplete(const GURL& url,
+                                                 int number_of_navigations);
 
   // Navigates to a url. This is same as NavigateToURL with a timeout option.
-  // The function returns until the navigation completes or timeout (in
-  // milliseconds) occurs. If return after timeout, is_timeout is set to true.
+  // The function blocks until the |number_of_navigations| navigations
+  // completes or timeout (in milliseconds) occurs. If return after timeout,
+  // is_timeout is set to true.
   AutomationMsg_NavigationResponseValues NavigateToURLWithTimeout(
-      const GURL& url, uint32 timeout_ms, bool* is_timeout);
+      const GURL& url, int number_of_navigations, uint32 timeout_ms,
+      bool* is_timeout);
 
   // Navigates to a url in an externally hosted tab.
   // This method accepts the same kinds of URL input that
   // can be passed to Chrome on the command line. This is a synchronous call and
   // hence blocks until the navigation completes.
-  AutomationMsg_NavigationResponseValues NavigateInExternalTab(const GURL& url);
+  AutomationMsg_NavigationResponseValues NavigateInExternalTab(
+      const GURL& url, const GURL& referrer);
+
+  AutomationMsg_NavigationResponseValues NavigateExternalTabAtIndex(int index);
 
   // Navigates to a url. This is an asynchronous version of NavigateToURL.
   // The function returns immediately after sending the LoadURL notification
@@ -109,9 +131,19 @@ class TabProxy : public AutomationResourceProxy {
   // hence blocks until the navigation completes.
   AutomationMsg_NavigationResponseValues GoBack();
 
+  // Equivalent to hitting the Back button. This is a synchronous call and
+  // hence blocks until the |number_of_navigations| navigations complete.
+  AutomationMsg_NavigationResponseValues GoBackBlockUntilNavigationsComplete(
+      int number_of_navigations);
+
   // Equivalent to hitting the Forward button. This is a synchronous call and
   // hence blocks until the navigation completes.
   AutomationMsg_NavigationResponseValues GoForward();
+
+  // Equivalent to hitting the Forward button. This is a synchronous call and
+  // hence blocks until the |number_of_navigations| navigations complete.
+  AutomationMsg_NavigationResponseValues GoForwardBlockUntilNavigationsComplete(
+      int number_of_navigations);
 
   // Equivalent to hitting the Reload button. This is a synchronous call and
   // hence blocks until the navigation completes.
@@ -202,7 +234,7 @@ class TabProxy : public AutomationResourceProxy {
   // |target_count|.
   bool WaitForBlockedPopupCountToChangeTo(int target_count, int wait_timeout);
 
-  bool GetDownloadDirectory(std::wstring* download_directory);
+  bool GetDownloadDirectory(FilePath* download_directory);
 
   // Shows an interstitial page.  Blocks until the interstitial page
   // has been loaded. Return false if a failure happens.3
@@ -251,8 +283,7 @@ class TabProxy : public AutomationResourceProxy {
   // Save the current web page. |file_name| is the HTML file name, and
   // |dir_path| is the directory for saving resource files. |type| indicates
   // which type we're saving as: HTML only or the complete web page.
-  bool SavePage(const std::wstring& file_name,
-                const std::wstring& dir_path,
+  bool SavePage(const FilePath& file_name, const FilePath& dir_path,
                 SavePackage::SavePackageType type);
 
   // Posts a message to the external tab.
@@ -283,10 +314,10 @@ class TabProxy : public AutomationResourceProxy {
   bool WaitForNavigation(int64 last_navigation_time);
 
   // Gets the current used encoding of the page in the tab.
-  bool GetPageCurrentEncoding(std::wstring* encoding);
+  bool GetPageCurrentEncoding(std::string* encoding);
 
   // Uses the specified encoding to override encoding of the page in the tab.
-  bool OverrideEncoding(const std::wstring& encoding);
+  bool OverrideEncoding(const std::string& encoding);
 
 #if defined(OS_WIN)
   // Resizes the tab window.
@@ -297,8 +328,20 @@ class TabProxy : public AutomationResourceProxy {
 
   // Sends the selected context menu command to the chrome instance
   void SendContextMenuCommand(int selected_command);
-
 #endif  // defined(OS_WIN)
+
+  // Selects all contents on the page.
+  void SelectAll();
+
+  // Edit operations on the page.
+  void Cut();
+  void Copy();
+  void Paste();
+
+  // These handlers issue asynchronous Reload and Stop notifications to the
+  // chrome instance.
+  void ReloadAsync();
+  void StopAsync();
 
   // Calls delegates
   void AddObserver(TabProxyDelegate* observer);

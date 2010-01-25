@@ -5,7 +5,7 @@
 // A struct for managing webkit's settings.
 //
 // Adding new values to this class probably involves updating
-// WebViewImpl::SetPreferences, common/render_messages.h, and
+// WebKit::WebSettings, common/render_messages.h, and
 // browser/profile.cc.
 
 #ifndef WEBKIT_GLUE_WEBPREFERENCES_H__
@@ -13,6 +13,10 @@
 
 #include <string>
 #include "googleurl/src/gurl.h"
+
+namespace WebKit {
+class WebView;
+}
 
 struct WebPreferences {
   std::wstring standard_font_family;
@@ -25,7 +29,7 @@ struct WebPreferences {
   int default_fixed_font_size;
   int minimum_font_size;
   int minimum_logical_font_size;
-  std::wstring default_encoding;
+  std::string default_encoding;
   bool javascript_enabled;
   bool web_security_enabled;
   bool javascript_can_open_windows_automatically;
@@ -33,7 +37,7 @@ struct WebPreferences {
   bool plugins_enabled;
   bool dom_paste_enabled;
   bool developer_extras_enabled;
-  std::wstring inspector_settings;
+  std::string inspector_settings;
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
   bool text_areas_are_resizable;
@@ -43,12 +47,20 @@ struct WebPreferences {
   bool remote_fonts_enabled;
   bool xss_auditor_enabled;
   bool local_storage_enabled;
+  bool databases_enabled;
   bool session_storage_enabled;
+  bool application_cache_enabled;
+  bool tabs_to_links;
 
   // TODO(tc): User style sheets will not work in chrome because it tries to
   // load the style sheet using a request without a frame.
   bool user_style_sheet_enabled;
   GURL user_style_sheet_location;
+
+  bool allow_universal_access_from_file_urls;
+
+  bool experimental_webgl_enabled;
+  bool experimental_notifications_enabled;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
@@ -64,7 +76,7 @@ struct WebPreferences {
         default_fixed_font_size(13),
         minimum_font_size(1),
         minimum_logical_font_size(6),
-        default_encoding(L"ISO-8859-1"),
+        default_encoding("ISO-8859-1"),
         javascript_enabled(true),
         web_security_enabled(true),
         javascript_can_open_windows_automatically(true),
@@ -72,7 +84,6 @@ struct WebPreferences {
         plugins_enabled(true),
         dom_paste_enabled(false),  // enables execCommand("paste")
         developer_extras_enabled(false),  // Requires extra work by embedder
-        inspector_settings(L""),
         shrinks_standalone_images_to_fit(true),
         uses_universal_detector(false),  // Disabled: page cycler regression
         text_areas_are_resizable(true),
@@ -82,9 +93,17 @@ struct WebPreferences {
         remote_fonts_enabled(false),
         xss_auditor_enabled(false),
         local_storage_enabled(false),
+        databases_enabled(false),
         session_storage_enabled(false),
-        user_style_sheet_enabled(false) {
+        application_cache_enabled(false),
+        tabs_to_links(true),
+        user_style_sheet_enabled(false),
+        allow_universal_access_from_file_urls(false),
+        experimental_webgl_enabled(false),
+        experimental_notifications_enabled(false) {
   }
+
+  void Apply(WebKit::WebView* web_view) const;
 };
 
 #endif  // WEBKIT_GLUE_WEBPREFERENCES_H__

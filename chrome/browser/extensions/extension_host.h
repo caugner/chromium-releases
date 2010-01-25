@@ -13,7 +13,12 @@
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/views/extensions/extension_view.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/gtk/extension_view_gtk.h"
+#elif defined(OS_MACOSX)
+#include "chrome/browser/cocoa/extension_view_mac.h"
 #endif
+#include "chrome/common/notification_registrar.h"
 
 class Browser;
 class Extension;
@@ -30,18 +35,28 @@ struct WebPreferences;
 // in the browser UI, or it may be hidden.
 class ExtensionHost : public RenderViewHostDelegate,
                       public RenderViewHostDelegate::View,
-                      public ExtensionFunctionDispatcher::Delegate {
+                      public ExtensionFunctionDispatcher::Delegate,
+                      public NotificationObserver {
  public:
+  class ProcessCreationQueue;
+
   // Enable DOM automation in created render view hosts.
   static void EnableDOMAutomation() { enable_dom_automation_ = true; }
 
   ExtensionHost(Extension* extension, SiteInstance* site_instance,
-                const GURL& url);
+                const GURL& url, ViewType::Type host_type);
   ~ExtensionHost();
 
 #if defined(TOOLKIT_VIEWS)
   void set_view(ExtensionView* view) { view_.reset(view); }
   ExtensionView* view() const { return view_.get(); }
+#elif defined(OS_LINUX)
+  ExtensionViewGtk* view() const { return view_.get(); }
+#elif defined(OS_MACOSX)
+  ExtensionViewMac* view() const { return view_.get(); }
+#else
+  // TODO(port): implement
+  void* view() const { return NULL; }
 #endif
 
   // Create an ExtensionView and tie it to this host and |browser|.
@@ -52,28 +67,43 @@ class ExtensionHost : public RenderViewHostDelegate,
   RenderProcessHost* render_process_host() const;
   SiteInstance* site_instance() const;
   bool did_stop_loading() const { return did_stop_loading_; }
+  bool document_element_available() const {
+    return document_element_available_;
+  }
+  Profile* profile() const { return profile_; }
+
+  // Sets the the ViewType of this host (e.g. mole, toolstrip).
+  void SetRenderViewType(ViewType::Type type);
 
   // Returns true if the render view is initialized and didn't crash.
   bool IsRenderViewLive() const;
 
-  // Initializes our RenderViewHost by creating its RenderView and navigating
-  // to this host's url.  Uses host_view for the RenderViewHost's view (can be
-  // NULL).
-  void CreateRenderView(RenderWidgetHostView* host_view);
+  // Prepares to initializes our RenderViewHost by creating its RenderView and
+  // navigating to this host's url. Uses host_view for the RenderViewHost's view
+  // (can be NULL). This happens delayed to avoid locking the UI.
+  void CreateRenderViewSoon(RenderWidgetHostView* host_view);
 
-  // Restarts extension's renderer process. Can be called only if the renderer
-  // process crashed.
-  void RecoverCrashedExtension();
+  // Sets |url_| and navigates |render_view_host_|.
+  void NavigateToURL(const GURL& url);
+
+  // Insert the theme CSS for a toolstrip/mole.
+  void InsertThemeCSS();
 
   // RenderViewHostDelegate implementation.
   virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual const GURL& GetURL() const { return url_; }
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
+  virtual ViewType::Type GetRenderViewType() const;
+  virtual int GetBrowserWindowID() const;
   virtual void RenderViewGone(RenderViewHost* render_view_host);
-  virtual void DidStopLoading(RenderViewHost* render_view_host);
+  virtual void DidNavigate(RenderViewHost* render_view_host,
+                           const ViewHostMsg_FrameNavigate_Params& params);
+  virtual void DidStopLoading();
+  virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host);
+
   virtual WebPreferences GetWebkitPrefs();
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const std::string& content,
+                                   const Value* content,
                                    int request_id,
                                    bool has_callback);
   virtual void RunJavaScriptMessage(const std::wstring& message,
@@ -82,11 +112,10 @@ class ExtensionHost : public RenderViewHostDelegate,
                                     const int flags,
                                     IPC::Message* reply_msg,
                                     bool* did_suppress_message);
-  virtual void DidInsertCSS();
+  virtual void Close(RenderViewHost* render_view_host);
 
   // RenderViewHostDelegate::View
-  virtual void CreateNewWindow(int route_id,
-                               base::WaitableEvent* modal_dialog_event);
+  virtual void CreateNewWindow(int route_id);
   virtual void CreateNewWidget(int route_id, bool activatable);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -96,25 +125,42 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos);
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask allowed_operations);
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
   virtual void HandleMouseEvent();
   virtual void HandleMouseLeave();
-  virtual void UpdatePreferredWidth(int pref_width);
+  virtual void UpdatePreferredSize(const gfx::Size& new_size);
+
+  // NotificationObserver
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  private:
+  friend class ProcessCreationQueue;
+
   // Whether to allow DOM automation for created RenderViewHosts. This is used
   // for testing.
   static bool enable_dom_automation_;
+
+  // Actually create the RenderView for this host. See CreateRenderViewSoon.
+  void CreateRenderViewNow();
 
   // ExtensionFunctionDispatcher::Delegate
   // If this ExtensionHost has a view, this returns the Browser that view is a
   // part of.  If this is a global background page, we use the active Browser
   // instead.
   virtual Browser* GetBrowser();
+  virtual ExtensionHost* GetExtensionHost() { return this; }
+
+  // Returns true if we're hosting a background page.
+  // This isn't valid until CreateRenderView is called.
+  bool is_background_page() const { return !view(); }
 
   // The extension that we're hosting in this view.
   Extension* extension_;
@@ -122,9 +168,13 @@ class ExtensionHost : public RenderViewHostDelegate,
   // The profile that this host is tied to.
   Profile* profile_;
 
-#if defined(TOOLKIT_VIEWS)
   // Optional view that shows the rendered content in the UI.
+#if defined(TOOLKIT_VIEWS)
   scoped_ptr<ExtensionView> view_;
+#elif defined(OS_LINUX)
+  scoped_ptr<ExtensionViewGtk> view_;
+#elif defined(OS_MACOSX)
+  scoped_ptr<ExtensionViewMac> view_;
 #endif
 
   // The host for our HTML content.
@@ -136,10 +186,19 @@ class ExtensionHost : public RenderViewHostDelegate,
   // Whether the RenderWidget has reported that it has stopped loading.
   bool did_stop_loading_;
 
+  // True if the main frame has finished parsing.
+  bool document_element_available_;
+
   // The URL being hosted.
   GURL url_;
 
+  NotificationRegistrar registrar_;
+
   scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
+
+  // Only EXTENSION_TOOLSTRIP and EXTENSION_BACKGROUND_PAGE are used here,
+  // others are not hostd by ExtensionHost.
+  ViewType::Type extension_host_type_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

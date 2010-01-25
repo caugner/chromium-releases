@@ -8,6 +8,7 @@
 #include <list>
 
 #include "base/basictypes.h"
+#include "base/task.h"
 #include "chrome/common/child_process_host.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel.h"
@@ -18,11 +19,11 @@ class WorkerProcessHost : public ChildProcessHost {
   // between the renderer and worker processes.
   struct WorkerInstance {
     GURL url;
-    int renderer_process_id;
+    int renderer_id;
     int render_view_route_id;
     int worker_route_id;
     IPC::Message::Sender* sender;
-    int sender_pid;
+    int sender_id;
     int sender_route_id;
   };
 
@@ -56,6 +57,17 @@ class WorkerProcessHost : public ChildProcessHost {
   // Called when a message arrives from the worker process.
   void OnMessageReceived(const IPC::Message& message);
 
+  // Given a Sender, returns the callback that generates a new routing id.
+  static CallbackWithReturnValue<int>::Type* GetNextRouteIdCallback(
+      IPC::Message::Sender* sender);
+
+  // Relays a message to the given endpoint.  Takes care of parsing the message
+  // if it contains a message port and sending it a valid route id.
+  static void RelayMessage(const IPC::Message& message,
+                           IPC::Message::Sender* sender,
+                           int route_id,
+                           CallbackWithReturnValue<int>::Type* next_route_id);
+
   virtual bool CanShutdown() { return instances_.empty(); }
 
   // Updates the title shown in the task manager.
@@ -68,6 +80,9 @@ class WorkerProcessHost : public ChildProcessHost {
   void OnForwardToWorker(const IPC::Message& message);
 
   Instances instances_;
+
+  // A callback to create a routing id for the associated worker process.
+  scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerProcessHost);
 };

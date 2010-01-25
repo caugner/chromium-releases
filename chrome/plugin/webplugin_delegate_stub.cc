@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,15 +18,19 @@
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
+#include "webkit/api/public/WebBindings.h"
 #include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webplugin_delegate.h"
 
+using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
+using webkit_glue::WebPlugin;
+using webkit_glue::WebPluginResourceClient;
 
 class FinishDestructionTask : public Task {
  public:
-  FinishDestructionTask(WebPluginDelegate* delegate, WebPlugin* webplugin)
+  FinishDestructionTask(WebPluginDelegateImpl* delegate, WebPlugin* webplugin)
     : delegate_(delegate), webplugin_(webplugin) { }
 
   void Run() {
@@ -38,7 +42,7 @@ class FinishDestructionTask : public Task {
   }
 
  private:
-  WebPluginDelegate* delegate_;
+  WebPluginDelegateImpl* delegate_;
   WebPlugin* webplugin_;
 };
 
@@ -48,11 +52,13 @@ WebPluginDelegateStub::WebPluginDelegateStub(
     instance_id_(instance_id),
     channel_(channel),
     delegate_(NULL),
-    webplugin_(NULL) {
+    webplugin_(NULL),
+    in_destructor_(false) {
   DCHECK(channel);
 }
 
 WebPluginDelegateStub::~WebPluginDelegateStub() {
+  in_destructor_ = true;
   child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
 
   if (channel_->in_send()) {
@@ -75,7 +81,9 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
   // A plugin can execute a script to delete itself in any of its NPP methods.
   // Hold an extra reference to ourself so that if this does occur and we're
   // handling a sync message, we don't crash when attempting to send a reply.
-  AddRef();
+  // The exception to this is when we're already in the destructor.
+  if (!in_destructor_)
+    AddRef();
 
   IPC_BEGIN_MESSAGE_MAP(WebPluginDelegateStub, msg)
     IPC_MESSAGE_HANDLER(PluginMsg_Init, OnInit)
@@ -94,6 +102,7 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_GetPluginScriptableObject,
                         OnGetPluginScriptableObject)
     IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometry, OnUpdateGeometry)
+    IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometrySync, OnUpdateGeometry)
     IPC_MESSAGE_HANDLER(PluginMsg_SendJavaScriptStream,
                         OnSendJavaScriptStream)
     IPC_MESSAGE_HANDLER(PluginMsg_DidReceiveManualResponse,
@@ -105,11 +114,11 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_InstallMissingPlugin, OnInstallMissingPlugin)
     IPC_MESSAGE_HANDLER(PluginMsg_HandleURLRequestReply,
                         OnHandleURLRequestReply)
-    IPC_MESSAGE_HANDLER(PluginMsg_URLRequestRouted, OnURLRequestRouted)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 
-  Release();
+  if (!in_destructor_)
+    Release();
 }
 
 bool WebPluginDelegateStub::Send(IPC::Message* msg) {
@@ -122,17 +131,9 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
 
   *result = false;
-  int argc = static_cast<int>(params.arg_names.size());
-  if (argc != static_cast<int>(params.arg_values.size())) {
+  if (params.arg_names.size() != params.arg_values.size()) {
     NOTREACHED();
     return;
-  }
-
-  char **argn = new char*[argc];
-  char **argv = new char*[argc];
-  for (int i = 0; i < argc; ++i) {
-    argn[i] = const_cast<char*>(params.arg_names[i].c_str());
-    argv[i] = const_cast<char*>(params.arg_values[i].c_str());
   }
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -144,24 +145,25 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
 #if defined(OS_WIN)
   parent = gfx::NativeViewFromId(params.containing_window);
 #elif defined(OS_LINUX)
-  PluginThread::current()->Send(new PluginProcessHostMsg_MapNativeViewId(
-      params.containing_window, &parent));
+  // This code is disabled, See issue 17110.
+  // The problem is that the XID can change at arbitrary times (e.g. when the
+  // tab is detached then reattached), so we need to be able to track these
+  // changes, and let the PluginInstance know.
+  // PluginThread::current()->Send(new PluginProcessHostMsg_MapNativeViewId(
+  //    params.containing_window, &parent));
 #endif
-  delegate_ = WebPluginDelegate::Create(path, mime_type_, parent);
 
+  webplugin_ = new WebPluginProxy(
+      channel_, instance_id_, page_url_, params.containing_window);
+  delegate_ = WebPluginDelegateImpl::Create(path, mime_type_, parent);
   if (delegate_) {
-    webplugin_ = new WebPluginProxy(
-        channel_, instance_id_, delegate_, page_url_);
-#if defined(OS_WIN)
-    if (!webplugin_->SetModalDialogEvent(params.modal_dialog_event))
-      return;
-#endif
-    *result = delegate_->Initialize(
-        params.url, argn, argv, argc, webplugin_, params.load_manually);
+    webplugin_->set_delegate(delegate_);
+    *result = delegate_->Initialize(params.url,
+                                    params.arg_names,
+                                    params.arg_values,
+                                    webplugin_,
+                                    params.load_manually);
   }
-
-  delete[] argn;
-  delete[] argv;
 }
 
 void WebPluginDelegateStub::OnWillSendRequest(int id, const GURL& url) {
@@ -173,8 +175,7 @@ void WebPluginDelegateStub::OnWillSendRequest(int id, const GURL& url) {
 }
 
 void WebPluginDelegateStub::OnDidReceiveResponse(
-    const PluginMsg_DidReceiveResponseParams& params, bool* cancel) {
-  *cancel = false;
+    const PluginMsg_DidReceiveResponseParams& params) {
   WebPluginResourceClient* client = webplugin_->GetResourceClient(params.id);
   if (!client)
     return;
@@ -183,8 +184,7 @@ void WebPluginDelegateStub::OnDidReceiveResponse(
                              params.headers,
                              params.expected_length,
                              params.last_modified,
-                             params.request_is_seekable,
-                             cancel);
+                             params.request_is_seekable);
 }
 
 void WebPluginDelegateStub::OnDidReceiveData(int id,
@@ -214,8 +214,9 @@ void WebPluginDelegateStub::OnDidFail(int id) {
   client->DidFail();
 }
 
-void WebPluginDelegateStub::OnDidFinishLoadWithReason(int reason) {
-  delegate_->DidFinishLoadWithReason(reason);
+void WebPluginDelegateStub::OnDidFinishLoadWithReason(
+    const GURL& url, int reason, intptr_t notify_data) {
+  delegate_->DidFinishLoadWithReason(url, reason, notify_data);
 }
 
 void WebPluginDelegateStub::OnSetFocus() {
@@ -270,13 +271,10 @@ void WebPluginDelegateStub::OnPrint(base::SharedMemoryHandle* shared_memory,
 }
 
 void WebPluginDelegateStub::OnUpdateGeometry(
-    const gfx::Rect& window_rect,
-    const gfx::Rect& clip_rect,
-    const TransportDIB::Handle& windowless_buffer,
-    const TransportDIB::Handle& background_buffer) {
+    const PluginMsg_UpdateGeometry_Param& param) {
   webplugin_->UpdateGeometry(
-      window_rect, clip_rect,
-      windowless_buffer, background_buffer);
+      param.window_rect, param.clip_rect,
+      param.windowless_buffer, param.background_buffer);
 }
 
 void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
@@ -292,15 +290,15 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
   new NPObjectStub(
-      object, channel_.get(), *route_id, webplugin_->modal_dialog_event(),
+      object, channel_.get(), *route_id, webplugin_->containing_window(),
       page_url_);
 
   // Release ref added by GetPluginScriptableObject (our stub holds its own).
-  NPN_ReleaseObject(object);
+  WebBindings::releaseObject(object);
 }
 
-void WebPluginDelegateStub::OnSendJavaScriptStream(const std::string& url,
-                                                   const std::wstring& result,
+void WebPluginDelegateStub::OnSendJavaScriptStream(const GURL& url,
+                                                   const std::string& result,
                                                    bool success,
                                                    bool notify_needed,
                                                    intptr_t notify_data) {
@@ -309,7 +307,7 @@ void WebPluginDelegateStub::OnSendJavaScriptStream(const std::string& url,
 }
 
 void WebPluginDelegateStub::OnDidReceiveManualResponse(
-    const std::string& url,
+    const GURL& url,
     const PluginMsg_DidReceiveResponseParams& params) {
   delegate_->DidReceiveManualResponse(url, params.mime_type, params.headers,
                                       params.expected_length,
@@ -373,10 +371,4 @@ void WebPluginDelegateStub::OnHandleURLRequestReply(
                                       params.notify_data,
                                       params.stream);
   webplugin_->OnResourceCreated(params.resource_id, resource_client);
-}
-
-void WebPluginDelegateStub::OnURLRequestRouted(const std::string& url,
-                                               bool notify_needed,
-                                               intptr_t notify_data) {
-  delegate_->URLRequestRouted(url, notify_needed, notify_data);
 }

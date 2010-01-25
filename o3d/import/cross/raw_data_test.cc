@@ -32,7 +32,6 @@
 
 // Tests functionality of the RawData class
 
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
 #include "utils/cross/file_path_utils.h"
 #include "base/file_path.h"
@@ -118,7 +117,7 @@ TEST_F(RawDataTest, CreateFromFile) {
   size_t file_length = static_cast<size_t>(file_size64);
   ASSERT_TRUE(file_length > 0);
   scoped_array<uint8> data(new uint8[file_length]);
-  ASSERT_EQ(fread(data.get(), file_length, 1, file), 1);
+  ASSERT_EQ(fread(data.get(), file_length, 1, file), 1U);
   CloseFile(file);
 
   ASSERT_EQ(file_length, ref->GetLength());
@@ -158,7 +157,7 @@ struct TestData {
   size_t offset;
 };
 
-} // anonymous namespace
+}  // anonymous namespace
 
 TEST_F(RawDataTest, StringValue) {
   // A BOM in the front (valid)
@@ -265,6 +264,22 @@ TEST_F(RawDataTest, StringValue) {
       EXPECT_TRUE(str.empty());
     }
   }
+}
+
+TEST_F(RawDataTest, CreateFromDataURL) {
+  RawData::Ref ref = RawData::CreateFromDataURL(g_service_locator,
+                                                "data:;base64,YWJj");
+  ASSERT_FALSE(ref.IsNull());
+  EXPECT_EQ(3u, ref->GetLength());
+  EXPECT_FALSE(CheckErrorExists(error_status()));
+  EXPECT_EQ(0, memcmp(ref->GetData(), "abc", 3));
+}
+
+TEST_F(RawDataTest, CreateFromDataURLFail) {
+  RawData::Ref ref = RawData::CreateFromDataURL(g_service_locator,
+                                                "data:;base64,Y");
+  EXPECT_TRUE(ref.IsNull());
+  EXPECT_TRUE(CheckErrorExists(error_status()));
 }
 
 }  // namespace o3d

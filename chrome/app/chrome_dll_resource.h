@@ -80,56 +80,59 @@
 #define IDC_SHOW_AS_TAB                 34029
 #define IDC_FULLSCREEN                  34030
 #define IDC_EXIT                        34031
+#define IDC_MOVE_TAB_NEXT               34032
+#define IDC_MOVE_TAB_PREVIOUS           34033
 
 // Page-related commands
-#define IDC_STAR                        35000
-#define IDC_VIEW_SOURCE                 35001
-#define IDC_CLOSE_POPUPS                35002
-#define IDC_PRINT                       35003
-#define IDC_SAVE_PAGE                   35004
-#define IDC_ENCODING_MENU               35005
+#define IDC_BOOKMARK_PAGE               35000
+#define IDC_BOOKMARK_ALL_TABS           35001
+#define IDC_VIEW_SOURCE                 35002
+#define IDC_CLOSE_POPUPS                35003
+#define IDC_PRINT                       35004
+#define IDC_SAVE_PAGE                   35005
+#define IDC_ENCODING_MENU               35006
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
 // encoding_menu_controller.cc.
-#define IDC_ENCODING_AUTO_DETECT        35006
-#define IDC_ENCODING_UTF8               35007
-#define IDC_ENCODING_UTF16LE            35008
-#define IDC_ENCODING_ISO88591           35009
-#define IDC_ENCODING_WINDOWS1252        35010
-#define IDC_ENCODING_GBK                35011
-#define IDC_ENCODING_GB18030            35012
-#define IDC_ENCODING_BIG5               35013
-#define IDC_ENCODING_BIG5HKSCS          35014
-#define IDC_ENCODING_KOREAN             35015
-#define IDC_ENCODING_SHIFTJIS           35016
-#define IDC_ENCODING_ISO2022JP          35017
-#define IDC_ENCODING_EUCJP              35018
-#define IDC_ENCODING_THAI               35019
-#define IDC_ENCODING_ISO885915          35020
-#define IDC_ENCODING_MACINTOSH          35021
-#define IDC_ENCODING_ISO88592           35022
-#define IDC_ENCODING_WINDOWS1250        35023
-#define IDC_ENCODING_ISO88595           35024
-#define IDC_ENCODING_WINDOWS1251        35025
-#define IDC_ENCODING_KOI8R              35026
-#define IDC_ENCODING_KOI8U              35027
-#define IDC_ENCODING_ISO88597           35028
-#define IDC_ENCODING_WINDOWS1253        35029
-#define IDC_ENCODING_ISO88594           35030
-#define IDC_ENCODING_ISO885913          35031
-#define IDC_ENCODING_WINDOWS1257        35032
-#define IDC_ENCODING_ISO88593           35033
-#define IDC_ENCODING_ISO885910          35034
-#define IDC_ENCODING_ISO885914          35035
-#define IDC_ENCODING_ISO885916          35036
-#define IDC_ENCODING_WINDOWS1254        35037
-#define IDC_ENCODING_ISO88596           35038
-#define IDC_ENCODING_WINDOWS1256        35039
-#define IDC_ENCODING_ISO88598           35040
-#define IDC_ENCODING_WINDOWS1255        35041
-#define IDC_ENCODING_WINDOWS1258        35042
-#define IDC_ENCODING_ISO88598I          35043
+#define IDC_ENCODING_AUTO_DETECT        35500
+#define IDC_ENCODING_UTF8               35501
+#define IDC_ENCODING_UTF16LE            35502
+#define IDC_ENCODING_ISO88591           35503
+#define IDC_ENCODING_WINDOWS1252        35504
+#define IDC_ENCODING_GBK                35505
+#define IDC_ENCODING_GB18030            35506
+#define IDC_ENCODING_BIG5               35507
+#define IDC_ENCODING_BIG5HKSCS          35508
+#define IDC_ENCODING_KOREAN             35509
+#define IDC_ENCODING_SHIFTJIS           35510
+#define IDC_ENCODING_ISO2022JP          35511
+#define IDC_ENCODING_EUCJP              35512
+#define IDC_ENCODING_THAI               35513
+#define IDC_ENCODING_ISO885915          35514
+#define IDC_ENCODING_MACINTOSH          35515
+#define IDC_ENCODING_ISO88592           35516
+#define IDC_ENCODING_WINDOWS1250        35517
+#define IDC_ENCODING_ISO88595           35518
+#define IDC_ENCODING_WINDOWS1251        35519
+#define IDC_ENCODING_KOI8R              35520
+#define IDC_ENCODING_KOI8U              35521
+#define IDC_ENCODING_ISO88597           35522
+#define IDC_ENCODING_WINDOWS1253        35523
+#define IDC_ENCODING_ISO88594           35524
+#define IDC_ENCODING_ISO885913          35525
+#define IDC_ENCODING_WINDOWS1257        35526
+#define IDC_ENCODING_ISO88593           35527
+#define IDC_ENCODING_ISO885910          35528
+#define IDC_ENCODING_ISO885914          35529
+#define IDC_ENCODING_ISO885916          35530
+#define IDC_ENCODING_WINDOWS1254        35531
+#define IDC_ENCODING_ISO88596           35532
+#define IDC_ENCODING_WINDOWS1256        35533
+#define IDC_ENCODING_ISO88598           35534
+#define IDC_ENCODING_WINDOWS1255        35535
+#define IDC_ENCODING_WINDOWS1258        35536
+#define IDC_ENCODING_ISO88598I          35537
 
 // Clipboard commands
 #define IDC_CUT                         36000
@@ -157,7 +160,7 @@
 #define IDC_OPEN_FILE                   40000
 #define IDC_CREATE_SHORTCUTS            40001
 #define IDC_DEVELOPER_MENU              40002
-#define IDC_JS_CONSOLE                  40004
+#define IDC_DEV_TOOLS                   40004
 #define IDC_TASK_MANAGER                40005
 #define IDC_SELECT_PROFILE              40006
 #define IDC_NEW_PROFILE                 40007
@@ -173,6 +176,10 @@
 #define IDC_VIEW_PASSWORDS              40017
 #define IDC_ABOUT                       40018
 #define IDC_HELP_PAGE                   40019
+#define IDC_SHOW_APP_MENU               40020
+#define IDC_SHOW_PAGE_MENU              40021
+#define IDC_SHOW_EXTENSION_SHELF        40022
+#define IDC_MANAGE_EXTENSIONS           40023
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -188,7 +195,8 @@
 #define IDC_SPELLCHECK_LANGUAGES_FIRST  41006
 #define IDC_SPELLCHECK_LANGUAGES_LAST   41106
 #define IDC_CHECK_SPELLING_OF_THIS_FIELD  41107
-#define IDC_P13N_INFO                   41108
+#define IDC_SYNC_BOOKMARKS              41108
+#define IDC_SPELLPANEL_TOGGLE           41109
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
@@ -206,4 +214,6 @@
 #define IDC_BOOKMARK_MENU               43000     // OSX only
 #define IDC_VIEW_MENU                   44000     // OSX only
 #define IDC_CONTROL_PANEL               45000     // Linux2 only
-
+#define IDC_HISTORY_MENU                46000     // OSX only
+#define IDC_HISTORY_MENU_VISITED        46100     // OSX only
+#define IDC_HISTORY_MENU_CLOSED         46200     // OSX only

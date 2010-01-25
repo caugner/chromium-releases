@@ -12,7 +12,6 @@
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
-#include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/singleton.h"
 #include "base/waitable_event_watcher.h"
@@ -36,17 +35,14 @@ class URLRequestContext;
 class ResourceDispatcherHost;
 class ResourceMessageFilter;
 
-// This can be called on the main thread and IO thread.  However it must
-// be created on the main thread.
+// This must be created on the main thread but it's only called on the IO/file
+// thread.
 class PluginService
     : public base::WaitableEventWatcher::Delegate,
       public NotificationObserver {
  public:
   // Returns the PluginService singleton.
   static PluginService* GetInstance();
-
-  // Gets the list of available plugins.
-  void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
 
   // Load all the plugins that should be loaded for the lifetime of the browser
   // (ie, with the LoadOnStartup flag set).
@@ -69,8 +65,7 @@ class PluginService
   // has been started by this service. This will start a process to host the
   // 'plugin_path' if needed. If the process fails to start, the return value
   // is NULL. Must be called on the IO thread.
-  PluginProcessHost* FindOrStartPluginProcess(const FilePath& plugin_path,
-                                              const std::string& clsid);
+  PluginProcessHost* FindOrStartPluginProcess(const FilePath& plugin_path);
 
   // Opens a channel to a plugin process for the given mime type, starting
   // a new plugin process if necessary.  This must be called on the IO thread
@@ -78,11 +73,8 @@ class PluginService
   void OpenChannelToPlugin(ResourceMessageFilter* renderer_msg_filter,
                            const GURL& url,
                            const std::string& mime_type,
-                           const std::string& clsid,
                            const std::wstring& locale,
                            IPC::Message* reply_msg);
-
-  bool HavePluginFor(const std::string& mime_type, bool allow_wildcard);
 
   // Get the path to the plugin specified.  policy_url is the URL of the page
   // requesting the plugin, so we can verify whether the plugin is allowed
@@ -90,7 +82,6 @@ class PluginService
   FilePath GetPluginPath(const GURL& url,
                          const GURL& policy_url,
                          const std::string& mime_type,
-                         const std::string& clsid,
                          std::string* actual_mime_type);
 
   // The UI thread's message loop
@@ -114,9 +105,6 @@ class PluginService
   // NotificationObserver implementation
   virtual void Observe(NotificationType type, const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // Get plugin info by matching full path.
-  bool GetPluginInfoByPath(const FilePath& plugin_path, WebPluginInfo* info);
 
   // Returns true if the given plugin is allowed to be used by a page with
   // the given URL.
@@ -142,10 +130,6 @@ class PluginService
   // extension-only plugins.
   typedef base::hash_map<FilePath, GURL> PrivatePluginMap;
   PrivatePluginMap private_plugins_;
-
-  // Need synchronization whenever we access the plugin_list singelton through
-  // webkit_glue since this class is called on the main and IO thread.
-  Lock lock_;
 
   NotificationRegistrar registrar_;
 

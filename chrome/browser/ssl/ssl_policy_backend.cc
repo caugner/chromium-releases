@@ -14,7 +14,6 @@
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "net/base/force_tls_state.h"
 
 using WebKit::WebConsoleMessage;
 
@@ -69,8 +68,7 @@ class SSLInfoBarDelegate : public ConfirmInfoBarDelegate {
 
 SSLPolicyBackend::SSLPolicyBackend(NavigationController* controller)
     : controller_(controller),
-      ssl_host_state_(controller->profile()->GetSSLHostState()),
-      force_tls_state_(controller->profile()->GetForceTLSState()) {
+      ssl_host_state_(controller->profile()->GetSSLHostState()) {
   DCHECK(controller_);
 }
 
@@ -107,28 +105,8 @@ void SSLPolicyBackend::ShowMessageWithLink(const std::wstring& msg,
   }
 }
 
-bool SSLPolicyBackend::SetMaxSecurityStyle(SecurityStyle style) {
-  NavigationEntry* entry = controller_->GetActiveEntry();
-  if (!entry) {
-    NOTREACHED();
-    return false;
-  }
-
-  if (entry->ssl().security_style() > style) {
-    entry->ssl().set_security_style(style);
-    return true;
-  }
-  return false;
-}
-
-void SSLPolicyBackend::AddMessageToConsole(
-    const string16& message, const WebConsoleMessage::Level& level) {
-  controller_->tab_contents()->render_view_host()->AddMessageToConsole(
-      string16(), message, level);
-}
-
-void SSLPolicyBackend::MarkHostAsBroken(const std::string& host, int pid) {
-  ssl_host_state_->MarkHostAsBroken(host, pid);
+void SSLPolicyBackend::MarkHostAsBroken(const std::string& host, int id) {
+  ssl_host_state_->MarkHostAsBroken(host, id);
   DispatchSSLInternalStateChanged();
 }
 
@@ -139,7 +117,6 @@ bool SSLPolicyBackend::DidMarkHostAsBroken(const std::string& host,
 
 void SSLPolicyBackend::DenyCertForHost(net::X509Certificate* cert,
                                        const std::string& host) {
-  // Remember that we don't like this cert for this host.
   ssl_host_state_->DenyCertForHost(cert, host);
 }
 
@@ -151,23 +128,6 @@ void SSLPolicyBackend::AllowCertForHost(net::X509Certificate* cert,
 net::X509Certificate::Policy::Judgment SSLPolicyBackend::QueryPolicy(
     net::X509Certificate* cert, const std::string& host) {
   return ssl_host_state_->QueryPolicy(cert, host);
-}
-
-void SSLPolicyBackend::AllowMixedContentForHost(const std::string& host) {
-  ssl_host_state_->AllowMixedContentForHost(host);
-}
-
-bool SSLPolicyBackend::DidAllowMixedContentForHost(
-    const std::string& host) const {
-  return ssl_host_state_->DidAllowMixedContentForHost(host);
-}
-
-bool SSLPolicyBackend::IsForceTLSEnabledForHost(const std::string& host) const {
-  return force_tls_state_->IsEnabledForHost(host);
-}
-
-void SSLPolicyBackend::Reload() {
-  controller_->Reload(true);
 }
 
 void SSLPolicyBackend::DispatchSSLInternalStateChanged() {

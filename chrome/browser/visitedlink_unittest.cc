@@ -507,11 +507,8 @@ class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
  public:
   explicit VisitRelayingRenderProcessHost(Profile* profile)
       : BrowserRenderProcessHost(profile) {
-    static int prev_id = 0;
-    SetProcessID(++prev_id);
   }
   virtual ~VisitRelayingRenderProcessHost() {
-    RemoveFromList();
   }
 
   virtual bool Init() { return true; }
@@ -547,9 +544,6 @@ class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
   }
 
  private:
-  int add_relay_count_;
-  int reset_relay_count_;
-
   DISALLOW_COPY_AND_ASSIGN(VisitRelayingRenderProcessHost);
 };
 
@@ -666,6 +660,8 @@ TEST_F(VisitedLinkEventsTest, Coalescense) {
 
 TEST_F(VisitedLinkRelayTest, Basics) {
   VisitedLinkMaster* master = profile_->GetVisitedLinkMaster();
+  rvh()->CreateRenderView();
+
   // Add a few URLs.
   master->AddURL(GURL("http://acidtests.org/"));
   master->AddURL(GURL("http://google.com/"));
@@ -688,6 +684,7 @@ TEST_F(VisitedLinkRelayTest, Basics) {
 
 TEST_F(VisitedLinkRelayTest, TabVisibility) {
   VisitedLinkMaster* master = profile_->GetVisitedLinkMaster();
+  rvh()->CreateRenderView();
 
   // Simulate tab becoming inactive.
   rvh()->WasHidden();
@@ -728,5 +725,32 @@ TEST_F(VisitedLinkRelayTest, TabVisibility) {
 
   // We should have only one more reset event.
   EXPECT_EQ(1, profile()->add_event_count());
+  EXPECT_EQ(1, profile()->reset_event_count());
+}
+
+TEST_F(VisitedLinkRelayTest, WebViewReadiness) {
+  VisitedLinkMaster* master = profile_->GetVisitedLinkMaster();
+
+  // Add a few URLs.
+  master->AddURL(GURL("http://acidtests.org/"));
+  master->AddURL(GURL("http://google.com/"));
+  master->AddURL(GURL("http://chromium.org/"));
+
+  WaitForCoalescense();
+
+  std::set<GURL> deleted_urls;
+  deleted_urls.insert(GURL("http://acidtests.org/"));
+  master->DeleteURLs(deleted_urls);
+
+  // We shouldn't have any events, because RenderView hasn't been created,
+  // and we ensure that updates are sent until it is.
+  EXPECT_EQ(0, profile()->add_event_count());
+  EXPECT_EQ(0, profile()->reset_event_count());
+
+  rvh()->CreateRenderView();
+
+  // We should now have just a reset event: adds are eaten up by a reset
+  // that followed.
+  EXPECT_EQ(0, profile()->add_event_count());
   EXPECT_EQ(1, profile()->reset_event_count());
 }

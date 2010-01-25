@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #if defined(OS_WIN)
 #include <objidl.h>
 #include <mlang.h>
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_FREEBSD)
 #include <sys/utsname.h>
 #endif
 
@@ -17,6 +17,7 @@
 #include "FrameTree.h"
 #include "FrameView.h"
 #include "Frame.h"
+#include "GlyphPageTreeNode.h"
 #include "HistoryItem.h"
 #include "ImageSource.h"
 #include "KURL.h"
@@ -34,6 +35,8 @@
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
+#include "net/base/escape.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/api/public/WebHistoryItem.h"
 #include "webkit/api/public/WebString.h"
@@ -41,7 +44,6 @@
 #if defined(OS_WIN)
 #include "webkit/api/public/win/WebInputEventFactory.h"
 #endif
-#include "webkit/glue/event_conversion.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webframe_impl.h"
@@ -49,9 +51,25 @@
 
 #include "webkit_version.h"  // Generated
 
+using WebKit::WebCanvas;
+using WebKit::WebFrame;
 using WebKit::WebHistoryItem;
 using WebKit::WebString;
 using WebKit::WebVector;
+using WebKit::WebView;
+
+namespace {
+
+static const char kLayoutTestsPattern[] = "/LayoutTests/";
+static const std::string::size_type kLayoutTestsPatternSize =
+    arraysize(kLayoutTestsPattern) - 1;
+static const char kFileUrlPattern[] = "file:/";
+static const char kDataUrlPattern[] = "data:";
+static const std::string::size_type kDataUrlPatternSize =
+    arraysize(kDataUrlPattern) - 1;
+static const char kFileTestPrefix[] = "(file test):";
+
+}
 
 //------------------------------------------------------------------------------
 // webkit_glue impl:
@@ -90,10 +108,10 @@ std::wstring DumpFramesAsText(WebFrame* web_frame, bool recursive) {
   std::wstring result;
 
   // Add header for all but the main frame. Skip empty frames.
-  if (webFrameImpl->GetParent() &&
+  if (webFrameImpl->parent() &&
       webFrameImpl->frame()->document()->documentElement()) {
     result.append(L"\n--------\nFrame: '");
-    result.append(webFrameImpl->GetName());
+    result.append(UTF16ToWideHack(webFrameImpl->name()));
     result.append(L"'\n--------\n");
   }
 
@@ -126,7 +144,7 @@ std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive) {
   std::wstring result;
 
   if (offset.width() > 0 || offset.height() > 0) {
-    if (webFrameImpl->GetParent()) {
+    if (webFrameImpl->parent()) {
       StringAppendF(&result, L"frame '%ls' ", StringToStdWString(
           webFrameImpl->frame()->tree()->name()).c_str());
     }
@@ -167,7 +185,19 @@ static std::wstring DumpHistoryItem(const WebHistoryItem& item,
     result.append(indent, L' ');
   }
 
-  result.append(UTF16ToWideHack(item.urlString()));
+  std::string url = item.urlString().utf8();
+  size_t pos;
+  if (url.find(kFileUrlPattern) == 0 &&
+      ((pos = url.find(kLayoutTestsPattern)) != std::string::npos)) {
+    // adjust file URLs to match upstream results.
+    url.replace(0, pos + kLayoutTestsPatternSize, kFileTestPrefix);
+  } else if (url.find(kDataUrlPattern) == 0) {
+    // URL-escape data URLs to match results upstream.
+    std::string path = EscapePath(url.substr(kDataUrlPatternSize));
+    url.replace(kDataUrlPatternSize, url.length(), path);
+  }
+
+  result.append(UTF8ToWide(url));
   if (!item.target().isEmpty())
     result.append(L" (in frame \"" + UTF16ToWide(item.target()) + L"\")");
   if (item.isTargetItem())
@@ -198,7 +228,7 @@ std::wstring DumpHistoryState(const std::string& history_state, int indent,
 }
 
 void ResetBeforeTestRun(WebView* view) {
-  WebFrameImpl* webframe = static_cast<WebFrameImpl*>(view->GetMainFrame());
+  WebFrameImpl* webframe = static_cast<WebFrameImpl*>(view->mainFrame());
   WebCore::Frame* frame = webframe->frame();
 
   // Reset the main frame name since tests always expect it to be empty.  It
@@ -271,6 +301,14 @@ WebString FilePathStringToWebString(const FilePath::StringType& str) {
 #endif
 }
 
+FilePath WebStringToFilePath(const WebKit::WebString& str) {
+  return FilePath(WebStringToFilePathString(str));
+}
+
+WebKit::WebString FilePathToWebString(const FilePath& file_path) {
+  return FilePathStringToWebString(file_path.value());
+}
+
 std::string GetWebKitVersion() {
   return StringPrintf("%d.%d", WEBKIT_VERSION_MAJOR, WEBKIT_VERSION_MINOR);
 }
@@ -284,7 +322,6 @@ struct UserAgentState {
   }
 
   std::string user_agent;
-  std::string mimic_safari_user_agent;
   bool user_agent_requested;
   bool user_agent_is_overridden;
 };
@@ -294,14 +331,15 @@ Singleton<UserAgentState> g_user_agent;
 std::string BuildOSCpuInfo() {
   std::string os_cpu;
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   int32 os_major_version = 0;
   int32 os_minor_version = 0;
   int32 os_bugfix_version = 0;
   base::SysInfo::OperatingSystemVersionNumbers(&os_major_version,
                                                &os_minor_version,
                                                &os_bugfix_version);
-#else
+#endif
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
   // Should work on any Posix system.
   struct utsname unixinfo;
   uname(&unixinfo);
@@ -327,6 +365,12 @@ std::string BuildOSCpuInfo() {
       os_major_version,
       os_minor_version,
       os_bugfix_version
+#elif defined(OS_CHROMEOS)
+      "CrOS %s %d.%d.%d",
+      cputype.c_str(),  // e.g. i686
+      os_major_version,
+      os_minor_version,
+      os_bugfix_version
 #else
       "%s %s",
       unixinfo.sysname, // e.g. Linux
@@ -337,7 +381,7 @@ std::string BuildOSCpuInfo() {
   return os_cpu;
 }
 
-void BuildUserAgent(bool mimic_safari, std::string* result) {
+void BuildUserAgent(std::string* result) {
   const char kUserAgentPlatform[] =
 #if defined(OS_WIN)
       "Windows";
@@ -359,15 +403,14 @@ void BuildUserAgent(bool mimic_safari, std::string* result) {
   // maximally compatible with Safari, we hope!!
   std::string product;
 
-  if (!mimic_safari) {
-    scoped_ptr<FileVersionInfo> version_info(
-        FileVersionInfo::CreateFileVersionInfoForCurrentModule());
-    if (version_info.get())
-      product = "Chrome/" + WideToASCII(version_info->product_version());
+  scoped_ptr<FileVersionInfo> version_info(
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+  if (version_info.get()) {
+    product = "Chrome/" + WideToASCII(version_info->product_version());
+  } else {
+    DLOG(WARNING) << "Unknown product version";
+    product = "Chrome/0.0.0.0";
   }
-
-  if (product.empty())
-    product = "Version/3.2.1";
 
   // Derived from Safari's UA string.
   StringAppendF(
@@ -387,7 +430,7 @@ void BuildUserAgent(bool mimic_safari, std::string* result) {
 }
 
 void SetUserAgentToDefault() {
-  BuildUserAgent(false, &g_user_agent->user_agent);
+  BuildUserAgent(&g_user_agent->user_agent);
 }
 
 }  // namespace
@@ -406,14 +449,6 @@ const std::string& GetUserAgent(const GURL& url) {
   if (g_user_agent->user_agent.empty())
     SetUserAgentToDefault();
   g_user_agent->user_agent_requested = true;
-  if (!g_user_agent->user_agent_is_overridden) {
-    // For hotmail, we need to spoof as Safari (bug 4111).
-    if (MatchPattern(url.host(), "*.mail.live.com")) {
-      if (g_user_agent->mimic_safari_user_agent.empty())
-        BuildUserAgent(true, &g_user_agent->mimic_safari_user_agent);
-      return g_user_agent->mimic_safari_user_agent;
-    }
-  }
   return g_user_agent->user_agent;
 }
 
@@ -428,6 +463,31 @@ void SetForcefullyTerminatePluginProcess(bool value) {
 
 bool ShouldForcefullyTerminatePluginProcess() {
   return g_forcefully_terminate_plugin_process;
+}
+
+WebCanvas* ToWebCanvas(skia::PlatformCanvas* canvas) {
+#if WEBKIT_USING_SKIA
+  return canvas;
+#elif WEBKIT_USING_CG
+  return canvas->getTopPlatformDevice().GetBitmapContext();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
+#endif
+}
+
+int GetGlyphPageCount() {
+  return WebCore::GlyphPageTreeNode::treeGlyphPageCount();
+}
+
+bool g_enable_media_cache = false;
+
+bool IsMediaCacheEnabled() {
+  return g_enable_media_cache;
+}
+
+void SetMediaCacheEnabled(bool enabled) {
+  g_enable_media_cache = enabled;
 }
 
 } // namespace webkit_glue

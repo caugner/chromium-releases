@@ -17,11 +17,11 @@
 #include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/common/transport_dib.h"
-#include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/notification_registrar.h"
 #include "webkit/api/public/WebCache.h"
 
+class AudioRendererHost;
 class CommandLine;
 class GURL;
 class RendererMainThread;
@@ -64,7 +64,8 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual void ReceivedBadMessage(uint16 msg_type);
   virtual void WidgetRestored();
   virtual void WidgetHidden();
-  virtual void AddWord(const std::wstring& word);
+  virtual void ViewCreated();
+  virtual void AddWord(const string16& word);
   virtual void AddVisitedLinks(const VisitedLinkCommon::Fingerprints& links);
   virtual void ResetVisitedLinks();
   virtual bool FastShutdownIfPossible();
@@ -116,6 +117,26 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
   // Sends the renderer process a new set of user scripts.
   void SendUserScriptsUpdate(base::SharedMemory* shared_memory);
+
+  // Generates a command line to be used to spawn a renderer and appends the
+  // results to |*command_line|. |*has_cmd_prefix| will be set if the renderer
+  // command line specifies a prefix which is another program that will actually
+  // execute the renderer (like gdb).
+  void AppendRendererCommandLine(CommandLine* command_line,
+                                 bool* has_cmd_prefix) const;
+
+  // Copies applicable command line switches from the given |browser_cmd| line
+  // flags to the output |renderer_cmd| line flags. Not all switches will be
+  // copied over.
+  void PropogateBrowserCommandLineToRenderer(const CommandLine& browser_cmd,
+                                             CommandLine* renderer_cmd) const;
+
+  // Spawns the renderer process, returning the new handle on success, or 0 on
+  // failure. The renderer command line is given in the first argument, and
+  // whether a command prefix was used when generating the command line is
+  // speficied in the second.
+  base::ProcessHandle ExecuteRenderer(CommandLine* cmd_line,
+                                      bool has_cmd_prefix);
 
   // Gets a handle to the renderer process, normalizing the case where we were
   // started with --single-process.

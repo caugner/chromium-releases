@@ -68,12 +68,16 @@ struct AddFileRecord {
 
 class MockArchiveGenerator : public IArchiveGenerator {
  public:
-  virtual void AddFile(const String& file_name,
+  MockArchiveGenerator() : closed_(false), success_(false) {
+  }
+
+  virtual bool AddFile(const String& file_name,
                        size_t file_size) {
     AddFileRecord record;
     record.file_name_ = file_name;
     record.file_size_ = file_size;
     add_file_records_.push_back(record);
+    return true;
   }
 
   virtual int AddFileBytes(MemoryReadStream* stream, size_t numBytes) {
@@ -85,7 +89,14 @@ class MockArchiveGenerator : public IArchiveGenerator {
     return 0;
   }
 
+  virtual void Close(bool success) {
+    closed_ = true;
+    success_ = success;
+  }
+
   vector<AddFileRecord> add_file_records_;
+  bool closed_;
+  bool success_;
 };
 
 class SerializerTest : public testing::Test {
@@ -94,7 +105,9 @@ class SerializerTest : public testing::Test {
       : object_manager_(g_service_locator),
         output_(StringWriter::CR_LF),
         json_writer_(&output_, 2),
-        serializer_(g_service_locator, &json_writer_, &archive_generator_) {
+        serializer_(
+            g_service_locator, &json_writer_, &archive_generator_,
+            Serializer::Options(Serializer::Options::kBinaryOutputOn)) {
     json_writer_.BeginCompacting();
   }
 
@@ -307,6 +320,37 @@ TEST_F(SerializerTest, ShouldSerializeCurveCustomSection) {
   EXPECT_EQ(expected.ToString(), output_.ToString());
 }
 
+TEST_F(SerializerTest, ShouldSerializeCurveCustomSectionNotBinary) {
+  Serializer serializer(
+      g_service_locator, &json_writer_, &archive_generator_,
+      Serializer::Options(Serializer::Options::kBinaryOutputOff));
+  Curve* curve = pack_->Create<Curve>();
+
+  StepCurveKey* step_key = curve->Create<StepCurveKey>();
+  step_key->SetInput(1);
+  step_key->SetOutput(2);
+
+  LinearCurveKey* linear_key = curve->Create<LinearCurveKey>();
+  linear_key->SetInput(3);
+  linear_key->SetOutput(4);
+
+  BezierCurveKey* bezier_key = curve->Create<BezierCurveKey>();
+  bezier_key->SetInput(5);
+  bezier_key->SetInTangent(Float2(6, 7));
+  bezier_key->SetOutput(8);
+  bezier_key->SetOutTangent(Float2(9, 10));
+
+  serializer.SerializePackBinary(pack_);
+  serializer.SerializeSection(curve, Serializer::CUSTOM_SECTION);
+
+  StringWriter expected(StringWriter::CR_LF);
+  expected.WriteFormatted(
+      "\"keys\":[[1,1,2],[2,3,4],[3,5,8,6,7,9,10]]");
+
+  EXPECT_EQ(expected.ToString(), output_.ToString());
+  EXPECT_TRUE(archive_generator_.add_file_records_.empty());
+}
+
 TEST_F(SerializerTest, ShouldSerializeCurveKeysToSingleBinaryFile) {
   // The purpose of this buffer is just to offset the following one in the
   // binary file.
@@ -321,10 +365,11 @@ TEST_F(SerializerTest, ShouldSerializeCurveKeysToSingleBinaryFile) {
   linear_key->SetOutput(4);
 
   serializer_.SerializePack(pack_);
-  EXPECT_EQ(1, archive_generator_.add_file_records_.size());
+  EXPECT_EQ(1U, archive_generator_.add_file_records_.size());
   const AddFileRecord& record = archive_generator_.add_file_records_[0];
-
   EXPECT_EQ("curve-keys.bin", record.file_name_);
+
+  EXPECT_FALSE(archive_generator_.closed_);
 
   // Test that the data matches what we get if we call SerializeCurve directly
   // The file should contain the concatenated contents of both curves
@@ -410,9 +455,11 @@ TEST_F(SerializerTest, SerializesAllIndexBufferBinaryToSingleFileInArchive) {
   }
 
   serializer_.SerializePack(pack_);
-  EXPECT_EQ(1, archive_generator_.add_file_records_.size());
+  EXPECT_EQ(1U, archive_generator_.add_file_records_.size());
   const AddFileRecord& record = archive_generator_.add_file_records_[0];
   EXPECT_EQ("index-buffers.bin", record.file_name_);
+
+  EXPECT_FALSE(archive_generator_.closed_);
 
   // Test that the data matches what we get if we call SerializeBuffer directly
   // The file should contain the concatenated contents of both buffers
@@ -697,6 +744,26 @@ TEST_F(SerializerTest, ShouldSerializeSkinProperties) {
       output_.ToString());
 }
 
+TEST_F(SerializerTest, ShouldSerializeSkinPropertiesNotBinary) {
+  Serializer serializer(
+      g_service_locator, &json_writer_, &archive_generator_,
+      Serializer::Options(Serializer::Options::kBinaryOutputOff));
+  Skin* skin = pack_->Create<Skin>();
+  skin->SetInverseBindPoseMatrix(0, Matrix4::identity());
+  Skin::Influences influences(1);
+  influences[0] = Skin::Influence(1, 2);
+  skin->SetVertexInfluences(0, influences);
+
+  serializer.SerializeSection(skin, Serializer::PROPERTIES_SECTION);
+
+  EXPECT_EQ(
+      "\"influences\":[[1,2]],"
+      "\"inverseBindPoseMatrices\":"
+      "[[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]]",
+      output_.ToString());
+  EXPECT_TRUE(archive_generator_.add_file_records_.empty());
+}
+
 TEST_F(SerializerTest, ShouldSerializeSkinCustomSection) {
   Skin* skin1 = pack_->Create<Skin>();
   Skin::Influences influences(1);
@@ -739,9 +806,11 @@ TEST_F(SerializerTest, ShouldSerializeSkinToSingleBinaryFile) {
   skin2->SetInverseBindPoseMatrix(0, Matrix4::identity());
 
   serializer_.SerializePack(pack_);
-  EXPECT_EQ(1, archive_generator_.add_file_records_.size());
+  EXPECT_EQ(1U, archive_generator_.add_file_records_.size());
   const AddFileRecord& record = archive_generator_.add_file_records_[0];
   EXPECT_EQ("skins.bin", record.file_name_);
+
+  EXPECT_FALSE(archive_generator_.closed_);
 
   // Test that the data matches what we get if we call SerializeSkin directly
   // The file should contain the concatenated contents of both skins
@@ -826,6 +895,7 @@ TEST_F(SerializerTest, ShouldSerializeBoundSkinEval) {
   skin_eval1->BindStream(skin_eval2, Stream::POSITION, 0);
   ParamVertexBufferStream* param = skin_eval2->GetVertexStreamParam(
       Stream::POSITION, 0);
+  EXPECT_TRUE(param != NULL);
 
   serializer_.SerializeSection(skin_eval1, Serializer::CUSTOM_SECTION);
   StringWriter expected(StringWriter::CR_LF);
@@ -852,6 +922,8 @@ TEST_F(SerializerTest, ShouldSerializeStreamBank) {
   Field* field_1 = vertex_buffer_1->CreateField(FloatField::GetApparentClass(),
                                                 3);
   VertexBuffer* vertex_buffer_2 = pack_->Create<VertexBuffer>();
+  EXPECT_TRUE(vertex_buffer_2 != NULL);
+
   Field* field_2 = vertex_buffer_1->CreateField(FloatField::GetApparentClass(),
                                                 3);
   stream_bank->SetVertexStream(Stream::POSITION,
@@ -1018,7 +1090,37 @@ TEST_F(SerializerTest, SerializesVertexBuffer) {
   EXPECT_EQ(expected.ToString(), output_.ToString());
 }
 
-TEST_F(SerializerTest, SerializesAllVertexBufferBinaryToSingleFileInArchive) {
+TEST_F(SerializerTest, SerializesVertexBufferNotBinary) {
+  Serializer serializer(
+      g_service_locator, &json_writer_, &archive_generator_,
+      Serializer::Options(Serializer::Options::kBinaryOutputOff));
+  Buffer* buffer = pack_->Create<VertexBuffer>();
+  Field* field = buffer->CreateField(FloatField::GetApparentClass(), 1);
+  buffer->AllocateElements(2);
+  {
+    BufferLockHelper locker(buffer);
+    float* data = locker.GetDataAs<float>(Buffer::WRITE_ONLY);
+    data[0] = 1.25f;
+    data[1] = -3.0f;
+  }
+
+  serializer.SerializePackBinary(pack_);
+  serializer.SerializeSection(buffer, Serializer::CUSTOM_SECTION);
+
+  StringWriter expected(StringWriter::CR_LF);
+  expected.WriteFormatted(
+    "\"fieldData\":[{"
+    "\"id\":%d,"
+    "\"type\":\"o3d.FloatField\","
+    "\"numComponents\":1,\"data\":[1.25,-3]}]",
+    field->id(), field->id());
+
+  EXPECT_EQ(expected.ToString(), output_.ToString());
+  EXPECT_TRUE(archive_generator_.add_file_records_.empty());
+}
+
+TEST_F(SerializerTest,
+       SerializesAllVertexBufferBinaryToSingleFileInArchive) {
   Buffer* buffer1 = pack_->Create<VertexBuffer>();
   buffer1->CreateField(FloatField::GetApparentClass(), 1);
   buffer1->AllocateElements(2);
@@ -1039,9 +1141,11 @@ TEST_F(SerializerTest, SerializesAllVertexBufferBinaryToSingleFileInArchive) {
   }
 
   serializer_.SerializePack(pack_);
-  EXPECT_EQ(1, archive_generator_.add_file_records_.size());
+  EXPECT_EQ(1U, archive_generator_.add_file_records_.size());
   const AddFileRecord& record = archive_generator_.add_file_records_[0];
   EXPECT_EQ("vertex-buffers.bin", record.file_name_);
+
+  EXPECT_FALSE(archive_generator_.closed_);
 
   // Test that the data matches what we get if we call SerializeBuffer directly
   // The file should contain the concatenated contents of both buffers

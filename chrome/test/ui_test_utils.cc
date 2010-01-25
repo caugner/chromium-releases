@@ -4,6 +4,8 @@
 
 #include "chrome/test/ui_test_utils.h"
 
+#include <vector>
+
 #include "base/json_reader.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -12,14 +14,15 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
-#if defined (OS_WIN)
-#include "views/widget/accelerator_handler.h"
+#if defined(TOOLKIT_VIEWS)
+#include "views/focus/accelerator_handler.h"
 #endif
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -198,7 +201,7 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
 // Used to block until an application modal dialog is shown.
 class AppModalDialogObserver : public NotificationObserver {
  public:
-  AppModalDialogObserver() {}
+  AppModalDialogObserver() : dialog_(NULL) {}
 
   AppModalDialog* WaitForAppModalDialog() {
     registrar_.Add(this, NotificationType::APP_MODAL_DIALOG_SHOWN,
@@ -230,19 +233,59 @@ class AppModalDialogObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(AppModalDialogObserver);
 };
 
-class CrashedRenderProcessObserver : public NotificationObserver {
+template <class T>
+class SimpleNotificationObserver : public NotificationObserver {
  public:
-  explicit CrashedRenderProcessObserver(RenderProcessHost* rph) {
-    registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
-                   Source<RenderProcessHost>(rph));
+  SimpleNotificationObserver(NotificationType notification_type,
+                             T* source) {
+    registrar_.Add(this, notification_type, Source<T>(source));
     ui_test_utils::RunMessageLoop();
   }
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    if (type == NotificationType::RENDERER_PROCESS_CLOSED) {
-      MessageLoopForUI::current()->Quit();
+    MessageLoopForUI::current()->Quit();
+  }
+
+ private:
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(SimpleNotificationObserver);
+};
+
+class FindInPageNotificationObserver : public NotificationObserver {
+ public:
+  explicit FindInPageNotificationObserver(TabContents* parent_tab)
+      : parent_tab_(parent_tab),
+        active_match_ordinal_(-1),
+        number_of_matches_(0) {
+    current_find_request_id_ = parent_tab->current_find_request_id();
+    registrar_.Add(this, NotificationType::FIND_RESULT_AVAILABLE,
+                   Source<TabContents>(parent_tab_));
+    ui_test_utils::RunMessageLoop();
+  }
+
+  int active_match_ordinal() const { return active_match_ordinal_; }
+
+  int number_of_matches() const { return number_of_matches_; }
+
+  virtual void Observe(NotificationType type, const NotificationSource& source,
+                       const NotificationDetails& details) {
+    if (type == NotificationType::FIND_RESULT_AVAILABLE) {
+      Details<FindNotificationDetails> find_details(details);
+      if (find_details->request_id() == current_find_request_id_) {
+        // We get multiple responses and one of those will contain the ordinal.
+        // This message comes to us before the final update is sent.
+        if (find_details->active_match_ordinal() > -1)
+          active_match_ordinal_ = find_details->active_match_ordinal();
+        if (find_details->final_update()) {
+          number_of_matches_ = find_details->number_of_matches();
+          MessageLoopForUI::current()->Quit();
+        } else {
+          DLOG(INFO) << "Ignoring, since we only care about the final message";
+        }
+      }
     } else {
       NOTREACHED();
     }
@@ -250,8 +293,16 @@ class CrashedRenderProcessObserver : public NotificationObserver {
 
  private:
   NotificationRegistrar registrar_;
+  TabContents* parent_tab_;
+  // We will at some point (before final update) be notified of the ordinal and
+  // we need to preserve it so we can send it later.
+  int active_match_ordinal_;
+  int number_of_matches_;
+  // The id of the current find request, obtained from TabContents. Allows us
+  // to monitor when the search completes.
+  int current_find_request_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(CrashedRenderProcessObserver);
+  DISALLOW_COPY_AND_ASSIGN(FindInPageNotificationObserver);
 };
 
 }  // namespace
@@ -260,9 +311,11 @@ void RunMessageLoop() {
   MessageLoopForUI* loop = MessageLoopForUI::current();
   bool did_allow_task_nesting = loop->NestableTasksAllowed();
   loop->SetNestableTasksAllowed(true);
-#if defined (OS_WIN)
+#if defined(TOOLKIT_VIEWS)
   views::AcceleratorHandler handler;
   loop->Run(&handler);
+#elif defined(OS_LINUX)
+  loop->Run(NULL);
 #else
   loop->Run();
 #endif
@@ -280,6 +333,23 @@ bool GetCurrentTabTitle(const Browser* browser, string16* title) {
   return true;
 }
 
+bool WaitForNavigationInCurrentTab(Browser* browser) {
+  TabContents* tab_contents = browser->GetSelectedTabContents();
+  if (!tab_contents)
+    return false;
+  WaitForNavigation(&tab_contents->controller());
+  return true;
+}
+
+bool WaitForNavigationsInCurrentTab(Browser* browser,
+                                    int number_of_navigations) {
+  TabContents* tab_contents = browser->GetSelectedTabContents();
+  if (!tab_contents)
+    return false;
+  WaitForNavigations(&tab_contents->controller(), number_of_navigations);
+  return true;
+}
+
 void WaitForNavigation(NavigationController* controller) {
   WaitForNavigations(controller, 1);
 }
@@ -287,6 +357,16 @@ void WaitForNavigation(NavigationController* controller) {
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations) {
   NavigationNotificationObserver observer(controller, number_of_navigations);
+}
+
+void WaitForNewTab(Browser* browser) {
+  SimpleNotificationObserver<Browser>
+      new_tab_observer(NotificationType::TAB_ADDED, browser);
+}
+
+void WaitForLoadStop(NavigationController* controller) {
+  SimpleNotificationObserver<NavigationController>
+      new_tab_observer(NotificationType::LOAD_STOP, controller);
 }
 
 void NavigateToURL(Browser* browser, const GURL& url) {
@@ -300,15 +380,6 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
       &browser->GetSelectedTabContents()->controller();
   browser->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   WaitForNavigations(controller, number_of_navigations);
-}
-
-bool ReloadCurrentTab(Browser* browser) {
-  browser->Reload();
-  TabContents* tab_contents = browser->GetSelectedTabContents();
-  if (!tab_contents)
-    return false;
-  WaitForNavigation(&tab_contents->controller());
-  return true;
 }
 
 Value* ExecuteJavaScript(RenderViewHost* render_view_host,
@@ -398,7 +469,38 @@ AppModalDialog* WaitForAppModalDialog() {
 void CrashTab(TabContents* tab) {
   RenderProcessHost* rph = tab->render_view_host()->process();
   base::KillProcess(rph->process().handle(), 0, false);
-  CrashedRenderProcessObserver crash_observer(rph);
+  SimpleNotificationObserver<RenderProcessHost>
+      crash_observer(NotificationType::RENDERER_PROCESS_CLOSED, rph);
+}
+
+void WaitForFocusChange(RenderViewHost* rvh) {
+  SimpleNotificationObserver<RenderViewHost>
+      focus_observer(NotificationType::FOCUS_CHANGED_IN_PAGE, rvh);
+}
+
+void WaitForFocusInBrowser(Browser* browser) {
+  SimpleNotificationObserver<Browser>
+      focus_observer(NotificationType::FOCUS_RETURNED_TO_BROWSER,
+      browser);
+}
+
+int FindInPage(TabContents* tab_contents, const string16& search_string,
+               bool forward, bool match_case, int* ordinal) {
+  tab_contents->StartFinding(search_string, forward, match_case);
+  FindInPageNotificationObserver observer(tab_contents);
+  if (ordinal)
+    *ordinal = observer.active_match_ordinal();
+  return observer.number_of_matches();
+}
+
+void RegisterAndWait(NotificationType::Type type,
+                     NotificationObserver* observer,
+                     int64 timeout_ms) {
+  NotificationRegistrar registrar;
+  registrar.Add(observer, type, NotificationService::AllSources());
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, new MessageLoop::QuitTask, timeout_ms);
+  RunMessageLoop();
 }
 
 }  // namespace ui_test_utils

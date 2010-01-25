@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H__
-#define BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H__
+#ifndef CHROME_BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H_
+#define CHROME_BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H_
 
 #include <map>
 #include <string>
 
 #include "base/task.h"
-#include "chrome/common/ref_counted_util.h"
+#include "base/ref_counted_memory.h"
 
 class DictionaryValue;
+class FilePath;
 class GURL;
 class MessageLoop;
 class URLRequest;
@@ -57,9 +58,20 @@ class ChromeURLDataManager {
     // Report that a request has resulted in the data |bytes|.
     // If the request can't be satisfied, pass NULL for |bytes| to indicate
     // the request is over.
-    void SendResponse(int request_id, RefCountedBytes* bytes);
+    void SendResponse(int request_id, RefCountedMemory* bytes);
 
-    MessageLoop* message_loop() const { return message_loop_; }
+    // Returns the MessageLoop on which the DataSource wishes to have
+    // StartDataRequest called to handle the request for |path|.  If the
+    // DataSource does not care which thread StartDataRequest is called on,
+    // this should return NULL.  The default implementation always returns
+    // message_loop_, which generally results in processing on the UI thread.
+    // It may be beneficial to return NULL for requests that are safe to handle
+    // directly on the IO thread.  This can improve performance by satisfying
+    // such requests more rapidly when there is a large amount of UI thread
+    // contention.
+    virtual MessageLoop* MessageLoopForRequestPath(const std::string& path)
+        const;
+
     const std::string& source_name() const { return source_name_; }
 
     static void SetFontAndTextDirection(DictionaryValue* localized_strings);
@@ -89,12 +101,12 @@ class ChromeURLDataManager {
   // A file source acts like a file:// URL to the specified path.
   // Calling this from threads other the IO thread must be done via
   // InvokeLater.
-  void AddFileSource(const std::string& source_name, const std::wstring& path);
+  void AddFileSource(const std::string& source_name, const FilePath& path);
   void RemoveFileSource(const std::string& source_name);
 
   static URLRequestJob* Factory(URLRequest* request, const std::string& scheme);
 
-private:
+ private:
   friend class URLRequestChromeJob;
 
   // Parse a URL into the components used to resolve its request.
@@ -104,7 +116,7 @@ private:
 
   // Translate a chrome resource URL into a local file path if there is one.
   // Returns false if there is no file handler for this URL
-  static bool URLToFilePath(const GURL& url, std::wstring* file_path);
+  static bool URLToFilePath(const GURL& url, FilePath* file_path);
 
   // Called by the job when it's starting up.
   // Returns false if |url| is not a URL managed by this object.
@@ -119,10 +131,10 @@ private:
 
   // Sent by Request::SendResponse.
   void DataAvailable(RequestID request_id,
-                     scoped_refptr<RefCountedBytes> bytes);
+                     scoped_refptr<RefCountedMemory> bytes);
 
   // File sources of data, keyed by source name (e.g. "inspector").
-  typedef std::map<std::string, std::wstring> FileSourceMap;
+  typedef std::map<std::string, FilePath> FileSourceMap;
   FileSourceMap file_sources_;
 
   // Custom sources of data, keyed by source path (e.g. "favicon").
@@ -142,8 +154,8 @@ private:
 // Since we have a single global ChromeURLDataManager, we don't need to
 // grab a reference to it when creating Tasks involving it.
 template <> struct RunnableMethodTraits<ChromeURLDataManager> {
-  static void RetainCallee(ChromeURLDataManager*) {}
-  static void ReleaseCallee(ChromeURLDataManager*) {}
+  void RetainCallee(ChromeURLDataManager* manager) {}
+  void ReleaseCallee(ChromeURLDataManager* manager) {}
 };
 
 // The single global instance of ChromeURLDataManager.
@@ -156,4 +168,4 @@ void RegisterURLRequestChromeJob();
 // Undoes the registration done by RegisterURLRequestChromeJob.
 void UnregisterURLRequestChromeJob();
 
-#endif  // BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H__
+#endif  // CHROME_BROWSER_DOM_UI_CHROME_URL_DATA_MANAGER_H_

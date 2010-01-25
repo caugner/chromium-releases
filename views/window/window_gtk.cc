@@ -7,6 +7,7 @@
 #include "app/gfx/path.h"
 #include "app/l10n_util.h"
 #include "base/gfx/rect.h"
+#include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/window/custom_frame_view.h"
 #include "views/window/hit_test.h"
@@ -67,7 +68,7 @@ GdkCursorType HitTestCodeToGdkCursorType(int hittest_code) {
       break;
   }
   // Default to something defaultish.
-  return GDK_ARROW;
+  return GDK_LEFT_PTR;
 }
 
 }  // namespace
@@ -83,13 +84,19 @@ Window* Window::CreateChromeWindow(gfx::NativeWindow parent,
                                    WindowDelegate* window_delegate) {
   WindowGtk* window = new WindowGtk(window_delegate);
   window->GetNonClientView()->SetFrameView(window->CreateFrameViewForWindow());
-  window->Init(bounds);
+  window->Init(parent, bounds);
   return window;
 }
 
 // static
 void Window::CloseAllSecondaryWindows() {
-  NOTIMPLEMENTED();
+  GList* windows = gtk_window_list_toplevels();
+  for (GList* window = windows; window;
+       window = g_list_next(window)) {
+    Window::CloseSecondaryWidget(
+        WidgetGtk::GetViewForNative(GTK_WIDGET(window->data)));
+  }
+  g_list_free(windows);
 }
 
 gfx::Rect WindowGtk::GetBounds() const {
@@ -99,7 +106,7 @@ gfx::Rect WindowGtk::GetBounds() const {
 }
 
 gfx::Rect WindowGtk::GetNormalBounds() const {
-  NOTIMPLEMENTED();
+  // We currently don't support tiling, so this doesn't matter.
   return GetBounds();
 }
 
@@ -114,19 +121,11 @@ void WindowGtk::Show() {
 }
 
 void WindowGtk::HideWindow() {
-  NOTIMPLEMENTED();
-}
-
-void WindowGtk::PushForceHidden() {
-  NOTIMPLEMENTED();
-}
-
-void WindowGtk::PopForceHidden() {
-  NOTIMPLEMENTED();
+  Hide();
 }
 
 void WindowGtk::Activate() {
-  NOTIMPLEMENTED();
+  gtk_window_present(GTK_WINDOW(GetNativeView()));
 }
 
 void WindowGtk::Close() {
@@ -150,11 +149,16 @@ void WindowGtk::Minimize() {
 }
 
 void WindowGtk::Restore() {
-  NOTIMPLEMENTED();
+  if (IsMaximized())
+    gtk_window_unmaximize(GetNativeWindow());
+  else if (IsMinimized())
+    gtk_window_deiconify(GetNativeWindow());
+  else if (IsFullscreen())
+    SetFullscreen(false);
 }
 
 bool WindowGtk::IsActive() const {
-  return gtk_window_is_active(GetNativeWindow());
+  return WidgetGtk::IsActive();
 }
 
 bool WindowGtk::IsVisible() const {
@@ -184,10 +188,6 @@ void WindowGtk::EnableClose(bool enable) {
   gtk_window_set_deletable(GetNativeWindow(), enable);
 }
 
-void WindowGtk::DisableInactiveRendering() {
-  NOTIMPLEMENTED();
-}
-
 void WindowGtk::UpdateWindowTitle() {
   // If the non-client view is rendering its own title, it'll need to relayout
   // now.
@@ -204,7 +204,7 @@ void WindowGtk::UpdateWindowTitle() {
 }
 
 void WindowGtk::UpdateWindowIcon() {
-  NOTIMPLEMENTED();
+  // Doesn't matter for chrome os.
 }
 
 void WindowGtk::SetIsAlwaysOnTop(bool always_on_top) {
@@ -218,6 +218,8 @@ NonClientFrameView* WindowGtk::CreateFrameViewForWindow() {
 }
 
 void WindowGtk::UpdateFrameAfterFrameChange() {
+  // We currently don't support different frame types on Gtk, so we don't
+  // need to implement this.
   NOTIMPLEMENTED();
 }
 
@@ -242,6 +244,8 @@ bool WindowGtk::ShouldUseNativeFrame() const {
 }
 
 void WindowGtk::FrameTypeChanged() {
+  // We currently don't support different frame types on Gtk, so we don't
+  // need to implement this.
   NOTIMPLEMENTED();
 }
 
@@ -314,7 +318,10 @@ void WindowGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
                                   &window_mask);
   GdkRegion* mask_region = window_mask.CreateGdkRegion();
   gdk_window_shape_combine_region(GetNativeView()->window, mask_region, 0, 0);
-  gdk_region_destroy(mask_region);
+  if (mask_region)
+    gdk_region_destroy(mask_region);
+
+  SaveWindowPosition();
 }
 
 gboolean WindowGtk::OnWindowStateEvent(GtkWidget* widget,
@@ -323,6 +330,14 @@ gboolean WindowGtk::OnWindowStateEvent(GtkWidget* widget,
   if (!(window_state_ & GDK_WINDOW_STATE_WITHDRAWN))
     SaveWindowPosition();
   return FALSE;
+}
+
+gboolean WindowGtk::OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event) {
+  GdkCursor* cursor = gdk_cursor_new(GDK_LEFT_PTR);
+  gdk_window_set_cursor(widget->window, cursor);
+  gdk_cursor_destroy(cursor);
+
+  return WidgetGtk::OnLeaveNotify(widget, event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -339,16 +354,16 @@ WindowGtk::WindowGtk(WindowDelegate* window_delegate)
   window_delegate_->window_.reset(this);
 }
 
-void WindowGtk::Init(const gfx::Rect& bounds) {
+void WindowGtk::Init(GtkWindow* parent, const gfx::Rect& bounds) {
+  WidgetGtk::Init(NULL, bounds);
+
   // We call this after initializing our members since our implementations of
   // assorted WidgetWin functions may be called during initialization.
   is_modal_ = window_delegate_->IsModal();
-  if (is_modal_) {
-    // TODO(erg): Fix once modality works.
-    // BecomeModal();
-  }
-
-  WidgetGtk::Init(NULL, bounds);
+  if (is_modal_)
+    gtk_window_set_modal(GetNativeWindow(), true);
+  if (parent)
+    gtk_window_set_transient_for(GetNativeWindow(), parent);
 
   g_signal_connect(G_OBJECT(GetNativeWindow()), "configure-event",
                    G_CALLBACK(CallConfigureEvent), this);
@@ -361,7 +376,7 @@ void WindowGtk::Init(const gfx::Rect& bounds) {
   WidgetGtk::SetContentsView(non_client_view_);
 
   UpdateWindowTitle();
-  SetInitialBounds(bounds);
+  SetInitialBounds(parent, bounds);
 
   // if (!IsAppWindow()) {
   //   notification_registrar_.Add(
@@ -396,28 +411,49 @@ void WindowGtk::SaveWindowPosition() {
     return;
 
   bool maximized = window_state_ & GDK_WINDOW_STATE_MAXIMIZED;
-  gfx::Rect bounds;
-  WidgetGtk::GetBounds(&bounds, true);
-  window_delegate_->SaveWindowPlacement(bounds, maximized);
+  window_delegate_->SaveWindowPlacement(GetBounds(), maximized);
 }
 
-void WindowGtk::SetInitialBounds(const gfx::Rect& create_bounds) {
+void WindowGtk::SetInitialBounds(GtkWindow* parent,
+                                 const gfx::Rect& create_bounds) {
   gfx::Rect saved_bounds(create_bounds.ToGdkRectangle());
   if (window_delegate_->GetSavedWindowBounds(&saved_bounds)) {
     WidgetGtk::SetBounds(saved_bounds);
   } else {
     if (create_bounds.IsEmpty()) {
-      SizeWindowToDefault();
+      SizeWindowToDefault(parent);
     } else {
       SetBounds(create_bounds, NULL);
     }
   }
 }
 
-void WindowGtk::SizeWindowToDefault() {
+void WindowGtk::SizeWindowToDefault(GtkWindow* parent) {
+  gfx::Rect center_rect;
+
+  if (parent) {
+    // We have a parent window, center over it.
+    gint parent_x = 0;
+    gint parent_y = 0;
+    gtk_window_get_position(parent, &parent_x, &parent_y);
+    gint parent_w = 0;
+    gint parent_h = 0;
+    gtk_window_get_size(parent, &parent_w, &parent_h);
+    center_rect = gfx::Rect(parent_x, parent_y, parent_w, parent_h);
+  } else {
+    // We have no parent window, center over the screen.
+    center_rect = Screen::GetMonitorWorkAreaNearestWindow(GetNativeView());
+  }
   gfx::Size size = non_client_view_->GetPreferredSize();
-  gfx::Rect bounds(size.width(), size.height());
+  gfx::Rect bounds(center_rect.x() + (center_rect.width() - size.width()) / 2,
+                   center_rect.y() + (center_rect.height() - size.height()) / 2,
+                   size.width(), size.height());
   SetBounds(bounds, NULL);
+}
+
+void WindowGtk::OnDestroy() {
+  non_client_view_->WindowClosing();
+  WidgetGtk::OnDestroy();
 }
 
 }  // namespace views

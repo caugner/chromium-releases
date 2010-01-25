@@ -11,7 +11,7 @@
 class FirstRunDialog : public ImportObserver {
  public:
   // Displays the first run UI for reporting opt-in, import data etc.
-  static bool Show(Profile* profile);
+  static bool Show(Profile* profile, ProcessSingleton* process_singleton);
 
   // Overridden methods from ImportObserver.
   virtual void ImportCanceled() {
@@ -31,6 +31,8 @@ class FirstRunDialog : public ImportObserver {
     user_data->OnDialogResponse(widget, response);
   }
   void OnDialogResponse(GtkWidget* widget, int response);
+  static void OnLearnMoreLinkClicked(GtkButton *button,
+                                     FirstRunDialog* first_run);
 
   // This method closes the first run window and quits the message loop so that
   // the Chrome startup can continue. This should be called when all the

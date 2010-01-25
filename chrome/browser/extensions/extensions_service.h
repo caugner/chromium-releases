@@ -45,6 +45,8 @@ class ExtensionUpdateService {
   virtual const ExtensionList* extensions() const = 0;
   virtual void UpdateExtension(const std::string& id, const FilePath& path) = 0;
   virtual Extension* GetExtensionById(const std::string& id) = 0;
+  virtual void UpdateExtensionBlacklist(
+    const std::vector<std::string>& blacklist) = 0;
 };
 
 // Manages installed and running Chromium extensions.
@@ -85,14 +87,28 @@ class ExtensionsService
   virtual ~ExtensionsService();
 
   // Gets the list of currently installed extensions.
-  virtual const ExtensionList* extensions() const {
-    return &extensions_;
+  virtual const ExtensionList* extensions() const { return &extensions_; }
+  virtual const ExtensionList* disabled_extensions() const {
+    return &disabled_extensions_;
   }
 
   const FilePath& install_directory() const { return install_directory_; }
 
   // Initialize and start all installed extensions.
   void Init();
+
+  // Look up an extension by ID.
+  Extension* GetExtensionById(const std::string& id) {
+    return GetExtensionByIdInternal(id, true, false);
+  }
+
+  // Retrieves a vector of all page actions, irrespective of which extension
+  // they belong to.
+  std::vector<ExtensionAction*> GetPageActions() const;
+
+  // Retrieves a vector of all browser actions, irrespective of which extension
+  // they belong to.
+  std::vector<ExtensionAction*> GetBrowserActions(bool include_popups) const;
 
   // Install the extension file at |extension_path|.  Will install as an
   // update if an older version is already installed.
@@ -109,6 +125,9 @@ class ExtensionsService
   virtual void UpdateExtension(const std::string& id,
                                const FilePath& extension_path);
 
+  // Reloads the specified extension.
+  void ReloadExtension(const std::string& extension_id);
+
   // Uninstalls the specified extension. Callers should only call this method
   // with extensions that exist. |external_uninstall| is a magical parameter
   // that is only used to send information to ExtensionPrefs, which external
@@ -117,6 +136,11 @@ class ExtensionsService
   // to ExtensionPrefs some other way.
   void UninstallExtension(const std::string& extension_id,
                           bool external_uninstall);
+
+  // Enable or disable an extension. The extension must be in the opposite state
+  // before calling.
+  void EnableExtension(const std::string& extension_id);
+  void DisableExtension(const std::string& extension_id);
 
   // Load the extension from the directory |extension_path|.
   void LoadExtension(const FilePath& extension_path);
@@ -130,7 +154,8 @@ class ExtensionsService
   // Unload the specified extension.
   void UnloadExtension(const std::string& extension_id);
 
-  // Unload all extensions.
+  // Unload all extensions. This is currently only called on shutdown, and
+  // does not send notifications.
   void UnloadAllExtensions();
 
   // Called only by testing.
@@ -138,9 +163,6 @@ class ExtensionsService
 
   // Scan the extension directory and clean up the cruft.
   void GarbageCollectExtensions();
-
-  // Lookup an extension by |id|.
-  virtual Extension* GetExtensionById(const std::string& id);
 
   // Lookup an extension by |url|.  This uses the host of the URL as the id.
   Extension* GetExtensionByURL(const GURL& url);
@@ -156,11 +178,13 @@ class ExtensionsService
   // Called by the backend when the initial extension load has completed.
   void OnLoadedInstalledExtensions();
 
-  // Called by the backend when extensions have been loaded.
-  void OnExtensionsLoaded(ExtensionList* extensions);
+  // Called by the backend when an extension has been loaded.
+  void OnExtensionLoaded(Extension* extension,
+                         bool allow_privilege_increase);
 
   // Called by the backend when an extension has been installed.
-  void OnExtensionInstalled(Extension* extension);
+  void OnExtensionInstalled(Extension* extension,
+                            bool allow_privilege_increase);
 
   // Called by the backend when an attempt was made to reinstall the same
   // version of an existing extension.
@@ -171,6 +195,11 @@ class ExtensionsService
                                 const std::string& version,
                                 const FilePath& path,
                                 Extension::Location location);
+
+  // Go through each extensions in pref, unload blacklisted extensions
+  // and update the blacklist state in pref.
+  virtual void UpdateExtensionBlacklist(
+    const std::vector<std::string>& blacklist);
 
   void set_extensions_enabled(bool enabled) { extensions_enabled_ = enabled; }
   bool extensions_enabled() { return extensions_enabled_; }
@@ -191,7 +220,35 @@ class ExtensionsService
   // Whether the extension service is ready.
   bool is_ready() { return ready_; }
 
+  // Note that this may return NULL if autoupdate is not turned on.
+  ExtensionUpdater* updater() { return updater_.get(); }
+
  private:
+  // Look up an extension by ID, optionally including either or both of enabled
+  // and disabled extensions.
+  Extension* GetExtensionByIdInternal(const std::string& id,
+                                      bool include_enabled,
+                                      bool include_disabled);
+
+  // Load a single extension from the prefs. This can be done on the UI thread
+  // because we don't touch the disk.
+  void LoadInstalledExtension(
+      DictionaryValue* manifest, const std::string& id,
+      const FilePath& path, Extension::Location location);
+
+  // Handles sending notification that |extension| was loaded.
+  void NotifyExtensionLoaded(Extension* extension);
+
+  // Handles sending notification that |extension| was unloaded.
+  void NotifyExtensionUnloaded(Extension* extension);
+
+  // Retrieves a vector of all page actions or browser actions, irrespective of
+  // which extension they belong to.  If |include_popups| is false, actions that
+  // are popups are excluded.
+  std::vector<ExtensionAction*> GetExtensionActions(
+      ExtensionAction::ExtensionActionType action_type,
+      bool include_popups) const;
+
   // The profile this ExtensionsService is part of.
   Profile* profile_;
 
@@ -203,6 +260,9 @@ class ExtensionsService
 
   // The current list of installed extensions.
   ExtensionList extensions_;
+
+  // The list of installed extensions that have been disabled.
+  ExtensionList disabled_extensions_;
 
   // The full path to the directory where extensions are installed.
   FilePath install_directory_;
@@ -239,17 +299,10 @@ class ExtensionsServiceBackend
 
   virtual ~ExtensionsServiceBackend();
 
-  // Loads the installed extensions.
-  // Errors are reported through ExtensionErrorReporter. On completion,
-  // OnExtensionsLoaded() is called with any successfully loaded extensions.
-  void LoadInstalledExtensions(scoped_refptr<ExtensionsService> frontend,
-                               InstalledExtensions* installed);
-
   // Loads a single extension from |path| where |path| is the top directory of
   // a specific extension where its manifest file lives.
-  // Errors are reported through ExtensionErrorReporter. On completion,
-  // OnExtensionsLoadedFromDirectory() is called with any successfully loaded
-  // extensions.
+  // Errors are reported through ExtensionErrorReporter. On success,
+  // OnExtensionLoaded() is called.
   // TODO(erikkay): It might be useful to be able to load a packed extension
   // (presumably into memory) without installing it.
   void LoadSingleExtension(const FilePath &path,
@@ -260,6 +313,12 @@ class ExtensionsServiceBackend
   // reported.
   void CheckForExternalUpdates(std::set<std::string> ids_to_ignore,
                                scoped_refptr<ExtensionsService> frontend);
+
+  // For the extension in |version_path| with |id|, check to see if it's an
+  // externally managed extension.  If so, tell the frontend to uninstall it.
+  void CheckExternalUninstall(scoped_refptr<ExtensionsService> frontend,
+                              const std::string& id,
+                              Extension::Location location);
 
   // Clear all ExternalExtensionProviders.
   void ClearProvidersForTesting();
@@ -275,10 +334,6 @@ class ExtensionsServiceBackend
                                         const FilePath& path,
                                         Extension::Location location);
  private:
-  // Loads a single installed extension.
-  void LoadInstalledExtension(const std::string& id, const FilePath& path,
-                              Extension::Location location);
-
   // Finish installing the extension in |crx_path| after it has been unpacked to
   // |unpacked_path|.  If |expected_id| is not empty, it's verified against the
   // extension's manifest before installation. If |silent| is true, there will
@@ -296,8 +351,8 @@ class ExtensionsServiceBackend
   void ReportExtensionLoadError(const FilePath& extension_path,
                                 const std::string& error);
 
-  // Notify the frontend that extensions were loaded.
-  void ReportExtensionsLoaded(ExtensionList* extensions);
+  // Notify the frontend that an extension was loaded.
+  void ReportExtensionLoaded(Extension* extension);
 
   // Notify the frontend that there was an error installing an extension.
   void ReportExtensionInstallError(const FilePath& extension_path,
@@ -312,12 +367,6 @@ class ExtensionsServiceBackend
   bool LookupExternalExtension(const std::string& id,
                                Version** version,
                                Extension::Location* location);
-
-  // For the extension in |version_path| with |id|, check to see if it's an
-  // externally managed extension.  If so return true if it should be
-  // uninstalled.
-  bool CheckExternalUninstall(const std::string& id,
-                              Extension::Location location);
 
   // This is a naked pointer which is set by each entry point.
   // The entry point is responsible for ensuring lifetime.

@@ -1,10 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/bookmark_bar_view.h"
 
+#include <algorithm>
 #include <limits>
+#include <set>
+#include <vector>
 
 #include "app/gfx/canvas.h"
 #include "app/gfx/text_elider.h"
@@ -19,6 +22,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/sync/sync_status_ui_helper.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/view_ids.h"
@@ -33,19 +37,13 @@
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "skia/ext/skia_utils.h"
 #include "views/controls/button/menu_button.h"
-#include "views/controls/menu/chrome_menu.h"
+#include "views/controls/menu/menu_item_view.h"
 #include "views/drag_utils.h"
 #include "views/view_constants.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
-
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#include "base/base_drag_source.h"
-#endif
 
 using views::CustomButton;
 using views::DropTargetEvent;
@@ -69,11 +67,6 @@ static const int kBarHeight = 29;
 // Preferred height of the bookmarks bar when only shown on the new tab page.
 const int BookmarkBarView::kNewtabBarHeight = 57;
 
-// How inset the bookmarks bar is when displayed on the new tab page. This is
-// in addition to the margins above.
-static const int kNewtabHorizontalPadding = 8;
-static const int kNewtabVerticalPadding = 12;
-
 // Padding between buttons.
 static const int kButtonPadding = 0;
 
@@ -85,12 +78,6 @@ static SkBitmap* kDefaultFavIcon = NULL;
 
 // Icon used for folders.
 static SkBitmap* kFolderIcon = NULL;
-
-// Border colors for the BookmarBarView.
-static const SkColor kTopBorderColor = SkColorSetRGB(222, 234, 248);
-
-// How round the 'new tab' style bookmarks bar is.
-static const int kNewtabBarRoundness = 5;
 
 // Offset for where the menu is shown relative to the bottom of the
 // BookmarkBarView.
@@ -116,18 +103,19 @@ static const int kSeparatorWidth = 4;
 // Starting x-coordinate of the separator line within a separator.
 static const int kSeparatorStartX = 2;
 
-// Border color along the left edge of the view representing the most recently
-// view pages.
-static const SkColor kSeparatorColor = SkColorSetRGB(194, 205, 212);
-
 // Left-padding for the instructional text.
 static const int kInstructionsPadding = 6;
 
 // Color of the instructional text.
 static const SkColor kInstructionsColor = SkColorSetRGB(128, 128, 142);
 
-// Tag for the other button.
+// Tag for the 'Other bookmarks' button.
 static const int kOtherFolderButtonTag = 1;
+
+#if defined(BROWSER_SYNC)
+// Tag for the sync error button.
+static const int kSyncErrorButtonTag = 2;
+#endif
 
 namespace {
 
@@ -140,13 +128,8 @@ static std::wstring CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
                                                 const GURL& url,
                                                 const std::wstring& title,
                                                 const std::wstring& languages) {
-#if defined(OS_WIN)
-  gfx::Rect monitor_bounds = win_util::GetMonitorBoundsForRect(
-      gfx::Rect(screen_loc.x(), screen_loc.y(), 1, 1));
-#else
-  gfx::Rect monitor_bounds(0, 0, 10000, 10000);
-  NOTIMPLEMENTED();
-#endif
+  int max_width = views::TooltipManager::GetMaxWidth(screen_loc.x(),
+                                                     screen_loc.y());
   gfx::Font tt_font = views::TooltipManager::GetDefaultFont();
   std::wstring result;
 
@@ -154,11 +137,9 @@ static std::wstring CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
   if (!title.empty()) {
     std::wstring localized_title;
     if (l10n_util::AdjustStringForLocaleDirection(title, &localized_title))
-      result.append(gfx::ElideText(localized_title,
-                                   tt_font,
-                                   monitor_bounds.width()));
+      result.append(gfx::ElideText(localized_title, tt_font, max_width));
     else
-      result.append(gfx::ElideText(title, tt_font, monitor_bounds.width()));
+      result.append(gfx::ElideText(title, tt_font, max_width));
   }
 
   // Only show the URL if the url and title differ.
@@ -172,10 +153,7 @@ static std::wstring CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
     // "/http://www.yahoo.com" when rendered, as is, in an RTL context since
     // the Unicode BiDi algorithm puts certain characters on the left by
     // default.
-    std::wstring elided_url(gfx::ElideUrl(url,
-                                          tt_font,
-                                          monitor_bounds.width(),
-                                          languages));
+    std::wstring elided_url(gfx::ElideUrl(url, tt_font, max_width, languages));
     if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
       l10n_util::WrapStringWithLTRFormatting(&elided_url);
     result.append(elided_url);
@@ -271,7 +249,17 @@ class BookmarkFolderButton : public views::MenuButton {
 // Tracks drops on the BookmarkBarView.
 
 struct BookmarkBarView::DropInfo {
-  DropInfo() : valid(false), drop_index(-1), is_menu_showing(false) {}
+  DropInfo()
+      : valid(false),
+        drop_index(-1),
+        is_menu_showing(false),
+        drop_on(false),
+        is_over_overflow(false),
+        is_over_other(false),
+        x(0),
+        y(0),
+        drag_operation(0) {
+  }
 
   // Whether the data is valid.
   bool valid;
@@ -311,25 +299,11 @@ class BookmarkBarView::ButtonSeparatorView : public views::View {
   virtual ~ButtonSeparatorView() {}
 
   virtual void Paint(gfx::Canvas* canvas) {
-    SkPaint paint;
-    paint.setShader(skia::CreateGradientShader(0,
-                                               height() / 2,
-                                               kTopBorderColor,
-                                               kSeparatorColor))->safeUnref();
-    SkRect rc = {SkIntToScalar(kSeparatorStartX),  SkIntToScalar(0),
-                 SkIntToScalar(1), SkIntToScalar(height() / 2) };
-    canvas->drawRect(rc, paint);
-
-    SkPaint paint_down;
-    paint_down.setShader(skia::CreateGradientShader(height() / 2,
-        height(),
-        kSeparatorColor,
-        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_TOOLBAR)
-        ))->safeUnref();
-    SkRect rc_down = {
-        SkIntToScalar(kSeparatorStartX),  SkIntToScalar(height() / 2),
-        SkIntToScalar(1), SkIntToScalar(height() - 1) };
-    canvas->drawRect(rc_down, paint_down);
+    DetachableToolbarView::PaintVerticalDivider(
+        canvas, kSeparatorStartX, height(), 1,
+        DetachableToolbarView::kEdgeDividerColor,
+        DetachableToolbarView::kMiddleDividerColor,
+        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_TOOLBAR));
   }
 
   virtual gfx::Size GetPreferredSize() {
@@ -338,7 +312,31 @@ class BookmarkBarView::ButtonSeparatorView : public views::View {
     return gfx::Size(kSeparatorWidth, 1);
   }
 
+  virtual bool GetAccessibleName(std::wstring* name) {
+    DCHECK(name);
+
+    if (!accessible_name_.empty()) {
+      name->assign(accessible_name_);
+      return true;
+    }
+    return false;
+  }
+
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role) {
+    DCHECK(role);
+
+    *role = AccessibilityTypes::ROLE_SEPARATOR;
+    return true;
+  }
+
+  virtual void SetAccessibleName(const std::wstring& name) {
+    accessible_name_.assign(name);
+  }
+
  private:
+  // Storage of strings needed for accessibility.
+  std::wstring accessible_name_;
+
   DISALLOW_COPY_AND_ASSIGN(ButtonSeparatorView);
 };
 
@@ -346,6 +344,8 @@ class BookmarkBarView::ButtonSeparatorView : public views::View {
 
 // static
 const int BookmarkBarView::kMaxButtonWidth = 150;
+const int BookmarkBarView::kNewtabHorizontalPadding = 8;
+const int BookmarkBarView::kNewtabVerticalPadding = 12;
 
 // static
 bool BookmarkBarView::testing_ = false;
@@ -368,11 +368,24 @@ BookmarkBarView::BookmarkBarView(Profile* profile, Browser* browser)
       other_bookmarked_button_(NULL),
       model_changed_listener_(NULL),
       show_folder_drop_menu_task_(NULL),
+#if defined(BROWSER_SYNC)
+      sync_error_button_(NULL),
+      sync_service_(NULL),
+#endif
       overflow_button_(NULL),
       instructions_(NULL),
       bookmarks_separator_view_(NULL),
       browser_(browser),
       throbbing_view_(NULL) {
+#if defined(BROWSER_SYNC)
+  if (profile->GetProfileSyncService()) {
+    // Obtain a pointer to the profile sync service and add our instance as an
+    // observer.
+    sync_service_ = profile->GetProfileSyncService();
+    sync_service_->AddObserver(this);
+  }
+#endif
+
   SetID(VIEW_ID_BOOKMARK_BAR);
   Init();
   SetProfile(profile);
@@ -388,6 +401,11 @@ BookmarkBarView::~BookmarkBarView() {
   if (model_)
     model_->RemoveObserver(this);
   StopShowFolderDropMenuTimer();
+
+#if defined(BROWSER_SYNC)
+  if (sync_service_)
+    sync_service_->RemoveObserver(this);
+#endif
 }
 
 void BookmarkBarView::SetProfile(Profile* profile) {
@@ -430,109 +448,43 @@ void BookmarkBarView::SetPageNavigator(PageNavigator* navigator) {
 }
 
 gfx::Size BookmarkBarView::GetPreferredSize() {
-  gfx::Size prefsize;
-  if (OnNewTabPage()) {
-    prefsize.set_height(kBarHeight + static_cast<int>(static_cast<double>
-                        (kNewtabBarHeight - kBarHeight) *
-                        (1 - size_animation_->GetCurrentValue())));
-  } else {
-    prefsize.set_height(static_cast<int>(static_cast<double>(kBarHeight) *
-                        size_animation_->GetCurrentValue()));
-  }
-
-  // Width doesn't matter, we're always given a width based on the browser
-  // size.
-  prefsize.set_width(1);
-
-  return prefsize;
+  return LayoutItems(true);
 }
 
 gfx::Size BookmarkBarView::GetMinimumSize() {
-  return gfx::Size(0, kBarHeight);
-}
-
-void BookmarkBarView::Layout() {
-  if (!GetParent())
-    return;
-
-  int x = kLeftMargin;
-  int y = kTopMargin;
-  int width = View::width() - kRightMargin - kLeftMargin;
-  int height = View::height() - kTopMargin - kBottomMargin;
-  int separator_margin = kSeparatorMargin;
+  // The minimum width of the bookmark bar should at least contain the overflow
+  // button, by which one can access all the Bookmark Bar items, and the "Other
+  // Bookmarks" folder, along with appropriate margins and button padding.
+  int width = kLeftMargin;
 
   if (OnNewTabPage()) {
     double current_state = 1 - size_animation_->GetCurrentValue();
-    x += static_cast<int>(static_cast<double>
+    width += 2 * static_cast<int>(static_cast<double>
         (kNewtabHorizontalPadding) * current_state);
-    y += static_cast<int>(static_cast<double>
-        (kNewtabVerticalPadding) * current_state);
-    width -= static_cast<int>(static_cast<double>
-        (kNewtabHorizontalPadding) * current_state);
-    height -= static_cast<int>(static_cast<double>
-        (kNewtabVerticalPadding * 2) * current_state);
-    separator_margin -= static_cast<int>(static_cast<double>
-        (kSeparatorMargin) * current_state);
   }
+
+  int sync_error_total_width = 0;
+#if defined(BROWSER_SYNC)
+  gfx::Size sync_error_button_pref = sync_error_button_->GetPreferredSize();
+  if (ShouldShowSyncErrorButton())
+    sync_error_total_width += kButtonPadding + sync_error_button_pref.width();
+#endif
 
   gfx::Size other_bookmarked_pref =
       other_bookmarked_button_->GetPreferredSize();
   gfx::Size overflow_pref = overflow_button_->GetPreferredSize();
   gfx::Size bookmarks_separator_pref =
       bookmarks_separator_view_->GetPreferredSize();
-  const int max_x = width - other_bookmarked_pref.width() - kButtonPadding -
-              overflow_pref.width() - kButtonPadding -
-              bookmarks_separator_pref.width();
 
-  // Next, layout out the buttons. Any buttons that are placed beyond the
-  // visible region and made invisible.
-  if (GetBookmarkButtonCount() == 0 && model_ && model_->IsLoaded()) {
-    gfx::Size pref = instructions_->GetPreferredSize();
-    instructions_->SetBounds(
-        x + kInstructionsPadding, y,
-        std::min(static_cast<int>(pref.width()),
-        max_x - x),
-        height);
-    instructions_->SetVisible(true);
-  } else {
-    instructions_->SetVisible(false);
+  width += (other_bookmarked_pref.width() + kButtonPadding +
+      overflow_pref.width() + kButtonPadding +
+      bookmarks_separator_pref.width() + sync_error_total_width);
 
-    for (int i = 0; i < GetBookmarkButtonCount(); ++i) {
-      views::View* child = GetChildViewAt(i);
-      gfx::Size pref = child->GetPreferredSize();
-      int next_x = x + pref.width() + kButtonPadding;
-      child->SetVisible(next_x < max_x);
-      child->SetBounds(x, y, pref.width(), height);
-      x = next_x;
-    }
-  }
+  return gfx::Size(width, kBarHeight);
+}
 
-  // Layout the right side of the bar.
-  const bool all_visible =
-      (GetBookmarkButtonCount() == 0 ||
-       GetChildViewAt(GetBookmarkButtonCount() - 1)->IsVisible());
-
-  // Layout the right side buttons.
-  x = max_x + kButtonPadding;
-
-  // The overflow button.
-  overflow_button_->SetBounds(x, y, overflow_pref.width(), height);
-  overflow_button_->SetVisible(!all_visible);
-
-  x += overflow_pref.width();
-
-  // Separator.
-  bookmarks_separator_view_->SetBounds(x,
-                                       y - kTopMargin,
-                                       bookmarks_separator_pref.width(),
-                                       height + kTopMargin + kBottomMargin -
-                                       separator_margin);
-  x += bookmarks_separator_pref.width();
-
-  // The other bookmarks button.
-  other_bookmarked_button_->SetBounds(x, y, other_bookmarked_pref.width(),
-                                      height);
-  x += other_bookmarked_pref.width() + kButtonPadding;
+void BookmarkBarView::Layout() {
+  LayoutItems(false);
 }
 
 void BookmarkBarView::DidChangeBounds(const gfx::Rect& previous,
@@ -547,7 +499,7 @@ void BookmarkBarView::ViewHierarchyChanged(bool is_add,
     // We may get inserted into a hierarchy with a profile - this typically
     // occurs when the bar's contents get populated fast enough that the
     // buttons are created before the bar is attached to a frame.
-    UpdateButtonColors();
+    UpdateColors();
 
     if (height() > 0) {
       // We only layout while parented. When we become parented, if our bounds
@@ -555,206 +507,6 @@ void BookmarkBarView::ViewHierarchyChanged(bool is_add,
       // Therefore we always force a layout when added.
       Layout();
     }
-  }
-}
-
-void BookmarkBarView::Paint(gfx::Canvas* canvas) {
-  if (IsDetachedStyle()) {
-    // Draw the background to match the new tab page.
-    ThemeProvider* tp = GetThemeProvider();
-    canvas->FillRectInt(
-        tp->GetColor(BrowserThemeProvider::COLOR_NTP_BACKGROUND),
-        0, 0, width(), height());
-
-    if (tp->HasCustomImage(IDR_THEME_NTP_BACKGROUND)) {
-      int tiling = BrowserThemeProvider::NO_REPEAT;
-      tp->GetDisplayProperty(BrowserThemeProvider::NTP_BACKGROUND_TILING,
-                             &tiling);
-      int alignment;
-      if (tp->GetDisplayProperty(BrowserThemeProvider::NTP_BACKGROUND_ALIGNMENT,
-                                 &alignment)) {
-        SkBitmap* ntp_background = tp->GetBitmapNamed(
-            IDR_THEME_NTP_BACKGROUND);
-
-        if (alignment & BrowserThemeProvider::ALIGN_TOP) {
-          PaintThemeBackgroundTopAligned(
-              canvas, ntp_background, tiling, alignment);
-        } else {
-          PaintThemeBackgroundBottomAligned(
-              canvas, ntp_background, tiling, alignment);
-        }
-      }
-    }
-
-    // Draw the 'bottom' of the toolbar above our bubble.
-    canvas->FillRectInt(ResourceBundle::toolbar_separator_color,
-                        0, 0, width(), 1);
-
-    SkRect rect;
-
-    // As 'hidden' according to the animation is the full in-tab state,
-    // we invert the value - when current_state is at '0', we expect the
-    // bar to be docked.
-    double current_state = 1 - size_animation_->GetCurrentValue();
-
-    // The 0.5 is to correct for Skia's "draw on pixel boundaries"ness.
-    double h_padding = static_cast<double>
-        (kNewtabHorizontalPadding) * current_state;
-    double v_padding = static_cast<double>
-        (kNewtabVerticalPadding) * current_state;
-    rect.set(SkDoubleToScalar(h_padding - 0.5),
-             SkDoubleToScalar(v_padding - 0.5),
-             SkDoubleToScalar(width() - h_padding - 0.5),
-             SkDoubleToScalar(height() - v_padding - 0.5));
-
-    double roundness = static_cast<double>
-        (kNewtabBarRoundness) * current_state;
-
-    // Draw our background.
-    SkPaint paint;
-    paint.setAntiAlias(true);
-    paint.setColor(
-        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_TOOLBAR));
-
-    canvas->drawRoundRect(rect,
-                          SkDoubleToScalar(roundness),
-                          SkDoubleToScalar(roundness), paint);
-
-    // Draw border
-    SkPaint border_paint;
-    border_paint.setColor(
-        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_NTP_HEADER));
-    border_paint.setStyle(SkPaint::kStroke_Style);
-    border_paint.setAlpha(96);
-    border_paint.setAntiAlias(true);
-
-    canvas->drawRoundRect(rect,
-                          SkDoubleToScalar(roundness),
-                          SkDoubleToScalar(roundness), border_paint);
-  } else {
-    gfx::Rect bounds = GetBounds(views::View::APPLY_MIRRORING_TRANSFORMATION);
-
-    SkColor theme_toolbar_color =
-        GetThemeProvider()->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
-    canvas->FillRectInt(theme_toolbar_color, 0, 0, width(), height());
-
-    canvas->TileImageInt(*GetThemeProvider()->
-        GetBitmapNamed(IDR_THEME_TOOLBAR),
-        GetParent()->GetBounds(views::View::APPLY_MIRRORING_TRANSFORMATION).x()
-        + bounds.x(), bounds.y(), 0, 0, width(), height());
-    canvas->FillRectInt(ResourceBundle::toolbar_separator_color,
-                        0, height() - 1, width(), 1);
-  }
-}
-
-void BookmarkBarView::PaintThemeBackgroundTopAligned(gfx::Canvas* canvas,
-    SkBitmap* ntp_background, int tiling, int alignment) {
-
-  if (alignment & BrowserThemeProvider::ALIGN_LEFT) {
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, 0, 0, width(), height());
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, 0, 0, width(),
-                           ntp_background->height());
-    else
-      canvas->TileImageInt(*ntp_background, 0, 0,
-          ntp_background->width(), ntp_background->height());
-
-  } else if (alignment & BrowserThemeProvider::ALIGN_RIGHT) {
-    int x_pos = width() % ntp_background->width() - ntp_background->width();
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, x_pos, 0,
-          width() + ntp_background->width(), height());
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, x_pos,
-          0, width() + ntp_background->width(), ntp_background->height());
-    else
-      canvas->TileImageInt(*ntp_background, width() - ntp_background->width(),
-          0, ntp_background->width(), ntp_background->height());
-
-  } else {  // ALIGN == CENTER
-    int x_pos = width() > ntp_background->width() ?
-        ((width() / 2 - ntp_background->width() / 2) %
-        ntp_background->width()) - ntp_background->width() :
-        width() / 2 - ntp_background->width() / 2;
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, x_pos, 0,
-                           width() + ntp_background->width(), height());
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, x_pos, 0,
-                           width() + ntp_background->width(),
-                           ntp_background->height());
-    else
-      canvas->TileImageInt(*ntp_background,
-          width() / 2 - ntp_background->width() / 2,
-          0, ntp_background->width(), ntp_background->height());
-  }
-}
-
-void BookmarkBarView::PaintThemeBackgroundBottomAligned(gfx::Canvas* canvas,
-    SkBitmap* ntp_background, int tiling, int alignment) {
-  int browser_height = GetParent()->GetBounds(
-      views::View::APPLY_MIRRORING_TRANSFORMATION).height();
-  int border_width = 5;
-  int y_pos = ((tiling == BrowserThemeProvider::REPEAT_X) ||
-               (tiling == BrowserThemeProvider::NO_REPEAT)) ?
-      browser_height - ntp_background->height() - height() - border_width :
-      browser_height % ntp_background->height() - height() - border_width -
-          ntp_background->height();
-
-  if (alignment & BrowserThemeProvider::ALIGN_LEFT) {
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, 0, y_pos, width(),
-          2 * height() + ntp_background->height() + 5);
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, 0, y_pos, width(),
-          ntp_background->height());
-    else if (tiling == BrowserThemeProvider::REPEAT_Y)
-      canvas->TileImageInt(*ntp_background, 0, y_pos,
-          ntp_background->width(),
-          2 * height() + ntp_background->height() + 5);
-    else
-      canvas->TileImageInt(*ntp_background, 0, y_pos, ntp_background->width(),
-          ntp_background->height());
-
-  } else if (alignment & BrowserThemeProvider::ALIGN_RIGHT) {
-    int x_pos = width() % ntp_background->width() - ntp_background->width();
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, x_pos, y_pos,
-          width() + ntp_background->width(),
-          2 * height() + ntp_background->height() + 5);
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, x_pos, y_pos,
-          width() + ntp_background->width(), ntp_background->height());
-    else if (tiling == BrowserThemeProvider::REPEAT_Y)
-      canvas->TileImageInt(*ntp_background, width() - ntp_background->width(),
-          y_pos, ntp_background->width(),
-          2 * height() + ntp_background->height() + 5);
-    else
-      canvas->TileImageInt(*ntp_background, width() - ntp_background->width(),
-          y_pos, ntp_background->width(), ntp_background->height());
-
-  } else {  // ALIGN == CENTER
-    int x_pos = width() > ntp_background->width() ?
-        ((width() / 2 - ntp_background->width() / 2) %
-        ntp_background->width()) - ntp_background->width() :
-        width() / 2 - ntp_background->width() / 2;
-    if (tiling == BrowserThemeProvider::REPEAT)
-      canvas->TileImageInt(*ntp_background, x_pos, y_pos,
-          width() + ntp_background->width(),
-          2 * height() + ntp_background->height() + 5);
-    else if (tiling == BrowserThemeProvider::REPEAT_X)
-      canvas->TileImageInt(*ntp_background, x_pos, y_pos,
-          width() + ntp_background->width(), ntp_background->height());
-    else if (tiling == BrowserThemeProvider::REPEAT_Y)
-      canvas->TileImageInt(*ntp_background,
-          width() / 2 - ntp_background->width() / 2,
-          y_pos, ntp_background->width(),
-          2 * height() + ntp_background->height() + 5);
-    else
-      canvas->TileImageInt(*ntp_background,
-          width() / 2 - ntp_background->width() / 2,
-          y_pos, ntp_background->width(), ntp_background->height());
   }
 }
 
@@ -797,6 +549,20 @@ void BookmarkBarView::PaintChildren(gfx::Canvas* canvas) {
                         indicator_bounds.y(), indicator_bounds.width(),
                         indicator_bounds.height());
   }
+}
+
+bool BookmarkBarView::GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats) {
+  if (!model_ || !model_->IsLoaded())
+    return false;
+  *formats = OSExchangeData::URL;
+  custom_formats->insert(BookmarkDragData::GetBookmarkCustomFormat());
+  return true;
+}
+
+bool BookmarkBarView::AreDropTypesRequired() {
+  return true;
 }
 
 bool BookmarkBarView::CanDrop(const OSExchangeData& data) {
@@ -926,8 +692,45 @@ int BookmarkBarView::OnPerformDrop(const DropTargetEvent& event) {
     parent_node = root;
   }
   return bookmark_utils::PerformBookmarkDrop(profile_, data, parent_node,
-                                            index);
+                                             index);
 }
+
+bool BookmarkBarView::GetAccessibleName(std::wstring* name) {
+  DCHECK(name);
+
+  if (!accessible_name_.empty()) {
+    name->assign(accessible_name_);
+    return true;
+  }
+  return false;
+}
+
+bool BookmarkBarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_TOOLBAR;
+  return true;
+}
+
+void BookmarkBarView::SetAccessibleName(const std::wstring& name) {
+  accessible_name_.assign(name);
+}
+
+#if defined(BROWSER_SYNC)
+void BookmarkBarView::OnStateChanged() {
+  // When the sync state changes, it is sufficient to invoke View::Layout since
+  // during layout we query the profile sync service and determine whether the
+  // new state requires showing the sync error button so that the user can
+  // re-enter her password. If extension shelf appears along with the bookmark
+  // shelf, it too needs to be layed out. Since both have the same parent, it is
+  // enough to let the parent layout both of these children.
+  // TODO(sky): This should not require Layout() and SchedulePaint(). Needs
+  //            some cleanup.
+  PreferredSizeChanged();
+  Layout();
+  SchedulePaint();
+}
+#endif  // defined(BROWSER_SYNC)
 
 void BookmarkBarView::OnFullscreenToggled(bool fullscreen) {
   if (!fullscreen)
@@ -936,17 +739,21 @@ void BookmarkBarView::OnFullscreenToggled(bool fullscreen) {
     size_animation_->Reset(0);
 }
 
-bool BookmarkBarView::IsDetachedStyle() {
+bool BookmarkBarView::IsDetached() const {
   return OnNewTabPage() && (size_animation_->GetCurrentValue() != 1);
 }
 
-bool BookmarkBarView::IsAlwaysShown() {
+bool BookmarkBarView::IsOnTop() const {
+  return true;
+}
+
+bool BookmarkBarView::IsAlwaysShown() const {
   return profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
 }
 
-bool BookmarkBarView::OnNewTabPage() {
+bool BookmarkBarView::OnNewTabPage() const {
   return (browser_ && browser_->GetSelectedTabContents() &&
-          browser_->GetSelectedTabContents()->IsBookmarkBarAlwaysVisible());
+          browser_->GetSelectedTabContents()->ShouldShowBookmarkBar());
 }
 
 int BookmarkBarView::GetToolbarOverlap(bool return_max) {
@@ -991,6 +798,11 @@ views::MenuItemView* BookmarkBarView::GetDropMenu() {
 }
 
 void BookmarkBarView::Init() {
+  // Note that at this point we're not in a hierarchy so GetThemeProvider() will
+  // return NULL.  When we're inserted into a hierarchy, we'll call
+  // UpdateColors(), which will set the appropriate colors for all the objects
+  // added in this function.
+
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   if (!kDefaultFavIcon)
@@ -999,20 +811,22 @@ void BookmarkBarView::Init() {
   other_bookmarked_button_ = CreateOtherBookmarkedButton();
   AddChildView(other_bookmarked_button_);
 
+#if defined(BROWSER_SYNC)
+  sync_error_button_ = CreateSyncErrorButton();
+  AddChildView(sync_error_button_);
+#endif
+
   overflow_button_ = CreateOverflowButton();
   AddChildView(overflow_button_);
 
   bookmarks_separator_view_ = new ButtonSeparatorView();
+  bookmarks_separator_view_->SetAccessibleName(
+      l10n_util::GetString(IDS_ACCNAME_SEPARATOR));
   AddChildView(bookmarks_separator_view_);
 
   instructions_ = new views::Label(
       l10n_util::GetString(IDS_BOOKMARKS_NO_ITEMS),
       rb.GetFont(ResourceBundle::BaseFont));
-
-  if (GetThemeProvider()) {
-    instructions_->SetColor(GetThemeProvider()->GetColor(
-        BrowserThemeProvider::COLOR_BOOKMARK_TEXT));
-  }
 
   AddChildView(instructions_);
 
@@ -1028,6 +842,8 @@ MenuButton* BookmarkBarView::CreateOtherBookmarkedButton() {
   button->SetIcon(GetGroupIcon());
   button->SetContextMenuController(this);
   button->set_tag(kOtherFolderButtonTag);
+  button->SetAccessibleName(
+      l10n_util::GetString(IDS_BOOMARK_BAR_OTHER_BOOKMARKED));
   return button;
 }
 
@@ -1047,14 +863,23 @@ MenuButton* BookmarkBarView::CreateOverflowButton() {
 
   // Make visible as necessary.
   button->SetVisible(false);
+  // Set accessibility name.
+  button->SetAccessibleName(
+      l10n_util::GetString(IDS_ACCNAME_BOOKMARKS_CHEVRON));
   return button;
 }
 
 int BookmarkBarView::GetBookmarkButtonCount() {
-  // We contain at least four non-bookmark button views: recently bookmarked,
-  // bookmarks separator, chevrons (for overflow), the instruction
-  // label.
+#if defined(BROWSER_SYNC)
+  // We contain at least four non-bookmark button views: other bookmarks,
+  // bookmarks separator, chevrons (for overflow), the instruction label and
+  // the sync error button.
+  return GetChildViewCount() - 5;
+#else
+  // We contain at least four non-bookmark button views: other bookmarks,
+  // bookmarks separator, chevrons (for overflow) and the instruction label.
   return GetChildViewCount() - 4;
+#endif
 }
 
 void BookmarkBarView::Loaded(BookmarkModel* model) {
@@ -1063,7 +888,7 @@ void BookmarkBarView::Loaded(BookmarkModel* model) {
   // Create a button for each of the children on the bookmark bar.
   for (int i = 0, child_count = node->GetChildCount(); i < child_count; ++i)
     AddChildView(i, CreateBookmarkButton(node->GetChild(i)));
-  UpdateButtonColors();
+  UpdateColors();
   other_bookmarked_button_->SetEnabled(true);
 
   Layout();
@@ -1110,7 +935,7 @@ void BookmarkBarView::BookmarkNodeAddedImpl(BookmarkModel* model,
   }
   DCHECK(index >= 0 && index <= GetBookmarkButtonCount());
   AddChildView(index, CreateBookmarkButton(parent->GetChild(index)));
-  UpdateButtonColors();
+  UpdateColors();
   Layout();
   SchedulePaint();
 }
@@ -1157,7 +982,7 @@ void BookmarkBarView::BookmarkNodeChangedImpl(BookmarkModel* model,
     return;
   }
   int index = model_->GetBookmarkBarNode()->IndexOfChild(node);
-  DCHECK(index != -1);
+  DCHECK_NE(-1, index);
   views::TextButton* button = GetBookmarkButton(index);
   gfx::Size old_pref = button->GetPreferredSize();
   ConfigureButton(node, button);
@@ -1186,7 +1011,7 @@ void BookmarkBarView::BookmarkNodeChildrenReordered(BookmarkModel* model,
   // Create the new buttons.
   for (int i = 0, child_count = node->GetChildCount(); i < child_count; ++i)
     AddChildView(i, CreateBookmarkButton(node->GetChild(i)));
-  UpdateButtonColors();
+  UpdateColors();
 
   Layout();
   SchedulePaint();
@@ -1245,9 +1070,7 @@ int BookmarkBarView::GetDragOperations(View* sender, int x, int y) {
   return DragDropTypes::DRAG_NONE;
 }
 
-void BookmarkBarView::RunMenu(views::View* view,
-                              const gfx::Point& pt,
-                              gfx::NativeView hwnd) {
+void BookmarkBarView::RunMenu(views::View* view, const gfx::Point& pt) {
   const BookmarkNode* node;
   MenuItemView::AnchorPosition anchor_point = MenuItemView::TOPLEFT;
 
@@ -1257,7 +1080,7 @@ void BookmarkBarView::RunMenu(views::View* view,
   int x = view->GetX(APPLY_MIRRORING_TRANSFORMATION);
   int bar_height = height() - kMenuOffset;
 
-  if (IsDetachedStyle())
+  if (IsDetached())
     bar_height -= kNewtabVerticalPadding;
 
   int start_index = 0;
@@ -1278,7 +1101,7 @@ void BookmarkBarView::RunMenu(views::View* view,
       anchor_point = MenuItemView::TOPRIGHT;
   } else {
     int button_index = GetChildIndex(view);
-    DCHECK(button_index != -1);
+    DCHECK_NE(-1, button_index);
     node = model_->GetBookmarkBarNode()->GetChild(button_index);
 
     // When the UI layout is RTL, the bookmarks are laid out from right to left
@@ -1292,7 +1115,7 @@ void BookmarkBarView::RunMenu(views::View* view,
   gfx::Point screen_loc(x, 0);
   View::ConvertPointToScreen(this, &screen_loc);
   bookmark_menu_ = new BookmarkMenuController(
-      browser_, profile_, page_navigator_, GetWidget()->GetNativeView(),
+      browser_, profile_, page_navigator_, GetWindow()->GetNativeWindow(),
       node, start_index, false);
   bookmark_menu_->set_observer(this);
   bookmark_menu_->RunMenuAt(gfx::Rect(screen_loc.x(), screen_loc.y(),
@@ -1300,13 +1123,24 @@ void BookmarkBarView::RunMenu(views::View* view,
                             anchor_point, false);
 }
 
-void BookmarkBarView::ButtonPressed(views::Button* sender) {
+void BookmarkBarView::ButtonPressed(views::Button* sender,
+                                    const views::Event& event) {
+#if defined(BROWSER_SYNC)
+  // Show the login wizard if the user clicked the re-login button.
+  if (sender->tag() == kSyncErrorButtonTag) {
+    DCHECK(sender == sync_error_button_);
+    DCHECK(sync_service_);
+    sync_service_->ShowLoginDialog();
+    return;
+  }
+#endif
+
   const BookmarkNode* node;
   if (sender->tag() == kOtherFolderButtonTag) {
     node = model_->other_node();
   } else {
     int index = GetChildIndex(sender);
-    DCHECK(index != -1);
+    DCHECK_NE(-1, index);
     node = model_->GetBookmarkBarNode()->GetChild(index);
   }
   DCHECK(page_navigator_);
@@ -1324,7 +1158,7 @@ void BookmarkBarView::ButtonPressed(views::Button* sender) {
     page_navigator_->OpenURL(node->GetURL(), GURL(),
         disposition_from_event_flags, PageTransition::AUTO_BOOKMARK);
   } else {
-    bookmark_utils::OpenAll(GetWidget()->GetNativeView(), profile_,
+    bookmark_utils::OpenAll(GetWindow()->GetNativeWindow(), profile_,
         GetPageNavigator(), node, disposition_from_event_flags);
   }
   UserMetrics::RecordAction(L"ClickedBookmarkBarURLButton", profile_);
@@ -1360,7 +1194,7 @@ void BookmarkBarView::ShowContextMenu(View* source,
     parent = model_->GetBookmarkBarNode();
     nodes.push_back(parent);
   }
-  BookmarkContextMenu controller(GetWidget()->GetNativeView(), GetProfile(),
+  BookmarkContextMenu controller(GetWindow()->GetNativeWindow(), GetProfile(),
                                  browser()->GetSelectedTabContents(),
                                  parent, nodes,
                                  BookmarkContextMenuController::BOOKMARK_BAR);
@@ -1387,6 +1221,7 @@ views::View* BookmarkBarView::CreateBookmarkButton(const BookmarkNode* node) {
 void BookmarkBarView::ConfigureButton(const BookmarkNode* node,
                                       views::TextButton* button) {
   button->SetText(node->GetTitle());
+  button->SetAccessibleName(node->GetTitle());
 
   // We don't always have a theme provider (ui tests, for example).
   if (GetThemeProvider()) {
@@ -1446,7 +1281,7 @@ void BookmarkBarView::Observe(NotificationType type,
 }
 
 void BookmarkBarView::ThemeChanged() {
-  UpdateButtonColors();
+  UpdateColors();
 }
 
 void BookmarkBarView::NotifyModelChanged() {
@@ -1501,7 +1336,7 @@ void BookmarkBarView::ShowDropFolderForNode(const BookmarkNode* node) {
 
   drop_info_->is_menu_showing = true;
   bookmark_drop_menu_ = new BookmarkMenuController(
-      browser_, profile_, page_navigator_, GetWidget()->GetNativeView(),
+      browser_, profile_, page_navigator_, GetWindow()->GetNativeWindow(),
       node, start_index, false);
   bookmark_drop_menu_->set_observer(this);
   gfx::Point screen_loc;
@@ -1710,16 +1545,194 @@ void BookmarkBarView::StopThrobbing(bool immediate) {
   throbbing_view_ = NULL;
 }
 
-void BookmarkBarView::UpdateButtonColors() {
+void BookmarkBarView::UpdateColors() {
   // We don't always have a theme provider (ui tests, for example).
-  if (GetThemeProvider()) {
-    for (int i = 0; i < GetBookmarkButtonCount(); i++) {
-      views::TextButton* button = GetBookmarkButton(i);
-      button->SetEnabledColor(GetThemeProvider()->GetColor(
-          BrowserThemeProvider::COLOR_BOOKMARK_TEXT));
-    }
-    other_bookmarked_button()->SetEnabledColor(GetThemeProvider()->GetColor(
-          BrowserThemeProvider::COLOR_BOOKMARK_TEXT));
-  }
+  const ThemeProvider* theme_provider = GetThemeProvider();
+  if (!theme_provider)
+    return;
+  SkColor text_color =
+      theme_provider->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
+  instructions_->SetColor(text_color);
+  for (int i = 0; i < GetBookmarkButtonCount(); ++i)
+    GetBookmarkButton(i)->SetEnabledColor(text_color);
+  other_bookmarked_button()->SetEnabledColor(text_color);
 }
+
+gfx::Size BookmarkBarView::LayoutItems(bool compute_bounds_only) {
+  gfx::Size prefsize;
+  if (!GetParent() && !compute_bounds_only)
+    return prefsize;
+
+  int x = kLeftMargin;
+  int y = kTopMargin;
+  int width = View::width() - kRightMargin - kLeftMargin;
+  int height = View::height() - kTopMargin - kBottomMargin;
+  int separator_margin = kSeparatorMargin;
+
+  if (OnNewTabPage()) {
+    double current_state = 1 - size_animation_->GetCurrentValue();
+    x += static_cast<int>(static_cast<double>
+        (kNewtabHorizontalPadding) * current_state);
+    y += static_cast<int>(static_cast<double>
+        (kNewtabVerticalPadding) * current_state);
+    width -= static_cast<int>(static_cast<double>
+        (kNewtabHorizontalPadding) * current_state);
+    height -= static_cast<int>(static_cast<double>
+        (kNewtabVerticalPadding * 2) * current_state);
+    separator_margin -= static_cast<int>(static_cast<double>
+        (kSeparatorMargin) * current_state);
+  }
+
+  gfx::Size other_bookmarked_pref =
+      other_bookmarked_button_->GetPreferredSize();
+  gfx::Size overflow_pref = overflow_button_->GetPreferredSize();
+  gfx::Size bookmarks_separator_pref =
+      bookmarks_separator_view_->GetPreferredSize();
+
+  int sync_error_total_width = 0;
+#if defined(BROWSER_SYNC)
+  gfx::Size sync_error_button_pref = sync_error_button_->GetPreferredSize();
+  const bool should_show_sync_error_button = ShouldShowSyncErrorButton();
+  if (should_show_sync_error_button) {
+    sync_error_total_width += kButtonPadding + sync_error_button_pref.width();
+  }
+#endif
+  const int max_x = width - other_bookmarked_pref.width() - kButtonPadding -
+      overflow_pref.width() - kButtonPadding -
+      bookmarks_separator_pref.width() - sync_error_total_width;
+
+  // Next, layout out the buttons. Any buttons that are placed beyond the
+  // visible region and made invisible.
+  if (GetBookmarkButtonCount() == 0 && model_ && model_->IsLoaded()) {
+    gfx::Size pref = instructions_->GetPreferredSize();
+    if (!compute_bounds_only) {
+      instructions_->SetBounds(
+          x + kInstructionsPadding, y,
+          std::min(static_cast<int>(pref.width()),
+          max_x - x),
+          height);
+      instructions_->SetVisible(true);
+    }
+  } else {
+    if (!compute_bounds_only)
+      instructions_->SetVisible(false);
+
+    for (int i = 0; i < GetBookmarkButtonCount(); ++i) {
+      views::View* child = GetChildViewAt(i);
+      gfx::Size pref = child->GetPreferredSize();
+      int next_x = x + pref.width() + kButtonPadding;
+      if (!compute_bounds_only) {
+        child->SetVisible(next_x < max_x);
+        child->SetBounds(x, y, pref.width(), height);
+      }
+      x = next_x;
+    }
+  }
+
+  // Layout the right side of the bar.
+  const bool all_visible =
+      (GetBookmarkButtonCount() == 0 ||
+       GetChildViewAt(GetBookmarkButtonCount() - 1)->IsVisible());
+
+  // Layout the right side buttons.
+  if (!compute_bounds_only)
+    x = max_x + kButtonPadding;
+  else
+    x += kButtonPadding;
+
+  // The overflow button.
+  if (!compute_bounds_only) {
+    overflow_button_->SetBounds(x, y, overflow_pref.width(), height);
+    overflow_button_->SetVisible(!all_visible);
+  }
+  x += overflow_pref.width();
+
+  // Separator.
+  if (!compute_bounds_only) {
+    bookmarks_separator_view_->SetBounds(x,
+                                         y - kTopMargin,
+                                         bookmarks_separator_pref.width(),
+                                         height + kTopMargin + kBottomMargin -
+                                         separator_margin);
+  }
+
+  x += bookmarks_separator_pref.width();
+
+  // The other bookmarks button.
+  if (!compute_bounds_only) {
+    other_bookmarked_button_->SetBounds(x, y, other_bookmarked_pref.width(),
+                                        height);
+  }
+  x += other_bookmarked_pref.width() + kButtonPadding;
+
+#if defined(BROWSER_SYNC)
+  // Set the real bounds of the sync error button only if it needs to appear on
+  // the bookmarks bar.
+  if (should_show_sync_error_button) {
+    x += kButtonPadding;
+    if (!compute_bounds_only) {
+      sync_error_button_->SetBounds(
+          x, y, sync_error_button_pref.width(), height);
+      sync_error_button_->SetVisible(true);
+    }
+    x += sync_error_button_pref.width();
+  } else if (!compute_bounds_only) {
+    sync_error_button_->SetBounds(x, y, 0, height);
+    sync_error_button_->SetVisible(false);
+  }
+#endif  // defined(BROWSER_SYNC)
+
+  // Set the preferred size computed so far.
+  if (compute_bounds_only) {
+    x += kRightMargin;
+    prefsize.set_width(x);
+    if (OnNewTabPage()) {
+      x += static_cast<int>(static_cast<double>(kNewtabHorizontalPadding) *
+          (1 - size_animation_->GetCurrentValue()));
+      prefsize.set_height(kBarHeight + static_cast<int>(static_cast<double>
+                          (kNewtabBarHeight - kBarHeight) *
+                          (1 - size_animation_->GetCurrentValue())));
+    } else {
+      prefsize.set_height(static_cast<int>(static_cast<double>(kBarHeight) *
+                          size_animation_->GetCurrentValue()));
+    }
+  }
+  return prefsize;
+}
+
+#if defined(BROWSER_SYNC)
+// The sync state reported by the profile sync service determines whether or
+// not the re-login indicator button should be visible.
+bool BookmarkBarView::ShouldShowSyncErrorButton() {
+  bool show_sync_error_button(false);
+  if (sync_service_ && sync_service_->HasSyncSetupCompleted()) {
+    std::wstring status_text;
+    std::wstring link_text;
+    SyncStatusUIHelper::MessageType sync_status;
+    sync_status = SyncStatusUIHelper::GetLabels(
+        sync_service_, &status_text, &link_text);
+    if (sync_status == SyncStatusUIHelper::SYNC_ERROR) {
+      show_sync_error_button = true;
+    }
+  }
+  return show_sync_error_button;
+}
+
+views::TextButton* BookmarkBarView::CreateSyncErrorButton() {
+  views::TextButton* sync_error_button =
+      new views::TextButton(this,
+              l10n_util::GetString(IDS_SYNC_BOOKMARK_BAR_ERROR));
+  sync_error_button->set_tag(kSyncErrorButtonTag);
+
+  // The tooltip is the only way we have to display text explaining the error
+  // to the user.
+  sync_error_button->SetTooltipText(
+      l10n_util::GetString(IDS_SYNC_BOOKMARK_BAR_ERROR_DESC));
+  sync_error_button->SetAccessibleName(
+      l10n_util::GetString(IDS_ACCNAME_SYNC_ERROR_BUTTON));
+  sync_error_button->SetIcon(
+      *ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING));
+  return sync_error_button;
+}
+#endif  // defined(BROWSER_SYNC)
 

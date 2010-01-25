@@ -7,9 +7,10 @@
 
 #include <gtk/gtk.h>
 
+#include <set>
+
 #include "base/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_shelf_model.h"
-#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
 
@@ -26,44 +27,55 @@ class ExtensionShelfGtk : public ExtensionShelfModelObserver,
   ExtensionShelfGtk(Profile* profile, Browser* browser);
   virtual ~ExtensionShelfGtk();
 
-  // Adds this GTK shelf into a sizing box.
-  void AddShelfToBox(GtkWidget* box);
-
   // Change the visibility of the bookmarks bar. (Starts out hidden, per GTK's
   // default behaviour).
   void Show();
   void Hide();
 
   // ExtensionShelfModelObserver
-  virtual void ToolstripInsertedAt(ExtensionHost* toolstrip, int index);
-  virtual void ToolstripRemovingAt(ExtensionHost* toolstrip, int index);
-  virtual void ToolstripMoved(ExtensionHost* toolstrip,
+  virtual void ToolstripInsertedAt(ExtensionHost* host, int index);
+  virtual void ToolstripRemovingAt(ExtensionHost* host, int index);
+  virtual void ToolstripMoved(ExtensionHost* host,
                               int from_index,
                               int to_index);
-  virtual void ToolstripChangedAt(ExtensionHost* toolstrip, int index);
+  virtual void ToolstripChanged(ExtensionShelfModel::iterator toolstrip);
   virtual void ExtensionShelfEmpty();
   virtual void ShelfModelReloaded();
+  virtual void ShelfModelDeleting();
 
- private:
-  // Create the contents of the extension shelf.
-  void Init(Profile* profile);
-
-  // Overridden from NotificationObserver:
+  // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Loads the background image into memory, or does nothing if already loaded.
+  GtkWidget* widget() {
+    return event_box_.get();
+  }
+
+ private:
+  class Toolstrip;
+
+  // Create the contents of the extension shelf.
+  void Init(Profile* profile);
+
+  // Lazily initialize background bitmap. Can be called many times.
   void InitBackground();
 
   // Determines what is our target height and sets it.
   void AdjustHeight();
+
+  void LoadFromModel();
+
+  Toolstrip* ToolstripAtIndex(int index);
 
   // GtkHBox callbacks.
   static gboolean OnHBoxExpose(GtkWidget* widget, GdkEventExpose* event,
                                ExtensionShelfGtk* window);
 
   Browser* browser_;
+
+  // Top level event box which draws the one pixel border.
+  GtkWidget* top_border_;
 
   // Contains |shelf_hbox_|. Event box exists to prevent leakage of
   // background color from the toplevel application window's GDK window.
@@ -72,19 +84,20 @@ class ExtensionShelfGtk : public ExtensionShelfModelObserver,
   // Used to position all children.
   GtkWidget* shelf_hbox_;
 
-  // Label for placeholder text.
-  // TODO(phajdan.jr): Remove the placeholder label when we have real contents.
-  GtkWidget* label_;
+  // Lazily-initialized background for toolstrips.
+  scoped_ptr<SkBitmap> background_;
 
   GtkThemeProvider* theme_provider_;
 
-  // Paints the background for our bookmark bar.
-  scoped_ptr<NineBox> background_ninebox_;
+  // The model representing the toolstrips on the shelf.
+  ExtensionShelfModel* model_;
+
+  // Set of toolstrip views which are really on the shelf.
+  std::set<Toolstrip*> toolstrips_;
 
   NotificationRegistrar registrar_;
 
-  // The model representing the toolstrips on the shelf.
-  scoped_ptr<ExtensionShelfModel> model_;
+  DISALLOW_COPY_AND_ASSIGN(ExtensionShelfGtk);
 };
 
-#endif  // CHROME_BROWSER_EXTENSION_SHELF_GTK_H_
+#endif  // CHROME_BROWSER_GTK_EXTENSION_SHELF_GTK_H_

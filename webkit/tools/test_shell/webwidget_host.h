@@ -5,8 +5,8 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_WEBWIDGET_HOST_H_
 #define WEBKIT_TOOLS_TEST_SHELL_WEBWIDGET_HOST_H_
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "skia/ext/platform_canvas.h"
@@ -61,6 +61,12 @@ class WebWidgetHost {
 
   WebKit::WebScreenInfo GetScreenInfo();
 
+  // Paints the entire canvas a semi-transparent black (grayish). This is used
+  // by the layout tests in fast/repaint. The alpha value matches upstream.
+  void DisplayRepaintMask() {
+    canvas()->drawARGB(167, 0, 0, 0);
+  }
+
  protected:
   WebWidgetHost();
   ~WebWidgetHost();
@@ -103,7 +109,10 @@ class WebWidgetHost {
   void Resize(const gfx::Size& size);
 #endif
 
+#if defined(OS_WIN)
   void TrackMouseLeave(bool enable);
+#endif
+
   void ResetScrollRect();
   void PaintRect(const gfx::Rect& rect);
 
@@ -125,7 +134,15 @@ class WebWidgetHost {
   int scroll_dx_;
   int scroll_dy_;
 
+#if defined(OS_WIN)
   bool track_mouse_leave_;
+#endif
+
+#if defined(OS_LINUX)
+  // Since GtkWindow resize is asynchronous, we have to stash the dimensions,
+  // so that the backing store doesn't have to wait for sizing to take place.
+  gfx::Size logical_size_;
+#endif
 
 #ifndef NDEBUG
   bool painting_;

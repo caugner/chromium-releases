@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "webkit/glue/plugins/plugin_lib.h"
 
 #include <dlfcn.h>
+#include <elf.h>
 
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -15,14 +14,63 @@
 // These headers must be included in this order to make the declaration gods
 // happy.
 #include "base/third_party/nspr/prcpucfg_linux.h"
-#include "third_party/mozilla/include/nsplugindefs.h"
 
+namespace {
+
+// Copied from nsplugindefs.h instead of including the file since it has a bunch
+// of dependencies.
+enum nsPluginVariable {
+  nsPluginVariable_NameString        = 1,
+  nsPluginVariable_DescriptionString = 2
+};
+
+// Read the ELF header and return true if it is usable on
+// the current architecture (e.g. 32-bit ELF on 32-bit build).
+// Returns false on other errors as well.
+bool ELFMatchesCurrentArchitecture(const FilePath& filename) {
+  FILE* file = fopen(filename.value().c_str(), "rb");
+  if (!file)
+    return false;
+
+  char buffer[5];
+  if (fread(buffer, 5, 1, file) != 1) {
+    fclose(file);
+    return false;
+  }
+  fclose(file);
+
+  if (buffer[0] != ELFMAG0 ||
+      buffer[1] != ELFMAG1 ||
+      buffer[2] != ELFMAG2 ||
+      buffer[3] != ELFMAG3) {
+    // Not an ELF file, perhaps?
+    return false;
+  }
+
+  int elf_class = buffer[EI_CLASS];
+#if defined(ARCH_CPU_32_BITS)
+  if (elf_class == ELFCLASS32)
+    return true;
+#elif defined(ARCH_CPU_64_BITS)
+  if (elf_class == ELFCLASS64)
+    return true;
+#endif
+
+  return false;
+}
+
+
+}  // anonymous namespace
 namespace NPAPI {
 
 bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
                                   WebPluginInfo* info) {
   // The file to reference is:
   // http://mxr.mozilla.org/firefox/source/modules/plugin/base/src/nsPluginsDirUnix.cpp
+
+  // Skip files that aren't appropriate for our architecture.
+  if (!ELFMatchesCurrentArchitecture(filename))
+    return false;
 
   void* dl = base::LoadNativeLibrary(filename);
   if (!dl)
@@ -39,28 +87,8 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
   if (NP_GetMIMEDescription)
     mime_description = NP_GetMIMEDescription();
 
-  if (mime_description) {
-    // We parse the description here into WebPluginMimeType structures.
-    // Description for Flash 10 looks like (all as one string):
-    //   "application/x-shockwave-flash:swf:Shockwave Flash;"
-    //   "application/futuresplash:spl:FutureSplash Player"
-    std::vector<std::string> descriptions;
-    SplitString(mime_description, ';', &descriptions);
-    for (size_t i = 0; i < descriptions.size(); ++i) {
-      std::vector<std::string> fields;
-      SplitString(descriptions[i], ':', &fields);
-      if (fields.size() != 3) {
-        LOG(WARNING) << "Couldn't parse plugin info: " << descriptions[i];
-        continue;
-      }
-
-      WebPluginMimeType mime_type;
-      mime_type.mime_type = fields[0];
-      SplitString(fields[1], ',', &mime_type.file_extensions);
-      mime_type.description = ASCIIToWide(fields[2]);
-      info->mime_types.push_back(mime_type);
-    }
-  }
+  if (mime_description)
+    ParseMIMEDescription(mime_description, &info->mime_types);
 
   // The plugin name and description live behind NP_GetValue calls.
   typedef NPError (*NP_GetValueType)(void* unused,
@@ -72,15 +100,61 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
     const char* name = NULL;
     NP_GetValue(NULL, nsPluginVariable_NameString, &name);
     if (name)
-      info->name = ASCIIToWide(name);
+      info->name = UTF8ToWide(name);
 
     const char* description = NULL;
     NP_GetValue(NULL, nsPluginVariable_DescriptionString, &description);
     if (description)
-      info->desc = ASCIIToWide(description);
+      info->desc = UTF8ToWide(description);
   }
 
+  base::UnloadNativeLibrary(dl);
+
   return true;
+}
+
+// static
+void PluginLib::ParseMIMEDescription(
+    const std::string& description,
+    std::vector<WebPluginMimeType>* mime_types) {
+  // We parse the description here into WebPluginMimeType structures.
+  // Naively from the NPAPI docs you'd think you could use
+  // string-splitting, but the Firefox parser turns out to do something
+  // different: find the first colon, then the second, then a semi.
+  //
+  // See ParsePluginMimeDescription near
+  // http://mxr.mozilla.org/firefox/source/modules/plugin/base/src/nsPluginsDirUtils.h#53
+
+  std::string::size_type ofs = 0;
+  for (;;) {
+    WebPluginMimeType mime_type;
+
+    std::string::size_type end = description.find(':', ofs);
+    if (end == std::string::npos)
+      break;
+    mime_type.mime_type = description.substr(ofs, end - ofs);
+    ofs = end + 1;
+
+    end = description.find(':', ofs);
+    if (end == std::string::npos)
+      break;
+    const std::string extensions = description.substr(ofs, end - ofs);
+    SplitString(extensions, ',', &mime_type.file_extensions);
+    ofs = end + 1;
+
+    end = description.find(';', ofs);
+    // It's ok for end to run off the string here.  If there's no
+    // trailing semicolon we consume the remainder of the string.
+    if (end != std::string::npos) {
+      mime_type.description = UTF8ToWide(description.substr(ofs, end - ofs));
+    } else {
+      mime_type.description = UTF8ToWide(description.substr(ofs));
+    }
+    mime_types->push_back(mime_type);
+    if (end == std::string::npos)
+      break;
+    ofs = end + 1;
+  }
 }
 
 }  // namespace NPAPI

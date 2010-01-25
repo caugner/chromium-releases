@@ -164,6 +164,18 @@ devtools.profiler.Processor = function() {
           processor: this.processTick_, backrefs: true, needProfile: true },
       'profiler': { parsers: [null, 'var-args'],
           processor: this.processProfiler_, needsProfile: false },
+      'heap-sample-begin': { parsers: [null, null, parseInt],
+          processor: this.processHeapSampleBegin_ },
+      'heap-sample-stats': { parsers: [null, null, parseInt, parseInt],
+          processor: this.processHeapSampleStats_ },
+      'heap-sample-item': { parsers: [null, parseInt, parseInt],
+          processor: this.processHeapSampleItem_ },
+      'heap-js-cons-item': { parsers: [null, parseInt, parseInt],
+          processor: this.processHeapJsConsItem_ },
+      'heap-js-ret-item': { parsers: [null, 'var-args'],
+          processor: this.processHeapJsRetItem_ },
+      'heap-sample-end': { parsers: [null, null],
+          processor: this.processHeapSampleEnd_ },
       // Not used in DevTools Profiler.
       'shared-library': null,
       // Obsolete row types.
@@ -214,6 +226,18 @@ devtools.profiler.Processor = function() {
    * @type {number}
    */
   this.ticksCount_ = 0;
+
+  /**
+   * The current heap snapshot.
+   * @type {string}
+   */
+  this.currentHeapSnapshot_ = null;
+
+  /**
+   * Next heap snapshot id.
+   * @type {number}
+   */
+  this.heapSnapshotId_ = 1;
 };
 goog.inherits(devtools.profiler.Processor, devtools.profiler.LogReader);
 
@@ -349,6 +373,96 @@ devtools.profiler.Processor.prototype.processTick_ = function(
   stack.push(devtools.profiler.Processor.PROGRAM_ENTRY_STR);
   this.currentProfile_.recordTick(this.processStack(pc, stack));
   this.ticksCount_++;
+};
+
+
+devtools.profiler.Processor.prototype.processHeapSampleBegin_ = function(
+    space, state, ticks) {
+  if (space != 'Heap') return;
+  this.currentHeapSnapshot_ = {
+      number: this.heapSnapshotId_++,
+      entries: {},
+      clusters: {},
+      lowlevels: {},
+      ticks: ticks
+  };
+};
+
+
+devtools.profiler.Processor.prototype.processHeapSampleStats_ = function(
+    space, state, capacity, used) {
+  if (space != 'Heap') return;
+  this.currentHeapSnapshot_.capacity = capacity;
+  this.currentHeapSnapshot_.used = used;
+};
+
+
+devtools.profiler.Processor.prototype.processHeapSampleItem_ = function(
+    item, number, size) {
+  if (!this.currentHeapSnapshot_) return;
+  this.currentHeapSnapshot_.lowlevels[item] = {
+    type: item, count: number, size: size
+  };
+};
+
+
+devtools.profiler.Processor.prototype.processHeapJsConsItem_ = function(
+    item, number, size) {
+  if (!this.currentHeapSnapshot_) return;
+  this.currentHeapSnapshot_.entries[item] = {
+    cons: item, count: number, size: size, retainers: {}
+  };
+};
+
+
+devtools.profiler.Processor.prototype.processHeapJsRetItem_ = function(
+    item, retainersArray) {
+  if (!this.currentHeapSnapshot_) return;
+  var rawRetainers = {};
+  for (var i = 0, n = retainersArray.length; i < n; ++i) {
+    var entry = retainersArray[i].split(';');
+    rawRetainers[entry[0]] = parseInt(entry[1], 10);
+  }
+
+  function mergeRetainers(entry) {
+    for (var rawRetainer in rawRetainers) {
+      var consName = rawRetainer.indexOf(':') != -1 ?
+          rawRetainer.split(':')[0] : rawRetainer;
+      if (!(consName in entry.retainers))
+        entry.retainers[consName] = { cons: consName, count: 0, clusters: {} };
+      var retainer = entry.retainers[consName];
+      retainer.count += rawRetainers[rawRetainer];
+      if (consName != rawRetainer)
+        retainer.clusters[rawRetainer] = true;
+    }
+  }
+
+  if (item.indexOf(':') != -1) {
+    // Array, Function, or Object instances cluster case.
+    if (!(item in this.currentHeapSnapshot_.clusters)) {
+      this.currentHeapSnapshot_.clusters[item] = {
+        cons: item, retainers: {}
+      };
+    }
+    mergeRetainers(this.currentHeapSnapshot_.clusters[item]);
+    item = item.split(':')[0];
+  }
+  mergeRetainers(this.currentHeapSnapshot_.entries[item]);
+};
+
+
+devtools.profiler.Processor.prototype.processHeapSampleEnd_ = function(
+    space, state) {
+  if (space != 'Heap') return;
+  var snapshot = this.currentHeapSnapshot_;
+  this.currentHeapSnapshot_ = null;
+  // For some reason, 'used' from 'heap-sample-stats' sometimes differ from
+  // the sum of objects sizes. To avoid discrepancy, we re-calculate 'used'.
+  snapshot.used = 0;
+  for (var item in snapshot.lowlevels) {
+      snapshot.used += snapshot.lowlevels[item].size;
+  }
+  WebInspector.panels.profiles.addSnapshot(snapshot);
 };
 
 

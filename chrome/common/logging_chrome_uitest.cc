@@ -45,8 +45,9 @@ namespace {
 TEST_F(ChromeLoggingTest, LogFileName) {
   SaveEnvironmentVariable(std::wstring());
 
-  std::wstring filename = logging::GetLogFileName();
-  ASSERT_NE(std::wstring::npos, filename.find(L"chrome_debug.log"));
+  FilePath filename = logging::GetLogFileName();
+  ASSERT_NE(FilePath::StringType::npos,
+            filename.value().find(FILE_PATH_LITERAL("chrome_debug.log")));
 
   RestoreEnvironmentVariable();
 }
@@ -55,8 +56,9 @@ TEST_F(ChromeLoggingTest, LogFileName) {
 TEST_F(ChromeLoggingTest, EnvironmentLogFileName) {
   SaveEnvironmentVariable(std::wstring(L"test value"));
 
-  std::wstring filename = logging::GetLogFileName();
-  ASSERT_EQ(std::wstring(L"test value"), filename);
+  FilePath filename = logging::GetLogFileName();
+  ASSERT_EQ(FilePath(FILE_PATH_LITERAL("test value")).value(),
+            filename.value());
 
   RestoreEnvironmentVariable();
 }
@@ -109,27 +111,8 @@ TEST_F(RendererCrashTest, Crash) {
     expected_crashes_ = 0;
   } else {
     scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(browser.get());
     ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_max_timeout_ms()));
     expected_crashes_ = 1;
   }
-}
-
-// Tests whether we correctly fail on browser crashes during UI Tests.
-class BrowserCrashTest : public UITest {
- protected:
- BrowserCrashTest() : UITest()
-  {
-    // Initial loads will never complete due to crash.
-    wait_for_initial_loads_ = false;
-
-    launch_arguments_.AppendSwitch(switches::kBrowserCrashTest);
-  }
-};
-
-// Launch the app in browser crash test mode.
-// This test is disabled. See bug 6910.
-TEST_F(BrowserCrashTest, DISABLED_Crash) {
-  // Wait while the process is writing the crash dump.
-  PlatformThread::Sleep(5000);
-  expected_crashes_ = 1;
 }

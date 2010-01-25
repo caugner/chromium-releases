@@ -64,6 +64,8 @@ void HistoryURLProvider::Stop() {
 }
 
 void HistoryURLProvider::DeleteMatch(const AutocompleteMatch& match) {
+  DCHECK(done_);
+
   // Delete the match from the history DB.
   HistoryService* history_service =
       profile_ ? profile_->GetHistoryService(Profile::EXPLICIT_ACCESS) :
@@ -94,15 +96,6 @@ void HistoryURLProvider::DeleteMatch(const AutocompleteMatch& match) {
   }
   DCHECK(found) << "Asked to delete a URL that isn't in our set of matches";
   listener_->OnProviderUpdate(true);
-
-  // Cancel any current pass 2 and rerun it, so we get correct history data.
-  if (!done_) {
-    // Copy params_->input to avoid a race condition where params_ gets deleted
-    // out from under us on the other thread after we set params_->cancel here.
-    AutocompleteInput input(params_->input);
-    params_->cancel = true;
-    RunAutocompletePasses(input, false);
-  }
 }
 
 // Called on the history thread.
@@ -116,8 +109,8 @@ void HistoryURLProvider::ExecuteWithDB(history::HistoryBackend* backend,
 
     DoAutocomplete(backend, db, params);
 
-    HISTOGRAM_TIMES("Autocomplete.HistoryAsyncQueryTime",
-                    TimeTicks::Now() - beginning_time);
+    UMA_HISTOGRAM_TIMES("Autocomplete.HistoryAsyncQueryTime",
+                        TimeTicks::Now() - beginning_time);
   }
 
   // Return the results (if any) to the main thread.
@@ -133,7 +126,8 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   // Create a What You Typed match, which we'll need below.
   bool have_what_you_typed_match =
       params->input.canonicalized_url().is_valid() &&
-      (params->input.type() != AutocompleteInput::UNKNOWN);
+      (params->input.type() != AutocompleteInput::UNKNOWN) &&
+      (params->input.type() != AutocompleteInput::QUERY);
   AutocompleteMatch what_you_typed_match(SuggestExactInput(params->input,
                                                            params->trim_http));
 
@@ -179,7 +173,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   if (what_you_typed_match.is_history_what_you_typed_match &&
       FixupExactSuggestion(db, params->input, &what_you_typed_match,
                            &history_matches)) {
-    // Got an exact match for the user's input.  Treat is as the best match
+    // Got an exact match for the user's input.  Treat it as the best match
     // regardless of the input type.
     exact_suggestion = 1;
     params->matches.push_back(what_you_typed_match);
@@ -187,7 +181,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
       history_matches.empty() ||
       !PromoteMatchForInlineAutocomplete(params, history_matches.front())) {
     // Failed to promote any URLs for inline autocompletion.  Use the What You
-    // Typed match, if we have it and the input wasn't UNKNOWN.
+    // Typed match, if we have it and the input looked like a URL.
     first_match = 0;
     if (have_what_you_typed_match)
       params->matches.push_back(what_you_typed_match);
@@ -471,7 +465,7 @@ int HistoryURLProvider::CalculateRelevance(AutocompleteInput::Type input_type,
       return 1400;
 
     case WHAT_YOU_TYPED:
-      return (input_type == AutocompleteInput::REQUESTED_URL) ? 1300 : 1200;
+      return 1200;
 
     default:
       return 900 + static_cast<int>(match_number);
@@ -599,9 +593,8 @@ void HistoryURLProvider::RunAutocompletePasses(
     bool fixup_input_and_run_pass_1) {
   matches_.clear();
 
-  if ((input.type() != AutocompleteInput::UNKNOWN) &&
-      (input.type() != AutocompleteInput::REQUESTED_URL) &&
-      (input.type() != AutocompleteInput::URL))
+  if ((input.type() == AutocompleteInput::INVALID) ||
+      (input.type() == AutocompleteInput::FORCED_QUERY))
     return;
 
   // Create a match for exactly what the user typed.  This will only be used as
@@ -609,7 +602,10 @@ void HistoryURLProvider::RunAutocompletePasses(
   // we'll run this again in DoAutocomplete() and use that result instead.
   const bool trim_http = !url_util::FindAndCompareScheme(
       WideToUTF8(input.text()), chrome::kHttpScheme, NULL);
-  if (input.canonicalized_url().is_valid())
+  // Don't do this for queries -- while we can sometimes mark up a match for
+  // this, it's not what the user wants, and just adds noise.
+  if ((input.type() != AutocompleteInput::QUERY) &&
+      input.canonicalized_url().is_valid())
     matches_.push_back(SuggestExactInput(input, trim_http));
 
   // We'll need the history service to run both passes, so try to obtain it.
@@ -643,13 +639,14 @@ void HistoryURLProvider::RunAutocompletePasses(
 
     // Pass 1: Get the in-memory URL database, and use it to find and promote
     // the inline autocomplete match, if any.
-    history::URLDatabase* url_db = history_service->in_memory_database();
+    history::URLDatabase* url_db = history_service->InMemoryDatabase();
     // url_db can be NULL if it hasn't finished initializing (or failed to
     // initialize).  In this case all we can do is fall back on the second
-    // pass.  Ultimately, we should probably try to ensure the history system
-    // starts properly before we get here, as otherwise this can cause
-    // inconsistent behavior when the user has just started the browser and
-    // tries to type immediately.
+    // pass.
+    //
+    // TODO(pkasting): We should just block here until this loads.  Any time
+    // someone unloads the history backend, we'll get inconsistent inline
+    // autocomplete behavior here.
     if (url_db) {
       DoAutocomplete(NULL, url_db, params.get());
       // params->matches now has the matches we should expose to the provider.

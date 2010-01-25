@@ -4,7 +4,8 @@
 
 #include "chrome/browser/gtk/tab_contents_container_gtk.h"
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
+#include "app/l10n_util.h"
 #include "chrome/browser/gtk/gtk_floating_container.h"
 #include "chrome/browser/gtk/status_bubble_gtk.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -17,6 +18,8 @@ namespace {
 // |allocation|.
 void ResizeChildren(GtkWidget* widget, void* param) {
   GtkAllocation* allocation = reinterpret_cast<GtkAllocation*>(param);
+  if (!GTK_WIDGET_VISIBLE(widget))
+    return;
 
   if (widget->allocation.width != allocation->width ||
       widget->allocation.height != allocation->height) {
@@ -52,6 +55,7 @@ void TabContentsContainerGtk::Init() {
   // +------------------------------------------------------------------+
 
   floating_.Own(gtk_floating_container_new());
+  gtk_widget_set_name(floating_.get(), "chrome-tab-contents-container");
 
   fixed_ = gtk_fixed_new();
   g_signal_connect(fixed_, "size-allocate",
@@ -67,6 +71,8 @@ void TabContentsContainerGtk::Init() {
 
   gtk_widget_show(fixed_);
   gtk_widget_show(floating_.get());
+
+  ViewIDUtil::SetDelegateForWidget(widget(), this);
 }
 
 void TabContentsContainerGtk::SetTabContents(TabContents* tab_contents) {
@@ -155,6 +161,20 @@ void TabContentsContainerGtk::TabContentsDestroyed(TabContents* contents) {
   SetTabContents(NULL);
 }
 
+// -----------------------------------------------------------------------------
+// ViewIDUtil::Delegate implementation
+
+GtkWidget* TabContentsContainerGtk::GetWidgetForViewID(ViewID view_id) {
+  if (view_id == VIEW_ID_TAB_CONTAINER ||
+      view_id == VIEW_ID_TAB_CONTAINER_FOCUS_VIEW) {
+    return widget();
+  }
+
+  return NULL;
+}
+
+// -----------------------------------------------------------------------------
+
 // static
 void TabContentsContainerGtk::OnFixedSizeAllocate(
     GtkWidget* fixed,
@@ -168,25 +188,26 @@ void TabContentsContainerGtk::OnFixedSizeAllocate(
 void TabContentsContainerGtk::OnSetFloatingPosition(
     GtkFloatingContainer* floating_container, GtkAllocation* allocation,
     TabContentsContainerGtk* tab_contents_container) {
-  GtkWidget* widget = tab_contents_container->status_bubble_->widget();
+  GtkWidget* status = tab_contents_container->status_bubble_->widget();
 
   // Look at the size request of the status bubble and tell the
   // GtkFloatingContainer where we want it positioned.
   GtkRequisition requisition;
-  gtk_widget_size_request(widget, &requisition);
+  gtk_widget_size_request(status, &requisition);
 
   GValue value = { 0, };
   g_value_init(&value, G_TYPE_INT);
-  g_value_set_int(&value, 0);
-  // TODO(erg): Since we're absolutely positioning stuff, we probably have to
-  // do manual RTL right here.
+  if (l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT)
+    g_value_set_int(&value, 0);
+  else
+    g_value_set_int(&value, allocation->width - requisition.width);
   gtk_container_child_set_property(GTK_CONTAINER(floating_container),
-                                   widget, "x", &value);
+                                   status, "x", &value);
 
   int child_y = std::max(
       allocation->y + allocation->height - requisition.height, 0);
   g_value_set_int(&value, child_y);
   gtk_container_child_set_property(GTK_CONTAINER(floating_container),
-                                   widget, "y", &value);
+                                   status, "y", &value);
   g_value_unset(&value);
 }

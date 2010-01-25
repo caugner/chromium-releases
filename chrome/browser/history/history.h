@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -101,8 +103,14 @@ class HistoryService : public CancelableRequestProvider,
   // test if a URL is bookmarked; it may be NULL during testing.
   bool Init(const FilePath& history_dir, BookmarkService* bookmark_service);
 
-  // Did the backend finish loading the databases?
-  bool backend_loaded() const { return backend_loaded_; }
+  // Triggers the backend to load if it hasn't already, and then returns whether
+  // it's finished loading.
+  bool BackendLoaded();
+
+  // Unloads the backend without actually shutting down the history service.
+  // This can be used to temporarily reduce the browser process' memory
+  // footprint.
+  void UnloadBackend();
 
   // Called on shutdown, this will tell the history backend to complete and
   // will release pointers to it. No other functions should be called once
@@ -123,12 +131,13 @@ class HistoryService : public CancelableRequestProvider,
   // identification purposes, hence it is a void*.
   void NotifyRenderProcessHostDestruction(const void* host);
 
-  // Returns the in-memory URL database. The returned pointer MAY BE NULL if
-  // the in-memory database has not been loaded yet. This pointer is owned
-  // by the history system. Callers should not store or cache this value.
+  // Triggers the backend to load if it hasn't already, and then returns the
+  // in-memory URL database. The returned pointer MAY BE NULL if the in-memory
+  // database has not been loaded yet. This pointer is owned by the history
+  // system. Callers should not store or cache this value.
   //
   // TODO(brettw) this should return the InMemoryHistoryBackend.
-  history::URLDatabase* in_memory_database() const;
+  history::URLDatabase* InMemoryDatabase();
 
   // Navigation ----------------------------------------------------------------
 
@@ -306,7 +315,10 @@ class HistoryService : public CancelableRequestProvider,
   // in the map containing redirects from the URL.  For example, if we have the
   // redirect chain A -> B -> C and A is a top visited URL, then A will be in
   // the vector and "A => {B -> C}" will be in the map.
-  typedef Callback2<std::vector<GURL>*, history::RedirectMap*>::Type
+  typedef Callback4<Handle,
+                    bool,  // Did we get the top urls and redirects?
+                    std::vector<GURL>*,  // List of top URLs.
+                    history::RedirectMap*>::Type  // Redirects for top URLs.
       QueryTopURLsAndRedirectsCallback;
 
   // Request the top |result_count| most visited URLs and the chain of redirects
@@ -336,66 +348,6 @@ class HistoryService : public CancelableRequestProvider,
   Handle GetPageThumbnail(const GURL& page_url,
                           CancelableRequestConsumerBase* consumer,
                           ThumbnailDataCallback* callback);
-
-  // Favicon -------------------------------------------------------------------
-
-  // Callback for GetFavIcon. If we have previously inquired about the favicon
-  // for this URL, |know_favicon| will be true, and the rest of the fields will
-  // be valid (otherwise they will be ignored).
-  //
-  // On |know_favicon| == true, |data| will either contain the PNG encoded
-  // favicon data, or it will be NULL to indicate that the site does not have
-  // a favicon (in other words, we know the site doesn't have a favicon, as
-  // opposed to not knowing anything). |expired| will be set to true if we
-  // refreshed the favicon "too long" ago and should be updated if the page
-  // is visited again.
-  typedef Callback5<Handle,                          // handle
-                    bool,                            // know_favicon
-                    scoped_refptr<RefCountedBytes>,  // data
-                    bool,                            // expired
-                    GURL>::Type                      // url of the favicon
-      FavIconDataCallback;
-
-  // Requests the favicon. FavIconConsumer is notified
-  // when the bits have been fetched. The consumer is NOT deleted by the
-  // HistoryService, and must be valid until the request is serviced.
-  Handle GetFavIcon(const GURL& icon_url,
-                    CancelableRequestConsumerBase* consumer,
-                    FavIconDataCallback* callback);
-
-  // Fetches the favicon at icon_url, sending the results to the given callback.
-  // If the favicon has previously been set via SetFavIcon(), then the favicon
-  // url for page_url and all redirects is set to icon_url. If the favicon has
-  // not been set, the database is not updated.
-  Handle UpdateFavIconMappingAndFetch(const GURL& page_url,
-                                      const GURL& icon_url,
-                                      CancelableRequestConsumerBase* consumer,
-                                      FavIconDataCallback* callback);
-
-  // Requests a favicon for a web page URL. FavIconConsumer is notified
-  // when the bits have been fetched. The consumer is NOT deleted by the
-  // HistoryService, and must be valid until the request is serviced.
-  //
-  // Note: this version is intended to be used to retrieve the favicon of a
-  // page that has been browsed in the past. |expired| in the callback is
-  // always false.
-  Handle GetFavIconForURL(const GURL& page_url,
-                          CancelableRequestConsumerBase* consumer,
-                          FavIconDataCallback* callback);
-
-  // Sets the favicon for a page.
-  void SetFavIcon(const GURL& page_url,
-                  const GURL& icon_url,
-                  const std::vector<unsigned char>& image_data);
-
-  // Marks the favicon for the page as being out of date.
-  void SetFavIconOutOfDateForPage(const GURL& page_url);
-
-  // Allows the importer to set many favicons for many pages at once. The pages
-  // must exist, any favicon sets for unknown pages will be discarded. Existing
-  // favicons will not be overwritten.
-  void SetImportedFavicons(
-      const std::vector<history::ImportedFavIconUsage>& favicon_usage);
 
   // Database management operations --------------------------------------------
 
@@ -568,6 +520,7 @@ class HistoryService : public CancelableRequestProvider,
  private:
   class BackendDelegate;
   friend class BackendDelegate;
+  friend class FaviconService;
   friend class history::HistoryBackend;
   friend class history::HistoryQueryTest;
   friend class HistoryOperation;
@@ -608,6 +561,9 @@ class HistoryService : public CancelableRequestProvider,
   void BroadcastNotifications(NotificationType type,
                               history::HistoryDetails* details_deleted);
 
+  // Initializes the backend.
+  void LoadBackendIfNecessary();
+
   // Notification from the backend that it has finished loading. Sends
   // notification (NOTIFY_HISTORY_LOADED) and sets backend_loaded_ to true.
   void OnDBLoaded();
@@ -615,6 +571,43 @@ class HistoryService : public CancelableRequestProvider,
   // Returns true if this looks like the type of URL we want to add to the
   // history. We filter out some URLs such as JavaScript.
   bool CanAddURL(const GURL& url) const;
+
+  // FavIcon -------------------------------------------------------------------
+
+  // These favicon methods are exposed to the FaviconService. Instead of calling
+  // these methods directly you should call the respective method on the
+  // FaviconService.
+
+  // Used by the FaviconService to get a favicon from the history backend.
+  void GetFavicon(FaviconService::GetFaviconRequest* request,
+                  const GURL& icon_url);
+
+  // Used by the FaviconService to update the favicon mappings on the history
+  // backend.
+  void UpdateFaviconMappingAndFetch(FaviconService::GetFaviconRequest* request,
+                                    const GURL& page_url,
+                                    const GURL& icon_url);
+
+  // Used by the FaviconService to get a favicon from the history backend.
+  void GetFaviconForURL(FaviconService::GetFaviconRequest* request,
+                        const GURL& page_url);
+
+  // Used by the FaviconService to mark the favicon for the page as being out
+  // of date.
+  void SetFaviconOutOfDateForPage(const GURL& page_url);
+
+  // Used by the FaviconService for importing many favicons for many pages at
+  // once. The pages must exist, any favicon sets for unknown pages will be
+  // discarded. Existing favicons will not be overwritten.
+  void SetImportedFavicons(
+      const std::vector<history::ImportedFavIconUsage>& favicon_usage);
+
+  // Used by the FaviconService to set the favicon for a page on the history
+  // backend.
+  void SetFavicon(const GURL& page_url,
+                  const GURL& icon_url,
+                  const std::vector<unsigned char>& image_data);
+
 
   // Sets the in-memory URL database. This is called by the backend once the
   // database is loaded to make it available.
@@ -631,7 +624,7 @@ class HistoryService : public CancelableRequestProvider,
   // Schedule ------------------------------------------------------------------
   //
   // Functions for scheduling operations on the history thread that have a
-  // handle and are cancelable. For fire-and-forget operations, see
+  // handle and may be cancelable. For fire-and-forget operations, see
   // ScheduleAndForget below.
 
   template<typename BackendFunc, class RequestType>
@@ -639,8 +632,10 @@ class HistoryService : public CancelableRequestProvider,
                   BackendFunc func,  // Function to call on the HistoryBackend.
                   CancelableRequestConsumerBase* consumer,
                   RequestType* request) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
-    AddRequest(request, consumer);
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
+    if (consumer)
+      AddRequest(request, consumer);
     ScheduleTask(priority,
                  NewRunnableMethod(history_backend_.get(), func,
                                    scoped_refptr<RequestType>(request)));
@@ -653,8 +648,10 @@ class HistoryService : public CancelableRequestProvider,
                   CancelableRequestConsumerBase* consumer,
                   RequestType* request,
                   const ArgA& a) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
-    AddRequest(request, consumer);
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
+    if (consumer)
+      AddRequest(request, consumer);
     ScheduleTask(priority,
                  NewRunnableMethod(history_backend_.get(), func,
                                    scoped_refptr<RequestType>(request),
@@ -672,8 +669,10 @@ class HistoryService : public CancelableRequestProvider,
                   RequestType* request,
                   const ArgA& a,
                   const ArgB& b) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
-    AddRequest(request, consumer);
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
+    if (consumer)
+      AddRequest(request, consumer);
     ScheduleTask(priority,
                  NewRunnableMethod(history_backend_.get(), func,
                                    scoped_refptr<RequestType>(request),
@@ -693,8 +692,10 @@ class HistoryService : public CancelableRequestProvider,
                   const ArgA& a,
                   const ArgB& b,
                   const ArgC& c) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
-    AddRequest(request, consumer);
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
+    if (consumer)
+      AddRequest(request, consumer);
     ScheduleTask(priority,
                  NewRunnableMethod(history_backend_.get(), func,
                                    scoped_refptr<RequestType>(request),
@@ -710,7 +711,8 @@ class HistoryService : public CancelableRequestProvider,
   template<typename BackendFunc>
   void ScheduleAndForget(SchedulePriority priority,
                          BackendFunc func) {  // Function to call on backend.
-    DCHECK(history_backend_) << "History service being called after cleanup";
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
     ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func));
   }
 
@@ -718,7 +720,8 @@ class HistoryService : public CancelableRequestProvider,
   void ScheduleAndForget(SchedulePriority priority,
                          BackendFunc func,  // Function to call on backend.
                          const ArgA& a) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
     ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func, a));
   }
 
@@ -727,7 +730,8 @@ class HistoryService : public CancelableRequestProvider,
                          BackendFunc func,  // Function to call on backend.
                          const ArgA& a,
                          const ArgB& b) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
     ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
                                              a, b));
   }
@@ -738,7 +742,8 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgA& a,
                          const ArgB& b,
                          const ArgC& c) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
     ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
                                              a, b, c));
   }
@@ -754,7 +759,8 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgB& b,
                          const ArgC& c,
                          const ArgD& d) {
-    DCHECK(history_backend_) << "History service being called after cleanup";
+    DCHECK(thread_) << "History service being called after cleanup";
+    LoadBackendIfNecessary();
     ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
                                              a, b, c, d));
   }
@@ -788,7 +794,11 @@ class HistoryService : public CancelableRequestProvider,
   // completed.
   bool backend_loaded_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(HistoryService);
+  // Cached values from Init(), used whenever we need to reload the backend.
+  FilePath history_dir_;
+  BookmarkService* bookmark_service_;
+
+  DISALLOW_COPY_AND_ASSIGN(HistoryService);
 };
 
 #endif  // CHROME_BROWSER_HISTORY_HISTORY_H__

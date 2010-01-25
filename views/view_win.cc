@@ -7,8 +7,6 @@
 #include "app/drag_drop_types.h"
 #include "app/gfx/canvas.h"
 #include "app/gfx/path.h"
-#include "app/os_exchange_data.h"
-#include "base/scoped_handle.h"
 #include "base/string_util.h"
 #include "views/accessibility/view_accessibility_wrapper.h"
 #include "views/border.h"
@@ -17,18 +15,9 @@
 
 namespace views {
 
-void View::DoDrag(const MouseEvent& e, int press_x, int press_y) {
-  int drag_operations = GetDragOperations(press_x, press_y);
-  if (drag_operations == DragDropTypes::DRAG_NONE)
-    return;
-
-  scoped_refptr<OSExchangeData> data = new OSExchangeData;
-  WriteDragData(press_x, press_y, data.get());
-
-  // Message the RootView to do the drag and drop. That way if we're removed
-  // the RootView can detect it and avoid calling us back.
-  RootView* root_view = GetRootView();
-  root_view->StartDragForViewFromMouseEvent(this, data, drag_operations);
+// static
+int View::GetDoubleClickTimeMS() {
+  return ::GetDoubleClickTime();
 }
 
 ViewAccessibilityWrapper* View::GetViewAccessibilityWrapper() {
@@ -36,14 +25,6 @@ ViewAccessibilityWrapper* View::GetViewAccessibilityWrapper() {
     accessibility_.reset(new ViewAccessibilityWrapper(this));
   }
   return accessibility_.get();
-}
-
-void View::Focus() {
-  // Set the native focus to the root view window so it receives the keyboard
-  // messages.
-  FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager)
-    focus_manager->FocusNativeView(GetRootView()->GetWidget()->GetNativeView());
 }
 
 int View::GetHorizontalDragThreshold() {

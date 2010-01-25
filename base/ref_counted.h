@@ -13,6 +13,11 @@ namespace base {
 namespace subtle {
 
 class RefCountedBase {
+ public:
+  static bool ImplementsThreadSafeReferenceCounting() { return false; }
+
+  bool HasOneRef() const { return ref_count_ == 1; }
+
  protected:
   RefCountedBase();
   ~RefCountedBase();
@@ -34,6 +39,11 @@ class RefCountedBase {
 };
 
 class RefCountedThreadSafeBase {
+ public:
+  static bool ImplementsThreadSafeReferenceCounting() { return true; }
+
+  bool HasOneRef() const;
+
  protected:
   RefCountedThreadSafeBase();
   ~RefCountedThreadSafeBase();
@@ -51,8 +61,6 @@ class RefCountedThreadSafeBase {
 
   DISALLOW_COPY_AND_ASSIGN(RefCountedThreadSafeBase);
 };
-
-
 
 }  // namespace subtle
 
@@ -199,6 +207,17 @@ class scoped_refptr {
   T* get() const { return ptr_; }
   operator T*() const { return ptr_; }
   T* operator->() const { return ptr_; }
+
+  // Release a pointer.
+  // The return value is the current pointer held by this object.
+  // If this object holds a NULL pointer, the return value is NULL.
+  // After this operation, this object will hold a NULL pointer,
+  // and will not own the object any more.
+  T* release() {
+    T* retVal = ptr_;
+    ptr_ = NULL;
+    return retVal;
+  }
 
   scoped_refptr<T>& operator=(T* p) {
     // AddRef first so that self assignment should work

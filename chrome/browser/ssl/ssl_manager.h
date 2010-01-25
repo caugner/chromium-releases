@@ -65,17 +65,9 @@ class SSLManager : public NotificationObserver {
                                     net::X509Certificate* cert,
                                     MessageLoop* ui_loop);
 
-  // Called before a URL request is about to be started.  Returns false if the
-  // resource request should be delayed while we figure out what to do.  We use
-  // this function as the entry point for our mixed content detection.
-  //
-  // TODO(jcampan): Implement a way to just cancel the request.  This is not
-  // straight-forward as canceling a request that has not been started will
-  // not remove from the pending_requests_ of the ResourceDispatcherHost.
-  // Called on the IO thread.
-  static bool ShouldStartRequest(ResourceDispatcherHost* resource_dispatcher,
-                                 URLRequest* request,
-                                 MessageLoop* ui_loop);
+  // Mixed content entry points.
+  void DidDisplayInsecureContent();
+  void DidRunInsecureContent(const std::string& security_origin);
 
   // Entry point for navigation.  This function begins the process of updating
   // the security UI when the main frame navigates to a new URL.

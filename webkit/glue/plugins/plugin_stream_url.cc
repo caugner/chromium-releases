@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "config.h"
-
 #include "webkit/glue/plugins/plugin_stream_url.h"
 
 #include "webkit/glue/glue_util.h"
@@ -47,16 +44,18 @@ void PluginStreamUrl::DidReceiveResponse(const std::string& mime_type,
                                          const std::string& headers,
                                          uint32 expected_length,
                                          uint32 last_modified,
-                                         bool request_is_seekable,
-                                         bool* cancel) {
+                                         bool request_is_seekable) {
   bool opened = Open(mime_type,
                      headers,
                      expected_length,
                      last_modified,
                      request_is_seekable);
   if (!opened) {
+    CancelRequest();
     instance()->RemoveStream(this);
-    *cancel = true;
+  } else {
+    if (id_ > 0)
+      instance()->webplugin()->SetDeferResourceLoading(id_, false);
   }
 }
 
@@ -65,8 +64,14 @@ void PluginStreamUrl::DidReceiveData(const char* buffer, int length,
   if (!open())
     return;
 
-  if (length > 0)
-    Write(const_cast<char*>(buffer), length, data_offset);
+  if (length > 0) {
+    // The PluginStreamUrl instance could get deleted if the plugin fails to
+    // accept data in NPP_Write.
+    if (Write(const_cast<char*>(buffer), length, data_offset) > 0) {
+      if (id_ > 0)
+        instance()->webplugin()->SetDeferResourceLoading(id_, false);
+    }
+  }
 }
 
 void PluginStreamUrl::DidFinishLoading() {

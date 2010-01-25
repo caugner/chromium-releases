@@ -18,7 +18,6 @@ typedef struct _GdkEventExpose GdkEventExpose;
 namespace views {
 
 class PaintTask;
-class RootViewDropTarget;
 class Widget;
 
 /////////////////////////////////////////////////////////////////////////////
@@ -41,6 +40,10 @@ class RootView : public View,
   explicit RootView(Widget* widget);
 
   virtual ~RootView();
+
+  // Sets the "contents view" of the RootView. This is the single child view
+  // that is responsible for laying out the contents of the widget.
+  void SetContentsView(View* contents_view);
 
   // Layout and Painting functions
 
@@ -87,14 +90,6 @@ class RootView : public View,
   virtual void OnMouseReleased(const MouseEvent& e, bool canceled);
   virtual void OnMouseMoved(const MouseEvent& e);
   virtual void SetMouseHandler(View* new_mouse_handler);
-
-  // Invoked when the Widget has been fully initialized.
-  // At the time the constructor is invoked the Widget may not be completely
-  // initialized, when this method is invoked, it is.
-  void OnWidgetCreated();
-
-  // Invoked prior to the Widget being destroyed.
-  void OnWidgetDestroyed();
 
   // Invoked By the Widget if the mouse drag is interrupted by
   // the system. Invokes OnMouseReleased with a value of true for canceled.
@@ -170,6 +165,14 @@ class RootView : public View,
 #elif defined(OS_LINUX)
   void OnPaint(GdkEventExpose* event);
 #endif
+
+  // Starts a drag operation for the specified view. This blocks until done.
+  // If the view has not been deleted during the drag, OnDragDone is invoked
+  // on the view.
+  // NOTE: |view| may be null.
+  void StartDragForViewFromMouseEvent(View* view,
+                                      const OSExchangeData& data,
+                                      int operation);
 
   // Accessibility accessors/mutators, overridden from View.
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
@@ -247,15 +250,6 @@ class RootView : public View,
   // Updates the last_mouse_* fields from e.
   void SetMouseLocationAndFlags(const MouseEvent& e);
 
-#if defined(OS_WIN)
-  // Starts a drag operation for the specified view. This blocks until done.
-  // If the view has not been deleted during the drag, OnDragDone is invoked
-  // on the view.
-  void StartDragForViewFromMouseEvent(View* view,
-                                      IDataObject* data,
-                                      int operation);
-#endif
-
   // If a view is dragging, this returns it. Otherwise returns NULL.
   View* GetDragView();
 
@@ -321,11 +315,6 @@ class RootView : public View,
   // The View that contains this RootView. This is used when we have RootView
   // wrapped inside native components, and is used for the focus traversal.
   View* focus_traversable_parent_view_;
-
-#if defined(OS_WIN)
-  // Handles dnd for us.
-  scoped_refptr<RootViewDropTarget> drop_target_;
-#endif
 
   // Storage of strings needed for accessibility.
   std::wstring accessible_name_;

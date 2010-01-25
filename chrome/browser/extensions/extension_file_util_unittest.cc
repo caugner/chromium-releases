@@ -8,7 +8,11 @@
 #include "base/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace keys = extension_manifest_keys;
 
 TEST(ExtensionFileUtil, MoveDirSafely) {
   // Create a test directory structure with some data in it.
@@ -56,110 +60,164 @@ TEST(ExtensionFileUtil, MoveDirSafely) {
   ASSERT_FALSE(file_util::PathExists(src_path));
 }
 
-TEST(ExtensionFileUtil, SetCurrentVersion) {
-  // Create an empty test directory.
-  ScopedTempDir temp;
-  ASSERT_TRUE(temp.CreateUniqueTempDir());
-
-  // Set its version.
-  std::string error;
-  std::string version = "1.0";
-  ASSERT_TRUE(extension_file_util::SetCurrentVersion(temp.path(), version,
-                                                     &error));
-
-  // Test the result.
-  std::string version_out;
-  ASSERT_TRUE(file_util::ReadFileToString(
-      temp.path().AppendASCII(extension_file_util::kCurrentVersionFileName),
-      &version_out));
-  ASSERT_EQ(version, version_out);
-
-  // Try again, overwriting the old value.
-  version = "2.0";
-  version_out.clear();
-  ASSERT_TRUE(extension_file_util::SetCurrentVersion(temp.path(), version,
-                                                     &error));
-  ASSERT_TRUE(file_util::ReadFileToString(
-      temp.path().AppendASCII(extension_file_util::kCurrentVersionFileName),
-      &version_out));
-  ASSERT_EQ(version, version_out);
-}
-
-TEST(ExtensionFileUtil, ReadCurrentVersion) {
-  // Read the version from a valid extension.
-  FilePath extension_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &extension_path));
-  extension_path = extension_path.AppendASCII("extensions")
-      .AppendASCII("good")
-      .AppendASCII("Extensions")
-      .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj");
-
-  std::string version;
-  ASSERT_TRUE(extension_file_util::ReadCurrentVersion(extension_path,
-                                                      &version));
-  ASSERT_EQ("1.0.0.0", version);
-
-  // Create an invalid extension and read its current version.
-  ScopedTempDir temp;
-  ASSERT_TRUE(temp.CreateUniqueTempDir());
-  ASSERT_FALSE(extension_file_util::ReadCurrentVersion(temp.path(), &version));
-}
-
 TEST(ExtensionFileUtil, CompareToInstalledVersion) {
   // Compare to an existing extension.
-  FilePath install_directory;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_directory));
-  install_directory = install_directory.AppendASCII("extensions")
+  FilePath install_dir;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  install_dir = install_dir.AppendASCII("extensions")
       .AppendASCII("good")
       .AppendASCII("Extensions");
 
-  std::string id = "behllobkkfkfnphdnhnkndlbkcpglgmj";
-  std::string version = "1.0.0.0";
-  std::string version_out;
+  const std::string kId = "behllobkkfkfnphdnhnkndlbkcpglgmj";
+  const std::string kCurrentVersion = "1.0.0.0";
 
-  ASSERT_EQ(Extension::UPGRADE, extension_file_util::CompareToInstalledVersion(
-    install_directory, id, "1.0.0.1", &version_out));
-  ASSERT_EQ(version, version_out);
+  FilePath version_dir;
 
-  version_out.clear();
+  ASSERT_EQ(Extension::UPGRADE,
+            extension_file_util::CompareToInstalledVersion(
+                install_dir, kId, kCurrentVersion, "1.0.0.1", &version_dir));
+
   ASSERT_EQ(Extension::REINSTALL,
             extension_file_util::CompareToInstalledVersion(
-                install_directory, id, "1.0.0.0", &version_out));
-  ASSERT_EQ(version, version_out);
+                install_dir, kId, kCurrentVersion, "1.0.0.0", &version_dir));
 
-  version_out.clear();
   ASSERT_EQ(Extension::REINSTALL,
             extension_file_util::CompareToInstalledVersion(
-                install_directory, id, "1.0.0", &version_out));
-  ASSERT_EQ(version, version_out);
+                install_dir, kId, kCurrentVersion, "1.0.0", &version_dir));
 
-  version_out.clear();
   ASSERT_EQ(Extension::DOWNGRADE,
             extension_file_util::CompareToInstalledVersion(
-                install_directory, id, "0.0.1.0", &version_out));
-  ASSERT_EQ(version, version_out);
+                install_dir, kId, kCurrentVersion, "0.0.1.0", &version_dir));
 
-  // Compare to an extension that is missing its Current Version file.
+  // Compare to an extension that is missing its manifest file.
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
-  FilePath src = install_directory.AppendASCII(id).AppendASCII(version);
-  FilePath dest = temp.path().AppendASCII(id).AppendASCII(version);
+  FilePath src = install_dir.AppendASCII(kId).AppendASCII(kCurrentVersion);
+  FilePath dest = temp.path().AppendASCII(kId).AppendASCII(kCurrentVersion);
   ASSERT_TRUE(file_util::CreateDirectory(dest.DirName()));
   ASSERT_TRUE(file_util::CopyDirectory(src, dest, true));
+  ASSERT_TRUE(file_util::Delete(dest.AppendASCII("manifest.json"), false));
 
-  version_out.clear();
   ASSERT_EQ(Extension::NEW_INSTALL,
             extension_file_util::CompareToInstalledVersion(
-                temp.path(), id, "0.0.1.0", &version_out));
-  ASSERT_EQ("", version_out);
+                temp.path(), kId, kCurrentVersion, "1.0.0", &version_dir));
 
-  // Compare to a completely non-existent extension.
-  version_out.clear();
+  // Compare to a non-existent extension.
+  const std::string kMissingVersion = "";
+  const std::string kBadId = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
   ASSERT_EQ(Extension::NEW_INSTALL,
             extension_file_util::CompareToInstalledVersion(
-                temp.path(), "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "0.0.1.0",
-                &version_out));
-  ASSERT_EQ("", version_out);
+                temp.path(), kBadId, kMissingVersion, "1.0.0", &version_dir));
+}
+
+TEST(ExtensionFileUtil, LoadExtensionWithValidLocales) {
+  FilePath install_dir;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  install_dir = install_dir.AppendASCII("extensions")
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
+      .AppendASCII("1.0.0.0");
+
+  std::string error;
+  scoped_ptr<Extension> extension(
+      extension_file_util::LoadExtension(install_dir, false, &error));
+  ASSERT_TRUE(extension != NULL);
+  EXPECT_EQ("The first extension that I made.", extension->description());
+}
+
+TEST(ExtensionFileUtil, LoadExtensionWithoutLocalesFolder) {
+  FilePath install_dir;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  install_dir = install_dir.AppendASCII("extensions")
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII("bjafgdebaacbbbecmhlhpofkepfkgcpa")
+      .AppendASCII("1.0");
+
+  std::string error;
+  scoped_ptr<Extension> extension(
+      extension_file_util::LoadExtension(install_dir, false, &error));
+  ASSERT_FALSE(extension == NULL);
+  EXPECT_TRUE(NULL == extension->message_bundle());
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(ExtensionFileUtil, CheckIllegalFilenamesNoUnderscores) {
+  ScopedTempDir temp;
+  ASSERT_TRUE(temp.CreateUniqueTempDir());
+
+  FilePath src_path = temp.path().AppendASCII("some_dir");
+  ASSERT_TRUE(file_util::CreateDirectory(src_path));
+
+  std::string data = "{ \"name\": { \"message\": \"foobar\" } }";
+  ASSERT_TRUE(file_util::WriteFile(src_path.AppendASCII("some_file.txt"),
+                                   data.c_str(), data.length()));
+  std::string error;
+  EXPECT_TRUE(extension_file_util::CheckForIllegalFilenames(temp.path(),
+                                                            &error));
+}
+
+TEST(ExtensionFileUtil, CheckIllegalFilenamesOnlyReserved) {
+  ScopedTempDir temp;
+  ASSERT_TRUE(temp.CreateUniqueTempDir());
+
+  FilePath src_path = temp.path().AppendASCII(Extension::kLocaleFolder);
+  ASSERT_TRUE(file_util::CreateDirectory(src_path));
+
+  std::string error;
+  EXPECT_TRUE(extension_file_util::CheckForIllegalFilenames(temp.path(),
+                                                            &error));
+}
+
+TEST(ExtensionFileUtil, CheckIllegalFilenamesReservedAndIllegal) {
+  ScopedTempDir temp;
+  ASSERT_TRUE(temp.CreateUniqueTempDir());
+
+  FilePath src_path = temp.path().AppendASCII(Extension::kLocaleFolder);
+  ASSERT_TRUE(file_util::CreateDirectory(src_path));
+
+  src_path = temp.path().AppendASCII("_some_dir");
+  ASSERT_TRUE(file_util::CreateDirectory(src_path));
+
+  std::string error;
+  EXPECT_FALSE(extension_file_util::CheckForIllegalFilenames(temp.path(),
+                                                             &error));
+}
+
+TEST(ExtensionFileUtil, LoadExtensionGivesHelpfullErrorOnMissingManifest) {
+  FilePath install_dir;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  install_dir = install_dir.AppendASCII("extensions")
+      .AppendASCII("bad")
+      .AppendASCII("Extensions")
+      .AppendASCII("dddddddddddddddddddddddddddddddd")
+      .AppendASCII("1.0");
+
+  std::string error;
+  scoped_ptr<Extension> extension(
+      extension_file_util::LoadExtension(install_dir, false, &error));
+  ASSERT_TRUE(extension == NULL);
+  ASSERT_FALSE(error.empty());
+  ASSERT_STREQ("Manifest file is missing or unreadable.", error.c_str());
+}
+
+TEST(ExtensionFileUtil, LoadExtensionGivesHelpfullErrorOnBadManifest) {
+  FilePath install_dir;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  install_dir = install_dir.AppendASCII("extensions")
+      .AppendASCII("bad")
+      .AppendASCII("Extensions")
+      .AppendASCII("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+      .AppendASCII("1.0");
+
+  std::string error;
+  scoped_ptr<Extension> extension(
+      extension_file_util::LoadExtension(install_dir, false, &error));
+  ASSERT_TRUE(extension == NULL);
+  ASSERT_FALSE(error.empty());
+  ASSERT_STREQ("Manifest is not valid JSON.  "
+               "Line: 2, column: 16, Syntax error.", error.c_str());
 }
 
 // TODO(aa): More tests as motivation allows. Maybe steal some from

@@ -80,6 +80,8 @@ MSVC_POP_WARNING();
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webframe_impl.h"
 
+using WebKit::WebFrame;
+
 namespace {
 
 // Default "mark of the web" declaration
@@ -444,7 +446,7 @@ void DomSerializer::EndTagToString(const WebCore::Element* element,
       if (html_element->endTagRequirement() == WebCore::TagStatusRequired) {
         // We need to write end tag when it is required.
         result += "</";
-        result += html_element->nodeName();
+        result += element->nodeName();
         result += ">";
       }
     } else {

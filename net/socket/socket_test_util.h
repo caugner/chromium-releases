@@ -12,12 +12,16 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
+#include "net/base/test_completion_callback.h"
 #include "net/socket/client_socket_factory.h"
+#include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 
@@ -185,6 +189,9 @@ class MockSocketArray {
   std::vector<T*> sockets_;
 };
 
+class MockTCPClientSocket;
+class MockSSLClientSocket;
+
 // ClientSocketFactory which contains arrays of sockets of each type.
 // You should first fill the arrays using AddMock{SSL,}Socket. When the factory
 // is asked to create a socket, it takes next entry from appropriate array.
@@ -196,6 +203,14 @@ class MockClientSocketFactory : public ClientSocketFactory {
   void AddMockSSLSocket(MockSSLSocket* socket);
   void ResetNextMockIndexes();
 
+  // Return |index|-th MockTCPClientSocket (starting from 0) that the factory
+  // created.
+  MockTCPClientSocket* GetMockTCPClientSocket(int index) const;
+
+  // Return |index|-th MockSSLClientSocket (starting from 0) that the factory
+  // created.
+  MockSSLClientSocket* GetMockSSLClientSocket(int index) const;
+
   // ClientSocketFactory
   virtual ClientSocket* CreateTCPClientSocket(const AddressList& addresses);
   virtual SSLClientSocket* CreateSSLClientSocket(
@@ -206,6 +221,10 @@ class MockClientSocketFactory : public ClientSocketFactory {
  private:
   MockSocketArray<MockSocket> mock_sockets_;
   MockSocketArray<MockSSLSocket> mock_ssl_sockets_;
+
+  // Store pointers to handed out sockets in case the test wants to get them.
+  std::vector<MockTCPClientSocket*> tcp_client_sockets_;
+  std::vector<MockSSLClientSocket*> ssl_client_sockets_;
 };
 
 class MockClientSocket : public net::SSLClientSocket {
@@ -228,6 +247,8 @@ class MockClientSocket : public net::SSLClientSocket {
                    net::CompletionCallback* callback) = 0;
   virtual int Write(net::IOBuffer* buf, int buf_len,
                     net::CompletionCallback* callback) = 0;
+  virtual bool SetReceiveBufferSize(int32 size) { return true; };
+  virtual bool SetSendBufferSize(int32 size) { return true; };
 
 #if defined(OS_LINUX)
   virtual int GetPeerName(struct sockaddr *name, socklen_t *namelen);
@@ -235,10 +256,9 @@ class MockClientSocket : public net::SSLClientSocket {
 
  protected:
   void RunCallbackAsync(net::CompletionCallback* callback, int result);
-  void RunCallback(int result);
+  void RunCallback(net::CompletionCallback*, int result);
 
   ScopedRunnableMethodFactory<MockClientSocket> method_factory_;
-  net::CompletionCallback* callback_;
   bool connected_;
 };
 
@@ -256,7 +276,11 @@ class MockTCPClientSocket : public MockClientSocket {
   virtual int Write(net::IOBuffer* buf, int buf_len,
                     net::CompletionCallback* callback);
 
+  net::AddressList addresses() const { return addresses_; }
+
  private:
+  net::AddressList addresses_;
+
   net::MockSocket* data_;
   int read_offset_;
   net::MockRead read_data_;
@@ -288,6 +312,79 @@ class MockSSLClientSocket : public MockClientSocket {
 
   scoped_ptr<ClientSocket> transport_;
   net::MockSSLSocket* data_;
+};
+
+class TestSocketRequest : public CallbackRunner< Tuple1<int> > {
+ public:
+  TestSocketRequest(
+      std::vector<TestSocketRequest*>* request_order,
+      size_t* completion_count)
+      : request_order_(request_order),
+        completion_count_(completion_count) {
+    DCHECK(request_order);
+    DCHECK(completion_count);
+  }
+
+  ClientSocketHandle* handle() { return &handle_; }
+
+  int WaitForResult();
+  virtual void RunWithParams(const Tuple1<int>& params);
+
+ private:
+  ClientSocketHandle handle_;
+  std::vector<TestSocketRequest*>* request_order_;
+  size_t* completion_count_;
+  TestCompletionCallback callback_;
+};
+
+class ClientSocketPoolTest : public testing::Test {
+ protected:
+  enum KeepAlive {
+    KEEP_ALIVE,
+
+    // A socket will be disconnected in addition to handle being reset.
+    NO_KEEP_ALIVE,
+  };
+
+  static const int kIndexOutOfBounds;
+  static const int kRequestNotFound;
+
+  virtual void SetUp();
+  virtual void TearDown();
+
+  template <typename PoolType, typename SocketParams>
+  int StartRequestUsingPool(PoolType* socket_pool,
+                            const std::string& group_name,
+                            int priority,
+                            const SocketParams& socket_params) {
+    DCHECK(socket_pool);
+    TestSocketRequest* request = new TestSocketRequest(&request_order_,
+                                                       &completion_count_);
+    requests_.push_back(request);
+    int rv = request->handle()->Init(
+        group_name, socket_params, priority, request,
+        socket_pool, NULL);
+    if (rv != ERR_IO_PENDING)
+      request_order_.push_back(request);
+    return rv;
+  }
+
+  // Provided there were n requests started, takes |index| in range 1..n
+  // and returns order in which that request completed, in range 1..n,
+  // or kIndexOutOfBounds if |index| is out of bounds, or kRequestNotFound
+  // if that request did not complete (for example was canceled).
+  int GetOrderOfRequest(size_t index);
+
+  // Resets first initialized socket handle from |requests_|. If found such
+  // a handle, returns true.
+  bool ReleaseOneConnection(KeepAlive keep_alive);
+
+  // Releases connections until there is nothing to release.
+  void ReleaseAllConnections(KeepAlive keep_alive);
+
+  ScopedVector<TestSocketRequest> requests_;
+  std::vector<TestSocketRequest*> request_order_;
+  size_t completion_count_;
 };
 
 }  // namespace net

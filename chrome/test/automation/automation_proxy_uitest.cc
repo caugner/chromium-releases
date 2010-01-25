@@ -9,6 +9,7 @@
 #include "app/message_box_flags.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/gfx/rect.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -17,6 +18,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
+#include "chrome/test/automation/autocomplete_edit_proxy.h"
+#include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy_uitest.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -25,6 +28,12 @@
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_unittest.h"
 #include "views/event.h"
+
+#if defined(OS_MACOSX)
+#define MAYBE_WindowGetViewBounds DISABLED_WindowGetViewBounds
+#else
+#define MAYBE_WindowGetViewBounds WindowGetViewBounds
+#endif
 
 class AutomationProxyTest : public UITest {
  protected:
@@ -61,10 +70,8 @@ TEST_F(AutomationProxyTest, GetBrowserWindow) {
   }
 };
 
-// TODO(port): This test is for Chrome Views, which we only use on Windows.
-// Maybe split this into a _win.cc file?
-#if defined(OS_WIN)
-TEST_F(AutomationProxyVisibleTest, WindowGetViewBounds) {
+// TODO(estade): port automation provider for this test to mac.
+TEST_F(AutomationProxyVisibleTest, MAYBE_WindowGetViewBounds) {
   {
     scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
     ASSERT_TRUE(browser.get());
@@ -152,7 +159,6 @@ TEST_F(AutomationProxyVisibleTest, WindowGetViewBounds) {
     */
   }
 }
-#endif  // defined(OS_WIN)
 
 TEST_F(AutomationProxyTest, GetTabCount) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
@@ -282,7 +288,7 @@ TEST_F(AutomationProxyTest, NavigateToURLWithTimeout1) {
 
   bool is_timeout;
   tab->NavigateToURLWithTimeout(net::FilePathToFileURL(filename),
-                                5000, &is_timeout);
+                                1, 5000, &is_timeout);
   ASSERT_FALSE(is_timeout);
 
   std::wstring title;
@@ -293,8 +299,8 @@ TEST_F(AutomationProxyTest, NavigateToURLWithTimeout1) {
   const int kLowTimeoutMs = 250;
   ASSERT_GE(URLRequestSlowHTTPJob::kDelayMs, kLowTimeoutMs);
   tab->NavigateToURLWithTimeout(
-      URLRequestSlowHTTPJob::GetMockUrl(filename.ToWStringHack()),
-      kLowTimeoutMs, &is_timeout);
+      URLRequestSlowHTTPJob::GetMockUrl(filename),
+      1, kLowTimeoutMs, &is_timeout);
   ASSERT_TRUE(is_timeout);
 }
 
@@ -313,14 +319,14 @@ TEST_F(AutomationProxyTest, NavigateToURLWithTimeout2) {
   const int kLowTimeoutMs = 250;
   ASSERT_GE(URLRequestSlowHTTPJob::kDelayMs, kLowTimeoutMs);
   tab->NavigateToURLWithTimeout(
-      URLRequestSlowHTTPJob::GetMockUrl(filename1.ToWStringHack()),
-      kLowTimeoutMs, &is_timeout);
+      URLRequestSlowHTTPJob::GetMockUrl(filename1),
+      1, kLowTimeoutMs, &is_timeout);
   ASSERT_TRUE(is_timeout);
 
   FilePath filename2(test_data_directory_);
   filename2 = filename2.AppendASCII("title1.html");
   tab->NavigateToURLWithTimeout(net::FilePathToFileURL(filename2),
-                                5000, &is_timeout);
+                                1, 5000, &is_timeout);
   ASSERT_FALSE(is_timeout);
 }
 
@@ -454,20 +460,6 @@ TEST_F(AutomationProxyTest, Cookies) {
   EXPECT_TRUE(value_result.find("foo1=baz1") != std::string::npos);
   EXPECT_TRUE(value_result.find("foo2=baz2") != std::string::npos);
 }
-
-// TODO(port): Determine what tests need this and port.
-#if defined(OS_WIN)
-TEST_F(AutomationProxyTest, GetHWND) {
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  ASSERT_TRUE(browser.get());
-  scoped_refptr<WindowProxy> window(browser->GetWindow());
-  ASSERT_TRUE(window.get());
-
-  HWND handle;
-  ASSERT_TRUE(window->GetHWND(&handle));
-  ASSERT_TRUE(handle);
-}
-#endif
 
 TEST_F(AutomationProxyTest, NavigateToURLAsync) {
   AutomationProxy* automation_object = automation();
@@ -652,54 +644,144 @@ TEST_F(AutomationProxyTest, BlockedPopupTest) {
 
 // TODO(port): Remove HWND if possible
 #if defined(OS_WIN)
-// Creates a top-level window, makes the |external_tab_window| a child of
-// that window and displays them. After displaying the windows the
-// function enters a message loop that processes window messages as well
-// as calling MessageLoop::current()->RunAllPending() to process any
-// incoming IPC messages. The time_to_wait_ms parameter is the maximum
-// time the loop will run. To end the loop earlier, post a quit message to
-// the thread.
-bool ExternalTabMessageLoop(HWND external_tab_window, int time_to_wait_ms) {
-  static const wchar_t class_name[] = L"External_Tab_UI_Test_Class";
-  static const wchar_t window_title[] = L"External Tab Tester";
+static const wchar_t class_name[] = L"External_Tab_UI_Test_Class";
+static const wchar_t window_title[] = L"External Tab Tester";
 
-  WNDCLASSEX wnd_class = {0};
-  wnd_class.cbSize = sizeof(wnd_class);
-  wnd_class.style = CS_HREDRAW | CS_VREDRAW;
-  wnd_class.lpfnWndProc = DefWindowProc;
-  wnd_class.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
-  wnd_class.lpszClassName = class_name;
-  ATOM atom = RegisterClassEx(&wnd_class);
-  if (0 == atom) {
-    NOTREACHED() << "RegisterClassEx";
-    return false;
+AutomationProxyForExternalTab::AutomationProxyForExternalTab(
+    int execution_timeout)
+    : AutomationProxy(execution_timeout),
+      messages_received_(0),
+      navigate_complete_(false),
+      quit_after_(QUIT_INVALID),
+      host_window_class_(NULL),
+      host_window_(NULL) {
+}
+
+AutomationProxyForExternalTab::~AutomationProxyForExternalTab() {
+  DestroyHostWindow();
+  UnregisterClassW(host_window_class_, NULL);
+}
+
+gfx::NativeWindow AutomationProxyForExternalTab::CreateHostWindow() {
+  DCHECK(!IsWindow(host_window_));
+  if (!host_window_class_) {
+    WNDCLASSEX wnd_class = {0};
+    wnd_class.cbSize = sizeof(wnd_class);
+    wnd_class.style = CS_HREDRAW | CS_VREDRAW;
+    wnd_class.lpfnWndProc = DefWindowProc;
+    wnd_class.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
+    wnd_class.lpszClassName = class_name;
+    host_window_class_ = reinterpret_cast<const wchar_t*>(
+        RegisterClassEx(&wnd_class));
+    if (!host_window_class_) {
+      NOTREACHED() << "RegisterClassEx failed. Error: " << GetLastError();
+      return false;
+    }
   }
 
   unsigned long style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
-  HWND external_tab_ui_parent = CreateWindow(class_name, window_title,
-                                             style, CW_USEDEFAULT, 0,
-                                             CW_USEDEFAULT, 0, NULL, NULL,
-                                             NULL, NULL);
-  style = GetWindowLong(external_tab_window, GWL_STYLE);
-  style |= WS_CHILD;
-  style &= ~WS_POPUP;
-  SetWindowLong(external_tab_window, GWL_STYLE, style);
-  SetParent(external_tab_window, external_tab_ui_parent);
-  RECT client_rect = {0};
-  GetClientRect(external_tab_ui_parent, &client_rect);
-  SetWindowPos(external_tab_window, NULL, 0, 0, client_rect.right,
-               client_rect.bottom, SWP_NOZORDER);
-  ShowWindow(external_tab_window, SW_SHOW);
-  ShowWindow(external_tab_ui_parent, SW_SHOW);
+  host_window_ = CreateWindow(host_window_class_, window_title, style,
+                              CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL,
+                              NULL, NULL, NULL);
+  if (!host_window_) {
+    NOTREACHED() << "CreateWindow failed. Error: " << GetLastError();
+    return false;
+  }
+
+  ShowWindow(host_window_, SW_SHOW);
+  return host_window_;
+}
+
+scoped_refptr<TabProxy> AutomationProxyForExternalTab::CreateTabWithHostWindow(
+    bool is_incognito, const GURL& initial_url,
+    gfx::NativeWindow* container_wnd, gfx::NativeWindow* tab_wnd) {
+  DCHECK(container_wnd);
+  DCHECK(tab_wnd);
+
+  CreateHostWindow();
+  EXPECT_NE(FALSE, ::IsWindow(host_window_));
+
+  RECT client_area = {0};
+  GetClientRect(host_window_, &client_area);
+
+  const IPC::ExternalTabSettings settings = {
+    host_window_,
+    gfx::Rect(client_area),
+    WS_CHILD | WS_VISIBLE,
+    is_incognito,
+    false,
+    false,
+    initial_url
+  };
+
+  scoped_refptr<TabProxy> tab(CreateExternalTab(settings, container_wnd,
+                                                tab_wnd));
+
+  EXPECT_TRUE(tab != NULL);
+  EXPECT_NE(FALSE, ::IsWindow(*container_wnd));
+  EXPECT_NE(FALSE, ::IsWindow(*tab_wnd));
+  return tab;
+}
+
+void AutomationProxyForExternalTab::DestroyHostWindow() {
+  if (host_window_) {
+    DestroyWindow(host_window_);
+    host_window_ = NULL;
+  }
+}
+
+bool AutomationProxyForExternalTab::WaitForNavigation(int timeout_ms) {
+  set_quit_after(AutomationProxyForExternalTab::QUIT_AFTER_NAVIGATION);
+  return RunMessageLoop(timeout_ms, NULL);
+}
+
+bool AutomationProxyForExternalTab::WaitForMessage(int timeout_ms) {
+  set_quit_after(AutomationProxyForExternalTab::QUIT_AFTER_MESSAGE);
+  return RunMessageLoop(timeout_ms, NULL);
+}
+
+bool AutomationProxyForExternalTab::WaitForTabCleanup(TabProxy* tab,
+                                                      int timeout_ms) {
+  DCHECK(tab);
+  base::Time end_time =
+      base::Time::Now() + TimeDelta::FromMilliseconds(timeout_ms);
+  while (base::Time::Now() < end_time) {
+    const int kWaitInterval = 50;
+    DWORD wait_result = MsgWaitForMultipleObjects(0, NULL, FALSE, kWaitInterval,
+                                                  QS_ALLINPUT);
+    if (!tab->is_valid())
+      break;
+    if (WAIT_OBJECT_0 == wait_result) {
+      MSG msg = {0};
+      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+      }
+    }
+  }
+
+  return !tab->is_valid();
+}
+
+bool AutomationProxyForExternalTab::RunMessageLoop(
+    int timeout_ms,
+    gfx::NativeWindow window_to_monitor) {
+  // If there's no host window then the abort or this loop will be stuck
+  // in GetMessage
+  if (!IsWindow(host_window_))
+    return false;
 
   // Allow the renderers to connect.
-
   const int kTimerIdQuit = 100;
   const int kTimerIdProcessPendingMessages = 101;
 
-  ::SetTimer(external_tab_ui_parent, kTimerIdQuit, time_to_wait_ms, NULL);
-  // Process pending messages every 50 milliseconds
-  ::SetTimer(external_tab_ui_parent, kTimerIdProcessPendingMessages, 50, NULL);
+  if (!window_to_monitor)
+    window_to_monitor = host_window_;
+
+  UINT_PTR quit_timer = ::SetTimer(host_window_, kTimerIdQuit,
+                                   timeout_ms, NULL);
+  UINT_PTR pump_timer = ::SetTimer(host_window_,
+                                   kTimerIdProcessPendingMessages, 50, NULL);
 
   MSG msg;
   bool quit = false;
@@ -708,56 +790,29 @@ bool ExternalTabMessageLoop(HWND external_tab_window, int time_to_wait_ms) {
     if (!ok || ok == -1)
       break;
 
-    if (msg.message == WM_TIMER && msg.hwnd == external_tab_ui_parent) {
+    if (msg.message == WM_TIMER && msg.hwnd == host_window_) {
       switch (msg.wParam) {
         case kTimerIdProcessPendingMessages:
           MessageLoop::current()->RunAllPending();
           break;
-
         case kTimerIdQuit:
-          ::KillTimer(external_tab_ui_parent, msg.wParam);
           quit = true;
           break;
-
         default:
           NOTREACHED() << "invalid timer id";
           break;
       }
-    } else if (msg.message == WM_QUIT) {
+    } else if ((msg.message == WM_QUIT) || (msg.message == kQuitLoopMessage)) {
       quit = true;
     } else {
       ::TranslateMessage(&msg);
       ::DispatchMessage(&msg);
     }
-  // In case there's an interactive user that closes the window.
-  } while (!quit && ::IsWindow(external_tab_ui_parent));
+  } while (!quit && ::IsWindow(window_to_monitor));
 
-  DestroyWindow(external_tab_ui_parent);
-
-  EXPECT_TRUE(UnregisterClassW(reinterpret_cast<const wchar_t*>(atom),
-                               wnd_class.hInstance));
-
-  return true;
-}
-
-AutomationProxyForExternalTab::AutomationProxyForExternalTab(
-    int execution_timeout)
-    : AutomationProxy(execution_timeout),
-      messages_received_(0),
-      navigate_complete_(false) {
-}
-
-bool AutomationProxyForExternalTab::WaitForNavigationComplete(
-    int max_time_to_wait_ms) {
-  base::TimeTicks start(base::TimeTicks::Now());
-  while (!navigate_complete_) {
-    PlatformThread::Sleep(50);
-    MessageLoop::current()->RunAllPending();
-    base::TimeTicks end(base::TimeTicks::Now());
-    base::TimeDelta delta = end - start;
-    if (static_cast<int>(delta.InMilliseconds()) > max_time_to_wait_ms)
-      return false;
-  }
+  KillTimer(host_window_, quit_timer);
+  KillTimer(host_window_, pump_timer);
+  quit_after_ = QUIT_INVALID;
   return true;
 }
 
@@ -769,6 +824,14 @@ void AutomationProxyForExternalTab::OnMessageReceived(const IPC::Message& msg) {
   IPC_END_MESSAGE_MAP()
 }
 
+void AutomationProxyForExternalTab::OnDidNavigate(
+    int tab_handle,
+    const IPC::NavigationInfo& nav_info) {
+  navigate_complete_ = true;
+  if (QUIT_AFTER_NAVIGATION == quit_after_)
+    QuitLoop();
+}
+
 void AutomationProxyForExternalTab::OnForwardMessageToExternalHost(
     int handle,
     const std::string& message,
@@ -778,103 +841,127 @@ void AutomationProxyForExternalTab::OnForwardMessageToExternalHost(
   message_ = message;
   origin_ = origin;
   target_ = target;
-  PostQuitMessage(0);
+
+  if (QUIT_AFTER_MESSAGE == quit_after_)
+    QuitLoop();
 }
 
-TEST_F(ExternalTabTestType, CreateExternalTab) {
-  const IPC::ExternalTabSettings settings = {
-    NULL,
-    gfx::Rect(),
-    WS_POPUP,
-    false,
-    false
-  };
+GURL simple_data_url = GURL(std::string(
+    "data:text/html,<html><head><title>External tab test</title></head>"
+    "<body>A simple page for testing a floating/invisible tab<br></div>"
+    "</body></html>"));
+
+// Create with specifying a url
+TEST_F(ExternalTabTestType, CreateExternalTab1) {
+  AutomationProxyForExternalTab* proxy =
+      static_cast<AutomationProxyForExternalTab*>(automation());
   HWND external_tab_container = NULL;
   HWND tab_wnd = NULL;
+  scoped_refptr<TabProxy> tab(proxy->CreateTabWithHostWindow(false,
+      simple_data_url, &external_tab_container, &tab_wnd));
 
-  scoped_refptr<TabProxy> tab(automation()->CreateExternalTab(settings,
-                              &external_tab_container, &tab_wnd));
-  EXPECT_TRUE(tab != NULL);
-  EXPECT_NE(FALSE, ::IsWindow(external_tab_container));
+  EXPECT_TRUE(tab->is_valid());
   if (tab != NULL) {
-    tab->NavigateInExternalTab(GURL(L"http://www.google.com"));
-    EXPECT_EQ(true, ExternalTabMessageLoop(external_tab_container, 1000));
-    // Since the tab goes away lazily, wait a bit
-    PlatformThread::Sleep(1000);
+    EXPECT_TRUE(proxy->WaitForNavigation(action_max_timeout_ms()));
+
+    proxy->DestroyHostWindow();
+    proxy->WaitForTabCleanup(tab, action_max_timeout_ms());
+
     EXPECT_FALSE(tab->is_valid());
+    EXPECT_EQ(FALSE, ::IsWindow(external_tab_container));
+    EXPECT_EQ(FALSE, ::IsWindow(tab_wnd));
   }
 }
 
-TEST_F(ExternalTabTestType, IncognitoMode) {
-  IPC::ExternalTabSettings settings = {
-    NULL,
-    gfx::Rect(),
-    WS_POPUP,
-    true,
-    false
-  };
+// Create with empty url and then navigate
+TEST_F(ExternalTabTestType, CreateExternalTab2) {
+  AutomationProxyForExternalTab* proxy =
+      static_cast<AutomationProxyForExternalTab*>(automation());
   HWND external_tab_container = NULL;
   HWND tab_wnd = NULL;
-  GURL url("http://anatomyofmelancholy.net");
-  std::string value_result;
+  scoped_refptr<TabProxy> tab(proxy->CreateTabWithHostWindow(false,
+      GURL(), &external_tab_container, &tab_wnd));
+
+  // Enter a message loop to allow the tab to be created
+  proxy->WaitForNavigation(2000);
+  EXPECT_TRUE(tab->is_valid());
+
+  if (tab != NULL) {
+    // Wait for navigation
+    tab->NavigateInExternalTab(simple_data_url, GURL());
+    EXPECT_TRUE(proxy->WaitForNavigation(action_max_timeout_ms()));
+
+    // Now destroy the external tab
+    proxy->DestroyHostWindow();
+    proxy->WaitForTabCleanup(tab, action_max_timeout_ms());
+
+    EXPECT_FALSE(tab->is_valid());
+    EXPECT_EQ(FALSE, ::IsWindow(external_tab_container));
+    EXPECT_EQ(FALSE, ::IsWindow(tab_wnd));
+  }
+}
+
+// Freezes randomly causing the entire ui test to hang
+// http://code.google.com/p/chromium/issues/detail?id=24664
+TEST_F(ExternalTabTestType, DISABLED_IncognitoMode) {
+  AutomationProxyForExternalTab* proxy =
+      static_cast<AutomationProxyForExternalTab*>(automation());
+  HWND external_tab_container = NULL;
+  HWND tab_wnd = NULL;
 
   // Create incognito tab
-  scoped_refptr<TabProxy> tab(automation()->CreateExternalTab(settings,
-                              &external_tab_container, &tab_wnd));
+  GURL url("http://anatomyofmelancholy.net");
+  scoped_refptr<TabProxy> tab(proxy->CreateTabWithHostWindow(true, url,
+      &external_tab_container, &tab_wnd));
+  EXPECT_TRUE(proxy->WaitForNavigation(action_max_timeout_ms()));
+
+  std::string value_result;
+
   EXPECT_TRUE(tab->SetCookie(url, "robert=burton; "
                                   "expires=Thu, 13 Oct 2011 05:04:03 UTC;"));
   EXPECT_TRUE(tab->GetCookieByName(url, "robert", &value_result));
   EXPECT_EQ("burton", value_result);
-  tab = NULL;
+  proxy->DestroyHostWindow();
   CloseBrowserAndServer();
+  tab = NULL;
 
-  value_result.empty();
+  value_result.clear();
   clear_profile_ = false;
   external_tab_container = NULL;
   tab_wnd = NULL;
   LaunchBrowserAndServer();
-  settings.is_off_the_record = false;
-  tab = automation()->CreateExternalTab(settings, &external_tab_container,
-                                        &tab_wnd);
+  tab = proxy->CreateTabWithHostWindow(false, url, &external_tab_container,
+                                       &tab_wnd);
   EXPECT_TRUE(tab->GetCookieByName(url, "robert", &value_result));
   EXPECT_EQ("", value_result);
 }
 
-TEST_F(ExternalTabTestType, ExternalTabPostMessage) {
+TEST_F(ExternalTabTestType, DISABLED_ExternalTabPostMessage) {
   AutomationProxyForExternalTab* proxy =
       static_cast<AutomationProxyForExternalTab*>(automation());
-
-  IPC::ExternalTabSettings settings = {
-    NULL,
-    gfx::Rect(),
-    WS_POPUP,
-    false,
-    false
-  };
   HWND external_tab_container = NULL;
   HWND tab_wnd = NULL;
-  scoped_refptr<TabProxy> tab(proxy->CreateExternalTab(settings,
-                              &external_tab_container, &tab_wnd));
-  EXPECT_TRUE(tab != NULL);
-  EXPECT_NE(FALSE, ::IsWindow(external_tab_container));
+  std::string content =
+      "data:text/html,<html><head><script>"
+      "function onload() {"
+      "  window.externalHost.onmessage = onMessage;"
+      "}"
+      "function onMessage(evt) {"
+      "  window.externalHost.postMessage(evt.data, '*');"
+      "}"
+      "</script></head>"
+      "<body onload='onload()'>external tab test<br></div>"
+      "</body></html>";
+  scoped_refptr<TabProxy> tab(proxy->CreateTabWithHostWindow(false,
+      GURL(content), &external_tab_container, &tab_wnd));
+
   if (tab != NULL) {
-    std::string content =
-        "data:text/html,<html><head><script>"
-        "function onload() {"
-        "  window.externalHost.onmessage = onMessage;"
-        "}"
-        "function onMessage(evt) {"
-        "  window.externalHost.postMessage(evt.data, '*');"
-        "}"
-        "</script></head>"
-        "<body onload='onload()'>external tab test<br></div>"
-        "</body></html>";
-    tab->NavigateInExternalTab(GURL(content));
-    EXPECT_TRUE(proxy->WaitForNavigationComplete(10000));
+    // Wait for navigation
+    EXPECT_TRUE(proxy->WaitForNavigation(action_max_timeout_ms()));
 
     tab->HandleMessageFromExternalHost("Hello from gtest", "null", "*");
+    EXPECT_TRUE(proxy->WaitForMessage(5000));
 
-    EXPECT_TRUE(ExternalTabMessageLoop(external_tab_container, 10000));
     EXPECT_NE(0, proxy->messages_received());
 
     if (proxy->messages_received()) {
@@ -883,31 +970,22 @@ TEST_F(ExternalTabTestType, ExternalTabPostMessage) {
   }
 }
 
-TEST_F(ExternalTabTestType, ExternalTabPostMessageTarget) {
+TEST_F(ExternalTabTestType, DISABLED_ExternalTabPostMessageTarget) {
+  const wchar_t kDocRoot[] = L"chrome/test/data/external_tab";
+  scoped_refptr<HTTPTestServer> server(
+      HTTPTestServer::CreateServer(kDocRoot, NULL));
+
+  const char kTestUrl[] = "http://localhost:1337/files/post_message.html";
+
   AutomationProxyForExternalTab* proxy =
       static_cast<AutomationProxyForExternalTab*>(automation());
-
-  IPC::ExternalTabSettings settings = {
-    NULL,
-    gfx::Rect(),
-    WS_POPUP,
-    false,
-    false
-  };
   HWND external_tab_container = NULL;
   HWND tab_wnd = NULL;
-  scoped_refptr<TabProxy> tab(proxy->CreateExternalTab(settings,
-      &external_tab_container, &tab_wnd));
-  EXPECT_TRUE(tab != NULL);
-  EXPECT_NE(FALSE, ::IsWindow(external_tab_container));
-  if (tab != NULL) {
-    const wchar_t kDocRoot[] = L"chrome/test/data/external_tab";
-    scoped_refptr<HTTPTestServer> server(
-        HTTPTestServer::CreateServer(kDocRoot, NULL));
+  scoped_refptr<TabProxy> tab(proxy->CreateTabWithHostWindow(false,
+      GURL(kTestUrl), &external_tab_container, &tab_wnd));
 
-    const char kTestUrl[] = "http://localhost:1337/files/post_message.html";
-    tab->NavigateInExternalTab(GURL(kTestUrl));
-    EXPECT_TRUE(proxy->WaitForNavigationComplete(10000));
+  if (tab != NULL) {
+    EXPECT_TRUE(proxy->WaitForNavigation(action_max_timeout_ms()));
 
     // Post a message to the page, specifying a target.
     // If the page receives it, it will post the same message right back to us.
@@ -916,7 +994,7 @@ TEST_F(ExternalTabTestType, ExternalTabPostMessageTarget) {
     tab->HandleMessageFromExternalHost(kTestMessage, kTestOrigin,
         "http://localhost:1337/");
 
-    EXPECT_TRUE(ExternalTabMessageLoop(external_tab_container, 10000));
+    EXPECT_TRUE(proxy->WaitForMessage(5000));
     EXPECT_NE(0, proxy->messages_received());
 
     if (proxy->messages_received()) {
@@ -925,7 +1003,6 @@ TEST_F(ExternalTabTestType, ExternalTabPostMessageTarget) {
     }
   }
 }
-
 #endif  // defined(OS_WIN)
 
 // TODO(port): Need to port autocomplete_edit_proxy.* first.
@@ -973,7 +1050,10 @@ TEST_F(AutomationProxyTest, AutocompleteParallelProxy) {
   EXPECT_EQ(text_to_set2, actual_text2);
 }
 
-TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
+#endif  // defined(OS_WIN) || defined(OS_LINUX)
+
+// So flaky, http://crbug.com/19876. Consult phajdan.jr before re-enabling.
+TEST_F(AutomationProxyVisibleTest, DISABLED_AutocompleteMatchesTest) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_refptr<AutocompleteEditProxy> edit(
@@ -990,9 +1070,9 @@ TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   EXPECT_TRUE(edit->GetAutocompleteMatches(&matches));
   EXPECT_FALSE(matches.empty());
 }
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
 
-// Disabled because flaky see bug #5314.
+// This test is flaky, see http://crbug.com/5314. Disabled because it hangs
+// on Mac (http://crbug.com/25039).
 TEST_F(AutomationProxyTest, DISABLED_AppModalDialogTest) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());

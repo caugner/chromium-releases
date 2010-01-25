@@ -4,11 +4,12 @@
 
 #include "chrome/browser/gtk/list_store_favicon_loader.h"
 
-#include "app/resource_bundle.h"
-#include "base/gfx/gtk_util.h"
-#include "base/gfx/png_decoder.h"
+#include <vector>
+
+#include "app/gfx/codec/png_codec.h"
+#include "app/gfx/gtk_util.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/profile.h"
-#include "grit/app_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 ListStoreFavIconLoader::ListStoreFavIconLoader(
@@ -16,17 +17,19 @@ ListStoreFavIconLoader::ListStoreFavIconLoader(
     Profile* profile, CancelableRequestConsumer* consumer)
     : list_store_(list_store), favicon_col_(favicon_col),
       favicon_handle_col_(favicon_handle_col), profile_(profile),
-      consumer_(consumer) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  default_favicon_ = rb.GetPixbufNamed(IDR_DEFAULT_FAVICON);
+      consumer_(consumer),
+      default_favicon_(GtkThemeProvider::GetDefaultFavicon(true)) {
+}
+
+ListStoreFavIconLoader::~ListStoreFavIconLoader() {
 }
 
 void ListStoreFavIconLoader::LoadFaviconForRow(const GURL& url,
                                                GtkTreeIter* iter) {
-  HistoryService* history =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  if (history) {
-    HistoryService::Handle handle = history->GetFavIconForURL(
+  FaviconService* favicon_service =
+      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  if (favicon_service) {
+    FaviconService::Handle handle = favicon_service->GetFaviconForURL(
         url, consumer_,
         NewCallback(this, &ListStoreFavIconLoader::OnGotFavIcon));
     gtk_list_store_set(list_store_, iter,
@@ -37,7 +40,7 @@ void ListStoreFavIconLoader::LoadFaviconForRow(const GURL& url,
 }
 
 bool ListStoreFavIconLoader::GetRowByFavIconHandle(
-    HistoryService::Handle handle, GtkTreeIter* result_iter) {
+    FaviconService::Handle handle, GtkTreeIter* result_iter) {
   GtkTreeIter iter;
   gboolean valid = gtk_tree_model_get_iter_first(
       GTK_TREE_MODEL(list_store_), &iter);
@@ -57,7 +60,7 @@ bool ListStoreFavIconLoader::GetRowByFavIconHandle(
 }
 
 void ListStoreFavIconLoader::OnGotFavIcon(
-    HistoryService::Handle handle, bool know_fav_icon,
+    FaviconService::Handle handle, bool know_fav_icon,
     scoped_refptr<RefCountedBytes> image_data, bool is_expired, GURL icon_url) {
   GtkTreeIter iter;
   if (!GetRowByFavIconHandle(handle, &iter))
@@ -68,9 +71,10 @@ void ListStoreFavIconLoader::OnGotFavIcon(
   if (know_fav_icon && image_data.get() && !image_data->data.empty()) {
     int width, height;
     std::vector<unsigned char> decoded_data;
-    if (PNGDecoder::Decode(&image_data->data.front(), image_data->data.size(),
-                           PNGDecoder::FORMAT_BGRA, &decoded_data, &width,
-                           &height)) {
+    if (gfx::PNGCodec::Decode(&image_data->data.front(),
+                              image_data->data.size(),
+                              gfx::PNGCodec::FORMAT_BGRA, &decoded_data,
+                              &width, &height)) {
       SkBitmap icon;
       icon.setConfig(SkBitmap::kARGB_8888_Config, width, height);
       icon.allocPixels();

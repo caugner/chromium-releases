@@ -32,7 +32,6 @@
 
 // This file contains the definition of the ParamCacheGL class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/error.h"
 #include "core/cross/param_array.h"
 #include "core/cross/renderer.h"
@@ -332,7 +331,7 @@ class EffectParamArraySamplerHandlerGL : public EffectParamHandlerGL {
             if (!sampler_gl) {
               sampler_gl = down_cast<SamplerGL*>(renderer->error_sampler());
             }
-            sampler_gl->ResetTexture(cg_param);
+            sampler_gl->ResetTexture(cg_element);
           }
         }
       }
@@ -457,6 +456,8 @@ static EffectParamHandlerGL::Ref GetHandlerFromParamAndCgType(
       case CG_SAMPLERCUBE:
         handler = EffectParamHandlerGL::Ref(
             new EffectParamArraySamplerHandlerGL(param_param_array));
+        break;
+      default:
         break;
     }
   } else if (param->IsA(ParamMatrix4::GetApparentClass())) {

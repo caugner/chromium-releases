@@ -31,7 +31,17 @@ class Profile;
   Profile* profile_;  // weak ref
   PrefService* prefs_;  // weak ref - Obtained from profile_ for convenience.
   scoped_ptr<PrefObserverBridge> observer_;  // Watches for pref changes.
-  IBOutlet NSTabView* tabView_;
+
+  IBOutlet NSToolbar* toolbar_;
+
+  // The views we'll rotate through
+  IBOutlet NSView* basicsView_;
+  IBOutlet NSView* personalStuffView_;
+  IBOutlet NSView* underTheHoodView_;
+
+  // Having two animations around is bad (they fight), so just use one.
+  scoped_nsobject<NSViewAnimation> animation_;
+
   IBOutlet NSArrayController* customPagesArrayController_;
 
   // Basics panel
@@ -58,6 +68,10 @@ class Profile;
   BooleanPrefMember safeBrowsing_;
   BooleanPrefMember metricsRecording_;
   IntegerPrefMember cookieBehavior_;
+  IBOutlet NSPathControl* downloadLocationControl_;
+  StringPrefMember defaultDownloadLocation_;
+  BooleanPrefMember askForSaveLocation_;
+  StringPrefMember currentTheme_;
 }
 
 // Designated initializer. |profile| should not be NULL.
@@ -73,12 +87,21 @@ class Profile;
 - (IBAction)addHomepage:(id)sender;
 - (IBAction)removeSelectedHomepages:(id)sender;
 - (IBAction)useCurrentPagesAsHomepage:(id)sender;
+- (IBAction)manageSearchEngines:(id)sender;
 
 // User Data panel
 - (IBAction)showSavedPasswords:(id)sender;
 - (IBAction)importData:(id)sender;
 - (IBAction)clearData:(id)sender;
-- (IBAction)resetTheme:(id)sender;
+- (IBAction)resetThemeToDefault:(id)sender;
+- (IBAction)themesGallery:(id)sender;
+
+// Under the hood
+- (IBAction)browseDownloadLocation:(id)sender;
+- (IBAction)privacyLearnMore:(id)sender;
+
+// When a toolbar button is clicked
+- (IBAction)toolbarButtonSelected:(id)sender;
 
 // Usable from cocoa bindings to hook up the custom home pages table.
 @property(readonly) CustomHomePagesModel* customPagesSource;

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/linux_util.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
@@ -23,31 +24,43 @@ namespace net {
 class ProxyConfigServiceLinux : public ProxyConfigService {
  public:
 
-  // These are used to derive mocks for unittests.
-  class EnvironmentVariableGetter {
-   public:
-    virtual ~EnvironmentVariableGetter() {}
-    // Gets an environment variable's value and stores it in
-    // result. Returns false if the key is unset.
-    virtual bool Getenv(const char* variable_name, std::string* result) = 0;
-  };
+  // Forward declaration of Delegate.
+  class Delegate;
 
   class GConfSettingGetter {
    public:
+    // Buffer size used in some implementations of this class when reading
+    // files. Defined here so unit tests can construct worst-case inputs.
+    static const size_t BUFFER_SIZE = 512;
+
+    GConfSettingGetter() {}
     virtual ~GConfSettingGetter() {}
 
-    // Initializes the class: obtains a gconf client, in the concrete
-    // implementation. Returns true on success. Must be called before
-    // using other methods.
-    virtual bool Init() = 0;
+    // Initializes the class: obtains a gconf client, or simulates one, in
+    // the concrete implementations. Returns true on success. Must be called
+    // before using other methods, and should be called on the thread running
+    // the glib main loop.
+    // One of |glib_default_loop| and |file_loop| will be used for gconf calls
+    // or reading necessary files, depending on the implementation.
+    virtual bool Init(MessageLoop* glib_default_loop,
+                      MessageLoopForIO* file_loop) = 0;
 
     // Releases the gconf client, which clears cached directories and
     // stops notifications.
-    virtual void Release() = 0;
+    virtual void Shutdown() = 0;
 
     // Requests notification of gconf setting changes for proxy
     // settings. Returns true on success.
-    virtual bool SetupNotification(void* callback_user_data) = 0;
+    virtual bool SetupNotification(Delegate* delegate) = 0;
+
+    // Returns the message loop for the thread on which this object
+    // handles notifications, and also on which it must be destroyed.
+    // Returns NULL if it does not matter.
+    virtual MessageLoop* GetNotificationLoop() = 0;
+
+    // Returns the data source's name (e.g. "gconf", "KDE", "test").
+    // Used only for diagnostic purposes (e.g. LOG(INFO) etc.).
+    virtual const char* GetDataSource() = 0;
 
     // Gets a string type value from gconf and stores it in
     // result. Returns false if the key is unset or on error. Must
@@ -62,6 +75,9 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
     // And for a string list.
     virtual bool GetStringList(const char* key,
                                std::vector<std::string>* result) = 0;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(GConfSettingGetter);
   };
 
   // ProxyConfigServiceLinux is created on the UI thread, and
@@ -87,9 +103,12 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
 
   class Delegate : public base::RefCountedThreadSafe<Delegate> {
    public:
+    // Constructor receives env var getter implementation to use, and
+    // takes ownership of it. This is the normal constructor.
+    explicit Delegate(base::EnvironmentVariableGetter* env_var_getter);
     // Constructor receives gconf and env var getter implementations
-    // to use, and takes ownership of them.
-    Delegate(EnvironmentVariableGetter* env_var_getter,
+    // to use, and takes ownership of them. Used for testing.
+    Delegate(base::EnvironmentVariableGetter* env_var_getter,
              GConfSettingGetter* gconf_getter);
     // Synchronously obtains the proxy configuration. If gconf is
     // used, also enables gconf notification for setting
@@ -97,13 +116,11 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
     // the default glib main loop, and so this method must be called
     // from the UI thread. The message loop for the IO thread is
     // specified so that notifications can post tasks to it (and for
-    // assertions).
+    // assertions). The message loop for the file thread is used to
+    // read any files needed to determine proxy settings.
     void SetupAndFetchInitialConfig(MessageLoop* glib_default_loop,
-                                    MessageLoop* io_loop);
-    // Resets cached_config_ and releases the gconf_getter_, making it
-    // possible to call SetupAndFetchInitialConfig() again. Only used
-    // in testing.
-    void Reset();
+                                    MessageLoop* io_loop,
+                                    MessageLoopForIO* file_loop);
 
     // Handler for gconf change notifications: fetches a new proxy
     // configuration from gconf settings, and if this config is
@@ -143,15 +160,11 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
     // and the configuration is valid.
     bool GetConfigFromGConf(ProxyConfig* config);
 
-    // Returns true if environment variables indicate that we are
-    // running GNOME (and therefore we want to use gconf settings).
-    bool ShouldTryGConf();
-
     // This method is posted from the UI thread to the IO thread to
     // carry the new config information.
     void SetNewProxyConfig(const ProxyConfig& new_config);
 
-    scoped_ptr<EnvironmentVariableGetter> env_var_getter_;
+    scoped_ptr<base::EnvironmentVariableGetter> env_var_getter_;
     scoped_ptr<GConfSettingGetter> gconf_getter_;
 
     // Cached proxy configuration, to be returned by
@@ -185,8 +198,10 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
 
   // Usual constructor
   ProxyConfigServiceLinux();
-  // For testing: takes alternate gconf and env var getter implementations.
-  ProxyConfigServiceLinux(EnvironmentVariableGetter* env_var_getter,
+  // For testing: take alternate gconf and env var getter implementations.
+  explicit ProxyConfigServiceLinux(
+      base::EnvironmentVariableGetter* env_var_getter);
+  ProxyConfigServiceLinux(base::EnvironmentVariableGetter* env_var_getter,
                           GConfSettingGetter* gconf_getter);
 
   virtual ~ProxyConfigServiceLinux() {
@@ -194,11 +209,10 @@ class ProxyConfigServiceLinux : public ProxyConfigService {
   }
 
   void SetupAndFetchInitialConfig(MessageLoop* glib_default_loop,
-                                  MessageLoop* io_loop) {
-    delegate_->SetupAndFetchInitialConfig(glib_default_loop, io_loop);
-  }
-  void Reset() {
-    delegate_->Reset();
+                                  MessageLoop* io_loop,
+                                  MessageLoopForIO* file_loop) {
+    delegate_->SetupAndFetchInitialConfig(glib_default_loop, io_loop,
+                                          file_loop);
   }
   void OnCheckProxyConfigSettings() {
     delegate_->OnCheckProxyConfigSettings();

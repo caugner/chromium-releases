@@ -47,14 +47,17 @@ class DownloadShelfContextMenu {
  public:
   virtual ~DownloadShelfContextMenu();
 
+  virtual DownloadItem* download() const { return download_; }
+
  protected:
   explicit DownloadShelfContextMenu(BaseDownloadItemModel* download_model);
 
   enum ContextMenuCommands {
-    SHOW_IN_FOLDER = 1,  // Open a file explorer window with the item selected
-    OPEN_WHEN_COMPLETE,  // Open the download when it's finished
-    ALWAYS_OPEN_TYPE,    // Default this file extension to always open
-    CANCEL,              // Cancel the download
+    SHOW_IN_FOLDER = 1,  // Open a file explorer window with the item selected.
+    OPEN_WHEN_COMPLETE,  // Open the download when it's finished.
+    ALWAYS_OPEN_TYPE,    // Default this file extension to always open.
+    CANCEL,              // Cancel the download.
+    TOGGLE_PAUSE,        // Temporarily pause a download.
     MENU_LAST
   };
 

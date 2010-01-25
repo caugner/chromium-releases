@@ -24,7 +24,6 @@ import common
 
 class TestNotFound(Exception): pass
 
-
 class ChromeTests:
 
   def __init__(self, options, args, test):
@@ -42,6 +41,10 @@ class ChromeTests:
 
     if test not in self._test_list:
       raise TestNotFound("Unknown test: %s" % test)
+
+    # Make sure tests running under purify are using the
+    # normal memory allocator instead of tcmalloc.
+    os.environ["CHROME_ALLOCATOR"] = "winheap"
 
     self._options = options
     self._args = args
@@ -84,37 +87,74 @@ class ChromeTests:
                               "--source_dir=%s" % (self._source_dir),
                               "--save_cache"]
 
+  def FindBuildDir(self, target, module, exe):
+    module_dir = os.path.join(self._source_dir, module)
+    dir_chrome = os.path.join(self._source_dir, "chrome", target)
+    dir_module = os.path.join(module_dir, target)
+    if not os.path.isdir(dir_chrome) and not os.path.isdir(dir_module):
+      return None
+
+    if exe:
+      exe_chrome = os.path.join(dir_chrome, exe)
+      exe_module = os.path.join(dir_module, exe)
+      if not os.path.isfile(exe_chrome) and not os.path.isfile(exe_module):
+        return None
+      if os.path.isfile(exe_chrome) and not os.path.isfile(exe_module):
+        return dir_chrome
+      elif os.path.isfile(exe_module) and not os.path.isfile(exe_chrome):
+        return dir_module
+      elif (os.stat(exe_module)[stat.ST_MTIME] >
+            os.stat(exe_chrome)[stat.ST_MTIME]):
+        return dir_module
+      else:
+        return dir_chrome
+    else:
+      if os.path.isdir(dir_chrome) and not os.path.isdir(dir_module):
+        return dir_chrome
+      elif os.path.isdir(dir_module) and not os.path.isdir(dir_chrome):
+        return dir_module
+      elif (os.stat(dir_module)[stat.ST_MTIME] >
+            os.stat(dir_chrome)[stat.ST_MTIME]):
+        return dir_module
+      else:
+        return dir_chrome
+
   def ComputeBuildDir(self, module, exe=None):
     ''' Computes the build dir for the given module / exe '''
     if self._options.build_dir:
       self._build_dir = self._options.build_dir
       return self._build_dir
-    # Recompute _build_dir since the module and exe might have changed from
-    # a previous call (we might be running multiple tests).
-    module_dir = os.path.join(self._source_dir, module)
-    dir_chrome = os.path.join(self._source_dir, "chrome", "Release")
-    dir_module = os.path.join(module_dir, "Release")
-    if exe:
-      exe_chrome = os.path.join(dir_chrome, exe)
-      exe_module = os.path.join(dir_module, exe)
-      if os.path.isfile(exe_chrome) and not os.path.isfile(exe_module):
-        self._build_dir = dir_chrome
-      elif os.path.isfile(exe_module) and not os.path.isfile(exe_chrome):
-        self._build_dir = dir_module
-      elif os.stat(exe_module)[stat.ST_MTIME] > os.stat(exe_chrome)[stat.ST_MTIME]:
-        self._build_dir = dir_module
+
+    # Use whatever build dir matches and was built most recently.  We prefer
+    # the 'Purify' build dir, so warn in other cases.
+    dirs = []
+    dir = self.FindBuildDir("Purify", module, exe)
+    if dir:
+      dirs.append(dir)
+    dir = self.FindBuildDir("Release", module, exe)
+    if dir:
+      dirs.append(dir)
+    dir = self.FindBuildDir("Debug", module, exe)
+    if dir:
+      dirs.append(dir)
+    while True:
+      if len(dirs) == 0:
+        raise Exception("Can't find appropriate build dir")
+      if len(dirs) == 1:
+        self._build_dir = dirs[0]
+        if self._build_dir.endswith("Debug"):
+          logging.warning("Using Debug build.  "
+                          "This is not recommended under Purify.")
+        elif self._build_dir.endswith("Release"):
+          logging.warning("Using Release build.  "
+                          "Consider building the 'Purify' target instead since "
+                          "you don't need to worry about setting a magic "
+                          "environment variable for it to behave correctly.")
+        return self._build_dir
+      if os.stat(dirs[0])[stat.ST_MTIME] > os.stat(dirs[1])[stat.ST_MTIME]:
+        dirs.remove(dirs[0])
       else:
-        self._build_dir = dir_chrome
-    else:
-      if os.path.isdir(dir_chrome) and not os.path.isdir(dir_module):
-        self._build_dir = dir_chrome
-      elif os.path.isdir(dir_module) and not os.path.isdir(dir_chrome):
-        self._build_dir = dir_module
-      elif os.stat(dir_module)[stat.ST_MTIME] > os.stat(dir_chrome)[stat.ST_MTIME]:
-        self._build_dir = dir_module
-      else:
-        self._build_dir = dir_chrome
-    return self._build_dir;
+        dirs.remove(dirs[1])
 
   def _DefaultCommand(self, module, exe=None):
     '''Generates the default command array that most tests will use.'''
@@ -132,6 +172,9 @@ class ChromeTests:
       cmd.append("--baseline")
     if self._options.verbose:
       cmd.append("--verbose")
+
+    # Recompute _build_dir since the module and exe might have changed from
+    # a previous call (we might be running multiple tests).
     self.ComputeBuildDir(module, exe);
     if exe:
       cmd.append(os.path.join(self._build_dir, exe))
@@ -168,16 +211,25 @@ class ChromeTests:
     if gtest_filter:
       cmd.append("--gtest_filter=%s" % gtest_filter)
 
-  def SimpleTest(self, module, name):
+  def SimpleTest(self, module, name, total_shards=None):
     cmd = self._DefaultCommand(module, name)
-    if not self._options.run_singly:
+    exe = cmd[-1]
+    current_path = os.path.dirname(sys.argv[0])
+
+    # TODO(nsylvain): Add a flag to disable this.
+    if total_shards:
+      script = ["python.exe",
+                os.path.join(current_path, "sharded_test_runner.py"), exe,
+                str(total_shards)]
+      return self.ScriptedTest(module, name, name, script, multi=True)
+    elif  self._options.run_singly:
+      script = ["python.exe",
+                os.path.join(current_path, "test_runner.py"), exe]
+      return self.ScriptedTest(module, name, name, script, multi=True)
+    else:
       self._ReadGtestFilterFile(name, cmd)
       cmd.append("--gtest_print_time")
       return common.RunSubprocess(cmd, 0)
-    else:
-      exe = cmd[-1]
-      script = ["python.exe", "test_runner.py", exe]
-      return self.ScriptedTest(module, exe, name, script, multi=True)
 
   def ScriptedTest(self, module, exe, name, script, multi=False, cmd_args=None,
                    out_dir_extra=None):
@@ -246,7 +298,7 @@ class ChromeTests:
     return self.SimpleTest("webkit", "test_shell_tests.exe")
 
   def TestUnit(self):
-    return self.SimpleTest("chrome", "unit_tests.exe")
+    return self.SimpleTest("chrome", "unit_tests.exe", total_shards=5)
 
   def TestLayoutAll(self):
     return self.TestLayout(run_all=True)
@@ -284,9 +336,6 @@ class ChromeTests:
     script_cmd = ["python.exe", script, "--run-singly", "-v",
                   "--noshow-results", "--time-out-ms=200000",
                   "--nocheck-sys-deps"]
-    if not run_all:
-      script_cmd.append("--run-chunk=%d:%d" % (chunk_num, chunk_size))
-
     if len(self._args):
       # if the arg is a txt file, then treat it as a list of tests
       if os.path.isfile(self._args[0]) and self._args[0][-4:] == ".txt":
@@ -299,8 +348,14 @@ class ChromeTests:
                               script_cmd, multi=True, cmd_args=["--timeout=0"])
       return ret
 
-    # store each chunk in its own directory so that we can find the data later
+    # Store each chunk in its own directory so that we can find the data later.
     chunk_dir = os.path.join("chunk_%05d" % chunk_num)
+    script_cmd.append("--run-chunk=%d:%d" % (chunk_num, chunk_size))
+
+    # Put the layout test results in the chunk dir as well.
+    script_cmd.append("--results-dir=%s" % os.path.join(self._report_dir,
+                                                        chunk_dir));
+
     ret = self.ScriptedTest("webkit", "test_shell.exe", "layout",
                             script_cmd, multi=True, cmd_args=["--timeout=0"],
                             out_dir_extra=chunk_dir)
@@ -344,6 +399,10 @@ class ChromeTests:
                              multi=True)
 
   def TestUI(self):
+    # If --gtest_filter is set, then we need to ignore the batch index.
+    if self._options.gtest_filter:
+      return self.TestUIAll()
+
     # Similar to layout test, we run a slice of UI tests with each run.
     # This is achieved by using --batch-count (total number of slices) and
     # --batch-index (current slice index) command line switches of UI tests.

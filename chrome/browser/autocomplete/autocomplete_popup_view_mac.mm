@@ -4,23 +4,63 @@
 
 #include "chrome/browser/autocomplete/autocomplete_popup_view_mac.h"
 
+#include "app/gfx/text_elider.h"
+#include "app/resource_bundle.h"
 #include "base/sys_string_conversions.h"
+#include "base/gfx/rect.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_mac.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/cocoa/nsimage_cache.h"
+#include "chrome/browser/bubble_positioner.h"
+#include "chrome/browser/cocoa/event_utils.h"
+#include "grit/theme_resources.h"
 
 namespace {
 
+// The size delta between the font used for the edit and the result
+// rows.
+const int kEditFontAdjust = -1;
+
+// How much to adjust the cell sizing up from the default determined
+// by the font.
+const int kCellHeightAdjust = 7.0;
+
+// How to round off the popup's corners.  Goal is to match star and go
+// buttons.
+const CGFloat kPopupRoundingRadius = 3.5;
+
+// Gap between the field and the popup.
+const CGFloat kPopupFieldGap = 2.0;
+
+// How opaque the popup window should be.  This matches Windows (see
+// autocomplete_popup_contents_view.cc, kGlassPopupTransparency).
+const CGFloat kPopupAlpha = 240.0 / 255.0;
+
+// How much space to leave for the left and right margins.
+const CGFloat kLeftRightMargin = 8.0;
+
+// How far to offset the text column from the left.
+const CGFloat kTextXOffset = 33.0;
+
+// Animation duration when animating the popup window smaller.
+const float kShrinkAnimationDuration = 0.1;
+
+// Maximum fraction of the popup width that can be used to display match
+// contents.
+const float kMaxContentsFraction = 0.7;
+
+// NSEvent -buttonNumber for middle mouse button.
+const static NSInteger kMiddleButtonNumber(2);
+
 // Background colors for different states of the popup elements.
 NSColor* BackgroundColor() {
-  return [NSColor controlBackgroundColor];
+  return [[NSColor controlBackgroundColor] colorWithAlphaComponent:kPopupAlpha];
 }
 NSColor* SelectedBackgroundColor() {
-  return [NSColor selectedControlColor];
+  return [[NSColor selectedControlColor] colorWithAlphaComponent:kPopupAlpha];
 }
 NSColor* HoveredBackgroundColor() {
-  return [NSColor controlColor];
+  return [[NSColor controlHighlightColor] colorWithAlphaComponent:kPopupAlpha];
 }
 
 // TODO(shess): These are totally unprincipled.  I experimented with
@@ -37,32 +77,45 @@ static const NSColor* DescriptionTextColor() {
   return [NSColor darkGrayColor];
 }
 
+// Helper to fetch and retain an image from the resource bundle.
+NSImage* RetainedResourceImage(int resource_id) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  NSImage* image = rb.GetNSImageNamed(resource_id);
+  DCHECK(image);
+  return [image retain];
+}
+
 // Return the appropriate icon for the given match.  Derived from the
 // gtk code.
 NSImage* MatchIcon(const AutocompleteMatch& match) {
   if (match.starred) {
-    return nsimage_cache::ImageNamed(@"o2_star.png");
+    static NSImage* starImage = RetainedResourceImage(IDR_O2_STAR);
+    return starImage;
   }
 
   switch (match.type) {
     case AutocompleteMatch::URL_WHAT_YOU_TYPED:
     case AutocompleteMatch::NAVSUGGEST: {
-      return nsimage_cache::ImageNamed(@"o2_globe.png");
+      static NSImage* globeImage = RetainedResourceImage(IDR_O2_GLOBE);
+      return globeImage;
     }
     case AutocompleteMatch::HISTORY_URL:
     case AutocompleteMatch::HISTORY_TITLE:
     case AutocompleteMatch::HISTORY_BODY:
     case AutocompleteMatch::HISTORY_KEYWORD: {
-      return nsimage_cache::ImageNamed(@"o2_history.png");
+      static NSImage* historyImage = RetainedResourceImage(IDR_O2_HISTORY);
+      return historyImage;
     }
     case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
     case AutocompleteMatch::SEARCH_HISTORY:
     case AutocompleteMatch::SEARCH_SUGGEST:
     case AutocompleteMatch::SEARCH_OTHER_ENGINE: {
-      return nsimage_cache::ImageNamed(@"o2_search.png");
+      static NSImage* searchImage = RetainedResourceImage(IDR_O2_SEARCH);
+      return searchImage;
     }
     case AutocompleteMatch::OPEN_HISTORY_PAGE: {
-      return nsimage_cache::ImageNamed(@"o2_more.png");
+      static NSImage* moreImage = RetainedResourceImage(IDR_O2_MORE);
+      return moreImage;
     }
     default:
       NOTREACHED();
@@ -80,14 +133,14 @@ NSImage* MatchIcon(const AutocompleteMatch& match) {
 NSMutableAttributedString* AutocompletePopupViewMac::DecorateMatchedString(
     const std::wstring &matchString,
     const AutocompleteMatch::ACMatchClassifications &classifications,
-    NSColor* textColor, NSFont* font) {
+    NSColor* textColor, gfx::Font& font) {
   // Cache for on-demand computation of the bold version of |font|.
   NSFont* boldFont = nil;
 
   // Start out with a string using the default style info.
   NSString* s = base::SysWideToNSString(matchString);
   NSDictionary* attributes = [NSDictionary dictionaryWithObjectsAndKeys:
-                                  font, NSFontAttributeName,
+                                  font.nativeFont(), NSFontAttributeName,
                                   textColor, NSForegroundColorAttributeName,
                                   nil];
   NSMutableAttributedString* as =
@@ -112,7 +165,8 @@ NSMutableAttributedString* AutocompletePopupViewMac::DecorateMatchedString(
     if (0 != (i->style & ACMatchClassification::MATCH)) {
       if (!boldFont) {
         NSFontManager* fontManager = [NSFontManager sharedFontManager];
-        boldFont = [fontManager convertFont:font toHaveTrait:NSBoldFontMask];
+        boldFont = [fontManager convertFont:font.nativeFont()
+                                toHaveTrait:NSBoldFontMask];
       }
       [as addAttribute:NSFontAttributeName value:boldFont range:range];
     }
@@ -121,33 +175,78 @@ NSMutableAttributedString* AutocompletePopupViewMac::DecorateMatchedString(
   return as;
 }
 
+NSMutableAttributedString* AutocompletePopupViewMac::ElideString(
+    NSMutableAttributedString* aString,
+    const std::wstring originalString,
+    const gfx::Font& font,
+    const float width) {
+  // If it already fits, nothing to be done.
+  if ([aString size].width <= width) {
+    return aString;
+  }
+
+  // If ElideText() decides to do nothing, nothing to be done.
+  const std::wstring elided(ElideText(originalString, font, width));
+  if (0 == elided.compare(originalString)) {
+    return aString;
+  }
+
+  // If everything was elided away, clear the string.
+  if (elided.size() == 0) {
+    [aString deleteCharactersInRange:NSMakeRange(0, [aString length])];
+    return aString;
+  }
+
+  // The ellipses should be the last character, and everything before
+  // that should match the original string.
+  const size_t i(elided.size() - 1);
+  DCHECK(0 != elided.compare(0, i, originalString));
+
+  // Replace the end of |aString| with the ellipses from |elided|.
+  NSString* s = base::SysWideToNSString(elided.substr(i));
+  [aString replaceCharactersInRange:NSMakeRange(i, [aString length] - i)
+                         withString:s];
+
+  return aString;
+}
+
 // Return the text to show for the match, based on the match's
 // contents and description.  Result will be in |font|, with the
 // boldfaced version used for matches.
 NSAttributedString* AutocompletePopupViewMac::MatchText(
-    const AutocompleteMatch& match, NSFont* font) {
+    const AutocompleteMatch& match, gfx::Font& font, float cellWidth) {
   NSMutableAttributedString *as =
-      DecorateMatchedString(match.contents, match.contents_class,
+      DecorateMatchedString(match.contents,
+                            match.contents_class,
                             ContentTextColor(), font);
 
   // If there is a description, append it, separated from the contents
-  // with an em dash, and decorated with a distinct color.
+  // with an en dash, and decorated with a distinct color.
   if (!match.description.empty()) {
+    // Make sure the current string fits w/in kMaxContentsFraction of
+    // the cell to make sure the description will be at least
+    // partially visible.
+    // TODO(shess): Consider revising our NSCell subclass to have two
+    // bits and just draw them right, rather than truncating here.
+    const float textWidth = cellWidth - kTextXOffset - kLeftRightMargin;
+    as = ElideString(as, match.contents, font,
+                     textWidth * kMaxContentsFraction);
+
     NSDictionary* attributes =
         [NSDictionary dictionaryWithObjectsAndKeys:
-             font, NSFontAttributeName,
+             font.nativeFont(), NSFontAttributeName,
              ContentTextColor(), NSForegroundColorAttributeName,
              nil];
-    NSString* rawEmDash = [NSString stringWithFormat:@" %C ", 0x2014];
-    NSAttributedString* emDash =
-        [[[NSAttributedString alloc] initWithString:rawEmDash
+    NSString* rawEnDash = [NSString stringWithFormat:@" %C ", 0x2013];
+    NSAttributedString* enDash =
+        [[[NSAttributedString alloc] initWithString:rawEnDash
                                          attributes:attributes] autorelease];
 
     NSAttributedString* description =
         DecorateMatchedString(match.description, match.description_class,
                               DescriptionTextColor(), font);
 
-    [as appendAttributedString:emDash];
+    [as appendAttributedString:enDash];
     [as appendAttributedString:description];
   }
 
@@ -172,7 +271,16 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
 // highlighting the cell the mouse is over.
 
 @interface AutocompleteMatrix : NSMatrix {
+  SEL middleClickAction_;
 }
+
+// Action to be called when the middle mouse button is released.
+- (void)setMiddleClickAction:(SEL)anAction;
+
+// Return the currently highlighted row.  Returns -1 if no row is
+// highlighted.
+- (NSInteger)highlightedRow;
+
 @end
 
 // Thin Obj-C bridge class between the target of the popup window's
@@ -189,23 +297,29 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
 - initWithPopupView:(AutocompletePopupViewMac*)view;
 
 // Tell popup model via popup_view_ about the selected row.
-- (void)select:sender;
+- (void)select:(id)sender;
+
+// Call |popup_view_| OnMiddleClick().
+- (void)middleSelect:(id)sender;
+
 @end
 
 AutocompletePopupViewMac::AutocompletePopupViewMac(
     AutocompleteEditViewMac* edit_view,
     AutocompleteEditModel* edit_model,
+    const BubblePositioner* bubble_positioner,
     Profile* profile,
     NSTextField* field)
     : model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
+      bubble_positioner_(bubble_positioner),
       field_(field),
       matrix_target_([[AutocompleteMatrixTarget alloc] initWithPopupView:this]),
       popup_(nil) {
   DCHECK(edit_view);
   DCHECK(edit_model);
   DCHECK(profile);
-  edit_model->set_popup_model(model_.get());
+  edit_model->SetPopupModel(model_.get());
 }
 
 AutocompletePopupViewMac::~AutocompletePopupViewMac() {
@@ -232,7 +346,11 @@ void AutocompletePopupViewMac::CreatePopupIfNeeded() {
                                                backing:NSBackingStoreBuffered
                                                  defer:YES]);
     [popup_ setMovableByWindowBackground:NO];
-    [popup_ setOpaque:YES];
+    // The window shape is determined by the content view
+    // (AutocompleteMatrix).
+    [popup_ setAlphaValue:1.0];
+    [popup_ setOpaque:NO];
+    [popup_ setBackgroundColor:[NSColor clearColor]];
     [popup_ setHasShadow:YES];
     [popup_ setLevel:NSNormalWindowLevel];
 
@@ -240,6 +358,7 @@ void AutocompletePopupViewMac::CreatePopupIfNeeded() {
         [[[AutocompleteMatrix alloc] initWithFrame:NSZeroRect] autorelease];
     [matrix setTarget:matrix_target_];
     [matrix setAction:@selector(select:)];
+    [matrix setMiddleClickAction:@selector(middleSelect:)];
     [popup_ setContentView:matrix];
   }
 }
@@ -261,7 +380,21 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
 
   CreatePopupIfNeeded();
 
-  // Load the results into the popup's matrix.
+  // Layout the popup and size it to land underneath the field.
+  NSRect r =
+      NSRectFromCGRect(bubble_positioner_->GetLocationStackBounds().ToCGRect());
+  r.origin = [[field_ window] convertBaseToScreen:r.origin];
+  DCHECK_GT(r.size.width, 0.0);
+
+  // The popup's font is a slightly smaller version of what |field_|
+  // uses.
+  NSFont* fieldFont = [field_ font];
+  const CGFloat resultFontSize = [fieldFont pointSize] + kEditFontAdjust;
+  gfx::Font resultFont = gfx::Font::CreateFont(
+      base::SysNSStringToWide([fieldFont fontName]), (int)resultFontSize);
+
+  // Load the results into the popup's matrix.  The popup window must be
+  // correctly sized before calling MatchText().
   AutocompleteMatrix* matrix = [popup_ contentView];
   const size_t rows = model_->result().size();
   DCHECK_GT(rows, 0U);
@@ -270,38 +403,40 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
     AutocompleteButtonCell* cell = [matrix cellAtRow:ii column:0];
     const AutocompleteMatch& match = model_->result().match_at(ii);
     [cell setImage:MatchIcon(match)];
-    [cell setAttributedTitle:MatchText(match, [field_ font])];
+    [cell setAttributedTitle:MatchText(match, resultFont, r.size.width)];
   }
-
-  // Layout the popup and size it to land underneath the field.
-  // TODO(shess) Consider refactoring to remove this depenency,
-  // because the popup doesn't need any of the field-like aspects of
-  // field_.  The edit view could expose helper methods for attaching
-  // the window to the field.
-
-  // Locate |field_| on the screen.
-  NSRect r = [field_ convertRect:[field_ bounds] toView:nil];
-  r.origin = [[field_ window] convertBaseToScreen:r.origin];
-  DCHECK_GT(r.size.width, 0.0);
 
   // Set the cell size to fit a line of text in the cell's font.  All
   // cells should use the same font and each should layout in one
   // line, so they should all be about the same height.
   const NSSize cellSize = [[matrix cellAtRow:0 column:0] cellSize];
   DCHECK_GT(cellSize.height, 0.0);
-  [matrix setCellSize:NSMakeSize(r.size.width, cellSize.height)];
+  [matrix setCellSize:NSMakeSize(r.size.width,
+                                 cellSize.height + kCellHeightAdjust)];
 
   // Make the matrix big enough to hold all the cells.
   [matrix sizeToCells];
 
   // Make the window just as big.
   r.size.height = [matrix frame].size.height;
-  r.origin.y -= r.size.height + 2;
+  r.origin.y -= r.size.height + kPopupFieldGap;
 
   // Update the selection.
   PaintUpdatesNow();
 
-  [popup_ setFrame:r display:YES];
+  // Animate the frame change if the only change is that the height got smaller.
+  // Otherwise, resize immediately.
+  NSRect oldFrame = [popup_ frame];
+  if (r.size.height < oldFrame.size.height &&
+      r.origin.x == oldFrame.origin.x &&
+      r.size.width == oldFrame.size.width) {
+    [NSAnimationContext beginGrouping];
+    [[NSAnimationContext currentContext] setDuration:kShrinkAnimationDuration];
+    [[popup_ animator] setFrame:r display:YES];
+    [NSAnimationContext endGrouping];
+  } else {
+    [popup_ setFrame:r display:YES];
+  }
 
   if (!IsOpen()) {
     [[field_ window] addChildWindow:popup_ ordered:NSWindowAbove];
@@ -329,8 +464,28 @@ void AutocompletePopupViewMac::AcceptInput() {
     PaintUpdatesNow();
   } else {
     model_->SetSelectedLine(selectedRow, false);
-    edit_view_->AcceptInput(CURRENT_TAB, false);
+    WindowOpenDisposition disposition =
+        event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+    edit_view_->AcceptInput(disposition, false);
   }
+}
+
+void AutocompletePopupViewMac::OnMiddleClick() {
+  const NSInteger row = [[popup_ contentView] highlightedRow];
+  if (row == -1) {
+    return;
+  }
+
+  // OpenURL() may close the popup, which will clear the result set
+  // and, by extension, |match| and its contents.  So copy the
+  // relevant strings out to make sure they stay alive until the call
+  // completes.
+  const AutocompleteMatch& match = model_->result().match_at(row);
+  const GURL url(match.destination_url);
+  std::wstring keyword;
+  const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
+  edit_view_->OpenURL(url, NEW_BACKGROUND_TAB, match.transition, GURL(), row,
+                      is_keyword_hint ? std::wstring() : keyword);
 }
 
 @implementation AutocompleteButtonCell
@@ -355,6 +510,41 @@ void AutocompletePopupViewMac::AcceptInput() {
     return HoveredBackgroundColor();
   }
   return BackgroundColor();
+}
+
+// The default NSButtonCell drawing leaves the image flush left and
+// the title next to the image.  This spaces things out to line up
+// with the star button and autocomplete field.
+// TODO(shess): Determine if the star button can change size (other
+// than scaling coordinates), in which case this needs to be more
+// dynamic.
+- (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView *)controlView {
+  [[self backgroundColor] set];
+  NSRectFill(cellFrame);
+
+  // Put the image centered vertically but in a fixed column.
+  // TODO(shess) Currently, the images are all 16x16 png files, so
+  // left-justified works out fine.  If that changes, it may be
+  // appropriate to align them on their centers instead of their
+  // left-hand sides.
+  NSImage* image = [self image];
+  if (image) {
+    NSRect imageRect = cellFrame;
+    imageRect.size = [image size];
+    imageRect.origin.y +=
+        floor((NSHeight(cellFrame) - NSHeight(imageRect)) / 2);
+    imageRect.origin.x += kLeftRightMargin;
+    [self drawImage:image withFrame:imageRect inView:controlView];
+  }
+
+  // Adjust the title position to be lined up under the field's text.
+  NSAttributedString* title = [self attributedTitle];
+  if (title) {
+    NSRect titleRect = cellFrame;
+    titleRect.size.width -= (kTextXOffset + kLeftRightMargin);
+    titleRect.origin.x += kTextXOffset;
+    [self drawTitle:title withFrame:titleRect inView:controlView];
+  }
 }
 
 @end
@@ -394,7 +584,9 @@ void AutocompletePopupViewMac::AcceptInput() {
   if (self) {
     [self setCellClass:[AutocompleteButtonCell class]];
 
-    [self setIntercellSpacing:NSMakeSize(1.0, 1.0)];
+    // Cells pack with no spacing.
+    [self setIntercellSpacing:NSMakeSize(0.0, 0.0)];
+
     [self setDrawsBackground:YES];
     [self setBackgroundColor:BackgroundColor()];
     [self renewRows:0 columns:1];
@@ -438,6 +630,70 @@ void AutocompletePopupViewMac::AcceptInput() {
   [self highlightRowAt:-1];
 }
 
+// The tracking area events aren't forwarded during a drag, so handle
+// highlighting manually for middle-click and middle-drag.
+- (void)otherMouseDown:(NSEvent*)theEvent {
+  if ([theEvent buttonNumber] == kMiddleButtonNumber) {
+    [self highlightRowUnder:theEvent];
+  }
+  [super otherMouseDown:theEvent];
+}
+- (void)otherMouseDragged:(NSEvent*)theEvent {
+  if ([theEvent buttonNumber] == kMiddleButtonNumber) {
+    [self highlightRowUnder:theEvent];
+  }
+  [super otherMouseDragged:theEvent];
+}
+
+- (void)otherMouseUp:(NSEvent*)theEvent {
+  // Only intercept middle button.
+  if ([theEvent buttonNumber] != kMiddleButtonNumber) {
+    [super otherMouseUp:theEvent];
+    return;
+  }
+
+  // -otherMouseDragged: should always have been called at this
+  // location, but make sure the user is getting the right feedback.
+  [self highlightRowUnder:theEvent];
+
+  // This does the right thing if target is nil.
+  [NSApp sendAction:middleClickAction_ to:[self target] from:self];
+}
+
+- (NSInteger)highlightedRow {
+  NSArray* cells = [self cells];
+  const NSUInteger count = [cells count];
+  for(NSUInteger i = 0; i < count; ++i) {
+    if ([[cells objectAtIndex:i] isHighlighted]) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+- (void)setMiddleClickAction:(SEL)anAction {
+  middleClickAction_ = anAction;
+}
+
+- (BOOL)isOpaque {
+  return NO;
+}
+
+// This handles drawing the decorations of the rounded popup window,
+// calling on NSMatrix to draw the actual contents.
+- (void)drawRect:(NSRect)rect {
+  NSBezierPath* path =
+      [NSBezierPath bezierPathWithRoundedRect:[self bounds]
+                                      xRadius:kPopupRoundingRadius
+                                      yRadius:kPopupRoundingRadius];
+
+  // Draw the matrix clipped to our border.
+  [NSGraphicsContext saveGraphicsState];
+  [path addClip];
+  [super drawRect:rect];
+  [NSGraphicsContext restoreGraphicsState];
+}
+
 @end
 
 @implementation AutocompleteMatrixTarget
@@ -450,9 +706,19 @@ void AutocompletePopupViewMac::AcceptInput() {
   return self;
 }
 
-- (void)select:sender {
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [super dealloc];
+}
+
+- (void)select:(id)sender {
   DCHECK(popup_view_);
   popup_view_->AcceptInput();
+}
+
+- (void)middleSelect:(id)sender {
+  DCHECK(popup_view_);
+  popup_view_->OnMiddleClick();
 }
 
 @end

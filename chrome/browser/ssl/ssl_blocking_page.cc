@@ -12,6 +12,7 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/ssl/ssl_cert_error_handler.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
@@ -81,7 +82,7 @@ std::string SSLBlockingPage::GetHTMLContents() {
       (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
        L"rtl" : L"ltr");
 
-  static const StringPiece html(
+  static const base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SSL_ROAD_BLOCK_HTML));
 
@@ -91,7 +92,7 @@ std::string SSLBlockingPage::GetHTMLContents() {
 void SSLBlockingPage::UpdateEntry(NavigationEntry* entry) {
   const net::SSLInfo& ssl_info = handler_->ssl_info();
   int cert_id = CertStore::GetSharedInstance()->StoreCert(
-      ssl_info.cert, tab()->render_view_host()->process()->pid());
+      ssl_info.cert, tab()->render_view_host()->process()->id());
 
   entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
   entry->ssl().set_cert_id(cert_id);

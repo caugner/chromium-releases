@@ -74,6 +74,12 @@ View::~View() {
     else
       child_views_[c]->SetParent(NULL);
   }
+
+#if defined(OS_WIN)
+  if (accessibility_.get()) {
+    accessibility_->Uninitialize();
+  }
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -274,6 +280,14 @@ bool View::HasFocus() {
   if (focus_manager)
     return focus_manager->GetFocusedView() == this;
   return false;
+}
+
+void View::Focus() {
+  // By default, we clear the native focus. This ensures that no visible native
+  // view as the focus and that we still receive keyboard inputs.
+  FocusManager* focus_manager = GetFocusManager();
+  if (focus_manager)
+    focus_manager->ClearNativeFocus();
 }
 
 void View::SetHotTracked(bool flag) {
@@ -554,6 +568,20 @@ void View::RemoveAllChildViews(bool delete_views) {
   UpdateTooltip();
 }
 
+void View::DoDrag(const MouseEvent& e, int press_x, int press_y) {
+  int drag_operations = GetDragOperations(press_x, press_y);
+  if (drag_operations == DragDropTypes::DRAG_NONE)
+    return;
+
+  OSExchangeData data;
+  WriteDragData(press_x, press_y, &data);
+
+  // Message the RootView to do the drag and drop. That way if we're removed
+  // the RootView can detect it and avoid calling us back.
+  RootView* root_view = GetRootView();
+  root_view->StartDragForViewFromMouseEvent(this, data, drag_operations);
+}
+
 void View::DoRemoveChildView(View* a_view,
                              bool update_focus_cycle,
                              bool update_tool_tip,
@@ -769,6 +797,8 @@ int View::GetID() const {
 }
 
 void View::SetGroup(int gid) {
+  // Don't change the group id once it's set.
+  DCHECK(group_ == -1 || group_ == gid);
   group_ = gid;
 }
 
@@ -964,8 +994,6 @@ void View::RemoveAccelerator(const Accelerator& accelerator) {
     return;
   }
 
-  // TODO(port): Fix this once we have a FocusManger for Linux.
-#if defined(OS_WIN)
   FocusManager* focus_manager = GetFocusManager();
   if (focus_manager) {
     // We may not have a FocusManager if the window containing us is being
@@ -973,7 +1001,6 @@ void View::RemoveAccelerator(const Accelerator& accelerator) {
     // nothing to unregister.
     focus_manager->UnregisterAccelerator(accelerator, this);
   }
-#endif
 }
 
 void View::ResetAccelerators() {
@@ -995,14 +1022,18 @@ void View::RegisterPendingAccelerators() {
     return;
   }
 
-  // TODO(port): Fix this once we have a FocusManger for Linux.
-#if defined(OS_WIN)
   FocusManager* focus_manager = GetFocusManager();
   if (!focus_manager) {
     // Some crash reports seem to show that we may get cases where we have no
     // focus manager (see bug #1291225).  This should never be the case, just
     // making sure we don't crash.
+
+    // TODO(jcampan): This fails for a view under WidgetGtk with TYPE_CHILD.
+    // (see http://crbug.com/21335) reenable NOTREACHED assertion and
+    // verify accelerators works as expected.
+#if defined(OS_WIN)
     NOTREACHED();
+#endif
     return;
   }
   std::vector<Accelerator>::const_iterator iter;
@@ -1011,7 +1042,6 @@ void View::RegisterPendingAccelerators() {
     focus_manager->RegisterAccelerator(*iter, this);
   }
   registered_accelerator_count_ = accelerators_->size();
-#endif
 }
 
 void View::UnregisterAccelerators() {
@@ -1020,8 +1050,6 @@ void View::UnregisterAccelerators() {
 
   RootView* root_view = GetRootView();
   if (root_view) {
-    // TODO(port): Fix this once we have a FocusManger for Linux.
-#if defined(OS_WIN)
     FocusManager* focus_manager = GetFocusManager();
     if (focus_manager) {
       // We may not have a FocusManager if the window containing us is being
@@ -1032,7 +1060,6 @@ void View::UnregisterAccelerators() {
     accelerators_->clear();
     accelerators_.reset();
     registered_accelerator_count_ = 0;
-#endif
   }
 }
 
@@ -1241,7 +1268,18 @@ DragController* View::GetDragController() {
   return drag_controller_;
 }
 
+bool View::GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats) {
+  return false;
+}
+
+bool View::AreDropTypesRequired() {
+  return false;
+}
+
 bool View::CanDrop(const OSExchangeData& data) {
+  // TODO(sky): when I finish up migration, this should default to true.
   return false;
 }
 

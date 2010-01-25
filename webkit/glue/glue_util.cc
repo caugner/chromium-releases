@@ -15,6 +15,7 @@
 
 #include <string>
 
+#include "AccessibilityObject.h"
 #include "ChromiumDataObject.h"
 #include "CString.h"
 #include "HistoryItem.h"
@@ -24,7 +25,9 @@
 #include "KURL.h"
 #include "Node.h"
 #include "PlatformString.h"
+#include "Range.h"
 #include "ResourceError.h"
+#include "SecurityOrigin.h"
 
 #undef LOG
 #include "base/compiler_specific.h"
@@ -33,13 +36,16 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/api/public/WebAccessibilityObject.h"
 #include "webkit/api/public/WebCursorInfo.h"
 #include "webkit/api/public/WebDragData.h"
 #include "webkit/api/public/WebForm.h"
 #include "webkit/api/public/WebHistoryItem.h"
 #include "webkit/api/public/WebNode.h"
 #include "webkit/api/public/WebPoint.h"
+#include "webkit/api/public/WebRange.h"
 #include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebSecurityOrigin.h"
 #include "webkit/api/public/WebSize.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
@@ -264,9 +270,11 @@ WTF::PassRefPtr<WebCore::HTMLFormElement> WebFormToHTMLFormElement(
 }
 
 // WebNode conversions ---------------------------------------------------------
+
 WebKit::WebNode NodeToWebNode(const WTF::PassRefPtr<WebCore::Node>& node) {
   return node;
 }
+
 WTF::PassRefPtr<WebCore::Node> WebNodeToNode(const WebKit::WebNode& node) {
   return node;
 }
@@ -281,6 +289,23 @@ WebKit::WebHistoryItem HistoryItemToWebHistoryItem(
 WTF::PassRefPtr<WebCore::HistoryItem> WebHistoryItemToHistoryItem(
     const WebKit::WebHistoryItem& item) {
   return item;
+}
+
+// WebRange conversions --------------------------------------------------------
+
+WebKit::WebRange RangeToWebRange(const WTF::PassRefPtr<WebCore::Range>& range) {
+  return range;
+}
+
+WTF::PassRefPtr<WebCore::Range> WebRangeToRange(const WebKit::WebRange& range) {
+  return range;
+}
+
+// WebSecurityOrigin conversions -----------------------------------------------
+
+WebKit::WebSecurityOrigin SecurityOriginToWebSecurityOrigin(
+    const WTF::PassRefPtr<WebCore::SecurityOrigin>& origin) {
+  return origin;
 }
 
 // WebURLError conversions -----------------------------------------------------
@@ -317,6 +342,18 @@ WebCore::ResourceResponse* WebURLResponseToMutableResourceResponse(
 const WebCore::ResourceResponse* WebURLResponseToResourceResponse(
     const WebKit::WebURLResponse* response) {
   return &response->toResourceResponse();
+}
+
+// WebAccessibilityObject conversions ------------------------------------------
+
+WebKit::WebAccessibilityObject AccessibilityObjectToWebAccessibilityObject(
+    const WTF::PassRefPtr<WebCore::AccessibilityObject>& object) {
+  return object;
+}
+
+WTF::PassRefPtr<WebCore::AccessibilityObject> WebAccessibilityObjectToAccessibilityObject(
+    const WebKit::WebAccessibilityObject& object) {
+  return object;
 }
 
 }  // namespace webkit_glue

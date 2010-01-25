@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,8 +117,10 @@ class ProfileManager : public NonThreadSafe,
   typedef ProfileVector::iterator iterator;
   typedef ProfileVector::const_iterator const_iterator;
 
-  const_iterator begin() { return profiles_.begin(); }
-  const_iterator end() { return profiles_.end(); }
+  iterator begin() { return profiles_.begin(); }
+  const_iterator begin() const { return profiles_.begin(); }
+  iterator end() { return profiles_.end(); }
+  const_iterator end() const { return profiles_.end(); }
 
   typedef std::vector<AvailableProfile*> AvailableProfileVector;
   const AvailableProfileVector& available_profiles() const {
@@ -129,9 +131,8 @@ class ProfileManager : public NonThreadSafe,
   void NewWindowWithProfile(Profile* profile);
 
   // PowerObserver notifications
-  void OnPowerStateChange(base::SystemMonitor*) {}
-  void OnSuspend(base::SystemMonitor*);
-  void OnResume(base::SystemMonitor*);
+  void OnSuspend();
+  void OnResume();
 
   // ------------------ static utility functions -------------------
 

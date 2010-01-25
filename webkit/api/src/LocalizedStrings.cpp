@@ -241,9 +241,25 @@ String contextMenuItemTagLeftToRight() { return String(); }
 String contextMenuItemTagRightToLeft() { return String(); }
 String contextMenuItemTagInspectElement() { return String(); }
 String contextMenuItemTagShowSpellingPanel(bool show) { return String(); }
-
-// FIXME: These should return something.
 String mediaElementLiveBroadcastStateText() { return String(); }
 String mediaElementLoadingStateText() { return String(); }
+
+String localizedMediaControlElementString(const String& /*name*/)
+{
+    // FIXME: to be fixed.
+    return String();
+}
+
+String localizedMediaControlElementHelpText(const String& /*name*/)
+{
+    // FIXME: to be fixed.
+    return String();
+}
+
+String localizedMediaTimeDescription(float /*time*/)
+{
+    // FIXME: to be fixed.
+    return String();
+}
 
 } // namespace WebCore

@@ -33,10 +33,10 @@ std::wstring AddBullet(const std::wstring& text) {
 
 }  // namespace
 
-FirstRunView::FirstRunView(Profile* profile,
-                           int import_items,
-                           int dont_import_items)
-    : FirstRunViewBase(profile, import_items, dont_import_items),
+FirstRunView::FirstRunView(Profile* profile, bool homepage_defined,
+                           int import_items, int dont_import_items)
+    : FirstRunViewBase(profile, homepage_defined, import_items,
+                       dont_import_items),
       welcome_label_(NULL),
       actions_label_(NULL),
       actions_import_(NULL),
@@ -58,6 +58,7 @@ void FirstRunView::SetupControls() {
   default_browser_->SetChecked(true);
 
   welcome_label_ = new Label(l10n_util::GetString(IDS_FIRSTRUN_DLG_TEXT));
+  welcome_label_->SetColor(SK_ColorBLACK);
   welcome_label_->SetMultiLine(true);
   welcome_label_->SetHorizontalAlignment(Label::ALIGN_LEFT);
   welcome_label_->SizeToFit(0);
@@ -156,6 +157,7 @@ void FirstRunView::OpenCustomizeDialog() {
                                 importer_host_,
                                 this,
                                 default_browser_->checked(),
+                                homepage_defined_,
                                 import_items_,
                                 dont_import_items_))->Show();
 }

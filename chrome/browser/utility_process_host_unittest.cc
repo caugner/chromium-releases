@@ -14,6 +14,8 @@
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -40,7 +42,6 @@ class TestUtilityProcessHostClient : public UtilityProcessHost::Client {
 
   virtual void OnUnpackExtensionSucceeded(const DictionaryValue& manifest) {
     success_ = true;
-    message_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask);
   }
 
   virtual void OnUnpackExtensionFailed(const std::string& error_message) {
@@ -75,12 +76,11 @@ class TestUtilityProcessHost : public UtilityProcessHost {
   }
 
  protected:
-  virtual std::wstring GetUtilityProcessCmd() {
+  virtual FilePath GetUtilityProcessCmd() {
     FilePath exe_path;
     PathService::Get(base::DIR_EXE, &exe_path);
-    exe_path = exe_path.AppendASCII(WideToASCII(
-        chrome::kBrowserProcessExecutablePath));
-    return exe_path.ToWStringHack();
+    exe_path = exe_path.Append(chrome::kHelperProcessExecutablePath);
+    return exe_path;
   }
 
   virtual bool UseSandbox() {
@@ -90,6 +90,42 @@ class TestUtilityProcessHost : public UtilityProcessHost {
  private:
 };
 
+class ProcessClosedObserver : public NotificationObserver {
+ public:
+  explicit ProcessClosedObserver(MessageLoop* message_loop)
+      : message_loop_(message_loop) {
+    registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
+                   NotificationService::AllSources());
+  }
+
+  void RunUntilClose(int child_id) {
+    child_id_ = child_id;
+    observed_ = false;
+    message_loop_->Run();
+    DCHECK(observed_);
+  }
+
+ private:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) {
+    DCHECK(type == NotificationType::CHILD_PROCESS_HOST_DISCONNECTED);
+    ChildProcessInfo* info = Details<ChildProcessInfo>(details).ptr();
+    if (info->id() == child_id_) {
+      observed_ = true;
+      message_loop_->Quit();
+    }
+  }
+
+  MessageLoop* message_loop_;
+  NotificationRegistrar registrar_;
+  int child_id_;
+  bool observed_;
+};
+
+#if !defined(OS_POSIX)
+// We should not run this on linux (crbug.com/22703) or MacOS (crbug.com/8102)
+// until problems related to autoupdate are fixed.
 TEST_F(UtilityProcessHostTest, ExtensionUnpacker) {
   // Copy the test extension into a temp dir and install from the temp dir.
   FilePath extension_file;
@@ -109,13 +145,15 @@ TEST_F(UtilityProcessHostTest, ExtensionUnpacker) {
   TestUtilityProcessHost* process_host =
       new TestUtilityProcessHost(client.get(), &message_loop_, &rdh);
   // process_host will delete itself when it's done.
+  ProcessClosedObserver observer(&message_loop_);
   process_host->StartExtensionUnpacker(
       temp_extension_dir.AppendASCII("theme.crx"));
-  message_loop_.Run();
+  observer.RunUntilClose(process_host->id());
   EXPECT_TRUE(client->success());
 
   // Clean up the temp dir.
   file_util::Delete(temp_extension_dir, true);
 }
+#endif
 
 }  // namespace

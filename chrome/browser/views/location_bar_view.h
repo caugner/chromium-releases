@@ -11,6 +11,7 @@
 #include "app/gfx/font.h"
 #include "base/gfx/rect.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/toolbar_model.h"
@@ -26,7 +27,7 @@
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
 #endif
 
-class AutocompletePopupPositioner;
+class BubblePositioner;
 class CommandUpdater;
 class GURL;
 class PageAction;
@@ -72,7 +73,7 @@ class LocationBarView : public LocationBar,
                   ToolbarModel* model,
                   Delegate* delegate,
                   bool popup_window_mode,
-                  AutocompletePopupPositioner* popup_positioner);
+                  const BubblePositioner* bubble_positioner);
   virtual ~LocationBarView();
 
   void Init();
@@ -124,14 +125,15 @@ class LocationBarView : public LocationBar,
   virtual void OnInputInProgress(bool in_progress) {
     delegate_->OnInputInProgress(in_progress);
   }
+  virtual void OnSetFocus();
   virtual SkBitmap GetFavIcon() const;
   virtual std::wstring GetTitle() const;
 
-  // Returns the accessibility role.
-  bool GetAccessibleRole(AccessibilityTypes::Role* role);
-
   // Overridden from views::View:
   virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e);
+  virtual bool GetAccessibleName(std::wstring* name);
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual void SetAccessibleName(const std::wstring& name);
 
   // Overridden from LocationBar:
   virtual void ShowFirstRunBubble(bool use_OEM_bubble);
@@ -143,6 +145,7 @@ class LocationBarView : public LocationBar,
   virtual void FocusLocation();
   virtual void FocusSearch();
   virtual void UpdatePageActions();
+  virtual void InvalidatePageActions();
   virtual void SaveStateToContents(TabContents* contents);
   virtual void Revert();
   virtual AutocompleteEditView* location_entry() {
@@ -151,6 +154,7 @@ class LocationBarView : public LocationBar,
   virtual LocationBarTesting* GetLocationBarForTesting() { return this; }
 
   // Overridden from LocationBarTesting:
+  virtual int PageActionCount() { return page_action_image_views_.size(); }
   virtual int PageActionVisibleCount();
 
   static const int kVertMargin;
@@ -252,9 +256,9 @@ class LocationBarView : public LocationBar,
   class ShowFirstRunBubbleTask;
 
   class LocationBarImageView : public views::ImageView,
-                               public InfoBubbleDelegate  {
-  public:
-    LocationBarImageView();
+                               public InfoBubbleDelegate {
+   public:
+    explicit LocationBarImageView(const BubblePositioner* bubble_positioner);
     virtual ~LocationBarImageView();
 
     // Overridden from view for the mouse hovering.
@@ -268,10 +272,10 @@ class LocationBarView : public LocationBar,
 
     virtual void ShowInfoBubble() = 0;
 
-  protected:
+   protected:
     void ShowInfoBubbleImpl(const std::wstring& text, SkColor text_color);
 
-  private:
+   private:
     friend class ShowInfoBubbleTask;
 
     // The currently shown info bubble if any.
@@ -280,6 +284,10 @@ class LocationBarView : public LocationBar,
     // A task used to display the info bubble when the mouse hovers on the
     // image.
     ShowInfoBubbleTask* show_info_bubble_task_;
+
+    // A positioner used to give the info bubble the correct target bounds.  The
+    // caller maintains ownership of this and must ensure it's kept alive.
+    const BubblePositioner* bubble_positioner_;
 
     DISALLOW_COPY_AND_ASSIGN(LocationBarImageView);
   };
@@ -296,7 +304,9 @@ class LocationBarView : public LocationBar,
       WARNING
     };
 
-    SecurityImageView(Profile* profile, ToolbarModel* model_);
+    SecurityImageView(Profile* profile,
+                      ToolbarModel* model_,
+                      const BubblePositioner* bubble_positioner);
     virtual ~SecurityImageView();
 
     // Sets the image that should be displayed.
@@ -332,11 +342,13 @@ class LocationBarView : public LocationBar,
 
   // PageActionImageView is used to display the icon for a given PageAction
   // and notify the extension when the icon is clicked.
-  class PageActionImageView : public LocationBarImageView {
-  public:
-    PageActionImageView(
-        LocationBarView* owner, Profile* profile,
-        const PageAction* page_action);
+  class PageActionImageView : public LocationBarImageView,
+                              public ImageLoadingTracker::Observer {
+   public:
+    PageActionImageView(LocationBarView* owner,
+                        Profile* profile,
+                        const ExtensionAction* page_action,
+                        const BubblePositioner* bubble_positioner);
     virtual ~PageActionImageView();
 
     // Overridden from view for the mouse hovering.
@@ -344,21 +356,17 @@ class LocationBarView : public LocationBar,
 
     // Overridden from LocationBarImageView.
     virtual void ShowInfoBubble();
+    virtual void Paint(gfx::Canvas* canvas);
+
+    // Overridden from ImageLoadingTracker.
+    virtual void OnImageLoaded(SkBitmap* image, size_t index);
 
     // Called to notify the PageAction that it should determine whether to be
     // visible or hidden. |contents| is the TabContents that is active, |url|
     // is the current page URL.
     void UpdateVisibility(TabContents* contents, GURL url);
 
-    // A callback for when the image has loaded.
-    void OnImageLoaded(SkBitmap* image, size_t index);
-
-  private:
-    // We load the images for the PageActions on the file thread. These tasks
-    // help with that.
-    class LoadImageTask;
-    class ImageLoadingTracker;
-
+   private:
     // The location bar view that owns us.
     LocationBarView* owner_;
 
@@ -367,7 +375,7 @@ class LocationBarView : public LocationBar,
 
     // The PageAction that this view represents. The PageAction is not owned by
     // us, it resides in the extension of this particular profile.
-    const PageAction* page_action_;
+    const ExtensionAction* page_action_;
 
     // The icons representing different states for the page action.
     std::vector<SkBitmap> page_action_icons_;
@@ -387,6 +395,7 @@ class LocationBarView : public LocationBar,
 
     DISALLOW_COPY_AND_ASSIGN(PageActionImageView);
   };
+  friend class PageActionImageView;
 
   // Both Layout and OnChanged call into this. This updates the contents
   // of the 3 views: selected_keyword, keyword_hint and type_search_view. If
@@ -429,10 +438,6 @@ class LocationBarView : public LocationBar,
 
   // Delete all page action views that we have created.
   void DeletePageActionViews();
-
-  // Retrieves a vector of all page actions, irrespective of which
-  // extension they belong to.
-  std::vector<PageAction*> GetPageActions();
 
   // Update the views for the Page Actions, to reflect state changes for
   // PageActions.
@@ -522,8 +527,13 @@ class LocationBarView : public LocationBar,
   // Used schedule a task for the first run info bubble.
   ScopedRunnableMethodFactory<LocationBarView> first_run_bubble_;
 
-  // The positioner that places the autocomplete popup.
-  AutocompletePopupPositioner* popup_positioner_;
+  // The positioner that places the omnibox and info bubbles.
+  const BubblePositioner* bubble_positioner_;
+
+  // Storage of string needed for accessibility.
+  std::wstring accessible_name_;
+
+  DISALLOW_COPY_AND_ASSIGN(LocationBarView);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_LOCATION_BAR_VIEW_H_

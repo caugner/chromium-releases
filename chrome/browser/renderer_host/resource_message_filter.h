@@ -1,39 +1,41 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_RESOURCE_MSG_FILTER_H_
 #define CHROME_BROWSER_RENDERER_HOST_RESOURCE_MSG_FILTER_H_
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 #include <string>
 #include <vector>
 
-#include "base/clipboard.h"
+#include "app/clipboard/clipboard.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
 #include "base/gfx/rect.h"
-#include "base/gfx/native_widget_types.h"
+#include "base/process.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
+#include "base/task.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/resolve_proxy_msg_helper.h"
-#include "chrome/browser/renderer_host/render_widget_helper.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/common/modal_dialog_event.h"
+#include "chrome/common/nacl_types.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/transport_dib.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "webkit/api/public/WebCache.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
 class AppCacheDispatcherHost;
 class AudioRendererHost;
-class Clipboard;
+class DatabaseDispatcherHost;
 class DOMStorageDispatcherHost;
 class ExtensionMessageService;
+class NotificationsPrefsCache;
 class Profile;
 class RenderWidgetHelper;
 class SpellChecker;
@@ -50,6 +52,9 @@ struct WebScreenInfo;
 }
 
 struct ViewHostMsg_ScriptedPrint_Params;
+#if defined(OS_LINUX)
+struct ViewHostMsg_DidPrintPage_Params;
+#endif
 
 // This class filters out incoming IPC messages for network requests and
 // processes them on the IPC thread.  As a result, network requests are not
@@ -68,6 +73,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   //        ResourceMessageFilter is 'given' ownership of the spellchecker
   //        object and must clean it up on exit.
   ResourceMessageFilter(ResourceDispatcherHost* resource_dispatcher_host,
+                        int child_id,
                         AudioRendererHost* audio_renderer_host,
                         PluginService* plugin_service,
                         printing::PrintJobManager* print_job_manager,
@@ -76,7 +82,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                         SpellChecker* spellchecker);
   virtual ~ResourceMessageFilter();
 
-  void Init(int render_process_id);
+  void Init();
 
   // IPC::ChannelProxy::MessageFilter methods:
   virtual void OnFilterAdded(IPC::Channel* channel);
@@ -90,14 +96,16 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   virtual URLRequestContext* GetRequestContext(
       uint32 request_id,
       const ViewHostMsg_Resource_Request& request_data);
-  virtual int GetProcessId() const { return render_process_id_; }
 
   SpellChecker* spellchecker() { return spellchecker_.get(); }
   ResourceDispatcherHost* resource_dispatcher_host() {
     return resource_dispatcher_host_;
   }
-  MessageLoop* ui_loop() { return render_widget_helper_->ui_loop(); }
+  MessageLoop* ui_loop();
   bool off_the_record() { return off_the_record_; }
+  CallbackWithReturnValue<int>::Type* next_route_id_callback() {
+    return next_route_id_callback_.get();
+  }
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -105,8 +113,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                        const NotificationDetails& details);
 
  private:
-  void OnMsgCreateWindow(int opener_id, bool user_gesture, int* route_id,
-                         ModalDialogEvent* modal_dialog_event);
+  void OnMsgCreateWindow(int opener_id, bool user_gesture, int* route_id);
   void OnMsgCreateWidget(int opener_id, bool activatable, int* route_id);
   void OnSetCookie(const GURL& url,
                    const GURL& first_party_for_cookies,
@@ -114,12 +121,6 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetCookies(const GURL& url,
                     const GURL& first_party_for_cookies,
                     std::string* cookies);
-  void OnGetDataDir(std::wstring* data_dir);
-  void OnPluginMessage(const FilePath& plugin_path,
-                       const std::vector<uint8>& message);
-  void OnPluginSyncMessage(const FilePath& plugin_path,
-                           const std::vector<uint8>& message,
-                           std::vector<uint8> *retval);
   void OnPluginFileDialog(const IPC::Message& msg,
                           bool multiple_files,
                           const std::wstring& title,
@@ -136,18 +137,27 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   // Not handled in the IO thread on Mac.
   void OnGetScreenInfo(gfx::NativeViewId window, IPC::Message* reply);
 #endif
-  void OnGetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
+  void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
+  static void OnGetPluginsOnFileThread(ResourceMessageFilter* filter,
+                                       bool refresh,
+                                       IPC::Message* reply_msg);
+  static void OnNotifyPluginsLoaded(ResourceMessageFilter* filter,
+                                    IPC::Message* reply_msg);
+  void OnPluginsLoaded(IPC::Message* reply_msg);
   void OnGetPluginPath(const GURL& url,
                        const GURL& policy_url,
                        const std::string& mime_type,
-                       const std::string& clsid,
                        FilePath* filename,
                        std::string* actual_mime_type);
   void OnOpenChannelToPlugin(const GURL& url,
                              const std::string& mime_type,
-                             const std::string& clsid,
                              const std::wstring& locale,
                              IPC::Message* reply_msg);
+  void OnLaunchNaCl(const std::wstring& url,
+                    int channel_descriptor,
+                    nacl::FileDescriptor* handle,
+                    nacl::FileDescriptor* nacl_process_handle,
+                    int* nacl_process_id);
   void OnCreateDedicatedWorker(const GURL& url,
                                int render_view_route_id,
                                int* route_id);
@@ -156,22 +166,35 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnDownloadUrl(const IPC::Message& message,
                      const GURL& url,
                      const GURL& referrer);
-  void OnSpellCheck(const std::wstring& word,
-                    IPC::Message* reply_msg);
-  void OnGetAutoCorrectWord(const std::wstring& word,
+  void OnSpellCheck(const string16& word, int tag, IPC::Message* reply_msg);
+  void OnGetDocumentTag(IPC::Message* reply_msg);
+  void OnDocumentWithTagClosed(int tag);
+  void OnGetAutoCorrectWord(const string16& word, int tag,
                             IPC::Message* reply_msg);
+  void OnShowSpellingPanel(bool show);
+  void OnUpdateSpellingPanelWithMisspelledWord(const string16& word);
   void OnDnsPrefetch(const std::vector<std::string>& hostnames);
   void OnRendererHistograms(int sequence_number,
                             const std::vector<std::string>& histogram_info);
+#if defined(USE_TCMALLOC)
+  void OnRendererTcmalloc(base::ProcessId pid, const std::string& output);
+#endif
   void OnReceiveContextMenuMsg(const IPC::Message& msg);
   // Clipboard messages
   void OnClipboardWriteObjects(const Clipboard::ObjectMap& objects);
 
   void OnClipboardIsFormatAvailable(Clipboard::FormatType format,
+                                    Clipboard::Buffer buffer,
                                     IPC::Message* reply);
-  void OnClipboardReadText(IPC::Message* reply);
-  void OnClipboardReadAsciiText(IPC::Message* reply);
-  void OnClipboardReadHTML(IPC::Message* reply);
+  void OnClipboardReadText(Clipboard::Buffer buffer, IPC::Message* reply);
+  void OnClipboardReadAsciiText(Clipboard::Buffer buffer, IPC::Message* reply);
+  void OnClipboardReadHTML(Clipboard::Buffer buffer, IPC::Message* reply);
+#if defined(OS_MACOSX)
+  void OnClipboardFindPboardWriteString(const string16& text);
+#endif
+
+  void OnCheckNotificationPermission(const GURL& origin,
+                                     int* permission_level);
 
 #if !defined(OS_MACOSX)
   // Not handled in the IO thread on Mac.
@@ -185,9 +208,29 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetPreferredExtensionForMimeType(const std::string& mime_type,
                                           FilePath::StringType* ext);
   void OnGetCPBrowsingContext(uint32* context);
+
+#if defined(OS_WIN)
+  // Used to pass resulting EMF from renderer to browser in printing.
   void OnDuplicateSection(base::SharedMemoryHandle renderer_handle,
                           base::SharedMemoryHandle* browser_handle);
+#endif
+
+#if defined(OS_LINUX)
+  // Used to ask the browser allocate a temporary file for the renderer
+  // to fill in resulting PDF in renderer.
+  void OnAllocateTempFileForPrinting(IPC::Message* reply_msg);
+  void OnTempFileForPrintingWritten(int fd_in_browser);
+#endif
+#if defined(OS_MACOSX)
+  // Used to ask the browser to allocate a block of shared memory for the
+  // renderer to send PDF across in.
+  void OnAllocatePDFTransport(size_t buffer_size,
+                              base::SharedMemoryHandle* handle);
+#endif
+
   void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);
+  static void OnResourceTypeStatsOnUIThread(WebKit::WebCache::ResourceTypeStats,
+                                            base::ProcessId renderer_id);
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
@@ -203,7 +246,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetDefaultPrintSettingsReply(
       scoped_refptr<printing::PrinterQuery> printer_query,
       IPC::Message* reply_msg);
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   // A javascript code requested to print the current page. The renderer host
   // have to show to the user the print dialog and returns the selected print
   // settings.
@@ -219,7 +262,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                            TransportDIB::Handle* result);
   void OnFreeTransportDIB(TransportDIB::Id dib_id);
 
-  void OnOpenChannelToExtension(int routing_id, const std::string& extension_id,
+  void OnOpenChannelToExtension(int routing_id,
+                                const std::string& source_extension_id,
+                                const std::string& target_extension_id,
                                 const std::string& channel_name, int* port_id);
   void OnOpenChannelToTab(int routing_id, int tab_id,
                           const std::string& extension_id,
@@ -237,10 +282,13 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void DoOnGetWindowRect(gfx::NativeViewId view, IPC::Message* reply_msg);
   void DoOnGetRootWindowRect(gfx::NativeViewId view, IPC::Message* reply_msg);
   void DoOnClipboardIsFormatAvailable(Clipboard::FormatType format,
+                                      Clipboard::Buffer buffer,
                                       IPC::Message* reply_msg);
-  void DoOnClipboardReadText(IPC::Message* reply_msg);
-  void DoOnClipboardReadAsciiText(IPC::Message* reply_msg);
-  void DoOnClipboardReadHTML(IPC::Message* reply_msg);
+  void DoOnClipboardReadText(Clipboard::Buffer buffer, IPC::Message* reply_msg);
+  void DoOnClipboardReadAsciiText(Clipboard::Buffer buffer,
+                                  IPC::Message* reply_msg);
+  void DoOnClipboardReadHTML(Clipboard::Buffer buffer, IPC::Message* reply_msg);
+  void DoOnAllocateTempFileForPrinting(IPC::Message* reply_msg);
 #endif
 
   bool CheckBenchmarkingEnabled();
@@ -268,7 +316,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   // used by the ResourceDispatcherHost to look up the TabContents that
   // originated URLRequest.  Since the RenderProcessHost can be destroyed
   // before this object, we only hold an ID for lookup.
-  int render_process_id_;
+  int child_id_;
 
   // Our spellchecker object.
   scoped_refptr<SpellChecker> spellchecker_;
@@ -305,13 +353,23 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   scoped_refptr<AudioRendererHost> audio_renderer_host_;
 
   // Handles AppCache related messages.
-  scoped_ptr<AppCacheDispatcherHost> app_cache_dispatcher_host_;
+  scoped_ptr<AppCacheDispatcherHost> appcache_dispatcher_host_;
 
   // Handles DOM Storage related messages.
   scoped_refptr<DOMStorageDispatcherHost> dom_storage_dispatcher_host_;
 
+  // Handles HTML5 DB related messages
+  scoped_ptr<DatabaseDispatcherHost> db_dispatcher_host_;
+
+  // A cache of notifications preferences which is used to handle
+  // Desktop Notifications permission messages.
+  scoped_refptr<NotificationsPrefsCache> notification_prefs_;
+
   // Whether this process is used for off the record tabs.
   bool off_the_record_;
+
+  // A callback to create a routing id for the associated renderer process.
+  scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceMessageFilter);
 };

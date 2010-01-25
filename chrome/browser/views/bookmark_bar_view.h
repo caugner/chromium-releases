@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@
 
 #include "app/slide_animation.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/views/bookmark_menu_controller_views.h"
+#include "chrome/browser/views/detachable_toolbar_view.h"
 #include "chrome/common/notification_registrar.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/label.h"
@@ -32,7 +34,10 @@ class MenuItemView;
 // BookmarkBarView shows the bookmarks from a specific Profile. BookmarkBarView
 // waits until the HistoryService for the profile has been loaded before
 // creating the BookmarkModel.
-class BookmarkBarView : public views::View,
+class BookmarkBarView : public DetachableToolbarView,
+#if defined(BROWSER_SYNC)
+                        public ProfileSyncServiceObserver,
+#endif
                         public BookmarkModelObserver,
                         public views::ViewMenuDelegate,
                         public views::ButtonListener,
@@ -84,6 +89,13 @@ class BookmarkBarView : public views::View,
   // the bookmark bar.
   void SetPageNavigator(PageNavigator* navigator);
 
+  // DetachableToolbarView methods:
+  virtual bool IsDetached() const;
+  virtual bool IsOnTop() const;
+  virtual double GetAnimationValue() const {
+    return size_animation_->GetCurrentValue();
+  }
+
   // View methods:
   virtual gfx::Size GetPreferredSize();
   virtual gfx::Size GetMinimumSize();
@@ -91,13 +103,24 @@ class BookmarkBarView : public views::View,
   virtual void DidChangeBounds(const gfx::Rect& previous,
                                const gfx::Rect& current);
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
-  virtual void Paint(gfx::Canvas* canvas);
   virtual void PaintChildren(gfx::Canvas* canvas);
+  virtual bool GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats);
+  virtual bool AreDropTypesRequired();
   virtual bool CanDrop(const OSExchangeData& data);
   virtual void OnDragEntered(const views::DropTargetEvent& event);
   virtual int OnDragUpdated(const views::DropTargetEvent& event);
   virtual void OnDragExited();
   virtual int OnPerformDrop(const views::DropTargetEvent& event);
+  virtual bool GetAccessibleName(std::wstring* name);
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual void SetAccessibleName(const std::wstring& name);
+
+#if defined(BROWSER_SYNC)
+  // ProfileSyncServiceObserver method.
+  virtual void OnStateChanged();
+#endif
 
   // Called when fullscreen mode toggles on or off; this affects our layout.
   void OnFullscreenToggled(bool fullscreen);
@@ -125,15 +148,11 @@ class BookmarkBarView : public views::View,
   // Returns the model.
   BookmarkModel* GetModel() { return model_; }
 
-  // Returns true if the bookmark bar is drawn detached from the toolbar.  This
-  // can only be true when OnNewTabPage() is true (see below).
-  bool IsDetachedStyle();
-
   // Returns true if the bookmarks bar preference is set to 'always show'.
-  bool IsAlwaysShown();
+  bool IsAlwaysShown() const;
 
   // True if we're on a page where the bookmarks bar is always visible.
-  bool OnNewTabPage();
+  bool OnNewTabPage() const;
 
   // How much we want the bookmark bar to overlap the toolbar.  If |return_max|
   // is true, we return the maximum overlap rather than the current overlap.
@@ -176,15 +195,14 @@ class BookmarkBarView : public views::View,
   // If true we're running tests. This short circuits a couple of animations.
   static bool testing_;
 
+  // Constants used in Browser View, as well as here.
+  // How inset the bookmarks bar is when displayed on the new tab page.
+  static const int kNewtabHorizontalPadding;
+  static const int kNewtabVerticalPadding;
+
  private:
   class ButtonSeparatorView;
   struct DropInfo;
-
-  // Paint the theme background with the proper alignment.
-  void PaintThemeBackgroundTopAligned(gfx::Canvas* canvas,
-      SkBitmap* ntp_background, int tiling, int alignment);
-  void PaintThemeBackgroundBottomAligned(gfx::Canvas* canvas,
-      SkBitmap* ntp_background, int tiling, int alignment);
 
   // Task that invokes ShowDropFolderForNode when run. ShowFolderDropMenuTask
   // deletes itself once run.
@@ -305,12 +323,11 @@ class BookmarkBarView : public views::View,
   // . menu for star groups.
   // The latter two are handled by a MenuRunner, which builds the appropriate
   // menu.
-  virtual void RunMenu(views::View* view, const gfx::Point& pt,
-                       gfx::NativeView parent);
+  virtual void RunMenu(views::View* view, const gfx::Point& pt);
 
   // Invoked when a star entry corresponding to a URL on the bookmark bar is
   // pressed. Forwards to the PageNavigator to open the URL.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Invoked for this View, one of the buttons or the 'other' button. Shows the
   // appropriate context menu.
@@ -377,9 +394,23 @@ class BookmarkBarView : public views::View,
   // throbs.
   void StopThrobbing(bool immediate);
 
-  // Updates the colors for all the buttons in the bookmarks bar.
-  void UpdateButtonColors();
+  // Updates the colors for all the child objects in the bookmarks bar.
+  void UpdateColors();
 
+  // This method computes the bounds for the bookmark bar items. If
+  // |compute_bounds_only| = TRUE, the bounds for the items are just computed,
+  // but are not set. This mode is used by GetPreferredSize() to obtain the
+  // desired bounds. If |compute_bounds_only| = FALSE, the bounds are set.
+  gfx::Size LayoutItems(bool compute_bounds_only);
+
+#if defined(BROWSER_SYNC)
+  // Determines whether the sync error button should appear on the bookmarks
+  // bar.
+  bool ShouldShowSyncErrorButton();
+
+  // Creates the sync error button and adds it as a child view.
+  views::TextButton* CreateSyncErrorButton();
+#endif
   NotificationRegistrar registrar_;
 
   Profile* profile_;
@@ -412,6 +443,15 @@ class BookmarkBarView : public views::View,
   // Used to track drops on the bookmark bar view.
   scoped_ptr<DropInfo> drop_info_;
 
+#if defined(BROWSER_SYNC)
+  // The sync re-login indicator which appears when the user needs to re-enter
+  // credentials in order to continue syncing.
+  views::TextButton* sync_error_button_;
+
+  // A pointer to the ProfileSyncService instance if one exists.
+  ProfileSyncService* sync_service_;
+#endif
+
   // Visible if not all the bookmark buttons fit.
   views::MenuButton* overflow_button_;
 
@@ -420,7 +460,7 @@ class BookmarkBarView : public views::View,
 
   ButtonSeparatorView* bookmarks_separator_view_;
 
-  // Owning browser. This is NULL duing testing.
+  // Owning browser. This is NULL during testing.
   Browser* browser_;
 
   // Animation controlling showing and hiding of the bar.
@@ -436,6 +476,9 @@ class BookmarkBarView : public views::View,
 
   // Background for extension toolstrips.
   SkBitmap toolstrip_background_;
+
+  // Storage of strings needed for accessibility.
+  std::wstring accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarView);
 };

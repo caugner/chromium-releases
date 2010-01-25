@@ -9,6 +9,8 @@
 #ifndef NET_PROXY_PROXY_SCRIPT_FETCHER_H_
 #define NET_PROXY_PROXY_SCRIPT_FETCHER_H_
 
+#include <string>
+
 #include "net/base/completion_callback.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
@@ -24,9 +26,9 @@ class ProxyScriptFetcher {
 
   // Downloads the given PAC URL, and invokes |callback| on completion.
   // On success |callback| is executed with a result code of OK, and a
-  // string of the response bytes. On failure, the result bytes is an empty
-  // string, and the result code is a network error. Some special network
-  // errors that may occur are:
+  // string of the response bytes (as UTF8). On failure, the result bytes is
+  // an empty string, and the result code is a network error. Some special
+  // network errors that may occur are:
   //
   //    ERR_TIMED_OUT         -- the fetch took too long to complete.
   //    ERR_FILE_TOO_BIG      -- the response's body was too large.
@@ -37,8 +39,8 @@ class ProxyScriptFetcher {
   // deleting |this|), then no callback is invoked.
   //
   // Only one fetch is allowed to be outstanding at a time.
-  virtual void Fetch(const GURL& url, std::string* bytes,
-                     CompletionCallback* callback) = 0;
+  virtual int Fetch(const GURL& url, std::string* utf8_bytes,
+                    CompletionCallback* callback) = 0;
 
   // Aborts the in-progress fetch (if any).
   virtual void Cancel() = 0;

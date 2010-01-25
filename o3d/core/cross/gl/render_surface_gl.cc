@@ -33,9 +33,9 @@
 // This file contains the implementation of RenderSurfaceGL and
 // RenderDepthStencilSurfaceGL.
 
-#include "core/cross/precompile.h"
 #include "core/cross/gl/render_surface_gl.h"
 #include "core/cross/gl/utils_gl-inl.h"
+#include "core/cross/renderer.h"
 
 namespace o3d {
 
@@ -52,6 +52,31 @@ RenderSurfaceGL::RenderSurfaceGL(ServiceLocator *service_locator,
 }
 
 RenderSurfaceGL::~RenderSurfaceGL() {
+}
+
+Bitmap::Ref RenderSurfaceGL::PlatformSpecificGetBitmap() const {
+  Renderer* renderer = service_locator()->GetService<Renderer>();
+  DCHECK(renderer);
+
+  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
+  bitmap->Allocate(
+      Texture::ARGB8, clip_width(), clip_height(), 1, Bitmap::IMAGE);
+
+  const RenderSurface* old_render_surface;
+  const RenderDepthStencilSurface* old_depth_surface;
+  bool old_is_back_buffer;
+
+  renderer->GetRenderSurfaces(&old_render_surface, &old_depth_surface,
+                              &old_is_back_buffer);
+  renderer->SetRenderSurfaces(this, NULL, false);
+
+  ::glReadPixels(0, 0, clip_width(), clip_height(), GL_BGRA, GL_UNSIGNED_BYTE,
+                 bitmap->image_data());
+
+  renderer->SetRenderSurfaces(old_render_surface, old_depth_surface,
+                              old_is_back_buffer);
+
+  return bitmap;
 }
 
 RenderDepthStencilSurfaceGL::RenderDepthStencilSurfaceGL(

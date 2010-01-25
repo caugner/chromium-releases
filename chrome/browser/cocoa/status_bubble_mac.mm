@@ -4,75 +4,117 @@
 
 #include "chrome/browser/cocoa/status_bubble_mac.h"
 
+#include <limits>
+
 #include "app/gfx/text_elider.h"
+#include "base/compiler_specific.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#import "chrome/browser/cocoa/bubble_view.h"
 #include "googleurl/src/gurl.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
+#import "third_party/GTM/AppKit/GTMTheme.h"
 
 namespace {
 
 const int kWindowHeight = 18;
+
 // The width of the bubble in relation to the width of the parent window.
-const float kWindowWidthPercent = 1.0f/3.0f;
+const double kWindowWidthPercent = 1.0 / 3.0;
 
 // How close the mouse can get to the infobubble before it starts sliding
 // off-screen.
 const int kMousePadding = 20;
 
 const int kTextPadding = 3;
-const int kTextPositionX = 4;
-const int kTextPositionY = 2;
 
-const float kWindowFill = 0.8f;
-const float kWindowEdge = 0.7f;
+// The animation key used for fade-in and fade-out transitions.
+const NSString* kFadeAnimationKey = @"alphaValue";
 
-// The roundedness of the edges of our bubble.
-const int kBubbleCornerRadius = 4.0f;
+// The status bubble's maximum opacity, when fully faded in.
+const CGFloat kBubbleOpacity = 1.0;
 
-// How long each fade should last for.
-const int kShowFadeDuration = 0.120f;
-const int kHideFadeDuration = 0.200f;
+// Delay before showing or hiding the bubble after a SetStatus or SetURL call.
+const int64 kShowDelayMilliseconds = 80;
+const int64 kHideDelayMilliseconds = 250;
 
-}
+// How long each fade should last.
+const NSTimeInterval kShowFadeInDurationSeconds = 0.120;
+const NSTimeInterval kHideFadeOutDurationSeconds = 0.200;
 
-// TODO(avi):
-// - do display delay
+// The minimum representable time interval.  This can be used as the value
+// passed to +[NSAnimationContext setDuration:] to stop an in-progress
+// animation as quickly as possible.
+const NSTimeInterval kMinimumTimeInterval =
+    std::numeric_limits<NSTimeInterval>::min();
 
-enum BubbleStyle {
-  STYLE_BOTTOM,    // Hanging off the bottom of the parent window
-  STYLE_FLOATING,  // Between BOTTOM and STANDARD
-  STYLE_STANDARD   // Nestled in the corner of the parent window
-};
+}  // namespace
 
-@interface StatusBubbleViewCocoa : NSView {
+@interface StatusBubbleAnimationDelegate : NSObject {
  @private
-  NSString* content_;
-  BubbleStyle style_;
+  StatusBubbleMac* statusBubble_;  // weak; owns us indirectly
 }
 
-- (void)setContent:(NSString*)content;
-- (void)setStyle:(BubbleStyle)style;
-- (NSFont*)font;
+- (id)initWithStatusBubble:(StatusBubbleMac*)statusBubble;
+
+// Invalidates this object so that no further calls will be made to
+// statusBubble_.  This should be called when statusBubble_ is released, to
+// prevent attempts to call into the released object.
+- (void)invalidate;
+
+// CAAnimation delegate method
+- (void)animationDidStop:(CAAnimation*)animation finished:(BOOL)finished;
 @end
 
-StatusBubbleMac::StatusBubbleMac(NSWindow* parent)
-    : parent_(parent),
+@implementation StatusBubbleAnimationDelegate
+
+- (id)initWithStatusBubble:(StatusBubbleMac*)statusBubble {
+  if ((self = [super init])) {
+    statusBubble_ = statusBubble;
+  }
+
+  return self;
+}
+
+- (void)invalidate {
+  statusBubble_ = NULL;
+}
+
+- (void)animationDidStop:(CAAnimation*)animation finished:(BOOL)finished {
+  if (statusBubble_)
+    statusBubble_->AnimationDidStop(animation, finished ? true : false);
+}
+
+@end
+
+StatusBubbleMac::StatusBubbleMac(NSWindow* parent, id delegate)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(timer_factory_(this)),
+      parent_(parent),
+      delegate_(delegate),
       window_(nil),
       status_text_(nil),
-      url_text_(nil) {
+      url_text_(nil),
+      state_(kBubbleHidden),
+      immediate_(false) {
 }
 
 StatusBubbleMac::~StatusBubbleMac() {
   Hide();
+
+  if (window_) {
+    [[[window_ animationForKey:kFadeAnimationKey] delegate] invalidate];
+    [parent_ removeChildWindow:window_];
+    [window_ release];
+    window_ = nil;
+  }
 }
 
 void StatusBubbleMac::SetStatus(const std::wstring& status) {
   Create();
 
-  NSString* status_ns = base::SysWideToNSString(status);
-
-  SetStatus(status_ns, false);
+  SetText(status, false);
 }
 
 void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
@@ -80,7 +122,7 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
 
   NSRect frame = [window_ frame];
   int text_width = static_cast<int>(frame.size.width -
-                                    kTextPositionX -
+                                    kBubbleViewTextPositionX -
                                     kTextPadding);
   NSFont* font = [[window_ contentView] font];
   gfx::Font font_chr =
@@ -88,12 +130,17 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
                             [font pointSize]);
 
   std::wstring status = gfx::ElideUrl(url, font_chr, text_width, languages);
-  NSString* status_ns = base::SysWideToNSString(status);
 
-  SetStatus(status_ns, true);
+  SetText(status, true);
 }
 
-void StatusBubbleMac::SetStatus(NSString* status, bool is_url) {
+void StatusBubbleMac::SetText(const std::wstring& text, bool is_url) {
+  // The status bubble allows the status and URL strings to be set
+  // independently.  Whichever was set non-empty most recently will be the
+  // value displayed.  When both are empty, the status bubble hides.
+
+  NSString* text_ns = base::SysWideToNSString(text);
+
   NSString** main;
   NSString** backup;
 
@@ -105,29 +152,51 @@ void StatusBubbleMac::SetStatus(NSString* status, bool is_url) {
     backup = &url_text_;
   }
 
-  if ([status isEqualToString:*main])
-    return;
+  // Don't return from this function early.  It's important to make sure that
+  // all calls to StartShowing and StartHiding are made, so that all delays
+  // are observed properly.  Specifically, if the state is currently
+  // kBubbleShowingTimer, the timer will need to be restarted even if
+  // [text_ns isEqualToString:*main] is true.
 
-  [*main release];
-  *main = [status retain];
-  if ([*main length] > 0) {
+  [*main autorelease];
+  *main = [text_ns retain];
+
+  bool show = true;
+  if ([*main length] > 0)
     [[window_ contentView] setContent:*main];
-  } else if ([*backup length] > 0) {
+  else if ([*backup length] > 0)
     [[window_ contentView] setContent:*backup];
-  } else {
-    Hide();
-  }
+  else
+    show = false;
 
-  FadeIn();
+  if (show)
+    StartShowing();
+  else
+    StartHiding();
 }
 
 void StatusBubbleMac::Hide() {
-  FadeOut();
+  CancelTimer();
 
-  if (window_) {
-    [parent_ removeChildWindow:window_];
-    [window_ release];
-    window_ = nil;
+  bool fade_out = false;
+  if (state_ == kBubbleHidingFadeOut || state_ == kBubbleShowingFadeIn) {
+    SetState(kBubbleHidingFadeOut);
+
+    if (!immediate_) {
+      // An animation is in progress.  Cancel it by starting a new animation.
+      // Use kMinimumTimeInterval to set the opacity as rapidly as possible.
+      fade_out = true;
+      [NSAnimationContext beginGrouping];
+      [[NSAnimationContext currentContext] setDuration:kMinimumTimeInterval];
+      [[window_ animator] setAlphaValue:0.0];
+      [NSAnimationContext endGrouping];
+    }
+  }
+
+  if (!fade_out) {
+    // No animation is in progress, so the opacity can be set directly.
+    [window_ setAlphaValue:0.0];
+    SetState(kBubbleHidden);
   }
 
   [status_text_ release];
@@ -146,6 +215,11 @@ void StatusBubbleMac::MouseMoved() {
   // Get the normal position of the frame.
   NSRect window_frame = [window_ frame];
   window_frame.origin = [parent_ frame].origin;
+
+  // Adjust the position to sit on top of download and extension shelves.
+  // |delegate_| can be nil during unit tests.
+  if ([delegate_ respondsToSelector:@selector(verticalOffsetForStatusBubble)])
+    window_frame.origin.y += [delegate_ verticalOffsetForStatusBubble];
 
   // Get the cursor position relative to the popup.
   cursor_location.x -= NSMaxX(window_frame);
@@ -171,36 +245,33 @@ void StatusBubbleMac::MouseMoved() {
     // and mate to the edges of the tab content).
     if (offset >= NSHeight(window_frame)) {
       offset = NSHeight(window_frame);
-      [[window_ contentView] setStyle:STYLE_BOTTOM];
+      [[window_ contentView] setCornerFlags:
+          kRoundedBottomLeftCorner | kRoundedBottomRightCorner];
     } else if (offset > 0) {
-      [[window_ contentView] setStyle:STYLE_FLOATING];
+      [[window_ contentView] setCornerFlags:
+          kRoundedTopRightCorner | kRoundedBottomLeftCorner |
+          kRoundedBottomRightCorner];
     } else {
-      [[window_ contentView] setStyle:STYLE_STANDARD];
+      [[window_ contentView] setCornerFlags:kRoundedTopRightCorner];
     }
 
-    offset_ = offset;
     window_frame.origin.y -= offset;
-    [window_ setFrame:window_frame display:YES];
   } else {
-    offset_ = 0;
-    [[window_ contentView] setStyle:STYLE_STANDARD];
-    [window_ setFrame:window_frame display:YES];
+    [[window_ contentView] setCornerFlags:kRoundedTopRightCorner];
   }
+
+  [window_ setFrame:window_frame display:YES];
 }
 
 void StatusBubbleMac::UpdateDownloadShelfVisibility(bool visible) {
-  NOTIMPLEMENTED();
 }
 
 void StatusBubbleMac::Create() {
   if (window_)
     return;
 
-  NSRect rect = [parent_ frame];
-  rect.size.height = kWindowHeight;
-  rect.size.width = static_cast<int>(kWindowWidthPercent * rect.size.width);
   // TODO(avi):fix this for RTL
-  window_ = [[NSWindow alloc] initWithContentRect:rect
+  window_ = [[NSWindow alloc] initWithContentRect:CalculateWindowFrame()
                                         styleMask:NSBorderlessWindowMask
                                           backing:NSBackingStoreBuffered
                                             defer:YES];
@@ -210,120 +281,214 @@ void StatusBubbleMac::Create() {
   [window_ setOpaque:NO];
   [window_ setHasShadow:NO];
 
-  StatusBubbleViewCocoa* view =
-      [[[StatusBubbleViewCocoa alloc] initWithFrame:NSZeroRect] autorelease];
+  // We do not need to worry about the bubble outliving |parent_| because our
+  // teardown sequence in BWC guarantees that |parent_| outlives the status
+  // bubble and that the StatusBubble is torn down completely prior to the
+  // window going away.
+  scoped_nsobject<BubbleView> view(
+      [[BubbleView alloc] initWithFrame:NSZeroRect themeProvider:parent_]);
   [window_ setContentView:view];
 
-  [parent_ addChildWindow:window_ ordered:NSWindowAbove];
+  [window_ setAlphaValue:0.0];
 
-  [window_ setAlphaValue:0.0f];
+  // Set a delegate for the fade-in and fade-out transitions to be notified
+  // when fades are complete.  The ownership model is for window_ to own
+  // animation_dictionary, which owns animation, which owns
+  // animation_delegate.
+  CAAnimation* animation = [[window_ animationForKey:kFadeAnimationKey] copy];
+  [animation autorelease];
+  StatusBubbleAnimationDelegate* animation_delegate =
+      [[StatusBubbleAnimationDelegate alloc] initWithStatusBubble:this];
+  [animation_delegate autorelease];
+  [animation setDelegate:animation_delegate];
+  NSMutableDictionary* animation_dictionary =
+      [NSMutableDictionary dictionaryWithDictionary:[window_ animations]];
+  [animation_dictionary setObject:animation forKey:kFadeAnimationKey];
+  [window_ setAnimations:animation_dictionary];
 
-  offset_ = 0;
-  [view setStyle:STYLE_STANDARD];
+  Attach();
+
+  [view setCornerFlags:kRoundedTopRightCorner];
   MouseMoved();
 }
 
-void StatusBubbleMac::FadeIn() {
-  [NSAnimationContext beginGrouping];
-  [[NSAnimationContext currentContext] setDuration:kShowFadeDuration];
-  [[window_ animator] setAlphaValue:1.0f];
-  [NSAnimationContext endGrouping];
+void StatusBubbleMac::Attach() {
+  // If the parent window is offscreen when the child is added, the child will
+  // never be displayed, even when the parent moves on-screen.  This method
+  // may be called several times during the process of creating or showing a
+  // status bubble to attach the bubble to its parent window.
+  if (![window_ parentWindow] && [parent_ isVisible])
+    [parent_ addChildWindow:window_ ordered:NSWindowAbove];
 }
 
-void StatusBubbleMac::FadeOut() {
-  [NSAnimationContext beginGrouping];
-  [[NSAnimationContext currentContext] setDuration:kHideFadeDuration];
-  [[window_ animator] setAlphaValue:0.0f];
-  [NSAnimationContext endGrouping];
+void StatusBubbleMac::AnimationDidStop(CAAnimation* animation, bool finished) {
+  DCHECK(state_ == kBubbleShowingFadeIn || state_ == kBubbleHidingFadeOut);
+
+  if (finished) {
+    // Because of the mechanism used to interrupt animations, this is never
+    // actually called with finished set to false.  If animations ever become
+    // directly interruptible, the check will ensure that state_ remains
+    // properly synchronized.
+    if (state_ == kBubbleShowingFadeIn) {
+      DCHECK_EQ([[window_ animator] alphaValue], kBubbleOpacity);
+      state_ = kBubbleShown;
+    } else {
+      DCHECK_EQ([[window_ animator] alphaValue], 0.0);
+      state_ = kBubbleHidden;
+    }
+  }
 }
 
-@implementation StatusBubbleViewCocoa
+void StatusBubbleMac::SetState(StatusBubbleState state) {
+  if (state == state_)
+    return;
 
-- (void)dealloc {
-  [content_ release];
-  [super dealloc];
+  if ([delegate_ respondsToSelector:@selector(statusBubbleWillEnterState:)])
+    [delegate_ statusBubbleWillEnterState:state];
+
+  state_ = state;
 }
 
-- (void)setContent:(NSString*)content {
-  [content_ autorelease];
-  content_ = [content copy];
-  [self setNeedsDisplay:YES];
-}
+void StatusBubbleMac::Fade(bool show) {
+  StatusBubbleState fade_state = kBubbleShowingFadeIn;
+  StatusBubbleState target_state = kBubbleShown;
+  NSTimeInterval full_duration = kShowFadeInDurationSeconds;
+  CGFloat opacity = kBubbleOpacity;
 
-- (void)setStyle:(BubbleStyle)style {
-  style_ = style;
-  [self setNeedsDisplay:YES];
-}
-
-- (NSFont*)font {
-  return [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
-}
-
-- (void)drawRect:(NSRect)rect {
-  float tl_radius, tr_radius, bl_radius, br_radius;
-
-  switch (style_) {
-    case STYLE_BOTTOM:
-      tl_radius = 0.0f;
-      tr_radius = 0.0f;
-      bl_radius = kBubbleCornerRadius;
-      br_radius = kBubbleCornerRadius;
-      break;
-    case STYLE_FLOATING:
-      tl_radius = 0.0f;
-      tr_radius = kBubbleCornerRadius;
-      bl_radius = kBubbleCornerRadius;
-      br_radius = kBubbleCornerRadius;
-      break;
-    case STYLE_STANDARD:
-      tl_radius = 0.0f;
-      tr_radius = kBubbleCornerRadius;
-      bl_radius = 0.0f;
-      br_radius = 0.0f;
-      break;
-    default:
-      NOTREACHED();
-      tl_radius = 0.0f;
-      tr_radius = 0.0f;
-      bl_radius = 0.0f;
-      br_radius = 0.0f;
+  if (!show) {
+    fade_state = kBubbleHidingFadeOut;
+    target_state = kBubbleHidden;
+    full_duration = kHideFadeOutDurationSeconds;
+    opacity = 0.0;
   }
 
-  // Background / Edge
+  DCHECK(state_ == fade_state || state_ == target_state);
 
-  NSRect bounds = [self bounds];
-  NSBezierPath *border = [NSBezierPath gtm_bezierPathWithRoundRect:bounds
-                                               topLeftCornerRadius:tl_radius
-                                              topRightCornerRadius:tr_radius
-                                            bottomLeftCornerRadius:bl_radius
-                                           bottomRightCornerRadius:br_radius];
+  if (state_ == target_state)
+    return;
 
-  [[NSColor colorWithDeviceWhite:kWindowFill alpha:1.0f] set];
-  [border fill];
+  Attach();
 
-  border = [NSBezierPath gtm_bezierPathWithRoundRect:bounds
-                                 topLeftCornerRadius:tl_radius
-                                topRightCornerRadius:tr_radius
-                              bottomLeftCornerRadius:bl_radius
-                             bottomRightCornerRadius:br_radius];
+  if (immediate_) {
+    [window_ setAlphaValue:opacity];
+    SetState(target_state);
+    return;
+  }
 
-  [[NSColor colorWithDeviceWhite:kWindowEdge alpha:1.0f] set];
-  [border stroke];
+  // If an incomplete transition has left the opacity somewhere between 0 and
+  // kBubbleOpacity, the fade rate is kept constant by shortening the duration.
+  NSTimeInterval duration =
+      full_duration *
+      fabs(opacity - [[window_ animator] alphaValue]) / kBubbleOpacity;
 
-  // Text
+  // 0.0 will not cancel an in-progress animation.
+  if (duration == 0.0)
+    duration = kMinimumTimeInterval;
 
-  NSFont* textFont = [self font];
-  NSShadow* textShadow = [[[NSShadow alloc] init] autorelease];
-  [textShadow setShadowBlurRadius:1.5f];
-  [textShadow setShadowColor:[NSColor whiteColor]];
-  [textShadow setShadowOffset:NSMakeSize(0.0f, -1.0f)];
-
-  NSDictionary* textDict = [NSDictionary dictionaryWithObjectsAndKeys:
-    textFont, NSFontAttributeName,
-    textShadow, NSShadowAttributeName,
-    nil];
-  [content_ drawAtPoint:NSMakePoint(kTextPositionX, kTextPositionY)
-         withAttributes:textDict];
+  // This will cancel an in-progress transition and replace it with this fade.
+  [NSAnimationContext beginGrouping];
+  [[NSAnimationContext currentContext] setDuration:duration];
+  [[window_ animator] setAlphaValue:opacity];
+  [NSAnimationContext endGrouping];
 }
 
-@end
+void StatusBubbleMac::StartTimer(int64 delay_ms) {
+  DCHECK(state_ == kBubbleShowingTimer || state_ == kBubbleHidingTimer);
+
+  if (immediate_) {
+    TimerFired();
+    return;
+  }
+
+  // There can only be one running timer.
+  CancelTimer();
+
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      timer_factory_.NewRunnableMethod(&StatusBubbleMac::TimerFired),
+      delay_ms);
+}
+
+void StatusBubbleMac::CancelTimer() {
+  if (!timer_factory_.empty())
+    timer_factory_.RevokeAll();
+}
+
+void StatusBubbleMac::TimerFired() {
+  DCHECK(state_ == kBubbleShowingTimer || state_ == kBubbleHidingTimer);
+
+  if (state_ == kBubbleShowingTimer) {
+    SetState(kBubbleShowingFadeIn);
+    Fade(true);
+  } else {
+    SetState(kBubbleHidingFadeOut);
+    Fade(false);
+  }
+}
+
+void StatusBubbleMac::StartShowing() {
+  Attach();
+
+  if (state_ == kBubbleHidden) {
+    // Arrange to begin fading in after a delay.
+    SetState(kBubbleShowingTimer);
+    StartTimer(kShowDelayMilliseconds);
+  } else if (state_ == kBubbleHidingFadeOut) {
+    // Cancel the fade-out in progress and replace it with a fade in.
+    SetState(kBubbleShowingFadeIn);
+    Fade(true);
+  } else if (state_ == kBubbleHidingTimer) {
+    // The bubble was already shown but was waiting to begin fading out.  It's
+    // given a stay of execution.
+    SetState(kBubbleShown);
+    CancelTimer();
+  } else if (state_ == kBubbleShowingTimer) {
+    // The timer was already running but nothing was showing yet.  Reaching
+    // this point means that there is a new request to show something.  Start
+    // over again by resetting the timer, effectively invalidating the earlier
+    // request.
+    StartTimer(kShowDelayMilliseconds);
+  }
+
+  // If the state is kBubbleShown or kBubbleShowingFadeIn, leave everything
+  // alone.
+}
+
+void StatusBubbleMac::StartHiding() {
+  if (state_ == kBubbleShown) {
+    // Arrange to begin fading out after a delay.
+    SetState(kBubbleHidingTimer);
+    StartTimer(kHideDelayMilliseconds);
+  } else if (state_ == kBubbleShowingFadeIn) {
+    // Cancel the fade-in in progress and replace it with a fade out.
+    SetState(kBubbleHidingFadeOut);
+    Fade(false);
+  } else if (state_ == kBubbleShowingTimer) {
+    // The bubble was already hidden but was waiting to begin fading in.  Too
+    // bad, it won't get the opportunity now.
+    SetState(kBubbleHidden);
+    CancelTimer();
+  }
+
+  // If the state is kBubbleHidden, kBubbleHidingFadeOut, or
+  // kBubbleHidingTimer, leave everything alone.  The timer is not reset as
+  // with kBubbleShowingTimer in StartShowing() because a subsequent request
+  // to hide something while one is already in flight does not invalidate the
+  // earlier request.
+}
+
+void StatusBubbleMac::UpdateSizeAndPosition() {
+  if (!window_)
+    return;
+
+  [window_ setFrame:CalculateWindowFrame() display:YES];
+}
+
+NSRect StatusBubbleMac::CalculateWindowFrame() {
+  DCHECK(parent_);
+
+  NSRect rect = [parent_ frame];
+  rect.size.height = kWindowHeight;
+  rect.size.width = static_cast<int>(kWindowWidthPercent * rect.size.width);
+  return rect;
+}

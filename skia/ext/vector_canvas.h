@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,11 @@
 #define SKIA_EXT_VECTOR_CANVAS_H_
 
 #include "skia/ext/platform_canvas.h"
-#include "skia/ext/vector_platform_device_win.h"
+#include "skia/ext/vector_platform_device.h"
+
+#if defined(__linux__)
+typedef struct _cairo cairo_t;
+#endif
 
 namespace skia {
 
@@ -17,22 +21,41 @@ namespace skia {
 class VectorCanvas : public PlatformCanvas {
  public:
   VectorCanvas();
+#if defined(WIN32)
   VectorCanvas(HDC dc, int width, int height);
+#elif defined(__linux__)
+  // Caller owns |context|. Ownership is not transferred.
+  VectorCanvas(cairo_t* context, int width, int height);
+#endif
   virtual ~VectorCanvas();
 
   // For two-part init, call if you use the no-argument constructor above
+#if defined(WIN32)
   bool initialize(HDC context, int width, int height);
+#elif defined(__linux__)
+  // Ownership of |context| is not transferred.
+  bool initialize(cairo_t* context, int width, int height);
+#endif
 
-  virtual SkBounder* setBounder(SkBounder*);
+  virtual SkBounder* setBounder(SkBounder* bounder);
+#if defined(WIN32) || defined(__linux__)
   virtual SkDevice* createDevice(SkBitmap::Config config,
                                  int width, int height,
                                  bool is_opaque, bool isForLayer);
+#endif
   virtual SkDrawFilter* setDrawFilter(SkDrawFilter* filter);
 
  private:
-  // |is_opaque| is unused. |shared_section| is in fact the HDC used for output.
+#if defined(WIN32)
+  // |shared_section| is in fact the HDC used for output. |is_opaque| is unused.
   virtual SkDevice* createPlatformDevice(int width, int height, bool is_opaque,
                                          HANDLE shared_section);
+#elif defined(__linux__)
+  // Ownership of |context| is not transferred. |is_opaque| is unused.
+  virtual SkDevice* createPlatformDevice(cairo_t* context,
+                                         int width, int height,
+                                         bool is_opaque);
+#endif
 
   // Returns true if the top device is vector based and not bitmap based.
   bool IsTopDeviceVectorial() const;

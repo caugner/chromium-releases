@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'libevent',
@@ -37,11 +34,27 @@
         # libevent has platform-specific implementation files.  Since its
         # native build uses autoconf, platform-specific config.h files are
         # provided and live in platform-specific directories.
-        [ 'OS == "linux"', { 'sources': [ 'epoll.c', 'epoll_sub.c' ],
-                             'include_dirs': [ 'linux' ] } ],
-        [ 'OS == "mac"',   { 'sources': [ 'kqueue.c' ],
+        [ 'OS == "linux"', {
+          'sources': [ 'epoll.c', 'epoll_sub.c' ],
+          'include_dirs': [ 'linux' ],
+          'link_settings':
+            { 'libraries': [
+              # We need rt for clock_gettime().
+              # TODO(port) Maybe on FreeBSD as well?
+              '-lrt',
+              ],
+            },
+          }
+        ],
+        [ 'OS == "mac" or OS == "freebsd"',   { 'sources': [ 'kqueue.c' ],
                              'include_dirs': [ 'mac' ] } ],
       ],
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

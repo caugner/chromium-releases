@@ -32,16 +32,15 @@
 
 // This file contains the declarations for Texture2DCB and TextureCUBECB.
 
-#ifndef O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H__
-#define O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H__
+#ifndef O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H_
+#define O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H_
 
-// Precompiled header comes before everything else.
-#include "core/cross/precompile.h"
-
+#include <vector>
 #include "core/cross/bitmap.h"
 #include "core/cross/texture.h"
 #include "core/cross/types.h"
 #include "command_buffer/common/cross/resource.h"
+#include "core/cross/command_buffer/render_surface_cb.h"
 
 namespace o3d {
 
@@ -61,23 +60,20 @@ class Texture2DCB : public Texture2D {
   // created Texture object.
   // The created texture takes ownership of the bitmap data.
   static Texture2DCB* Create(ServiceLocator* service_locator,
-                             Bitmap *bitmap,
+                             Texture::Format format,
+                             int levels,
+                             int width,
+                             int height,
                              bool enable_render_surfaces);
 
-  // Locks the image buffer of a given mipmap level for writing from main
-  // memory.
-  virtual bool Lock(int level, void** texture_data);
-
-  // Unlocks this texture and returns it to OpenCB control.
-  virtual bool Unlock(int level);
-
-  // Returns a RenderSurface object associated with a mip_level of a texture.
-  // Parameters:
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(int mip_level, Pack *pack);
+  // Overridden from Texture2D
+  virtual void SetRect(int level,
+                       unsigned left,
+                       unsigned top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
 
   // Returns the implementation-specific texture handle for this texture.
   virtual void* GetTextureHandle() const {
@@ -85,31 +81,43 @@ class Texture2DCB : public Texture2D {
   }
 
   // Gets the texture resource ID.
-  command_buffer::ResourceID resource_id() const { return resource_id_; }
+  command_buffer::ResourceId resource_id() const { return resource_id_; }
 
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificLock(
+      int level, void** texture_data, int* pitch, AccessMode mode);
+
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificUnlock(int level);
+
+  // Overridden from Texture2D
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(int mip_level);
 
  private:
   // Initializes the Texture2DCB from a preexisting OpenCB texture handle
   // and raw Bitmap data.
   // The texture takes ownership of the bitmap data.
   Texture2DCB(ServiceLocator* service_locator,
-              command_buffer::ResourceID resource_id,
-              const Bitmap &bitmap,
-              bool resize_npot,
+              command_buffer::ResourceId resource_id,
+              Texture::Format format,
+              int levels,
+              int width,
+              int height,
               bool enable_render_surfaces);
 
   // Returns true if the backing bitmap has the data for the level.
   bool HasLevel(unsigned int level) {
-    DCHECK_LT(level, levels());
+    DCHECK_LT(level, static_cast<unsigned int>(levels()));
     return (has_levels_ & (1 << level)) != 0;
   }
 
   RendererCB* renderer_;
-  command_buffer::ResourceID resource_id_;
+  command_buffer::ResourceId resource_id_;
 
   // A bitmap used to back the NPOT textures on POT-only hardware, and to back
   // the pixel buffer for Lock().
@@ -118,6 +126,9 @@ class Texture2DCB : public Texture2D {
   // Bitfield that indicates mip levels that are currently stored in the
   // backing bitmap.
   unsigned int has_levels_;
+
+  // Bitfield that indicates which mip levels are currently locked.
+  unsigned int locked_levels_;
 };
 
 // TextureCUBECB ---------------------------------------------------------------
@@ -130,27 +141,20 @@ class TextureCUBECB : public TextureCUBE {
 
   // Create a new Cube texture from scratch.
   static TextureCUBECB* TextureCUBECB::Create(ServiceLocator* service_locator,
-                                              Bitmap *bitmap,
+                                              Texture::Format format,
+                                              int levels,
+                                              int edge_length,
                                               bool enable_render_surfaces);
 
-  // Locks the image buffer of a given face and mipmap level for loading
-  // from main memory.
-  virtual bool Lock(CubeFace face, int level, void** texture_data);
-
-  // Unlocks the image buffer of a given face and mipmap level.
-  virtual bool Unlock(CubeFace face, int level);
-
-  // Returns a RenderSurface object associated with a given cube face and
-  // mip_level of a texture.
-  // Parameters:
-  //  face: [in] The cube face from which to extract the surface.
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(CubeFace face,
-                                              int level,
-                                              Pack* pack);
+  // Overridden from TextureCUBE
+  virtual void SetRect(CubeFace face,
+                       int level,
+                       unsigned dst_left,
+                       unsigned dst_top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
 
   // Returns the implementation-specific texture handle for this texture.
   virtual void* GetTextureHandle() const {
@@ -158,39 +162,54 @@ class TextureCUBECB : public TextureCUBE {
   }
 
   // Gets the texture resource ID.
-  command_buffer::ResourceID resource_id() const { return resource_id_; }
+  command_buffer::ResourceId resource_id() const { return resource_id_; }
 
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificLock(
+      CubeFace face, int level, void** texture_data, int* pitch,
+      AccessMode mode);
+
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificUnlock(CubeFace face, int level);
+
+  // Overridden from TextureCUBE.
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(CubeFace face,
+                                                              int level);
  private:
   // Creates a texture from a pre-existing texture resource.
   TextureCUBECB(ServiceLocator* service_locator,
-                command_buffer::ResourceID texture,
-                const Bitmap &bitmap,
-                bool resize_to_pot,
+                command_buffer::ResourceId texture,
+                Texture::Format format,
+                int levels,
+                int edge_length,
                 bool enable_render_surfaces);
 
 
   // Returns true if the backing bitmap has the data for the level.
-  bool HasLevel(unsigned int level, CubeFace face) {
-    DCHECK_LT(level, levels());
+  bool HasLevel(CubeFace face, unsigned int level) {
+    DCHECK_LT(level, static_cast<unsigned int>(levels()));
     return (has_levels_[face] & (1 << level)) != 0;
   }
 
   RendererCB* renderer_;
-  command_buffer::ResourceID resource_id_;
+  command_buffer::ResourceId resource_id_;
 
-  // A bitmap used to back the NPOT textures on POT-only hardware, and to back
-  // the pixel buffer for Lock().
-  Bitmap::Ref backing_bitmap_;
+  // Bitmaps used to back the NPOT textures on POT-only hardware.
+  Bitmap::Ref backing_bitmaps_[NUMBER_OF_FACES];
 
   // Bitfields that indicates mip levels that are currently stored in the
   // backing bitmap, one per face.
-  unsigned int has_levels_[6];
+  unsigned int has_levels_[NUMBER_OF_FACES];
+
+  // Bitfields that indicates which levels are currently locked, one per face.
+  unsigned int locked_levels_[NUMBER_OF_FACES];
 };
 
 }  // namespace o3d
 
-#endif  // O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H__
+#endif  // O3D_CORE_CROSS_COMMAND_BUFFER_TEXTURE_CB_H_

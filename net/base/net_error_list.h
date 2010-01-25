@@ -109,6 +109,9 @@ NET_ERROR(CERT_ERROR_IN_SSL_RENEGOTIATION, -116)
 // The SSL handshake failed because of a bad or missing client certificate.
 NET_ERROR(BAD_SSL_CLIENT_AUTH_CERT, -117)
 
+// A connection attempt timed out.
+NET_ERROR(CONNECTION_TIMED_OUT, -118)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -191,13 +194,17 @@ NET_ERROR(CERT_REVOKED, -206)
 //
 NET_ERROR(CERT_INVALID, -207)
 
+// The server responded with a certificate that is signed using a weak
+// signature algorithm.
+NET_ERROR(CERT_WEAK_SIGNATURE_ALGORITHM, -208)
+
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -208)
+NET_ERROR(CERT_END, -209)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -250,15 +257,23 @@ NET_ERROR(PAC_SCRIPT_FAILED, -327)
 // satisfy the range requested.
 NET_ERROR(REQUEST_RANGE_NOT_SATISFIABLE, -328)
 
+// The identity used for authentication is invalid.
+NET_ERROR(MALFORMED_IDENTITY, -329)
+
+// Content decoding of the response body failed.
+NET_ERROR(CONTENT_DECODING_FAILED, -330)
+
+// An operation could not be completed because all network IO
+// is suspended.
+NET_ERROR(NETWORK_IO_SUSPENDED, -331)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
 // Unable to read from the disk cache.
 NET_ERROR(CACHE_READ_FAILURE, -401)
 
-// The network transaction factory of the cache was not able to create a new
-// transaction.
-NET_ERROR(CACHE_CANNOT_CREATE_NETWORK_TRANSACTION, -402)
+// ****NOTE THAT code -402 is available****
 
 // The operation is not supported for this entry.
 NET_ERROR(CACHE_OPERATION_NOT_SUPPORTED, -403)

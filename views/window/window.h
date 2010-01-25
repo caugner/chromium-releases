@@ -5,9 +5,10 @@
 #ifndef VIEWS_WINDOW_WINDOW_H_
 #define VIEWS_WINDOW_WINDOW_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 
 namespace gfx {
+class Font;
 class Rect;
 class Size;
 }
@@ -17,6 +18,7 @@ namespace views {
 class ClientView;
 class NonClientFrameView;
 class NonClientView;
+class Widget;
 class WindowDelegate;
 
 // An interface implemented by an object that provides a top level window.
@@ -46,6 +48,11 @@ class Window {
   // is closed.
   static void CloseAllSecondaryWindows();
 
+  // Used by |CloseAllSecondaryWindows|. If |widget|'s window is a secondary
+  // window, the window is closed. If |widget| has no window, it is closed.
+  // Does nothing if |widget| is null.
+  static void CloseSecondaryWidget(Widget* widget);
+
   // Retrieves the window's bounds, including its frame.
   virtual gfx::Rect GetBounds() const = 0;
 
@@ -67,6 +74,7 @@ class Window {
   // Push/PopForceHidden.
   virtual void HideWindow() = 0;
 
+#if defined(OS_WIN)
   // Hides the window if it hasn't already been force-hidden. The force hidden
   // count is tracked, so calling multiple times is allowed, you just have to
   // be sure to call PopForceHidden the same number of times.
@@ -75,6 +83,14 @@ class Window {
   // Decrements the force hidden count, showing the window if we have reached
   // the top of the stack. See PushForceHidden.
   virtual void PopForceHidden() = 0;
+
+  // Prevents the window from being rendered as deactivated the next time it is.
+  // This state is reset automatically as soon as the window becomes activated
+  // again. There is no ability to control the state through this API as this
+  // leads to sync problems.
+  // For Gtk use WidgetGtk::make_transient_to_parent.
+  virtual void DisableInactiveRendering() = 0;
+#endif
 
   // Activate the window, assuming it already exists and is visible.
   virtual void Activate() = 0;
@@ -112,12 +128,6 @@ class Window {
   // Toggles the enable state for the Close button (and the Close menu item in
   // the system menu).
   virtual void EnableClose(bool enable) = 0;
-
-  // Prevents the window from being rendered as deactivated the next time it is.
-  // This state is reset automatically as soon as the window becomes activated
-  // again. There is no ability to control the state through this API as this
-  // leads to sync problems.
-  virtual void DisableInactiveRendering() = 0;
 
   // Tell the window to update its title from the delegate.
   virtual void UpdateWindowTitle() = 0;

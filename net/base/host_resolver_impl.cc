@@ -16,6 +16,7 @@
 #endif
 
 #include "base/compiler_specific.h"
+#include "base/debug_util.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
@@ -23,6 +24,7 @@
 #include "base/worker_pool.h"
 #include "net/base/address_list.h"
 #include "net/base/host_resolver_proc.h"
+#include "net/base/load_log.h"
 #include "net/base/net_errors.h"
 
 #if defined(OS_WIN)
@@ -53,16 +55,27 @@ static int ResolveAddrInfo(HostResolverProc* resolver_proc,
 
 class HostResolverImpl::Request {
  public:
-  Request(int id, const RequestInfo& info, CompletionCallback* callback,
+  Request(LoadLog* load_log,
+          int id,
+          const RequestInfo& info,
+          CompletionCallback* callback,
           AddressList* addresses)
-      : id_(id), info_(info), job_(NULL), callback_(callback),
-        addresses_(addresses) {}
+      : load_log_(load_log),
+        id_(id),
+        info_(info),
+        job_(NULL),
+        callback_(callback),
+        addresses_(addresses) {
+  }
 
   // Mark the request as cancelled.
   void MarkAsCancelled() {
     job_ = NULL;
     callback_ = NULL;
     addresses_ = NULL;
+    // Clear the LoadLog to make sure it won't be released later on the
+    // worker thread. See http://crbug.com/22272
+    load_log_ = NULL;
   }
 
   bool was_cancelled() const {
@@ -89,6 +102,10 @@ class HostResolverImpl::Request {
     return job_;
   }
 
+  LoadLog* load_log() const {
+    return load_log_;
+  }
+
   int id() const {
     return id_;
   }
@@ -98,6 +115,8 @@ class HostResolverImpl::Request {
   }
 
  private:
+  scoped_refptr<LoadLog> load_log_;
+
   // Unique ID for this request. Used by observers to identify requests.
   int id_;
 
@@ -171,10 +190,8 @@ class HostResolverImpl::Job
       origin_loop_ = NULL;
     }
 
-    // We don't have to do anything further to actually cancel the requests
-    // that were attached to this job (since they are unreachable now).
-    // But we will call HostResolverImpl::CancelRequest(Request*) on each one
-    // in order to notify any observers.
+    // We will call HostResolverImpl::CancelRequest(Request*) on each one
+    // in order to notify any observers, and also clear the LoadLog.
     for (RequestsList::const_iterator it = requests_.begin();
          it != requests_.end(); ++it) {
       HostResolverImpl::Request* req = *it;
@@ -291,15 +308,16 @@ HostResolverImpl::~HostResolverImpl() {
 int HostResolverImpl::Resolve(const RequestInfo& info,
                               AddressList* addresses,
                               CompletionCallback* callback,
-                              RequestHandle* out_req) {
+                              RequestHandle* out_req,
+                              LoadLog* load_log) {
   if (shutdown_)
     return ERR_UNEXPECTED;
 
   // Choose a unique ID number for observers to see.
   int request_id = next_request_id_++;
 
-  // Notify registered observers.
-  NotifyObserversStartRequest(request_id, info);
+  // Update the load log and notify registered observers.
+  OnStartRequest(load_log, request_id, info);
 
   // If we have an unexpired cache entry, use it.
   if (info.allow_cached_response()) {
@@ -309,8 +327,8 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
       addresses->SetFrom(cache_entry->addrlist, info.port());
       int error = cache_entry->error;
 
-      // Notify registered observers.
-      NotifyObserversFinishRequest(request_id, info, error);
+      // Update the load log and notify registered observers.
+      OnFinishRequest(load_log, request_id, info, error);
 
       return error;
     }
@@ -329,15 +347,15 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
     // Write to cache.
     cache_.Set(info.hostname(), error, addrlist, base::TimeTicks::Now());
 
-    // Notify registered observers.
-    NotifyObserversFinishRequest(request_id, info, error);
+    // Update the load log and notify registered observers.
+    OnFinishRequest(load_log, request_id, info, error);
 
     return error;
   }
 
   // Create a handle for this request, and pass it back to the user if they
   // asked for it (out_req != NULL).
-  Request* req = new Request(request_id, info, callback, addresses);
+  Request* req = new Request(load_log, request_id, info, callback, addresses);
   if (out_req)
     *out_req = reinterpret_cast<RequestHandle>(req);
 
@@ -367,12 +385,22 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
 // See OnJobComplete(Job*) for why it is important not to clean out
 // cancelled requests from Job::requests_.
 void HostResolverImpl::CancelRequest(RequestHandle req_handle) {
+  if (shutdown_) {
+    // TODO(eroman): temp hack for: http://crbug.com/18373
+    // Because we destroy outstanding requests during Shutdown(),
+    // |req_handle| is already cancelled.
+    LOG(ERROR) << "Called HostResolverImpl::CancelRequest() after Shutdown().";
+    StackTrace().PrintBacktrace();
+    return;
+  }
   Request* req = reinterpret_cast<Request*>(req_handle);
   DCHECK(req);
   DCHECK(req->job());
+  // Hold a reference to the request's load log as we are about to clear it.
+  scoped_refptr<LoadLog> load_log(req->load_log());
   // NULL out the fields of req, to mark it as cancelled.
   req->MarkAsCancelled();
-  NotifyObserversCancelRequest(req->id(), req->info());
+  OnCancelRequest(load_log, req->id(), req->info());
 }
 
 void HostResolverImpl::AddObserver(Observer* observer) {
@@ -387,6 +415,10 @@ void HostResolverImpl::RemoveObserver(Observer* observer) {
   DCHECK(it != observers_.end());
 
   observers_.erase(it);
+}
+
+HostCache* HostResolverImpl::GetHostCache() {
+  return &cache_;
 }
 
 void HostResolverImpl::Shutdown() {
@@ -439,8 +471,8 @@ void HostResolverImpl::OnJobComplete(Job* job,
     if (!req->was_cancelled()) {
       DCHECK_EQ(job, req->job());
 
-      // Notify registered observers.
-      NotifyObserversFinishRequest(req->id(), req->info(), error);
+      // Update the load log and notify registered observers.
+      OnFinishRequest(req->load_log(), req->id(), req->info(), error);
 
       req->OnComplete(error, addrlist);
 
@@ -454,30 +486,68 @@ void HostResolverImpl::OnJobComplete(Job* job,
   cur_completing_job_ = NULL;
 }
 
-void HostResolverImpl::NotifyObserversStartRequest(int request_id,
-                                               const RequestInfo& info) {
-  for (ObserversList::iterator it = observers_.begin();
-       it != observers_.end(); ++it) {
-    (*it)->OnStartResolution(request_id, info);
+void HostResolverImpl::OnStartRequest(LoadLog* load_log,
+                                      int request_id,
+                                      const RequestInfo& info) {
+  LoadLog::BeginEvent(load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL);
+
+  // Notify the observers of the start.
+  if (!observers_.empty()) {
+    LoadLog::BeginEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART);
+
+    for (ObserversList::iterator it = observers_.begin();
+         it != observers_.end(); ++it) {
+      (*it)->OnStartResolution(request_id, info);
+    }
+
+    LoadLog::EndEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONSTART);
   }
 }
 
-void HostResolverImpl::NotifyObserversFinishRequest(int request_id,
-                                                const RequestInfo& info,
-                                                int error) {
-  bool was_resolved = error == OK;
-  for (ObserversList::iterator it = observers_.begin();
-       it != observers_.end(); ++it) {
-    (*it)->OnFinishResolutionWithStatus(request_id, was_resolved, info);
+void HostResolverImpl::OnFinishRequest(LoadLog* load_log,
+                                       int request_id,
+                                       const RequestInfo& info,
+                                       int error) {
+  // Notify the observers of the completion.
+  if (!observers_.empty()) {
+    LoadLog::BeginEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH);
+
+    bool was_resolved = error == OK;
+    for (ObserversList::iterator it = observers_.begin();
+         it != observers_.end(); ++it) {
+      (*it)->OnFinishResolutionWithStatus(request_id, was_resolved, info);
+    }
+
+    LoadLog::EndEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONFINISH);
   }
+
+  LoadLog::EndEvent(load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL);
 }
 
-void HostResolverImpl::NotifyObserversCancelRequest(int request_id,
-                                                const RequestInfo& info) {
-  for (ObserversList::iterator it = observers_.begin();
-       it != observers_.end(); ++it) {
-    (*it)->OnCancelResolution(request_id, info);
+void HostResolverImpl::OnCancelRequest(LoadLog* load_log,
+                                       int request_id,
+                                       const RequestInfo& info) {
+  LoadLog::AddEvent(load_log, LoadLog::TYPE_CANCELLED);
+
+  // Notify the observers of the cancellation.
+  if (!observers_.empty()) {
+    LoadLog::BeginEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONCANCEL);
+
+    for (ObserversList::iterator it = observers_.begin();
+         it != observers_.end(); ++it) {
+      (*it)->OnCancelResolution(request_id, info);
+    }
+
+    LoadLog::EndEvent(
+        load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL_OBSERVER_ONCANCEL);
   }
+
+  LoadLog::EndEvent(load_log, LoadLog::TYPE_HOST_RESOLVER_IMPL);
 }
 
 }  // namespace net

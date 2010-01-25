@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "app/gfx/font.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_nsobject.h"
@@ -24,11 +25,15 @@ class Profile;
 
 // Implements AutocompletePopupView using a raw NSWindow containing an
 // NSTableView.
+//
+// TODO(rohitrao): This class is set up in a way that makes testing hard.
+// Refactor and write unittests.  http://crbug.com/9977
 
 class AutocompletePopupViewMac : public AutocompletePopupView {
  public:
   AutocompletePopupViewMac(AutocompleteEditViewMac* edit_view,
                            AutocompleteEditModel* edit_model,
+                           const BubblePositioner* bubble_positioner,
                            Profile* profile,
                            NSTextField* field);
   virtual ~AutocompletePopupViewMac();
@@ -56,7 +61,6 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
     // though.
   }
   virtual void UpdatePopupAppearance();
-  virtual void OnHoverEnabledOrDisabled(bool disabled) { NOTIMPLEMENTED(); }
 
   // This is only called by model in SetSelectedLine() after updating
   // everything.  Popup should already be visible.
@@ -70,11 +74,16 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
   // helper object.
   void AcceptInput();
 
+  // Called when the user middle-clicks an item.  Opens the hovered
+  // item in a background tab.
+  void OnMiddleClick();
+
   // Return the text to show for the match, based on the match's
   // contents and description.  Result will be in |font|, with the
   // boldfaced version used for matches.
   static NSAttributedString* MatchText(const AutocompleteMatch& match,
-                                       NSFont* font);
+                                gfx::Font& font,
+                                float cellWidth);
 
   // Helper for MatchText() to allow sharing code between the contents
   // and description cases.  Returns NSMutableAttributedString as a
@@ -82,7 +91,19 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
   static NSMutableAttributedString* DecorateMatchedString(
       const std::wstring &matchString,
       const AutocompleteMatch::ACMatchClassifications &classifications,
-      NSColor* textColor, NSFont* font);
+      NSColor* textColor, gfx::Font& font);
+
+  // Helper for MatchText() to elide a marked-up string using
+  // gfx::ElideText() as a model.  Modifies |aString| in place.
+  // TODO(shess): Consider breaking AutocompleteButtonCell out of this
+  // code, and modifying it to have something like -setMatch:, so that
+  // these convolutions to expose internals for testing can be
+  // cleaner.
+  static NSMutableAttributedString* ElideString(
+      NSMutableAttributedString* aString,
+      const std::wstring originalString,
+      const gfx::Font& font,
+      const float cellWidth);
 
  private:
   // Create the popup_ instance if needed.
@@ -90,7 +111,7 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
 
   scoped_ptr<AutocompletePopupModel> model_;
   AutocompleteEditViewMac* edit_view_;
-
+  const BubblePositioner* bubble_positioner_;  // owned by toolbar controller
   NSTextField* field_;  // owned by tab controller
 
   scoped_nsobject<AutocompleteMatrixTarget> matrix_target_;

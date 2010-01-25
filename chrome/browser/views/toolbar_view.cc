@@ -12,6 +12,7 @@
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -19,16 +20,18 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/encoding_menu_controller.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/sync/sync_status_ui_helper.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/user_data_manager.h"
 #include "chrome/browser/views/bookmark_menu_button.h"
+#include "chrome/browser/views/browser_actions_container.h"
 #include "chrome/browser/views/event_utils.h"
 #include "chrome/browser/views/go_button.h"
 #include "chrome/browser/views/location_bar_view.h"
@@ -39,9 +42,6 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#ifdef CHROME_PERSONALIZATION
-#include "chrome/personalization/personalization.h"
-#endif
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -49,10 +49,8 @@
 #include "views/background.h"
 #include "views/controls/button/button_dropdown.h"
 #include "views/controls/label.h"
-#if defined(OS_WIN)
 #include "views/drag_utils.h"
 #include "views/widget/tooltip_manager.h"
-#endif
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
 
@@ -64,20 +62,15 @@ static const int kStatusBubbleWidth = 480;
 // Separation between the location bar and the menus.
 static const int kMenuButtonOffset = 3;
 
+// The minimum width of the location bar when browser actions are visible.
+static const int kMinLocationBarWidthWithBrowserActions = 400;
+
 // Padding to the right of the location bar
 static const int kPaddingRight = 2;
 
 static const int kPopupTopSpacingNonGlass = 3;
 static const int kPopupBottomSpacingNonGlass = 2;
 static const int kPopupBottomSpacingGlass = 1;
-
-// The vertical distance between the bottom of the omnibox and the top of the
-// popup.
-static const int kOmniboxPopupVerticalSpacing = 2;
-// The number of pixels of margin on the buttons on either side of the omnibox.
-// We use this value to inset the bounds returned for the omnibox popup, since
-// we want the popup to be only as wide as the visible frame of the omnibox.
-static const int kOmniboxButtonsHorizontalMargin = 2;
 
 static SkBitmap* kPopupBackgroundEdge = NULL;
 
@@ -101,17 +94,17 @@ void EncodingMenuModel::Build() {
       encoding_menu_items.begin();
   for (; it != encoding_menu_items.end(); ++it) {
     int id = it->first;
-    std::wstring& label = it->second;
+    string16& label = it->second;
     if (id == 0) {
       AddSeparator();
     } else {
       if (id == IDC_ENCODING_AUTO_DETECT) {
-        AddCheckItem(id, WideToUTF16Hack(label));
+        AddCheckItem(id, label);
       } else {
         // Use the id of the first radio command as the id of the group.
         if (group_id <= 0)
           group_id = id;
-        AddRadioItem(id, WideToUTF16Hack(label), group_id);
+        AddRadioItem(id, label, group_id);
       }
     }
   }
@@ -165,6 +158,7 @@ ToolbarView::ToolbarView(Browser* browser)
       star_(NULL),
       location_bar_(NULL),
       go_(NULL),
+      browser_actions_(NULL),
       page_menu_(NULL),
       app_menu_(NULL),
       bookmark_menu_(NULL),
@@ -177,7 +171,7 @@ ToolbarView::ToolbarView(Browser* browser)
   browser_->command_updater()->AddCommandObserver(IDC_FORWARD, this);
   browser_->command_updater()->AddCommandObserver(IDC_RELOAD, this);
   browser_->command_updater()->AddCommandObserver(IDC_HOME, this);
-  browser_->command_updater()->AddCommandObserver(IDC_STAR, this);
+  browser_->command_updater()->AddCommandObserver(IDC_BOOKMARK_PAGE, this);
   if (browser->type() == Browser::TYPE_NORMAL)
     display_mode_ = DISPLAYMODE_NORMAL;
   else
@@ -259,14 +253,13 @@ bool ToolbarView::GetAcceleratorInfo(int id, views::Accelerator* accel) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, views::MenuDelegate implementation:
 
-void ToolbarView::RunMenu(views::View* source, const gfx::Point& pt,
-                          gfx::NativeView parent) {
+void ToolbarView::RunMenu(views::View* source, const gfx::Point& pt) {
   switch (source->GetID()) {
     case VIEW_ID_PAGE_MENU:
-      RunPageMenu(pt, parent);
+      RunPageMenu(pt);
       break;
     case VIEW_ID_APP_MENU:
-      RunAppMenu(pt, parent);
+      RunAppMenu(pt);
       break;
     default:
       NOTREACHED() << "Invalid source menu.";
@@ -339,7 +332,7 @@ void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
     case IDC_HOME:
       button = home_;
       break;
-    case IDC_STAR:
+    case IDC_BOOKMARK_PAGE:
       button = star_;
       break;
   }
@@ -350,7 +343,8 @@ void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, views::Button::ButtonListener implementation:
 
-void ToolbarView::ButtonPressed(views::Button* sender) {
+void ToolbarView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   int id = sender->tag();
   switch (id) {
     case IDC_BACK:
@@ -367,27 +361,27 @@ void ToolbarView::ButtonPressed(views::Button* sender) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, AutocompletePopupPositioner implementation:
+// ToolbarView, BubblePositioner implementation:
 
-gfx::Rect ToolbarView::GetPopupBounds() const {
+gfx::Rect ToolbarView::GetLocationStackBounds() const {
+  // The number of pixels from the left or right edges of the location stack to
+  // "just inside the visible borders".  When the omnibox bubble contents are
+  // aligned with this, the visible borders tacked on to the outsides will line
+  // up with the visible borders on the location stack.
+  const int kLocationStackEdgeWidth = 2;
+
   gfx::Point origin;
   views::View::ConvertPointToScreen(star_, &origin);
-  origin.set_y(origin.y() + star_->height() + kOmniboxPopupVerticalSpacing);
-  gfx::Rect popup_bounds(origin.x(), origin.y(),
+  gfx::Rect stack_bounds(origin.x(), origin.y(),
                          star_->width() + location_bar_->width() + go_->width(),
-                         0);
+                         location_bar_->height());
   if (UILayoutIsRightToLeft()) {
-    popup_bounds.set_x(
-        popup_bounds.x() - location_bar_->width() - go_->width());
-  } else {
-    popup_bounds.set_x(popup_bounds.x());
+    stack_bounds.set_x(
+        stack_bounds.x() - location_bar_->width() - go_->width());
   }
-  popup_bounds.set_y(popup_bounds.y());
-  popup_bounds.set_width(popup_bounds.width());
-  // Inset the bounds a little, since the buttons on either edge of the omnibox
-  // have invisible padding that makes the popup appear too wide.
-  popup_bounds.Inset(kOmniboxButtonsHorizontalMargin, 0);
-  return popup_bounds;
+  // Inset the bounds to just inside the visible edges (see comment above).
+  stack_bounds.Inset(kLocationStackEdgeWidth, 0);
+  return stack_bounds;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -425,13 +419,13 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
   // TODO(cpu) Bug 1109102. Query WebKit land for the actual bindings.
   switch (command_id) {
     case IDC_CUT:
-      *accelerator = views::Accelerator(L'X', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_X, false, true, false);
       return true;
     case IDC_COPY:
-      *accelerator = views::Accelerator(L'C', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_C, false, true, false);
       return true;
     case IDC_PASTE:
-      *accelerator = views::Accelerator(L'V', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_V, false, true, false);
       return true;
   }
   // Else, we retrieve the accelerator information from the frame.
@@ -453,6 +447,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
         (home_->GetPreferredSize().width() + kControlHorizOffset) : 0) +
         star_->GetPreferredSize().width() + go_->GetPreferredSize().width() +
         kMenuButtonOffset +
+        browser_actions_->GetPreferredSize().width() +
         (bookmark_menu_ ? bookmark_menu_->GetPreferredSize().width() : 0) +
         page_menu_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kPaddingRight;
@@ -524,14 +519,30 @@ void ToolbarView::Layout() {
                    child_y, star_->GetPreferredSize().width(), child_height);
 
   int go_button_width = go_->GetPreferredSize().width();
+  int browser_actions_width = browser_actions_->GetPreferredSize().width();
   int page_menu_width = page_menu_->GetPreferredSize().width();
   int app_menu_width = app_menu_->GetPreferredSize().width();
   int bookmark_menu_width = bookmark_menu_ ?
       bookmark_menu_->GetPreferredSize().width() : 0;
   int location_x = star_->x() + star_->width();
   int available_width = width() - kPaddingRight - bookmark_menu_width -
-      app_menu_width - page_menu_width - kMenuButtonOffset - go_button_width -
-      location_x;
+      app_menu_width - page_menu_width - browser_actions_width -
+      kMenuButtonOffset - go_button_width - location_x;
+
+  // We wait until the width of location bar is a minimum allowed. After this
+  // state, the width available for the browser actions is compromised until
+  // it can hold a minimum number of browser actions (currently 2). After this
+  // state, the location bar width starts shrinking again, with the minimum
+  // number of browser actions sticking on the the right of the location bar.
+  // TODO(sidchat): Use percentage width instead of fixed width to determine
+  //                minimum width of the location bar. BUG=24316.
+  if (available_width < kMinLocationBarWidthWithBrowserActions &&
+      browser_actions_width > 0) {
+    available_width += browser_actions_width;
+    browser_actions_width = browser_actions_->GetClippedPreferredWidth(
+        available_width - kMinLocationBarWidthWithBrowserActions);
+    available_width -= browser_actions_width;
+  }
   location_bar_->SetBounds(location_x, child_y, std::max(available_width, 0),
                            child_height);
 
@@ -539,6 +550,19 @@ void ToolbarView::Layout() {
                  go_button_width, child_height);
 
   int next_menu_x = go_->x() + go_->width() + kMenuButtonOffset;
+
+  browser_actions_->SetBounds(next_menu_x, 0, browser_actions_width, height());
+
+  // The browser actions need to do a layout explicitly, because when an
+  // extension is loaded/unloaded/changed, BrowserActionContainer removes and
+  // re-adds everything, regardless of whether it has a page action. For a
+  // page action, browser action bounds do not change, as a result of which
+  // SetBounds does not do a layout at all.
+  // TODO(sidchat): Rework the above bahavior so that explicit layout is not
+  //                required.
+  browser_actions_->Layout();
+
+  next_menu_x += browser_actions_width;
 
   if (bookmark_menu_) {
     bookmark_menu_->SetBounds(next_menu_x, child_y, bookmark_menu_width,
@@ -586,7 +610,6 @@ void ToolbarView::ShowContextMenu(int x, int y, bool is_mouse_gesture) {
 }
 
 void ToolbarView::DidGainFocus() {
-#if defined(OS_WIN)
   // Check to see if MSAA focus should be restored to previously focused button,
   // and if button is an enabled, visibled child of toolbar.
   if (!acc_focused_view_ ||
@@ -618,6 +641,7 @@ void ToolbarView::DidGainFocus() {
     view_index = acc_focused_view_->GetID();
   }
 
+#if defined(OS_WIN)
   gfx::NativeView wnd = GetWidget()->GetNativeView();
 
   // Notify Access Technology that there was a change in keyboard focus.
@@ -630,22 +654,32 @@ void ToolbarView::DidGainFocus() {
 }
 
 void ToolbarView::WillLoseFocus() {
-#if defined(OS_WIN)
-  if (acc_focused_view_) {
-    // Resetting focus state.
-    acc_focused_view_->SetHotTracked(false);
-  }
   // Any tooltips that are active should be hidden when toolbar loses focus.
   if (GetWidget() && GetWidget()->GetTooltipManager())
     GetWidget()->GetTooltipManager()->HideKeyboardTooltip();
-#else
-  // TODO(port): deal with toolbar a11y focus.
-  NOTIMPLEMENTED();
-#endif
+
+  // Removes the Child MSAA view's focus when toolbar loses focus.
+  if (acc_focused_view_) {
+    acc_focused_view_->SetHotTracked(false);
+    acc_focused_view_ = NULL;
+  }
+}
+
+void ToolbarView::RequestFocus() {
+  // When the toolbar needs to request focus, the default implementation of
+  // View::RequestFocus requires the View to be focusable. Since ToolbarView is
+  // not technically focused, we need to temporarily set and remove focus so
+  // that it can focus back to its MSAA focused state.
+  if (acc_focused_view_) {
+    SetFocusable(true);
+    View::RequestFocus();
+    SetFocusable(false);
+  } else {
+    View::RequestFocus();
+  }
 }
 
 bool ToolbarView::OnKeyPressed(const views::KeyEvent& e) {
-#if defined(OS_WIN)
   // Paranoia check, button should be initialized upon toolbar gaining focus.
   if (!acc_focused_view_)
     return false;
@@ -653,16 +687,16 @@ bool ToolbarView::OnKeyPressed(const views::KeyEvent& e) {
   int focused_view = GetChildIndex(acc_focused_view_);
   int next_view = focused_view;
 
-  switch (e.GetCharacter()) {
-    case VK_LEFT:
+  switch (e.GetKeyCode()) {
+    case base::VKEY_LEFT:
       next_view = GetNextAccessibleViewIndex(focused_view, true);
       break;
-    case VK_RIGHT:
+    case base::VKEY_RIGHT:
       next_view = GetNextAccessibleViewIndex(focused_view, false);
       break;
-    case VK_DOWN:
-    case VK_RETURN:
-      // VK_SPACE is already handled by the default case.
+    case base::VKEY_DOWN:
+    case base::VKEY_RETURN:
+      // VKEY_SPACE is already handled by the default case.
       if (acc_focused_view_->GetID() == VIEW_ID_PAGE_MENU ||
           acc_focused_view_->GetID() == VIEW_ID_APP_MENU) {
         // If a menu button in toolbar is activated and its menu is displayed,
@@ -699,24 +733,23 @@ bool ToolbarView::OnKeyPressed(const views::KeyEvent& e) {
     // Hot-track new focused button.
     acc_focused_view_->SetHotTracked(true);
 
-    // Retrieve information to generate an MSAA focus event.
-    int view_id = acc_focused_view_->GetID();
-    gfx::NativeView wnd = GetWidget()->GetNativeView();
-
     // Show the tooltip for the view that got the focus.
     if (GetWidget()->GetTooltipManager()) {
       GetWidget()->GetTooltipManager()->
           ShowKeyboardTooltip(GetChildViewAt(next_view));
     }
+#if defined(OS_WIN)
+    // Retrieve information to generate an MSAA focus event.
+    gfx::NativeView wnd = GetWidget()->GetNativeView();
+    int view_id = acc_focused_view_->GetID();
     // Notify Access Technology that there was a change in keyboard focus.
     ::NotifyWinEvent(EVENT_OBJECT_FOCUS, wnd, OBJID_CLIENT,
                      static_cast<LONG>(view_id));
+#else
+    NOTIMPLEMENTED();
+#endif
     return true;
   }
-#else
-  // TODO(port): deal with toolbar a11y focus.
-  NOTIMPLEMENTED();
-#endif
   return false;
 }
 
@@ -760,7 +793,6 @@ void ToolbarView::WriteDragData(views::View* sender,
 
   UserMetrics::RecordAction(L"Toolbar_DragStar", profile_);
 
-#if defined(OS_WIN)
   // If there is a bookmark for the URL, add the bookmark drag data for it. We
   // do this to ensure the bookmark is moved, rather than creating an new
   // bookmark.
@@ -780,10 +812,6 @@ void ToolbarView::WriteDragData(views::View* sender,
                                    tab->GetFavIcon(),
                                    data);
   }
-#else
-  // TODO(port): do bookmark item drag & drop
-  NOTIMPLEMENTED();
-#endif
 }
 
 int ToolbarView::GetDragOperations(views::View* sender, int x, int y) {
@@ -851,7 +879,7 @@ void ToolbarView::CreateLeftSideControls() {
 
 void ToolbarView::CreateCenterStack(Profile *profile) {
   star_ = new ToolbarStarToggle(this, this);
-  star_->set_tag(IDC_STAR);
+  star_->set_tag(IDC_BOOKMARK_PAGE);
   star_->SetDragController(this);
   star_->SetTooltipText(l10n_util::GetString(IDS_TOOLTIP_STAR));
   star_->SetToggledTooltipText(l10n_util::GetString(IDS_TOOLTIP_STARRED));
@@ -871,17 +899,19 @@ void ToolbarView::CreateCenterStack(Profile *profile) {
 
   LoadCenterStackImages();
 
+  location_bar_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_LOCATION));
   AddChildView(location_bar_);
   location_bar_->Init();
   AddChildView(go_);
 }
 
 void ToolbarView::CreateRightSideControls(Profile* profile) {
+  browser_actions_ = new BrowserActionsContainer(profile, this);
+
   page_menu_ = new views::MenuButton(NULL, std::wstring(), this, false);
   page_menu_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_PAGE));
   page_menu_->SetTooltipText(l10n_util::GetString(IDS_PAGEMENU_TOOLTIP));
   page_menu_->SetID(VIEW_ID_PAGE_MENU);
-
 
   app_menu_ = new views::MenuButton(NULL, std::wstring(), this, false);
   app_menu_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_APP));
@@ -889,17 +919,18 @@ void ToolbarView::CreateRightSideControls(Profile* profile) {
       l10n_util::GetString(IDS_PRODUCT_NAME)));
   app_menu_->SetID(VIEW_ID_APP_MENU);
 
-  LoadRightSideControlsImages();
-
-  AddChildView(page_menu_);
-  AddChildView(app_menu_);
-
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kBookmarkMenu)) {
     bookmark_menu_ = new BookmarkMenuButton(browser_);
     AddChildView(bookmark_menu_);
   } else {
     bookmark_menu_ = NULL;
   }
+
+  LoadRightSideControlsImages();
+
+  AddChildView(browser_actions_);
+  AddChildView(page_menu_);
+  AddChildView(app_menu_);
 }
 
 void ToolbarView::LoadLeftSideControlsImages() {
@@ -991,14 +1022,17 @@ void ToolbarView::LoadRightSideControlsImages() {
     app_menu_->SetIcon(*tp->GetBitmapNamed(IDR_MENU_CHROME_RTL));
   else
     app_menu_->SetIcon(*tp->GetBitmapNamed(IDR_MENU_CHROME));
+
+  if (bookmark_menu_ != NULL)
+    bookmark_menu_->SetIcon(*tp->GetBitmapNamed(IDR_MENU_BOOKMARK));
 }
 
-void ToolbarView::RunPageMenu(const gfx::Point& pt, gfx::NativeView parent) {
+void ToolbarView::RunPageMenu(const gfx::Point& pt) {
   CreatePageMenu();
   page_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
 }
 
-void ToolbarView::RunAppMenu(const gfx::Point& pt, gfx::NativeView parent) {
+void ToolbarView::RunAppMenu(const gfx::Point& pt) {
   CreateAppMenu();
   app_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
 }
@@ -1033,10 +1067,12 @@ void ToolbarView::CreatePageMenu() {
   page_menu_contents_->AddSeparator();
   page_menu_contents_->AddSubMenuWithStringId(
       IDS_DEVELOPER_MENU, devtools_menu_contents_.get());
-#endif
 
   page_menu_contents_->AddSeparator();
   page_menu_contents_->AddItemWithStringId(IDC_REPORT_BUG, IDS_REPORT_BUG);
+#else
+  NOTIMPLEMENTED();
+#endif
 
   page_menu_menu_.reset(new views::Menu2(page_menu_contents_.get()));
 }
@@ -1046,16 +1082,18 @@ void ToolbarView::CreateDevToolsMenuContents() {
   devtools_menu_contents_.reset(new views::SimpleMenuModel(this));
   devtools_menu_contents_->AddItem(IDC_VIEW_SOURCE,
                                    l10n_util::GetString(IDS_VIEW_SOURCE));
-  devtools_menu_contents_->AddItem(IDC_JS_CONSOLE,
-                                   l10n_util::GetString(IDS_JS_CONSOLE));
+  if (g_browser_process->have_inspector_files()) {
+    devtools_menu_contents_->AddItem(IDC_DEV_TOOLS,
+                                     l10n_util::GetString(IDS_DEV_TOOLS));
+  }
   devtools_menu_contents_->AddItem(IDC_TASK_MANAGER,
                                    l10n_util::GetString(IDS_TASK_MANAGER));
 }
 #endif
 
 void ToolbarView::CreateAppMenu() {
-  if (app_menu_contents_.get())
-    return;
+  // We always rebuild the app menu so that we can get the current state of
+  // the sync system.
 
   app_menu_contents_.reset(new views::SimpleMenuModel(this));
   app_menu_contents_->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
@@ -1066,7 +1104,8 @@ void ToolbarView::CreateAppMenu() {
   // We will create the child menu items for this once the asynchronous call is
   // done.  See OnGetProfilesDone().
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kEnableUserDataDirProfiles)) {
+  if (command_line.HasSwitch(switches::kEnableUserDataDirProfiles) &&
+      !profiles_menu_contents_.get()) {
     profiles_helper_->GetProfiles(NULL);
     profiles_menu_contents_.reset(new views::SimpleMenuModel(this));
     app_menu_contents_->AddSubMenuWithStringId(IDS_PROFILE_MENU,
@@ -1083,19 +1122,33 @@ void ToolbarView::CreateAppMenu() {
                                           IDS_BOOKMARK_MANAGER);
   app_menu_contents_->AddItemWithStringId(IDC_SHOW_DOWNLOADS,
                                           IDS_SHOW_DOWNLOADS);
+
+  // Create the manage extensions menu item.
+  ExtensionsService* extensions_service =
+      browser_->profile()->GetExtensionsService();
+  if (extensions_service && extensions_service->extensions_enabled()) {
+    app_menu_contents_->AddItemWithStringId(IDC_MANAGE_EXTENSIONS,
+                                            IDS_SHOW_EXTENSIONS);
+  }
+
   app_menu_contents_->AddSeparator();
-#ifdef CHROME_PERSONALIZATION
-  if (!Personalization::IsP13NDisabled(profile_)) {
-    app_menu_contents_->AddItem(
-        IDC_P13N_INFO,
-        Personalization::GetMenuItemInfoText(browser()));
+#if defined(BROWSER_SYNC)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSync)) {
+    std::wstring label;
+    std::wstring link;
+    // TODO(timsteele): Need a ui helper method to just get the type without
+    // needing labels.
+    SyncStatusUIHelper::MessageType type = SyncStatusUIHelper::GetLabels(
+        browser_->profile()->GetProfileSyncService(), &label, &link);
+    label = type == SyncStatusUIHelper::SYNCED ?
+        l10n_util::GetString(IDS_SYNC_MENU_BOOKMARKS_SYNCED_LABEL) :
+        type == SyncStatusUIHelper::SYNC_ERROR ?
+        l10n_util::GetString(IDS_SYNC_MENU_BOOKMARK_SYNC_ERROR_LABEL) :
+        l10n_util::GetString(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+    app_menu_contents_->AddItem(IDC_SYNC_BOOKMARKS, label);
+    app_menu_contents_->AddSeparator();
   }
 #endif
-  app_menu_contents_->AddItemWithStringId(IDC_CLEAR_BROWSING_DATA,
-                                          IDS_CLEAR_BROWSING_DATA);
-  app_menu_contents_->AddItemWithStringId(IDC_IMPORT_SETTINGS,
-                                          IDS_IMPORT_SETTINGS);
-  app_menu_contents_->AddSeparator();
   app_menu_contents_->AddItem(IDC_OPTIONS,
                               l10n_util::GetStringFUTF16(
                                   IDS_OPTIONS,

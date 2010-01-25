@@ -17,23 +17,34 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/lock.h"
+#include "base/ref_counted_memory.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(USE_BASE_DATA_PACK)
 namespace base {
 class DataPack;
 }
 #endif
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 typedef struct _GdkPixbuf GdkPixbuf;
 #endif
-namespace gfx{
+namespace gfx {
 class Font;
 }
 class SkBitmap;
 typedef uint32 SkColor;
+namespace base {
 class StringPiece;
+}
+
+#if defined(OS_MACOSX)
+#ifdef __OBJC__
+@class NSImage;
+#else
+class NSImage;
+#endif  // __OBJC__
+#endif  // defined(OS_MACOSX)
 
 // ResourceBundle is a central facility to load images and other resources,
 // such as theme graphics.
@@ -67,7 +78,7 @@ class ResourceBundle {
   void LoadThemeResources();
 
   // Gets the bitmap with the specified resource_id, first by looking into the
-  // theme data, than in the current module data if applicable.
+  // theme data, then in the current module data if applicable.
   // Returns a pointer to a shared instance of the SkBitmap. This shared bitmap
   // is owned by the resource bundle and should not be freed.
   //
@@ -80,14 +91,12 @@ class ResourceBundle {
   // Loads the raw bytes of an image resource into |bytes|,
   // without doing any processing or interpretation of
   // the resource. Returns whether we successfully read the resource.
-  bool LoadImageResourceBytes(int resource_id,
-                              std::vector<unsigned char>* bytes);
+  RefCountedStaticMemory* LoadImageResourceBytes(int resource_id);
 
   // Loads the raw bytes of a data resource into |bytes|,
   // without doing any processing or interpretation of
   // the resource. Returns whether we successfully read the resource.
-  bool LoadDataResourceBytes(int resource_id,
-                             std::vector<unsigned char>* bytes);
+  RefCountedStaticMemory* LoadDataResourceBytes(int resource_id);
 
   // Return the contents of a file in a string given the resource id.
   // This will copy the data from the resource and return it as a string.
@@ -97,7 +106,7 @@ class ResourceBundle {
 
   // Like GetDataResource(), but avoids copying the resource.  Instead, it
   // returns a StringPiece which points into the actual resource in the image.
-  StringPiece GetRawDataResource(int resource_id);
+  base::StringPiece GetRawDataResource(int resource_id);
 
   // Get a localized string given a message id.  Returns an empty
   // string if the message_id is not found.
@@ -112,7 +121,10 @@ class ResourceBundle {
 
   // Loads and returns a cursor from the app module.
   HCURSOR LoadCursor(int cursor_id);
-#elif defined(OS_LINUX)
+#elif defined(OS_MACOSX)
+  // Wrapper for GetBitmapNamed. Converts the bitmap to an autoreleased NSImage.
+  NSImage* GetNSImageNamed(int resource_id);
+#elif defined(USE_X11)
   // Gets the GdkPixbuf with the specified resource_id, first by looking into
   // the theme data, than in the current module data if applicable.  Returns a
   // pointer to a shared instance of the GdkPixbuf.  This shared GdkPixbuf is
@@ -149,7 +161,7 @@ class ResourceBundle {
 #if defined(OS_WIN)
   // Windows stores resources in DLLs, which are managed by HINSTANCE.
   typedef HINSTANCE DataHandle;
-#elif defined(OS_LINUX) || defined(OS_MACOSX)
+#elif defined(USE_BASE_DATA_PACK)
   // Linux uses base::DataPack.
   typedef base::DataPack* DataHandle;
 #endif
@@ -172,12 +184,12 @@ class ResourceBundle {
   // string if no locale data files are found.
   FilePath GetLocaleFilePath(const std::wstring& pref_locale);
 
-  // Loads the raw bytes of a resource from |module| into |bytes|,
-  // without doing any processing or interpretation of
-  // the resource. Returns whether we successfully read the resource.
-  static bool LoadResourceBytes(DataHandle module,
-                                int resource_id,
-                                std::vector<unsigned char>* bytes);
+  // Returns a handle to bytes from the resource |module|, without doing any
+  // processing or interpretation of the resource. Returns whether we
+  // successfully read the resource.  Caller does not own the data returned
+  // through this method and must not modify the data pointed to by |bytes|.
+  static RefCountedStaticMemory* LoadResourceBytes(DataHandle module,
+                                                   int resource_id);
 
   // Creates and returns a new SkBitmap given the data file to look in and the
   // resource id.  It's up to the caller to free the returned bitmap when
@@ -197,7 +209,7 @@ class ResourceBundle {
   // ownership of the pointers.
   typedef std::map<int, SkBitmap*> SkImageMap;
   SkImageMap skia_images_;
-#if defined(OS_LINUX)
+#if defined(USE_X11)
   typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
   GdkPixbufMap gdk_pixbufs_;
 #endif
@@ -215,4 +227,4 @@ class ResourceBundle {
   DISALLOW_EVIL_CONSTRUCTORS(ResourceBundle);
 };
 
-#endif // APP_RESOURCE_BUNDLE_H_
+#endif  // APP_RESOURCE_BUNDLE_H_

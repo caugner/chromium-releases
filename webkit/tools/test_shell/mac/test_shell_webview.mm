@@ -9,7 +9,8 @@
 #include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "webkit/glue/webview.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
 
@@ -76,7 +77,7 @@
 
 - (IBAction)stopLoading:(id)sender {
   if (shell_ && shell_->webView())
-    shell_->webView()->StopLoading();
+    shell_->webView()->mainFrame()->stopLoading();
 }
 
 - (IBAction)takeURLStringValueFrom:(NSTextField *)sender {
@@ -87,7 +88,7 @@
   NSURL* tempUrl = [NSURL URLWithString:url];
   if (tempUrl && ![tempUrl scheme])
     url = [@"http://" stringByAppendingString:url];
-  shell_->LoadURL(UTF8ToWide([url UTF8String]).c_str());
+  shell_->LoadURL(GURL(std::string([url UTF8String])));
 }
 
 - (void)mouseDown:(NSEvent *)theEvent {

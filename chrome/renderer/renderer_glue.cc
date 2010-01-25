@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include <wininet.h>
 #endif
 
+#include "app/clipboard/clipboard.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/resource_bundle.h"
-#include "base/clipboard.h"
-#include "base/scoped_clipboard_writer.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
@@ -30,9 +30,7 @@
 #include "webkit/api/public/WebKitClient.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
-
 
 #if defined(OS_WIN)
 #include <strsafe.h>  // note: per msdn docs, this must *follow* other includes
@@ -160,7 +158,7 @@ void AppendToLog(const char* file, int line, const char* msg) {
   logging::LogMessage(file, line).stream() << msg;
 }
 
-StringPiece GetDataResource(int resource_id) {
+base::StringPiece GetDataResource(int resource_id) {
   return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
 }
 
@@ -176,23 +174,27 @@ Clipboard* ClipboardGetClipboard(){
   return NULL;
 }
 
-bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format) {
+bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format,
+                                Clipboard::Buffer buffer) {
   bool result;
   RenderThread::current()->Send(
-      new ViewHostMsg_ClipboardIsFormatAvailable(format, &result));
+      new ViewHostMsg_ClipboardIsFormatAvailable(format, buffer, &result));
   return result;
 }
 
-void ClipboardReadText(string16* result) {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadText(result));
+void ClipboardReadText(Clipboard::Buffer buffer, string16* result) {
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadText(buffer,
+                                                                  result));
 }
 
-void ClipboardReadAsciiText(std::string* result) {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadAsciiText(result));
+void ClipboardReadAsciiText(Clipboard::Buffer buffer, std::string* result) {
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadAsciiText(buffer,
+                                                                       result));
 }
 
-void ClipboardReadHTML(string16* markup, GURL* url) {
-  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadHTML(markup, url));
+void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url) {
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadHTML(buffer,
+                                                                  markup, url));
 }
 
 GURL GetInspectorURL() {
@@ -204,11 +206,20 @@ std::string GetUIResourceProtocol() {
   return "chrome";
 }
 
-bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
   if (!RenderThread::current()->plugin_refresh_allowed())
     refresh = false;
-  return RenderThread::current()->Send(new ViewHostMsg_GetPlugins(
-     refresh, plugins));
+  RenderThread::current()->Send(new ViewHostMsg_GetPlugins(refresh, plugins));
+}
+
+bool IsProtocolSupportedForMedia(const GURL& url) {
+  // If new protocol is to be added here, we need to make sure the response is
+  // validated accordingly in the media engine.
+  if (url.SchemeIsFile() || url.SchemeIs(chrome::kHttpScheme) ||
+      url.SchemeIs(chrome::kHttpsScheme) ||
+      url.SchemeIs(chrome::kExtensionScheme))
+    return true;
+  return false;
 }
 
 // static factory function
@@ -223,13 +234,13 @@ ResourceLoaderBridge* ResourceLoaderBridge::Create(
     int load_flags,
     int origin_pid,
     ResourceType::Type resource_type,
-    int app_cache_context_id,
+    int appcache_host_id,
     int routing_id) {
   ResourceDispatcher* dispatch = ChildThread::current()->resource_dispatcher();
   return dispatch->CreateBridge(method, url, first_party_for_cookies, referrer,
                                 frame_origin, main_frame_origin, headers,
                                 load_flags, origin_pid, resource_type, 0,
-                                app_cache_context_id, routing_id);
+                                appcache_host_id, routing_id);
 }
 
 void NotifyCacheStats() {

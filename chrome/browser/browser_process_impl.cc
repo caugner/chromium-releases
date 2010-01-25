@@ -1,12 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_process_impl.h"
 
+#include "app/clipboard/clipboard.h"
 #include "app/l10n_util.h"
-#include "base/clipboard.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
@@ -31,15 +32,22 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
+#include "ipc/ipc_logging.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "views/focus/view_storage.h"
-#include "views/widget/accelerator_handler.h"
-#elif defined(OS_POSIX)
+#elif defined(OS_MACOSX)
+#include "chrome/browser/printing/print_job_manager.h"
+#elif defined(OS_LINUX)
 // TODO(port): Remove the temporary scaffolding as we port the above headers.
 #include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+#include "chrome/common/plugin_messages.h"
+#include "chrome/common/render_messages.h"
 #endif
 
 namespace {
@@ -59,7 +67,7 @@ class BrowserProcessSubThread : public ChromeThread {
       : ChromeThread(identifier) {
   }
 
-  ~BrowserProcessSubThread() {
+  virtual ~BrowserProcessSubThread() {
     // We cannot rely on our base class to stop the thread since we want our
     // CleanUp function to run.
     Stop();
@@ -93,6 +101,35 @@ class BrowserProcessSubThread : public ChromeThread {
   NotificationService* notification_service_;
 };
 
+class IOThread : public BrowserProcessSubThread {
+ public:
+  IOThread() : BrowserProcessSubThread(ChromeThread::IO) {}
+
+  virtual ~IOThread() {
+    // We cannot rely on our base class to stop the thread since we want our
+    // CleanUp function to run.
+    Stop();
+  }
+
+ protected:
+  virtual void CleanUp() {
+    // URLFetcher and URLRequest instances must NOT outlive the IO thread.
+    //
+    // Strictly speaking, URLFetcher's CheckForLeaks() should be done on the
+    // UI thread. However, since there _shouldn't_ be any instances left
+    // at this point, it shouldn't be a race.
+    //
+    // We check URLFetcher first, since if it has leaked then an associated
+    // URLRequest will also have leaked. However it is more useful to
+    // crash showing the callstack of URLFetcher's allocation than its
+    // URLRequest member.
+    base::LeakTracker<URLFetcher>::CheckForLeaks();
+    base::LeakTracker<URLRequest>::CheckForLeaks();
+
+    BrowserProcessSubThread::CleanUp();
+  }
+};
+
 }  // namespace
 
 BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
@@ -103,15 +140,17 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       created_db_thread_(false),
       created_profile_manager_(false),
       created_local_state_(false),
+#if defined(OS_WIN)
       initialized_broker_services_(false),
       broker_services_(NULL),
+#endif  // defined(OS_WIN)
       created_icon_manager_(false),
       created_debugger_wrapper_(false),
       created_devtools_manager_(false),
       module_ref_count_(0),
-      memory_model_(MEDIUM_MEMORY_MODEL),
       checked_for_new_frames_(false),
-      using_new_frames_(false) {
+      using_new_frames_(false),
+      have_inspector_files_(true) {
   g_browser_process = this;
   clipboard_.reset(new Clipboard);
   main_notification_service_.reset(new NotificationService);
@@ -119,18 +158,6 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
   // Must be created after the NotificationService.
   print_job_manager_.reset(new printing::PrintJobManager);
 
-  // Configure the browser memory model.
-  if (command_line.HasSwitch(switches::kMemoryModel)) {
-    std::wstring model = command_line.GetSwitchValue(switches::kMemoryModel);
-    if (!model.empty()) {
-      if (model == L"high")
-        memory_model_ = HIGH_MEMORY_MODEL;
-      else if (model == L"low")
-        memory_model_ = LOW_MEMORY_MODEL;
-      else if (model == L"medium")
-        memory_model_ = MEDIUM_MEMORY_MODEL;
-    }
-  }
   shutdown_event_.reset(new base::WaitableEvent(true, false));
 }
 
@@ -173,13 +200,6 @@ BrowserProcessImpl::~BrowserProcessImpl() {
     resource_dispatcher_host()->Shutdown();
   }
 
-  // Shutdown DNS prefetching now to ensure that network stack objects
-  // living on the IO thread get destroyed before the IO thread goes away.
-  if (io_thread_.get()) {
-    io_thread_->message_loop()->PostTask(FROM_HERE,
-        NewRunnableFunction(chrome_browser_net::EnsureDnsPrefetchShutdown));
-  }
-
 #if defined(OS_LINUX)
   // The IO thread must outlive the BACKGROUND_X11 thread.
   background_x11_thread_.reset();
@@ -188,7 +208,7 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   // Need to stop io_thread_ before resource_dispatcher_host_, since
   // io_thread_ may still deref ResourceDispatcherHost and handle resource
   // request before going away.
-  io_thread_.reset();
+  ResetIOThread();
 
   // Clean up state that lives on the file_thread_ before it goes away.
   if (resource_dispatcher_host_.get()) {
@@ -308,13 +328,28 @@ void BrowserProcessImpl::CreateIOThread() {
   background_x11_thread_.swap(background_x11_thread);
 #endif
 
-  scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(ChromeThread::IO));
+  scoped_ptr<base::Thread> thread(new IOThread);
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_IO;
   if (!thread->StartWithOptions(options))
     return;
   io_thread_.swap(thread);
+}
+
+void BrowserProcessImpl::ResetIOThread() {
+  if (io_thread_.get()) {
+    io_thread_->message_loop()->PostTask(FROM_HERE,
+        NewRunnableFunction(CleanupOnIOThread));
+  }
+  io_thread_.reset();
+}
+
+// static
+void BrowserProcessImpl::CleanupOnIOThread() {
+  // Shutdown DNS prefetching now to ensure that network stack objects
+  // living on the IO thread get destroyed before the IO thread goes away.
+  chrome_browser_net::EnsureDnsPrefetchShutdown();
+  // TODO(eroman): can this be merged into IOThread::CleanUp() ?
 }
 
 void BrowserProcessImpl::CreateFileThread() {
@@ -363,6 +398,7 @@ void BrowserProcessImpl::CreateLocalState() {
   local_state_.reset(new PrefService(local_state_path, file_thread()));
 }
 
+#if defined(OS_WIN)
 void BrowserProcessImpl::InitBrokerServices(
     sandbox::BrokerServices* broker_services) {
   DCHECK(!initialized_broker_services_ && broker_services_ == NULL);
@@ -370,6 +406,7 @@ void BrowserProcessImpl::InitBrokerServices(
   initialized_broker_services_ = true;
   broker_services_ = broker_services;
 }
+#endif  // defined(OS_WIN)
 
 void BrowserProcessImpl::CreateIconManager() {
   DCHECK(!created_icon_manager_ && icon_manager_.get() == NULL);
@@ -390,19 +427,74 @@ void BrowserProcessImpl::CreateDevToolsManager() {
   devtools_manager_ = new DevToolsManager();
 }
 
-void BrowserProcessImpl::CreateAcceleratorHandler() {
-#if defined(OS_WIN)
-  DCHECK(accelerator_handler_.get() == NULL);
-  scoped_ptr<views::AcceleratorHandler> accelerator_handler(
-      new views::AcceleratorHandler);
-  accelerator_handler_.swap(accelerator_handler);
-#else
-  // TODO(port): remove this completely, it has no business being here.
-#endif
-}
-
 void BrowserProcessImpl::CreateGoogleURLTracker() {
   DCHECK(google_url_tracker_.get() == NULL);
   scoped_ptr<GoogleURLTracker> google_url_tracker(new GoogleURLTracker);
   google_url_tracker_.swap(google_url_tracker);
+}
+
+// The BrowserProcess object must outlive the file thread so we use traits
+// which don't do any management.
+template <>
+struct RunnableMethodTraits<BrowserProcessImpl> {
+  void RetainCallee(BrowserProcessImpl* process) {}
+  void ReleaseCallee(BrowserProcessImpl* process) {}
+};
+
+void BrowserProcessImpl::CheckForInspectorFiles() {
+  file_thread()->message_loop()->PostTask
+      (FROM_HERE,
+       NewRunnableMethod(this, &BrowserProcessImpl::DoInspectorFilesCheck));
+}
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+
+void BrowserProcessImpl::SetIPCLoggingEnabled(bool enable) {
+  // First enable myself.
+  if (enable)
+    IPC::Logging::current()->Enable();
+  else
+    IPC::Logging::current()->Disable();
+
+  // Now tell subprocesses.  Messages to ChildProcess-derived
+  // processes must be done on the IO thread.
+  io_thread()->message_loop()->PostTask
+      (FROM_HERE,
+       NewRunnableMethod(
+           this,
+           &BrowserProcessImpl::SetIPCLoggingEnabledForChildProcesses,
+           enable));
+
+  // Finally, tell the renderers which don't derive from ChildProcess.
+  // Messages to the renderers must be done on the UI (main) thread.
+  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance())
+    i.GetCurrentValue()->Send(new ViewMsg_SetIPCLoggingEnabled(enable));
+}
+
+// Helper for SetIPCLoggingEnabled.
+void BrowserProcessImpl::SetIPCLoggingEnabledForChildProcesses(bool enabled) {
+  DCHECK(MessageLoop::current() ==
+         ChromeThread::GetMessageLoop(ChromeThread::IO));
+
+  ChildProcessHost::Iterator i;  // default constr references a singleton
+  while (!i.Done()) {
+    i->Send(new PluginProcessMsg_SetIPCLoggingEnabled(enabled));
+    ++i;
+  }
+}
+
+#endif  // IPC_MESSAGE_LOG_ENABLED
+
+void BrowserProcessImpl::DoInspectorFilesCheck() {
+  // Runs on FILE thread.
+  DCHECK(file_thread_->message_loop() == MessageLoop::current());
+  bool result = false;
+
+  FilePath inspector_dir;
+  if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
+    result = file_util::PathExists(inspector_dir);
+  }
+
+  have_inspector_files_ = result;
 }

@@ -12,6 +12,7 @@
 #include "base/thread.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/url_constants.h"
@@ -21,12 +22,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job.h"
-#ifdef CHROME_PERSONALIZATION
-// TODO(timsteele): Remove all CHROME_PERSONALIZATION code in this file.
-// It is only temporarily needed to configure some personalization data sources
-// that will go away soon.
-#include "chrome/personalization/personalization.h"
-#endif
+#include "net/url_request/url_request_view_net_internals_job.h"
 
 #include "grit/locale_settings.h"
 
@@ -54,7 +50,7 @@ class URLRequestChromeJob : public URLRequestJob {
 
   // Called by ChromeURLDataManager to notify us that the data blob is ready
   // for us.
-  void DataAvailable(RefCountedBytes* bytes);
+  void DataAvailable(RefCountedMemory* bytes);
 
   void SetMimeType(const std::string& mime_type) {
     mime_type_ = mime_type;
@@ -70,7 +66,7 @@ class URLRequestChromeJob : public URLRequestJob {
   void CompleteRead(net::IOBuffer* buf, int buf_size, int* bytes_read);
 
   // The actual data we're serving.  NULL until it's been fetched.
-  scoped_refptr<RefCountedBytes> data_;
+  scoped_refptr<RefCountedMemory> data_;
   // The current offset into the data that we're handing off to our
   // callers via the Read interfaces.
   int data_offset_;
@@ -103,7 +99,7 @@ void RegisterURLRequestChromeJob() {
     url_util::AddStandardScheme(kChromeURLScheme);
   }
 
-  std::wstring inspector_dir;
+  FilePath inspector_dir;
   if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
     // TODO(yurys): remove "inspector" source when new developer tools support
     // all features of in-process Web Inspector and Console Debugger. For the
@@ -118,15 +114,10 @@ void RegisterURLRequestChromeJob() {
                                       &ChromeURLDataManager::Factory);
   URLRequest::RegisterProtocolFactory(chrome::kPrintScheme,
                                       &ChromeURLDataManager::Factory);
-#ifdef CHROME_PERSONALIZATION
-  url_util::AddStandardScheme(kPersonalizationScheme);
-  URLRequest::RegisterProtocolFactory(kPersonalizationScheme,
-                                      &ChromeURLDataManager::Factory);
-#endif
 }
 
 void UnregisterURLRequestChromeJob() {
-  std::wstring inspector_dir;
+  FilePath inspector_dir;
   if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
     chrome_url_data_manager.RemoveFileSource("inspector");
     chrome_url_data_manager.RemoveFileSource(chrome::kChromeUIDevToolsHost);
@@ -137,13 +128,7 @@ void UnregisterURLRequestChromeJob() {
 void ChromeURLDataManager::URLToRequest(const GURL& url,
                                         std::string* source_name,
                                         std::string* path) {
-#ifdef CHROME_PERSONALIZATION
-  DCHECK(url.SchemeIs(kChromeURLScheme) ||
-         url.SchemeIs(kPersonalizationScheme) ||
-         url.SchemeIs(chrome::kPrintScheme));
-#else
   DCHECK(url.SchemeIs(kChromeURLScheme) || url.SchemeIs(chrome::kPrintScheme));
-#endif
 
   if (!url.is_valid()) {
     NOTREACHED();
@@ -172,7 +157,7 @@ void ChromeURLDataManager::URLToRequest(const GURL& url,
 
 // static
 bool ChromeURLDataManager::URLToFilePath(const GURL& url,
-                                         std::wstring* file_path) {
+                                         FilePath* file_path) {
   // Parse the URL into a request for a source and path.
   std::string source_name;
   std::string relative_path;
@@ -183,8 +168,8 @@ bool ChromeURLDataManager::URLToFilePath(const GURL& url,
   if (i == chrome_url_data_manager.file_sources_.end())
     return false;
 
-  file_path->assign(i->second);
-  file_util::AppendToPath(file_path, UTF8ToWide(relative_path));
+  *file_path = i->second.AppendASCII(relative_path);
+
   return true;
 }
 
@@ -199,7 +184,7 @@ void ChromeURLDataManager::AddDataSource(scoped_refptr<DataSource> source) {
 }
 
 void ChromeURLDataManager::AddFileSource(const std::string& source_name,
-                                         const std::wstring& file_path) {
+                                         const FilePath& file_path) {
   DCHECK(file_sources_.count(source_name) == 0);
   file_sources_[source_name] = file_path;
 }
@@ -242,9 +227,19 @@ bool ChromeURLDataManager::StartRequest(const GURL& url,
   job->SetMimeType(source->GetMimeType(path));
 
   // Forward along the request to the data source.
-  source->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(source, &DataSource::StartDataRequest,
-                        path, request_id));
+  MessageLoop* target_message_loop = source->MessageLoopForRequestPath(path);
+  if (!target_message_loop) {
+    // The DataSource is agnostic to which thread StartDataRequest is called
+    // on for this path.  Call directly into it from this thread, the IO
+    // thread.
+    source->StartDataRequest(path, request_id);
+  } else {
+    // The DataSource wants StartDataRequest to be called on a specific thread,
+    // usually the UI thread, for this path.
+    target_message_loop->PostTask(FROM_HERE,
+        NewRunnableMethod(source, &DataSource::StartDataRequest,
+                          path, request_id));
+  }
   return true;
 }
 
@@ -263,7 +258,7 @@ void ChromeURLDataManager::RemoveRequest(URLRequestChromeJob* job) {
 
 void ChromeURLDataManager::DataAvailable(
     RequestID request_id,
-    scoped_refptr<RefCountedBytes> bytes) {
+    scoped_refptr<RefCountedMemory> bytes) {
   // Forward this data on to the pending URLRequest, if it exists.
   PendingRequestMap::iterator i = pending_requests_.find(request_id);
   if (i != pending_requests_.end()) {
@@ -277,11 +272,16 @@ void ChromeURLDataManager::DataAvailable(
 
 void ChromeURLDataManager::DataSource::SendResponse(
     RequestID request_id,
-    RefCountedBytes* bytes) {
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+    RefCountedMemory* bytes) {
+  ChromeThread::GetMessageLoop(ChromeThread::IO)->PostTask(FROM_HERE,
       NewRunnableMethod(&chrome_url_data_manager,
                         &ChromeURLDataManager::DataAvailable,
-                        request_id, scoped_refptr<RefCountedBytes>(bytes)));
+                        request_id, scoped_refptr<RefCountedMemory>(bytes)));
+}
+
+MessageLoop* ChromeURLDataManager::DataSource::MessageLoopForRequestPath(
+    const std::string& path) const {
+  return message_loop_;
 }
 
 // static
@@ -297,20 +297,56 @@ void ChromeURLDataManager::DataSource::SetFontAndTextDirection(
        L"rtl" : L"ltr");
 }
 
+// This class describes how to form chrome://net-internals/DESCRIPTION
+// URLs, and conversely how to extract DESCRIPTION.
+//
+// This needs to be passed to URLRequestViewNetInternalsJob, which lives
+// in the network module and doesn't know anything about what URL protocol
+// it has been registered with.
+class NetInternalsURLFormat : public URLRequestViewNetInternalsJob::URLFormat {
+ public:
+  virtual std::string GetDetails(const GURL& url) {
+    DCHECK(IsSupportedURL(url));
+    size_t start = strlen(chrome::kNetworkViewInternalsURL);
+    if (start >= url.spec().size())
+      return std::string();
+    return url.spec().substr(start);
+  }
+
+  virtual GURL MakeURL(const std::string& details) {
+    return GURL(std::string(chrome::kNetworkViewInternalsURL) + details);
+  }
+
+  static bool IsSupportedURL(const GURL& url) {
+    // Note that kNetworkViewInternalsURL is terminated by a '/'.
+    return StartsWithASCII(url.spec(),
+                           chrome::kNetworkViewInternalsURL,
+                           true /*case_sensitive*/);
+  }
+};
+
 URLRequestJob* ChromeURLDataManager::Factory(URLRequest* request,
                                              const std::string& scheme) {
   // Try first with a file handler
-  std::wstring path;
+  FilePath path;
   if (ChromeURLDataManager::URLToFilePath(request->url(), &path))
-    return new URLRequestChromeFileJob(request,
-                                       FilePath::FromWStringHack(path));
+    return new URLRequestChromeFileJob(request, path);
+
+  // Next check for chrome://net-internals/, which uses its own job type.
+  if (NetInternalsURLFormat::IsSupportedURL(request->url())) {
+    static NetInternalsURLFormat url_format;
+    return new URLRequestViewNetInternalsJob(request, &url_format);
+  }
 
   // Fall back to using a custom handler
   return new URLRequestChromeJob(request);
 }
 
 URLRequestChromeJob::URLRequestChromeJob(URLRequest* request)
-    : URLRequestJob(request), data_offset_(0) {}
+    : URLRequestJob(request),
+      data_offset_(0),
+      pending_buf_size_(0) {
+}
 
 URLRequestChromeJob::~URLRequestChromeJob() {
   CHECK(!chrome_url_data_manager.HasPendingJob(this));
@@ -332,7 +368,7 @@ bool URLRequestChromeJob::GetMimeType(std::string* mime_type) const {
   return !mime_type_.empty();
 }
 
-void URLRequestChromeJob::DataAvailable(RefCountedBytes* bytes) {
+void URLRequestChromeJob::DataAvailable(RefCountedMemory* bytes) {
   if (bytes) {
     // The request completed, and we have all the data.
     // Clear any IO pending status.
@@ -370,11 +406,11 @@ bool URLRequestChromeJob::ReadRawData(net::IOBuffer* buf, int buf_size,
 
 void URLRequestChromeJob::CompleteRead(net::IOBuffer* buf, int buf_size,
                                        int* bytes_read) {
-  int remaining = static_cast<int>(data_->data.size()) - data_offset_;
+  int remaining = static_cast<int>(data_->size()) - data_offset_;
   if (buf_size > remaining)
     buf_size = remaining;
   if (buf_size > 0) {
-    memcpy(buf->data(), &data_->data[0] + data_offset_, buf_size);
+    memcpy(buf->data(), data_->front() + data_offset_, buf_size);
     data_offset_ += buf_size;
   }
   *bytes_read = buf_size;

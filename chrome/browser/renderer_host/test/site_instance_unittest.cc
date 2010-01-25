@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/string16.h"
+#include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -10,6 +11,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -246,9 +248,9 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   GURL url_foo_https = GURL("https://foo/a.html");
   GURL url_foo_port = GURL("http://foo:8080/a.html");
   GURL url_javascript = GURL("javascript:alert(1);");
-  GURL url_crash = GURL("about:crash");
-  GURL url_hang = GURL("about:hang");
-  GURL url_shorthang = GURL("about:shorthang");
+  GURL url_crash = GURL(chrome::kAboutCrashURL);
+  GURL url_hang = GURL(chrome::kAboutHangURL);
+  GURL url_shorthang = GURL(chrome::kAboutShorthangURL);
 
   // Same scheme and port -> same site.
   EXPECT_TRUE(SiteInstance::IsSameWebSite(url_foo, url_foo2));
@@ -423,8 +425,8 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Create some extension instances and make sure they share a process.
   scoped_refptr<SiteInstance> extension1_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome-extension://foo/bar")));
-  policy->Add(extension1_instance->GetProcess()->pid());
-  policy->GrantExtensionBindings(extension1_instance->GetProcess()->pid());
+  policy->Add(extension1_instance->GetProcess()->id());
+  policy->GrantExtensionBindings(extension1_instance->GetProcess()->id());
 
   scoped_refptr<SiteInstance> extension2_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome-extension://baz/bar")));
@@ -437,8 +439,8 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Create some DOMUI instances and make sure they share a process.
   scoped_refptr<SiteInstance> dom1_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome://newtab")));
-  policy->Add(dom1_instance->GetProcess()->pid());
-  policy->GrantDOMUIBindings(dom1_instance->GetProcess()->pid());
+  policy->Add(dom1_instance->GetProcess()->id());
+  policy->GrantDOMUIBindings(dom1_instance->GetProcess()->id());
 
   scoped_refptr<SiteInstance> dom2_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome://history")));
@@ -455,4 +457,71 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   }
 
   STLDeleteContainerPointers(hosts.begin(), hosts.end());
+}
+
+// Test to ensure that profiles that derive from each other share site
+// information.
+TEST_F(SiteInstanceTest, GetSiteInstanceMap) {
+  int deleteCounter = 0;
+
+  scoped_ptr<Profile> p1(new TestingProfile());
+  scoped_ptr<Profile> p2(new TestingProfile());
+  scoped_ptr<Profile> p3(new DerivedTestingProfile(p1.get()));
+
+  // In this test, instances 1 and 2 will be deleted automatically when the
+  // SiteInstance objects they return are deleted.  However, instance 3 never
+  // returns any SitesIntance objects in this test, so will not be automatically
+  // deleted.  It must be deleted manually.
+  TestBrowsingInstance* instance1(new TestBrowsingInstance(p1.get(),
+      &deleteCounter));
+  TestBrowsingInstance* instance2(new TestBrowsingInstance(p2.get(),
+      &deleteCounter));
+  scoped_refptr<TestBrowsingInstance> instance3(
+      new TestBrowsingInstance(p3.get(), &deleteCounter));
+
+  instance1->use_process_per_site = true;
+  instance2->use_process_per_site = true;
+  instance3->use_process_per_site = true;
+
+  // The same profile with the same site.
+  scoped_refptr<SiteInstance> s1a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s1b(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  EXPECT_EQ(s1a, s1b);
+
+  // The same profile with different sites.
+  scoped_refptr<SiteInstance> s2a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s2b(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://foo/boo")));
+  EXPECT_NE(s2a, s2b);
+
+  // The different profiles with the same site.
+  scoped_refptr<SiteInstance> s3a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s3b(instance2->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  EXPECT_NE(s3a, s3b);
+
+  // The different profiles with different sites.
+  scoped_refptr<SiteInstance> s4a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s4b(instance2->GetSiteInstanceForURL(
+      GURL("chrome-extension://foo/boo")));
+  EXPECT_NE(s4a, s4b);
+
+  // The derived profiles with the same site.
+  scoped_refptr<SiteInstance> s5a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s5b(instance3->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  EXPECT_EQ(s5a, s5b);
+
+  // The derived profiles with the different sites.
+  scoped_refptr<SiteInstance> s6a(instance1->GetSiteInstanceForURL(
+      GURL("chrome-extension://baz/bar")));
+  scoped_refptr<SiteInstance> s6b(instance3->GetSiteInstanceForURL(
+      GURL("chrome-extension://foo/boo")));
+  EXPECT_NE(s6a, s6b);
 }

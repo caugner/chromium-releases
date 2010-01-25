@@ -4,14 +4,22 @@
 
 #include "chrome/browser/gtk/options/advanced_contents_gtk.h"
 
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #include "app/l10n_util.h"
 #include "base/basictypes.h"
+#include "base/file_util.h"
+#include "base/linux_util.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
+#include "base/string_tokenizer.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/fonts_languages_window.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/gtk/options/cookies_view.h"
 #include "chrome/browser/gtk/options/options_layout_gtk.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/options_page_base.h"
@@ -22,12 +30,21 @@
 #include "chrome/common/gtk_util.h"
 #include "chrome/common/pref_member.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/process_watcher.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/cookie_policy.h"
 
 namespace {
+
+// Command used to configure GNOME proxy settings. The command was renamed
+// in January 2009, so both are used to work on both old and new systems.
+const char* kOldGNOMEProxyConfigCommand[] = {"gnome-network-preferences", NULL};
+const char* kGNOMEProxyConfigCommand[] = {"gnome-network-properties", NULL};
+// KDE3 and KDE4 are only slightly different, but incompatible. Go figure.
+const char* kKDE3ProxyConfigCommand[] = {"kcmshell", "proxy", NULL};
+const char* kKDE4ProxyConfigCommand[] = {"kcmshell4", "proxy", NULL};
 
 // The pixel width we wrap labels at.
 // TODO(evanm): make the labels wrap at the appropriate width.
@@ -46,6 +63,53 @@ GtkWidget* CreateCheckButtonWithWrappedLabel(int string_id) {
   gtk_container_add(GTK_CONTAINER(checkbox),
                     CreateWrappedLabel(string_id));
   return checkbox;
+}
+
+GtkWidget* AddCheckButtonWithWrappedLabel(int string_id,
+                                          GtkWidget* container,
+                                          GCallback handler,
+                                          gpointer data) {
+  GtkWidget* checkbox = CreateCheckButtonWithWrappedLabel(string_id);
+  gtk_box_pack_start(GTK_BOX(container), checkbox, FALSE, FALSE, 0);
+  g_signal_connect(checkbox, "toggled", handler, data);
+  return checkbox;
+}
+
+// Don't let the widget handle scroll events. Instead, pass it on to the
+// parent widget.
+gboolean PassScrollToParent(GtkWidget* widget, GdkEvent* event,
+                            gpointer unused) {
+  if (widget->parent)
+    gtk_propagate_event(widget->parent, event);
+
+  return TRUE;
+}
+
+// Recursively search for a combo box among the children of |widget|.
+void SearchForComboBox(GtkWidget* widget, gpointer data) {
+  if (GTK_IS_COMBO_BOX(widget)) {
+    *reinterpret_cast<GtkWidget**>(data) = widget;
+  } else if (GTK_IS_CONTAINER(widget)) {
+    gtk_container_foreach(GTK_CONTAINER(widget), SearchForComboBox, data);
+  }
+}
+
+// Letting the combo boxes in the advanced options page handle scroll events is
+// annoying because they fight with the scrolled window. Also,
+// GtkFileChooserButton is buggy in that if you scroll on it very quickly it
+// spews Gtk-WARNINGs, which causes us to crash in debug. This function disables
+// scrolling for the combo box in |widget| (the first one it finds in a DFS).
+void DisableScrolling(GtkWidget* widget) {
+  gpointer combo_box_ptr = NULL;
+  SearchForComboBox(widget, &combo_box_ptr);
+
+  if (!combo_box_ptr) {
+    NOTREACHED() << " Did not find a combo box in this widget.";
+    return;
+  }
+
+  g_signal_connect(GTK_WIDGET(combo_box_ptr), "scroll-event",
+                   G_CALLBACK(PassScrollToParent), NULL);
 }
 
 }  // anonymous namespace
@@ -91,24 +155,24 @@ class DownloadSection : public OptionsPageBase {
 
   // Flag to ignore gtk callbacks while we are loading prefs, to avoid
   // then turning around and saving them again.
-  bool initializing_;
+  bool pref_changing_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadSection);
 };
 
 DownloadSection::DownloadSection(Profile* profile)
-    : OptionsPageBase(profile), initializing_(true) {
+    : OptionsPageBase(profile), pref_changing_(true) {
   page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
 
   // Download location options.
   download_location_button_ = gtk_file_chooser_button_new(
-      // TODO(mattm): There doesn't seem to be a reasonable localized string for
-      // the chooser title?  (Though no other file choosers have a title either,
-      // bug 16890.)
-      "",
+      l10n_util::GetStringUTF8(
+          IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_WINDOW_TITLE).c_str(),
       GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
   g_signal_connect(download_location_button_, "selection-changed",
                    G_CALLBACK(OnDownloadLocationChanged), this);
+  DisableScrolling(download_location_button_);
+
   // Add the default download path to the list of shortcuts in the selector.
   FilePath default_download_path;
   if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,
@@ -157,7 +221,7 @@ DownloadSection::DownloadSection(Profile* profile)
                      reset_file_handlers_button_,
                      FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(page_),
-                     OptionsLayoutBuilderGtk::IndentWidget(button_hbox),
+                     gtk_util::IndentWidget(button_hbox),
                      FALSE, FALSE, 0);
 
   // Init prefs watchers.
@@ -172,7 +236,7 @@ DownloadSection::DownloadSection(Profile* profile)
 }
 
 void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
-  initializing_ = true;
+  pref_changing_ = true;
   if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory) {
     gtk_file_chooser_set_current_folder(
         GTK_FILE_CHOOSER(download_location_button_),
@@ -192,13 +256,13 @@ void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
     gtk_widget_set_sensitive(reset_file_handlers_label_, enabled);
     gtk_widget_set_sensitive(reset_file_handlers_button_, enabled);
   }
-  initializing_ = false;
+  pref_changing_ = false;
 }
 
 // static
 void DownloadSection::OnDownloadLocationChanged(GtkFileChooser* widget,
                                                 DownloadSection* section) {
-  if (section->initializing_)
+  if (section->pref_changing_)
     return;
 
   gchar* folder = gtk_file_chooser_get_filename(widget);
@@ -216,7 +280,7 @@ void DownloadSection::OnDownloadLocationChanged(GtkFileChooser* widget,
 // static
 void DownloadSection::OnDownloadAskForSaveLocationChanged(
     GtkWidget* widget, DownloadSection* section) {
-  if (section->initializing_)
+  if (section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   if (enabled) {
@@ -250,6 +314,20 @@ class NetworkSection : public OptionsPageBase {
   }
 
  private:
+  struct ProxyConfigCommand {
+    std::string binary;
+    const char** argv;
+  };
+  // The callback functions for invoking the proxy config dialog.
+  static void OnChangeProxiesButtonClicked(GtkButton *button,
+                                           NetworkSection* section);
+  // Search $PATH to find one of the commands. Store the full path to
+  // it in the |binary| field and the command array index in in |index|.
+  static bool SearchPATH(ProxyConfigCommand* commands, size_t ncommands,
+                         size_t* index);
+  // Start the given proxy configuration utility.
+  static void StartProxyConfigUtil(const ProxyConfigCommand& command);
+
   // The widget containing the options for this section.
   GtkWidget* page_;
 
@@ -259,8 +337,116 @@ class NetworkSection : public OptionsPageBase {
 NetworkSection::NetworkSection(Profile* profile)
     : OptionsPageBase(profile) {
   page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
-  gtk_box_pack_start(GTK_BOX(page_), gtk_label_new("TODO network options"),
+
+  GtkWidget* proxy_description_label = CreateWrappedLabel(
+      IDS_OPTIONS_PROXIES_LABEL);
+  gtk_misc_set_alignment(GTK_MISC(proxy_description_label), 0, 0);
+  gtk_box_pack_start(GTK_BOX(page_), proxy_description_label,
                      FALSE, FALSE, 0);
+
+  GtkWidget* change_proxies_button = gtk_button_new_with_label(
+      l10n_util::GetStringUTF8(
+          IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON).c_str());
+  g_signal_connect(change_proxies_button, "clicked",
+                   G_CALLBACK(OnChangeProxiesButtonClicked), this);
+  // Stick it in an hbox so it doesn't expand to the whole width.
+  GtkWidget* button_hbox = gtk_hbox_new(FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(button_hbox),
+                     change_proxies_button,
+                     FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(page_),
+                     gtk_util::IndentWidget(button_hbox),
+                     FALSE, FALSE, 0);
+}
+
+// static
+void NetworkSection::OnChangeProxiesButtonClicked(GtkButton *button,
+                                                  NetworkSection* section) {
+  section->UserMetricsRecordAction(L"Options_ChangeProxies", NULL);
+
+  scoped_ptr<base::EnvironmentVariableGetter> env_getter(
+      base::EnvironmentVariableGetter::Create());
+
+  ProxyConfigCommand command;
+  bool found_command = false;
+  switch (base::GetDesktopEnvironment(env_getter.get())) {
+    case base::DESKTOP_ENVIRONMENT_GNOME: {
+      size_t index;
+      ProxyConfigCommand commands[2];
+      commands[0].argv = kGNOMEProxyConfigCommand;
+      commands[1].argv = kOldGNOMEProxyConfigCommand;
+      found_command = SearchPATH(commands, 2, &index);
+      if (found_command)
+        command = commands[index];
+      break;
+    }
+
+    case base::DESKTOP_ENVIRONMENT_KDE3:
+      command.argv = kKDE3ProxyConfigCommand;
+      found_command = SearchPATH(&command, 1, NULL);
+      break;
+
+    case base::DESKTOP_ENVIRONMENT_KDE4:
+      command.argv = kKDE4ProxyConfigCommand;
+      found_command = SearchPATH(&command, 1, NULL);
+      break;
+
+    case base::DESKTOP_ENVIRONMENT_OTHER:
+      break;
+  }
+
+  if (found_command) {
+    StartProxyConfigUtil(command);
+  } else {
+    const char* name = base::GetDesktopEnvironmentName(env_getter.get());
+    if (name)
+      LOG(ERROR) << "Could not find " << name << " network settings in $PATH";
+    BrowserList::GetLastActive()->
+        OpenURL(GURL(l10n_util::GetStringUTF8(IDS_LINUX_PROXY_CONFIG_URL)),
+                GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  }
+}
+
+// static
+bool NetworkSection::SearchPATH(ProxyConfigCommand* commands, size_t ncommands,
+                                size_t* index) {
+  const char* path = getenv("PATH");
+  if (!path)
+    return false;
+  FilePath bin_path;
+  CStringTokenizer tk(path, path + strlen(path), ":");
+  // Search $PATH looking for the commands in order.
+  while (tk.GetNext()) {
+    for (size_t i = 0; i < ncommands; i++) {
+      bin_path = FilePath(tk.token()).Append(commands[i].argv[0]);
+      if (file_util::PathExists(bin_path)) {
+        commands[i].binary = bin_path.value();
+        if (index)
+          *index = i;
+        return true;
+      }
+    }
+  }
+  // Did not find any of the binaries in $PATH.
+  return false;
+}
+
+// static
+void NetworkSection::StartProxyConfigUtil(const ProxyConfigCommand& command) {
+  std::vector<std::string> argv;
+  argv.push_back(command.binary);
+  for (size_t i = 1; command.argv[i]; i++)
+    argv.push_back(command.argv[i]);
+  base::file_handle_mapping_vector no_files;
+  base::ProcessHandle handle;
+  if (!base::LaunchApp(argv, no_files, false, &handle)) {
+    LOG(ERROR) << "StartProxyConfigUtil failed to start " << command.binary;
+    BrowserList::GetLastActive()->
+        OpenURL(GURL(l10n_util::GetStringUTF8(IDS_LINUX_PROXY_CONFIG_URL)),
+                GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+    return;
+  }
+  ProcessWatcher::EnsureProcessGetsReaped(handle);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -302,6 +488,8 @@ class PrivacySection : public OptionsPageBase {
                               PrivacySection* options_window);
   static void OnCookieBehaviorChanged(GtkComboBox* combo_box,
                                       PrivacySection* privacy_section);
+  static void OnShowCookiesButtonClicked(GtkButton *button,
+                                         PrivacySection* privacy_section);
 
   // The widget containing the options for this section.
   GtkWidget* page_;
@@ -326,14 +514,14 @@ class PrivacySection : public OptionsPageBase {
 
   // Flag to ignore gtk callbacks while we are loading prefs, to avoid
   // then turning around and saving them again.
-  bool initializing_;
+  bool pref_changing_;
 
   DISALLOW_COPY_AND_ASSIGN(PrivacySection);
 };
 
 PrivacySection::PrivacySection(Profile* profile)
     : OptionsPageBase(profile),
-      initializing_(true) {
+      pref_changing_(true) {
   page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
 
   GtkWidget* section_description_label = CreateWrappedLabel(
@@ -390,7 +578,18 @@ PrivacySection::PrivacySection(Profile* profile)
                    G_CALLBACK(OnLoggingChange), this);
 #endif
 
+  GtkWidget* cookie_description_label = gtk_label_new(
+      l10n_util::GetStringUTF8(IDS_OPTIONS_COOKIES_ACCEPT_LABEL).c_str());
+  gtk_misc_set_alignment(GTK_MISC(cookie_description_label), 0, 0);
+  gtk_box_pack_start(GTK_BOX(page_), cookie_description_label, FALSE, FALSE, 0);
+
+  GtkWidget* cookie_controls = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
+  gtk_box_pack_start(GTK_BOX(page_),
+                     gtk_util::IndentWidget(cookie_controls),
+                     FALSE, FALSE, 0);
+
   cookie_behavior_combobox_ = gtk_combo_box_new_text();
+  DisableScrolling(cookie_behavior_combobox_);
   gtk_combo_box_append_text(
       GTK_COMBO_BOX(cookie_behavior_combobox_),
       l10n_util::GetStringUTF8(IDS_OPTIONS_COOKIES_ACCEPT_ALL_COOKIES).c_str());
@@ -403,17 +602,18 @@ PrivacySection::PrivacySection(Profile* profile)
       l10n_util::GetStringUTF8(IDS_OPTIONS_COOKIES_BLOCK_ALL_COOKIES).c_str());
   g_signal_connect(G_OBJECT(cookie_behavior_combobox_), "changed",
                    G_CALLBACK(OnCookieBehaviorChanged), this);
-
-  GtkWidget* cookie_controls = gtk_util::CreateLabeledControlsGroup(NULL,
-      l10n_util::GetStringUTF8(IDS_OPTIONS_COOKIES_ACCEPT_LABEL).c_str(),
-      cookie_behavior_combobox_,
-      NULL);
-  gtk_box_pack_start(GTK_BOX(page_), cookie_controls, FALSE, FALSE, 0);
-
-  // TODO(mattm): show cookies button
-  gtk_box_pack_start(GTK_BOX(page_),
-                     gtk_label_new("TODO rest of the privacy options"),
+  gtk_box_pack_start(GTK_BOX(cookie_controls), cookie_behavior_combobox_,
                      FALSE, FALSE, 0);
+
+  GtkWidget* show_cookies_button = gtk_button_new_with_label(
+      l10n_util::GetStringUTF8(IDS_OPTIONS_COOKIES_SHOWCOOKIES).c_str());
+  g_signal_connect(show_cookies_button, "clicked",
+                   G_CALLBACK(OnShowCookiesButtonClicked), this);
+  // Stick it in an hbox so it doesn't expand to the whole width.
+  GtkWidget* button_hbox = gtk_hbox_new(FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(button_hbox), show_cookies_button,
+                     FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(cookie_controls), button_hbox, FALSE, FALSE, 0);
 
   // Init member prefs so we can update the controls if prefs change.
   alternate_error_pages_.Init(prefs::kAlternateErrorPagesEnabled,
@@ -441,7 +641,7 @@ void PrivacySection::OnLearnMoreLinkClicked(GtkButton *button,
 // static
 void PrivacySection::OnEnableLinkDoctorChange(GtkWidget* widget,
                                               PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   privacy_section->UserMetricsRecordAction(
@@ -455,7 +655,7 @@ void PrivacySection::OnEnableLinkDoctorChange(GtkWidget* widget,
 // static
 void PrivacySection::OnEnableSuggestChange(GtkWidget* widget,
                                            PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   privacy_section->UserMetricsRecordAction(
@@ -469,7 +669,7 @@ void PrivacySection::OnEnableSuggestChange(GtkWidget* widget,
 // static
 void PrivacySection::OnDNSPrefetchingChange(GtkWidget* widget,
                                            PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   privacy_section->UserMetricsRecordAction(
@@ -484,7 +684,7 @@ void PrivacySection::OnDNSPrefetchingChange(GtkWidget* widget,
 // static
 void PrivacySection::OnSafeBrowsingChange(GtkWidget* widget,
                                           PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   privacy_section->UserMetricsRecordAction(
@@ -502,7 +702,7 @@ void PrivacySection::OnSafeBrowsingChange(GtkWidget* widget,
 // static
 void PrivacySection::OnLoggingChange(GtkWidget* widget,
                                      PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
   privacy_section->UserMetricsRecordAction(
@@ -527,7 +727,7 @@ void PrivacySection::OnLoggingChange(GtkWidget* widget,
 // static
 void PrivacySection::OnCookieBehaviorChanged(GtkComboBox* combo_box,
                                              PrivacySection* privacy_section) {
-  if (privacy_section->initializing_)
+  if (privacy_section->pref_changing_)
     return;
   net::CookiePolicy::Type cookie_policy =
       net::CookiePolicy::FromInt(gtk_combo_box_get_active(combo_box));
@@ -546,8 +746,15 @@ void PrivacySection::OnCookieBehaviorChanged(GtkComboBox* combo_box,
   privacy_section->cookie_behavior_.SetValue(cookie_policy);
 }
 
+// static
+void PrivacySection::OnShowCookiesButtonClicked(
+    GtkButton *button, PrivacySection* privacy_section) {
+  privacy_section->UserMetricsRecordAction(L"Options_ShowCookies", NULL);
+  CookiesView::Show(privacy_section->profile());
+}
+
 void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
-  initializing_ = true;
+  pref_changing_ = true;
   if (!pref_name || *pref_name == prefs::kAlternateErrorPagesEnabled) {
     gtk_toggle_button_set_active(
         GTK_TOGGLE_BUTTON(enable_link_doctor_checkbox_),
@@ -580,7 +787,7 @@ void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
         GTK_COMBO_BOX(cookie_behavior_combobox_),
         net::CookiePolicy::FromInt(cookie_behavior_.GetValue()));
   }
-  initializing_ = false;
+  pref_changing_ = false;
 }
 
 void PrivacySection::ResolveMetricsReportingEnabled() {
@@ -623,18 +830,43 @@ class SecuritySection : public OptionsPageBase {
   }
 
  private:
+  // Overridden from OptionsPageBase.
+  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+
   // The callback functions for the options widgets.
   static void OnManageCertificatesClicked(GtkButton* button,
                                           SecuritySection* section);
+  static void OnRevCheckingEnabledToggled(GtkToggleButton* togglebutton,
+                                          SecuritySection* section);
+  static void OnSSL2EnabledToggled(GtkToggleButton* togglebutton,
+                                   SecuritySection* section);
+  static void OnSSL3EnabledToggled(GtkToggleButton* togglebutton,
+                                   SecuritySection* section);
+  static void OnTLS1EnabledToggled(GtkToggleButton* togglebutton,
+                                   SecuritySection* section);
 
   // The widget containing the options for this section.
   GtkWidget* page_;
+  GtkWidget* rev_checking_enabled_checkbox_;
+  GtkWidget* ssl2_enabled_checkbox_;
+  GtkWidget* ssl3_enabled_checkbox_;
+  GtkWidget* tls1_enabled_checkbox_;
+
+  // SSLConfigService prefs.
+  BooleanPrefMember rev_checking_enabled_;
+  BooleanPrefMember ssl2_enabled_;
+  BooleanPrefMember ssl3_enabled_;
+  BooleanPrefMember tls1_enabled_;
+
+  // Flag to ignore gtk callbacks while we are loading prefs, to avoid
+  // then turning around and saving them again.
+  bool pref_changing_;
 
   DISALLOW_COPY_AND_ASSIGN(SecuritySection);
 };
 
 SecuritySection::SecuritySection(Profile* profile)
-    : OptionsPageBase(profile) {
+    : OptionsPageBase(profile), pref_changing_(true) {
   page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
 
   GtkWidget* manage_certificates_label = CreateWrappedLabel(
@@ -651,14 +883,57 @@ SecuritySection::SecuritySection(Profile* profile)
   GtkWidget* manage_certificates_hbox = gtk_hbox_new(FALSE, 0);
   gtk_box_pack_start(GTK_BOX(manage_certificates_hbox),
                      manage_certificates_link, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(page_), OptionsLayoutBuilderGtk::IndentWidget(
-                         manage_certificates_hbox),
+  gtk_box_pack_start(GTK_BOX(page_),
+                     gtk_util::IndentWidget(manage_certificates_hbox),
                      FALSE, FALSE, 0);
   g_signal_connect(manage_certificates_link, "clicked",
                    G_CALLBACK(OnManageCertificatesClicked), this);
 
-  // TODO(mattm): add SSLConfigService options when that is ported to Linux
+  // TODO(mattm): should have a description label here and have the checkboxes
+  // indented, but IDS_OPTIONS_SSL_GROUP_DESCRIPTION isn't appropriate and
+  // didn't think of adding a Linux specific one before the string freeze.
+  rev_checking_enabled_checkbox_ = AddCheckButtonWithWrappedLabel(
+      IDS_OPTIONS_SSL_CHECKREVOCATION, page_,
+      G_CALLBACK(OnRevCheckingEnabledToggled), this);
+  ssl2_enabled_checkbox_ = AddCheckButtonWithWrappedLabel(
+      IDS_OPTIONS_SSL_USESSL2, page_, G_CALLBACK(OnSSL2EnabledToggled), this);
+  ssl3_enabled_checkbox_ = AddCheckButtonWithWrappedLabel(
+      IDS_OPTIONS_SSL_USESSL3, page_, G_CALLBACK(OnSSL3EnabledToggled), this);
+  tls1_enabled_checkbox_ = AddCheckButtonWithWrappedLabel(
+      IDS_OPTIONS_SSL_USETLS1, page_, G_CALLBACK(OnTLS1EnabledToggled), this);
+
+
+  rev_checking_enabled_.Init(prefs::kCertRevocationCheckingEnabled,
+                             profile->GetPrefs(), this);
+  ssl2_enabled_.Init(prefs::kSSL2Enabled, profile->GetPrefs(), this);
+  ssl3_enabled_.Init(prefs::kSSL3Enabled, profile->GetPrefs(), this);
+  tls1_enabled_.Init(prefs::kTLS1Enabled, profile->GetPrefs(), this);
+
+  NotifyPrefChanged(NULL);
 }
+
+void SecuritySection::NotifyPrefChanged(const std::wstring* pref_name) {
+  pref_changing_ = true;
+  if (!pref_name || *pref_name == prefs::kCertRevocationCheckingEnabled) {
+    gtk_toggle_button_set_active(
+        GTK_TOGGLE_BUTTON(rev_checking_enabled_checkbox_),
+        rev_checking_enabled_.GetValue());
+  }
+  if (!pref_name || *pref_name == prefs::kSSL2Enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ssl2_enabled_checkbox_),
+                                 ssl2_enabled_.GetValue());
+  }
+  if (!pref_name || *pref_name == prefs::kSSL3Enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ssl3_enabled_checkbox_),
+                                 ssl3_enabled_.GetValue());
+  }
+  if (!pref_name || *pref_name == prefs::kTLS1Enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tls1_enabled_checkbox_),
+                                 tls1_enabled_.GetValue());
+  }
+  pref_changing_ = false;
+}
+
 
 // static
 void SecuritySection::OnManageCertificatesClicked(GtkButton* button,
@@ -666,6 +941,68 @@ void SecuritySection::OnManageCertificatesClicked(GtkButton* button,
   BrowserList::GetLastActive()->
       OpenURL(GURL(l10n_util::GetStringUTF8(IDS_LINUX_CERTIFICATES_CONFIG_URL)),
               GURL(), NEW_WINDOW, PageTransition::LINK);
+}
+
+// static
+void SecuritySection::OnRevCheckingEnabledToggled(GtkToggleButton* togglebutton,
+                                                  SecuritySection* section) {
+  if (section->pref_changing_)
+    return;
+
+  bool enabled = gtk_toggle_button_get_active(togglebutton);
+  if (enabled) {
+    section->UserMetricsRecordAction(L"Options_CheckCertRevocation_Enable",
+                                     NULL);
+  } else {
+    section->UserMetricsRecordAction(L"Options_CheckCertRevocation_Disable",
+                                     NULL);
+  }
+  section->rev_checking_enabled_.SetValue(enabled);
+}
+
+// static
+void SecuritySection::OnSSL2EnabledToggled(GtkToggleButton* togglebutton,
+                                           SecuritySection* section) {
+  if (section->pref_changing_)
+    return;
+
+  bool enabled = gtk_toggle_button_get_active(togglebutton);
+  if (enabled) {
+    section->UserMetricsRecordAction(L"Options_SSL2_Enable", NULL);
+  } else {
+    section->UserMetricsRecordAction(L"Options_SSL2_Disable", NULL);
+  }
+  section->ssl2_enabled_.SetValue(enabled);
+}
+
+// static
+void SecuritySection::OnSSL3EnabledToggled(GtkToggleButton* togglebutton,
+                                           SecuritySection* section) {
+  if (section->pref_changing_)
+    return;
+
+  bool enabled = gtk_toggle_button_get_active(togglebutton);
+  if (enabled) {
+    section->UserMetricsRecordAction(L"Options_SSL3_Enable", NULL);
+  } else {
+    section->UserMetricsRecordAction(L"Options_SSL3_Disable", NULL);
+  }
+  section->ssl3_enabled_.SetValue(enabled);
+}
+
+// static
+void SecuritySection::OnTLS1EnabledToggled(GtkToggleButton* togglebutton,
+                                           SecuritySection* section) {
+  if (section->pref_changing_)
+    return;
+
+  bool enabled = gtk_toggle_button_get_active(togglebutton);
+  if (enabled) {
+    section->UserMetricsRecordAction(L"Options_TLS1_Enable", NULL);
+  } else {
+    section->UserMetricsRecordAction(L"Options_TLS1_Disable", NULL);
+  }
+  section->tls1_enabled_.SetValue(enabled);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -712,7 +1049,7 @@ WebContentSection::WebContentSection(Profile* profile)
                      fonts_and_languages_button,
                      FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(page_),
-                     OptionsLayoutBuilderGtk::IndentWidget(button_hbox),
+                     gtk_util::IndentWidget(button_hbox),
                      FALSE, FALSE, 0);
 
   // TODO(mattm): gears options would go here if we supported gears

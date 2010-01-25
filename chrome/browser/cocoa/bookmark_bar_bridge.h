@@ -11,14 +11,16 @@
 #ifndef CHROME_BROWSER_COCOA_BOOKMARK_BAR_BRIDGE_H_
 #define CHROME_BROWSER_COCOA_BOOKMARK_BAR_BRIDGE_H_
 
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "base/basictypes.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
 
 class Browser;
 @class BookmarkBarController;
 
 class BookmarkBarBridge : public BookmarkModelObserver {
  public:
-  BookmarkBarBridge(BookmarkBarController* controller, BookmarkModel* model);
+  BookmarkBarBridge(BookmarkBarController* controller,
+                    BookmarkModel* model);
   virtual ~BookmarkBarBridge();
 
   // Overridden from BookmarkModelObserver
@@ -45,7 +47,7 @@ class BookmarkBarBridge : public BookmarkModelObserver {
 
  private:
   BookmarkBarController* controller_;  // weak; owns me
-  BookmarkModel *model_;  // weak; it is owned by a Profile.
+  BookmarkModel* model_;  // weak; it is owned by a Profile.
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarBridge);
 };

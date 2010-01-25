@@ -18,14 +18,27 @@ using base::TimeDelta;
 
 namespace net {
 
+// TCPConnectJobs will time out after this many seconds.  Note this is the total
+// time, including both host resolution and TCP connect() times.
+//
+// TODO(eroman): The use of this constant needs to be re-evaluated. The time
+// needed for TCPClientSocketXXX::Connect() can be arbitrarily long, since
+// the address list may contain many alternatives, and most of those may
+// timeout. Even worse, the per-connect timeout threshold varies greatly
+// between systems (anywhere from 20 seconds to 190 seconds).
+// See comment #12 at http://crbug.com/23364 for specifics.
+static const int kTCPConnectJobTimeoutInSeconds = 240; // 4 minutes.
+
 TCPConnectJob::TCPConnectJob(
     const std::string& group_name,
     const HostResolver::RequestInfo& resolve_info,
     const ClientSocketHandle* handle,
+    base::TimeDelta timeout_duration,
     ClientSocketFactory* client_socket_factory,
     HostResolver* host_resolver,
-    Delegate* delegate)
-    : ConnectJob(group_name, handle, delegate),
+    Delegate* delegate,
+    LoadLog* load_log)
+    : ConnectJob(group_name, handle, timeout_duration, delegate, load_log),
       resolve_info_(resolve_info),
       client_socket_factory_(client_socket_factory),
       ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -38,7 +51,21 @@ TCPConnectJob::~TCPConnectJob() {
   // ~SingleRequestHostResolver and ~ClientSocket will take care of it.
 }
 
-int TCPConnectJob::Connect() {
+LoadState TCPConnectJob::GetLoadState() const {
+  switch (next_state_) {
+    case kStateResolveHost:
+    case kStateResolveHostComplete:
+      return LOAD_STATE_RESOLVING_HOST;
+    case kStateTCPConnect:
+    case kStateTCPConnectComplete:
+      return LOAD_STATE_CONNECTING;
+    default:
+      NOTREACHED();
+      return LOAD_STATE_IDLE;
+  }
+}
+
+int TCPConnectJob::ConnectInternal() {
   next_state_ = kStateResolveHost;
   return DoLoop(OK);
 }
@@ -46,7 +73,7 @@ int TCPConnectJob::Connect() {
 void TCPConnectJob::OnIOComplete(int result) {
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING)
-    delegate()->OnConnectJobComplete(rv, this);  // Deletes |this|
+    NotifyDelegateOfCompletion(rv);  // Deletes |this|
 }
 
 int TCPConnectJob::DoLoop(int result) {
@@ -82,13 +109,11 @@ int TCPConnectJob::DoLoop(int result) {
 }
 
 int TCPConnectJob::DoResolveHost() {
-  set_load_state(LOAD_STATE_RESOLVING_HOST);
   next_state_ = kStateResolveHostComplete;
-  return resolver_.Resolve(resolve_info_, &addresses_, &callback_);
+  return resolver_.Resolve(resolve_info_, &addresses_, &callback_, load_log());
 }
 
 int TCPConnectJob::DoResolveHostComplete(int result) {
-  DCHECK_EQ(LOAD_STATE_RESOLVING_HOST, load_state());
   if (result == OK)
     next_state_ = kStateTCPConnect;
   return result;
@@ -96,14 +121,13 @@ int TCPConnectJob::DoResolveHostComplete(int result) {
 
 int TCPConnectJob::DoTCPConnect() {
   next_state_ = kStateTCPConnectComplete;
-  set_load_state(LOAD_STATE_CONNECTING);
   set_socket(client_socket_factory_->CreateTCPClientSocket(addresses_));
   connect_start_time_ = base::TimeTicks::Now();
+  // TODO(eroman): Socket::Connect() should take a LoadLog.
   return socket()->Connect(&callback_);
 }
 
 int TCPConnectJob::DoTCPConnectComplete(int result) {
-  DCHECK_EQ(load_state(), LOAD_STATE_CONNECTING);
   if (result == OK) {
     DCHECK(connect_start_time_ != base::TimeTicks());
     base::TimeDelta connect_duration =
@@ -124,11 +148,13 @@ int TCPConnectJob::DoTCPConnectComplete(int result) {
 
 ConnectJob* TCPClientSocketPool::TCPConnectJobFactory::NewConnectJob(
     const std::string& group_name,
-    const ClientSocketPoolBase::Request& request,
-    ConnectJob::Delegate* delegate) const {
+    const PoolBase::Request& request,
+    ConnectJob::Delegate* delegate,
+    LoadLog* load_log) const {
   return new TCPConnectJob(
-      group_name, request.resolve_info, request.handle,
-      client_socket_factory_, host_resolver_, delegate);
+      group_name, request.params(), request.handle(),
+      base::TimeDelta::FromSeconds(kTCPConnectJobTimeoutInSeconds),
+      client_socket_factory_, host_resolver_, delegate, load_log);
 }
 
 TCPClientSocketPool::TCPClientSocketPool(
@@ -136,46 +162,50 @@ TCPClientSocketPool::TCPClientSocketPool(
     int max_sockets_per_group,
     HostResolver* host_resolver,
     ClientSocketFactory* client_socket_factory)
-    : base_(new ClientSocketPoolBase(
-        max_sockets, max_sockets_per_group,
-        new TCPConnectJobFactory(client_socket_factory, host_resolver))) {}
+    : base_(max_sockets, max_sockets_per_group,
+            base::TimeDelta::FromSeconds(kUnusedIdleSocketTimeout),
+            base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
+            new TCPConnectJobFactory(client_socket_factory, host_resolver)) {}
 
 TCPClientSocketPool::~TCPClientSocketPool() {}
 
 int TCPClientSocketPool::RequestSocket(
     const std::string& group_name,
-    const HostResolver::RequestInfo& resolve_info,
+    const void* resolve_info,
     int priority,
     ClientSocketHandle* handle,
-    CompletionCallback* callback) {
-  return base_->RequestSocket(
-      group_name, resolve_info, priority, handle, callback);
+    CompletionCallback* callback,
+    LoadLog* load_log) {
+  const HostResolver::RequestInfo* casted_resolve_info =
+      static_cast<const HostResolver::RequestInfo*>(resolve_info);
+  return base_.RequestSocket(
+      group_name, *casted_resolve_info, priority, handle, callback, load_log);
 }
 
 void TCPClientSocketPool::CancelRequest(
     const std::string& group_name,
     const ClientSocketHandle* handle) {
-  base_->CancelRequest(group_name, handle);
+  base_.CancelRequest(group_name, handle);
 }
 
 void TCPClientSocketPool::ReleaseSocket(
     const std::string& group_name,
     ClientSocket* socket) {
-  base_->ReleaseSocket(group_name, socket);
+  base_.ReleaseSocket(group_name, socket);
 }
 
 void TCPClientSocketPool::CloseIdleSockets() {
-  base_->CloseIdleSockets();
+  base_.CloseIdleSockets();
 }
 
 int TCPClientSocketPool::IdleSocketCountInGroup(
     const std::string& group_name) const {
-  return base_->IdleSocketCountInGroup(group_name);
+  return base_.IdleSocketCountInGroup(group_name);
 }
 
 LoadState TCPClientSocketPool::GetLoadState(
     const std::string& group_name, const ClientSocketHandle* handle) const {
-  return base_->GetLoadState(group_name, handle);
+  return base_.GetLoadState(group_name, handle);
 }
 
 }  // namespace net

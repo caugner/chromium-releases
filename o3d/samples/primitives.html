@@ -44,12 +44,12 @@ to make various shapes.
 Primitives
 </title>
 <script type="text/javascript" src="o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.rendergraph');
 o3djs.require('o3djs.primitives');
-o3djs.require('o3djs.effect');
+o3djs.require('o3djs.material');
 
 // global variables
 var g_o3dElement;
@@ -58,9 +58,7 @@ var g_o3d;
 var g_math;
 var g_pack;
 var g_viewInfo;
-
-var g_lightPosition = [5, 5, 7];
-var g_eyePosition = [1, 3, 12];
+var g_eyePosition = [3, 4, 14];
 
 /**
  * Creates the client area.
@@ -131,28 +129,15 @@ function initContext() {
 }
 
 /**
- * Creates a phong material based on the given single color.
- * @param {Array} baseColor An array with 4 entries, the R,G,B, and A components
- *   of a color.
- * @return {Material} A phong material whose overall pigment is baseColor.
+ * Creates a material based on the given single color.
+ * @param {!o3djs.math.Vector4} baseColor A 4-component vector with
+ *     the R,G,B, and A components of a color.
+ * @return {!o3d.Material} A phong material whose overall pigment is
+ *     baseColor.
  */
-function createPhongMaterial(baseColor) {
+function createMaterial(baseColor) {
   // Create a new, empty Material object.
-  var material = g_pack.createObject('Material');
-
-  o3djs.effect.attachStandardShader(
-      g_pack, material, g_lightPosition, 'phong');
-
-  material.drawList = g_viewInfo.performanceDrawList;
-
-  // Assign parameters to the phong material.
-  material.getParam('emissive').value = [0, 0, 0, 1];
-  material.getParam('ambient').value = g_math.mulScalarVector(0.1, baseColor);
-  material.getParam('diffuse').value = g_math.mulScalarVector(0.9, baseColor);
-  material.getParam('specular').value = [.2, .2, .2, 1];
-  material.getParam('shininess').value = 20;
-
-  return material;
+  return o3djs.material.createBasicMaterial(g_pack, g_viewInfo, baseColor);
 }
 
 /**
@@ -162,27 +147,45 @@ function createPhongMaterial(baseColor) {
 function createShapes() {
   var cube = o3djs.primitives.createCube(
       g_pack,
-      createPhongMaterial([0,1,0,1]), // A green phong-shaded material.
+      createMaterial([0,1,0,1]), // A green phong-shaded material.
       Math.sqrt(2));                  // The length of each side of the cube.
 
   var sphere = o3djs.primitives.createSphere(
       g_pack,
-      createPhongMaterial([1,0,0,1]),
+      createMaterial([1,0,0,1]),
       1.0,   // Radius of the sphere.
       30,    // Number of meridians.
       20);    // Number of parallels.
 
   var cylinder = o3djs.primitives.createCylinder(
       g_pack,
-      createPhongMaterial([1,0,1,1]),
+      createMaterial([1,0,1,1]),
       0.5,   // Radius.
-      1.5,   // Depth.
+      1.5,   // Height.
+      20,    // Number of radial subdivisions.
+      20);   // Number of vertical subdivisions.
+
+  var truncatedCone = o3djs.primitives.createTruncatedCone(
+      g_pack,
+      createMaterial([0,0,1,1]),
+      0.3,   // Bottom radius.
+      0.5,   // Top radius.
+      1.5,   // Height.
+      20,    // Number of radial subdivisions.
+      20);   // Number of vertical subdivisions.
+
+  var cone = o3djs.primitives.createTruncatedCone(
+      g_pack,
+      createMaterial([0,1,0,1]),
+      0.5,   // Bottom radius.
+      0.0,   // Top radius.
+      1.5,   // Height.
       20,    // Number of radial subdivisions.
       20);   // Number of vertical subdivisions.
 
   var plane = o3djs.primitives.createPlane(
       g_pack,
-      createPhongMaterial([0,1,1,1]),
+      createMaterial([0,1,1,1]),
       1,      // Width.
       1.618,  // Depth.
       3,      // Horizontal subdivisions.
@@ -199,13 +202,13 @@ function createShapes() {
 
   var prism = o3djs.primitives.createPrism(
       g_pack,
-      createPhongMaterial([1,1,0,1]),
+      createMaterial([1,1,0,1]),
       polygon,  // The profile polygon to be extruded.
       1);       // The depth of the extrusion.
 
   var disc = o3djs.primitives.createDisc(
       g_pack,
-      createPhongMaterial([1,0,0,1]),
+      createMaterial([1,0,0,1]),
       1,   // Radius.
       7,   // Divisions.
       2,   // Stacks (optional).
@@ -214,12 +217,14 @@ function createShapes() {
 
   // Add the shapes to the transforms.
   var transformTable = [
-    {shape: cube, translation: [-2, 1, 0]},
-    {shape: sphere, translation: [0, 1, 0]},
-    {shape: cylinder, translation: [2, 1, 0]},
-    {shape: plane, translation: [-2, -1, 0]},
-    {shape: prism, translation: [0, -1, 0]},
-    {shape: disc, translation: [2, -1, 0]}
+    {shape: cube, translation: [-3, 1, 0]},
+    {shape: sphere, translation: [-1, 1, 0]},
+    {shape: cylinder, translation: [1, 1, 0]},
+    {shape: truncatedCone, translation: [3, 1, 0]},
+    {shape: plane, translation: [-3, -1, 0]},
+    {shape: prism, translation: [-1, -1, 0]},
+    {shape: disc, translation: [1, -1, 0]},
+    {shape: cone, translation: [3, -1, 0]},
   ];
 
   for (var tt = 0; tt < transformTable.length; ++tt) {

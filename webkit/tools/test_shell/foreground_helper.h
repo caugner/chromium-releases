@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <atlbase.h>
-#include <atlwin.h>
+#ifndef WEBKIT_TOOLS_TEST_SHELL_FOREGROUND_HELPER_H_
+#define WEBKIT_TOOLS_TEST_SHELL_FOREGROUND_HELPER_H_
 
+#include "app/win/window_impl.h"
 #include "base/logging.h"
 
 // Helper class for moving a window to the foreground.
@@ -14,9 +15,9 @@
 // to be capable of moving to the foreground.
 //
 // This is probably leveraging a windows bug.
-class ForegroundHelper : public CWindowImpl<ForegroundHelper> {
+class ForegroundHelper : public app::WindowImpl {
  public:
-  BEGIN_MSG_MAP(ForegroundHelper)
+  BEGIN_MSG_MAP_EX(ForegroundHelper)
     MESSAGE_HANDLER(WM_HOTKEY, OnHotKey)
   END_MSG_MAP()
 
@@ -37,15 +38,16 @@ class ForegroundHelper : public CWindowImpl<ForegroundHelper> {
     // be in the foreground and allowed to move the target window
     // into the foreground too.
 
-    if (NULL == Create(NULL, NULL, NULL, WS_POPUP))
-      return AtlHresultFromLastError();
+    set_window_style(WS_POPUP);
+    Init(NULL, gfx::Rect());
 
     static const int hotkey_id = 0x0000baba;
 
     // Store the target window into our USERDATA for use in our
     // HotKey handler.
-    SetWindowLongPtr(GWLP_USERDATA, reinterpret_cast<ULONG_PTR>(window));
-    RegisterHotKey(m_hWnd, hotkey_id, 0, VK_F22);
+    SetWindowLongPtr(hwnd(), GWLP_USERDATA,
+                     reinterpret_cast<ULONG_PTR>(window));
+    RegisterHotKey(hwnd(), hotkey_id, 0, VK_F22);
 
     // If the calling thread is not yet a UI thread, call PeekMessage
     // to ensure creation of its message queue.
@@ -70,8 +72,8 @@ class ForegroundHelper : public CWindowImpl<ForegroundHelper> {
         break;
     }
 
-    UnregisterHotKey(m_hWnd, hotkey_id);
-    DestroyWindow();
+    UnregisterHotKey(hwnd(), hotkey_id);
+    DestroyWindow(hwnd());
 
     return S_OK;
   }
@@ -81,8 +83,11 @@ class ForegroundHelper : public CWindowImpl<ForegroundHelper> {
                    WPARAM wparam,
                    LPARAM lparam,
                    BOOL& handled) {
-    HWND window = reinterpret_cast<HWND>(GetWindowLongPtr(GWLP_USERDATA));
+    HWND window = reinterpret_cast<HWND>(GetWindowLongPtr(hwnd(),
+                                                          GWLP_USERDATA));
     SetForegroundWindow(window);
     return 1;
   }
 };
+
+#endif  // WEBKIT_TOOLS_TEST_SHELL_FOREGROUND_HELPER_H_

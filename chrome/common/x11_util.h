@@ -11,6 +11,9 @@
 // we use a void* for Visual*). The Xlib headers are highly polluting so we try
 // hard to limit their spread into the rest of the code.
 
+#include <string>
+#include <vector>
+
 #include "base/gfx/rect.h"
 #include "base/task.h"
 
@@ -34,6 +37,8 @@ namespace x11_util {
 
 // These functions cache their results.
 
+// Check if there's an open connection to an X server.
+bool XDisplayExists();
 // Return an X11 connection for the current, primary display.
 Display* GetXDisplay();
 // Return true iff the connection supports X shared memory
@@ -59,6 +64,17 @@ int BitsPerPixelForPixmapDepth(Display* display, int depth);
 bool IsWindowVisible(XID window);
 // Returns the bounds of |window|.
 bool GetWindowRect(XID window, gfx::Rect* rect);
+// Get the value of an int or string property.  On success, true is returned and
+// the value is stored in |value|.
+bool GetIntProperty(XID window, const std::string& property_name, int* value);
+bool GetStringProperty(
+    XID window, const std::string& property_name, std::string* value);
+
+// Get |window|'s parent window, or None if |window| is the root window.
+XID GetParentWindow(XID window);
+
+// Walk up |window|'s hierarchy until we find a direct child of |root|.
+XID GetHighestAncestorWindow(XID window, XID root);
 
 // Implementers of this interface receive a notification for every X window of
 // the main display.
@@ -72,6 +88,15 @@ class EnumerateWindowsDelegate {
 // Enumerates all windows in the current display.  Will recurse into child
 // windows up to a depth of |max_depth|.
 bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate, int max_depth);
+
+// Returns a list of top-level windows in top-to-bottom stacking order.
+bool GetXWindowStack(std::vector<XID>* windows);
+
+// Restack a window in relation to one of its siblings.  If |above| is true,
+// |window| will be stacked directly above |sibling|; otherwise it will stacked
+// directly below it.  Both windows must be immediate children of the same
+// window.
+void RestackWindow(XID window, XID sibling, bool above);
 
 // Return a handle to a server side pixmap. |shared_memory_key| is a SysV
 // IPC key. The shared memory region must contain 32-bit pixels.

@@ -51,11 +51,8 @@ void Channel::ChannelImpl::Close() {
     DCHECK(thread_check_->CalledOnValidThread());
   }
 
-  bool waited = false;
-  if (input_state_.is_pending || output_state_.is_pending) {
+  if (input_state_.is_pending || output_state_.is_pending)
     CancelIo(pipe_);
-    waited = true;
-  }
 
   // Closing the handle at this point prevents us from issuing more requests
   // form OnIOCompleted().
@@ -68,10 +65,6 @@ void Channel::ChannelImpl::Close() {
   base::Time start = base::Time::Now();
   while (input_state_.is_pending || output_state_.is_pending) {
     MessageLoopForIO::current()->WaitForIOCompletion(INFINITE, this);
-  }
-  if (waited) {
-    // We want to see if we block the message loop for too long.
-    UMA_HISTOGRAM_TIMES("AsyncIO.IPCChannelClose", base::Time::Now() - start);
   }
 
   while (!output_queue_.empty()) {
@@ -170,7 +163,7 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
 }
 
 bool Channel::ChannelImpl::Connect() {
-  DLOG(WARNING) << "Connect called twice";
+  DLOG_IF(WARNING, thread_check_.get()) << "Connect called more than once";
 
   if (!thread_check_.get())
     thread_check_.reset(new NonThreadSafe());

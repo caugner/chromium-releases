@@ -41,8 +41,13 @@ extern const wchar_t kDistroPingDelay[];
 extern const wchar_t kDistroShowWelcomePage[];
 // Boolean pref that triggers skipping the first run dialogs.
 extern const wchar_t kDistroSkipFirstRunPref[];
+// Boolean. Do not create Chrome desktop shortcuts. Cmd line override present.
+extern const wchar_t kDoNotCreateShortcuts[];
 // Boolean. Do not launch Chrome after first install. Cmd line override present.
 extern const wchar_t kDoNotLaunchChrome[];
+// Boolean. Do not register with Google Update to have Chrome launched after
+// install. Cmd line override present.
+extern const wchar_t kDoNotRegisterForUpdateLaunch[];
 // Boolean. Register Chrome as default browser. Cmd line override present.
 extern const wchar_t kMakeChromeDefault[];
 // Boolean. Register Chrome as default browser for the current user.

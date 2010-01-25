@@ -1,8 +1,15 @@
 vars = {
   "chromium_trunk":
     "http://src.chromium.org/svn/trunk",
-  "nixysa_rev": "28",
-  "o3d_code_rev": "98",
+  "nixysa_rev": "54",
+  "chromium_rev": "22547",
+  "o3d_code_rev": "154",
+  "skia_rev": "279",
+  "gyp_rev": "706",
+  "gtest_rev": "267",
+  "gflags_rev": "30",
+  "breakpad_rev": "346",
+  "v8_rev": "2624",
 }
 
 deps = {
@@ -18,9 +25,6 @@ deps = {
   "o3d/third_party/chrome":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/chrome@" + Var("o3d_code_rev"),
 
-  "o3d/third_party/doxygen":
-    "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/doxygen@" + Var("o3d_code_rev"),
-
   "o3d/third_party/fcollada":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/fcollada@" + Var("o3d_code_rev"),
 
@@ -30,14 +34,14 @@ deps = {
   "o3d/third_party/icu38":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/icu38@" + Var("o3d_code_rev"),
 
-  "o3d/third_party/java":
-    "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/java@" + Var("o3d_code_rev"),
-
   "o3d/third_party/jpeg":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/jpeg@" + Var("o3d_code_rev"),
 
   "o3d/third_party/jsdoctoolkit":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/jsdoctoolkit@" + Var("o3d_code_rev"),
+
+  "o3d/third_party/libevent":
+    "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/libevent@" + Var("o3d_code_rev"),
 
   "o3d/third_party/pdiff":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/pdiff@" + Var("o3d_code_rev"),
@@ -45,11 +49,11 @@ deps = {
   "o3d/third_party/png":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/png@" + Var("o3d_code_rev"),
 
-  "o3d/third_party/py":
-    "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/py@" + Var("o3d_code_rev"),
-
   "o3d/third_party/scons":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/scons@" + Var("o3d_code_rev"),
+
+  "o3d/third_party/selenium_rc":
+    "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/selenium_rc@" + Var("o3d_code_rev"),
 
   "o3d/third_party/skia":
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/skia/files@" + Var("o3d_code_rev"),
@@ -67,33 +71,36 @@ deps = {
     "http://o3d.googlecode.com/svn/trunk/googleclient/third_party/zlib@" + Var("o3d_code_rev"),
 
   "o3d/third_party/v8":
-    "http://v8.googlecode.com/svn/trunk@2255",
+    "http://v8.googlecode.com/svn/trunk@" + Var("v8_rev"),
 
   # NACL has to be in this weird directory because it looks for
   # googleclient two levels above it.
   "o3d/third_party/native_client/googleclient/native_client":
     "http://nativeclient.googlecode.com/svn/trunk/nacl/googleclient/native_client@188",
 
-  "o3d/third_party/breakpad/files":
-    "http://google-breakpad.googlecode.com/svn/trunk@339",
+  "o3d/third_party/breakpad":
+    "http://google-breakpad.googlecode.com/svn/trunk/src@" + Var("breakpad_rev"),
 
-  "o3d/third_party/nixysa/files":
+  "o3d/third_party/nixysa":
     "http://nixysa.googlecode.com/svn/trunk/nixysa@" + Var("nixysa_rev"),
 
-  "o3d/third_party/npapi/files":
+  "o3d/third_party/npapi":
     "http://nixysa.googlecode.com/svn/trunk/third_party/npapi@" + Var("nixysa_rev"),
 
-  "o3d/third_party/ply/files":
+  "o3d/third_party/ply":
     "http://nixysa.googlecode.com/svn/trunk/third_party/ply-3.1@" + Var("nixysa_rev"),
 
   "o3d/third_party/gflags/":
-    "http://google-gflags.googlecode.com/svn/trunk@30",
+    "http://google-gflags.googlecode.com/svn/trunk@" + Var("gflags_rev"),
 
   "o3d/third_party/gtest/files":
-    "http://googletest.googlecode.com/svn/trunk@243",
+    "http://googletest.googlecode.com/svn/trunk@" + Var("gtest_rev"),
 
   "o3d/third_party/gmock/files":
-    "http://googlemock.googlecode.com/svn/tags/release-1.0.0",
+    Var("chromium_trunk") + "/src/testing/gmock@" + Var("chromium_rev"),
+
+  "tools/gyp":
+    "http://gyp.googlecode.com/svn/trunk@" + Var("gyp_rev"),
 }
 
 deps_os = {

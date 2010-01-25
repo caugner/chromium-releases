@@ -9,11 +9,13 @@
 #include "Document.h"
 #include "DOMWindow.h"
 #include "Frame.h"
+#include "InspectorBackend.h"
 #include "InspectorController.h"
 #include "Node.h"
 #include "Page.h"
 #include "PlatformString.h"
 #include "SecurityOrigin.h"
+#include "Settings.h"
 #include "V8Binding.h"
 #include "V8CustomBinding.h"
 #include "V8Proxy.h"
@@ -23,27 +25,33 @@
 #undef LOG
 
 #include "base/string_util.h"
-#include "base/values.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebScriptSource.h"
 #include "webkit/glue/devtools/bound_object.h"
 #include "webkit/glue/devtools/debugger_agent.h"
 #include "webkit/glue/devtools/devtools_rpc_js.h"
-#include "webkit/glue/devtools/dom_agent.h"
 #include "webkit/glue/devtools/tools_agent.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webdevtoolsclient_delegate.h"
 #include "webkit/glue/webdevtoolsclient_impl.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webview_impl.h"
 
 using namespace WebCore;
+using WebKit::WebFrame;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
+using WebKit::WebView;
+
+static v8::Local<v8::String> ToV8String(const String& s) {
+  if (s.isNull())
+    return v8::Local<v8::String>();
+
+  return v8::String::New(reinterpret_cast<const uint16_t*>(s.characters()),
+                         s.length());
+}
 
 DEFINE_RPC_JS_BOUND_OBJ(DebuggerAgent, DEBUGGER_AGENT_STRUCT,
     DebuggerAgentDelegate, DEBUGGER_AGENT_DELEGATE_STRUCT)
-DEFINE_RPC_JS_BOUND_OBJ(DomAgent, DOM_AGENT_STRUCT,
-    DomAgentDelegate, DOM_AGENT_DELEGATE_STRUCT)
 DEFINE_RPC_JS_BOUND_OBJ(ToolsAgent, TOOLS_AGENT_STRUCT,
     ToolsAgentDelegate, TOOLS_AGENT_DELEGATE_STRUCT)
 
@@ -68,7 +76,9 @@ class ToolsAgentNativeDelegateImpl : public ToolsAgentNativeDelegate {
 
     InspectorController* ic = frame_->frame()->page()->inspectorController();
     if (request.frame && request.frame->attached()) {
-      ic->addSourceToFrame(request.mime_type, content, request.frame.get());
+      ic->inspectorBackend()->addSourceToFrame(request.mime_type,
+                                               content,
+                                               request.frame.get());
     }
   }
 
@@ -95,61 +105,42 @@ class ToolsAgentNativeDelegateImpl : public ToolsAgentNativeDelegate {
   DISALLOW_COPY_AND_ASSIGN(ToolsAgentNativeDelegateImpl);
 };
 
-namespace {
-
-class RemoteDebuggerCommandExecutor : public CppBoundClass {
- public:
-  RemoteDebuggerCommandExecutor(
-      WebDevToolsClientDelegate* delegate,
-      WebFrame* frame,
-      const std::wstring& classname)
-      : delegate_(delegate) {
-    BindToJavascript(frame, classname);
-    BindMethod("DebuggerCommand",
-                &RemoteDebuggerCommandExecutor::DebuggerCommand);
-  }
-  virtual ~RemoteDebuggerCommandExecutor() {}
-
-  // The DebuggerCommand() function provided to Javascript.
-  void DebuggerCommand(const CppArgumentList& args, CppVariant* result) {
-    std::string command = args[0].ToString();
-    result->SetNull();
-    delegate_->SendDebuggerCommandToAgent(command);
-  }
-
- private:
-  WebDevToolsClientDelegate* delegate_;
-  DISALLOW_COPY_AND_ASSIGN(RemoteDebuggerCommandExecutor);
-};
-
-} //  namespace
-
 // static
 WebDevToolsClient* WebDevToolsClient::Create(
     WebView* view,
-    WebDevToolsClientDelegate* delegate) {
-  return new WebDevToolsClientImpl(static_cast<WebViewImpl*>(view), delegate);
+    WebDevToolsClientDelegate* delegate,
+    const WebString& application_locale) {
+  return new WebDevToolsClientImpl(
+      static_cast<WebViewImpl*>(view),
+      delegate,
+      webkit_glue::WebStringToString(application_locale));
 }
 
 WebDevToolsClientImpl::WebDevToolsClientImpl(
     WebViewImpl* web_view_impl,
-    WebDevToolsClientDelegate* delegate)
+    WebDevToolsClientDelegate* delegate,
+    const String& application_locale)
     : web_view_impl_(web_view_impl),
       delegate_(delegate),
+      application_locale_(application_locale),
       loaded_(false) {
   WebFrameImpl* frame = web_view_impl_->main_frame();
-
-  // Debugger commands should be sent using special method.
-  debugger_command_executor_obj_.set(new RemoteDebuggerCommandExecutor(
-      delegate, frame, L"RemoteDebuggerCommandExecutor"));
-  debugger_agent_obj_.set(new JsDebuggerAgentBoundObj(
-      this, frame, L"RemoteDebuggerAgent"));
-  dom_agent_obj_.set(new JsDomAgentBoundObj(this, frame, L"RemoteDomAgent"));
-  tools_agent_obj_.set(
-      new JsToolsAgentBoundObj(this, frame, L"RemoteToolsAgent"));
-
   v8::HandleScope scope;
   v8::Handle<v8::Context> frame_context = V8Proxy::context(frame->frame());
+
+  debugger_agent_obj_.set(new JsDebuggerAgentBoundObj(
+      this, frame_context, "RemoteDebuggerAgent"));
+  tools_agent_obj_.set(
+      new JsToolsAgentBoundObj(this, frame_context, "RemoteToolsAgent"));
+
+  // Debugger commands should be sent using special method.
+  debugger_command_executor_obj_.set(
+      new BoundObject(frame_context, this, "RemoteDebuggerCommandExecutor"));
+  debugger_command_executor_obj_->AddProtoFunction(
+      "DebuggerCommand",
+      WebDevToolsClientImpl::JsDebuggerCommand);
+  debugger_command_executor_obj_->Build();
+
   dev_tools_host_.set(new BoundObject(frame_context, this, "DevToolsHost"));
   dev_tools_host_->AddProtoFunction(
       "reset",
@@ -165,7 +156,7 @@ WebDevToolsClientImpl::WebDevToolsClientImpl(
       WebDevToolsClientImpl::JsLoaded);
   dev_tools_host_->AddProtoFunction(
       "search",
-      WebCore::V8Custom::v8InspectorControllerSearchCallback);
+      WebCore::V8Custom::v8InspectorBackendSearchCallback);
   dev_tools_host_->AddProtoFunction(
       "getPlatform",
       WebDevToolsClientImpl::JsGetPlatform);
@@ -184,6 +175,12 @@ WebDevToolsClientImpl::WebDevToolsClientImpl(
   dev_tools_host_->AddProtoFunction(
       "toggleInspectElementMode",
       WebDevToolsClientImpl::JsToggleInspectElementMode);
+  dev_tools_host_->AddProtoFunction(
+      "getApplicationLocale",
+      WebDevToolsClientImpl::JsGetApplicationLocale);
+  dev_tools_host_->AddProtoFunction(
+      "hiddenPanels",
+      WebDevToolsClientImpl::JsHiddenPanels);
   dev_tools_host_->Build();
 }
 
@@ -191,27 +188,32 @@ WebDevToolsClientImpl::~WebDevToolsClientImpl() {
 }
 
 void WebDevToolsClientImpl::DispatchMessageFromAgent(
-      const std::string& class_name,
-      const std::string& method_name,
-      const std::string& raw_msg) {
+      const WebString& class_name,
+      const WebString& method_name,
+      const WebString& param1,
+      const WebString& param2,
+      const WebString& param3) {
   if (ToolsAgentNativeDelegateDispatch::Dispatch(
           tools_agent_native_delegate_impl_.get(),
-          class_name,
-          method_name,
-          raw_msg)) {
+          webkit_glue::WebStringToString(class_name),
+          webkit_glue::WebStringToString(method_name),
+          webkit_glue::WebStringToString(param1),
+          webkit_glue::WebStringToString(param2),
+          webkit_glue::WebStringToString(param3))) {
     return;
   }
 
-  std::string expr = StringPrintf(
-      "devtools.dispatch('%s','%s',%s)",
-      class_name.c_str(),
-      method_name.c_str(),
-      raw_msg.c_str());
+  Vector<String> v;
+  v.append(webkit_glue::WebStringToString(class_name));
+  v.append(webkit_glue::WebStringToString(method_name));
+  v.append(webkit_glue::WebStringToString(param1));
+  v.append(webkit_glue::WebStringToString(param2));
+  v.append(webkit_glue::WebStringToString(param3));
   if (!loaded_) {
-    pending_incoming_messages_.append(expr);
+    pending_incoming_messages_.append(v);
     return;
   }
-  ExecuteScript(expr);
+  ExecuteScript(v);
 }
 
 void WebDevToolsClientImpl::AddResourceSourceToFrame(int resource_id,
@@ -225,16 +227,36 @@ void WebDevToolsClientImpl::AddResourceSourceToFrame(int resource_id,
   tools_agent_native_delegate_impl_->RequestSent(resource_id, mime_type, frame);
 }
 
-void WebDevToolsClientImpl::ExecuteScript(const std::string& expr) {
-  web_view_impl_->GetMainFrame()->ExecuteScript(
-      WebScriptSource(WebString::fromUTF8(expr)));
+void WebDevToolsClientImpl::ExecuteScript(const Vector<String>& v) {
+  WebFrameImpl* frame = web_view_impl_->main_frame();
+  v8::HandleScope scope;
+  v8::Handle<v8::Context> frame_context = V8Proxy::context(frame->frame());
+  v8::Context::Scope context_scope(frame_context);
+  v8::Handle<v8::Value> dispatch_function =
+      frame_context->Global()->Get(v8::String::New("devtools$$dispatch"));
+  ASSERT(dispatch_function->IsFunction());
+  v8::Handle<v8::Function> function = v8::Handle<v8::Function>::Cast(dispatch_function);
+  v8::Handle<v8::Value> args[] = {
+    ToV8String(v.at(0)),
+    ToV8String(v.at(1)),
+    ToV8String(v.at(2)),
+    ToV8String(v.at(3)),
+    ToV8String(v.at(4)),
+  };
+  function->Call(frame_context->Global(), 5, args);
 }
 
-
-void WebDevToolsClientImpl::SendRpcMessage(const std::string& class_name,
-                                           const std::string& method_name,
-                                           const std::string& raw_msg) {
-  delegate_->SendMessageToAgent(class_name, method_name, raw_msg);
+void WebDevToolsClientImpl::SendRpcMessage(const String& class_name,
+                                           const String& method_name,
+                                           const String& param1,
+                                           const String& param2,
+                                           const String& param3) {
+  delegate_->SendMessageToAgent(
+      webkit_glue::StringToWebString(class_name),
+      webkit_glue::StringToWebString(method_name),
+      webkit_glue::StringToWebString(param1),
+      webkit_glue::StringToWebString(param2),
+      webkit_glue::StringToWebString(param3));
 }
 
 // static
@@ -273,7 +295,7 @@ v8::Handle<v8::Value> WebDevToolsClientImpl::JsAddSourceToFrame(
 
   Page* page = V8Proxy::retrieveFrameForEnteredContext()->page();
   InspectorController* inspectorController = page->inspectorController();
-  return WebCore::v8Boolean(inspectorController->
+  return WebCore::v8Boolean(inspectorController->inspectorBackend()->
       addSourceToFrame(mime_type, source_string, node));
 }
 
@@ -305,7 +327,7 @@ v8::Handle<v8::Value> WebDevToolsClientImpl::JsLoaded(
   SecurityOrigin* origin = page->mainFrame()->domWindow()->securityOrigin();
   origin->grantUniversalAccess();
 
-  for (Vector<std::string>::iterator it =
+  for (Vector<Vector<String> >::iterator it =
            client->pending_incoming_messages_.begin();
        it != client->pending_incoming_messages_.end();
        ++it) {
@@ -370,5 +392,31 @@ v8::Handle<v8::Value> WebDevToolsClientImpl::JsToggleInspectElementMode(
       v8::External::Cast(*args.Data())->Value());
   int enabled = static_cast<int>(args[0]->BooleanValue());
   client->delegate_->ToggleInspectElementMode(enabled);
+  return v8::Undefined();
+}
+
+// static
+v8::Handle<v8::Value> WebDevToolsClientImpl::JsGetApplicationLocale(
+    const v8::Arguments& args) {
+  WebDevToolsClientImpl* client = static_cast<WebDevToolsClientImpl*>(
+      v8::External::Cast(*args.Data())->Value());
+  return v8String(client->application_locale_);
+}
+
+// static
+v8::Handle<v8::Value> WebDevToolsClientImpl::JsHiddenPanels(
+    const v8::Arguments& args) {
+  Page* page = V8Proxy::retrieveFrameForEnteredContext()->page();
+  return v8String(page->settings()->databasesEnabled() ? "" : "databases");
+}
+
+// static
+v8::Handle<v8::Value> WebDevToolsClientImpl::JsDebuggerCommand(
+    const v8::Arguments& args) {
+  WebDevToolsClientImpl* client = static_cast<WebDevToolsClientImpl*>(
+      v8::External::Cast(*args.Data())->Value());
+  String command = WebCore::toWebCoreStringWithNullCheck(args[0]);
+  WebString std_command = webkit_glue::StringToWebString(command);
+  client->delegate_->SendDebuggerCommandToAgent(std_command);
   return v8::Undefined();
 }

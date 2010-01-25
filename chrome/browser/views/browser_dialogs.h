@@ -5,8 +5,7 @@
 #ifndef CHROME_BROWSER_VIEWS_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_VIEWS_BROWSER_DIALOGS_H_
 
-#include "base/gfx/native_widget_types.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "app/gfx/native_widget_types.h"
 
 // This file contains functions for running a variety of browser dialogs and
 // popups. The dialogs here are the ones that the caller does not need to
@@ -65,7 +64,7 @@ bool IsBookmarkBubbleViewShowing();
 void ShowBookmarkManagerView(Profile* profile);
 
 // Shows the about dialog. See AboutChromeView.
-void ShowAboutChromeView(views::Widget* parent,
+void ShowAboutChromeView(gfx::NativeWindow parent,
                          Profile* profile);
 
 // Shows an HTML dialog. See HtmlDialogView.
@@ -98,15 +97,9 @@ void EditSearchEngine(gfx::NativeWindow parent,
                       EditSearchEngineControllerDelegate* delegate,
                       Profile* profile);
 
-// Shows the page info using the specified information.
-// |url| is the url of the page/frame the info applies to, |ssl| is the SSL
-// information for that page/frame.  If |show_history| is true, a section
-// showing how many times that URL has been visited is added to the page info.
-void ShowPageInfo(gfx::NativeWindow parent,
-                  Profile* profile,
-                  const GURL& url,
-                  const NavigationEntry::SSLStatus& ssl,
-                  bool show_history);
+// Shows the repost form confirmation dialog box.
+void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
+                                 TabContents* tab_contents);
 
 }  // namespace browser
 

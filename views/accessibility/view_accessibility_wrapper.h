@@ -9,6 +9,7 @@
 #include <oleacc.h>
 
 #include "base/basictypes.h"
+#include "base/scoped_comptr_win.h"
 
 namespace views {
 class View;
@@ -31,6 +32,8 @@ class ViewAccessibilityWrapper {
 
   STDMETHODIMP CreateDefaultInstance(REFIID iid);
 
+  HRESULT Uninitialize();
+
   // Returns a pointer to a specified interface on an object to which a client
   // currently holds an interface pointer. If pointer exists, it is reused,
   // otherwise a new pointer is created. Used by accessibility implementation to
@@ -44,7 +47,7 @@ class ViewAccessibilityWrapper {
 
  private:
   // Instance of accessibility information and handling for a View.
-  CComPtr<IAccessible> accessibility_info_;
+  ScopedComPtr<IAccessible> accessibility_info_;
 
   // View needed to initialize IAccessible.
   views::View* view_;

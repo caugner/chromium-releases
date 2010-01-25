@@ -11,8 +11,15 @@
 
 namespace chrome {
 
+extern const char kChromeVersion[];
+
 extern const wchar_t kBrowserProcessExecutableName[];
+extern const wchar_t kHelperProcessExecutableName[];
 extern const wchar_t kBrowserProcessExecutablePath[];
+extern const FilePath::CharType kHelperProcessExecutablePath[];
+#if defined(OS_MACOSX)
+extern const FilePath::CharType kFrameworkName[];
+#endif
 extern const wchar_t kBrowserAppName[];
 extern const wchar_t kMessageWindowClass[];
 extern const wchar_t kCrashReportLog[];
@@ -28,8 +35,9 @@ extern const FilePath::CharType kArchivedHistoryFilename[];
 extern const FilePath::CharType kCacheDirname[];
 extern const FilePath::CharType kMediaCacheDirname[];
 extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
+extern const FilePath::CharType kAppCacheDirname[];
 extern const wchar_t kChromePluginDataDirname[];
-extern const wchar_t kThemeImagesDirname[];
+extern const FilePath::CharType kThemeImagesDirname[];
 extern const FilePath::CharType kCookieFilename[];
 extern const FilePath::CharType kExtensionsCookieFilename[];
 extern const FilePath::CharType kHistoryFilename[];
@@ -37,11 +45,14 @@ extern const FilePath::CharType kLocalStateFilename[];
 extern const FilePath::CharType kPreferencesFilename[];
 extern const FilePath::CharType kSafeBrowsingFilename[];
 extern const FilePath::CharType kSingletonSocketFilename[];
+extern const FilePath::CharType kSingletonLockFilename[];
 extern const FilePath::CharType kThumbnailsFilename[];
+extern const FilePath::CharType kNewTabThumbnailsFilename[];
 extern const wchar_t kUserDataDirname[];
 extern const FilePath::CharType kUserScriptsDirname[];
 extern const FilePath::CharType kWebDataFilename[];
 extern const FilePath::CharType kBookmarksFileName[];
+extern const FilePath::CharType kPrivacyBlacklistFileName[];
 extern const FilePath::CharType kHistoryBookmarksFileName[];
 extern const FilePath::CharType kCustomDictionaryFileName[];
 extern const FilePath::CharType kLoginDataFileName[];

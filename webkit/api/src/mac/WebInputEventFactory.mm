@@ -151,6 +151,11 @@ static int windowsKeyCodeForKeyEvent(NSEvent* event)
     case 62: // Right Ctrl
         return 0x11;
 
+// Begin non-Apple addition ---------------------------------------------------
+    case 63: // Function (no Windows key code)
+        return 0;
+// End non-Apple addition -----------------------------------------------------
+
     // VK_CLEAR (0C) CLEAR key
     case 71: return 0x0C;
 
@@ -186,6 +191,14 @@ static int windowsKeyCodeForKeyEvent(NSEvent* event)
     // VK_DIVIDE (6F) Divide key
     case 75: return 0x6F;
     }
+
+// Begin non-Apple addition ---------------------------------------------------
+    // |-[NSEvent charactersIgnoringModifiers]| isn't allowed for
+    // NSFlagsChanged, and conceivably we may not have caught everything
+    // which causes an NSFlagsChanged above.
+    if ([event type] == NSFlagsChanged)
+        return 0;
+// End non-Apple addition -----------------------------------------------------
 
     NSString* s = [event charactersIgnoringModifiers];
     if ([s length] != 1)
@@ -523,9 +536,13 @@ static NSString* keyIdentifierForKeyEvent(NSEvent* event)
         case 62: // Right Ctrl
             return @"Control";
 
-        default:
-            ASSERT_NOT_REACHED();
-            return @"";
+// Begin non-Apple addition/modification --------------------------------------
+        case 63: // Function
+            return @"Function";
+
+        default: // Unknown, but this may be a strange/new keyboard.
+            return @"Unidentified";
+// End non-Apple addition/modification ----------------------------------------
         }
     }
 
@@ -846,7 +863,7 @@ WebKeyboardEvent WebInputEventFactory::keyboardEvent(NSEvent* event)
     WebKeyboardEvent result;
 
     result.type =
-        isKeyUpEvent(event) ? WebInputEvent::KeyUp : WebInputEvent::KeyDown;
+        isKeyUpEvent(event) ? WebInputEvent::KeyUp : WebInputEvent::RawKeyDown;
 
     result.modifiers = modifiersFromEvent(event);
 
@@ -902,6 +919,25 @@ WebKeyboardEvent WebInputEventFactory::keyboardEvent(NSEvent* event)
 
     result.timeStampSeconds = [event timestamp];
 
+    return result;
+}
+
+WebKeyboardEvent WebInputEventFactory::keyboardEvent(wchar_t character,
+                                                     int modifiers,
+                                                     double timeStampSeconds)
+{
+    // keyboardEvent(NSEvent*) depends on the NSEvent object and
+    // it is hard to use it from methods of the NSTextInput protocol. For
+    // such methods, this function creates a WebInputEvent::Char event without
+    // using a NSEvent object.
+    WebKeyboardEvent result;
+    result.type = WebKit::WebInputEvent::Char;
+    result.timeStampSeconds = timeStampSeconds;
+    result.modifiers = modifiers;
+    result.windowsKeyCode = character;
+    result.nativeKeyCode = character;
+    result.text[0] = character;
+    result.unmodifiedText[0] = character;
     return result;
 }
 
@@ -1111,20 +1147,23 @@ WebMouseWheelEvent WebInputEventFactory::mouseWheelEvent(NSEvent* event, NSView*
 
     // Wheel ticks are supposed to be raw, unaccelerated values, one per physical
     // mouse wheel notch. The delta event is perfect for this (being a good
-    // "specific edge case" as mentioned above). For trackpads, unfortunately, we
-    // don't have anything better.
-
-    result.wheelTicksY =
-        CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventDeltaAxis1);
-    result.wheelTicksX =
-        CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventDeltaAxis2);
+    // "specific edge case" as mentioned above). Trackpads, unfortunately, do
+    // event chunking, and sending mousewheel events with 0 ticks causes some
+    // websites to malfunction. Therefore, for all continuous input devices we use
+    // the point delta data instead, since we cannot distinguish trackpad data
+    // from data from any other continuous device.
 
     if (CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventIsContinuous)) {
-        result.deltaY =
+        result.wheelTicksY = result.deltaY =
             CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventPointDeltaAxis1);
-        result.deltaX =
+        result.wheelTicksX = result.deltaX =
             CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventPointDeltaAxis2);
     } else {
+        result.wheelTicksY =
+            CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventDeltaAxis1);
+        result.wheelTicksX =
+            CGEventGetIntegerValueField(cgEvent, kCGScrollWheelEventDeltaAxis2);
+
         // Convert wheel delta amount to a number of pixels to scroll.
         static const double scrollbarPixelsPerCocoaTick = 40.0;
 

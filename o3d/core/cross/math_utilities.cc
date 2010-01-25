@@ -33,7 +33,6 @@
 // The file contains defintions of various math related functions.
 
 #include <math.h>
-#include "core/cross/precompile.h"
 #include "core/cross/math_utilities.h"
 
 static const float kEpsilon = 0.00001f;
@@ -101,6 +100,19 @@ Matrix4 CreateOrthographicMatrix(float left,
   return Matrix4::identity();
 }
 
+namespace {
+
+// -15 stored using a single precision bias of 127
+const unsigned kHalfFloatMinBiasedExpAsSingleFpExponent = 0x38000000u;
+// max exponent value in single precision that will be converted
+// to Inf or Nan when stored as a half-float
+const unsigned kHalfFloatMaxBiasedExpAsSingleFpExponent = 0x47800000u;
+// 255 is the max exponent biased value
+const unsigned kFloatMaxBiasedExponent = (0xFFu << 23);
+const unsigned kHalfFloatMaxBiasedExponent = (0x1Fu << 10);
+
+}  // anonymous namespace
+
 uint16 FloatToHalf(float value) {
   union FloatAndUInt {
     float f;
@@ -113,23 +125,13 @@ uint16 FloatToHalf(float value) {
   unsigned exponent;
   uint16 half;
 
-  // -15 stored using a single precision bias of 127
-  const unsigned HALF_FLOAT_MIN_BIASED_EXP_AS_SINGLE_FP_EXP =
-      0x38000000;
-  // max exponent value in single precision that will be converted
-  // to Inf or Nan when stored as a half-float
-  const unsigned HALF_FLOAT_MAX_BIASED_EXP_AS_SINGLE_FP_EXP = 0x47800000;
-  // 255 is the max exponent biased value
-  const unsigned FLOAT_MAX_BIASED_EXP = (0xFF << 23);
-  const unsigned HALF_FLOAT_MAX_BIASED_EXP = (0x1F << 10);
-
   // get mantissa
   mantissa = v & ((1 << 23) - 1);
   // get exponent bits
-  exponent = v & FLOAT_MAX_BIASED_EXP;
-  if (exponent >= HALF_FLOAT_MAX_BIASED_EXP_AS_SINGLE_FP_EXP) {
+  exponent = v & kFloatMaxBiasedExponent;
+  if (exponent >= kHalfFloatMaxBiasedExpAsSingleFpExponent) {
     // check if the original single precision float number is a NaN
-    if (mantissa && (exponent == FLOAT_MAX_BIASED_EXP)) {
+    if (mantissa && (exponent == kFloatMaxBiasedExponent)) {
       // we have a single precision NaN
       mantissa = (1 << 23) - 1;
     } else {
@@ -137,12 +139,12 @@ uint16 FloatToHalf(float value) {
       mantissa = 0;
     }
     half = (static_cast<uint16>(sign) << 15) |
-           static_cast<uint16>(HALF_FLOAT_MAX_BIASED_EXP) |
+           static_cast<uint16>(kHalfFloatMaxBiasedExponent) |
            static_cast<uint16>(mantissa >> 13);
   // check if exponent is <= -15
-  } else if (exponent <= HALF_FLOAT_MIN_BIASED_EXP_AS_SINGLE_FP_EXP) {
+  } else if (exponent <= kHalfFloatMinBiasedExpAsSingleFpExponent) {
     // store a denorm half-float value or zero
-    exponent = (HALF_FLOAT_MIN_BIASED_EXP_AS_SINGLE_FP_EXP -
+    exponent = (kHalfFloatMinBiasedExpAsSingleFpExponent -
                 exponent) >> 23;
     mantissa >>= (14 + exponent);
 
@@ -152,11 +154,57 @@ uint16 FloatToHalf(float value) {
     half =
         (static_cast<uint16>(sign) << 15) |
         static_cast<uint16>(
-            (exponent - HALF_FLOAT_MIN_BIASED_EXP_AS_SINGLE_FP_EXP) >> 13) |
+            (exponent - kHalfFloatMinBiasedExpAsSingleFpExponent) >> 13) |
         static_cast<uint16>(mantissa >> 13);
   }
   return half;
 }
+
+float HalfToFloat(uint16 half) {
+  unsigned int sign = static_cast<unsigned int>(half >> 15);
+  unsigned int mantissa = static_cast<unsigned int>(half & ((1 << 10) - 1));
+  unsigned int exponent = static_cast<unsigned int>(
+      half & kHalfFloatMaxBiasedExponent);
+
+  if (exponent == kHalfFloatMaxBiasedExponent) {
+    // we have a half-float NaN or Inf
+    // half-float NaNs will be converted to a single precision NaN
+    // half-float Infs will be converted to a single precision Inf
+    exponent = kFloatMaxBiasedExponent;
+    if (mantissa)
+      mantissa = (1 << 23) - 1;  // set all bits to indicate a NaN
+  } else if (exponent == 0x0) {
+    // convert half-float zero/denorm to single precision value
+    if (mantissa) {
+      mantissa <<= 1;
+      exponent = kHalfFloatMinBiasedExpAsSingleFpExponent;
+      // check for leading 1 in denorm mantissa
+      while ((mantissa & (1 << 10)) == 0) {
+        // for every leading 0, decrement single precision exponent by 1
+        // and shift half-float mantissa value to the left
+        mantissa <<= 1;
+        exponent -= (1 << 23);
+      }
+      // clamp the mantissa to 10-bits
+      mantissa &= ((1 << 10) - 1);
+      // shift left to generate single-precision mantissa of 23-bits
+      mantissa <<= 13;
+    }
+  } else {
+    // shift left to generate single-precision mantissa of 23-bits
+    mantissa <<= 13;
+    // generate single precision biased exponent value
+    exponent = (exponent << 13) + kHalfFloatMinBiasedExpAsSingleFpExponent;
+  }
+
+  union {
+    unsigned int int_value;
+    float float_value;
+  } value;
+  value.int_value = (sign << 31) | exponent | mantissa;
+  return value.float_value;
+}
+
 }  // namespace Vectormath
 }  // namespace Aos
 
@@ -180,4 +228,6 @@ float FrobeniusNorm(const Matrix4& matrix) {
   }
   return sqrtf(sumOfElementsSquared);
 }
+
+const float kPi = ::acosf(-1.0f);
 }  // namespace o3d

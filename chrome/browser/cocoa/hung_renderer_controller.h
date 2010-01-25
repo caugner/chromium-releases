@@ -21,11 +21,18 @@
 
 #include <vector>
 
-@interface HungRendererController : NSWindowController {
+#import "base/cocoa_protocols_mac.h"
+
+@class MultiKeyEquivalentButton;
+class TabContents;
+
+@interface HungRendererController : NSWindowController<NSTableViewDataSource> {
  @private
-  IBOutlet NSButton* waitButton_;
+  IBOutlet MultiKeyEquivalentButton* waitButton_;
   IBOutlet NSButton* killButton_;
   IBOutlet NSTableView* tableView_;
+  IBOutlet NSImageView* imageView_;
+  IBOutlet NSTextField* messageView_;
 
   // The TabContents for which this dialog is open.  Should never be
   // NULL while this dialog is open.
@@ -59,7 +66,7 @@
 
 @interface HungRendererController (JustForTesting)
 - (NSButton*)killButton;
-- (NSButton*)waitButton;
+- (MultiKeyEquivalentButton*)waitButton;
 @end
 
 #endif  // CHROME_BROWSER_COCOA_HUNG_RENDERER_CONTROLLER_H_

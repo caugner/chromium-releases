@@ -2,20 +2,24 @@
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
-// MainFrm.h : interface of the CMainFrame class
-// This file is in Microsoft coding style
-
 #ifndef MEDIA_PLAYER_MAINFRM_H_
 #define MEDIA_PLAYER_MAINFRM_H_
+
+#include "media/player/list.h"
+#include "media/player/props.h"
+#include "media/player/seek.h"
+#include "media/player/view.h"
 
 const int POPUP_MENU_POSITION = 0;
 const int FILE_MENU_POSITION = 0;
 const int RECENT_MENU_POSITION = 6;
 
-const wchar_t g_lpcstrMRURegKey[] = L"Software\\Google\\Video\\MediaPlayer";
-const wchar_t g_lpcstrApp[] = L"MediaPlayer";
+const wchar_t* const g_lpcstrMRURegKey =
+    L"Software\\Google\\Video\\MediaPlayer";
+const wchar_t* const g_lpcstrApp = L"MediaPlayer";
 
-
+// Interface of the CMainFrame class
+// TODO(fbarchard): Remove hungarian notation.
 class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     public CUpdateUI<CMainFrame>,
     public CMessageFilter, public CIdleHandler,
@@ -100,13 +104,7 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     UIEnable(ID_PLAY_QUADRUPLESPEED, true);
     UIEnable(ID_PLAY_EIGHTSPEED, true);
     UIEnable(ID_PLAY_SIXTEENSPEED, true);
-#ifdef _OPENMP
-    UIEnable(ID_OPTIONS_OPENMP, true);
-#else
-    UIEnable(ID_OPTIONS_OPENMP, false);
-#endif
     UIEnable(ID_OPTIONS_EXIT, true);  // Not currently implemented.
-    UIEnable(ID_OPTIONS_SWSCALER, true);
     UIEnable(ID_OPTIONS_DRAW, true);
     UIEnable(ID_OPTIONS_AUDIO, !bMovieOpen);  // Disable while playing.
     UIEnable(ID_OPTIONS_DUMPYUVFILE, true);
@@ -140,7 +138,7 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     UpdateLayout();
   }
 
-  void UpdateTitleBar(wchar_t* lpstrTitle) {
+  void UpdateTitleBar(const wchar_t* lpstrTitle) {
     CString strDefault;
     strDefault.LoadString(IDR_MAINFRAME);
     CString strTitle = strDefault;
@@ -238,9 +236,7 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     COMMAND_RANGE_HANDLER_EX(ID_PLAY_HALFSPEED, ID_PLAY_SIXTEENSPEED,
                              OnPlaySpeed)
     COMMAND_ID_HANDLER_EX(ID_APP_ABOUT, OnAppAbout)
-    COMMAND_ID_HANDLER_EX(ID_OPTIONS_OPENMP, OnOptionsOpenMP)
     COMMAND_ID_HANDLER_EX(ID_OPTIONS_EXIT, OnOptionsExit)
-    COMMAND_ID_HANDLER_EX(ID_OPTIONS_SWSCALER, OnOptionsSWScaler)
     COMMAND_ID_HANDLER_EX(ID_OPTIONS_DRAW, OnOptionsDraw)
     COMMAND_ID_HANDLER_EX(ID_OPTIONS_AUDIO, OnOptionsAudio)
     COMMAND_ID_HANDLER_EX(ID_OPTIONS_DUMPYUVFILE, OnOptionsDumpYUVFile)
@@ -285,9 +281,7 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     UPDATE_ELEMENT(ID_PLAY_QUADRUPLESPEED, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_PLAY_EIGHTSPEED, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_PLAY_SIXTEENSPEED, UPDUI_MENUPOPUP)
-    UPDATE_ELEMENT(ID_OPTIONS_OPENMP, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_OPTIONS_EXIT, UPDUI_MENUPOPUP)
-    UPDATE_ELEMENT(ID_OPTIONS_SWSCALER, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_OPTIONS_DRAW, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_OPTIONS_AUDIO, UPDUI_MENUPOPUP)
     UPDATE_ELEMENT(ID_OPTIONS_DUMPYUVFILE, UPDUI_MENUPOPUP)
@@ -376,14 +370,11 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     UISetCheck(ID_VIEW_TOOLBAR, 1);
     UISetCheck(ID_VIEW_STATUS_BAR, 1);
     UISetCheck(ID_VIEW_ROTATE0, 1);
-    UISetCheck(ID_OPTIONS_OPENMP, 0);
     UISetCheck(ID_OPTIONS_EXIT, 0);
     UISetCheck(ID_OPTIONS_DRAW, 1);
     UISetCheck(ID_OPTIONS_AUDIO, 1);
     UpdateSizeUICheck();
     UpdateSpeedUICheck();
-
-    OnOptionsOpenMP(0, 0, 0);  // Toggle openmp off on init.
 
     CMessageLoop* pLoop = g_module.GetMessageLoop();
     ATLASSERT(pLoop != NULL);
@@ -393,7 +384,7 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     return 0;
   }
 
-  void OnContextMenu(CWindow wnd, CPoint point) {
+  void OnContextMenu(CWindow wnd, POINT point) {
     if (wnd.m_hWnd == m_view.m_hWnd) {
       CMenu menu;
       menu.LoadMenu(IDR_CONTEXTMENU);
@@ -409,13 +400,13 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     PostMessage(WM_CLOSE);
   }
 
-  bool IsMovie(wchar_t* file_name) {
+  bool IsMovie(const wchar_t* file_name) {
     if (_tcsstr(file_name, L".bmp"))
       return false;
     return true;
   }
 
-  bool MovieOpenFile(wchar_t* file_name) {
+  bool MovieOpenFile(const wchar_t* file_name) {
     bool success = false;
 
     if (m_bPrintPreview)
@@ -684,26 +675,10 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
     UpdateLayout();
   }
 
-  void OnOptionsOpenMP(UINT /*uNotifyCode*/, int /*nID*/, CWindow /*wnd*/) {
-#ifdef _OPENMP
-    bool enable_openmp = !media::Movie::get()->GetOpenMpEnable();
-    media::Movie::get()->SetOpenMpEnable(enable_openmp);
-    UISetCheck(ID_OPTIONS_OPENMP, enable_openmp);
-#endif
-    UpdateLayout();
-  }
-
   void OnOptionsExit(UINT /*uNotifyCode*/, int /*nID*/, CWindow /*wnd*/) {
     // TODO(fbarchard): Implement when pipeline exposes properties.
     enable_exit = !enable_exit;
     UISetCheck(ID_OPTIONS_EXIT, enable_exit);
-    UpdateLayout();
-  }
-
-  void OnOptionsSWScaler(UINT /*uNotifyCode*/, int /*nID*/, CWindow /*wnd*/) {
-    bool enable_swscaler = !media::Movie::get()->GetSwscalerEnable();
-    media::Movie::get()->SetSwscalerEnable(enable_swscaler);
-    UISetCheck(ID_OPTIONS_SWSCALER, enable_swscaler);
     UpdateLayout();
   }
 
@@ -741,4 +716,3 @@ class CMainFrame : public CFrameWindowImpl<CMainFrame>,
 };
 
 #endif  // MEDIA_PLAYER_MAINFRM_H_
-

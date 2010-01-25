@@ -21,6 +21,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "net/url_request/url_request_job_tracker.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
+#include "webkit/api/public/WebCache.h"
 
 class MessageLoop;
 class SkBitmap;
@@ -46,9 +47,17 @@ class TaskManager {
     virtual SkBitmap GetIcon() const = 0;
     virtual base::ProcessHandle GetProcess() const = 0;
 
+    virtual bool ReportsCacheStats() const { return false; }
+    virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const {
+      return WebKit::WebCache::ResourceTypeStats();
+    }
+
+    virtual bool ReportsSqliteMemoryUsed() const { return false; }
+    virtual size_t SqliteMemoryUsedBytes() const { return 0; }
+
     // A helper function for ActivateFocusedTab.  Returns NULL by default
     // because not all resources have an assoiciated tab.
-    virtual TabContents* GetTabContents() const {return NULL;}
+    virtual TabContents* GetTabContents() const { return NULL; }
 
     // Whether this resource does report the network usage accurately.
     // This controls whether 0 or N/A is displayed when no bytes have been
@@ -60,6 +69,13 @@ class TaskManager {
     // Called when some bytes have been read and support_network_usage returns
     // false (meaning we do have network usage support).
     virtual void SetSupportNetworkUsage() = 0;
+
+    // The TaskManagerModel periodically refreshes its data and call this
+    // on all live resources.
+    virtual void Refresh() {}
+
+    virtual void NotifyResourceTypeStats(
+        const WebKit::WebCache::ResourceTypeStats& stats) {}
   };
 
   // ResourceProviders are responsible for adding/removing resources to the task
@@ -74,7 +90,7 @@ class TaskManager {
   // notifications to the task manager.
   // Note: ResourceProviders have to be ref counted as they are used in
   // MessageLoop::InvokeLater().
-  class ResourceProvider : public base::RefCounted<ResourceProvider> {
+  class ResourceProvider : public base::RefCountedThreadSafe<ResourceProvider> {
    public:
     virtual ~ResourceProvider() {}
 
@@ -116,9 +132,12 @@ class TaskManager {
 
   TaskManagerModel* model() const { return model_.get(); }
 
+  void OpenAboutMemory();
+
  private:
   FRIEND_TEST(TaskManagerTest, Basic);
   FRIEND_TEST(TaskManagerTest, Resources);
+  FRIEND_TEST(TaskManagerTest, RefreshCalled);
 
   // Obtain an instance via GetInstance().
   TaskManager();
@@ -152,7 +171,7 @@ class TaskManagerModelObserver {
 
 // The model that the TaskManager is using.
 class TaskManagerModel : public URLRequestJobTracker::JobObserver,
-                         public base::RefCounted<TaskManagerModel> {
+                         public base::RefCountedThreadSafe<TaskManagerModel> {
  public:
   explicit TaskManagerModel(TaskManager* task_manager);
   ~TaskManagerModel();
@@ -172,6 +191,10 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   std::wstring GetResourcePhysicalMemory(int index) const;
   std::wstring GetResourceProcessId(int index) const;
   std::wstring GetResourceStatsValue(int index, int col_id) const;
+  std::wstring GetResourceWebCoreImageCacheSize(int index) const;
+  std::wstring GetResourceWebCoreScriptsCacheSize(int index) const;
+  std::wstring GetResourceWebCoreCSSCacheSize(int index) const;
+  std::wstring GetResourceSqliteMemoryUsed(int index) const;
   std::wstring GetResourceGoatsTeleported(int index) const;
 
   // Returns true if the resource is first in its group (resources
@@ -213,7 +236,13 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
   void Clear();  // Removes all items.
 
+  void NotifyResourceTypeStats(
+        base::ProcessId renderer_handle,
+        const WebKit::WebCache::ResourceTypeStats& stats);
+
  private:
+  FRIEND_TEST(TaskManagerTest, RefreshCalled);
+
   enum UpdateState {
     IDLE = 0,      // Currently not updating.
     TASK_PENDING,  // An update task is pending.
@@ -222,15 +251,23 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
   // This struct is used to exchange information between the io and ui threads.
   struct BytesReadParam {
-    BytesReadParam(int origin_pid, int render_process_host_id,
-                   int routing_id, int byte_count)
-        : origin_pid(origin_pid),
-          render_process_host_id(render_process_host_id),
+    BytesReadParam(int origin_child_id,
+                   int render_process_host_child_id,
+                   int routing_id,
+                   int byte_count)
+        : origin_child_id(origin_child_id),
+          render_process_host_child_id(render_process_host_child_id),
           routing_id(routing_id),
-          byte_count(byte_count) { }
+          byte_count(byte_count) {}
 
-    int origin_pid;
-    int render_process_host_id;
+    // This is the child ID of the originator of the request. It will often be
+    // the same as the render_process_host_child_id, but will be different when
+    // another sub-process like a plugin is routing requests through a renderer.
+    int origin_child_id;
+
+    // The child ID of the RenderProcessHist this request was routed through.
+    int render_process_host_child_id;
+
     int routing_id;
     int byte_count;
   };
@@ -291,9 +328,9 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
                                 base::ProcessMetrics** proc_metrics1,
                                 base::ProcessMetrics** proc_metrics2) const;
 
-  // Given a string containing a number, this function returns the formatted
-  // string that should be displayed in the task manager's memory cell.
-  std::wstring GetMemCellText(std::wstring* number) const;
+  // Given a number, this function returns the formatted string that should be
+  // displayed in the task manager's memory cell.
+  std::wstring GetMemCellText(int64 number) const;
 
   // The list of providers to the task manager. They are ref counted.
   ResourceProviderList providers_;

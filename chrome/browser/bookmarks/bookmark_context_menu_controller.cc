@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/bookmark_context_menu.h"
+#include "chrome/browser/bookmarks/bookmark_context_menu_controller.h"
 
 #include "app/l10n_util.h"
 #include "base/compiler_specific.h"
@@ -48,7 +48,7 @@ class EditFolderController : public InputWindowDialog::Delegate,
   }
 
   static void Show(Profile* profile,
-                   gfx::NativeView wnd,
+                   gfx::NativeWindow wnd,
                    const BookmarkNode* node,
                    bool is_new,
                    bool show_in_manager) {
@@ -60,7 +60,7 @@ class EditFolderController : public InputWindowDialog::Delegate,
 
  private:
   EditFolderController(Profile* profile,
-                       gfx::NativeView wnd,
+                       gfx::NativeWindow wnd,
                        const BookmarkNode* node,
                        bool is_new,
                        bool show_in_manager)
@@ -193,7 +193,7 @@ class SelectOnCreationHandler : public BookmarkEditor::Handler {
 }  // namespace
 
 BookmarkContextMenuController::BookmarkContextMenuController(
-    gfx::NativeView parent_window,
+    gfx::NativeWindow parent_window,
     BookmarkContextMenuControllerDelegate* delegate,
     Profile* profile,
     PageNavigator* navigator,
@@ -316,7 +316,8 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
           editor_config = BookmarkEditor::SHOW_TREE;
         else
           editor_config = BookmarkEditor::NO_TREE;
-        BookmarkEditor::Show(parent_window_, profile_, NULL, selection_[0],
+        BookmarkEditor::Show(parent_window_, profile_, parent_,
+                             BookmarkEditor::EditDetails(selection_[0]),
                              editor_config, NULL);
       } else {
         EditFolderController::Show(profile_, parent_window_, selection_[0],
@@ -349,7 +350,8 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
         handler = new SelectOnCreationHandler(profile_);
       }
       BookmarkEditor::Show(parent_window_, profile_, GetParentForNewNodes(),
-                           NULL, editor_config, handler);
+                           BookmarkEditor::EditDetails(), editor_config,
+                           handler);
       break;
     }
 

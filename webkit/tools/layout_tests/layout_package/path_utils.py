@@ -1,255 +1,360 @@
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Some utility methods for getting paths used by run_webkit_tests.py.
-"""
+"""This package contains utility methods for manipulating paths and
+filenames for test results and baselines. It also contains wrappers
+of a few routines in platform_utils.py so that platform_utils.py can
+be considered a 'protected' package - i.e., this file should be
+the only file that ever includes platform_utils. This leads to
+us including a few things that don't really have anything to do
+ with paths, unfortunately."""
 
 import errno
 import os
-import platform_utils
-import subprocess
+import stat
 import sys
 
-import google.path_utils
+import platform_utils
+import platform_utils_win
+import platform_utils_mac
+import platform_utils_linux
 
+# Cache some values so we don't have to recalculate them. _basedir is
+# used by PathFromBase() and caches the full (native) path to the top
+# of the source tree (/src). _baseline_search_path is used by
+# ExpectedBaseline() and caches the list of native paths to search
+# for baseline results.
+_basedir = None
+_baseline_search_path = None
 
 class PathNotFound(Exception): pass
 
-# Save some paths here so we don't keep re-evaling.
-_webkit_root = None
-_layout_data_dir = None
-_layout_tests_dir = None
-# A map from platform description to directory list.
-_platform_results_dirs = {}
+def LayoutTestsDir(path=None):
+  """Returns the fully-qualified path to the directory containing the input
+  data for the specified layout test.
 
-# An instance of the PlatformUtility for use by methods mapped from there.
-_platform_util = None
-
-# TODO this should probably be moved into path_utils as ToUnixPath().
-def WinPathToUnix(path):
-  """Convert a windows path to use unix-style path separators (a/b/c)."""
-  return path.replace('\\', '/')
-
-def WebKitRoot():
-  """Returns the full path to the directory containing webkit.gyp.  Raises
-  PathNotFound if we're unable to find webkit.gyp."""
-  global _webkit_root
-  if _webkit_root:
-    return _webkit_root
-  webkit_gyp_path = google.path_utils.FindUpward(google.path_utils.ScriptDir(),
-                                                 'webkit.gyp')
-  _webkit_root = os.path.dirname(webkit_gyp_path)
-  return _webkit_root
-
-def LayoutDataDir():
-  """Gets the full path to the tests directory.  Raises PathNotFound if
-  we're unable to find it."""
-  global _layout_data_dir
-  if _layout_data_dir:
-    return _layout_data_dir
-  _layout_data_dir = google.path_utils.FindUpward(WebKitRoot(), 'webkit',
-                                                  'data', 'layout_tests')
-  return _layout_data_dir
-
-def LayoutTestsDir(path = None):
-  """Returns the full path to the directory containing layout tests, based on
-  the supplied relative or absolute path to a layout tests. If the path contains
-  "LayoutTests" directory, locates this directory, assuming it's either in
-  in webkit/data/layout_tests or in third_party/WebKit."""
-
-  if path != None and path.find('LayoutTests') == -1:
-    return LayoutDataDir()
-
-  global _layout_tests_dir
-  if _layout_tests_dir:
-    return _layout_tests_dir
-
-  webkit_dir = google.path_utils.FindUpward(
-      google.path_utils.ScriptDir(), 'third_party', 'WebKit')
-
-  if os.path.exists(os.path.join(webkit_dir, 'LayoutTests')):
-    _layout_tests_dir = webkit_dir
+  We have not fully upstreamed all of our layout tests, so we need to
+  potentially return two different places."""
+  if path and path.find('LayoutTests') == -1:
+    return PathFromBase('webkit', 'data', 'layout_tests')
   else:
-    _layout_tests_dir = LayoutDataDir()
+    return PathFromBase('third_party', 'WebKit');
 
-  return _layout_tests_dir
+def ChromiumBaselinePath(platform=None):
+  """Returns the full path to the directory containing expected
+  baseline results from chromium ports. If |platform| is None, the
+  currently executing platform is used."""
+  if platform is None:
+    platform = platform_utils.PlatformName()
+  return PathFromBase('webkit', 'data', 'layout_tests', 'platform', platform)
 
-def ChromiumPlatformResultsEnclosingDir():
-  """Returns the full path to the directory containing Chromium platform
-  result directories.
-  """
-  # TODO(pamg): Once we move platform/chromium-* into LayoutTests/platform/,
-  # remove this and use PlatformResultsEnclosingDir() for everything.
-  return os.path.join(LayoutDataDir(), 'platform')
+def WebKitBaselinePath(platform):
+  """Returns the full path to the directory containing expected
+  baseline results from WebKit ports."""
+  return PathFromBase('third_party', 'WebKit', 'LayoutTests',
+                      'platform', platform)
 
-def WebKitPlatformResultsEnclosingDir():
-  """Gets the full path to just above the platform results directory."""
-  return os.path.join(LayoutTestsDir(), 'LayoutTests', 'platform')
+def BaselineSearchPath(platform=None):
+  """Returns the list of directories to search for baselines/results for a
+  given platform, in order of preference. Paths are relative to the top of the
+  source tree. If parameter platform is None, returns the list for the current
+  platform that the script is running on."""
+  if platform is None:
+    return platform_utils.BaselineSearchPath(False)
+  elif platform.startswith('mac'):
+    return platform_utils_mac.BaselineSearchPath(True)
+  elif platform.startswith('win'):
+    return platform_utils_win.BaselineSearchPath(True)
+  elif platform.startswith('linux'):
+    return platform_utils_linux.BaselineSearchPath(True)
+  else:
+    return platform_utils.BaselineSearchPath(False)
 
-def PlatformResultsEnclosingDir(platform):
-  """Gets the path to just above the results directory for this platform."""
-  if platform.startswith('chromium'):
-    return ChromiumPlatformResultsEnclosingDir()
-  return WebKitPlatformResultsEnclosingDir()
+def ExpectedBaseline(filename, suffix, platform=None, all_baselines=False):
+  """Given a test name, finds where the baseline result is located. The
+  result is returned as a pair of values, the absolute path to top of the test
+  results directory, and the relative path from there to the results file.
 
-def ExpectedFilename(filename, suffix, platform):
-  """Given a test name, returns an absolute path to its expected results.
+  Both return values will be in the format appropriate for the
+  current platform (e.g., "\\" for path separators on Windows).
 
-  The result will be sought in the hierarchical platform directories, in the
-  corresponding WebKit platform directories, in the WebKit platform/mac/
-  directory, and finally next to the test file.
-
-  Suppose that the |platform| is 'chromium-win-xp'.  In that case, the
-  following directories are searched in order, if they exist, and the first
-  match is returned:
-    LayoutTests/platform/chromium-win-xp/
-    LayoutTests/platform/chromium-win/
-    LayoutTests/platform/chromium/
-    LayoutTests/platform/win-xp/
-    LayoutTests/platform/win/
-    LayoutTests/platform/mac/
-    the directory in which the test itself is located
-
-  If the |platform| is 'chromium-mac-leopard', the sequence will be as follows:
-    LayoutTests/platform/chromium-mac-leopard/
-    LayoutTests/platform/chromium-mac/
-    LayoutTests/platform/chromium/
-    LayoutTests/platform/mac-leopard/
-    LayoutTests/platform/mac/
-    the directory in which the test itself is located
-
-  A platform may optionally fall back to the Windows results if its own
-  results are not found, by returning True from its platform-specific
-  platform_utils.IsNonWindowsPlatformTargettingWindowsResults(). Supposing
-  that Linux does so, the search sequence for the |platform| 'chromium-linux'
-  will be
-    LayoutTests/platform/chromium-linux/
-    LayoutTests/platform/chromium/
-    LayoutTests/platform/linux/
-    LayoutTests/platform/chromium-win/
-    LayoutTests/platform/win/
-    LayoutTests/platform/mac/
-    the directory in which the test itself is located
-
-  If no expected results are found in any of the searched directories, the
-  directory in which the test itself is located will be returned.
+  If the results file is not found, then None will be returned for the
+  directory, but the expected relative pathname will still be returned.
 
   Args:
-    filename: absolute filename to test file
-    suffix: file suffix of the expected results, including dot; e.g. '.txt'
-        or '.png'.  This should not be None, but may be an empty string.
-    platform: a hyphen-separated list of platform descriptors from least to
-        most specific, matching the WebKit format, that will be used to find
-        the platform/ directories to look in. For example, 'chromium-win' or
-        'chromium-mac-leopard'.
-
-  Returns:
-    An absolute path to the most specific matching result file for the given
-    test, following the search rules described above.
+     filename: absolute filename to test file
+     suffix: file suffix of the expected results, including dot; e.g. '.txt'
+         or '.png'.  This should not be None, but may be an empty string.
+     platform: layout test platform: 'win', 'linux' or 'mac'. Defaults to the
+               current platform.
+     all_baselines: If True, return an ordered list of all baseline paths
+                    for the given platform. If False, return only the first
+                    one.
+  Returns
+     a list of ( platform_dir, results_filename ), where
+       platform_dir - abs path to the top of the results tree (or test tree)
+       results_filename - relative path from top of tree to the results file
+         (os.path.join of the two gives you the full path to the file, unless
+          None was returned.)
   """
+  global _baseline_search_path
+  global _search_path_platform
   testname = os.path.splitext(RelativeTestFilename(filename))[0]
+
   # While we still have tests in LayoutTests/, chrome/, and pending/, we need
   # to strip that outer directory.
   # TODO(pamg): Once we upstream all of chrome/ and pending/, clean this up.
-  testdir, testname = testname.split('/', 1)
-  results_filename = testname + '-expected' + suffix
+  platform_filename = testname + '-expected' + suffix
+  testdir, base_filename = platform_filename.split('/', 1)
 
-  # Use the cached directory list if we have one.
-  global _platform_results_dirs
-  platform_dirs = _platform_results_dirs.get(platform, [])
-  if len(platform_dirs) == 0:
-    # Build the list of platform directories: chromium-foo-bar, chromium-foo,
-    # chromium.
-    segments = platform.split('-')
-    for length in range(len(segments), 0, -1):
-      platform_dirs.append('-'.join(segments[:length]))
+  if (_baseline_search_path is None) or (_search_path_platform != platform):
+    _baseline_search_path = BaselineSearchPath(platform)
+    _search_path_platform = platform
 
-    # Append corresponding WebKit platform directories too.
-    if platform.startswith('chromium-'):
-      for length in range(len(segments), 1, -1):
-        platform_dirs.append('-'.join(segments[1:length]))
+  current_platform_dir = ChromiumBaselinePath(PlatformName(platform))
 
-    if platform_utils.IsNonWindowsPlatformTargettingWindowsResults():
-      if platform.startswith('chromium'):
-        platform_dirs.append('chromium-win')
-      platform_dirs.append('win')
+  baselines = []
+  foundCurrentPlatform = False
+  for platform_dir in _baseline_search_path:
+    # Find current platform from baseline search paths and start from there.
+    if platform_dir == current_platform_dir:
+      foundCurrentPlatform = True
 
-    # Finally, append platform/mac/ to all searches.
-    if 'mac' not in platform_dirs:
-      platform_dirs.append('mac')
+    if foundCurrentPlatform:
+      # TODO(pamg): Clean this up once we upstream everything in chrome/ and
+      # pending/.
+      if os.path.basename(platform_dir).startswith('chromium'):
+        if os.path.exists(os.path.join(platform_dir, platform_filename)):
+          baselines.append((platform_dir, platform_filename))
+      else:
+        if os.path.exists(os.path.join(platform_dir, base_filename)):
+          baselines.append((platform_dir, base_filename))
 
-    platform_dirs = [os.path.join(PlatformResultsEnclosingDir(x), x)
-                     for x in platform_dirs]
-    _platform_results_dirs[platform] = platform_dirs
-
-  for platform_dir in platform_dirs:
-    # TODO(pamg): Clean this up once we upstream everything in chrome/ and
-    # pending/.
-    if os.path.basename(platform_dir).startswith('chromium'):
-      platform_file = os.path.join(platform_dir, testdir, results_filename)
-    else:
-      platform_file = os.path.join(platform_dir, results_filename)
-    if os.path.exists(platform_file):
-      return platform_file
+      if not all_baselines and baselines:
+        return baselines
 
   # If it wasn't found in a platform directory, return the expected result
-  # in the test's directory, even if no such file actually exists.
-  return os.path.join(os.path.dirname(filename),
-                      os.path.basename(results_filename))
+  # in the test directory, even if no such file actually exists.
+  platform_dir = LayoutTestsDir(filename)
+  if os.path.exists(os.path.join(platform_dir, platform_filename)):
+    baselines.append((platform_dir, platform_filename))
 
-def TestShellBinaryPath(target):
-  """Gets the full path to the test_shell binary for the target build
-  configuration. Raises PathNotFound if the file doesn't exist"""
-  platform_util = platform_utils.PlatformUtility('')
-  full_path = os.path.join(WebKitRoot(), target,
-                           platform_util.TestShellBinary())
-  if not os.path.exists(full_path):
-    # try output directory from either Xcode or chrome.sln
-    full_path = platform_util.TestShellBinaryPath(target)
-  if not os.path.exists(full_path):
-    raise PathNotFound('unable to find test_shell at %s' % full_path)
-  return full_path
+  if baselines:
+    return baselines
 
-def LayoutTestHelperBinaryPath(target):
-  """Gets the full path to the layout test helper binary for the target build
-  configuration. Raises PathNotFound if the file doesn't exist"""
-  platform_util = platform_utils.PlatformUtility('')
-  # try output directory from either Xcode or chrome.sln
-  full_path = platform_util.LayoutTestHelperBinaryPath(target)
-  if not os.path.exists(full_path):
-    raise PathNotFound('unable to find layout_test_helper at %s' % full_path)
-  return full_path
+  return [(None, platform_filename)]
+
+def ExpectedFilename(filename, suffix):
+  """Given a test name, returns an absolute path to its expected results.
+
+  If no expected results are found in any of the searched directories, the
+  directory in which the test itself is located will be returned. The return
+  value is in the format appropriate for the platform (e.g., "\\" for
+  path separators on windows).
+
+  Args:
+     filename: absolute filename to test file
+     suffix: file suffix of the expected results, including dot; e.g. '.txt'
+         or '.png'.  This should not be None, but may be an empty string.
+     platform: the most-specific directory name to use to build the
+         search list of directories, e.g., 'chromium-win', or
+         'chromium-mac-leopard' (we follow the WebKit format)
+  """
+  platform_dir, platform_filename = ExpectedBaseline(filename, suffix)[0]
+  if platform_dir:
+    return os.path.join(platform_dir, platform_filename)
+  return os.path.join(LayoutTestsDir(filename), platform_filename)
 
 def RelativeTestFilename(filename):
   """Provide the filename of the test relative to the layout data
   directory as a unix style path (a/b/c)."""
-  return WinPathToUnix(filename[len(LayoutTestsDir(filename)) + 1:])
+  return _WinPathToUnix(filename[len(LayoutTestsDir(filename)) + 1:])
 
-def GetPlatformUtil():
-  """Returns a singleton instance of the PlatformUtility."""
-  global _platform_util
-  if not _platform_util:
-    # Avoid circular import by delaying it.
-    import layout_package.platform_utils
-    _platform_util = (
-        layout_package.platform_utils.PlatformUtility(WebKitRoot()))
-  return _platform_util
+def _WinPathToUnix(path):
+  """Convert a windows path to use unix-style path separators (a/b/c)."""
+  return path.replace('\\', '/')
 
-# Map platform specific path utility functions.  We do this as a convenience
-# so importing path_utils will get all path related functions even if they are
-# platform specific.
+#
+# Routines that are arguably platform-specific but have been made
+# generic for now (they used to be in platform_utils_*)
+#
+def FilenameToUri(full_path):
+  """Convert a test file to a URI."""
+  LAYOUTTEST_HTTP_DIR = "LayoutTests/http/tests/"
+  PENDING_HTTP_DIR    = "pending/http/tests/"
+  LAYOUTTEST_WEBSOCKET_DIR = "LayoutTests/websocket/tests/"
+
+  relative_path = _WinPathToUnix(RelativeTestFilename(full_path))
+  port = None
+  use_ssl = False
+
+  if relative_path.startswith(LAYOUTTEST_HTTP_DIR):
+    # LayoutTests/http/tests/ run off port 8000 and ssl/ off 8443
+    relative_path = relative_path[len(LAYOUTTEST_HTTP_DIR):]
+    port = 8000
+  elif relative_path.startswith(PENDING_HTTP_DIR):
+    # pending/http/tests/ run off port 9000 and ssl/ off 9443
+    relative_path = relative_path[len(PENDING_HTTP_DIR):]
+    port = 9000
+  elif relative_path.startswith(LAYOUTTEST_WEBSOCKET_DIR):
+    # LayoutTests/websocket/tests/ run off port 8880
+    relative_path = relative_path[len(LAYOUTTEST_WEBSOCKET_DIR):]
+    port = 8880
+  elif relative_path.find("/http/") >= 0:
+    # chrome/http/tests run off of port 8081 with the full path
+    port = 8081
+
+  # Make LayoutTests/http/tests/local run as local files. This is to mimic the
+  # logic in run-webkit-tests.
+  # TODO(jianli): Consider extending this to "media/".
+  if port and not relative_path.startswith("local/"):
+    if relative_path.startswith("ssl/"):
+      port += 443
+      protocol = "https"
+    else:
+      protocol = "http"
+    return "%s://127.0.0.1:%u/%s" % (protocol, port, relative_path)
+
+  if sys.platform in ('cygwin', 'win32'):
+    return "file:///" + GetAbsolutePath(full_path)
+  return "file://" + GetAbsolutePath(full_path)
+
 def GetAbsolutePath(path):
-  return GetPlatformUtil().GetAbsolutePath(path)
+  """Returns an absolute UNIX path."""
+  return _WinPathToUnix(os.path.abspath(path))
 
-def FilenameToUri(path):
-  return GetPlatformUtil().FilenameToUri(path)
+def MaybeMakeDirectory(*path):
+  """Creates the specified directory if it doesn't already exist."""
+  # This is a reimplementation of google.path_utils.MaybeMakeDirectory().
+  try:
+    os.makedirs(os.path.join(*path))
+  except OSError, e:
+    if e.errno != errno.EEXIST:
+      raise
 
-def TestListPlatformDir():
-  return GetPlatformUtil().TestListPlatformDir()
+def PathFromBase(*comps):
+  """Returns an absolute filename from a set of components specified
+  relative to the top of the source tree. If the path does not exist,
+  the exception PathNotFound is raised."""
+  # This is a reimplementation of google.path_utils.PathFromBase().
+  global _basedir
+  if _basedir == None:
+    # We compute the top of the source tree by finding the absolute
+    # path of this source file, and then climbing up three directories
+    # as given in subpath. If we move this file, subpath needs to be updated.
+    path = os.path.abspath(__file__)
+    subpath = os.path.join('webkit','tools','layout_tests')
+    _basedir = path[:path.index(subpath)]
+  path = os.path.join(_basedir, *comps)
+  if not os.path.exists(path):
+    raise PathNotFound('could not find %s' % (path))
+  return path
 
-def PlatformDir():
-  return GetPlatformUtil().PlatformDir()
+def RemoveDirectory(*path):
+  """Recursively removes a directory, even if it's marked read-only.
 
-def PlatformNewResultsDir():
-  return GetPlatformUtil().PlatformNewResultsDir()
+  Remove the directory located at *path, if it exists.
+
+  shutil.rmtree() doesn't work on Windows if any of the files or directories
+  are read-only, which svn repositories and some .svn files are.  We need to
+  be able to force the files to be writable (i.e., deletable) as we traverse
+  the tree.
+
+  Even with all this, Windows still sometimes fails to delete a file, citing
+  a permission error (maybe something to do with antivirus scans or disk
+  indexing).  The best suggestion any of the user forums had was to wait a
+  bit and try again, so we do that too.  It's hand-waving, but sometimes it
+  works. :/
+  """
+  file_path = os.path.join(*path)
+  if not os.path.exists(file_path):
+    return
+
+  win32 = False
+  if sys.platform == 'win32':
+    win32 = True
+    # Some people don't have the APIs installed. In that case we'll do without.
+    try:
+      win32api = __import__('win32api')
+      win32con = __import__('win32con')
+    except ImportError:
+      win32 = False
+
+    def remove_with_retry(rmfunc, path):
+      os.chmod(path, stat.S_IWRITE)
+      if win32:
+        win32api.SetFileAttributes(path, win32con.FILE_ATTRIBUTE_NORMAL)
+      try:
+        return rmfunc(path)
+      except EnvironmentError, e:
+        if e.errno != errno.EACCES:
+          raise
+        print 'Failed to delete %s: trying again' % repr(path)
+        time.sleep(0.1)
+        return rmfunc(path)
+  else:
+    def remove_with_retry(rmfunc, path):
+      if os.path.islink(path):
+        return os.remove(path)
+      else:
+        return rmfunc(path)
+
+  for root, dirs, files in os.walk(file_path, topdown=False):
+    # For POSIX:  making the directory writable guarantees removability.
+    # Windows will ignore the non-read-only bits in the chmod value.
+    os.chmod(root, 0770)
+    for name in files:
+      remove_with_retry(os.remove, os.path.join(root, name))
+    for name in dirs:
+      remove_with_retry(os.rmdir, os.path.join(root, name))
+
+  remove_with_retry(os.rmdir, file_path)
+
+#
+# Wrappers around platform_utils
+#
+
+def PlatformName(platform=None):
+  """Returns the appropriate chromium platform name for |platform|. If
+     |platform| is None, returns the name of the chromium platform on the
+     currently running system. If |platform| is of the form 'chromium-*',
+     it is returned unchanged, otherwise 'chromium-' is prepended."""
+  if platform == None:
+    return platform_utils.PlatformName()
+  if not platform.startswith('chromium-'):
+    platform = "chromium-" + platform
+  return platform
+
+def PlatformVersion():
+  return platform_utils.PlatformVersion()
+
+def LigHTTPdExecutablePath():
+  return platform_utils.LigHTTPdExecutablePath()
+
+def LigHTTPdModulePath():
+  return platform_utils.LigHTTPdModulePath()
+
+def LigHTTPdPHPPath():
+  return platform_utils.LigHTTPdPHPPath()
+
+def WDiffPath():
+  return platform_utils.WDiffPath()
+
+def TestShellPath(target):
+  return platform_utils.TestShellPath(target)
+
+def ImageDiffPath(target):
+  return platform_utils.ImageDiffPath(target)
+
+def LayoutTestHelperPath(target):
+  return platform_utils.LayoutTestHelperPath(target)
+
+def FuzzyMatchPath():
+  return platform_utils.FuzzyMatchPath()
+
+def ShutDownHTTPServer(server_process):
+  return platform_utils.ShutDownHTTPServer(server_process)
+
+def KillAllTestShells():
+  platform_utils.KillAllTestShells()

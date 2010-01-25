@@ -116,12 +116,10 @@ class AutocompleteProviderTest : public testing::Test,
 };
 
 void AutocompleteProviderTest::SetUp() {
-  registrar_.Add(this,
-                 NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
+  registrar_.Add(this, NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
                  NotificationService::AllSources());
-  registrar_.Add(
-      this,
-      NotificationType::AUTOCOMPLETE_CONTROLLER_SYNCHRONOUS_MATCHES_AVAILABLE,
+  registrar_.Add(this,
+      NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
       NotificationService::AllSources());
   ResetController(false);
 }
@@ -212,14 +210,24 @@ TEST(AutocompleteTest, InputType) {
     { L"?foo bar", AutocompleteInput::FORCED_QUERY },
     { L"?http://foo.com/bar", AutocompleteInput::FORCED_QUERY },
     { L"foo", AutocompleteInput::UNKNOWN },
+    { L"foo.c", AutocompleteInput::UNKNOWN },
     { L"foo.com", AutocompleteInput::URL },
+    { L"-.com", AutocompleteInput::QUERY },
     { L"foo/bar", AutocompleteInput::URL },
     { L"foo/bar baz", AutocompleteInput::UNKNOWN },
     { L"http://foo/bar baz", AutocompleteInput::URL },
     { L"foo bar", AutocompleteInput::QUERY },
+    { L"\"foo:bar\"", AutocompleteInput::QUERY },
     { L"link:foo.com", AutocompleteInput::UNKNOWN },
     { L"www.foo.com:81", AutocompleteInput::URL },
     { L"localhost:8080", AutocompleteInput::URL },
+    { L"foo.com:123456", AutocompleteInput::QUERY },
+    { L"foo.com:abc", AutocompleteInput::QUERY },
+    { L"user@foo.com", AutocompleteInput::UNKNOWN },
+    { L"user:pass@foo.com", AutocompleteInput::UNKNOWN },
+    { L"1.2", AutocompleteInput::UNKNOWN },
+    { L"1.2/45", AutocompleteInput::UNKNOWN },
+    { L"ps/2 games", AutocompleteInput::UNKNOWN },
     { L"en.wikipedia.org/wiki/James Bond", AutocompleteInput::URL },
     // In Chrome itself, mailto: will get handled by ShellExecute, but in
     // unittest mode, we don't have the data loaded in the external protocol
@@ -231,7 +239,20 @@ TEST(AutocompleteTest, InputType) {
     { L"C:\\Program Files", AutocompleteInput::URL },
     { L"\\\\Server\\Folder\\File", AutocompleteInput::URL },
 #endif  // defined(OS_WIN)
-    { L"http://foo.com/", AutocompleteInput::URL },
+    { L"http:foo", AutocompleteInput::URL },
+    { L"http://foo", AutocompleteInput::URL },
+    { L"http://foo.c", AutocompleteInput::URL },
+    { L"http://foo.com", AutocompleteInput::URL },
+    { L"http://-.com", AutocompleteInput::QUERY },
+    { L"http://foo.com:abc", AutocompleteInput::QUERY },
+    { L"http://foo.com:123456", AutocompleteInput::QUERY },
+    { L"http:user@foo.com", AutocompleteInput::URL },
+    { L"http://user@foo.com", AutocompleteInput::URL },
+    { L"http://user:pass@foo.com", AutocompleteInput::URL },
+    { L"http://1.2", AutocompleteInput::URL },
+    { L"http://1.2/45", AutocompleteInput::URL },
+    { L"http:ps/2 games", AutocompleteInput::URL },
+    { L"http://ps/2 games", AutocompleteInput::URL },
     { L"127.0.0.1", AutocompleteInput::URL },
     { L"127.0.1", AutocompleteInput::UNKNOWN },
     { L"127.0.1/", AutocompleteInput::UNKNOWN },

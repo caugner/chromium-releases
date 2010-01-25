@@ -4,91 +4,115 @@
 
 #include "chrome/browser/extensions/extension_host.h"
 
-#include "app/l10n_util.h"
+#include <list>
+
 #include "app/resource_bundle.h"
+#include "base/message_loop.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/site_instance.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-
+#include "chrome/common/view_types.h"
+#include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
-
+#include "views/widget/widget.h"
 #include "webkit/glue/context_menu.h"
 
-namespace {
-
-class CrashedExtensionInfobarDelegate : public ConfirmInfoBarDelegate {
- public:
-  CrashedExtensionInfobarDelegate(TabContents* tab_contents,
-                                  ExtensionHost* extension_host)
-      : ConfirmInfoBarDelegate(tab_contents),
-        extension_host_(extension_host) {
-  }
-
-  virtual std::wstring GetMessageText() const {
-    return l10n_util::GetStringF(IDS_EXTENSION_CRASHED_INFOBAR_MESSAGE,
-        UTF8ToWide(extension_host_->extension()->name()));
-  }
-
-  virtual SkBitmap* GetIcon() const {
-    // TODO(erikkay): Create extension-specific icon. http://crbug.com/14591
-    return ResourceBundle::GetSharedInstance().GetBitmapNamed(
-        IDR_INFOBAR_PLUGIN_CRASHED);
-  }
-
-  virtual int GetButtons() const {
-    return BUTTON_OK;
-  }
-
-  virtual std::wstring GetButtonLabel(
-      ConfirmInfoBarDelegate::InfoBarButton button) const {
-    if (button == BUTTON_OK)
-      return l10n_util::GetString(IDS_EXTENSION_CRASHED_INFOBAR_RESTART_BUTTON);
-    return ConfirmInfoBarDelegate::GetButtonLabel(button);
-  }
-
-  virtual bool Accept() {
-    extension_host_->RecoverCrashedExtension();
-    return true;
-  }
-
- private:
-  ExtensionHost* extension_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(CrashedExtensionInfobarDelegate);
-};
-
-}  // namespace
-
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationsMask;
 
 // static
 bool ExtensionHost::enable_dom_automation_ = false;
 
+static const char* kToolstripTextColorSubstitution = "$TEXT_COLOR$";
+
+// Helper class that rate-limits the creation of renderer processes for
+// ExtensionHosts, to avoid blocking the UI.
+class ExtensionHost::ProcessCreationQueue {
+ public:
+  static ProcessCreationQueue* get() {
+    return Singleton<ProcessCreationQueue>::get();
+  }
+
+  // Add a host to the queue for RenderView creation.
+  void CreateSoon(ExtensionHost* host) {
+    queue_.push_back(host);
+    PostTask();
+  }
+
+  // Remove a host from the queue (in case it's being deleted).
+  void Remove(ExtensionHost* host) {
+    Queue::iterator it = std::find(queue_.begin(), queue_.end(), host);
+    if (it != queue_.end())
+      queue_.erase(it);
+  }
+
+ private:
+  friend class Singleton<ProcessCreationQueue>;
+  friend struct DefaultSingletonTraits<ProcessCreationQueue>;
+  ProcessCreationQueue()
+      : pending_create_(false),
+        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) { }
+
+  // Queue up a delayed task to process the next ExtensionHost in the queue.
+  void PostTask() {
+    if (!pending_create_) {
+      MessageLoop::current()->PostTask(FROM_HERE,
+          method_factory_.NewRunnableMethod(
+             &ProcessCreationQueue::ProcessOneHost));
+      pending_create_ = true;
+    }
+  }
+
+  // Create the RenderView for the next host in the queue.
+  void ProcessOneHost() {
+    pending_create_ = false;
+    if (queue_.empty())
+      return;  // can happen on shutdown
+
+    queue_.front()->CreateRenderViewNow();
+    queue_.pop_front();
+
+    if (!queue_.empty())
+      PostTask();
+  }
+
+  typedef std::list<ExtensionHost*> Queue;
+  Queue queue_;
+  bool pending_create_;
+  ScopedRunnableMethodFactory<ProcessCreationQueue> method_factory_;
+};
+
+////////////////
+// ExtensionHost
+
 ExtensionHost::ExtensionHost(Extension* extension, SiteInstance* site_instance,
-                             const GURL& url)
+                             const GURL& url, ViewType::Type host_type)
     : extension_(extension),
       profile_(site_instance->browsing_instance()->profile()),
       did_stop_loading_(false),
-      url_(url) {
-  render_view_host_ = new RenderViewHost(
-      site_instance, this, MSG_ROUTING_NONE, NULL);
+      document_element_available_(false),
+      url_(url),
+      extension_host_type_(host_type) {
+  render_view_host_ = new RenderViewHost(site_instance, this, MSG_ROUTING_NONE);
   render_view_host_->AllowBindings(BindingsPolicy::EXTENSION);
   if (enable_dom_automation_)
     render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
@@ -99,6 +123,7 @@ ExtensionHost::~ExtensionHost() {
       NotificationType::EXTENSION_HOST_DESTROYED,
       Source<Profile>(profile_),
       Details<ExtensionHost>(this));
+  ProcessCreationQueue::get()->Remove(this);
   render_view_host_->Shutdown();  // deletes render_view_host
 }
 
@@ -109,7 +134,11 @@ void ExtensionHost::CreateView(Browser* browser) {
   // hierarchy.
   view_->SetParentOwned(false);
 #elif defined(OS_LINUX)
-  // FIXME(phajdan.jr): Add extension view for GTK.
+  view_.reset(new ExtensionViewGtk(this, browser));
+  view_->Init();
+#elif defined(OS_MACOSX)
+  view_.reset(new ExtensionViewMac(this, browser));
+  view_->Init();
 #else
   // TODO(port)
   NOTREACHED();
@@ -128,64 +157,174 @@ bool ExtensionHost::IsRenderViewLive() const {
   return render_view_host_->IsRenderViewLive();
 }
 
-void ExtensionHost::CreateRenderView(RenderWidgetHostView* host_view) {
+void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
+  LOG(INFO) << "Creating RenderView for " + extension_->name();
   render_view_host_->set_view(host_view);
+  ProcessCreationQueue::get()->CreateSoon(this);
+}
+
+void ExtensionHost::CreateRenderViewNow() {
   render_view_host_->CreateRenderView();
-  render_view_host_->NavigateToURL(url_);
+  NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
+  LOG(INFO) << "Sending EXTENSION_PROCESS_CREATED";
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_PROCESS_CREATED,
       Source<Profile>(profile_),
       Details<ExtensionHost>(this));
 }
 
-void ExtensionHost::RecoverCrashedExtension() {
-  DCHECK(!IsRenderViewLive());
-#if defined(TOOLKIT_VIEWS)
-  if (view_.get()) {
-    // The view should call us back to CreateRenderView, which is the place
-    // where we create the render process and fire notification.
-    view_->RecoverCrashedExtension();
-  } else {
-    CreateRenderView(NULL);
+void ExtensionHost::NavigateToURL(const GURL& url) {
+  LOG(INFO) << "Request to NavigateToURL " << url.spec() << " for "
+      << extension_->name();
+  // Prevent explicit navigation to another extension id's pages.
+  // This method is only called by some APIs, so we still need to protect
+  // DidNavigate below (location = "").
+  if (url.SchemeIs(chrome::kExtensionScheme) &&
+      url.host() != extension_->id()) {
+    // TODO(erikkay) communicate this back to the caller?
+    return;
   }
-#else
-  CreateRenderView(NULL);
-#endif
+
+  url_ = url;
+
+  if (!is_background_page() && !extension_->GetBackgroundPageReady()) {
+    LOG(INFO) << "...Waiting on EXTENSION_BACKGROUND_PAGE_READY";
+    // Make sure the background page loads before any others.
+    registrar_.Add(this, NotificationType::EXTENSION_BACKGROUND_PAGE_READY,
+                   Source<Extension>(extension_));
+    return;
+  }
+
+  LOG(INFO) << "Navigating to " << url_.spec();
+  render_view_host_->NavigateToURL(url_);
 }
 
-void ExtensionHost::UpdatePreferredWidth(int pref_width) {
-#if defined(OS_WIN)
+void ExtensionHost::Observe(NotificationType type,
+                            const NotificationSource& source,
+                            const NotificationDetails& details) {
+  if (type == NotificationType::EXTENSION_BACKGROUND_PAGE_READY) {
+    DCHECK(extension_->GetBackgroundPageReady());
+    NavigateToURL(url_);
+  } else if (type == NotificationType::BROWSER_THEME_CHANGED) {
+    InsertThemeCSS();
+  } else {
+    NOTREACHED();
+  }
+}
+
+void ExtensionHost::UpdatePreferredSize(const gfx::Size& new_size) {
   if (view_.get())
-    view_->DidContentsPreferredWidthChange(pref_width);
-#endif
+    view_->UpdatePreferredSize(new_size);
 }
 
 void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host) {
+  LOG(INFO) << "Sending EXTENSION_PROCESS_CRASHED for " + extension_->name();
   DCHECK_EQ(render_view_host_, render_view_host);
-  Browser* browser = GetBrowser();
-  if (browser) {
-    TabContents* current_tab = browser->GetSelectedTabContents();
-    if (current_tab) {
-      current_tab->AddInfoBar(
-          new CrashedExtensionInfobarDelegate(current_tab, this));
-    }
-  }
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_PROCESS_CRASHED,
-      Source<Profile>(profile_),
+      Source<ExtensionsService>(profile_->GetExtensionsService()),
       Details<ExtensionHost>(this));
 }
 
-void ExtensionHost::DidStopLoading(RenderViewHost* render_view_host) {
-  // TODO(aa): This is toolstrip-specific and should probably not be here.
-  // ExtensionToolstrip in bookmark_bar_view.cc?
-  static const StringPiece toolstrip_css(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_EXTENSIONS_TOOLSTRIP_CSS));
-  render_view_host->InsertCSSInWebFrame(L"", toolstrip_css.as_string());
+void ExtensionHost::DidNavigate(RenderViewHost* render_view_host,
+    const ViewHostMsg_FrameNavigate_Params& params) {
+  // We only care when the outer frame changes.
+  switch (params.transition) {
+    case PageTransition::AUTO_SUBFRAME:
+    case PageTransition::MANUAL_SUBFRAME:
+      return;
+  }
 
+  if (!params.url.SchemeIs(chrome::kExtensionScheme)) {
+    extension_function_dispatcher_.reset(NULL);
+    url_ = params.url;
+    return;
+  }
+
+  // This catches two bogus use cases:
+  // (1) URLs that look like chrome-extension://somethingbogus or
+  //     chrome-extension://nosuchid/, in other words, no Extension would
+  //     be found.
+  // (2) URLs that refer to a different extension than this one.
+  // In both cases, we preserve the old URL and reset the EFD to NULL.  This
+  // will leave the host in kind of a bad state with poor UI and errors, but
+  // it's better than the alternative.
+  // TODO(erikkay) Perhaps we should display log errors or display a big 404
+  // in the toolstrip or something like that.
+  if (params.url.host() != extension_->id()) {
+    extension_function_dispatcher_.reset(NULL);
+    return;
+  }
+
+  LOG(INFO) << "(DidNavigate) Resetting EFD to " << url_.spec() << " for "
+      << extension_->name();
+  url_ = params.url;
+  extension_function_dispatcher_.reset(
+      new ExtensionFunctionDispatcher(render_view_host_, this, url_));
+}
+
+void ExtensionHost::InsertThemeCSS() {
+  DCHECK(!is_background_page());
+
+  static const base::StringPiece toolstrip_theme_css(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+      IDR_EXTENSIONS_TOOLSTRIP_THEME_CSS));
+
+  std::string css = toolstrip_theme_css.as_string();
+  ThemeProvider* theme_provider =
+      render_view_host()->process()->profile()->GetThemeProvider();
+
+  SkColor text_color = theme_provider ?
+      theme_provider->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT) :
+      SK_ColorBLACK;
+
+  std::string hex_color_string = StringPrintf(
+      "#%02x%02x%02x", SkColorGetR(text_color),
+                       SkColorGetG(text_color),
+                       SkColorGetB(text_color));
+  size_t pos = css.find(kToolstripTextColorSubstitution);
+  while (pos != std::string::npos) {
+    css.replace(pos, 12, hex_color_string);
+    pos = css.find(kToolstripTextColorSubstitution);
+  }
+
+  // As a toolstrip, inject our toolstrip CSS to make it easier for toolstrips
+  // to blend in with the chrome UI.
+  render_view_host()->InsertCSSInWebFrame(L"", css, "ToolstripThemeCSS");
+}
+
+void ExtensionHost::DidStopLoading() {
+  bool notify = !did_stop_loading_;
   did_stop_loading_ = true;
+  if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
+      extension_host_type_ == ViewType::EXTENSION_MOLE ||
+      extension_host_type_ == ViewType::EXTENSION_POPUP) {
+#if defined(TOOLKIT_VIEWS)
+    if (view_.get())
+      view_->DidStopLoading();
+#endif
+  }
+  if (notify) {
+    LOG(INFO) << "Sending EXTENSION_HOST_DID_STOP_LOADING";
+    NotificationService::current()->Notify(
+        NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
+        Source<Profile>(profile_),
+        Details<ExtensionHost>(this));
+  }
+}
+
+void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
+  document_element_available_ = true;
+  if (is_background_page()) {
+    extension_->SetBackgroundPageReady();
+  } else {
+    InsertThemeCSS();
+
+    // Listen for browser changes so we can resend the CSS.
+    registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+                   NotificationService::AllSources());
+  }
 }
 
 void ExtensionHost::RunJavaScriptMessage(const std::wstring& message,
@@ -200,41 +339,46 @@ void ExtensionHost::RunJavaScriptMessage(const std::wstring& message,
   render_view_host()->JavaScriptMessageBoxClosed(reply_msg, true, L"");
 }
 
+void ExtensionHost::Close(RenderViewHost* render_view_host) {
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
+#if defined(TOOLKIT_VIEWS)
+    // TODO(erikkay) This is a bit of a hack.  By hiding the widget, we trigger
+    // a deactivation which will then bubble into ExtensionPopup and actually
+    // close the popup. Perhaps we should have a more explicit delegate to
+    // ExtensionHost.
+    view_->GetWidget()->Hide();
+#endif
+  }
+}
+
 WebPreferences ExtensionHost::GetWebkitPrefs() {
   PrefService* prefs = render_view_host()->process()->profile()->GetPrefs();
   const bool kIsDomUI = true;
-  return RenderViewHostDelegateHelper::GetWebkitPrefs(prefs, kIsDomUI);
+  WebPreferences webkit_prefs =
+      RenderViewHostDelegateHelper::GetWebkitPrefs(prefs, kIsDomUI);
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP)
+    webkit_prefs.allow_scripts_to_close_windows = true;
+  return webkit_prefs;
 }
 
 void ExtensionHost::ProcessDOMUIMessage(const std::string& message,
-                                        const std::string& content,
+                                        const Value* content,
                                         int request_id,
                                         bool has_callback) {
-  extension_function_dispatcher_->HandleRequest(message, content, request_id,
-                                                has_callback);
-}
-
-void ExtensionHost::DidInsertCSS() {
-#if defined(TOOLKIT_VIEWS)
-  if (view_.get())
-    view_->SetDidInsertCSS(true);
-#endif
+  if (extension_function_dispatcher_.get()) {
+    extension_function_dispatcher_->HandleRequest(message, content, request_id,
+                                                  has_callback);
+  }
 }
 
 RenderViewHostDelegate::View* ExtensionHost::GetViewDelegate() {
-  // TODO(erikkay) this is unfortunate.  The interface declares that this method
-  // must be const (no good reason for it as far as I can tell) which means you
-  // can't return self without doing this const_cast.  Either we need to change
-  // the interface, or we need to split out the view delegate into another
-  // object (which is how TabContents works).
   return this;
 }
 
-void ExtensionHost::CreateNewWindow(int route_id,
-                                    base::WaitableEvent* modal_dialog_event) {
+void ExtensionHost::CreateNewWindow(int route_id) {
   delegate_view_helper_.CreateNewWindow(
-      route_id, modal_dialog_event, render_view_host()->process()->profile(),
-      site_instance());
+      route_id, render_view_host()->process()->profile(),
+      site_instance(), DOMUIFactory::GetDOMUIType(url_), NULL);
 }
 
 void ExtensionHost::CreateNewWidget(int route_id, bool activatable) {
@@ -253,7 +397,6 @@ void ExtensionHost::ShowCreatedWindow(int route_id,
     DCHECK(browser);
     if (!browser)
       return;
-    // TODO(erikkay) is it safe to pass in NULL as source?
     browser->AddTabContents(contents, disposition, initial_pos,
                             user_gesture);
   }
@@ -274,20 +417,24 @@ void ExtensionHost::ShowCreatedWidget(int route_id,
 }
 
 void ExtensionHost::ShowContextMenu(const ContextMenuParams& params) {
-  // TODO(erikkay) - This is a temporary hack.  Show a menu here instead.
-  DevToolsManager::GetInstance()->OpenDevToolsWindow(render_view_host());
+  // TODO(erikkay) Show a default context menu.
 }
 
-void ExtensionHost::StartDragging(const WebDropData& drop_data) {
+void ExtensionHost::StartDragging(const WebDropData& drop_data,
+    WebDragOperationsMask operation_mask) {
 }
 
-void ExtensionHost::UpdateDragCursor(bool is_drop_target) {
+void ExtensionHost::UpdateDragCursor(WebDragOperation operation) {
 }
 
 void ExtensionHost::GotFocus() {
 }
 
 void ExtensionHost::TakeFocus(bool reverse) {
+}
+
+bool ExtensionHost::IsReservedAccelerator(const NativeWebKeyboardEvent& event) {
+  return false;
 }
 
 void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
@@ -308,12 +455,21 @@ void ExtensionHost::HandleMouseLeave() {
 }
 
 Browser* ExtensionHost::GetBrowser() {
-#if defined(OS_WIN)
   if (view_.get())
     return view_->browser();
-#endif
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
-      render_view_host()->process()->profile());
+
+  Profile* profile = render_view_host()->process()->profile();
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+
+  // It's possible for a browser to exist, but to have never been active.
+  // This can happen if you launch the browser on a machine without an active
+  // desktop (a headless buildbot) or if you quickly give another app focus
+  // at launch time.  This is easy to do with browser_tests.
+  if (!browser)
+    browser = BrowserList::FindBrowserWithProfile(profile);
+
+  // TODO(erikkay): can this still return NULL?  Is Rafael's comment still
+  // valid here?
   // NOTE(rafaelw): This can return NULL in some circumstances. In particular,
   // a toolstrip or background_page onload chrome.tabs api call can make it
   // into here before the browser is sufficiently initialized to return here.
@@ -323,7 +479,46 @@ Browser* ExtensionHost::GetBrowser() {
   return browser;
 }
 
+void ExtensionHost::SetRenderViewType(ViewType::Type type) {
+  DCHECK(type == ViewType::EXTENSION_MOLE ||
+         type == ViewType::EXTENSION_TOOLSTRIP);
+  extension_host_type_ = type;
+  render_view_host()->ViewTypeChanged(extension_host_type_);
+}
+
+ViewType::Type ExtensionHost::GetRenderViewType() const {
+  return extension_host_type_;
+}
+
 void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
+  if (view_.get())
+    view_->RenderViewCreated();
+
+  // TODO(mpcomplete): This is duplicated in DidNavigate, which means that
+  // we'll create 2 EFDs for the first navigation. We should try to find a
+  // better way to unify them.
+  // See http://code.google.com/p/chromium/issues/detail?id=18240
+  LOG(INFO) << "(RenderViewCreated) Resetting EFD to " << url_.spec() << " for "
+      << extension_->name();
   extension_function_dispatcher_.reset(
-      new ExtensionFunctionDispatcher(render_view_host_, this, url_));
+      new ExtensionFunctionDispatcher(render_view_host, this, url_));
+
+  render_view_host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
+      render_view_host->routing_id()));
+}
+
+int ExtensionHost::GetBrowserWindowID() const {
+  int window_id = -1;
+  if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
+      extension_host_type_ == ViewType::EXTENSION_MOLE ||
+      extension_host_type_ == ViewType::EXTENSION_POPUP) {
+    window_id = ExtensionTabUtil::GetWindowId(
+        const_cast<ExtensionHost* >(this)->GetBrowser());
+  } else if (extension_host_type_ == ViewType::EXTENSION_BACKGROUND_PAGE) {
+    // Background page is not attached to any browser window, so pass -1.
+    window_id = -1;
+  } else {
+    NOTREACHED();
+  }
+  return window_id;
 }

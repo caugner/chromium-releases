@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <iostream>
-
 #include "base/at_exit.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/event_recorder.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/icu_util.h"
+#include "base/i18n/icu_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -22,10 +20,12 @@
 #include "base/trace_event.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
+#include "net/base/net_util.h"
 #include "net/http/http_cache.h"
 #include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebScriptController.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/extensions/v8/gc_extension.h"
@@ -37,8 +37,6 @@
 #include "webkit/tools/test_shell/test_shell_request_context.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_shell_webkit_init.h"
-
-using namespace std;
 
 static const size_t kPathBufSize = 2048;
 
@@ -81,6 +79,16 @@ int main(int argc, char* argv[]) {
        parsed_command_line.HasSwitch(test_shell::kLayoutTests));
   bool layout_test_mode =
       parsed_command_line.HasSwitch(test_shell::kLayoutTests);
+  bool ux_theme = parsed_command_line.HasSwitch(test_shell::kUxTheme);
+  bool classic_theme =
+      parsed_command_line.HasSwitch(test_shell::kClassicTheme);
+#if defined(OS_WIN)
+  bool generic_theme = (layout_test_mode && !ux_theme && !classic_theme) ||
+      parsed_command_line.HasSwitch(test_shell::kGenericTheme);
+#else
+  // Stop compiler warnings about unused variables.
+  ux_theme = ux_theme;
+#endif
 
   bool enable_gp_fault_error_box = false;
   enable_gp_fault_error_box =
@@ -136,8 +144,7 @@ int main(int argc, char* argv[]) {
   // Initializing with a default context, which means no on-disk cookie DB,
   // and no support for directory listings.
   SimpleResourceLoaderBridge::Init(
-      new TestShellRequestContext(cache_path.ToWStringHack(),
-                                  cache_mode, layout_test_mode));
+      new TestShellRequestContext(cache_path, cache_mode, layout_test_mode));
 
   // Load ICU data tables
   icu_util::Initialize();
@@ -157,9 +164,15 @@ int main(int argc, char* argv[]) {
     TestShell::SetAllowScriptsToCloseWindows();
 
   // Disable user themes for layout tests so pixel tests are consistent.
-  if (layout_test_mode) {
+#if defined(OS_WIN)
+  TestShellWebTheme::Engine engine;
+#endif
+  if (classic_theme)
     platform.SelectUnifiedTheme();
-  }
+#if defined(OS_WIN)
+  if (generic_theme)
+    test_shell_webkit_init.SetThemeEngine(&engine);
+#endif
 
   if (parsed_command_line.HasSwitch(test_shell::kTestShellTimeOut)) {
     const std::wstring timeout_str = parsed_command_line.GetSwitchValue(
@@ -171,20 +184,30 @@ int main(int argc, char* argv[]) {
   }
 
   // Treat the first loose value as the initial URL to open.
-  FilePath uri;
+  GURL starting_url;
 
   // Default to a homepage if we're interactive.
   if (!layout_test_mode) {
-    PathService::Get(base::DIR_SOURCE_ROOT, &uri);
-    uri = uri.AppendASCII("webkit");
-    uri = uri.AppendASCII("data");
-    uri = uri.AppendASCII("test_shell");
-    uri = uri.AppendASCII("index.html");
+    FilePath path;
+    PathService::Get(base::DIR_SOURCE_ROOT, &path);
+    path = path.AppendASCII("webkit");
+    path = path.AppendASCII("data");
+    path = path.AppendASCII("test_shell");
+    path = path.AppendASCII("index.html");
+    starting_url = net::FilePathToFileURL(path);
   }
 
   std::vector<std::wstring> loose_values = parsed_command_line.GetLooseValues();
-  if (loose_values.size() > 0)
-    uri = FilePath::FromWStringHack(loose_values[0]);
+  if (loose_values.size() > 0) {
+    GURL url(WideToUTF16Hack(loose_values[0]));
+    if (url.is_valid()) {
+      starting_url = url;
+    } else {
+      // Treat as a file path
+      starting_url =
+          net::FilePathToFileURL(FilePath::FromWStringHack(loose_values[0]));
+    }
+  }
 
   std::wstring js_flags =
     parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
@@ -209,7 +232,7 @@ int main(int argc, char* argv[]) {
   StatsTable::set_current(table);
 
   TestShell* shell;
-  if (TestShell::CreateNewWindow(uri.ToWStringHack(), &shell)) {
+  if (TestShell::CreateNewWindow(starting_url, &shell)) {
     if (record_mode || playback_mode) {
       platform.SetWindowPositionForRecording(shell);
       WebKit::registerExtension(extensions_v8::PlaybackExtension::Get());
@@ -256,7 +279,7 @@ int main(int argc, char* argv[]) {
           params.dump_tree = false;
       }
 
-      if (uri.empty()) {
+      if (!starting_url.is_valid()) {
         // Watch stdin for URLs.
         char filenameBuffer[kPathBufSize];
         while (fgets(filenameBuffer, sizeof(filenameBuffer), stdin)) {
@@ -271,6 +294,14 @@ int main(int argc, char* argv[]) {
             continue;
 
           params.test_url = strtok(filenameBuffer, " ");
+
+          // Set the current path to the directory that contains the test
+          // files. This is because certain test file may use the relative
+          // path.
+          GURL test_url(params.test_url);
+          FilePath test_file_path;
+          net::FileURLToFilePath(test_url, &test_file_path);
+          file_util::SetCurrentDirectory(test_file_path.DirName());
 
           int old_timeout_ms = TestShell::GetLayoutTestTimeout();
 
@@ -290,7 +321,7 @@ int main(int argc, char* argv[]) {
       } else {
         // TODO(ojan): Provide a way for run-singly tests to pass
         // in a hash and then set params.pixel_hash here.
-        params.test_url = WideToUTF8(uri.ToWStringHack()).c_str();
+        params.test_url = WideToUTF8(loose_values[0]);
         TestShell::RunFileTest(params);
       }
 

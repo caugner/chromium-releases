@@ -46,12 +46,14 @@
 namespace o3d {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-class TarGzProcessor : public ArchiveProcessor {
+class TarGzProcessor : public ArchiveProcessor  {
  public:
   explicit TarGzProcessor(ArchiveCallbackClient *callback_client);
 
-  virtual int     ProcessCompressedBytes(MemoryReadStream *stream,
-                                         size_t bytes_to_process);
+  virtual Status ProcessBytes(MemoryReadStream *stream,
+                              size_t bytes_to_process);
+
+  virtual void Close(bool success);
 
  private:
   TarProcessor   tar_processor_;

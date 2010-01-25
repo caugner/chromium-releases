@@ -7,6 +7,7 @@
 #include "webkit/glue/plugins/test/plugin_arguments_test.h"
 #include "webkit/glue/plugins/test/plugin_delete_plugin_in_stream_test.h"
 #include "webkit/glue/plugins/test/plugin_get_javascript_url_test.h"
+#include "webkit/glue/plugins/test/plugin_get_javascript_url2_test.h"
 #include "webkit/glue/plugins/test/plugin_geturl_test.h"
 #include "webkit/glue/plugins/test/plugin_javascript_open_popup.h"
 #include "webkit/glue/plugins/test/plugin_new_fails_test.h"
@@ -99,7 +100,8 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode,
   if (test_name == "arguments") {
     new_test = new NPAPIClient::PluginArgumentsTest(instance,
       NPAPIClient::PluginClient::HostFunctions());
-  } else if (test_name == "geturl") {
+  } else if (test_name == "geturl" || test_name == "geturl_404_response" ||
+             test_name == "geturl_fail_write") {
     new_test = new NPAPIClient::PluginGetURLTest(instance,
       NPAPIClient::PluginClient::HostFunctions());
   } else if (test_name == "npobject_proxy") {
@@ -117,6 +119,9 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode,
 #endif
   } else if (test_name == "getjavascripturl") {
     new_test = new NPAPIClient::ExecuteGetJavascriptUrlTest(instance,
+      NPAPIClient::PluginClient::HostFunctions());
+  } else if (test_name == "getjavascripturl2") {
+    new_test = new NPAPIClient::ExecuteGetJavascriptUrl2Test(instance,
       NPAPIClient::PluginClient::HostFunctions());
 #if defined(OS_WIN)
   // TODO(port): plugin_window_size_test.*.
@@ -155,7 +160,8 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode,
   // TODO(port): plugin_windowed_test.*.
   } else if (test_name == "hidden_plugin" ||
              test_name == "create_instance_in_paint" ||
-             test_name == "alert_in_window_message") {
+             test_name == "alert_in_window_message" ||
+             test_name == "ensure_scripting_works_in_destroy") {
     new_test = new NPAPIClient::WindowedPluginTest(instance,
         NPAPIClient::PluginClient::HostFunctions());
 #endif
@@ -186,10 +192,10 @@ NPError NPP_Destroy(NPP instance, NPSavedData** save) {
 
   NPAPIClient::PluginTest *plugin =
     (NPAPIClient::PluginTest*)instance->pdata;
-  delete plugin;
 
-  // XXXMB - do work here.
-  return NPERR_GENERIC_ERROR;
+  NPError rv = plugin->Destroy();
+  delete plugin;
+  return rv;
 }
 
 NPError NPP_SetWindow(NPP instance, NPWindow* pNPWindow) {

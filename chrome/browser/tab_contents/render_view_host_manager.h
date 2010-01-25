@@ -73,8 +73,7 @@ class RenderViewHostManager
   // For arguments, see TabContents constructor.
   void Init(Profile* profile,
             SiteInstance* site_instance,
-            int routing_id,
-            base::WaitableEvent* modal_dialog_event);
+            int routing_id);
 
   // Returns the currently actuive RenderViewHost.
   //
@@ -127,16 +126,13 @@ class RenderViewHostManager
   // Called when a renderer's main frame navigates.
   void DidNavigateMainFrame(RenderViewHost* render_view_host);
 
+  // Set the DOMUI after committing a page load. This is useful for navigations
+  // initiated from a renderer, where we want to give the new renderer DOMUI
+  // privileges from the originating renderer.
+  void SetDOMUIPostCommit(DOMUI* dom_ui);
+
   // Called when a provisional load on the given renderer is aborted.
   void RendererAbortedProvisionalLoad(RenderViewHost* render_view_host);
-
-  // Forwards the message to the RenderViewHost, which is the original one.
-  void OnJavaScriptMessageBoxClosed(IPC::Message* reply_msg,
-                                    bool success,
-                                    const std::wstring& prompt);
-
-  // Forwards this message to the RenderViewHost.
-  void OnJavaScriptMessageBoxWindowDestroyed();
 
   // Sets the passed passed interstitial as the currently showing interstitial.
   // |interstitial_page| should be non NULL (use the remove_interstitial_page

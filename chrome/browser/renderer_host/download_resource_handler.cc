@@ -4,6 +4,7 @@
 
 #include "chrome/browser/renderer_host/download_resource_handler.h"
 
+#include "base/logging.h"
 #include "chrome/browser/download/download_file.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
@@ -60,7 +61,7 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   info->total_bytes = content_length_;
   info->state = DownloadItem::IN_PROGRESS;
   info->download_id = download_id_;
-  info->render_process_id = global_id_.process_id;
+  info->child_id = global_id_.child_id;
   info->render_view_id = render_view_id_;
   info->request_id = global_id_.request_id;
   info->content_disposition = content_disposition_;
@@ -85,6 +86,8 @@ bool DownloadResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     read_buffer_ = new net::IOBuffer(*buf_size);
   }
   *buf = read_buffer_.get();
+  // TODO(willchan): Remove after debugging bug 16371.
+  CHECK(read_buffer_->data());
   return true;
 }
 
@@ -163,8 +166,7 @@ void DownloadResourceHandler::CheckWriteProgress() {
     StartPauseTimer();
 
   if (is_paused_ != should_pause) {
-    rdh_->PauseRequest(global_id_.process_id,
-                       global_id_.request_id,
+    rdh_->PauseRequest(global_id_.child_id, global_id_.request_id,
                        should_pause);
     is_paused_ = should_pause;
   }

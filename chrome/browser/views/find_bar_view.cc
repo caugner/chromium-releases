@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/find_bar_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/find_bar_win.h"
+#include "chrome/browser/views/find_bar_host.h"
 #include "chrome/browser/view_ids.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -44,7 +44,7 @@ static const SkColor kTextColorMatchCount = SkColorSetRGB(178, 178, 178);
 static const SkColor kTextColorNoMatch = SK_ColorBLACK;
 
 // The background color of the match count label when results are found.
-static const SkColor kBackgroundColorMatch = SkColorSetRGB(255, 255, 255);
+static const SkColor kBackgroundColorMatch = SK_ColorWHITE;
 
 // The background color of the match count label when no results are found.
 static const SkColor kBackgroundColorNoMatch = SkColorSetRGB(255, 102, 102);
@@ -76,7 +76,7 @@ static const int kDefaultCharWidth = 43;
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarView, public:
 
-FindBarView::FindBarView(FindBarWin* container)
+FindBarView::FindBarView(FindBarHost* container)
     : container_(container),
       find_text_(NULL),
       match_count_text_(NULL),
@@ -85,6 +85,7 @@ FindBarView::FindBarView(FindBarWin* container)
       find_next_button_(NULL),
       close_button_(NULL),
       animation_offset_(0) {
+  SetID(VIEW_ID_FIND_IN_PAGE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   find_text_ = new views::Textfield();
@@ -164,7 +165,7 @@ FindBarView::~FindBarView() {
 }
 
 void FindBarView::SetFindText(const string16& find_text) {
-  find_text_->SetText(UTF16ToWide(find_text));
+  find_text_->SetText(find_text);
 }
 
 void FindBarView::UpdateForResult(const FindNotificationDetails& result,
@@ -175,9 +176,9 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
   // If we don't have any results and something was passed in, then that means
   // someone pressed F3 while the Find box was closed. In that case we need to
   // repopulate the Find box with what was passed in.
-  std::wstring search_string = find_text_->text();
+  string16 search_string = find_text_->text();
   if (search_string.empty() && !find_text.empty()) {
-    find_text_->SetText(UTF16ToWide(find_text));
+    find_text_->SetText(find_text);
     find_text_->SelectAll();
   }
 
@@ -406,21 +407,25 @@ gfx::Size FindBarView::GetPreferredSize() {
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarView, views::ButtonListener implementation:
 
-void FindBarView::ButtonPressed(views::Button* sender) {
+void FindBarView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   switch (sender->tag()) {
     case FIND_PREVIOUS_TAG:
     case FIND_NEXT_TAG:
       if (!find_text_->text().empty()) {
         container_->GetFindBarController()->tab_contents()->StartFinding(
-            WideToUTF16(find_text_->text()),
+            find_text_->text(),
             sender->tag() == FIND_NEXT_TAG,
             false);  // Not case sensitive.
       }
-      // Move the focus back to the text-field, we don't want the button
-      // focused.
-      // TODO(jcampan): http://crbug.com/9867 we should not change the focus
-      //                when teh button was pressed by pressing a key.
-      find_text_->RequestFocus();
+      if (event.IsMouseEvent()) {
+        // If mouse event, we move the focus back to the text-field, so that the
+        // user doesn't have to click on the text field to change the search. We
+        // don't want to do this for keyboard clicks on the button, since the
+        // user is more likely to press FindNext again than change the search
+        // query.
+        find_text_->RequestFocus();
+      }
       break;
     case CLOSE_TAG:
       container_->GetFindBarController()->EndFindSession();
@@ -435,7 +440,7 @@ void FindBarView::ButtonPressed(views::Button* sender) {
 // FindBarView, views::Textfield::Controller implementation:
 
 void FindBarView::ContentsChanged(views::Textfield* sender,
-                                  const std::wstring& new_contents) {
+                                  const string16& new_contents) {
   FindBarController* controller = container_->GetFindBarController();
   DCHECK(controller);
   // We must guard against a NULL tab_contents, which can happen if the text
@@ -449,8 +454,7 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
   // initiate search (even though old searches might be in progress).
   if (!new_contents.empty()) {
     // The last two params here are forward (true) and case sensitive (false).
-    controller->tab_contents()->StartFinding(WideToUTF16(new_contents),
-                                             true, false);
+    controller->tab_contents()->StartFinding(new_contents, true, false);
   } else {
     // The textbox is empty so we reset.  true = clear selection on page.
     controller->tab_contents()->StopFinding(true);
@@ -464,24 +468,20 @@ bool FindBarView::HandleKeystroke(views::Textfield* sender,
   if (!container_->IsVisible())
     return false;
 
-  // TODO(port): Handle this for other platforms.
-  #if defined(OS_WIN)
-  if (container_->MaybeForwardKeystrokeToWebpage(key.message, key.key,
-                                                 key.flags))
+  if (container_->MaybeForwardKeystrokeToWebpage(key))
     return true;  // Handled, we are done!
 
-  if (views::Textfield::IsKeystrokeEnter(key)) {
+  if (key.GetKeyboardCode() == base::VKEY_RETURN) {
     // Pressing Return/Enter starts the search (unless text box is empty).
-    std::wstring find_string = find_text_->text();
+    string16 find_string = find_text_->text();
     if (!find_string.empty()) {
       // Search forwards for enter, backwards for shift-enter.
       container_->GetFindBarController()->tab_contents()->StartFinding(
           find_string,
-          GetKeyState(VK_SHIFT) >= 0,
+          !key.IsShiftHeld(),
           false);  // Not case sensitive.
     }
   }
-  #endif
 
   return false;
 }

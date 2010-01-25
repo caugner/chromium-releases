@@ -16,7 +16,9 @@
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class MessageLoop;
+namespace base {
 class StringPiece;
+}
 
 // Manages a segment of shared memory that contains the user scripts the user
 // has installed.  Lives on the UI thread.
@@ -28,7 +30,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   // script-reloading worker on as well as the path the scripts live in.
   // These are normally the file thread and a directory inside the profile.
   UserScriptMaster(MessageLoop* worker, const FilePath& script_dir);
-  ~UserScriptMaster();
+  virtual ~UserScriptMaster();
 
   // Add a watched directory. All scripts will be reloaded when any file in
   // this directory changes.
@@ -36,7 +38,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
 
   // Kicks off a process on the file thread to reload scripts from disk
   // into a new chunk of shared memory and notify renderers.
-  void StartScan();
+  virtual void StartScan();
 
   // Gets the segment of shared memory for the scripts.
   base::SharedMemory* GetSharedMemory() const {
@@ -67,13 +69,13 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   // on the file thread. It must be created on, and its public API must only be
   // called from, the master's thread.
   class ScriptReloader
-      : public base::RefCounted<UserScriptMaster::ScriptReloader> {
+      : public base::RefCountedThreadSafe<UserScriptMaster::ScriptReloader> {
    public:
     // Parses the includes out of |script| and returns them in |includes|.
-    static bool ParseMetadataHeader(const StringPiece& script_text,
+    static bool ParseMetadataHeader(const base::StringPiece& script_text,
                                     UserScript* script);
 
-    static void LoadScriptsFromDirectory(const FilePath script_dir,
+    static void LoadScriptsFromDirectory(const FilePath& script_dir,
                                          UserScriptList* result);
 
     explicit ScriptReloader(UserScriptMaster* master);
@@ -81,7 +83,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
     // Start a scan for scripts.
     // Will always send a message to the master upon completion.
     void StartScan(MessageLoop* work_loop, const FilePath& script_dir,
-                   const UserScriptList &external_scripts);
+                   const UserScriptList& external_scripts);
 
     // The master is going away; don't call it back.
     void DisownMaster() {

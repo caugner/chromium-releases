@@ -1,18 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/scrollbar/bitmap_scroll_bar.h"
 
+#if defined(OS_LINUX)
+#include "views/screen.h"
+#endif
+
 #include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "base/compiler_specific.h"
+#include "base/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "grit/app_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/controls/menu/menu.h"
 #include "views/controls/scroll_view.h"
 #include "views/widget/widget.h"
+#include "views/window/window.h"
 
 #undef min
 #undef max
@@ -46,7 +52,7 @@ class AutorepeatButton : public ImageButton {
 
  protected:
   virtual bool OnMousePressed(const MouseEvent& event) {
-    Button::NotifyClick(event.GetFlags());
+    Button::NotifyClick(event);
     repeater_.Start();
     return true;
   }
@@ -58,14 +64,24 @@ class AutorepeatButton : public ImageButton {
 
  private:
   void NotifyClick() {
-    Button::NotifyClick(0);
+#if defined(OS_WIN)
+    DWORD pos = GetMessagePos();
+    POINTS points = MAKEPOINTS(pos);
+    gfx::Point cursor_point(points.x, points.y);
+#elif defined(OS_LINUX)
+    gfx::Point cursor_point = Screen::GetCursorScreenPoint();
+#endif
+    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+                            cursor_point.x(), cursor_point.y(),
+                            views::Event::EF_LEFT_BUTTON_DOWN);
+    Button::NotifyClick(event);
   }
 
   // The repeat controller that we use to repeatedly click the button when the
   // mouse button is down.
   RepeatController repeater_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(AutorepeatButton);
+  DISALLOW_COPY_AND_ASSIGN(AutorepeatButton);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -117,7 +133,7 @@ class BitmapScrollBarThumb : public View {
     if (scroll_bar_->IsHorizontal()) {
       thumb_bounds.set_x(track_bounds.x() + position);
     } else {
-      thumb_bounds.set_x(track_bounds.y() + position);
+      thumb_bounds.set_y(track_bounds.y() + position);
     }
     SetBounds(thumb_bounds);
   }
@@ -246,10 +262,10 @@ class BitmapScrollBarThumb : public View {
   // The current state of the thumb button.
   CustomButton::ButtonState state_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(BitmapScrollBarThumb);
+  DISALLOW_COPY_AND_ASSIGN(BitmapScrollBarThumb);
 };
 
-} // anonymous namespace
+}  // anonymous namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // BitmapScrollBar, public:
@@ -479,33 +495,33 @@ bool BitmapScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
 
 bool BitmapScrollBar::OnKeyPressed(const KeyEvent& event) {
   ScrollAmount amount = SCROLL_NONE;
-  switch(event.GetCharacter()) {
-    case VK_UP:
+  switch (event.GetKeyCode()) {
+    case base::VKEY_UP:
       if (!IsHorizontal())
         amount = SCROLL_PREV_LINE;
       break;
-    case VK_DOWN:
+    case base::VKEY_DOWN:
       if (!IsHorizontal())
         amount = SCROLL_NEXT_LINE;
       break;
-    case VK_LEFT:
+    case base::VKEY_LEFT:
       if (IsHorizontal())
         amount = SCROLL_PREV_LINE;
       break;
-    case VK_RIGHT:
+    case base::VKEY_RIGHT:
       if (IsHorizontal())
         amount = SCROLL_NEXT_LINE;
       break;
-    case VK_PRIOR:
+    case base::VKEY_PRIOR:
       amount = SCROLL_PREV_PAGE;
       break;
-    case VK_NEXT:
+    case base::VKEY_NEXT:
       amount = SCROLL_NEXT_PAGE;
       break;
-    case VK_HOME:
+    case base::VKEY_HOME:
       amount = SCROLL_START;
       break;
-    case VK_END:
+    case base::VKEY_END:
       amount = SCROLL_END;
       break;
   }
@@ -629,7 +645,7 @@ void BitmapScrollBar::ExecuteCommand(int id) {
 ///////////////////////////////////////////////////////////////////////////////
 // BitmapScrollBar, ButtonListener implementation:
 
-void BitmapScrollBar::ButtonPressed(Button* sender) {
+void BitmapScrollBar::ButtonPressed(Button* sender, const views::Event& event) {
   if (sender == prev_button_) {
     ScrollByAmount(SCROLL_PREV_LINE);
   } else if (sender == next_button_) {

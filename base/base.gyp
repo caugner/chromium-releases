@@ -6,25 +6,23 @@
   'variables': {
     'chromium_code': 1,
   },
-  'includes': [
-    '../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'base',
       'type': '<(library)',
-      'dependencies': [
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
-      ],
       'msvs_guid': '1832A374-8A74-4F9E-B536-69A699B3E165',
       'sources': [
         '../build/build_config.h',
         'crypto/cssm_init.cc',
         'crypto/cssm_init.h',
         'crypto/rsa_private_key.h',
+        'crypto/rsa_private_key.cc',
+        'crypto/rsa_private_key_mac.cc',
+        'crypto/rsa_private_key_nss.cc',
         'crypto/rsa_private_key_win.cc',
         'crypto/signature_creator.h',
+        'crypto/signature_creator_mac.cc',
+        'crypto/signature_creator_nss.cc',
         'crypto/signature_creator_win.cc',
         'crypto/signature_verifier.h',
         'crypto/signature_verifier_mac.cc',
@@ -33,6 +31,8 @@
         'third_party/dmg_fp/dmg_fp.h',
         'third_party/dmg_fp/dtoa.cc',
         'third_party/dmg_fp/g_fmt.cc',
+        'third_party/icu/icu_utf.cc',
+        'third_party/icu/icu_utf.h',
         'third_party/nspr/prcpucfg.h',
         'third_party/nspr/prcpucfg_win.h',
         'third_party/nspr/prtime.cc',
@@ -63,6 +63,8 @@
         'atomicops_internals_x86_gcc.cc',
         'at_exit.cc',
         'at_exit.h',
+        'atomic_flag.h',
+        'atomic_flag.cc',
         'atomic_ref_count.h',
         'atomic_sequence_num.h',
         'atomicops.h',
@@ -83,13 +85,7 @@
         'base_switches.h',
         'basictypes.h',
         'bzip2_error_handler.cc',
-        'clipboard.cc',
-        'clipboard.h',
-        'clipboard_linux.cc',
-        'clipboard_mac.mm',
-        'clipboard_util.cc',
-        'clipboard_util.h',
-        'clipboard_win.cc',
+        'cocoa_protocols_mac.h',
         'command_line.cc',
         'command_line.h',
         'compiler_specific.h',
@@ -123,18 +119,22 @@
         'file_path.h',
         'file_util.cc',
         'file_util.h',
-        'file_util_icu.cc',
         'file_util_linux.cc',
         'file_util_mac.mm',
         'file_util_posix.cc',
         'file_util_win.cc',
         'file_version_info.cc',
         'file_version_info.h',
-        'file_version_info_linux.cc',
         'file_version_info_mac.mm',
         'fix_wp64.h',
         'float_util.h',
         'foundation_utils_mac.h',
+        'gfx/point.cc',
+        'gfx/point.h',
+        'gfx/rect.cc',
+        'gfx/rect.h',
+        'gfx/size.cc',
+        'gfx/size.h',
         'global_descriptors_posix.h',
         'global_descriptors_posix.cc',
         'hash_tables.h',
@@ -146,22 +146,22 @@
         'hmac_win.cc',
         'iat_patch.cc',
         'iat_patch.h',
-        'icu_util.cc',
-        'icu_util.h',
         'id_map.h',
-        'idle_timer.cc',
-        'idle_timer.h',
-        'idle_timer_none.cc',
         'image_util.cc',
         'image_util.h',
         'json_reader.cc',
         'json_reader.h',
         'json_writer.cc',
         'json_writer.h',
+        'keyboard_code_conversion_gtk.cc',
+        'keyboard_code_conversion_gtk.h',
         'keyboard_codes.h',
         'keyboard_codes_win.h',
+        'keyboard_codes_posix.h',
         'lazy_instance.cc',
         'lazy_instance.h',
+        'leak_tracker.h',
+        'linked_list.h',
         'linked_ptr.h',
         'linux_util.cc',
         'linux_util.h',
@@ -199,8 +199,11 @@
         'native_library_win.cc',
         'non_thread_safe.cc',
         'non_thread_safe.h',
+        'nsimage_cache_mac.h',
+        'nsimage_cache_mac.mm',
         'nss_init.cc',
         'nss_init.h',
+        'nullable_string16.h',
         'object_watcher.cc',
         'object_watcher.h',
         'observer_list.h',
@@ -235,17 +238,16 @@
         'rand_util_win.cc',
         'ref_counted.cc',
         'ref_counted.h',
+        'ref_counted_memory.h',
         'registry.cc',
         'registry.h',
         'resource_util.cc',
         'resource_util.h',
-        'revocable_store.cc',
-        'revocable_store.h',
+        'safe_strerror_posix.cc',
+        'safe_strerror_posix.h',
         'scoped_bstr_win.cc',
         'scoped_bstr_win.h',
         'scoped_cftyperef.h',
-        'scoped_clipboard_writer.cc',
-        'scoped_clipboard_writer.h',
         'scoped_comptr_win.h',
         'scoped_handle.h',
         'scoped_handle_win.h',
@@ -259,6 +261,8 @@
         'scoped_variant_win.cc',
         'scoped_variant_win.h',
         'scoped_vector.h',
+        'setproctitle_linux.c',
+        'setproctitle_linux.h',
         'sha2.cc',
         'sha2.h',
         'shared_memory.h',
@@ -282,9 +286,9 @@
         'string_tokenizer.h',
         'string_util.cc',
         'string_util.h',
-        'string_util_icu.cc',
         'string_util_win.h',
         'sys_info.h',
+        'sys_info_chromeos.cc',
         'sys_info_mac.cc',
         'sys_info_posix.cc',
         'sys_info_win.cc',
@@ -297,11 +301,6 @@
         'system_monitor_posix.cc',
         'system_monitor_win.cc',
         'task.h',
-        'test_file_util.h',
-        'test_file_util_linux.cc',
-        'test_file_util_mac.cc',
-        'test_file_util_posix.cc',
-        'test_file_util_win.cc',
         'thread.cc',
         'thread.h',
         'thread_collision_warner.cc',
@@ -314,8 +313,6 @@
         'thread_local_win.cc',
         'time.cc',
         'time.h',
-        'time_format.cc',
-        'time_format.h',
         'time_mac.cc',
         'time_posix.cc',
         'time_win.cc',
@@ -328,6 +325,8 @@
         'tracked_objects.cc',
         'tracked_objects.h',
         'tuple.h',
+        'utf_string_conversions.cc',
+        'utf_string_conversions.h',
         'unix_domain_socket_posix.cc',
         'values.cc',
         'values.h',
@@ -341,13 +340,12 @@
         'waitable_event_win.cc',
         'watchdog.cc',
         'watchdog.h',
+        'weak_ptr.h',
         'win_util.cc',
         'win_util.h',
         'windows_message_list.h',
         'wmi_util.cc',
         'wmi_util.h',
-        'word_iterator.cc',
-        'word_iterator.h',
         'worker_pool.h',
         'worker_pool_linux.cc',
         'worker_pool_linux.h',
@@ -366,62 +364,27 @@
       'msvs_disabled_warnings': [
         4244, 4554, 4018, 4102,
       ],
+      'mac_framework_dirs': [
+        '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
+      ],
       'conditions': [
-        [ 'OS == "linux"', {
-            'actions': [
-              {
-                'action_name': 'linux_version',
-                'variables': {
-                  'lastchange_path':
-                    '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-                  'version_py_path': '../chrome/tools/build/version.py',
-                  'version_path': '../chrome/VERSION',
-                  'template_input_path': 'file_version_info_linux.h.version',
-                },
-                'conditions': [
-                  [ 'branding == "Chrome"', {
-                    'variables': {
-                       'branding_path':
-                         '../chrome/app/theme/google_chrome/BRANDING',
-                    },
-                  }, { # else branding!="Chrome"
-                    'variables': {
-                       'branding_path':
-                         '../chrome/app/theme/chromium/BRANDING',
-                    },
-                  }],
-                ],
-                'inputs': [
-                  '<(template_input_path)',
-                  '<(version_path)',
-                  '<(branding_path)',
-                  '<(lastchange_path)',
-                ],
-                'outputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/base/file_version_info_linux.h',
-                ],
-                'action': [
-                  'python',
-                  '<(version_py_path)',
-                  '-f', '<(version_path)',
-                  '-f', '<(branding_path)',
-                  '-f', '<(lastchange_path)',
-                  '<(template_input_path)',
-                  '<@(_outputs)',
-                ],
-                'message': 'Generating version information',
-              },
-            ],
-            'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)',
-            ],
-            'sources/': [ ['exclude', '_(mac|win)\\.cc$'],
+        [ 'OS == "linux" or OS == "freebsd"', {
+            'variables' : {
+              'linux_use_tcmalloc%': 0,
+            },
+            'sources/': [ ['exclude', '_(mac|win|chromeos)\\.cc$'],
                           ['exclude', '\\.mm?$' ] ],
-            'sources!': [
-              # Linux has an implementation of idle_timer that depends
-              # on XScreenSaver, but it's unclear if we want it yet,
-              # so use idle_timer_none.cc instead.
-              'idle_timer.cc',
+            'conditions': [
+              [ 'chromeos==1 or toolkit_views==1', {
+                  'sources/': [ ['include', '_chromeos\\.cc$'] ]
+                },
+              ],
+              [ 'linux_use_tcmalloc==1', {
+                  'dependencies': [
+                    '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+                  ],
+                },
+              ],
             ],
             'dependencies': [
               '../build/util/build_util.gyp:lastchange',
@@ -441,23 +404,32 @@
               '../build/linux/system.gyp:gtk',
             ],
           },
-          {  # else: OS != "linux"
+          {  # else: OS != "linux" && OS != "freebsd"
             'sources/': [
               ['exclude', '/xdg_mime/'],
             ],
             'sources!': [
+              'crypto/rsa_private_key_nss.cc',
+              'crypto/signature_creator_nss.cc',
               'crypto/signature_verifier_nss.cc',
               'atomicops_internals_x86_gcc.cc',
               'directory_watcher_inotify.cc',
               'hmac_nss.cc',
-              'idle_timer_none.cc',
               'linux_util.cc',
               'message_pump_glib.cc',
               'nss_init.cc',
               'nss_init.h',
               'time_posix.cc',
             ],
-          }
+          },
+        ],
+        [ 'OS != "linux"', {
+            'sources!': [
+              # Not automatically excluded by the *linux.cc rules.
+              'setproctitle_linux.c',
+              'setproctitle_linux.h',
+            ],
+          },
         ],
         [ 'GENERATOR == "quentin"', {
             # Quentin builds don't have a recent enough glibc to include the
@@ -470,8 +442,17 @@
             ],
           },
         ],
+        [ 'OS == "freebsd"', {
+            'sources!': [
+              'directory_watcher_inotify.cc',
+            ],
+            'sources': [
+              'directory_watcher_stub.cc',
+            ],
+          },
+        ],
         [ 'OS == "mac"', {
-            'sources/': [ ['exclude', '_(linux|win)\\.cc$'] ],
+            'sources/': [ ['exclude', '_(linux|gtk|win|chromeos)\\.cc$'] ],
             'sources!': [
             ],
             'link_settings': {
@@ -492,7 +473,10 @@
           }
         ],
         [ 'OS == "win"', {
-            'sources/': [ ['exclude', '_(linux|mac|posix)\\.cc$'],
+            'include_dirs': [
+              '../chrome/third_party/wtl/include',
+            ],
+            'sources/': [ ['exclude', '_(linux|gtk|mac|posix|chromeos)\\.cc$'],
                           ['exclude', '\\.mm?$' ] ],
             'sources!': [
               'data_pack.cc',
@@ -509,7 +493,6 @@
               'base_drag_source.cc',
               'base_drop_target.cc',
               'cpu.cc',
-              'clipboard_util.cc',
               'debug_on_start.cc',
               'event_recorder.cc',
               'file_version_info.cc',
@@ -527,67 +510,36 @@
       ],
     },
     {
-      'target_name': 'base_gfx',
+      'target_name': 'base_i18n',
       'type': '<(library)',
-      'msvs_guid': 'A508ADD3-CECE-4E0F-8448-2F5E454DF551',
-      'sources': [
-        'gfx/gdi_util.cc',
-        'gfx/gdi_util.h',
-        'gfx/gtk_native_view_id_manager.cc',
-        'gfx/gtk_native_view_id_manager.h',
-        'gfx/gtk_util.cc',
-        'gfx/gtk_util.h',
-        'gfx/jpeg_codec.cc',
-        'gfx/jpeg_codec.h',
-        'gfx/native_theme.cc',
-        'gfx/native_theme.h',
-        'gfx/native_widget_types.h',
-        'gfx/native_widget_types_gtk.cc',
-        'gfx/platform_canvas.h',
-        'gfx/platform_canvas_linux.h',
-        'gfx/platform_canvas_mac.h',
-        'gfx/platform_device_linux.h',
-        'gfx/platform_device_mac.h',
-        'gfx/png_decoder.cc',
-        'gfx/png_decoder.h',
-        'gfx/png_encoder.cc',
-        'gfx/png_encoder.h',
-        'gfx/point.cc',
-        'gfx/point.h',
-        'gfx/rect.cc',
-        'gfx/rect.h',
-        'gfx/size.cc',
-        'gfx/size.h',
-      ],
-      'mac_framework_dirs': [
-        '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
-      ],
+      'msvs_guid': '968F3222-9798-4D21-BE08-15ECB5EF2994',
       'dependencies': [
         'base',
-        '../skia/skia.gyp:skia',
-        '../third_party/libjpeg/libjpeg.gyp:libjpeg',
-        '../third_party/libpng/libpng.gyp:libpng',
-        '../third_party/zlib/zlib.gyp:zlib',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
       ],
       'export_dependent_settings': [
         'base',
       ],
+      'sources': [
+        'i18n/file_util_icu.cc',
+        'i18n/file_util_icu.h',
+        'i18n/icu_string_conversions.cc',
+        'i18n/icu_string_conversions.h',
+        'i18n/icu_util.cc',
+        'i18n/icu_util.h',
+        'i18n/number_formatting.cc',
+        'i18n/number_formatting.h',
+        'i18n/time_formatting.cc',
+        'i18n/time_formatting.h',
+        'i18n/word_iterator.cc',
+        'i18n/word_iterator.h',
+      ],
       'conditions': [
-        ['OS == "linux"', {
+        ['OS == "linux" or OS == "freebsd"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
           ],
-        }],
-        [ 'OS != "win"', { 'sources!': [
-            'gfx/gdi_util.cc',
-            'gfx/native_theme.cc',
-            ],
-        }],
-        [ 'OS != "linux"', { 'sources!': [
-            'gfx/gtk_native_view_id_manager.cc',
-            'gfx/gtk_util.cc',
-            'gfx/native_widget_types_gtk.cc',
-            ],
         }],
       ],
     },
@@ -596,9 +548,15 @@
       'type': 'executable',
       'msvs_guid': '27A30967-4BBA-48D1-8522-CDE95F7B1CEC',
       'sources': [
+        # Infrastructure files.
+        'multiprocess_test.h',
+        'test/run_all_unittests.cc',
+        'test/test_suite.h',
+
+        # Tests.
         'at_exit_unittest.cc',
+        'atomic_flag_unittest.cc',
         'atomicops_unittest.cc',
-        'clipboard_unittest.cc',
         'command_line_unittest.cc',
         'condition_variable_unittest.cc',
         'crypto/rsa_private_key_unittest.cc',
@@ -612,17 +570,19 @@
         'file_path_unittest.cc',
         'file_util_unittest.cc',
         'file_version_info_unittest.cc',
-        'gfx/jpeg_codec_unittest.cc',
-        'gfx/native_theme_unittest.cc',
-        'gfx/png_codec_unittest.cc',
         'gfx/rect_unittest.cc',
         'gmock_unittest.cc',
         'histogram_unittest.cc',
         'hmac_unittest.cc',
-        'idletimer_unittest.cc',
+        'id_map_unittest.cc',
+        'i18n/file_util_icu_unittest.cc',
+        'i18n/icu_string_conversions_unittest.cc',
+        'i18n/word_iterator_unittest.cc',
         'json_reader_unittest.cc',
         'json_writer_unittest.cc',
         'lazy_instance_unittest.cc',
+        'leak_tracker_unittest.cc',
+        'linked_list_unittest.cc',
         'linked_ptr_unittest.cc',
         'mac_util_unittest.cc',
         'message_loop_unittest.cc',
@@ -636,7 +596,6 @@
         'process_util_unittest.cc',
         'rand_util_unittest.cc',
         'ref_counted_unittest.cc',
-        'run_all_unittests.cc',
         'scoped_bstr_win_unittest.cc',
         'scoped_comptr_win_unittest.cc',
         'scoped_ptr_unittest.cc',
@@ -670,37 +629,34 @@
         'waitable_event_unittest.cc',
         'waitable_event_watcher_unittest.cc',
         'watchdog_unittest.cc',
+        'weak_ptr_unittest.cc',
         'win_util_unittest.cc',
         'wmi_util_unittest.cc',
-        'word_iterator_unittest.cc',
         'worker_pool_unittest.cc',
       ],
       'include_dirs': [
         # word_iterator.h (used by word_iterator_unittest.cc) leaks an ICU
         # #include for unicode/uchar.h.  This should probably be cleaned up.
-        '../third_party/icu38/public/common',
+        '../third_party/icu/public/common',
       ],
       'dependencies': [
         'base',
-        'base_gfx',
-        '../skia/skia.gyp:skia',
+        'base_i18n',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
       'conditions': [
-        ['OS == "linux"', {
+        ['OS == "linux" or OS == "freebsd"', {
           'sources!': [
             'file_version_info_unittest.cc',
-            # Linux has an implementation of idle_timer, but it's unclear
-            # if we want it yet, so leave it 'unported' for now.
-            'idletimer_unittest.cc',
             'worker_pool_linux_unittest.cc',
           ],
           'dependencies': [
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:nss',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
-        }, {  # OS != "linux"
+        }, {  # OS != "linux" and OS != "freebsd"
           'sources!': [
             'message_pump_glib_unittest.cc',
           ]
@@ -714,7 +670,7 @@
         # TODO(mark): This should not be necessary.
         ['OS == "win"', {
           'dependencies': [
-            '../third_party/icu38/icu38.gyp:icudata',
+            '../third_party/icu/icu.gyp:icudata',
           ],
           'sources!': [
             'data_pack_unittest.cc',
@@ -722,9 +678,6 @@
           ],
         }, {  # OS != "win"
           'sources!': [
-            'crypto/rsa_private_key_unittest.cc',
-            'crypto/signature_creator_unittest.cc',
-            'gfx/native_theme_unittest.cc',
             'object_watcher_unittest.cc',
             'pe_image_unittest.cc',
             'scoped_bstr_win_unittest.cc',
@@ -743,11 +696,47 @@
       'type': '<(library)',
       'dependencies': [
         'base',
+      ],
+      'sources': [
+        'test/test_file_util.h',
+        'test/test_file_util_linux.cc',
+        'test/test_file_util_mac.cc',
+        'test/test_file_util_posix.cc',
+        'test/test_file_util_win.cc',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd"', {
+            'sources/': [ ['exclude', '_(mac|win|chromeos)\\.cc$'],
+                          ['exclude', '\\.mm?$' ] ],
+            'conditions': [
+              [ 'chromeos==1 or toolkit_views==1', {
+                  'sources/': [ ['include', '_chromeos\\.cc$'] ]
+                },
+              ],
+            ],
+          },
+        ],
+        [ 'OS == "mac"', {
+            'sources/': [ ['exclude', '_(linux|win|chromeos)\\.cc$'] ],
+          },
+        ],
+        [ 'OS == "win"', {
+            'sources/': [ ['exclude', '_(linux|mac|posix|chromeos)\\.cc$'],
+                          ['exclude', '\\.mm?$' ] ],
+          },
+        ],
+      ],
+    },
+    {
+      'target_name': 'test_support_perf',
+      'type': '<(library)',
+      'dependencies': [
+        'base',
         '../testing/gtest.gyp:gtest',
       ],
       'sources': [
         'perftimer.cc',
-        'run_all_perftests.cc',
+        'test/run_all_perftests.cc',
       ],
       'direct_dependent_settings': {
         'defines': [
@@ -755,11 +744,11 @@
         ],
       },
       'conditions': [
-        ['OS == "linux"', {
+        ['OS == "linux" or OS == "freebsd"', {
           'dependencies': [
             # Needed to handle the #include chain:
-            #   base/perf_test_suite.h
-            #   base/test_suite.h
+            #   base/test/perf_test_suite.h
+            #   base/test/test_suite.h
             #   gtk/gtk.h
             '../build/linux/system.gyp:gtk',
           ],
@@ -784,5 +773,70 @@
         },
       ],
     }],
+    [ 'OS == "linux" or OS == "freebsd"', {
+      'targets': [
+        {
+          'target_name': 'linux_versioninfo',
+          'type': '<(library)',
+          'sources': [
+            'file_version_info_linux.cc',
+          ],
+          'include_dirs': [
+            '..',
+            '<(SHARED_INTERMEDIATE_DIR)',
+          ],
+          'actions': [
+            {
+              'action_name': 'linux_version',
+              'variables': {
+                'lastchange_path':
+                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+                'version_py_path': '../chrome/tools/build/version.py',
+                'version_path': '../chrome/VERSION',
+                'template_input_path': 'file_version_info_linux.h.version',
+              },
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                     'branding_path':
+                       '../chrome/app/theme/google_chrome/BRANDING',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                     'branding_path':
+                       '../chrome/app/theme/chromium/BRANDING',
+                  },
+                }],
+              ],
+              'inputs': [
+                '<(template_input_path)',
+                '<(version_path)',
+                '<(branding_path)',
+                '<(lastchange_path)',
+              ],
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/base/file_version_info_linux.h',
+              ],
+              'action': [
+                'python',
+                '<(version_py_path)',
+                '-f', '<(version_path)',
+                '-f', '<(branding_path)',
+                '-f', '<(lastchange_path)',
+                '<(template_input_path)',
+                '<@(_outputs)',
+              ],
+              'message': 'Generating version information',
+            },
+          ],
+        },
+      ],
+    }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

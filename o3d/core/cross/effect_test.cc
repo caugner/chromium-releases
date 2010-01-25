@@ -30,13 +30,17 @@
  */
 
 
+#include "tests/common/win/testing_common.h"
 #include "core/cross/client.h"
 #include "core/cross/effect.h"
-#include "core/cross/primitive.h"
-#include "core/cross/standard_param.h"
+#include "core/cross/image_utils.h"
+#include "core/cross/pack.h"
 #include "core/cross/param_array.h"
+#include "core/cross/primitive.h"
+#include "core/cross/sampler.h"
+#include "core/cross/standard_param.h"
 #include "core/cross/stream.h"
-#include "tests/common/win/testing_common.h"
+#include "core/cross/texture_base.h"
 
 namespace o3d {
 
@@ -252,7 +256,6 @@ TEST_F(EffectTest, CreateAndDestroyEffect) {
   ASSERT_TRUE(color != NULL);
   ASSERT_TRUE(index != NULL);
 
-  void* vbuffer = NULL;
   Field* vertex_field = verts->CreateField(FloatField::GetApparentClass(),
                                            arraysize(kVertexBlock[0]));
   ASSERT_TRUE(vertex_field != NULL);
@@ -306,7 +309,7 @@ TEST_F(EffectTest, CreateAndDestroyEffect) {
   String filepath = *g_program_path + "/unittest_data/rock01.tga";
   Texture *texture = pack->CreateTextureFromFile(filepath,
                                                  filepath,
-                                                 Bitmap::TGA,
+                                                 image::TGA,
                                                  true);
   EXPECT_TRUE(texture != NULL);
 
@@ -364,7 +367,7 @@ TEST_F(EffectTest, CreateUniformParameters) {
     } else {
       ASSERT_TRUE(param != NULL);
       if (expected_info.num_elements > 0) {
-        ASSERT_TRUE(param->IsA(ParamParamArray::GetApparentClass()));
+        EXPECT_TRUE(param->IsA(ParamParamArray::GetApparentClass()));
       } else {
         EXPECT_TRUE(param->IsA(expected_info.type));
       }

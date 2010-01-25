@@ -4,6 +4,7 @@
     <output filename="grit/locale_settings.h" type="rc_header">
       <emit emit_type='prepend'></emit>
     </output>
+    <output filename="locale_settings_am.rc" type="rc_all" lang="am" />
     <output filename="locale_settings_ar.rc" type="rc_all" lang="ar" />
     <output filename="locale_settings_bg.rc" type="rc_all" lang="bg" />
     <output filename="locale_settings_bn.rc" type="rc_all" lang="bn" />
@@ -48,6 +49,7 @@
     <output filename="locale_settings_sl.rc" type="rc_all" lang="sl" />
     <output filename="locale_settings_sr.rc" type="rc_all" lang="sr" />
     <output filename="locale_settings_sv.rc" type="rc_all" lang="sv" />
+    <output filename="locale_settings_sw.rc" type="rc_all" lang="sw" />
     <output filename="locale_settings_ta.rc" type="rc_all" lang="ta" />
     <output filename="locale_settings_te.rc" type="rc_all" lang="te" />
     <output filename="locale_settings_th.rc" type="rc_all" lang="th" />
@@ -57,6 +59,7 @@
     <output filename="locale_settings_zh-CN.rc" type="rc_all" lang="zh-CN" />
     <output filename="locale_settings_zh-TW.rc" type="rc_all" lang="zh-TW" />
 
+    <output filename="locale_settings_am.pak" type="data_package" lang="am" />
     <output filename="locale_settings_ar.pak" type="data_package" lang="ar" />
     <output filename="locale_settings_bg.pak" type="data_package" lang="bg" />
     <output filename="locale_settings_bn.pak" type="data_package" lang="bn" />
@@ -101,6 +104,7 @@
     <output filename="locale_settings_sl.pak" type="data_package" lang="sl" />
     <output filename="locale_settings_sr.pak" type="data_package" lang="sr" />
     <output filename="locale_settings_sv.pak" type="data_package" lang="sv" />
+    <output filename="locale_settings_sw.pak" type="data_package" lang="sw" />
     <output filename="locale_settings_ta.pak" type="data_package" lang="ta" />
     <output filename="locale_settings_te.pak" type="data_package" lang="te" />
     <output filename="locale_settings_th.pak" type="data_package" lang="th" />
@@ -111,6 +115,7 @@
     <output filename="locale_settings_zh-TW.pak" type="data_package" lang="zh-TW" />
   </outputs>
   <translations>
+    <file path="locale_settings_am.xtb" lang="am" />
     <file path="locale_settings_ar.xtb" lang="ar" />
     <file path="locale_settings_bg.xtb" lang="bg" />
     <file path="locale_settings_bn.xtb" lang="bn" />
@@ -152,6 +157,7 @@
     <file path="locale_settings_sl.xtb" lang="sl" />
     <file path="locale_settings_sr.xtb" lang="sr" />
     <file path="locale_settings_sv.xtb" lang="sv" />
+    <file path="locale_settings_sw.xtb" lang="sw" />
     <file path="locale_settings_ta.xtb" lang="ta" />
     <file path="locale_settings_te.xtb" lang="te" />
     <file path="locale_settings_th.xtb" lang="th" />
@@ -219,18 +225,30 @@
         <include name="IDR_TERMS_HTML" file="terms\terms_chromium.html" type="BINDATA" />
       </if>
     </includes>
-    <messages>
+    <messages fallback_to_english="true">
 
-      <!-- The font used in web-style native pages (e.g. History). -->
-      <message name="IDS_WEB_FONT_FAMILY" use_name_for_id="true">
-        Arial
-      </message>
+      <if expr="os != 'darwin'">
+        <!-- The font used in web-style native pages (e.g. History). -->
+        <message name="IDS_WEB_FONT_FAMILY" use_name_for_id="true">
+          Arial
+        </message>
 
-      <!-- The relative font size in % used in web-style native pages
-      (e.g. History).  -->
-      <message name="IDS_WEB_FONT_SIZE" use_name_for_id="true">
-        84%
-      </message>
+        <!-- The relative font size in % used in web-style native pages
+        (e.g. History).  -->
+        <message name="IDS_WEB_FONT_SIZE" use_name_for_id="true">
+          84%
+        </message>
+      </if>
+
+      <if expr="os == 'darwin'">
+        <message name="IDS_WEB_FONT_FAMILY" desc="The font used in web-style native pages (e.g. History) (Mac)">
+          Helvetica
+        </message>
+
+        <message name="IDS_WEB_FONT_SIZE" desc="The relative font size in % used in web-style native pages (e.g. History) (Mac)">
+          84%
+        </message>
+      </if>
 
       <!-- The default value for HTTP Accept-Language header. -->
       <message name="IDS_ACCEPT_LANGUAGES" use_name_for_id="true">
@@ -242,56 +260,100 @@
         ISO-8859-1
       </message>
 
-      <!-- The default value to determine whether
-           |WebPreference::standard_font_family| is serif or sans-serif. -->
-      <message name="IDS_STANDARD_FONT_IS_SERIF" use_name_for_id="true">
-        true
-      </message>
+      <if expr="os != 'darwin'">
+        <!-- The default value to determine whether
+             |WebPreference::standard_font_family| is serif or sans-serif. -->
+        <message name="IDS_STANDARD_FONT_IS_SERIF" use_name_for_id="true">
+          true
+        </message>
 
-      <!-- The default value for |WebPreference::fixed_font_family| -->
-      <message name="IDS_FIXED_FONT_FAMILY" use_name_for_id="true">
-        Courier New
-      </message>
+        <!-- The default value for |WebPreference::fixed_font_family| -->
+        <message name="IDS_FIXED_FONT_FAMILY" use_name_for_id="true">
+          Courier New
+        </message>
 
-      <!-- The default value for |WebPreference::serif_font_family| -->
-      <message name="IDS_SERIF_FONT_FAMILY" use_name_for_id="true">
-        Times New Roman
-      </message>
+        <!-- The default value for |WebPreference::serif_font_family| -->
+        <message name="IDS_SERIF_FONT_FAMILY" use_name_for_id="true">
+          Times New Roman
+        </message>
 
-      <!-- The default value for |WebPreference::sans_serif_font_family| -->
-      <message name="IDS_SANS_SERIF_FONT_FAMILY" use_name_for_id="true">
-        Arial
-      </message>
+        <!-- The default value for |WebPreference::sans_serif_font_family| -->
+        <message name="IDS_SANS_SERIF_FONT_FAMILY" use_name_for_id="true">
+          Arial
+        </message>
 
-      <!-- The default value for |WebPreference::cursive_font_family| -->
-      <message name="IDS_CURSIVE_FONT_FAMILY" use_name_for_id="true">
-        Comic Sans MS
-      </message>
+        <!-- The default value for |WebPreference::cursive_font_family| -->
+        <message name="IDS_CURSIVE_FONT_FAMILY" use_name_for_id="true">
+          Comic Sans MS
+        </message>
 
-      <!-- The default value for |WebPreference::fantasy_font_family| -->
-      <message name="IDS_FANTASY_FONT_FAMILY" use_name_for_id="true">
-        Impact
-      </message>
+        <!-- The default value for |WebPreference::fantasy_font_family| -->
+        <message name="IDS_FANTASY_FONT_FAMILY" use_name_for_id="true">
+          Impact
+        </message>
 
-      <!-- The default value for |WebPreference::default_font_size| -->
-      <message name="IDS_DEFAULT_FONT_SIZE" use_name_for_id="true">
-        16
-      </message>
+        <!-- The default value for |WebPreference::default_font_size| -->
+        <message name="IDS_DEFAULT_FONT_SIZE" use_name_for_id="true">
+          16
+        </message>
 
-      <!-- The default value for |WebPreference::default_fixed_font_size| -->
-      <message name="IDS_DEFAULT_FIXED_FONT_SIZE" use_name_for_id="true">
-        13
-      </message>
+        <!-- The default value for |WebPreference::default_fixed_font_size| -->
+        <message name="IDS_DEFAULT_FIXED_FONT_SIZE" use_name_for_id="true">
+          13
+        </message>
 
-      <!-- The default value for |WebPreference::minimum_font_size| -->
-      <message name="IDS_MINIMUM_FONT_SIZE" use_name_for_id="true">
-        1
-      </message>
+        <!-- The default value for |WebPreference::minimum_font_size| -->
+        <message name="IDS_MINIMUM_FONT_SIZE" use_name_for_id="true">
+          1
+        </message>
 
-      <!-- The default value for |WebPreference::minimum_logical_font_size|. -->
-      <message name="IDS_MINIMUM_LOGICAL_FONT_SIZE" use_name_for_id="true">
-        6
-      </message>
+        <!-- The default value for |WebPreference::minimum_logical_font_size|. -->
+        <message name="IDS_MINIMUM_LOGICAL_FONT_SIZE" use_name_for_id="true">
+          6
+        </message>
+      </if>
+
+      <if expr="os == 'darwin'">
+        <message name="IDS_STANDARD_FONT_IS_SERIF" desc="The default value to determine whether |WebPreference::standard_font_family| is serif or sans-serif (Mac)">
+          true
+        </message>
+
+        <message name="IDS_FIXED_FONT_FAMILY" desc="The default value for |WebPreference::fixed_font_family| (Mac)">
+          Courier
+        </message>
+
+        <message name="IDS_SERIF_FONT_FAMILY" desc="The default value for |WebPreference::serif_font_family| (Mac)">
+          Times
+        </message>
+
+        <message name="IDS_SANS_SERIF_FONT_FAMILY" desc="The default value for |WebPreference::sans_serif_font_family| (Mac)">
+          Helvetica
+        </message>
+
+        <message name="IDS_CURSIVE_FONT_FAMILY" desc="The default value for |WebPreference::cursive_font_family| (Mac)">
+          Apple Chancery
+        </message>
+
+        <message name="IDS_FANTASY_FONT_FAMILY" desc="The default value for |WebPreference::fantasy_font_family| (Mac)">
+          Papyrus
+        </message>
+
+        <message name="IDS_DEFAULT_FONT_SIZE" desc="The default value for |WebPreference::default_font_size| (Mac)">
+          16
+        </message>
+
+        <message name="IDS_DEFAULT_FIXED_FONT_SIZE" desc="The default value for |WebPreference::default_fixed_font_size| (Mac)">
+          13
+        </message>
+
+        <message name="IDS_MINIMUM_FONT_SIZE" desc="The default value for |WebPreference::minimum_font_size| (Mac)">
+          1
+        </message>
+
+        <message name="IDS_MINIMUM_LOGICAL_FONT_SIZE" desc="The default value for |WebPreference::minimum_logical_font_size| (Mac)">
+          9
+        </message>
+      </if>
 
       <!-- The default value for |WebPreference::uses_universal_detector|. -->
       <message name="IDS_USES_UNIVERSAL_DETECTOR" use_name_for_id="true">
@@ -335,6 +397,29 @@
       <!-- above for defn of character width) -->
       <message name="IDS_OPTIONS_RESET_CONFIRM_BOX_WIDTH_CHARS" use_name_for_id="true">
         80
+      </message>
+
+      <!-- The width and height of the URL picker dialog box in characters and lines -->
+      <!-- (See above). -->
+      <message name="IDS_URLPICKER_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        80
+      </message>
+      <message name="IDS_URLPICKER_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        30
+      </message>
+
+      <!-- The width of the page column of the URL picker dialog box, in characters.  -->
+      <message name="IDS_URLPICKER_DIALOG_LEFT_COLUMN_WIDTH_CHARS" use_name_for_id="true">
+        33
+      </message>
+
+      <!-- The width and height of the Passwords and Exceptions dialog box in -->
+      <!-- characters and lines (See above). -->
+      <message name="IDS_PASSWORDS_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        106
+      </message>
+      <message name="IDS_PASSWORDS_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        27
       </message>
 
       <!-- The width and height of the Bug Reporting dialog box in characters and lines -->
@@ -511,6 +596,11 @@
         http://www.google.com/support/chrome/bin/answer.py?answer=114836&amp;hl=[GRITLANGCODE]
       </message>
 
+      <!-- The URL for the "Learn more" page for the usage/crash reporting option in the first run dialog. -->
+      <message name="IDS_LEARN_MORE_REPORTING_URL" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?answer=96817&amp;hl=[GRITLANGCODE]
+      </message>
+
       <!-- The width and height of the bookmark manager in characters and lines -->
       <!-- (See above). -->
       <message name="IDS_BOOKMARK_MANAGER_DIALOG_WIDTH_CHARS" use_name_for_id="true">
@@ -549,18 +639,48 @@
         http://code.google.com/p/chromium/wiki/LinuxCertManagement
       </message>
 
+      <!-- The URL for Linux proxy configuration help when not running under -->
+      <!-- a supported desktop environment. -->
+      <message name="IDS_LINUX_PROXY_CONFIG_URL" translateable="false">
+        http://code.google.com/p/chromium/wiki/LinuxProxyConfig
+      </message>
+
       <!-- The URL for the themes gallery. -->
-      <!-- TODO(arv): Use GRITLANGCODE -->
       <message name="IDS_THEMES_GALLERY_URL" translateable="false">
         https://tools.google.com/chrome/intl/[GRITLANGCODE]/themes/index.html
       </message>
+
       <!-- The URL for Google Chrome welcome page. This is used for the pre -->
       <!-- populated thumbnails. -->
-      <!-- TODO(arv): Use GRITLANGCODE -->
       <message name="IDS_CHROME_WELCOME_URL" translateable="false">
         http://www.google.com/chrome/intl/[GRITLANGCODE]/welcome.html
       </message>
+      
+      <!-- The width of the sync setup wizard / login dialog in characters. -->
+      <message name="IDS_SYNC_SETUP_WIZARD_WIDTH_CHARS" use_name_for_id="true">
+        46
+      </message>
+      
+      <!-- The height of the sync setup wizard / login dialog in lines. -->
+      <message name="IDS_SYNC_SETUP_WIZARD_HEIGHT_LINES" use_name_for_id="true">
+        14
+      </message>
 
+      <!-- The default width/height for confirmation dialogs. -->
+      <message name="IDS_CONFIRM_MESSAGE_BOX_DEFAULT_WIDTH_CHARS" use_name_for_id="true">
+        50
+      </message>
+      <message name="IDS_CONFIRM_MESSAGE_BOX_DEFAULT_HEIGHT_LINES" use_name_for_id="true">
+        5
+      </message>
+
+      <!-- The default width/height for the stop syncing confirmation dialog. -->
+      <message name="IDS_CONFIRM_STOP_SYNCING_DIALOG_WIDTH_CHARS" use_name_for_id="true">
+        60
+      </message>
+      <message name="IDS_CONFIRM_STOP_SYNCING_DIALOG_HEIGHT_LINES" use_name_for_id="true">
+        8
+      </message>
     </messages>
   </release>
 </grit>

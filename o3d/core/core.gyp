@@ -13,13 +13,42 @@
       '../../<(gtestdir)',
       '../../<(nacldir)',
     ],
+    'defines': [
+      'O3D_PLUGIN_VERSION="<!(python ../plugin/version_info.py --version)"',
+    ],
     'conditions': [
+      ['OS == "win"',
+        {
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'ForcedIncludeFiles':
+              'core/cross/precompile.h',
+            },
+          },
+        },
+      ],
       ['renderer == "d3d9" and OS == "win"',
         {
           'include_dirs': [
             '$(DXSDK_DIR)/Include',
           ],
         }
+      ],
+      ['OS == "linux"',
+        {
+          'cflags': [
+            '-include',
+            'core/cross/precompile.h',
+          ],
+        },
+      ],
+      ['renderer == "gl"',
+        {
+          'include_dirs': [
+            '../../<(glewdir)/include',
+            '../../<(cgdir)/include',
+          ],
+        },
       ],
     ],
   },
@@ -35,7 +64,6 @@
         '../../<(pngdir)/libpng.gyp:libpng',
         '../../<(zlibdir)/zlib.gyp:zlib',
         '../../skia/skia.gyp:skia',
-        '../build/nacl.gyp:build_nacl',
       ],
       'sources': [
         'cross/bitmap.cc',
@@ -119,6 +147,9 @@
         'cross/id_manager.h',
         'cross/ierror_status.cc',
         'cross/ierror_status.h',
+        'cross/image_utils.cc',
+        'cross/imain_thread_task_poster.cc',
+        'cross/imain_thread_task_poster.h',
         'cross/install_check.h',
         'cross/lost_resource_callback.h',
         'cross/material.cc',
@@ -134,6 +165,8 @@
         'cross/matrix4_scale.h',
         'cross/matrix4_translation.cc',
         'cross/matrix4_translation.h',
+        'cross/message_commands.cc',
+        'cross/message_commands.h',
         'cross/message_queue.cc',
         'cross/message_queue.h',
         'cross/named_object.cc',
@@ -225,7 +258,6 @@
       'direct_dependent_settings': {
         'include_dirs': [
           '..',
-          'cross',
         ],
       },
       'conditions': [
@@ -240,7 +272,15 @@
                 'win',
               ],
             },
-          }
+          },
+        ],
+        ['renderer == "gl"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:cg_libs',
+              '../build/libs.gyp:gl_libs',
+            ],
+          },
         ],
         ['OS == "linux"',
           {
@@ -253,7 +293,7 @@
                 'linux',
               ],
             },
-          }
+          },
         ],
         ['OS == "mac"',
           {
@@ -266,7 +306,10 @@
                 'mac',
               ],
             },
-          }
+            'xcode_settings': {
+              'GCC_PREFIX_HEADER': 'cross/precompile.h',
+            },
+          },
         ],
       ],
     },
@@ -279,6 +322,13 @@
       'sources': [
       ],
       'conditions': [
+        ['OS == "mac"',
+          {
+            'xcode_settings': {
+              'GCC_PREFIX_HEADER': 'cross/precompile.h',
+            },
+          },
+        ],
         ['renderer == "gl"',
           {
             'sources': [
@@ -307,7 +357,10 @@
               'cross/gl/utils_gl.cc',
               'cross/gl/utils_gl.h',
             ],
-          }
+            'dependencies': [
+              '../build/libs.gyp:gl_libs',
+            ],
+          },
         ],
         ['renderer == "d3d9" and OS == "win"',
           {
@@ -337,17 +390,51 @@
               'win/d3d9/utils_d3d9.cc',
               'win/d3d9/utils_d3d9.h',
             ],
-          }
+          },
+        ],
+        ['renderer == "cb"',
+          {
+            'dependencies': [
+              '../command_buffer/command_buffer.gyp:command_buffer_client',
+              '../command_buffer/command_buffer.gyp:command_buffer_service',
+              '../gpu_plugin/gpu_plugin.gyp:np_utils',
+
+              # These dependencies is only needed for RendererCBLocal. They can
+              # be removed when RendererCBLocal is not needed.
+              '../gpu_plugin/gpu_plugin.gyp:command_buffer',
+              '../gpu_plugin/gpu_plugin.gyp:np_utils',
+            ],
+            'sources': [
+              'cross/command_buffer/buffer_cb.cc',
+              'cross/command_buffer/buffer_cb.h',
+              'cross/command_buffer/effect_cb.cc',
+              'cross/command_buffer/effect_cb.h',
+              'cross/command_buffer/install_check.cc',
+              'cross/command_buffer/install_check.h',
+              'cross/command_buffer/param_cache_cb.cc',
+              'cross/command_buffer/param_cache_cb.h',
+              'cross/command_buffer/primitive_cb.cc',
+              'cross/command_buffer/primitive_cb.h',
+              'cross/command_buffer/renderer_cb.cc',
+              'cross/command_buffer/renderer_cb.h',
+              'cross/command_buffer/render_surface_cb.cc',
+              'cross/command_buffer/render_surface_cb.h',
+              'cross/command_buffer/sampler_cb.cc',
+              'cross/command_buffer/sampler_cb.h',
+              'cross/command_buffer/states_cb.cc',
+              'cross/command_buffer/states_cb.h',
+              'cross/command_buffer/stream_bank_cb.cc',
+              'cross/command_buffer/stream_bank_cb.h',
+              'cross/command_buffer/texture_cb.cc',
+              'cross/command_buffer/texture_cb.h',
+            ],
+          },
         ],
       ],
     },
     {
       'target_name': 'o3dCoreTest',
       'type': 'none',
-      'dependencies': [
-        'o3dCore',
-        'o3dCorePlatform',
-      ],
       'direct_dependent_settings': {
         'sources': [
           'cross/bitmap_test.cc',
@@ -362,18 +449,20 @@
           'cross/draw_pass_test.cc',
           'cross/effect_test.cc',
           'cross/element_test.cc',
+          'cross/event_manager_test.cc',
           'cross/features_test.cc',
           'cross/field_test.cc',
           'cross/float_n_test.cc',
           'cross/function_test.cc',
+          'cross/image_utils_test.cc',
           'cross/material_test.cc',
           'cross/math_utilities_test.cc',
           'cross/matrix4_axis_rotation_test.cc',
           'cross/matrix4_composition_test.cc',
           'cross/matrix4_scale_test.cc',
           'cross/matrix4_translation_test.cc',
-  # TODO(gspencer): fix this test so it can be re-enabled.
-  #       'cross/message_queue_test.cc',
+          'cross/message_commands_test.cc',
+          'cross/message_queue_test.cc',
           'cross/object_base_test.cc',
           'cross/pack_test.cc',
           'cross/param_array_test.cc',
@@ -393,6 +482,8 @@
           'cross/state_test.cc',
           'cross/stream_bank_test.cc',
           'cross/stream_test.cc',
+          'cross/texture_base_test.cc',
+          'cross/texture_test.cc',
           'cross/transform_test.cc',
           'cross/tree_traversal_test.cc',
           'cross/vector_map_test.cc',
@@ -404,3 +495,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

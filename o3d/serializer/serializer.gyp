@@ -20,6 +20,9 @@
     {
       'target_name': 'o3dSerializer',
       'type': 'static_library',
+      'dependencies': [
+        '../import/import.gyp:o3dSerializationObjects',
+      ],
       'sources': [
         'cross/serializer.cc',
         'cross/serializer.h',
@@ -42,3 +45,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -21,6 +21,7 @@
 #include "webkit/api/public/WebURLLoaderClient.h"
 #include "webkit/api/public/WebURLRequest.h"
 #include "webkit/api/public/WebURLResponse.h"
+#include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
@@ -150,7 +151,8 @@ void PopulateURLResponse(
   response->setTextEncodingName(StdStringToWebString(info.charset));
   response->setExpectedContentLength(info.content_length);
   response->setSecurityInfo(info.security_info);
-  response->setAppCacheID(info.app_cache_id);
+  response->setAppCacheID(info.appcache_id);
+  response->setAppCacheManifestURL(info.appcache_manifest_url);
 
   const net::HttpResponseHeaders* headers = info.headers;
   if (!headers)
@@ -221,9 +223,10 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   void HandleDataURL();
 
   WebURLLoaderImpl* loader_;
-  GURL url_;
+  WebURLRequest request_;
   WebURLLoaderClient* client_;
   scoped_ptr<ResourceLoaderBridge> bridge_;
+  scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
   int64 expected_content_length_;
 };
@@ -258,11 +261,13 @@ void WebURLLoaderImpl::Context::Start(
     ResourceLoaderBridge::SyncLoadResponse* sync_load_response) {
   DCHECK(!bridge_.get());
 
-  url_ = request.url();
-  if (url_.SchemeIs("data")) {
+  request_ = request;  // Save the request.
+
+  GURL url = request.url();
+  if (url.SchemeIs("data")) {
     if (sync_load_response) {
       // This is a sync load. Do the work now.
-      sync_load_response->url = url_;
+      sync_load_response->url = url;
       std::string data;
       GetInfoFromDataURL(sync_load_response->url, sync_load_response,
                          &sync_load_response->data,
@@ -325,7 +330,7 @@ void WebURLLoaderImpl::Context::Start(
   // creating the GURLs.
   bridge_.reset(ResourceLoaderBridge::Create(
       method,
-      url_,
+      url,
       request.firstPartyForCookies(),
       referrer_url,
       frame_origin,
@@ -334,7 +339,7 @@ void WebURLLoaderImpl::Context::Start(
       load_flags,
       requestor_pid,
       FromTargetType(request.targetType()),
-      request.appCacheContextID(),
+      request.appCacheHostID(),
       request.requestorID()));
 
   if (!request.httpBody().isNull()) {
@@ -389,18 +394,20 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
 
   WebURLResponse response;
   response.initialize();
-  PopulateURLResponse(url_, info, &response);
+  PopulateURLResponse(request_.url(), info, &response);
 
   // TODO(darin): We lack sufficient information to construct the actual
-  // request that resulted from the redirect, so we just report a GET
-  // navigation to the new location.
+  // request that resulted from the redirect.
   WebURLRequest new_request(new_url);
+  new_request.setFirstPartyForCookies(request_.firstPartyForCookies());
+  if (response.httpStatusCode() == 307)
+    new_request.setHTTPMethod(request_.httpMethod());
 
-  url_ = new_url;
+  request_ = new_request;
   client_->willSendRequest(loader_, new_request, response);
 
   // Only follow the redirect if WebKit left the URL unmodified.
-  if (url_ == new_request.url())
+  if (new_url == GURL(new_request.url()))
     return true;
 
   // We assume that WebKit only changes the URL to suppress a redirect, and we
@@ -417,18 +424,22 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
 
   WebURLResponse response;
   response.initialize();
-  PopulateURLResponse(url_, info, &response);
+  PopulateURLResponse(request_.url(), info, &response);
   response.setIsContentFiltered(content_filtered);
 
   expected_content_length_ = response.expectedContentLength();
 
+  if (info.mime_type == "text/vnd.chromium.ftp-dir")
+    response.setMIMEType(WebString::fromUTF8("text/html"));
+
   client_->didReceiveResponse(loader_, response);
 
-  // we may have been cancelled after didReceiveResponse, which would leave us
-  // without a client and therefore without much need to do multipart handling.
+  // We may have been cancelled after didReceiveResponse, which would leave us
+  // without a client and therefore without much need to do further handling.
   if (!client_)
     return;
 
+  DCHECK(!ftp_listing_delegate_.get());
   DCHECK(!multipart_delegate_.get());
   if (info.headers && info.mime_type == "multipart/x-mixed-replace") {
     std::string content_type;
@@ -443,6 +454,9 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
       multipart_delegate_.reset(
           new MultipartResponseDelegate(client_, loader_, response, boundary));
     }
+  } else if (info.mime_type == "text/vnd.chromium.ftp-dir") {
+    ftp_listing_delegate_.reset(
+        new FtpDirectoryListingResponseDelegate(client_, loader_, response));
   }
 }
 
@@ -450,7 +464,11 @@ void WebURLLoaderImpl::Context::OnReceivedData(const char* data, int len) {
   if (!client_)
     return;
 
-  if (multipart_delegate_.get()) {
+  if (ftp_listing_delegate_.get()) {
+    // The FTP listing delegate will make the appropriate calls to
+    // client_->didReceiveData and client_->didReceiveResponse.
+    ftp_listing_delegate_->OnReceivedData(data, len);
+  } else if (multipart_delegate_.get()) {
     // The multipart delegate will make the appropriate calls to
     // client_->didReceiveData and client_->didReceiveResponse.
     multipart_delegate_->OnReceivedData(data, len);
@@ -462,7 +480,10 @@ void WebURLLoaderImpl::Context::OnReceivedData(const char* data, int len) {
 void WebURLLoaderImpl::Context::OnCompletedRequest(
     const URLRequestStatus& status,
     const std::string& security_info) {
-  if (multipart_delegate_.get()) {
+  if (ftp_listing_delegate_.get()) {
+    ftp_listing_delegate_->OnCompletedRequest();
+    ftp_listing_delegate_.reset(NULL);
+  } else if (multipart_delegate_.get()) {
     multipart_delegate_->OnCompletedRequest();
     multipart_delegate_.reset(NULL);
   }
@@ -483,7 +504,7 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
       WebURLError error;
       error.domain = WebString::fromUTF8(net::kErrorDomain);
       error.reason = error_code;
-      error.unreachableURL = url_;
+      error.unreachableURL = request_.url();
       client_->didFail(loader_, error);
     } else {
       client_->didFinishLoading(loader_);
@@ -497,7 +518,7 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
 }
 
 std::string WebURLLoaderImpl::Context::GetURLForDebugging() {
-  return url_.spec();
+  return request_.url().spec();
 }
 
 void WebURLLoaderImpl::Context::HandleDataURL() {
@@ -505,7 +526,7 @@ void WebURLLoaderImpl::Context::HandleDataURL() {
   URLRequestStatus status;
   std::string data;
 
-  if (GetInfoFromDataURL(url_, &info, &data, &status)) {
+  if (GetInfoFromDataURL(request_.url(), &info, &data, &status)) {
     OnReceivedResponse(info, false);
     if (!data.empty())
       OnReceivedData(data.data(), data.size());

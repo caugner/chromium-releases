@@ -38,6 +38,7 @@ class NativeButton;
 class BaseDownloadItemModel;
 class DownloadShelfView;
 class SkBitmap;
+class DownloadShelfContextMenuWin;
 
 class DownloadItemView : public views::ButtonListener,
                          public views::View,
@@ -64,7 +65,7 @@ class DownloadItemView : public views::ButtonListener,
   virtual bool OnMouseDragged(const views::MouseEvent& event);
 
   // ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // AnimationDelegate implementation.
   virtual void AnimationProgressed(const Animation* animation);
@@ -76,6 +77,9 @@ class DownloadItemView : public views::ButtonListener,
 
   // IconManager::Client interface.
   void OnExtractIconComplete(IconManager::Handle handle, SkBitmap* icon_bitmap);
+
+  // Returns the DownloadItem model object belonging to this item.
+  DownloadItem* get_download() { return download_; }
 
  private:
   enum State {
@@ -240,6 +244,9 @@ class DownloadItemView : public views::ButtonListener,
   // Method factory used to delay reenabling of the item when opening the
   // downloaded file.
   ScopedRunnableMethodFactory<DownloadItemView> reenable_method_factory_;
+
+  // The currently running download context menu.
+  DownloadShelfContextMenuWin* active_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemView);
 };

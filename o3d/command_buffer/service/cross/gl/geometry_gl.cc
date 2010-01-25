@@ -49,7 +49,7 @@ void VertexBufferGL::Create() {
   glGenBuffers(1, &gl_buffer_);
   glBindBuffer(GL_ARRAY_BUFFER, gl_buffer_);
   GLenum usage =
-      (flags() & vertex_buffer::DYNAMIC) ?  GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+      (flags() & vertex_buffer::kDynamic) ?  GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
   glBufferData(GL_ARRAY_BUFFER, size(), NULL, usage);
   CHECK_GL_ERROR();
 }
@@ -99,7 +99,7 @@ void IndexBufferGL::Create() {
   glGenBuffers(1, &gl_buffer_);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl_buffer_);
   GLenum usage =
-      (flags() & vertex_buffer::DYNAMIC) ?  GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+      (flags() & vertex_buffer::kDynamic) ?  GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, size(), NULL, usage);
   CHECK_GL_ERROR();
 }
@@ -142,7 +142,7 @@ bool IndexBufferGL::GetData(unsigned int offset,
 
 // Sets the input element in the VertexStruct resource.
 void VertexStructGL::SetInput(unsigned int input_index,
-                              ResourceID vertex_buffer_id,
+                              ResourceId vertex_buffer_id,
                               unsigned int offset,
                               unsigned int stride,
                               vertex_struct::Type type,
@@ -160,8 +160,12 @@ void VertexStructGL::SetInput(unsigned int input_index,
 
 namespace {
 
-inline const GLvoid *OffsetToPtr(GLintptr offset) {
-  return static_cast<char *>(NULL) + offset;
+inline ptrdiff_t OffsetToPtrDiff(unsigned int offset) {
+  return static_cast<ptrdiff_t>(offset);
+}
+
+inline void* OffsetToPtr(ptrdiff_t offset) {
+  return reinterpret_cast<void*>(offset);
 }
 
 }  // anonymous namespace
@@ -189,7 +193,8 @@ unsigned int VertexStructGL::SetStreams(GAPIGL *gapi) {
       DCHECK_NE(vertex_buffer->gl_buffer(), 0);
       glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer->gl_buffer());
       glVertexAttribPointer(i, attrib.size, attrib.type, attrib.normalized,
-                            attrib.stride, OffsetToPtr(attrib.offset));
+                            attrib.stride,
+                            OffsetToPtr(attrib.offset));
       max_vertices = std::min(max_vertices,
                               vertex_buffer->size() / attrib.stride);
     }
@@ -230,21 +235,21 @@ namespace {
 inline unsigned int GetAttribIndex(vertex_struct::Semantic semantic,
                                    unsigned int semantic_index) {
   switch (semantic) {
-    case vertex_struct::POSITION:
+    case vertex_struct::kPosition:
       DCHECK_EQ(semantic_index, 0);
       return 0;
-    case vertex_struct::NORMAL:
+    case vertex_struct::kNormal:
       DCHECK_EQ(semantic_index, 0);
       return 2;
-    case vertex_struct::COLOR:
-      DCHECK_LT(semantic_index, 2);
+    case vertex_struct::kColor:
+      DCHECK_LT(semantic_index, 2U);
       return 3 + semantic_index;
-    case vertex_struct::TEX_COORD:
-      DCHECK_LT(semantic_index, 8);
+    case vertex_struct::kTexCoord:
+      DCHECK_LT(semantic_index, 8U);
       return 8 + semantic_index;
     default:
       DLOG(FATAL) << "Not reached.";
-      break;
+      return 0;
   }
 }
 
@@ -253,15 +258,15 @@ inline void ExtractSizeTypeNormalized(vertex_struct::Type type,
                                       GLenum *gl_type,
                                       GLboolean *normalized) {
   switch (type) {
-    case vertex_struct::FLOAT1:
-    case vertex_struct::FLOAT2:
-    case vertex_struct::FLOAT3:
-    case vertex_struct::FLOAT4:
-      *size = type - vertex_struct::FLOAT1 + 1;
+    case vertex_struct::kFloat1:
+    case vertex_struct::kFloat2:
+    case vertex_struct::kFloat3:
+    case vertex_struct::kFloat4:
+      *size = type - vertex_struct::kFloat1 + 1;
       *gl_type = GL_FLOAT;
       *normalized = false;
       break;
-    case vertex_struct::UCHAR4N:
+    case vertex_struct::kUChar4N:
       *size = 4;
       *gl_type = GL_UNSIGNED_BYTE;
       *normalized = true;
@@ -295,129 +300,129 @@ void VertexStructGL::Compile() {
     ExtractSizeTypeNormalized(element.type, &attrib.size, &attrib.type,
                               &attrib.normalized);
     attrib.stride = element.stride;
-    attrib.offset = element.offset;
+    attrib.offset = OffsetToPtrDiff(element.offset);
   }
   dirty_ = false;
 }
 
-BufferSyncInterface::ParseError GAPIGL::CreateVertexBuffer(ResourceID id,
+parse_error::ParseError GAPIGL::CreateVertexBuffer(ResourceId id,
                                                            unsigned int size,
                                                            unsigned int flags) {
   VertexBufferGL *vertex_buffer = new VertexBufferGL(size, flags);
   vertex_buffer->Create();
   vertex_buffers_.Assign(id, vertex_buffer);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
-BufferSyncInterface::ParseError GAPIGL::DestroyVertexBuffer(ResourceID id) {
+parse_error::ParseError GAPIGL::DestroyVertexBuffer(ResourceId id) {
   return vertex_buffers_.Destroy(id) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::SetVertexBufferData(ResourceID id,
+parse_error::ParseError GAPIGL::SetVertexBufferData(ResourceId id,
                                                             unsigned int offset,
                                                             unsigned int size,
                                                             const void *data) {
   VertexBufferGL *vertex_buffer = vertex_buffers_.Get(id);
-  if (!vertex_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!vertex_buffer) return parse_error::kParseInvalidArguments;
   return vertex_buffer->SetData(offset, size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::GetVertexBufferData(ResourceID id,
+parse_error::ParseError GAPIGL::GetVertexBufferData(ResourceId id,
                                                             unsigned int offset,
                                                             unsigned int size,
                                                             void *data) {
   VertexBufferGL *vertex_buffer = vertex_buffers_.Get(id);
-  if (!vertex_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!vertex_buffer) return parse_error::kParseInvalidArguments;
   return vertex_buffer->GetData(offset, size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::CreateIndexBuffer(ResourceID id,
+parse_error::ParseError GAPIGL::CreateIndexBuffer(ResourceId id,
                                                           unsigned int size,
                                                           unsigned int flags) {
   IndexBufferGL *index_buffer = new IndexBufferGL(size, flags);
   index_buffer->Create();
   index_buffers_.Assign(id, index_buffer);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
-BufferSyncInterface::ParseError GAPIGL::DestroyIndexBuffer(ResourceID id) {
-  return vertex_buffers_.Destroy(id) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+parse_error::ParseError GAPIGL::DestroyIndexBuffer(ResourceId id) {
+  return index_buffers_.Destroy(id) ?
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::SetIndexBufferData(ResourceID id,
+parse_error::ParseError GAPIGL::SetIndexBufferData(ResourceId id,
                                                            unsigned int offset,
                                                            unsigned int size,
                                                            const void *data) {
   IndexBufferGL *index_buffer = index_buffers_.Get(id);
-  if (!index_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!index_buffer) return parse_error::kParseInvalidArguments;
   return index_buffer->SetData(offset, size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::GetIndexBufferData(ResourceID id,
+parse_error::ParseError GAPIGL::GetIndexBufferData(ResourceId id,
                                                            unsigned int offset,
                                                            unsigned int size,
                                                            void *data) {
   IndexBufferGL *index_buffer = index_buffers_.Get(id);
-  if (!index_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!index_buffer) return parse_error::kParseInvalidArguments;
   return index_buffer->GetData(offset, size, data) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::CreateVertexStruct(
-    ResourceID id,
+parse_error::ParseError GAPIGL::CreateVertexStruct(
+    ResourceId id,
     unsigned int input_count) {
   if (id == current_vertex_struct_) validate_streams_ = true;
   VertexStructGL *vertex_struct = new VertexStructGL(input_count);
   vertex_structs_.Assign(id, vertex_struct);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
-BufferSyncInterface::ParseError GAPIGL::DestroyVertexStruct(ResourceID id) {
+parse_error::ParseError GAPIGL::DestroyVertexStruct(ResourceId id) {
   if (id == current_vertex_struct_) validate_streams_ = true;
   return vertex_structs_.Destroy(id) ?
-      BufferSyncInterface::PARSE_NO_ERROR :
-      BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+      parse_error::kParseNoError :
+      parse_error::kParseInvalidArguments;
 }
 
-BufferSyncInterface::ParseError GAPIGL::SetVertexInput(
-    ResourceID vertex_struct_id,
+parse_error::ParseError GAPIGL::SetVertexInput(
+    ResourceId vertex_struct_id,
     unsigned int input_index,
-    ResourceID vertex_buffer_id,
+    ResourceId vertex_buffer_id,
     unsigned int offset,
     unsigned int stride,
     vertex_struct::Type type,
     vertex_struct::Semantic semantic,
     unsigned int semantic_index) {
   switch (semantic) {
-    case vertex_struct::POSITION:
+    case vertex_struct::kPosition:
       if (semantic_index != 0) {
-        return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+        return parse_error::kParseInvalidArguments;
       }
       break;
-    case vertex_struct::NORMAL:
+    case vertex_struct::kNormal:
       if (semantic_index != 0) {
-        return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+        return parse_error::kParseInvalidArguments;
       }
       break;
-    case vertex_struct::COLOR:
+    case vertex_struct::kColor:
       if (semantic_index >= 2) {
-        return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+        return parse_error::kParseInvalidArguments;
       }
       break;
-    case vertex_struct::TEX_COORD:
+    case vertex_struct::kTexCoord:
       if (semantic_index >= 8) {
-        return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+        return parse_error::kParseInvalidArguments;
       }
       break;
     default:
@@ -427,16 +432,16 @@ BufferSyncInterface::ParseError GAPIGL::SetVertexInput(
   if (vertex_buffer_id == current_vertex_struct_) validate_streams_ = true;
   VertexStructGL *vertex_struct = vertex_structs_.Get(vertex_struct_id);
   if (!vertex_struct || input_index >= vertex_struct->count())
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   vertex_struct->SetInput(input_index, vertex_buffer_id, offset, stride, type,
                           semantic, semantic_index);
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
-BufferSyncInterface::ParseError GAPIGL::SetVertexStruct(ResourceID id) {
+parse_error::ParseError GAPIGL::SetVertexStruct(ResourceId id) {
   current_vertex_struct_ = id;
   validate_streams_ = true;
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 bool GAPIGL::ValidateStreams() {
@@ -453,30 +458,30 @@ bool GAPIGL::ValidateStreams() {
 
 namespace {
 
-void PrimitiveTypeToGL(GAPIInterface::PrimitiveType primitive_type,
+void PrimitiveTypeToGL(command_buffer::PrimitiveType primitive_type,
                        GLenum *gl_mode,
                        unsigned int *count) {
   switch (primitive_type) {
-    case GAPIInterface::POINTS:
+    case command_buffer::kPoints:
       *gl_mode = GL_POINTS;
       break;
-    case GAPIInterface::LINES:
+    case command_buffer::kLines:
       *gl_mode = GL_LINES;
       *count *= 2;
       break;
-    case GAPIInterface::LINE_STRIPS:
+    case command_buffer::kLineStrips:
       *gl_mode = GL_LINE_STRIP;
       ++*count;
       break;
-    case GAPIInterface::TRIANGLES:
+    case command_buffer::kTriangles:
       *gl_mode = GL_TRIANGLES;
       *count *= 3;
       break;
-    case GAPIInterface::TRIANGLE_STRIPS:
+    case command_buffer::kTriangleStrips:
       *gl_mode = GL_TRIANGLE_STRIP;
       *count += 2;
       break;
-    case GAPIInterface::TRIANGLE_FANS:
+    case command_buffer::kTriangleFans:
       *gl_mode = GL_TRIANGLE_FAN;
       *count += 2;
       break;
@@ -488,60 +493,60 @@ void PrimitiveTypeToGL(GAPIInterface::PrimitiveType primitive_type,
 
 }  // anonymous namespace
 
-BufferSyncInterface::ParseError GAPIGL::Draw(PrimitiveType primitive_type,
+parse_error::ParseError GAPIGL::Draw(PrimitiveType primitive_type,
                                              unsigned int first,
                                              unsigned int count) {
   if (validate_effect_ && !ValidateEffect()) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   DCHECK(current_effect_);
   if (validate_streams_ && !ValidateStreams()) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   GLenum gl_mode = GL_POINTS;
   PrimitiveTypeToGL(primitive_type, &gl_mode, &count);
   if (first + count > max_vertices_) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   glDrawArrays(gl_mode, first, count);
   CHECK_GL_ERROR();
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
-BufferSyncInterface::ParseError GAPIGL::DrawIndexed(
+parse_error::ParseError GAPIGL::DrawIndexed(
     PrimitiveType primitive_type,
-    ResourceID index_buffer_id,
+    ResourceId index_buffer_id,
     unsigned int first,
     unsigned int count,
     unsigned int min_index,
     unsigned int max_index) {
   IndexBufferGL *index_buffer = index_buffers_.Get(index_buffer_id);
-  if (!index_buffer) return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+  if (!index_buffer) return parse_error::kParseInvalidArguments;
   if (validate_effect_ && !ValidateEffect()) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   DCHECK(current_effect_);
   if (validate_streams_ && !ValidateStreams()) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   if ((min_index >= max_vertices_) || (max_index > max_vertices_)) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   GLenum gl_mode = GL_POINTS;
   PrimitiveTypeToGL(primitive_type, &gl_mode, &count);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer->gl_buffer());
-  GLenum index_type = (index_buffer->flags() & index_buffer::INDEX_32BIT) ?
+  GLenum index_type = (index_buffer->flags() & index_buffer::kIndex32Bit) ?
                       GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-  GLuint index_size = (index_buffer->flags() & index_buffer::INDEX_32BIT) ?
+  GLuint index_size = (index_buffer->flags() & index_buffer::kIndex32Bit) ?
                       sizeof(GLuint) : sizeof(GLushort);  // NOLINT
   GLuint offset = first * index_size;
   if (offset + count * index_size > index_buffer->size()) {
-    return BufferSyncInterface::PARSE_INVALID_ARGUMENTS;
+    return parse_error::kParseInvalidArguments;
   }
   glDrawRangeElements(gl_mode, min_index, max_index, count, index_type,
                       OffsetToPtr(offset));
   CHECK_GL_ERROR();
-  return BufferSyncInterface::PARSE_NO_ERROR;
+  return parse_error::kParseNoError;
 }
 
 }  // namespace command_buffer

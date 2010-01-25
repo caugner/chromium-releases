@@ -63,8 +63,8 @@
 // --------------------------------------------------------------------|-----
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // HistoryURL (exact or inline autocomplete match)                     | 1400
-// HistoryURL (what you typed)                                         | 1300
-// Search Primary Provider (what you typed)                            | 1200
+// HistoryURL (what you typed)                                         | 1200
+// Search Primary Provider (what you typed)                            | 1150
 // Keyword (substituting, exact match)                                 | 1100
 // Search Primary Provider (past query in history)                     | 1050--
 // HistoryContents (any match in title of starred page)                | 1000++
@@ -100,16 +100,18 @@
 // QUERY input type:
 // --------------------------------------------------------------------|-----
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
-// Keyword (substituting, exact match)                                 | 1400
+// Keyword (substituting, exact match)                                 | 1450
+// HistoryURL (exact or inline autocomplete match)                     | 1400
 // Search Primary Provider (what you typed)                            | 1300
-// Search Primary Provider (past query in history)                     | 1250--
-// HistoryContents (any match in title of starred page)                | 1200++
-// Search Primary Provider (navigational suggestion)                   | 1000++
-// HistoryContents (any match in title of nonstarred page)             |  900++
-// Search Primary Provider (suggestion)                                |  800++
-// HistoryContents (any match in body of starred page)                 |  750++
-// HistoryContents (any match in body of nonstarred page)              |  700++
-// Keyword (inexact match)                                             |  650
+// Search Primary Provider (past query in history)                     | 1050--
+// HistoryContents (any match in title of starred page)                | 1000++
+// HistoryURL (inexact match)                                          |  900++
+// Search Primary Provider (navigational suggestion)                   |  800++
+// HistoryContents (any match in title of nonstarred page)             |  700++
+// Search Primary Provider (suggestion)                                |  600++
+// HistoryContents (any match in body of starred page)                 |  550++
+// HistoryContents (any match in body of nonstarred page)              |  500++
+// Keyword (inexact match)                                             |  450
 // Search Secondary Provider (what you typed)                          |  250
 // Search Secondary Provider (past query in history)                   |  200--
 // Search Secondary Provider (navigational suggestion)                 |  150++
@@ -117,14 +119,14 @@
 //
 // FORCED_QUERY input type:
 // --------------------------------------------------------------------|-----
-// Search Primary Provider (what you typed)                            | 1500
-// Search Primary Provider (past query in history)                     | 1250--
-// HistoryContents (any match in title of starred page)                | 1200++
-// Search Primary Provider (navigational suggestion)                   | 1000++
-// HistoryContents (any match in title of nonstarred page)             |  900++
-// Search Primary Provider (suggestion)                                |  800++
-// HistoryContents (any match in body of starred page)                 |  750++
-// HistoryContents (any match in body of nonstarred page)              |  700++
+// Search Primary Provider (what you typed)                            | 1300
+// Search Primary Provider (past query in history)                     | 1050--
+// HistoryContents (any match in title of starred page)                | 1000++
+// Search Primary Provider (navigational suggestion)                   |  800++
+// HistoryContents (any match in title of nonstarred page)             |  700++
+// Search Primary Provider (suggestion)                                |  600++
+// HistoryContents (any match in body of starred page)                 |  550++
+// HistoryContents (any match in body of nonstarred page)              |  500++
 //
 // (A search keyword is a keyword with a replacement string; a bookmark keyword
 // is a keyword with no replacement string, that is, a shortcut for a URL.)
@@ -157,6 +159,10 @@ typedef std::vector<AutocompleteProvider*> ACProviders;
 // The user input for an autocomplete query.  Allows copying.
 class AutocompleteInput {
  public:
+  // Note that the type below may be misleading.  For example, "http:/" alone
+  // cannot be opened as a URL, so it is marked as a QUERY; yet the user
+  // probably intends to type more and have it eventually become a URL, so we
+  // need to make sure we still run it through inline autocomplete.
   enum Type {
     INVALID,        // Empty input
     UNKNOWN,        // Valid input whose type cannot be determined
@@ -480,6 +486,8 @@ class AutocompleteProvider
   virtual ~AutocompleteProvider();
 
   // Invoked when the profile changes.
+  // NOTE: Do not access any previous Profile* at this point as it may have
+  // already been deleted.
   void SetProfile(Profile* profile);
 
   // Called to start an autocomplete query.  The provider is responsible for
@@ -518,7 +526,8 @@ class AutocompleteProvider
 
   // Called to delete a match and the backing data that produced it.  This
   // match should not appear again in this or future queries.  This can only be
-  // called for matches the provider marks as deletable.
+  // called for matches the provider marks as deletable.  This should only be
+  // called when no query is running.
   // NOTE: Remember to call OnProviderUpdate() if matches_ is updated.
   virtual void DeleteMatch(const AutocompleteMatch& match) {}
 
@@ -701,6 +710,9 @@ class AutocompleteController : public ACProviderListener {
   explicit AutocompleteController(const ACProviders& providers)
       : providers_(providers),
         history_contents_provider_(NULL),
+        updated_latest_result_(false),
+        delay_interval_has_passed_(false),
+        have_committed_during_this_query_(false),
         done_(true) {
   }
 #endif
@@ -713,6 +725,8 @@ class AutocompleteController : public ACProviderListener {
   // Starts an autocomplete query, which continues until all providers are
   // done or the query is Stop()ed.  It is safe to Start() a new query without
   // Stop()ing the previous one.
+  //
+  // See AutocompleteInput::desired_tld() for meaning of |desired_tld|.
   //
   // |prevent_inline_autocomplete| is true if the generated result set should
   // not require inline autocomplete for the default match.  This is difficult
@@ -746,12 +760,11 @@ class AutocompleteController : public ACProviderListener {
   // fired, they will be discarded.
   //
   // If |clear_result| is true, the controller will also erase the result set.
-  // TODO(pkasting): This is temporary.  Instead, we should keep a separate
-  // result set that tracks the displayed matches.
   void Stop(bool clear_result);
 
   // Asks the relevant provider to delete |match|, and ensures observers are
-  // notified of resulting changes immediately.
+  // notified of resulting changes immediately.  This should only be called when
+  // no query is running.
   void DeleteMatch(const AutocompleteMatch& match);
 
   // Getters

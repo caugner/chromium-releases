@@ -4,14 +4,13 @@
 
 #include "chrome/browser/gtk/nine_box.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
 #include "base/basictypes.h"
-#include "base/gfx/gtk_util.h"
 #include "base/gfx/point.h"
 #include "base/logging.h"
-#include "chrome/common/notification_service.h"
 
 namespace {
 
@@ -44,29 +43,6 @@ NineBox::NineBox(int top_left, int top, int top_right, int left, int center,
   images_[6] = bottom_left ? rb.GetPixbufNamed(bottom_left) : NULL;
   images_[7] = bottom ? rb.GetPixbufNamed(bottom) : NULL;
   images_[8] = bottom_right ? rb.GetPixbufNamed(bottom_right) : NULL;
-}
-
-NineBox::NineBox(ThemeProvider* theme_provider,
-                 int top_left, int top, int top_right, int left, int center,
-                 int right, int bottom_left, int bottom, int bottom_right)
-    : theme_provider_(theme_provider) {
-  image_ids_[0] = top_left;
-  image_ids_[1] = top;
-  image_ids_[2] = top_right;
-  image_ids_[3] = left;
-  image_ids_[4] = center;
-  image_ids_[5] = right;
-  image_ids_[6] = bottom_left;
-  image_ids_[7] = bottom;
-  image_ids_[8] = bottom_right;
-
-  // Load images by pretending that we got a BROWSER_THEME_CHANGED
-  // notification.
-  Observe(NotificationType::BROWSER_THEME_CHANGED,
-          NotificationService::AllSources(),
-          NotificationService::NoDetails());
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
 }
 
 NineBox::~NineBox() {
@@ -164,12 +140,13 @@ void NineBox::ChangeWhiteToTransparent() {
 }
 
 void NineBox::ContourWidget(GtkWidget* widget) const {
+  int width = widget->allocation.width;
+  int height = widget->allocation.height;
   int x1 = gdk_pixbuf_get_width(images_[0]);
-  int x2 = widget->allocation.width - gdk_pixbuf_get_width(images_[2]);
+  int x2 = width - gdk_pixbuf_get_width(images_[2]);
 
   // Paint the left and right sides.
-  GdkBitmap* mask = gdk_pixmap_new(NULL, widget->allocation.width,
-                                   widget->allocation.height, 1);
+  GdkBitmap* mask = gdk_pixmap_new(NULL, width, height, 1);
   gdk_pixbuf_render_threshold_alpha(images_[0], mask,
                                     0, 0,
                                     0, 0, -1, -1,
@@ -181,26 +158,35 @@ void NineBox::ContourWidget(GtkWidget* widget) const {
 
   // Assume no transparency in the middle rectangle.
   cairo_t* cr = gdk_cairo_create(mask);
-  cairo_rectangle(cr, x1, 0, x2 - x1, widget->allocation.height);
+  cairo_rectangle(cr, x1, 0, x2 - x1, height);
   cairo_fill(cr);
+  cairo_destroy(cr);
 
   // Mask the widget's window's shape.
-  gtk_widget_shape_combine_mask(widget, mask, 0, 0);
+  if (l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT) {
+    gtk_widget_shape_combine_mask(widget, mask, 0, 0);
+  } else {
+    GdkBitmap* flipped_mask = gdk_pixmap_new(NULL, width, height, 1);
+    cairo_t* flipped_cr = gdk_cairo_create(flipped_mask);
+
+    // Clear the target bitmap.
+    cairo_set_operator(flipped_cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(flipped_cr);
+
+    // Apply flipping transformation.
+    cairo_translate(flipped_cr, width, 0.0f);
+    cairo_scale(flipped_cr, -1.0f, 1.0f);
+
+    // Paint the source bitmap onto the target.
+    cairo_set_operator(flipped_cr, CAIRO_OPERATOR_SOURCE);
+    gdk_cairo_set_source_pixmap(flipped_cr, mask, 0, 0);
+    cairo_paint(flipped_cr);
+    cairo_destroy(flipped_cr);
+
+    // Mask the widget.
+    gtk_widget_shape_combine_mask(widget, flipped_mask, 0, 0);
+    g_object_unref(flipped_mask);
+  }
 
   g_object_unref(mask);
-  cairo_destroy(cr);
-}
-
-void NineBox::Observe(NotificationType type, const NotificationSource& source,
-                      const NotificationDetails& details) {
-  if (NotificationType::BROWSER_THEME_CHANGED != type) {
-    NOTREACHED();
-    return;
-  }
-
-  // Reload images.
-  for (size_t i = 0; i < arraysize(image_ids_); ++i) {
-    images_[i] = image_ids_[i] ?
-                 theme_provider_->GetPixbufNamed(image_ids_[i]) : NULL;
-  }
 }

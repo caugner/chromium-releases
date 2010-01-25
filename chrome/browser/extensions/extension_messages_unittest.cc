@@ -16,6 +16,7 @@ static void DispatchOnConnect(int source_port_id, const std::string& name,
   args.Set(1, Value::CreateStringValue(name));
   args.Set(2, Value::CreateStringValue(tab_json));
   args.Set(3, Value::CreateStringValue(""));  // extension ID is empty for tests
+  args.Set(4, Value::CreateStringValue(""));  // extension ID is empty for tests
   RendererExtensionBindings::Invoke(
       ExtensionMessageService::kDispatchOnConnect, args, NULL);
 }
@@ -41,8 +42,7 @@ TEST_F(RenderViewTest, ExtensionMessagesOpenChannel) {
   render_thread_.sink().ClearMessages();
   LoadHTML("<body></body>");
   ExecuteJavaScript(
-    "var e = new chrome.Extension('foobar');"
-    "var port = e.connect('testName');"
+    "var port = chrome.extension.connect({name:'testName'});"
     "port.onMessage.addListener(doOnMessage);"
     "port.postMessage({message: 'content ready'});"
     "function doOnMessage(msg, port) {"
@@ -57,7 +57,7 @@ TEST_F(RenderViewTest, ExtensionMessagesOpenChannel) {
   void* iter = IPC::SyncMessage::GetDataIterator(open_channel_msg);
   ViewHostMsg_OpenChannelToExtension::SendParam open_params;
   ASSERT_TRUE(IPC::ReadParam(open_channel_msg, &iter, &open_params));
-  EXPECT_EQ("testName", open_params.c);
+  EXPECT_EQ("testName", open_params.d);
 
   const IPC::Message* post_msg =
       render_thread_.sink().GetUniqueMessageMatching(
@@ -88,7 +88,7 @@ TEST_F(RenderViewTest, ExtensionMessagesOpenChannel) {
 TEST_F(RenderViewTest, ExtensionMessagesOnConnect) {
   LoadHTML("<body></body>");
   ExecuteJavaScript(
-    "chrome.self.onConnect.addListener(function (port) {"
+    "chrome.extension.onConnect.addListener(function (port) {"
     "  port.test = 24;"
     "  port.onMessage.addListener(doOnMessage);"
     "  port.onDisconnect.addListener(doOnDisconnect);"
@@ -146,4 +146,73 @@ TEST_F(RenderViewTest, ExtensionMessagesOnConnect) {
   iter = IPC::SyncMessage::GetDataIterator(alert_msg);
   ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
   EXPECT_EQ(L"disconnected: 24", alert_param.a);
+}
+
+// Tests that we don't send the disconnect message until all ports have
+// disconnected.
+TEST_F(RenderViewTest, ExtensionMessagesDisconnect) {
+  LoadHTML("<body></body>");
+  ExecuteJavaScript(
+    "chrome.extension.onConnect.addListener(function (port) {"
+    "  port.onMessage.addListener(function(msg, p) {"
+    "    if (msg.disconnect) port.disconnect();"
+    "  });"
+    "});"
+    "var iframe1 = document.createElement('iframe');"
+    "var iframe2 = document.createElement('iframe');"
+    "var src = 'javascript:"
+    "   chrome.extension.onConnect.addListener(function(port) {"
+    "     port.postMessage(\"onconnect\");"
+    "     port.onMessage.addListener(function(p) { alert(\"NOTREACHED\"); });"
+    "     port.disconnect();"
+    "   });';"
+    "iframe1.src = src;"
+    "iframe2.src = src;"
+    "document.body.appendChild(iframe1);"
+    "document.body.appendChild(iframe2);");
+
+  render_thread_.sink().ClearMessages();
+
+  // Simulate a new connection being opened.  The two child frames should
+  // disconnect immediately, but we shouldn't get a disconnect message until
+  // all 3 frames disconnect.
+  const int kPortId = 0;
+  const std::string kPortName = "testName";
+  DispatchOnConnect(kPortId, kPortName, "null");
+
+  // Verify that we handled the new connection by posting a message.
+  const IPC::Message* post_msg =
+      render_thread_.sink().GetFirstMessageMatching(
+          ViewHostMsg_ExtensionPostMessage::ID);
+  ASSERT_TRUE(post_msg);
+  ViewHostMsg_ExtensionPostMessage::Param post_params;
+  ViewHostMsg_ExtensionPostMessage::Read(post_msg, &post_params);
+  EXPECT_EQ("\"onconnect\"", post_params.b);
+
+  // Simulate sending a message.
+  render_thread_.sink().ClearMessages();
+  DispatchOnMessage("{\"val\": 42}", kPortId);
+
+  // If we get an alert box, then the iframes failed to disconnect properly.
+  const IPC::Message* alert_msg =
+      render_thread_.sink().GetFirstMessageMatching(
+          ViewHostMsg_RunJavaScriptMessage::ID);
+  ASSERT_FALSE(alert_msg);
+
+  // We should not get a disconnect message yet, since the toplevel frame didn't
+  // disconnect.
+  const IPC::Message* disconnect_msg =
+      render_thread_.sink().GetFirstMessageMatching(
+          ViewHostMsg_ExtensionCloseChannel::ID);
+  ASSERT_FALSE(disconnect_msg);
+
+  // Disconnect the port in the top frame.
+  render_thread_.sink().ClearMessages();
+  DispatchOnMessage("{\"disconnect\": true}", kPortId);
+
+  // Now we should have a disconnect message.
+  disconnect_msg =
+      render_thread_.sink().GetUniqueMessageMatching(
+          ViewHostMsg_ExtensionCloseChannel::ID);
+  ASSERT_TRUE(disconnect_msg);
 }

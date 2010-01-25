@@ -7,11 +7,10 @@
 
 #include "webkit/glue/webaccessibility.h"
 
-namespace WebCore {
-class AccessibilityObject;
-}
-
+namespace WebKit {
+class WebAccessibilityObject;
 class WebView;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -35,7 +34,7 @@ class WebAccessibilityManager {
   // calling into WebKit's AccessibilityObject. Maintains a hashmap of the
   // currently active (browser side ref-count non-zero) instances. Returns true
   // if successful, false otherwise.
-  virtual bool GetAccObjInfo(WebView* view,
+  virtual bool GetAccObjInfo(WebKit::WebView* view,
       const WebAccessibility::InParams& in_params,
       WebAccessibility::OutParams* out_params) = 0;
 
@@ -46,14 +45,14 @@ class WebAccessibilityManager {
 
   // Retrieves the id of the input AccessibilityObject, due to a focus event.
   // Returns an id greater than or equal to 0 if successful, -1 otherwise.
-  virtual int FocusAccObj(WebCore::AccessibilityObject* acc_obj) = 0;
+  virtual int FocusAccObj(const WebKit::WebAccessibilityObject& object) = 0;
 
  private:
   // Retrieves the RenderObject associated with this WebView, and uses it to
   // initialize the root of the GlueAccessibilityObject tree with the
   // associated accessibility information. Returns true if successful, false
   // otherwise.
-  virtual bool InitAccObjRoot(WebView* view) = 0;
+  virtual bool InitAccObjRoot(WebKit::WebView* view) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(WebAccessibilityManager);
 };

@@ -4,7 +4,9 @@
 
 #import "chrome/browser/app_controller_mac.h"
 
+#include "app/l10n_util_mac.h"
 #include "base/command_line.h"
+#include "base/mac_util.h"
 #include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -14,20 +16,29 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_window.h"
+#import "chrome/browser/chrome_application_mac.h"
 #import "chrome/browser/cocoa/about_window_controller.h"
 #import "chrome/browser/cocoa/bookmark_menu_bridge.h"
+#import "chrome/browser/cocoa/browser_window_cocoa.h"
+#import "chrome/browser/cocoa/browser_window_controller.h"
+#import "chrome/browser/cocoa/history_menu_bridge.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/encoding_menu_controller_delegate_mac.h"
-#import "chrome/browser/cocoa/menu_localizer.h"
 #import "chrome/browser/cocoa/preferences_window_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/options_window.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/temp_scaffolding_stubs.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
 @interface AppController(PRIVATE)
 - (void)initMenuState;
@@ -38,6 +49,8 @@
 - (void)openFiles:(NSAppleEventDescriptor*)event
         withReply:(NSAppleEventDescriptor*)reply;
 - (void)windowLayeringDidChange:(NSNotification*)inNotification;
+- (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
+- (BOOL)shouldQuitWithInProgressDownloads;
 @end
 
 @implementation AppController
@@ -99,21 +112,63 @@
 
   // Set up the command updater for when there are no windows open
   [self initMenuState];
+
+  // Activate (bring to foreground) if asked to do so.  On
+  // Windows this logic isn't necessary since
+  // BrowserWindow::Activate() calls ::SetForegroundWindow() which is
+  // adequate.  On Mac, BrowserWindow::Activate() calls -[NSWindow
+  // makeKeyAndOrderFront:] which does not activate the application
+  // itself.
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  if (parsed_command_line.HasSwitch(switches::kActivateOnLaunch)) {
+    [NSApp activateIgnoringOtherApps:YES];
+  }
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:
+    (NSApplication *)sender {
+  // Check for in-progress downloads, and prompt the user if they really want to
+  // quit (and thus cancel the downloads).
+  if (![self shouldQuitWithInProgressDownloads])
+    return NSTerminateCancel;
+
+  return NSTerminateNow;
 }
 
 // Called when the app is shutting down. Clean-up as appropriate.
 - (void)applicationWillTerminate:(NSNotification *)aNotification {
-  DCHECK(!BrowserList::HasBrowserWithProfile([self defaultProfile]));
-  if (!BrowserList::HasBrowserWithProfile([self defaultProfile])) {
-    // As we're shutting down, we need to nuke the TabRestoreService, which will
-    // start the shutdown of the NavigationControllers and allow for proper
-    // shutdown. If we don't do this chrome won't shutdown cleanly, and may end
-    // up crashing when some thread tries to use the IO thread (or another
-    // thread) that is no longer valid.
-    [self defaultProfile]->ResetTabRestoreService();
-  }
+  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
+  [em removeEventHandlerForEventClass:kInternetEventClass
+                           andEventID:kAEGetURL];
+  [em removeEventHandlerForEventClass:'WWW!'
+                           andEventID:'OURL'];
+  [em removeEventHandlerForEventClass:kCoreEventClass
+                           andEventID:kAEOpenDocuments];
+
+  // Close all the windows.
+  BrowserList::CloseAllBrowsers(true);
+
+  // On Windows, this is done in Browser::OnWindowClosing, but that's not
+  // appropriate on Mac since we don't shut down when we reach zero windows.
+  browser_shutdown::OnShutdownStarting(browser_shutdown::BROWSER_EXIT);
+
+  // Release the reference to the browser process. Once all the browsers get
+  // dealloc'd, it will stop the RunLoop and fall back into main().
+  g_browser_process->ReleaseModule();
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)didEndMainMessageLoop {
+  DCHECK(!BrowserList::HasBrowserWithProfile([self defaultProfile]));
+  if (!BrowserList::HasBrowserWithProfile([self defaultProfile])) {
+    // As we're shutting down, we need to nuke the TabRestoreService, which
+    // will start the shutdown of the NavigationControllers and allow for
+    // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
+    // and may end up crashing when some thread tries to use the IO thread (or
+    // another thread) that is no longer valid.
+    [self defaultProfile]->ResetTabRestoreService();
+  }
 }
 
 // Helper routine to get the window controller if the key window is a tabbed
@@ -121,9 +176,21 @@
 // "preferences".
 - (TabWindowController*)keyWindowTabController {
   NSWindowController* keyWindowController =
-      [[[NSApplication sharedApplication] keyWindow] windowController];
+      [[NSApp keyWindow] windowController];
   if ([keyWindowController isKindOfClass:[TabWindowController class]])
     return (TabWindowController*)keyWindowController;
+
+  return nil;
+}
+
+// Helper routine to get the window controller if the main window is a tabbed
+// window, or nil if not. Examples of non-tabbed windows are "about" or
+// "preferences".
+- (TabWindowController*)mainWindowTabController {
+  NSWindowController* mainWindowController =
+      [[NSApp mainWindow] windowController];
+  if ([mainWindowController isKindOfClass:[TabWindowController class]])
+    return (TabWindowController*)mainWindowController;
 
   return nil;
 }
@@ -133,6 +200,7 @@
 // the shift modifer is used.
 - (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)inHaveTabs {
   [closeWindowMenuItem_ setKeyEquivalent:(inHaveTabs ? @"W" : @"w")];
+  [closeWindowMenuItem_ setKeyEquivalentModifierMask:NSCommandKeyMask];
 }
 
 // If the window has tabs, make "close tab" take over cmd-w, otherwise it
@@ -147,10 +215,25 @@
   }
 }
 
+// Explicitly remove any command-key equivalents from the close tab/window
+// menus so that nothing can go haywire if we get a user action during pending
+// updates.
+- (void)clearCloseMenuItemKeyEquivalents {
+  [closeTabMenuItem_ setKeyEquivalent:@""];
+  [closeTabMenuItem_ setKeyEquivalentModifierMask:0];
+  [closeWindowMenuItem_ setKeyEquivalent:@""];
+  [closeWindowMenuItem_ setKeyEquivalentModifierMask:0];
+}
+
 // See if we have a window with tabs open, and adjust the key equivalents for
 // Close Tab/Close Window accordingly
 - (void)fixCloseMenuItemKeyEquivalents {
   TabWindowController* tabController = [self keyWindowTabController];
+  if (!tabController && ![NSApp keyWindow]) {
+    // There might be a small amount of time where there is no key window,
+    // so just use our main browser window if there is one.
+    tabController = [self mainWindowTabController];
+  }
   BOOL windowWithMultipleTabs =
       (tabController && [tabController numberOfTabs] > 1);
   [self adjustCloseWindowMenuItemKeyEquivalent:windowWithMultipleTabs];
@@ -163,6 +246,11 @@
 // we do the enabling.
 - (void)delayedFixCloseMenuItemKeyEquivalents {
   if (!fileMenuUpdatePending_) {
+    // The OS prefers keypresses to timers, so it's possible that a cmd-w
+    // can sneak in before this timer fires. In order to prevent that from
+    // having any bad consequences, just clear the keys combos altogether. They
+    // will be reset when the timer eventually fires.
+    [self clearCloseMenuItemKeyEquivalents];
     [self performSelector:@selector(fixCloseMenuItemKeyEquivalents)
                withObject:nil
                afterDelay:0];
@@ -183,7 +271,11 @@
 // Called when the number of tabs changes in one of the browser windows. The
 // object is the tab strip controller, but we don't currently care.
 - (void)tabsChanged:(NSNotification*)notify {
-  [self delayedFixCloseMenuItemKeyEquivalents];
+  // We don't need to do this on a delay, as in the method above, because the
+  // window layering isn't changing. As a result, there's no chance that a
+  // different window will sneak in as the key window and cause the problems
+  // we hacked around above by clearing the key equivalents.
+  [self fixCloseMenuItemKeyEquivalents];
 }
 
 // If the auto-update interval is not set, make it 5 hours.
@@ -215,16 +307,8 @@
   DCHECK(g_browser_process);
   g_browser_process->AddRefModule();
 
-  // Create the localizer for the main menu. We can't do this in the nib
-  // because it's too early. Do it before we create any bookmark menus as well,
-  // just in case one has a title that matches any of our strings (unlikely,
-  // but technically possible).
-  scoped_nsobject<MenuLocalizer> localizer(
-      [[MenuLocalizer alloc] initWithBundle:nil]);
-  [localizer localizeObject:[NSApplication sharedApplication]
-                recursively:YES];
-
-  bookmarkMenuBridge_.reset(new BookmarkMenuBridge());
+  bookmarkMenuBridge_.reset(new BookmarkMenuBridge([self defaultProfile]));
+  historyMenuBridge_.reset(new HistoryMenuBridge([self defaultProfile]));
 
   [self setUpdateCheckInterval];
 
@@ -232,44 +316,106 @@
   // current locale (see http://crbug.com/7647 for details).
   // We need a valid g_browser_process to get the profile which is why we can't
   // call this from awakeFromNib.
-  EncodingMenuControllerDelegate::BuildEncodingMenu([self defaultProfile]);
+  NSMenu* view_menu = [[[NSApp mainMenu] itemWithTag:IDC_VIEW_MENU] submenu];
+  NSMenuItem* encoding_menu_item = [view_menu itemWithTag:IDC_ENCODING_MENU];
+  NSMenu *encoding_menu = [encoding_menu_item submenu];
+  EncodingMenuControllerDelegate::BuildEncodingMenu([self defaultProfile],
+                                                    encoding_menu);
 
   // Now that we're initialized we can open any URLs we've been holding onto.
   [self openPendingURLs];
 }
 
-// We can't use the standard terminate: method because it will abruptly exit
-// the app and leave things on the stack in an unfinalized state. We need to
-// post a quit message to our run loop so the stack can gracefully unwind.
-- (IBAction)quit:(id)sender {
-  // TODO(pinkerton):
-  // since we have to roll it ourselves, ask the delegate (ourselves, really)
-  // if we should terminate. For example, we might not want to if the user
-  // has ongoing downloads or multiple windows/tabs open. However, this would
-  // require posting UI and may require spinning up another run loop to
-  // handle it. If it says to continue, post the quit message, otherwise
-  // go back to normal.
+// Helper function for populating and displaying the in progress downloads at
+// exit alert panel.
+- (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount {
+  NSString* warningText = nil;
+  NSString* explanationText = nil;
+  NSString* waitTitle = nil;
+  NSString* exitTitle = nil;
 
-  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
-  [em removeEventHandlerForEventClass:kInternetEventClass
-                           andEventID:kAEGetURL];
-  [em removeEventHandlerForEventClass:'WWW!'
-                           andEventID:'OURL'];
-  [em removeEventHandlerForEventClass:kCoreEventClass
-                           andEventID:kAEOpenDocuments];
+  std::wstring product_name = l10n_util::GetString(IDS_PRODUCT_NAME);
 
-  // TODO(pinkerton): Not sure where this should live, including it here
-  // causes all sorts of asserts from the open renderers. On Windows, it
-  // lives in Browser::OnWindowClosing, but that's not appropriate on Mac
-  // since we don't shut down when we reach zero windows.
-  // browser_shutdown::OnShutdownStarting(browser_shutdown::WINDOW_CLOSE);
+  // Set the dialog text based on whether or not there are multiple downloads.
+  if (downloadCount == 1) {
+    // Dialog text: warning and explanation.
+    warningText =
+        base::SysWideToNSString(l10n_util::GetStringF(
+            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING, product_name));
+    explanationText =
+        base::SysWideToNSString(l10n_util::GetStringF(
+            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION, product_name));
 
-  // Close all the windows.
-  BrowserList::CloseAllBrowsers(true);
+    // Cancel download and exit button text.
+    exitTitle =
+        base::SysWideToNSString(l10n_util::GetString(
+            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL));
 
-  // Release the reference to the browser process. Once all the browsers get
-  // dealloc'd, it will stop the RunLoop and fall back into main().
-  g_browser_process->ReleaseModule();
+    // Wait for download button text.
+    waitTitle =
+        base::SysWideToNSString(l10n_util::GetString(
+            IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
+  } else {
+    // Dialog text: warning and explanation.
+    warningText =
+        base::SysWideToNSString(l10n_util::GetStringF(
+            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING, product_name,
+            IntToWString(downloadCount)));
+    explanationText =
+        base::SysWideToNSString(l10n_util::GetStringF(
+            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION, product_name));
+
+    // Cancel downloads and exit button text.
+    exitTitle =
+        base::SysWideToNSString(l10n_util::GetString(
+            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL));
+
+    // Wait for downloads button text.
+    waitTitle =
+        base::SysWideToNSString(l10n_util::GetString(
+            IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
+  }
+
+  // 'waitButton' is the default choice.
+  int choice = NSRunAlertPanel(warningText, explanationText,
+                               waitTitle, exitTitle, nil);
+  return choice == NSAlertDefaultReturn ? YES : NO;
+}
+
+// Check all profiles for in progress downloads, and if we find any, prompt the
+// user to see if we should continue to exit (and thus cancel the downloads), or
+// if we should wait.
+- (BOOL)shouldQuitWithInProgressDownloads {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  if (!profile_manager)
+    return YES;
+
+  ProfileManager::const_iterator it = profile_manager->begin();
+  for (; it != profile_manager->end(); ++it) {
+    Profile* profile = *it;
+    DownloadManager* download_manager = profile->GetDownloadManager();
+    if (download_manager && download_manager->in_progress_count() > 0) {
+      int downloadCount = download_manager->in_progress_count();
+      if ([self userWillWaitForInProgressDownloads:downloadCount]) {
+        // Create a new browser window (if necessary) and navigate to the
+        // downloads page if the user chooses to wait.
+        Browser* browser = BrowserList::FindBrowserWithProfile(profile);
+        if (!browser) {
+          browser = Browser::Create(profile);
+          browser->window()->Show();
+        }
+        DCHECK(browser);
+        browser->ShowDownloadsTab();
+        return NO;
+      }
+
+      // User wants to exit.
+      return YES;
+    }
+  }
+
+  // No profiles or active downloads found, okay to exit.
+  return YES;
 }
 
 // Called to determine if we should enable the "restore tab" menu item.
@@ -278,6 +424,15 @@
 - (BOOL)canRestoreTab {
   TabRestoreService* service = [self defaultProfile]->GetTabRestoreService();
   return service && !service->entries().empty();
+}
+
+// Returns true if there is no browser window, or if the active window is
+// blocked by a modal dialog.
+- (BOOL)keyWindowIsMissingOrBlocked {
+  Browser* browser = BrowserList::GetLastActive();
+  return browser == NULL ||
+         ![[browser->window()->GetNativeHandle() attachedSheet]
+           isKindOfClass:[NSWindow class]];
 }
 
 // Called to validate menu items when there are no key windows. All the
@@ -294,17 +449,30 @@
     if (menuState_->SupportsCommand(tag)) {
       switch (tag) {
         case IDC_RESTORE_TAB:
-          enable = [self canRestoreTab];
+          enable = [self keyWindowIsMissingOrBlocked] && [self canRestoreTab];
+          break;
+        // The File Menu commands are not automatically disabled by Cocoa when
+        // a dialog sheet obscures the browser window, so we disable them here.
+        // We don't need to include IDC_CLOSE_WINDOW, because app_controller
+        // is only activated when there are no key windows (see function
+        // comment).
+        case IDC_OPEN_FILE:
+        case IDC_NEW_WINDOW:
+        case IDC_NEW_TAB:
+        case IDC_NEW_INCOGNITO_WINDOW:
+          enable = [self keyWindowIsMissingOrBlocked];
           break;
         default:
           enable = menuState_->IsCommandEnabled(tag) ? YES : NO;
       }
     }
-  } else if (action == @selector(quit:)) {
+  } else if (action == @selector(terminate:)) {
     enable = YES;
   } else if (action == @selector(showPreferences:)) {
     enable = YES;
   } else if (action == @selector(orderFrontStandardAboutPanel:)) {
+    enable = YES;
+  } else if (action == @selector(newWindowFromDock:)) {
     enable = YES;
   }
   return enable;
@@ -324,7 +492,7 @@
       Browser::OpenEmptyWindow(defaultProfile);
       break;
     case IDC_NEW_INCOGNITO_WINDOW:
-      Browser::OpenURLOffTheRecord(defaultProfile, GURL());
+      Browser::OpenEmptyWindow(defaultProfile->GetOffTheRecordProfile());
       break;
     case IDC_RESTORE_TAB:
       Browser::OpenWindowWithRestoredTabs(defaultProfile);
@@ -499,14 +667,10 @@
 }
 
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
-#if !defined(GOOGLE_CHROME_BUILD)
-  // If not branded behave like a generic Cocoa app.
-  [NSApp orderFrontStandardAboutPanel:sender];
-#else
   // Otherwise bring up our special dialog (e.g. with an auto-update button).
   if (!aboutController_) {
     aboutController_.reset([[AboutWindowController alloc]
-                             initWithWindowNibName:@"About"]);
+                             initWithProfile:[self defaultProfile]]);
     if (!aboutController_) {
       // If we get here something is wacky.  I managed to do it when
       // testing by explicitly forcing an auto-update to an older
@@ -527,7 +691,43 @@
   if (![[aboutController_ window] isVisible])
     [[aboutController_ window] center];
   [aboutController_ showWindow:self];
-#endif
+}
+
+// Explicitly bring to the foreground when creating new windows from the dock.
+- (void)newWindowFromDock:(id)sender {
+  [NSApp activateIgnoringOtherApps:YES];
+  [self commandDispatch:sender];
+}
+
+- (NSMenu*)applicationDockMenu:(id)sender {
+  NSMenu* dockMenu = [[[NSMenu alloc] initWithTitle: @""] autorelease];
+  NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);
+  scoped_nsobject<NSMenuItem> item([[NSMenuItem alloc]
+                                       initWithTitle:titleStr
+                                       action:@selector(newWindowFromDock:)
+                                       keyEquivalent:@""]);
+  [item setTarget:self];
+  [item setTag:IDC_NEW_WINDOW];
+  [dockMenu addItem:item];
+
+  titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_INCOGNITO_WINDOW_MAC);
+  item.reset([[NSMenuItem alloc] initWithTitle:titleStr
+                                 action:@selector(newWindowFromDock:)
+                                 keyEquivalent:@""]);
+  [item setTarget:self];
+  [item setTag:IDC_NEW_INCOGNITO_WINDOW];
+  [dockMenu addItem:item];
+
+  return dockMenu;
 }
 
 @end
+
+//---------------------------------------------------------------------------
+
+// Stub for cross-platform method that isn't called on Mac OS X.
+void ShowOptionsWindow(OptionsPage page,
+                       OptionsGroup highlight_group,
+                       Profile* profile) {
+  NOTIMPLEMENTED();
+}

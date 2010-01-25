@@ -11,13 +11,14 @@
 #include "net/base/escape.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/api/public/WebData.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/api/public/WebScriptSource.h"
-#include "webkit/glue/webframe.h"
-#include "webkit/glue/webview.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
+using WebKit::WebFrame;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 
@@ -29,6 +30,8 @@ using WebKit::WebString;
 #define TEST_PLUGIN_NAME "libnpapi_test_plugin.so"
 #endif
 
+// Ignore these until 64-bit plugin build is fixed. http://crbug.com/18337
+#if !defined(ARCH_CPU_64_BITS)
 // Provides functionality for creating plugin tests.
 class PluginTest : public TestShellTest {
  public:
@@ -97,23 +100,23 @@ TEST_F(PluginTest, Refresh) {
   // test plugin from a previous test.
   DeleteTestPlugin();
   ASSERT_FALSE(file_util::PathExists(plugin_file_path_));
-  test_shell_->webView()->GetMainFrame()->ExecuteScript(refresh);
+  test_shell_->webView()->mainFrame()->executeScript(refresh);
 
-  test_shell_->webView()->GetMainFrame()->LoadHTMLString(
+  test_shell_->webView()->mainFrame()->loadHTMLString(
       html, GURL("about:blank"));
   test_shell_->WaitTestFinished();
 
-  std::wstring text;
-  test_shell_->webView()->GetMainFrame()->ExecuteScript(call_check);
-  test_shell_->webView()->GetMainFrame()->GetContentAsPlainText(10000, &text);
-  ASSERT_EQ(text, L"FAIL");
+  std::string text;
+  test_shell_->webView()->mainFrame()->executeScript(call_check);
+  text = test_shell_->webView()->mainFrame()->contentAsText(10000).utf8();
+  ASSERT_EQ(text, "FAIL");
 
   CopyTestPlugin();
 
-  test_shell_->webView()->GetMainFrame()->ExecuteScript(refresh);
-  test_shell_->webView()->GetMainFrame()->ExecuteScript(call_check);
-  test_shell_->webView()->GetMainFrame()->GetContentAsPlainText(10000, &text);
-  ASSERT_EQ(text, L"DONE");
+  test_shell_->webView()->mainFrame()->executeScript(refresh);
+  test_shell_->webView()->mainFrame()->executeScript(call_check);
+  text = test_shell_->webView()->mainFrame()->contentAsText(10000).utf8();
+  ASSERT_EQ(text, "DONE");
 }
 
 #if defined(OS_WIN)
@@ -136,14 +139,13 @@ TEST_F(PluginTest, DefaultPluginLoadTest) {
       </DIV>\
       ";
 
-  test_shell_->webView()->GetMainFrame()->LoadHTMLString(
+  test_shell_->webView()->mainFrame()->loadHTMLString(
       html, GURL("about:blank"));
   test_shell_->WaitTestFinished();
 
-  std::wstring text;
-  test_shell_->webView()->GetMainFrame()->GetContentAsPlainText(10000, &text);
-
-  ASSERT_EQ(true, StartsWith(text, L"DONE", true));
+  std::string text =
+      test_shell_->webView()->mainFrame()->contentAsText(10000).utf8();
+  ASSERT_EQ(true, StartsWithASCII(text, "DONE", true));
 }
 #endif
 
@@ -153,7 +155,7 @@ TEST_F(PluginTest, DeleteFrameDuringEvent) {
   FilePath test_html = data_dir_;
   test_html = test_html.AppendASCII("plugins");
   test_html = test_html.AppendASCII("delete_frame.html");
-  test_shell_->LoadURL(test_html.ToWStringHack().c_str());
+  test_shell_->LoadFile(test_html);
   test_shell_->WaitTestFinished();
 
   WebKit::WebMouseEvent input;
@@ -183,10 +185,10 @@ TEST_F(PluginTest, PluginVisibilty) {
   FilePath test_html = data_dir_;
   test_html = test_html.AppendASCII("plugins");
   test_html = test_html.AppendASCII("plugin_visibility.html");
-  test_shell_->LoadURL(test_html.ToWStringHack().c_str());
+  test_shell_->LoadFile(test_html);
   test_shell_->WaitTestFinished();
 
-  WebFrame* main_frame = test_shell_->webView()->GetMainFrame();
+  WebFrame* main_frame = test_shell_->webView()->mainFrame();
   HWND frame_hwnd = test_shell_->webViewWnd();
   HWND plugin_hwnd = NULL;
   EnumChildWindows(frame_hwnd, EnumChildProc,
@@ -194,13 +196,14 @@ TEST_F(PluginTest, PluginVisibilty) {
   ASSERT_TRUE(plugin_hwnd != NULL);
   ASSERT_FALSE(IsWindowVisible(plugin_hwnd));
 
-  main_frame->ExecuteScript(WebString::fromUTF8("showPlugin(true)"));
+  main_frame->executeScript(WebString::fromUTF8("showPlugin(true)"));
   ASSERT_TRUE(IsWindowVisible(plugin_hwnd));
 
-  main_frame->ExecuteScript(WebString::fromUTF8("showFrame(false)"));
+  main_frame->executeScript(WebString::fromUTF8("showFrame(false)"));
   ASSERT_FALSE(IsWindowVisible(plugin_hwnd));
 
-  main_frame->ExecuteScript(WebString::fromUTF8("showFrame(true)"));
+  main_frame->executeScript(WebString::fromUTF8("showFrame(true)"));
   ASSERT_TRUE(IsWindowVisible(plugin_hwnd));
 }
 #endif
+#endif //!ARCH_CPU_64_BITS

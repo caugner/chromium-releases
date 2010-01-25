@@ -33,6 +33,10 @@ NativeViewHost::~NativeViewHost() {
 void NativeViewHost::Attach(gfx::NativeView native_view) {
   DCHECK(!native_view_);
   native_view_ = native_view;
+  // If set_focus_view() has not been invoked, this view is the one that should
+  // be seen as focused when the native view receives focus.
+  if (!focus_view_)
+    focus_view_ = this;
   native_wrapper_->NativeViewAttached();
 }
 
@@ -48,9 +52,9 @@ void NativeViewHost::SetPreferredSize(const gfx::Size& size) {
 }
 
 void NativeViewHost::NativeViewDestroyed() {
-  // TODO(beng): figure out if this should/could call Detach instead since as it
-  //             stands right now this object is left in an inconsistent state.
-  native_view_ = NULL;
+  // Detach so we can clear our state and notify the native_wrapper_ to release
+  // ref on the native view.
+  Detach();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -63,13 +67,6 @@ gfx::Size NativeViewHost::GetPreferredSize() {
 void NativeViewHost::Layout() {
   if (!native_view_ || !native_wrapper_.get())
     return;
-
-  // Since widgets know nothing about the View hierarchy (they are direct
-  // children of the Widget that hosts our View hierarchy) they need to be
-  // positioned in the coordinate system of the Widget, not the current
-  // view.
-  gfx::Point top_left;
-  ConvertPointToWidget(this, &top_left);
 
   gfx::Rect vis_bounds = GetVisibleBounds();
   bool visible = !vis_bounds.IsEmpty();
@@ -88,10 +85,17 @@ void NativeViewHost::Layout() {
     }
   }
 
-  if (visible)
+  if (visible) {
+    // Since widgets know nothing about the View hierarchy (they are direct
+    // children of the Widget that hosts our View hierarchy) they need to be
+    // positioned in the coordinate system of the Widget, not the current
+    // view.
+    gfx::Point top_left;
+    ConvertPointToWidget(this, &top_left);
     native_wrapper_->ShowWidget(top_left.x(), top_left.y(), width(), height());
-  else
+  } else {
     native_wrapper_->HideWidget();
+  }
 }
 
 void NativeViewHost::Paint(gfx::Canvas* canvas) {

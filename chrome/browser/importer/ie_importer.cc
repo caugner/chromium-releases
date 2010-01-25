@@ -4,23 +4,28 @@
 
 #include "chrome/browser/importer/ie_importer.h"
 
-#include <atlbase.h>
+#include <ole2.h>
 #include <intshcut.h>
 #include <pstore.h>
 #include <shlobj.h>
 #include <urlhist.h>
 
 #include <algorithm>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "app/l10n_util.h"
 #include "app/win_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/registry.h"
+#include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/win_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/time_format.h"
@@ -60,46 +65,43 @@ const GUID IEImporter::kUnittestGUID = { 0xa79029d6, 0x753e, 0x4e27,
 
 void IEImporter::StartImport(ProfileInfo profile_info,
                              uint16 items,
-                             ProfileWriter* writer,
-                             MessageLoop* delagate_loop,
-                             ImporterHost* host) {
-  writer_ = writer;
+                             ImporterBridge* bridge) {
+  bridge_ = bridge;
   source_path_ = profile_info.source_path;
-  importer_host_ = host;
 
-  NotifyStarted();
+  bridge_->NotifyStarted();
 
-  // Some IE settings (such as Protected Storage) is obtained via COM APIs.
+  // Some IE settings (such as Protected Storage) are obtained via COM APIs.
   win_util::ScopedCOMInitializer com_initializer;
 
   if ((items & HOME_PAGE) && !cancelled())
     ImportHomepage();  // Doesn't have a UI item.
   // The order here is important!
+  if ((items & HISTORY) && !cancelled()) {
+    bridge_->NotifyItemStarted(HISTORY);
+    ImportHistory();
+    bridge_->NotifyItemEnded(HISTORY);
+  }
   if ((items & FAVORITES) && !cancelled()) {
-    NotifyItemStarted(FAVORITES);
+    bridge_->NotifyItemStarted(FAVORITES);
     ImportFavorites();
-    NotifyItemEnded(FAVORITES);
+    bridge_->NotifyItemEnded(FAVORITES);
   }
   if ((items & SEARCH_ENGINES) && !cancelled()) {
-    NotifyItemStarted(SEARCH_ENGINES);
+    bridge_->NotifyItemStarted(SEARCH_ENGINES);
     ImportSearchEngines();
-    NotifyItemEnded(SEARCH_ENGINES);
+    bridge_->NotifyItemEnded(SEARCH_ENGINES);
   }
   if ((items & PASSWORDS) && !cancelled()) {
-    NotifyItemStarted(PASSWORDS);
+    bridge_->NotifyItemStarted(PASSWORDS);
     // Always import IE6 passwords.
     ImportPasswordsIE6();
 
     if (CurrentIEVersion() >= 7)
       ImportPasswordsIE7();
-    NotifyItemEnded(PASSWORDS);
+    bridge_->NotifyItemEnded(PASSWORDS);
   }
-  if ((items & HISTORY) && !cancelled()) {
-    NotifyItemStarted(HISTORY);
-    ImportHistory();
-    NotifyItemEnded(HISTORY);
-  }
-  NotifyEnded();
+  bridge_->NotifyEnded();
 }
 
 void IEImporter::ImportFavorites() {
@@ -113,10 +115,12 @@ void IEImporter::ImportFavorites() {
   ParseFavoritesFolder(info, &bookmarks);
 
   if (!bookmarks.empty() && !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddBookmarkEntry, bookmarks,
-        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE),
-        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
+    const std::wstring& first_folder_name =
+        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE);
+    int options = 0;
+    if (import_to_bookmark_bar())
+      options = ProfileWriter::IMPORT_TO_BOOKMARK_BAR;
+    bridge_->AddBookmarkEntries(bookmarks, first_folder_name, options);
   }
 }
 
@@ -142,8 +146,8 @@ void IEImporter::ImportPasswordsIE6() {
     return;
   }
 
-  CComPtr<IPStore> pstore;
-  HRESULT result = PStoreCreateInstance(&pstore, 0, 0, 0);
+  ScopedComPtr<IPStore, &IID_IPStore> pstore;
+  HRESULT result = PStoreCreateInstance(pstore.Receive(), 0, 0, 0);
   if (result != S_OK) {
     FreeLibrary(pstorec_dll);
     return;
@@ -152,9 +156,9 @@ void IEImporter::ImportPasswordsIE6() {
   std::vector<AutoCompleteInfo> ac_list;
 
   // Enumerates AutoComplete items in the protected database.
-  CComPtr<IEnumPStoreItems> item;
+  ScopedComPtr<IEnumPStoreItems, &IID_IEnumPStoreItems> item;
   result = pstore->EnumItems(0, &AutocompleteGUID,
-                             &AutocompleteGUID, 0, &item);
+                             &AutocompleteGUID, 0, item.Receive());
   if (result != PST_E_OK) {
     pstore.Release();
     FreeLibrary(pstorec_dll);
@@ -235,8 +239,7 @@ void IEImporter::ImportPasswordsIE6() {
         }
     }
 
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddPasswordForm, form));
+    bridge_->SetPasswordForm(form);
   }
 }
 
@@ -263,10 +266,8 @@ void IEImporter::ImportPasswordsIE7() {
         password_info.url_hash = reg_iterator.Name();
         password_info.encrypted_data = value;
         password_info.date_created = Time::Now();
-        main_loop_->PostTask(FROM_HERE,
-            NewRunnableMethod(writer_,
-                              &ProfileWriter::AddIE7PasswordInfo,
-                              password_info));
+
+        bridge_->AddIE7PasswordInfo(password_info);
       }
     }
 
@@ -282,14 +283,14 @@ void IEImporter::ImportHistory() {
                                   chrome::kFileScheme};
   int total_schemes = arraysize(kSchemes);
 
-  CComPtr<IUrlHistoryStg2> url_history_stg2;
+  ScopedComPtr<IUrlHistoryStg2> url_history_stg2;
   HRESULT result;
-  result = url_history_stg2.CoCreateInstance(CLSID_CUrlHistory, NULL,
-                                             CLSCTX_INPROC_SERVER);
+  result = url_history_stg2.CreateInstance(CLSID_CUrlHistory, NULL,
+                                           CLSCTX_INPROC_SERVER);
   if (FAILED(result))
     return;
-  CComPtr<IEnumSTATURL> enum_url;
-  if (SUCCEEDED(result = url_history_stg2->EnumUrls(&enum_url))) {
+  ScopedComPtr<IEnumSTATURL> enum_url;
+  if (SUCCEEDED(result = url_history_stg2->EnumUrls(enum_url.Receive()))) {
     std::vector<history::URLRow> rows;
     STATURL stat_url;
     ULONG fetched;
@@ -327,8 +328,7 @@ void IEImporter::ImportHistory() {
     }
 
     if (!rows.empty() && !cancelled()) {
-      main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-          &ProfileWriter::AddHistoryPage, rows));
+      bridge_->SetHistoryItems(rows);
     }
   }
 }
@@ -405,9 +405,7 @@ void IEImporter::ImportSearchEngines() {
           static_cast<int>(search_engines.size()) - 1;
     }
   }
-  main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-      &ProfileWriter::AddKeywords, search_engines, default_search_engine_index,
-      true));
+  bridge_->SetKeywords(search_engines, default_search_engine_index, true);
 }
 
 void IEImporter::ImportHomepage() {
@@ -434,8 +432,7 @@ void IEImporter::ImportHomepage() {
       return;
   }
 
-  main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-      &ProfileWriter::AddHomepage, homepage));
+  bridge_->AddHomePage(homepage);
 }
 
 bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo *info) {
@@ -541,14 +538,14 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
 
 std::wstring IEImporter::ResolveInternetShortcut(const std::wstring& file) {
   win_util::CoMemReleaser<wchar_t> url;
-  CComPtr<IUniformResourceLocator> url_locator;
-  HRESULT result = url_locator.CoCreateInstance(CLSID_InternetShortcut, NULL,
-                                                CLSCTX_INPROC_SERVER);
+  ScopedComPtr<IUniformResourceLocator> url_locator;
+  HRESULT result = url_locator.CreateInstance(CLSID_InternetShortcut, NULL,
+                                              CLSCTX_INPROC_SERVER);
   if (FAILED(result))
     return std::wstring();
 
-  CComPtr<IPersistFile> persist_file;
-  result = url_locator.QueryInterface(&persist_file);
+  ScopedComPtr<IPersistFile> persist_file;
+  result = persist_file.QueryFrom(url_locator);
   if (FAILED(result))
     return std::wstring();
 

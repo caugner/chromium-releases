@@ -14,7 +14,9 @@
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
+class CairoCachedSurface;
 class GtkThemeProvider;
 
 // These classes implement two kinds of custom-drawn buttons.  They're
@@ -35,11 +37,17 @@ class CustomDrawButtonBase : public NotificationObserver {
 
   ~CustomDrawButtonBase();
 
-  GdkPixbuf* pixbufs(int i) const { return pixbufs_[i]; }
+  // Returns the dimensions of the first surface.
+  int Width() const;
+  int Height() const;
 
   gboolean OnExpose(GtkWidget* widget, GdkEventExpose* e);
 
   void set_paint_override(int state) { paint_override_ = state; }
+  int paint_override() const { return paint_override_; }
+
+  // Set the background details.
+  void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
 
   // Provide NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -47,9 +55,12 @@ class CustomDrawButtonBase : public NotificationObserver {
                        const NotificationDetails& details);
 
  private:
-  // We store one GdkPixbuf* for each possible state of the button;
+  // We store one surface for each possible state of the button;
   // INSENSITIVE is the last available state;
-  GdkPixbuf* pixbufs_[GTK_STATE_INSENSITIVE + 1];
+  scoped_ptr<CairoCachedSurface> surfaces_[GTK_STATE_INSENSITIVE + 1];
+
+  // The background image.
+  scoped_ptr<CairoCachedSurface> background_image_;
 
   // If non-negative, the state to paint the button.
   int paint_override_;
@@ -78,8 +89,7 @@ class CustomDrawButton : public NotificationObserver {
   CustomDrawButton(int normal_id,
                    int active_id,
                    int highlight_id,
-                   int depressed_id,
-                   const char* stock_id);
+                   int depressed_id);
 
   // Same as above, but uses themed (and possibly tinted) images.
   CustomDrawButton(GtkThemeProvider* theme_provider,
@@ -87,7 +97,8 @@ class CustomDrawButton : public NotificationObserver {
                    int active_id,
                    int highlight_id,
                    int depressed_id,
-                   const char* stock_id);
+                   const char* stock_id,
+                   GtkIconSize stock_size);
 
   ~CustomDrawButton();
 
@@ -112,18 +123,21 @@ class CustomDrawButton : public NotificationObserver {
   // Resume normal drawing of the widget's state.
   void UnsetPaintOverride();
 
+  // Set the background details.
+  void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
+
   // Provide NotificationObserver implementation.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Returns a standard close button.
-  static CustomDrawButton* CloseButton();
+  // Returns a standard close button. Pass a |theme_provider| to use Gtk icons
+  // in Gtk rendering mode.
+  static CustomDrawButton* CloseButton(GtkThemeProvider* theme_provider);
 
  private:
-  // Sets the button to themed or not. Buttons that don't take a theme_provider
-  // can safely pass in NULL.
-  void SetBrowserTheme(GtkThemeProvider* theme_provider);
+  // Sets the button to themed or not.
+  void SetBrowserTheme();
 
   // Callback for custom button expose, used to draw the custom graphics.
   static gboolean OnCustomExpose(GtkWidget* widget,
@@ -135,11 +149,12 @@ class CustomDrawButton : public NotificationObserver {
 
   CustomDrawButtonBase button_base_;
 
-  // The stock icon name.
-  const char* gtk_stock_name_;
+  // Our theme provider.
+  GtkThemeProvider* theme_provider_;
 
-  // Whether we have an expose signal handler we may need to remove.
-  bool has_expose_signal_handler_;
+  // The stock icon name and size.
+  const char* gtk_stock_name_;
+  GtkIconSize icon_size_;
 
   // Used to listen for theme change notifications.
   NotificationRegistrar registrar_;

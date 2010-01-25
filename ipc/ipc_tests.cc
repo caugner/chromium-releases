@@ -26,8 +26,8 @@
 #include "base/global_descriptors_posix.h"
 #endif
 #include "base/perftimer.h"
-#include "base/perf_test_suite.h"
-#include "base/test_suite.h"
+#include "base/test/perf_test_suite.h"
+#include "base/test/test_suite.h"
 #include "base/thread.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_channel.h"
@@ -270,7 +270,7 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
         L"RunTestClient",
         fds_to_map,
         debug_on_start);
-#endif  // defined(OS_POXIX)
+#endif  // defined(OS_POSIX)
 
     ASSERT_TRUE(process_handle);
 
@@ -284,6 +284,73 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
     base::CloseProcessHandle(process_handle);
   }
   thread.Stop();
+}
+
+class ChannelListenerWithOnConnectedSend : public IPC::Channel::Listener {
+ public:
+  virtual void OnChannelConnected(int32 peer_pid) {
+    SendNextMessage();
+  }
+
+  virtual void OnMessageReceived(const IPC::Message& message) {
+    IPC::MessageIterator iter(message);
+
+    iter.NextInt();
+    const std::string data = iter.NextString();
+    const std::string big_string = iter.NextString();
+    EXPECT_EQ(kLongMessageStringNumBytes - 1, big_string.length());
+    SendNextMessage();
+  }
+
+  virtual void OnChannelError() {
+    // There is a race when closing the channel so the last message may be lost.
+    EXPECT_LE(messages_left_, 1);
+    MessageLoop::current()->Quit();
+  }
+
+  void Init(IPC::Message::Sender* s) {
+    sender_ = s;
+    messages_left_ = 50;
+  }
+
+ private:
+  void SendNextMessage() {
+    if (--messages_left_ == 0) {
+      MessageLoop::current()->Quit();
+    } else {
+      Send(sender_, "Foo");
+    }
+  }
+
+  IPC::Message::Sender* sender_;
+  int messages_left_;
+};
+
+TEST_F(IPCChannelTest, SendMessageInChannelConnected) {
+  // This tests the case of a listener sending back an event in it's
+  // OnChannelConnected handler.
+
+  ChannelListenerWithOnConnectedSend channel_listener;
+  // Setup IPC channel.
+  IPC::Channel channel(kTestClientChannel, IPC::Channel::MODE_SERVER,
+                       &channel_listener);
+  channel_listener.Init(&channel);
+  channel.Connect();
+
+  base::ProcessHandle process_handle = SpawnChild(TEST_CLIENT, &channel);
+  ASSERT_TRUE(process_handle);
+
+  Send(&channel, "hello from parent");
+
+  // Run message loop.
+  MessageLoop::current()->Run();
+
+  // Close Channel so client gets its OnChannelError() callback fired.
+  channel.Close();
+
+  // Cleanup child process.
+  EXPECT_TRUE(base::WaitForSingleProcess(process_handle, 5000));
+  base::CloseProcessHandle(process_handle);
 }
 
 MULTIPROCESS_TEST_MAIN(RunTestClient) {

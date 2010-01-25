@@ -18,8 +18,7 @@ namespace views {
 // NativeButtonWin, public:
 
 NativeButtonWin::NativeButtonWin(NativeButton* native_button)
-    : NativeControlWin(),
-      native_button_(native_button) {
+    : native_button_(native_button) {
   // Associates the actual HWND with the native_button so the native_button is
   // the one considered as having the focus (not the wrapper) when the HWND is
   // focused directly (with a click for example).
@@ -61,6 +60,14 @@ View* NativeButtonWin::GetView() {
 void NativeButtonWin::SetFocus() {
   // Focus the associated HWND.
   Focus();
+}
+
+bool NativeButtonWin::UsesNativeLabel() const {
+  return true;
+}
+
+bool NativeButtonWin::UsesNativeRadioButtonGroup() const {
+  return false;
 }
 
 gfx::NativeView NativeButtonWin::GetTestingHandle() const {
@@ -156,6 +163,10 @@ bool NativeCheckboxWin::OnKeyDown(int vkey) {
   return false;
 }
 
+bool NativeCheckboxWin::UsesNativeLabel() const {
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeCheckboxWin, NativeButtonWin overrides:
 
@@ -175,7 +186,7 @@ bool NativeCheckboxWin::ProcessMessage(UINT message, WPARAM w_param,
 
 void NativeCheckboxWin::CreateNativeControl() {
   HWND control_hwnd = CreateWindowEx(
-      WS_EX_TRANSPARENT | GetAdditionalExStyle(), L"BUTTON", L"",
+      GetAdditionalExStyle(), L"BUTTON", L"",
       WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | BS_CHECKBOX,
       0, 0, width(), height(), GetWidget()->GetNativeView(), NULL, NULL, NULL);
   NativeControlCreated(control_hwnd);

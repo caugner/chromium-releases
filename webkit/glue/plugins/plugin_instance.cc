@@ -2,36 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "build/build_config.h"
 
 #include "webkit/glue/plugins/plugin_instance.h"
 
 #include "base/file_util.h"
-#include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/thread_local.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webplugin.h"
+#include "webkit/glue/webplugin_delegate.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/plugins/plugin_string_stream.h"
-#if defined(OS_WIN)
-#include "webkit/glue/plugins/mozilla_extensions.h"
-#endif
 #include "net/base/escape.h"
 
 namespace NPAPI {
-
-// Use TLS to store the PluginInstance object during its creation.  We need to
-// pass this instance to the service manager (MozillaExtensionApi) created as a
-// result of NPN_GetValue in the context of NP_Initialize.
-static base::LazyInstance<base::ThreadLocalPointer<PluginInstance> > lazy_tls(
-    base::LINKER_INITIALIZED);
 
 PluginInstance::PluginInstance(PluginLib *plugin, const std::string &mime_type)
     : plugin_(plugin),
@@ -43,8 +31,11 @@ PluginInstance::PluginInstance(PluginLib *plugin, const std::string &mime_type)
       transparent_(true),
       webplugin_(0),
       mime_type_(mime_type),
-      get_notify_data_(NULL),
       use_mozilla_user_agent_(false),
+#if defined (OS_MACOSX)
+      drawing_model_(0),
+      event_model_(0),
+#endif
       message_loop_(MessageLoop::current()),
       load_manually_(false),
       in_close_streams_(false) {
@@ -68,13 +59,13 @@ PluginInstance::~PluginInstance() {
     plugin_->CloseInstance();
 }
 
-PluginStreamUrl *PluginInstance::CreateStream(int resource_id,
-                                              const std::string &url,
-                                              const std::string &mime_type,
+PluginStreamUrl* PluginInstance::CreateStream(int resource_id,
+                                              const GURL& url,
+                                              const std::string& mime_type,
                                               bool notify_needed,
-                                              void *notify_data) {
-  PluginStreamUrl *stream = new PluginStreamUrl(
-      resource_id, GURL(url), this, notify_needed, notify_data);
+                                              void* notify_data) {
+  PluginStreamUrl* stream = new PluginStreamUrl(
+      resource_id, url, this, notify_needed, notify_data);
 
   AddStream(stream);
   return stream;
@@ -119,32 +110,12 @@ void PluginInstance::CloseStreams() {
   in_close_streams_ = false;
 }
 
-#if defined(OS_WIN)
-bool PluginInstance::HandleEvent(UINT message, WPARAM wParam, LPARAM lParam) {
-  if (!windowless_)
-    return false;
-
-  NPEvent windowEvent;
-  windowEvent.event = message;
-  windowEvent.lParam = static_cast<uint32>(lParam);
-  windowEvent.wParam = static_cast<uint32>(wParam);
-  return NPP_HandleEvent(&windowEvent) != 0;
-}
-#elif defined(OS_LINUX)
-bool PluginInstance::HandleEvent(XEvent* event) {
-  if (!windowless_)
-    return false;
-  return NPP_HandleEvent(event);
-}
-#endif
-
 bool PluginInstance::Start(const GURL& url,
                            char** const param_names,
                            char** const param_values,
                            int param_count,
                            bool load_manually) {
   load_manually_ = load_manually;
-  instance_url_ = url;
   unsigned short mode = load_manually_ ? NP_FULL : NP_EMBED;
   npp_->ndata = this;
 
@@ -161,21 +132,10 @@ NPObject *PluginInstance::GetPluginScriptableObject() {
   return value;
 }
 
-void PluginInstance::SetURLLoadData(const GURL& url,
-                                    intptr_t notify_data) {
-  get_url_ = url;
-  get_notify_data_ = notify_data;
-}
-
 // WebPluginLoadDelegate methods
-void PluginInstance::DidFinishLoadWithReason(NPReason reason) {
-  if (!get_url_.is_empty()) {
-    NPP_URLNotify(get_url_.spec().c_str(), reason,
-        reinterpret_cast<void*>(get_notify_data_));
-  }
-
-  get_url_ = GURL();
-  get_notify_data_ = NULL;
+void PluginInstance::DidFinishLoadWithReason(const GURL& url, NPReason reason,
+                                             void* notify_data) {
+  NPP_URLNotify(url.spec().c_str(), reason, notify_data);
 }
 
 // NPAPI methods
@@ -210,14 +170,6 @@ void PluginInstance::NPP_Destroy() {
     //       to be stored there.
     DCHECK(savedData == 0);
   }
-
-#if defined(OS_WIN)
-  // Clean up back references to this instance if any
-  if (mozilla_extenstions_) {
-    mozilla_extenstions_->DetachFromInstance();
-    mozilla_extenstions_ = NULL;
-  }
-#endif
 
   for (unsigned int file_index = 0; file_index < files_created_.size();
        file_index++) {
@@ -325,7 +277,7 @@ NPError PluginInstance::NPP_SetValue(NPNVariable variable, void *value) {
   return NPERR_INVALID_FUNCTABLE_ERROR;
 }
 
-short PluginInstance::NPP_HandleEvent(NPEvent *event) {
+short PluginInstance::NPP_HandleEvent(void* event) {
   DCHECK(npp_functions_ != 0);
   DCHECK(npp_functions_->event != 0);
   if (npp_functions_->event != 0) {
@@ -343,8 +295,8 @@ bool PluginInstance::NPP_Print(NPPrint* platform_print) {
   return false;
 }
 
-void PluginInstance::SendJavaScriptStream(const std::string& url,
-                                          const std::wstring& result,
+void PluginInstance::SendJavaScriptStream(const GURL& url,
+                                          const std::string& result,
                                           bool success,
                                           bool notify_needed,
                                           intptr_t notify_data) {
@@ -353,34 +305,28 @@ void PluginInstance::SendJavaScriptStream(const std::string& url,
       new PluginStringStream(this, url, notify_needed,
                              reinterpret_cast<void*>(notify_data));
     AddStream(stream);
-    stream->SendToPlugin(WideToUTF8(result), "text/html");
+    stream->SendToPlugin(result, "text/html");
   } else {
     // NOTE: Sending an empty stream here will crash MacroMedia
     // Flash 9.  Just send the URL Notify.
     if (notify_needed) {
-      this->NPP_URLNotify(url.c_str(), NPRES_DONE,
+      this->NPP_URLNotify(url.spec().c_str(), NPRES_DONE,
                           reinterpret_cast<void*>(notify_data));
     }
   }
 }
 
-void PluginInstance::DidReceiveManualResponse(const std::string& url,
+void PluginInstance::DidReceiveManualResponse(const GURL& url,
                                               const std::string& mime_type,
                                               const std::string& headers,
                                               uint32 expected_length,
                                               uint32 last_modified) {
   DCHECK(load_manually_);
-  std::string response_url = url;
-  if (response_url.empty()) {
-    response_url = instance_url_.spec();
-  }
-
-  bool cancel = false;
 
   plugin_data_stream_ = CreateStream(-1, url, mime_type, false, NULL);
 
   plugin_data_stream_->DidReceiveResponse(mime_type, headers, expected_length,
-                                          last_modified, true, &cancel);
+                                          last_modified, true);
 }
 
 void PluginInstance::DidReceiveManualData(const char* buffer, int length) {
@@ -408,52 +354,26 @@ void PluginInstance::DidManualLoadFail() {
 }
 
 void PluginInstance::PluginThreadAsyncCall(void (*func)(void *),
-                                           void *userData) {
+                                           void *user_data) {
   message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &PluginInstance::OnPluginThreadAsyncCall, func, userData));
+      this, &PluginInstance::OnPluginThreadAsyncCall, func, user_data));
 }
 
 void PluginInstance::OnPluginThreadAsyncCall(void (*func)(void *),
-                                             void *userData) {
+                                             void *user_data) {
 #if defined(OS_WIN)
     // We are invoking an arbitrary callback provided by a third
   // party plugin. It's better to wrap this into an exception
   // block to protect us from crashes.
   __try {
-    func(userData);
+    func(user_data);
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     // Maybe we can disable a crashing plugin.
     // But for now, just continue.
   }
 #else
-  NOTIMPLEMENTED();
+  func(user_data);
 #endif
-}
-
-PluginInstance* PluginInstance::SetInitializingInstance(
-    PluginInstance* instance) {
-  PluginInstance* old_instance = lazy_tls.Pointer()->Get();
-  lazy_tls.Pointer()->Set(instance);
-  return old_instance;
-}
-
-PluginInstance* PluginInstance::GetInitializingInstance() {
-  return lazy_tls.Pointer()->Get();
-}
-
-NPError PluginInstance::GetServiceManager(void** service_manager) {
-#if defined(OS_WIN)
-  if (!mozilla_extenstions_) {
-    mozilla_extenstions_ = new MozillaExtensionApi(this);
-  }
-
-  DCHECK(mozilla_extenstions_);
-  mozilla_extenstions_->QueryInterface(nsIServiceManager::GetIID(),
-                                       service_manager);
-#else
-  NOTIMPLEMENTED();
-#endif
-  return NPERR_NO_ERROR;
 }
 
 void PluginInstance::PushPopupsEnabledState(bool enabled) {

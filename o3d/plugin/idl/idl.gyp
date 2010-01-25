@@ -7,9 +7,9 @@
     '../../build/common.gypi',
   ],
   'variables': {
-    'chromium_code': 1,
-    'idl_out_dir': '<(SHARED_INTERMEDIATE_DIR)/idl_glue',
-    'static_glue_dir': '../../../third_party/nixysa/files/static_glue/npapi',
+    'chromium_code': 0,
+    'idl_out_path': '<(SHARED_INTERMEDIATE_DIR)/idl_glue',
+    'static_glue_dir': '../../../<(nixysadir)/static_glue/npapi',
     'idl_files': [
       'archive_request.idl',
       'bitmap.idl',
@@ -71,81 +71,116 @@
       'viewport.idl',
     ],
   },
+  'target_defaults': {
+    'include_dirs': [
+      '../..',
+      '../../..',
+      '../../../<(npapidir)/include',
+      '../../../<(zlibdir)',
+      '../../../skia/config',
+      '../../plugin/cross',
+      '<(static_glue_dir)',
+      '<(idl_out_path)',
+    ],
+    'conditions': [
+      ['OS=="win"',
+        {
+          'defines': [
+            'OS_WINDOWS',
+          ],
+        },
+      ],
+      ['OS=="mac"',
+        {
+          'include_dirs': [
+            '../mac',
+          ],
+          'defines': [
+            'XP_MACOSX',
+          ],
+        },
+      ],
+      ['OS=="linux"',
+        {
+          'include_dirs': [
+            '/usr/include/cairo',
+            '/usr/include/glib-2.0',
+            '/usr/include/gtk-2.0',
+            '/usr/include/pango-1.0',
+            '/usr/lib/glib-2.0/include',
+            '/usr/lib/gtk-2.0/include',
+            '/usr/include/atk-1.0',
+          ],
+        },
+      ],
+    ],
+  },
   'targets': [
+    {
+      # This target is only used when we're not built as part of Chrome,
+      # since chrome has its own implementation of the NPAPI from webkit.
+      'target_name': 'o3dNpnApi',
+      'type': 'static_library',
+      'include_dirs': [
+        '../../../<(npapidir)/include',
+      ],
+      'sources': [
+        '<(static_glue_dir)/npn_api.cc',
+      ],
+    },
     {
       'target_name': 'o3dPluginIdl',
       'type': 'static_library',
-      'rules': [
+      'dependencies': [
+        '../../../<(zlibdir)/zlib.gyp:zlib',
+        '../../../base/base.gyp:base',
+        '../../../skia/skia.gyp:skia',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '../../../<(npapidir)/include',
+          '<(idl_out_path)',
+          '<(static_glue_dir)',
+        ],
+      },
+      'actions': [
         {
-          'rule_name': 'generate_idl',
-          'extension': 'idl',
+          'action_name': 'generate_idl',
           'process_outputs_as_sources': 1,
           'inputs': [
-            '../../../<(nixysadir)/codegen.py',
-            'codegen.py',
+            '<@(idl_files)',
           ],
           'outputs': [
-            '<(idl_out_dir)/<(RULE_INPUT_ROOT)_glue.cc',
-            '<(idl_out_dir)/<(RULE_INPUT_ROOT)_glue.h',
-            '<(idl_out_dir)/globals_glue.cc',
-            '<(idl_out_dir)/globals_glue.h',
-            '<(idl_out_dir)/hash',
-            '<(idl_out_dir)/parsetab.py',
-            '<(idl_out_dir)/parsetab.pyc',
+            '<(idl_out_path)/hash',
+            '<(idl_out_path)/globals_glue.cc',
+            '<(idl_out_path)/globals_glue.h',
+            '<!@(python idl_filenames.py \'<(idl_out_path)\' <@(idl_files))',
           ],
           'action': [
             'python',
             'codegen.py',
             '--binding-module=o3d:../../plugin/o3d_binding.py',
             '--generate=npapi',
-            '--output-dir=<(idl_out_dir)',
+            '--output-dir=<(idl_out_path)',
             '<@(idl_files)',
           ],
-          'message': 'Generating IDL glue for <(RULE_INPUT_PATH)',
+          'message': 'Generating IDL glue code.',
         },
-      ],
-      'include_dirs': [
-        '../..',
-        '../../..',
-        '../../../<(npapidir)/include',
-        '../../plugin/cross',
-        '<(static_glue_dir)',
-        '<(idl_out_dir)',
-      ],
-      'dependencies': [
-        '../../../<(zlibdir)/zlib.gyp:zlib',
-        '../../../base/base.gyp:base',
-        '../../../skia/skia.gyp:skia',
       ],
       'sources': [
         '../cross/archive_request_static_glue.cc',
         '../cross/archive_request_static_glue.h',
         '../cross/o3d_glue.cc',
         '../cross/o3d_glue.h',
-        '<(idl_out_dir)/globals_glue.cc',
-        '<(idl_out_dir)/globals_glue.h',
         '<(static_glue_dir)/common.cc',
-        '<(static_glue_dir)/npn_api.cc',
         '<(static_glue_dir)/static_object.cc',
-        '<@(idl_files)',
-      ],
-      'hard_dependency': 1,
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '../../../<(npapidir)/include',
-          '<(idl_out_dir)',
-          '<(static_glue_dir)',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"',
-          {
-            'defines': [
-              'OS_WINDOWS',
-            ],
-          },
-        ],
       ],
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

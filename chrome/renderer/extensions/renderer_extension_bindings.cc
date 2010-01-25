@@ -29,6 +29,18 @@ using bindings_utils::ExtensionBase;
 
 namespace {
 
+struct ExtensionData {
+  struct PortData {
+    int ref_count;  // how many contexts have a handle to this port
+    bool disconnected;  // true if this port was forcefully disconnected
+    PortData() : ref_count(0), disconnected(false) {}
+  };
+  std::map<int, PortData> ports;  // port ID -> data
+};
+ExtensionData::PortData& GetPortData(int port_id) {
+  return Singleton<ExtensionData>::get()->ports[port_id];
+}
+
 const char* kExtensionDeps[] = { EventBindings::kName };
 
 class ExtensionImpl : public ExtensionBase {
@@ -48,6 +60,10 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(PostMessage);
     } else if (name->Equals(v8::String::New("CloseChannel"))) {
       return v8::FunctionTemplate::New(CloseChannel);
+    } else if (name->Equals(v8::String::New("PortAddRef"))) {
+      return v8::FunctionTemplate::New(PortAddRef);
+    } else if (name->Equals(v8::String::New("PortRelease"))) {
+      return v8::FunctionTemplate::New(PortRelease);
     }
     return ExtensionBase::GetNativeFunction(name);
   }
@@ -61,12 +77,15 @@ class ExtensionImpl : public ExtensionBase {
     if (!renderview)
       return v8::Undefined();
 
-    if (args.Length() >= 2 && args[0]->IsString() && args[1]->IsString()) {
-      std::string id = *v8::String::Utf8Value(args[0]->ToString());
-      std::string channel_name = *v8::String::Utf8Value(args[1]->ToString());
+    if (args.Length() >= 3 && args[0]->IsString() && args[1]->IsString() &&
+        args[2]->IsString()) {
+      std::string source_id = *v8::String::Utf8Value(args[0]->ToString());
+      std::string target_id = *v8::String::Utf8Value(args[1]->ToString());
+      std::string channel_name = *v8::String::Utf8Value(args[2]->ToString());
       int port_id = -1;
       renderview->Send(new ViewHostMsg_OpenChannelToExtension(
-          renderview->routing_id(), id, channel_name, &port_id));
+          renderview->routing_id(), source_id, target_id,
+          channel_name, &port_id));
       return v8::Integer::New(port_id);
     }
     return v8::Undefined();
@@ -87,13 +106,40 @@ class ExtensionImpl : public ExtensionBase {
     return v8::Undefined();
   }
 
-  // Sends a message along the given channel.
+  // Forcefully disconnects a port.
   static v8::Handle<v8::Value> CloseChannel(const v8::Arguments& args) {
     if (args.Length() >= 1 && args[0]->IsInt32()) {
       int port_id = args[0]->Int32Value();
       // Send via the RenderThread because the RenderView might be closing.
       EventBindings::GetRenderThread()->Send(
           new ViewHostMsg_ExtensionCloseChannel(port_id));
+      GetPortData(port_id).disconnected = true;
+    }
+    return v8::Undefined();
+  }
+
+  // A new port has been created for a context.  This occurs both when script
+  // opens a connection, and when a connection is opened to this script.
+  static v8::Handle<v8::Value> PortAddRef(const v8::Arguments& args) {
+    if (args.Length() >= 1 && args[0]->IsInt32()) {
+      int port_id = args[0]->Int32Value();
+      ++GetPortData(port_id).ref_count;
+    }
+    return v8::Undefined();
+  }
+
+  // The frame a port lived in has been destroyed.  When there are no more
+  // frames with a reference to a given port, we will disconnect it and notify
+  // the other end of the channel.
+  static v8::Handle<v8::Value> PortRelease(const v8::Arguments& args) {
+    if (args.Length() >= 1 && args[0]->IsInt32()) {
+      int port_id = args[0]->Int32Value();
+      if (!GetPortData(port_id).disconnected &&
+          --GetPortData(port_id).ref_count == 0) {
+        // Send via the RenderThread because the RenderView might be closing.
+        EventBindings::GetRenderThread()->Send(
+            new ViewHostMsg_ExtensionCloseChannel(port_id));
+      }
     }
     return v8::Undefined();
   }
@@ -150,7 +196,8 @@ const char* RendererExtensionBindings::kName =
     "chrome/RendererExtensionBindings";
 
 v8::Extension* RendererExtensionBindings::Get() {
-  return new ExtensionImpl();
+  static v8::Extension* extension = new ExtensionImpl();
+  return extension;
 }
 
 void RendererExtensionBindings::Invoke(const std::string& function_name,

@@ -10,15 +10,17 @@
 
 #include "build/build_config.h"
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
+class ImporterBridge;
 class MessageLoop;
 class TemplateURL;
 
@@ -27,19 +29,6 @@ struct IE7PasswordInfo;
 namespace webkit_glue {
 struct PasswordForm;
 }
-
-// An enumeration of the type of browsers that we support to import
-// settings and data from them.
-enum ProfileType {
-#if defined(OS_WIN)
-  MS_IE,
-#endif
-  FIREFOX2,
-  FIREFOX3,
-  GOOGLE_TOOLBAR5,
-  // Identifies a 'bookmarks.html' file.
-  BOOKMARKS_HTML
-};
 
 // An enumeration of the type of data we want to import.
 enum ImportItem {
@@ -53,20 +42,20 @@ enum ImportItem {
   ALL            = 0x003f
 };
 
-typedef struct {
+struct ProfileInfo {
   std::wstring description;
   ProfileType browser_type;
   std::wstring source_path;
   std::wstring app_path;
   uint16 services_supported;  // bitmap of ImportItem
-} ProfileInfo;
+};
 
 class FirefoxProfileLock;
 class Importer;
 
 // ProfileWriter encapsulates profile for writing entries into it.
 // This object must be invoked on UI thread.
-class ProfileWriter : public base::RefCounted<ProfileWriter> {
+class ProfileWriter : public base::RefCountedThreadSafe<ProfileWriter> {
  public:
   // Used to identify how the bookmarks are added.
   enum BookmarkOptions {
@@ -156,13 +145,13 @@ class ProfileWriter : public base::RefCounted<ProfileWriter> {
 
   Profile* profile_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ProfileWriter);
+  DISALLOW_COPY_AND_ASSIGN(ProfileWriter);
 };
 
 // This class hosts the importers. It enumerates profiles from other
 // browsers dynamically, and controls the process of importing. When
 // the import process is done, ImporterHost deletes itself.
-class ImporterHost : public base::RefCounted<ImporterHost>,
+class ImporterHost : public base::RefCountedThreadSafe<ImporterHost>,
                      public BookmarkModelObserver,
                      public NotificationObserver {
  public:
@@ -193,6 +182,7 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
                                              const BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          const BookmarkNode* node) {}
+  virtual void BookmarkModelBeingDeleted(BookmarkModel* model);
 
   // NotificationObserver method. Called when TemplateURLModel has been loaded.
   void Observe(NotificationType type,
@@ -261,42 +251,38 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   void ImportItemEnded(ImportItem item);
   void ImportEnded();
 
-  Importer* CreateImporterByType(ProfileType type);
+  int GetAvailableProfileCount() {
+      return importer_list_.GetAvailableProfileCount();
+  }
 
-  // Returns the number of different browser profiles you can import from.
-  int GetAvailableProfileCount();
-
-  // Returns the name of the profile at the 'index' slot. The profiles are
+    // Returns the name of the profile at the 'index' slot. The profiles are
   // ordered such that the profile at index 0 is the likely default browser.
-  std::wstring GetSourceProfileNameAt(int index) const;
+  std::wstring GetSourceProfileNameAt(int index) const {
+    return importer_list_.GetSourceProfileNameAt(index);
+  }
 
   // Returns the ProfileInfo at the specified index.  The ProfileInfo should be
   // passed to StartImportSettings().
-  const ProfileInfo& GetSourceProfileInfoAt(int index) const;
+  const ProfileInfo& GetSourceProfileInfoAt(int index) const {
+    return importer_list_.GetSourceProfileInfoAt(index);
+  }
 
-  // Returns the ProfileInfo with the given browser type
-  const ProfileInfo& GetSourceProfileInfoForBrowserType(int browser_type) const;
+  // Returns the ProfileInfo with the given browser type.
+  const ProfileInfo& GetSourceProfileInfoForBrowserType(int browser_type)
+      const {
+    return importer_list_.GetSourceProfileInfoForBrowserType(browser_type);
+  }
+
 
  private:
   // If we're not waiting on any model to finish loading, invokes the task_.
   void InvokeTaskIfDone();
 
-  // Detects the installed browsers and their associated profiles, then
-  // stores their information in a list. It returns the list of description
-  // of all profiles.
-  void DetectSourceProfiles();
-
-  // Helper methods for detecting available profiles.
-#if defined(OS_WIN)
-  void DetectIEProfiles();
-#endif
-  void DetectFirefoxProfiles();
-  void DetectGoogleToolbarProfiles();
-
   NotificationRegistrar registrar_;
+  ImporterList importer_list_;
 
-  // The list of profiles with the default one first.
-  std::vector<ProfileInfo*> source_profiles_;
+  // Profile we're importing from.
+  Profile* profile_;
 
   Observer* observer_;
   scoped_refptr<ProfileWriter> writer_;
@@ -313,6 +299,9 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   // True if we're waiting for the model to finish loading.
   bool waiting_for_bookmarkbar_model_;
 
+  // Have we installed a listener on the bookmark model?
+  bool installed_bookmark_observer_;
+
   // True if source profile is readable.
   bool is_source_readable_;
 
@@ -325,14 +314,12 @@ class ImporterHost : public base::RefCounted<ImporterHost>,
   // Firefox profile lock.
   scoped_ptr<FirefoxProfileLock> firefox_lock_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ImporterHost);
+  DISALLOW_COPY_AND_ASSIGN(ImporterHost);
 };
 
 // The base class of all importers.
-class Importer : public base::RefCounted<Importer> {
+class Importer : public base::RefCountedThreadSafe<Importer> {
  public:
-  virtual ~Importer() { }
-
   // All importers should implement this method by adding their
   // import logic. And it will be run in file thread by ImporterHost.
   //
@@ -341,9 +328,7 @@ class Importer : public base::RefCounted<Importer> {
   // stuff have been finished.
   virtual void StartImport(ProfileInfo profile_info,
                            uint16 items,
-                           ProfileWriter* writer,
-                           MessageLoop* delegate_loop,
-                           ImporterHost* host) = 0;
+                           ImporterBridge* bridge) = 0;
 
   // Cancels the import process.
   virtual void Cancel() { cancelled_ = true; }
@@ -357,20 +342,6 @@ class Importer : public base::RefCounted<Importer> {
  protected:
   Importer();
 
-  // Notifies the coordinator that the collection of data for the specified
-  // item has begun.
-  void NotifyItemStarted(ImportItem item);
-
-  // Notifies the coordinator that the collection of data for the specified
-  // item has completed.
-  void NotifyItemEnded(ImportItem item);
-
-  // Notifies the coordinator that the import operation has begun.
-  void NotifyStarted();
-
-  // Notifies the coordinator that the entire import operation has completed.
-  void NotifyEnded();
-
   // Given raw image data, decodes the icon, re-sampling to the correct size as
   // necessary, and re-encodes as PNG data in the given output vector. Returns
   // true on success.
@@ -379,15 +350,7 @@ class Importer : public base::RefCounted<Importer> {
 
   bool import_to_bookmark_bar() const { return import_to_bookmark_bar_; }
 
-  // The importer should know the main thread so that ProfileWriter
-  // will be invoked in thread instead.
-  MessageLoop* main_loop_;
-
-  // The message loop in which the importer operates.
-  MessageLoop* delagate_loop_;
-
-  // The coordinator host for this importer.
-  ImporterHost* importer_host_;
+  scoped_refptr<ImporterBridge> bridge_;
 
  private:
   // True if the caller cancels the import process.
@@ -396,7 +359,7 @@ class Importer : public base::RefCounted<Importer> {
   // True if the importer is created in the first run UI.
   bool import_to_bookmark_bar_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Importer);
+  DISALLOW_COPY_AND_ASSIGN(Importer);
 };
 
 // An interface an object that calls StartImportingWithUI can call to be
@@ -413,9 +376,6 @@ class ImportObserver {
 };
 
 
-#if !defined(OS_MACOSX)
-// TODO(port): Make StartImportingWithUI portable.
-
 // Shows a UI for importing and begins importing the specified items from
 // source_profile to target_profile. observer is notified when the process is
 // complete, can be NULL. parent is the window to parent the UI to, can be NULL
@@ -428,6 +388,5 @@ void StartImportingWithUI(gfx::NativeWindow parent_window,
                           Profile* target_profile,
                           ImportObserver* observer,
                           bool first_run);
-#endif
 
 #endif  // CHROME_BROWSER_IMPORTER_IMPORTER_H_

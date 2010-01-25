@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/json_reader.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
@@ -53,7 +54,14 @@ class ExtensionAPIClientTest : public RenderViewTest {
     ViewHostMsg_ExtensionRequest::Param params;
     ViewHostMsg_ExtensionRequest::Read(request_msg, &params);
     ASSERT_EQ(function.c_str(), params.a) << js;
-    ASSERT_EQ(arg1.c_str(), params.b) << js;
+
+    Value* args = NULL;
+    ASSERT_TRUE(params.b.IsType(Value::TYPE_LIST));
+    ASSERT_TRUE(static_cast<const ListValue*>(&params.b)->Get(0, &args));
+
+    JSONReader reader;
+    scoped_ptr<Value> arg1_value(reader.JsonToValue(arg1, false, false));
+    ASSERT_TRUE(args->Equals(arg1_value.get())) << js;
     render_thread_.sink().ClearMessages();
   }
 };
@@ -71,7 +79,9 @@ TEST_F(ExtensionAPIClientTest, CallbackDispatching) {
     "}"
     "function callback(result) {"
     "  assert(typeof result == 'object', 'result not object');"
-    "  assert(JSON.stringify(result) == '{\"foo\":\"bar\"}', "
+    "  assert(JSON.stringify(result) == '{\"id\":1,\"index\":1,\"windowId\":1,"
+                                        "\"selected\":true,"
+                                        "\"url\":\"http://www.google.com/\"}',"
     "         'incorrect result');"
     "  console.log('pass')"
     "}"
@@ -92,7 +102,8 @@ TEST_F(ExtensionAPIClientTest, CallbackDispatching) {
 
   // Now send the callback a response
   ExtensionProcessBindings::HandleResponse(
-      callback_id, true, "{\"foo\":\"bar\"}", "");
+    callback_id, true, "{\"id\":1,\"index\":1,\"windowId\":1,\"selected\":true,"
+                       "\"url\":\"http://www.google.com/\"}", "");
 
   // And verify that it worked
   ASSERT_EQ("pass", GetConsoleMessage());
@@ -138,7 +149,8 @@ TEST_F(ExtensionAPIClientTest, GetCurentWindow) {
                "windows.getCurrent", "null");
 }
 
-TEST_F(ExtensionAPIClientTest, GetLastFocusedWindow) {
+// http://crbug.com/22248
+TEST_F(ExtensionAPIClientTest, DISABLED_GetLastFocusedWindow) {
   ExpectJsFail("chrome.windows.getLastFocused(function(){}, 20);",
                "Uncaught Error: Too many arguments.");
 
@@ -154,18 +166,21 @@ TEST_F(ExtensionAPIClientTest, GetLastFocusedWindow) {
 }
 
 TEST_F(ExtensionAPIClientTest, GetAllWindows) {
-  ExpectJsFail("chrome.windows.getAll(true, function(){}, 20);",
+  ExpectJsFail("chrome.windows.getAll({populate: true}, function(){}, 20);",
                "Uncaught Error: Too many arguments.");
 
   ExpectJsFail("chrome.windows.getAll(1, function(){});",
                "Uncaught Error: Invalid value for argument 0. "
-               "Expected 'boolean' but got 'integer'.");
+               "Expected 'object' but got 'integer'.");
 
-  ExpectJsPass("chrome.windows.getAll(true, function(){})",
-               "windows.getAll", "true");
+  ExpectJsPass("chrome.windows.getAll({populate:true}, function(){})",
+               "windows.getAll", "{\"populate\":true}");
 
   ExpectJsPass("chrome.windows.getAll(null, function(){})",
                "windows.getAll", "null");
+
+  ExpectJsPass("chrome.windows.getAll({}, function(){})",
+               "windows.getAll", "{}");
 
   ExpectJsPass("chrome.windows.getAll(undefined, function(){})",
                "windows.getAll", "null");
@@ -422,29 +437,41 @@ TEST_F(ExtensionAPIClientTest, RemoveTab) {
                "tabs.remove", "2");
 }
 
+TEST_F(ExtensionAPIClientTest, CaptureVisibleTab) {
+  ExpectJsFail("chrome.tabs.captureVisibleTab(0);",
+               "Uncaught Error: Parameter 1 is required.");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab(function(){}, 0)",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'integer' but got 'function'.");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab(null, function(img){});",
+               "tabs.captureVisibleTab", "null");
+}
+
 // Bookmark API tests
 // TODO(erikkay) add more variations here
 
 TEST_F(ExtensionAPIClientTest, CreateBookmark) {
   ExpectJsFail(
-      "chrome.bookmarks.create({parentId:'x', title:0}, function(){})",
+      "chrome.bookmarks.create({parentId:0, title:0}, function(){})",
       "Uncaught Error: Invalid value for argument 0. "
-      "Property 'parentId': Expected 'integer' but got 'string', "
+      "Property 'parentId': Expected 'string' but got 'integer', "
       "Property 'title': Expected 'string' but got 'integer'.");
 
   ExpectJsPass(
-      "chrome.bookmarks.create({parentId:0, title:'x'}, function(){})",
+      "chrome.bookmarks.create({parentId:'0', title:'x'}, function(){})",
       "bookmarks.create",
-      "{\"parentId\":0,\"title\":\"x\"}");
+      "{\"parentId\":\"0\",\"title\":\"x\"}");
 }
 
 TEST_F(ExtensionAPIClientTest, GetBookmarks) {
-  ExpectJsPass("chrome.bookmarks.get(0, function(){});",
+  ExpectJsPass("chrome.bookmarks.get('0', function(){});",
                "bookmarks.get",
-               "0");
-  ExpectJsPass("chrome.bookmarks.get([0,1,2,3], function(){});",
+               "\"0\"");
+  ExpectJsPass("chrome.bookmarks.get(['0','1','2','3'], function(){});",
                "bookmarks.get",
-               "[0,1,2,3]");
+               "[\"0\",\"1\",\"2\",\"3\"]");
   ExpectJsFail("chrome.bookmarks.get(null, function(){});",
                "Uncaught Error: Parameter 0 is required.");
   // TODO(erikkay) This is succeeding, when it should fail.
@@ -457,9 +484,9 @@ TEST_F(ExtensionAPIClientTest, GetBookmarks) {
 }
 
 TEST_F(ExtensionAPIClientTest, GetBookmarkChildren) {
-  ExpectJsPass("chrome.bookmarks.getChildren(42, function(){});",
+  ExpectJsPass("chrome.bookmarks.getChildren('42', function(){});",
                "bookmarks.getChildren",
-               "42");
+               "\"42\"");
 }
 
 TEST_F(ExtensionAPIClientTest, GetBookmarkTree) {
@@ -475,46 +502,132 @@ TEST_F(ExtensionAPIClientTest, SearchBookmarks) {
 }
 
 TEST_F(ExtensionAPIClientTest, RemoveBookmark) {
-  ExpectJsPass("chrome.bookmarks.remove(42);",
+  ExpectJsPass("chrome.bookmarks.remove('42');",
                "bookmarks.remove",
-               "[42,false]");
+               "\"42\"");
 }
 
 TEST_F(ExtensionAPIClientTest, RemoveBookmarkTree) {
-  ExpectJsPass("chrome.bookmarks.removeTree(42);",
+  ExpectJsPass("chrome.bookmarks.removeTree('42');",
                "bookmarks.removeTree",
-               "[42,true]");
+               "\"42\"");
 }
 
 TEST_F(ExtensionAPIClientTest, MoveBookmark) {
-  ExpectJsPass("chrome.bookmarks.move(42,{parentId:1,index:0});",
+  ExpectJsPass("chrome.bookmarks.move('42',{parentId:'1',index:0});",
                "bookmarks.move",
-               "[42,{\"parentId\":1,\"index\":0}]");
+               "[\"42\",{\"parentId\":\"1\",\"index\":0}]");
 }
 
 TEST_F(ExtensionAPIClientTest, SetBookmarkTitle) {
-  ExpectJsPass("chrome.bookmarks.update(42,{title:'x'});",
+  ExpectJsPass("chrome.bookmarks.update('42',{title:'x'});",
                "bookmarks.update",
-               "[42,{\"title\":\"x\"}]");
+               "[\"42\",{\"title\":\"x\"}]");
 }
 
 TEST_F(ExtensionAPIClientTest, EnablePageAction) {
   // Basic old-school enablePageAction call.
   ExpectJsPass("chrome.pageActions.enableForTab("
-               "\"dummy\", {tabId: 0, url: \"http://foo/\"});",
+               "'dummy', {tabId: 0, url: 'http://foo/'});",
                "pageActions.enableForTab",
                "[\"dummy\",{\"tabId\":0,\"url\":\"http://foo/\"}]");
   // Try both optional parameters (title and iconId).
   ExpectJsPass("chrome.pageActions.enableForTab("
-               "\"dummy\", {tabId: 0, url: \"http://foo/\","
-                           "title: \"a\", iconId: 0});",
+               "'dummy', {tabId: 0, url: 'http://foo/',"
+                           "title: 'a', iconId: 0});",
                "pageActions.enableForTab",
                "[\"dummy\",{\"tabId\":0,\"url\":\"http://foo/\","
                            "\"title\":\"a\",\"iconId\":0}]");
 
   // Now try disablePageAction.
   ExpectJsPass("chrome.pageActions.disableForTab("
-               "\"dummy\", {tabId: 0, url: \"http://foo/\"});",
+               "'dummy', {tabId: 0, url: 'http://foo/'});",
                "pageActions.disableForTab",
                "[\"dummy\",{\"tabId\":0,\"url\":\"http://foo/\"}]");
+}
+
+TEST_F(ExtensionAPIClientTest, ExpandToolstrip) {
+  ExpectJsPass("chrome.toolstrip.expand({height:100, url:'http://foo/'})",
+               "toolstrip.expand",
+               "{\"height\":100,\"url\":\"http://foo/\"}");
+  ExpectJsPass("chrome.toolstrip.expand({height:100}, null)",
+               "toolstrip.expand",
+               "{\"height\":100}");
+  ExpectJsPass("chrome.toolstrip.expand({height:100,url:'http://foo/'}, "
+                   "function(){})",
+               "toolstrip.expand",
+               "{\"height\":100,\"url\":\"http://foo/\"}");
+
+
+  ExpectJsFail("chrome.toolstrip.expand()",
+               "Uncaught Error: Parameter 0 is required.");
+  ExpectJsFail("chrome.toolstrip.expand(1)",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'object' but got 'integer'.");
+  ExpectJsFail("chrome.toolstrip.expand({height:'100', url:'http://foo/'})",
+               "Uncaught Error: Invalid value for argument 0. "
+                   "Property 'height': "
+               "Expected 'integer' but got 'string'.");
+  ExpectJsFail("chrome.toolstrip.expand({height:100,url:100})",
+               "Uncaught Error: Invalid value for argument 0. Property 'url': "
+               "Expected 'string' but got 'integer'.");
+  ExpectJsFail("chrome.toolstrip.expand({height:100,'url':'http://foo/'}, 32)",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Expected 'function' but got 'integer'.");
+}
+
+TEST_F(ExtensionAPIClientTest, CollapseToolstrip) {
+  ExpectJsPass("chrome.toolstrip.collapse({url:'http://foo/'})",
+               "toolstrip.collapse",
+               "{\"url\":\"http://foo/\"}");
+  ExpectJsPass("chrome.toolstrip.collapse(null)",
+               "toolstrip.collapse",
+               "null");
+  ExpectJsPass("chrome.toolstrip.collapse({url:'http://foo/'}, function(){})",
+               "toolstrip.collapse",
+               "{\"url\":\"http://foo/\"}");
+
+  ExpectJsFail("chrome.toolstrip.collapse(1)",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'object' but got 'integer'.");
+  ExpectJsFail("chrome.toolstrip.collapse(100)",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'object' but got 'integer'.");
+  ExpectJsFail("chrome.toolstrip.collapse({url:'http://foo/'}, 32)",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Expected 'function' but got 'integer'.");
+}
+
+// I18N API
+TEST_F(ExtensionAPIClientTest, GetAcceptLanguages) {
+  ExpectJsFail("chrome.i18n.getAcceptLanguages(32, function(){})",
+               "Uncaught Error: Too many arguments.");
+
+  ExpectJsFail("chrome.i18n.getAcceptLanguages()",
+               "Uncaught Error: Parameter 0 is required.");
+
+  ExpectJsFail("chrome.i18n.getAcceptLanguages('abc')",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'function' but got 'string'.");
+
+  ExpectJsPass("chrome.i18n.getAcceptLanguages(function(){})",
+               "i18n.getAcceptLanguages", "null");
+}
+
+TEST_F(ExtensionAPIClientTest, GetL10nMessage) {
+  ExpectJsFail("chrome.i18n.getMessage()",
+               "Uncaught Error: Parameter 0 is required.");
+
+  ExpectJsFail("chrome.i18n.getMessage(1)",
+               "Uncaught Error: Invalid value for argument 0. "
+               "Expected 'string' but got 'integer'.");
+
+  ExpectJsFail("chrome.i18n.getMessage('name', [])",
+               "Uncaught Error: Invalid value for argument 1. Value does not "
+               "match any valid type choices.");
+
+  ExpectJsFail("chrome.i18n.getMessage('name', ['p1', 'p2', 'p3', 'p4', 'p5', "
+               "'p6', 'p7', 'p8', 'p9', 'p10'])",
+               "Uncaught Error: Invalid value for argument 1. Value does not "
+               "match any valid type choices.");
 }

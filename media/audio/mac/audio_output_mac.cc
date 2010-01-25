@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "media/audio/audio_util.h"
 
 // Overview of operation:
 // 1) An object of PCMQueueOutAudioOutputStream is created by the AudioManager
@@ -25,10 +26,12 @@
 // 6) The same thread that called stop will call Close() where we cleanup
 // and notifiy the audio manager, which likley will destroy this object.
 
-// TODO(cpu): Remove the constant for this error when snow leopard arrives.
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
 enum {
   kAudioQueueErr_EnqueueDuringReset = -66632
 };
+#endif
 
 PCMQueueOutAudioOutputStream::PCMQueueOutAudioOutputStream(
     AudioManagerMac* manager, int channels, int sampling_rate,
@@ -37,7 +40,10 @@ PCMQueueOutAudioOutputStream::PCMQueueOutAudioOutputStream(
           audio_queue_(NULL),
           buffer_(),
           source_(NULL),
-          manager_(manager) {
+          manager_(manager),
+          silence_bytes_(0),
+          volume_(1),
+          pending_bytes_(0) {
   // We must have a manager.
   DCHECK(manager_);
   // A frame is one sample across all channels. In interleaved audio the per
@@ -52,6 +58,11 @@ PCMQueueOutAudioOutputStream::PCMQueueOutAudioOutputStream(
   format_.mFramesPerPacket = 1;
   format_.mBytesPerPacket = (format_.mBitsPerChannel * channels) / 8;
   format_.mBytesPerFrame = format_.mBytesPerPacket;
+
+  // Silence buffer has a duration of 6ms to simulate the behavior of Windows.
+  // This value is choosen by experiments and macs cannot keep up with
+  // anything less than 6ms.
+  silence_bytes_ = format_.mBytesPerFrame * sampling_rate * 6 / 1000;
 }
 
 PCMQueueOutAudioOutputStream::~PCMQueueOutAudioOutputStream() {
@@ -81,7 +92,7 @@ bool PCMQueueOutAudioOutputStream::Open(size_t packet_size) {
     return false;
   }
   // Allocate the hardware-managed buffers.
-  for(size_t ix = 0; ix != kNumBuffers; ++ix) {
+  for (size_t ix = 0; ix != kNumBuffers; ++ix) {
     err = AudioQueueAllocateBuffer(audio_queue_, packet_size, &buffer_[ix]);
     if (err != noErr) {
       HandleError(err);
@@ -136,14 +147,44 @@ void PCMQueueOutAudioOutputStream::Stop() {
 }
 
 void PCMQueueOutAudioOutputStream::SetVolume(double left_level,
-                                             double right_level) {
-  // TODO(cpu): Implement.
+                                             double ) {
+  if (!audio_queue_)
+    return;
+  volume_ = static_cast<float>(left_level);
+  OSStatus err = AudioQueueSetParameter(audio_queue_,
+                                        kAudioQueueParam_Volume,
+                                        left_level);
+  if (err != noErr) {
+    HandleError(err);
+  }
 }
 
 void PCMQueueOutAudioOutputStream::GetVolume(double* left_level,
                                              double* right_level) {
-  // TODO(cpu): Implement.
+  if (!audio_queue_)
+    return;
+  *left_level = volume_;
+  *right_level = volume_;
 }
+
+// Reorder PCM from AAC layout to Core Audio layout.
+// TODO(fbarchard): Switch layout when ffmpeg is updated.
+namespace {
+template<class Format>
+static void SwizzleLayout(Format* b, size_t filled) {
+  static const int kNumSurroundChannels = 6;
+  Format aac[kNumSurroundChannels];
+  for (size_t i = 0; i < filled; i += sizeof(aac), b += kNumSurroundChannels) {
+    memcpy(aac, b, sizeof(aac));
+    b[0] = aac[1];  // L
+    b[1] = aac[2];  // R
+    b[2] = aac[0];  // C
+    b[3] = aac[5];  // LFE
+    b[4] = aac[3];  // Ls
+    b[5] = aac[4];  // Rs
+  }
+}
+}  // namespace
 
 // Note to future hackers of this function: Do not add locks here because we
 // call out to third party source that might do crazy things including adquire
@@ -159,16 +200,40 @@ void PCMQueueOutAudioOutputStream::RenderCallback(void* p_this,
   AudioSourceCallback* source = audio_stream->source_;
   if (!source)
     return;
+
+  // Adjust the number of pending bytes by subtracting the amount played.
+  audio_stream->pending_bytes_ -= buffer->mAudioDataByteSize;
   size_t capacity = buffer->mAudioDataBytesCapacity;
-  // TODO(hclam): Provide pending bytes.
   size_t filled = source->OnMoreData(audio_stream, buffer->mAudioData,
-                                     capacity, 0);
-  if (filled > capacity) {
+                                     capacity, audio_stream->pending_bytes_);
+
+  // In order to keep the callback running, we need to provide a positive amount
+  // of data to the audio queue. To simulate the behavior of Windows, we write
+  // a buffer of silence.
+  if (!filled) {
+    CHECK(audio_stream->silence_bytes_ <= static_cast<int>(capacity));
+    filled = audio_stream->silence_bytes_;
+    memset(buffer->mAudioData, 0, filled);
+  } else if (filled > capacity) {
     // User probably overran our buffer.
     audio_stream->HandleError(0);
     return;
   }
+
+  // Handle channel order for 5.1 audio.
+  if (audio_stream->format_.mChannelsPerFrame == 6) {
+    if (audio_stream->format_.mBitsPerChannel == 8) {
+      SwizzleLayout(reinterpret_cast<uint8*>(buffer->mAudioData), filled);
+    } else if (audio_stream->format_.mBitsPerChannel == 16) {
+      SwizzleLayout(reinterpret_cast<int16*>(buffer->mAudioData), filled);
+    } else if (audio_stream->format_.mBitsPerChannel == 32) {
+      SwizzleLayout(reinterpret_cast<int32*>(buffer->mAudioData), filled);
+    }
+  }
+
   buffer->mAudioDataByteSize = filled;
+  // Incremnet bytes by amount filled into audio buffer.
+  audio_stream->pending_bytes_ += filled;
   if (NULL == queue)
     return;
   // Queue the audio data to the audio driver.
@@ -187,23 +252,25 @@ void PCMQueueOutAudioOutputStream::RenderCallback(void* p_this,
 
 void PCMQueueOutAudioOutputStream::Start(AudioSourceCallback* callback) {
   DCHECK(callback);
-  OSStatus err = AudioQueueStart(audio_queue_, NULL);
-  if (err != noErr) {
-    HandleError(err);
-    return;
-  }
+  OSStatus err = noErr;
   source_ = callback;
+  pending_bytes_ = 0;
   // Ask the source to pre-fill all our buffers before playing.
-  for(size_t ix = 0; ix != kNumBuffers; ++ix) {
+  for (size_t ix = 0; ix != kNumBuffers; ++ix) {
+    buffer_[ix]->mAudioDataByteSize = 0;
     RenderCallback(this, NULL, buffer_[ix]);
   }
   // Queue the buffers to the audio driver, sounds starts now.
-  for(size_t ix = 0; ix != kNumBuffers; ++ix) {
+  for (size_t ix = 0; ix != kNumBuffers; ++ix) {
     err = AudioQueueEnqueueBuffer(audio_queue_, buffer_[ix], 0, NULL);
     if (err != noErr) {
       HandleError(err);
       return;
     }
   }
+  err  = AudioQueueStart(audio_queue_, NULL);
+  if (err != noErr) {
+    HandleError(err);
+    return;
+  }
 }
-

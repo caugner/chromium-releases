@@ -8,21 +8,43 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/cocoa/gradient_button_cell.h"
 #import "chrome/browser/cocoa/toolbar_controller.h"
+#import "chrome/browser/cocoa/view_resizer_pong.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
+
+// An NSView that fakes out hitTest:.
+@interface HitView : NSView {
+  id hitTestReturn_;
+}
+@end
+
+@implementation HitView
+
+- (void)setHitTestReturn:(id)rtn {
+  hitTestReturn_ = rtn;
+}
+
+- (NSView *)hitTest:(NSPoint)aPoint {
+  return hitTestReturn_;
+}
+
+@end
+
 
 namespace {
 
-class ToolbarControllerTest : public testing::Test {
+class ToolbarControllerTest : public PlatformTest {
  public:
 
   // Indexes that match the ordering returned by the private ToolbarController
   // |-toolbarViews| method.
   enum {
     kBackIndex, kForwardIndex, kReloadIndex, kHomeIndex, kStarIndex, kGoIndex,
-    kPageIndex, kWrenchIndex, kLocationIndex,
+    kPageIndex, kWrenchIndex, kLocationIndex, kEncodingMenuIndex
   };
 
   ToolbarControllerTest() {
@@ -32,13 +54,13 @@ class ToolbarControllerTest : public testing::Test {
     // ensure they get picked up correct on initialization
     updater->UpdateCommandEnabled(IDC_BACK, false);
     updater->UpdateCommandEnabled(IDC_FORWARD, false);
+    resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     bar_.reset(
         [[ToolbarController alloc] initWithModel:browser->toolbar_model()
                                         commands:browser->command_updater()
                                          profile:helper_.profile()
-                                  webContentView:nil
-                                    infoBarsView:nil
-                                bookmarkDelegate:nil]);
+                                         browser:browser
+                                  resizeDelegate:resizeDelegate_.get()]);
     EXPECT_TRUE([bar_ view]);
     NSView* parent = [cocoa_helper_.window() contentView];
     [parent addSubview:[bar_ view]];
@@ -55,12 +77,13 @@ class ToolbarControllerTest : public testing::Test {
               [[views objectAtIndex:kReloadIndex] isEnabled] ? true : false);
     EXPECT_EQ(updater->IsCommandEnabled(IDC_HOME),
               [[views objectAtIndex:kHomeIndex] isEnabled] ? true : false);
-    EXPECT_EQ(updater->IsCommandEnabled(IDC_STAR),
+    EXPECT_EQ(updater->IsCommandEnabled(IDC_BOOKMARK_PAGE),
               [[views objectAtIndex:kStarIndex] isEnabled] ? true : false);
   }
 
   CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
   BrowserTestHelper helper_;
+  scoped_nsobject<ViewResizerPong> resizeDelegate_;
   scoped_nsobject<ToolbarController> bar_;
 };
 
@@ -70,23 +93,23 @@ TEST_F(ToolbarControllerTest, InitialState) {
   CompareState(updater, [bar_ toolbarViews]);
 }
 
-// Make sure awakeFromNib created a bookmarkBarController
-TEST_F(ToolbarControllerTest, AwakeFromNibCreatesBMBController) {
-  EXPECT_TRUE([bar_ bookmarkBarController]);
-}
-
 // Make sure a "titlebar only" toolbar works
 TEST_F(ToolbarControllerTest, TitlebarOnly) {
   NSView* view = [bar_ view];
-  EXPECT_TRUE([bar_ bookmarkBarController]);
 
   [bar_ setHasToolbar:NO];
   EXPECT_NE(view, [bar_ view]);
-  EXPECT_FALSE([bar_ bookmarkBarController]);
+
+  // Simulate a popup going fullscreen and back.
+  NSView* superview = [view superview];
+  // TODO(jrg): find a way to add an [NSAutoreleasePool drain] in
+  // here.  I don't have access to the current
+  // scoped_nsautorelease_pool to do it properly :-(
+  [view removeFromSuperview];
+  [superview addSubview:view];
 
   [bar_ setHasToolbar:YES];
   EXPECT_EQ(view, [bar_ view]);
-  EXPECT_TRUE([bar_ bookmarkBarController]);
 
   // Leave it off to make sure that's fine
   [bar_ setHasToolbar:NO];
@@ -182,6 +205,104 @@ TEST_F(ToolbarControllerTest, TogglePageWrench) {
   EXPECT_EQ(showButtons, [wrenchButton isHidden]);
   EXPECT_NE(NSMinX(originalGoFrame), NSMinX([goButton frame]));
   EXPECT_NE(NSWidth(originalLocationBarFrame), NSWidth([locationBar frame]));
+}
+
+// Ensure that we don't toggle the buttons when we have a strip marked as not
+// having the full toolbar. Also ensure that the location bar doesn't change
+// size.
+TEST_F(ToolbarControllerTest, DontToggleWhenNoToolbar) {
+  [bar_ setHasToolbar:NO];
+  NSView* homeButton = [[bar_ toolbarViews] objectAtIndex:kHomeIndex];
+  NSView* pageButton = [[bar_ toolbarViews] objectAtIndex:kPageIndex];
+  NSView* wrenchButton = [[bar_ toolbarViews] objectAtIndex:kWrenchIndex];
+  NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
+  NSRect locationBarFrame = [locationBar frame];
+  EXPECT_EQ([homeButton isHidden], YES);
+  EXPECT_EQ([pageButton isHidden], YES);
+  EXPECT_EQ([wrenchButton isHidden], YES);
+  [bar_ showOptionalHomeButton];
+  EXPECT_EQ([homeButton isHidden], YES);
+  NSRect newLocationBarFrame = [locationBar frame];
+  EXPECT_TRUE(NSEqualRects(locationBarFrame, newLocationBarFrame));
+  [bar_ showOptionalPageWrenchButtons];
+  EXPECT_EQ([pageButton isHidden], YES);
+  EXPECT_EQ([wrenchButton isHidden], YES);
+  newLocationBarFrame = [locationBar frame];
+  EXPECT_TRUE(NSEqualRects(locationBarFrame, newLocationBarFrame));
+}
+
+TEST_F(ToolbarControllerTest, StarButtonInWindowCoordinates) {
+  NSRect star = [bar_ starButtonInWindowCoordinates];
+  NSRect all = [[[bar_ view] window] frame];
+
+  // Make sure the star is completely inside the window rect
+  EXPECT_TRUE(NSContainsRect(all, star));
+}
+
+TEST_F(ToolbarControllerTest, BubblePosition) {
+  NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
+
+  // The window frame (in window base coordinates).
+  NSRect all = [[[bar_ view] window] frame];
+  // The frame of the location bar in window base coordinates.
+  NSRect locationFrame =
+      [locationBar convertRect:[locationBar bounds] toView:nil];
+  // The frame of the location stack in window base coordinates.  The horizontal
+  // coordinates here are used for the omnibox dropdown.
+  gfx::Rect locationStackFrame = [bar_ locationStackBounds];
+
+  // Make sure the location stack starts to the left of and ends to the right of
+  // the location bar.
+  EXPECT_LT(locationStackFrame.x(), NSMinX(locationFrame));
+  EXPECT_GT(locationStackFrame.right(), NSMaxX(locationFrame));
+}
+
+TEST_F(ToolbarControllerTest, HoverButtonForEvent) {
+  scoped_nsobject<HitView> view([[HitView alloc]
+                                  initWithFrame:NSMakeRect(0,0,100,100)]);
+  [bar_ setView:view];
+  NSEvent* event = [NSEvent mouseEventWithType:NSMouseMoved
+                                      location:NSMakePoint(10,10)
+                                 modifierFlags:0
+                                     timestamp:0
+                                  windowNumber:0
+                                       context:nil
+                                   eventNumber:0
+                                    clickCount:0
+                                      pressure:0.0];
+
+  // NOT a match.
+  [view setHitTestReturn:bar_.get()];
+  EXPECT_FALSE([bar_ hoverButtonForEvent:event]);
+
+  // Not yet...
+  scoped_nsobject<NSButton> button([[NSButton alloc] init]);
+  [view setHitTestReturn:button];
+  EXPECT_FALSE([bar_ hoverButtonForEvent:event]);
+
+  // Now!
+  scoped_nsobject<GradientButtonCell> cell([[GradientButtonCell alloc] init]);
+  [button setCell:cell.get()];
+  EXPECT_TRUE([bar_ hoverButtonForEvent:nil]);
+}
+
+TEST_F(ToolbarControllerTest, PopulateEncodingMenu) {
+  NSMenu* encodings = [[bar_ toolbarViews] objectAtIndex:kEncodingMenuIndex];
+
+  // Can't check item strings because of localization, but the nib has zero
+  // items so check that we at least populated the menu with something at
+  // startup.
+  EXPECT_NE(0, [encodings numberOfItems]);
+}
+
+TEST_F(ToolbarControllerTest, CorrectHeightWhenCompressed) {
+  [bar_ setShouldBeCompressed:YES];
+  EXPECT_EQ(30.0, [resizeDelegate_ height]);
+}
+
+TEST_F(ToolbarControllerTest, CorrectHeightWhenUnompressed) {
+  [bar_ setShouldBeCompressed:NO];
+  EXPECT_EQ(36.0, [resizeDelegate_ height]);
 }
 
 }  // namespace

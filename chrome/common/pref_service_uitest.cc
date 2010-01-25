@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/gfx/rect.h"
+#include "base/test/test_file_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
@@ -60,7 +62,7 @@ public:
   void TearDown() {
     UITest::TearDown();
 
-    EXPECT_TRUE(DieFileDie(tmp_profile_, true));
+    EXPECT_TRUE(file_util::DieFileDie(tmp_profile_, true));
   }
 
 public:
@@ -95,37 +97,34 @@ TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   ASSERT_TRUE(browser.get());
   scoped_refptr<WindowProxy> window(browser->GetWindow());
 
-  HWND hWnd;
-  ASSERT_TRUE(window->GetHWND(&hWnd));
-
-  WINDOWPLACEMENT window_placement;
-  ASSERT_TRUE(GetWindowPlacement(hWnd, &window_placement));
+  gfx::Rect bounds;
+  ASSERT_TRUE(window->GetBounds(&bounds));
 
   // Retrieve the expected rect values from "Preferences"
   int bottom = 0;
   std::wstring kBrowserWindowPlacement(prefs::kBrowserWindowPlacement);
   EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".bottom",
       &bottom));
-  EXPECT_EQ(bottom, window_placement.rcNormalPosition.bottom);
+  EXPECT_EQ(bottom, bounds.y() + bounds.height());
 
   int top = 0;
   EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".top",
       &top));
-  EXPECT_EQ(top, window_placement.rcNormalPosition.top);
+  EXPECT_EQ(top, bounds.y());
 
   int left = 0;
   EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".left",
       &left));
-  EXPECT_EQ(left, window_placement.rcNormalPosition.left);
+  EXPECT_EQ(left, bounds.x());
 
   int right = 0;
   EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".right",
       &right));
-  EXPECT_EQ(right, window_placement.rcNormalPosition.right);
+  EXPECT_EQ(right, bounds.x() + bounds.width());
 
-  // Find if launched window is maximized
-  bool is_window_maximized = (window_placement.showCmd == SW_MAXIMIZE);
-
+  // Find if launched window is maximized.
+  bool is_window_maximized = false;
+  ASSERT_TRUE(window->IsMaximized(&is_window_maximized));
   bool is_maximized = false;
   EXPECT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + L".maximized",
       &is_maximized));

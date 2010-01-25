@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H__
-#define CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H__
+#ifndef CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_
+#define CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_
 
 #include <string>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/message_loop.h"
@@ -64,6 +65,9 @@ class PluginChannelBase : public IPC::Channel::Listener,
       PluginChannelFactory factory, MessageLoop* ipc_message_loop,
       bool create_pipe_now);
 
+  // Sends a message to all instances.
+  static void Broadcast(IPC::Message* message);
+
   // Called on the worker thread
   PluginChannelBase();
 
@@ -86,7 +90,6 @@ class PluginChannelBase : public IPC::Channel::Listener,
   scoped_ptr<IPC::SyncChannel> channel_;
 
  private:
-
   IPC::Channel::Mode mode_;
   std::string channel_name_;
   int plugin_count_;
@@ -116,7 +119,7 @@ class PluginChannelBase : public IPC::Channel::Listener,
   // in the middle of dispatching a message.
   bool send_unblocking_only_during_dispatch_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginChannelBase);
+  DISALLOW_COPY_AND_ASSIGN(PluginChannelBase);
 };
 
-#endif  // CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H__
+#endif  // CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_

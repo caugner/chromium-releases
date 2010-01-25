@@ -7,9 +7,10 @@
 
 #include "build/build_config.h"
 
-#include <iostream>
+#include <iosfwd>
 
 #if defined(OS_WIN)
+typedef unsigned long DWORD;
 typedef struct tagPOINT POINT;
 #elif defined(OS_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
@@ -25,6 +26,10 @@ class Point {
   Point();
   Point(int x, int y);
 #if defined(OS_WIN)
+  // |point| is a DWORD value that contains a coordinate.  The x-coordinate is
+  // the low-order short and the y-coordinate is the high-order short.  This
+  // value is commonly acquired from GetMessagePos/GetCursorPos.
+  explicit Point(DWORD point);
   explicit Point(const POINT& point);
   Point& operator=(const POINT& point);
 #elif defined(OS_MACOSX)
@@ -70,8 +75,6 @@ class Point {
 
 }  // namespace gfx
 
-inline std::ostream& operator<<(std::ostream& out, const gfx::Point& p) {
-  return out << p.x() << "," << p.y();
-}
+std::ostream& operator<<(std::ostream& out, const gfx::Point& p);
 
-#endif // BASE_GFX_POINT_H__
+#endif  // BASE_GFX_POINT_H__

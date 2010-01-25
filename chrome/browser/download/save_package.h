@@ -13,6 +13,7 @@
 #include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/ref_counted.h"
+#include "base/task.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "googleurl/src/gurl.h"
@@ -55,6 +56,8 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
                     public SelectFileDialog::Listener {
  public:
   enum SavePackageType {
+    // The value of the save type before its set by the user.
+    SAVE_TYPE_UNKNOWN = -1,
     // User chose to save only the HTML of the page.
     SAVE_AS_ONLY_HTML = 0,
     // User chose to save complete-html page.
@@ -81,7 +84,7 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Constructor for user initiated page saving. This constructor results in a
   // SavePackage that will generate and sanitize a suggested name for the user
   // in the "Save As" dialog box.
-  SavePackage(TabContents* web_content);
+  explicit SavePackage(TabContents* web_content);
 
   // This contructor is used only for testing. We can bypass the file and
   // directory name generation / sanitization by providing well known paths
@@ -128,6 +131,7 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   int tab_id() const { return tab_id_; }
 
   void GetSaveInfo();
+  void ContinueGetSaveInfo(FilePath save_dir);
   void ContinueSave(SavePackageParam* param,
                     const FilePath& final_name,
                     int index);
@@ -196,6 +200,9 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // For testing only.
   SavePackage(const FilePath& file_full_path,
               const FilePath& directory_full_path);
+
+  // Notes from Init() above applies here as well.
+  void InternalInit();
 
   void Stop();
   void CheckFinish();
@@ -308,6 +315,8 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   scoped_refptr<SelectFileDialog> select_file_dialog_;
 
   friend class SavePackageTest;
+
+  ScopedRunnableMethodFactory<SavePackage> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SavePackage);
 };

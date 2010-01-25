@@ -5,6 +5,18 @@
 #include <fstream>
 #include <iostream>
 
+#if defined(USE_SYSTEM_ZLIB)
+// The code below uses the MOZ_Z_ forms of these functions in order that things
+// should work on Windows. In order to make this code cross platform, we map
+// back to the normal functions here in the case that we are using the system
+// zlib.
+#define MOZ_Z_deflate deflate
+#define MOZ_Z_deflateEnd deflateEnd
+#include <zlib.h>
+#else
+#include "third_party/zlib/zlib.h"
+#endif
+
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
@@ -13,7 +25,6 @@
 #include "net/base/io_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#include "third_party/zlib/zlib.h"
 
 namespace {
 
@@ -66,7 +77,7 @@ class GZipUnitTest : public PlatformTest {
     file_path = file_path.AppendASCII("google.txt");
 
     // Read data from the file into buffer.
-    file_util::ReadFileToString(file_path, &source_buffer_);
+    ASSERT_TRUE(file_util::ReadFileToString(file_path, &source_buffer_));
 
     // Encode the data with deflate
     deflate_encode_buffer_ = new char[kDefaultBufferSize];

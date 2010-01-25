@@ -15,15 +15,21 @@
 
 namespace base {
 
+#if defined(OS_LINUX)
+const char kSelfExe[] = "/proc/self/exe";
+#elif defined(OS_FREEBSD)
+const char kSelfExe[] = "/proc/curproc/file";
+#endif
+
 bool PathProviderLinux(int key, FilePath* result) {
   FilePath path;
   switch (key) {
     case base::FILE_EXE:
-    case base::FILE_MODULE: { // TODO(evanm): is this correct?
+    case base::FILE_MODULE: {  // TODO(evanm): is this correct?
       char bin_dir[PATH_MAX + 1];
-      int bin_dir_size = readlink("/proc/self/exe", bin_dir, PATH_MAX);
+      int bin_dir_size = readlink(kSelfExe, bin_dir, PATH_MAX);
       if (bin_dir_size < 0 || bin_dir_size > PATH_MAX) {
-        NOTREACHED() << "Unable to resolve /proc/self/exe.";
+        NOTREACHED() << "Unable to resolve " << kSelfExe << ".";
         return false;
       }
       bin_dir[bin_dir_size] = 0;
@@ -33,12 +39,23 @@ bool PathProviderLinux(int key, FilePath* result) {
     case base::DIR_SOURCE_ROOT:
       // On linux, unit tests execute two levels deep from the source root.
       // For example:  sconsbuild/{Debug|Release}/net_unittest
-      if (!PathService::Get(base::DIR_EXE, &path))
-        return false;
-      path = path.Append(FilePath::kParentDirectory)
-                 .Append(FilePath::kParentDirectory);
-      *result = path;
-      return true;
+      if (PathService::Get(base::DIR_EXE, &path)) {
+        path = path.DirName().DirName();
+        if (file_util::PathExists(path.Append("base/base_paths_linux.cc"))) {
+          *result = path;
+          return true;
+        }
+      }
+      // If that failed (maybe the build output is symlinked to a different
+      // drive) try assuming the current directory is the source root.
+      if (file_util::GetCurrentDirectory(&path) &&
+          file_util::PathExists(path.Append("base/base_paths_linux.cc"))) {
+        *result = path;
+        return true;
+      }
+      LOG(ERROR) << "Couldn't find your source root.  "
+                 << "Try running from your chromium/src directory.";
+      return false;
   }
   return false;
 }

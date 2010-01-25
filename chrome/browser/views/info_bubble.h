@@ -1,12 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_INFO_BUBBLE_H_
 #define CHROME_BROWSER_VIEWS_INFO_BUBBLE_H_
 
-#include "app/slide_animation.h"
-#include "views/view.h"
+#include "chrome/browser/views/bubble_border.h"
 
 #if defined(OS_WIN)
 #include "views/widget/widget_win.h"
@@ -19,10 +18,11 @@
 // in the tooltip. Additionally the InfoBubble renders an arrow pointing at
 // the region the info bubble is providing the information about.
 //
-// To use an InfoBubble invoke Show and it'll take care of the rest. InfoBubble
-// (or rather ContentView) insets the content view for you, so that the
-// content typically shouldn't have any additional margins around the view.
+// To use an InfoBubble, invoke Show() and it'll take care of the rest.  The
+// InfoBubble insets the contents for you, so the contents typically shouldn't
+// have any additional margins.
 
+class BorderWidget;
 class InfoBubble;
 
 namespace views {
@@ -32,6 +32,37 @@ class Window;
 namespace gfx {
 class Path;
 }
+
+#if defined(OS_WIN)
+// This is a window that surrounds the info bubble and paints the margin and
+// border.  It is a separate window so that it can be a layered window, so that
+// we can use >1-bit alpha shadow images on the borders, which look nicer than
+// the Windows CS_DROPSHADOW shadows.  The info bubble window itself cannot be a
+// layered window because that prevents it from hosting native child controls.
+class BorderWidget : public views::WidgetWin {
+ public:
+  BorderWidget();
+  virtual ~BorderWidget() { }
+
+  // Given the owning (parent) window, the size of the contained contents
+  // (without margins), and the rect (in screen coordinates) to point to,
+  // initializes the window and returns the bounds (in screen coordinates) the
+  // contents should use.  |is_rtl| is supplied to
+  // BorderContents::InitAndGetBounds(), see its declaration for details.
+  gfx::Rect InitAndGetBounds(HWND owner,
+                             const gfx::Rect& position_relative_to,
+                             const gfx::Size& contents_size,
+                             bool is_rtl);
+
+ private:
+  // Overridden from WidgetWin:
+  virtual LRESULT OnMouseActivate(HWND window,
+                                  UINT hit_test,
+                                  UINT mouse_message);
+
+  DISALLOW_COPY_AND_ASSIGN(BorderWidget);
+};
+#endif
 
 class InfoBubbleDelegate {
  public:
@@ -48,139 +79,68 @@ class InfoBubbleDelegate {
 // TODO: this code is ifdef-tastic. It might be cleaner to refactor the
 // WidgetFoo subclass into a separate class that calls into InfoBubble.
 // That way InfoBubble has no (or very few) ifdefs.
+class InfoBubble
 #if defined(OS_WIN)
-class InfoBubble : public views::WidgetWin, public AnimationDelegate {
-#else
-class InfoBubble : public views::WidgetGtk, public AnimationDelegate {
+    : public views::WidgetWin,
+#elif defined(OS_LINUX)
+    : public views::WidgetGtk,
 #endif
+      public views::AcceleratorTarget {
  public:
-  // Shows the InfoBubble. The InfoBubble is parented to parent, contains
-  // the View content and positioned relative to the screen position
-  // position_relative_to. Show takes ownership of content and deletes the
-  // created InfoBubble when another window is activated. You can explicitly
-  // close the bubble by invoking Close.  A delegate may optionally be provided
-  // to be notified when the InfoBubble is closed and to prevent the InfoBubble
-  // from being closed when the Escape key is pressed (which is the default
-   // behavior if there is no delegate).
+  // Shows the InfoBubble.  |parent| is set as the parent window, |contents| are
+  // the contents shown in the bubble, and |position_relative_to| is a rect in
+  // screen coordinates at which the InfoBubble will point.  Show() takes
+  // ownership of |contents| and deletes the created InfoBubble when another
+  // window is activated.  You can explicitly close the bubble by invoking
+  // Close().  You may provide an optional |delegate| to be notified when the
+  // InfoBubble is closed and/or to prevent the InfoBubble from being closed
+  // when the Escape key is pressed (the default behavior).
   static InfoBubble* Show(views::Window* parent,
                           const gfx::Rect& position_relative_to,
-                          views::View* content,
+                          views::View* contents,
                           InfoBubbleDelegate* delegate);
 
+  // Overridden from WidgetWin:
+  virtual void Close();
+
+  static const SkColor kBackgroundColor;
+
+ protected:
   InfoBubble();
-  virtual ~InfoBubble();
+  virtual ~InfoBubble() {}
 
   // Creates the InfoBubble.
   void Init(views::Window* parent,
             const gfx::Rect& position_relative_to,
-            views::View* content);
-
-  // Sets the delegate for that InfoBubble.
-  void SetDelegate(InfoBubbleDelegate* delegate) { delegate_ = delegate; }
+            views::View* contents,
+            InfoBubbleDelegate* delegate);
 
 #if defined(OS_WIN)
-  // The InfoBubble is automatically closed when it loses activation status.
+  // Overridden from WidgetWin:
   virtual void OnActivate(UINT action, BOOL minimized, HWND window);
-
-  // Return our rounded window shape.
-  virtual void OnSize(UINT param, const CSize& size);
+#elif defined(OS_LINUX)
+  // Overridden from WidgetGtk:
+  virtual void IsActiveChanged();
 #endif
-
-  // Overridden to notify the owning ChromeFrame the bubble is closing.
-  virtual void Close();
-
-  // AcceleratorTarget method:
-  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
-
-  // AnimationDelegate Implementation
-  virtual void AnimationProgressed(const Animation* animation);
-
- protected:
-  // InfoBubble::CreateContentView() creates one of these. ContentView houses
-  // the supplied content as its only child view, renders the arrow/border of
-  // the bubble and sizes the content.
-  class ContentView : public views::View {
-   public:
-    // Possible edges the arrow is aligned along.
-    enum ArrowEdge {
-      TOP_LEFT     = 0,
-      TOP_RIGHT    = 1,
-      BOTTOM_LEFT  = 2,
-      BOTTOM_RIGHT = 3
-    };
-
-    // Creates the ContentView. The supplied view is added as the only child of
-    // the ContentView.
-    ContentView(views::View* content, InfoBubble* host);
-
-    virtual ~ContentView() {}
-
-    // Returns the bounds for the window to contain this view.
-    //
-    // This invokes CalculateWindowBounds, if the returned bounds don't fit on
-    // the monitor containing position_relative_to, the arrow edge is adjusted.
-    virtual gfx::Rect CalculateWindowBoundsAndAjust(
-        const gfx::Rect& position_relative_to);
-
-    // Sets the edge the arrow is rendered at.
-    void SetArrowEdge(ArrowEdge arrow_edge) { arrow_edge_ = arrow_edge; }
-
-    // Returns the preferred size, which is the sum of the preferred size of
-    // the content and the border/arrow.
-    virtual gfx::Size GetPreferredSize();
-
-    // Positions the content relative to the border.
-    virtual void Layout();
-
-    // Return the mask for the content view.
-    void GetMask(const gfx::Size& size, gfx::Path* mask);
-
-    // Paints the background and arrow appropriately.
-    virtual void Paint(gfx::Canvas* canvas);
-
-    // Returns true if the arrow is positioned along the top edge of the
-    // view. If this returns false the arrow is positioned along the bottom
-    // edge.
-    bool IsTop() { return (arrow_edge_ & 2) == 0; }
-
-    // Returns true if the arrow is positioned along the left edge of the
-    // view. If this returns false the arrow is positioned along the right edge.
-    bool IsLeft() { return (arrow_edge_ & 1) == 0; }
-
-   private:
-
-    // Returns the bounds for the window containing us based on the current
-    // arrow edge.
-    gfx::Rect CalculateWindowBounds(const gfx::Rect& position_relative_to);
-
-    // Edge to draw the arrow at.
-    ArrowEdge arrow_edge_;
-
-    // The bubble we're in.
-    InfoBubble* host_;
-
-    DISALLOW_COPY_AND_ASSIGN(ContentView);
-  };
-
-  // Creates and return a new ContentView containing content.
-  virtual ContentView* CreateContentView(views::View* content);
 
  private:
   // Closes the window notifying the delegate. |closed_by_escape| is true if
   // the close is the result of pressing escape.
   void Close(bool closed_by_escape);
 
-  // The delegate notified when the InfoBubble is closed.
+  // Overridden from AcceleratorTarget:
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
+
+  // The delegate, if any.
   InfoBubbleDelegate* delegate_;
 
   // The window that this InfoBubble is parented to.
   views::Window* parent_;
 
-  // The content view contained by the infobubble.
-  ContentView* content_view_;
-
-  // The fade-in animation.
-  scoped_ptr<SlideAnimation> fade_animation_;
+#if defined(OS_WIN)
+  // The window used to render the padding, border and arrow.
+  scoped_ptr<BorderWidget> border_;
+#endif
 
   // Have we been closed?
   bool closed_;

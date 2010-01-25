@@ -33,8 +33,8 @@
 // This file contains the definition of the D3D9 versions of geometry-related
 // resource classes.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H__
-#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H_
+#define O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H_
 
 #include <vector>
 #include <utility>
@@ -99,7 +99,7 @@ class VertexStructD3D9 : public VertexStruct {
   virtual ~VertexStructD3D9();
   // Adds an input to the vertex struct.
   void SetInput(unsigned int input_index,
-                ResourceID vertex_buffer_id,
+                ResourceId vertex_buffer_id,
                 unsigned int offset,
                 unsigned int stride,
                 vertex_struct::Type type,
@@ -114,7 +114,7 @@ class VertexStructD3D9 : public VertexStruct {
   void Compile(IDirect3DDevice9 *d3d_device);
 
   bool dirty_;
-  typedef std::pair<ResourceID, unsigned int> StreamPair;
+  typedef std::pair<ResourceId, unsigned int> StreamPair;
   std::vector<StreamPair> streams_;
   IDirect3DVertexDeclaration9 *d3d_vertex_decl_;
   DISALLOW_COPY_AND_ASSIGN(VertexStructD3D9);
@@ -123,4 +123,4 @@ class VertexStructD3D9 : public VertexStruct {
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_WIN_D3D9_GEOMETRY_D3D9_H_

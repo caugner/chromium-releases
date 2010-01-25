@@ -1,9 +1,10 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/nss_init.h"
 
+#include <dlfcn.h>
 #include <nss.h>
 #include <plarena.h>
 #include <prerror.h>
@@ -55,28 +56,47 @@ SECMODModule *InitDefaultRootCerts() {
   return NULL;
 }
 
+// A singleton to initialize/deinitialize NSPR.
+// Separate from the NSS singleton because we initialize NSPR on the UI thread.
+class NSPRInitSingleton {
+ public:
+  NSPRInitSingleton() {
+    PR_Init(PR_USER_THREAD, PR_PRIORITY_NORMAL, 0);
+  }
+
+  ~NSPRInitSingleton() {
+    PRStatus prstatus = PR_Cleanup();
+    if (prstatus != PR_SUCCESS) {
+      LOG(ERROR) << "PR_Cleanup failed; was NSPR initialized on wrong thread?";
+    }
+  }
+};
+
 class NSSInitSingleton {
  public:
   NSSInitSingleton() {
-    SECStatus status;
+    base::EnsureNSPRInit();
+
+    SECStatus status = SECFailure;
     std::string database_dir = GetDefaultConfigDirectory();
     if (!database_dir.empty()) {
       // Initialize with a persistant database (~/.pki/nssdb).
       // Use "sql:" which can be shared by multiple processes safely.
       status = NSS_InitReadWrite(
           StringPrintf("sql:%s", database_dir.c_str()).c_str());
-    } else {
-      LOG(WARNING) << "Initialize NSS without using a persistent database "
-                   << "(~/.pki/nssdb).";
-      status = NSS_NoDB_Init(".");
+      if (status != SECSuccess) {
+        LOG(ERROR) << "Error initializing NSS with a persistent "
+                      "databases: NSS error code " << PR_GetError();
+      }
     }
     if (status != SECSuccess) {
-      char buffer[513] = "Couldn't retrieve error";
-      PRInt32 err_length = PR_GetErrorTextLength();
-      if (err_length > 0 && static_cast<size_t>(err_length) < sizeof(buffer))
-        PR_GetErrorText(buffer);
-
-      NOTREACHED() << "Error initializing NSS: " << buffer;
+      LOG(WARNING) << "Initialize NSS without a persistent database "
+                      "(~/.pki/nssdb).";
+      status = NSS_NoDB_Init(NULL);
+      if (status != SECSuccess) {
+        LOG(ERROR) << "Error initializing NSS without a persistent "
+                      "database: NSS error code " << PR_GetError();
+      }
     }
 
     // If we haven't initialized the password for the NSS databases,
@@ -93,12 +113,22 @@ class NSSInitSingleton {
 
     NSS_SetDomesticPolicy();
 
+    // Use late binding to avoid scary but benign warning
+    // "Symbol `SSL_ImplementedCiphers' has different size in shared object,
+    //  consider re-linking"
+    const PRUint16* pSSL_ImplementedCiphers = static_cast<const PRUint16*>(
+        dlsym(RTLD_DEFAULT, "SSL_ImplementedCiphers"));
+    if (pSSL_ImplementedCiphers == NULL) {
+      NOTREACHED() << "Can't get list of supported ciphers";
+      return;
+    }
+
     // Explicitly enable exactly those ciphers with keys of at least 80 bits
     for (int i = 0; i < SSL_NumImplementedCiphers; i++) {
       SSLCipherSuiteInfo info;
-      if (SSL_GetCipherSuiteInfo(SSL_ImplementedCiphers[i], &info,
+      if (SSL_GetCipherSuiteInfo(pSSL_ImplementedCiphers[i], &info,
                                  sizeof(info)) == SECSuccess) {
-        SSL_CipherPrefSetDefault(SSL_ImplementedCiphers[i],
+        SSL_CipherPrefSetDefault(pSSL_ImplementedCiphers[i],
                                  (info.effectiveKeyBits >= 80));
       }
     }
@@ -120,15 +150,14 @@ class NSSInitSingleton {
     SSL_ClearSessionCache();
 
     SECStatus status = NSS_Shutdown();
-    if (status != SECSuccess)
-      LOG(ERROR) << "NSS_Shutdown failed, leak?  See "
-                    "http://code.google.com/p/chromium/issues/detail?id=4609";
+    if (status != SECSuccess) {
+      // We LOG(INFO) because this failure is relatively harmless
+      // (leaking, but we're shutting down anyway).
+      LOG(INFO) << "NSS_Shutdown failed; see "
+                   "http://code.google.com/p/chromium/issues/detail?id=4609";
+    }
 
     PL_ArenaFinish();
-
-    PRStatus prstatus = PR_Cleanup();
-    if (prstatus != PR_SUCCESS)
-      LOG(ERROR) << "PR_Cleanup failed?";
   }
 
  private:
@@ -138,6 +167,10 @@ class NSSInitSingleton {
 }  // namespace
 
 namespace base {
+
+void EnsureNSPRInit() {
+  Singleton<NSPRInitSingleton>::get();
+}
 
 void EnsureNSSInit() {
   Singleton<NSSInitSingleton>::get();

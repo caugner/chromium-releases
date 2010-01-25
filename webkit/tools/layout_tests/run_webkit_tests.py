@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -28,42 +28,39 @@ import optparse
 import os
 import Queue
 import random
+import re
 import shutil
 import subprocess
 import sys
 import time
 import traceback
 
-import google.path_utils
-
 from layout_package import compare_failures
 from layout_package import test_expectations
 from layout_package import http_server
+from layout_package import json_results_generator
 from layout_package import path_utils
-from layout_package import platform_utils
 from layout_package import test_failures
 from layout_package import test_shell_thread
+from layout_package import test_files
+from layout_package import websocket_server
 from test_types import fuzzy_image_diff
 from test_types import image_diff
 from test_types import test_type_base
 from test_types import text_diff
-from test_types import simplified_text_diff
 
 class TestInfo:
   """Groups information about a test for easy passing of data."""
-  def __init__(self, filename, timeout, platform):
+  def __init__(self, filename, timeout):
     """Generates the URI and stores the filename and timeout for this test.
     Args:
       filename: Full path to the test.
       timeout: Timeout for running the test in TestShell.
-      platform: The platform whose test expected results to grab.
       """
     self.filename = filename
     self.uri = path_utils.FilenameToUri(filename)
     self.timeout = timeout
-    expected_hash_file = path_utils.ExpectedFilename(filename,
-                                                     '.checksum',
-                                                     platform)
+    expected_hash_file = path_utils.ExpectedFilename(filename, '.checksum')
     try:
       self.image_hash = open(expected_hash_file, "r").read()
     except IOError, e:
@@ -72,39 +69,71 @@ class TestInfo:
       self.image_hash = None
 
 
+class ResultSummaryEntry:
+  def __init__(self, all, failed, failure_counts, skipped):
+    """Resolves result counts.
+
+    Args:
+      all: list of all tests in this category
+      failed: list of failing tests in this category
+      skipped: list of skipped tests
+      failure_counts: dictionary of (TestFailure -> frequency)
+    """
+    self.skip_count = len(skipped)
+    self.total_count = len(all | skipped)
+    self.pass_count = self.total_count - self.skip_count - len(failed)
+    self.failure_counts = failure_counts;
+
+
+class ResultSummary:
+  """Container for all result summaries for this test run.
+
+  Args:
+    deferred: ResultSummary object for deferred tests.
+    wontfix: ResultSummary object for wontfix tests.
+    fixable: ResultSummary object for tests marked in test_expectations.txt as
+        needing fixing but are not deferred/wontfix (i.e. should be fixed
+        for the next release).
+    fixable_count: Count of all fixable and skipped tests. This is essentially
+        a deduped sum of all the failures that are not deferred/wontfix.
+    all_fixable_count: Count of all the tests that are not deferred/wontfix.
+        This includes passing tests.
+  """
+  def __init__(self, deferred, wontfix, fixable, fixable_count,
+      all_fixable_count):
+    self.deferred = deferred
+    self.wontfix = wontfix
+    self.fixable = fixable
+    self.fixable_count = fixable_count
+    self.all_fixable_count = all_fixable_count
+
+
 class TestRunner:
   """A class for managing running a series of tests on a series of test
   files."""
 
-  # When collecting test cases, we include any file with these extensions.
-  _supported_file_extensions = set(['.html', '.shtml', '.xml', '.xhtml', '.pl',
-                                    '.php', '.svg'])
-  # When collecting test cases, skip these directories
-  _skipped_directories = set(['.svn', '_svn', 'resources'])
-
-  # Top-level directories to shard when running tests.
-  _shardable_directories = set(['chrome', 'LayoutTests', 'pending'])
-
   HTTP_SUBDIR = os.sep.join(['', 'http', ''])
+  WEBSOCKET_SUBDIR = os.sep.join(['', 'websocket', ''])
 
   # The per-test timeout in milliseconds, if no --time-out-ms option was given
   # to run_webkit_tests. This should correspond to the default timeout in
   # test_shell.exe.
-  DEFAULT_TEST_TIMEOUT_MS = 10 * 1000
+  DEFAULT_TEST_TIMEOUT_MS = 6 * 1000
 
-  def __init__(self, options, paths, platform_new_results_dir):
-    """Collect a list of files to test.
+  def __init__(self, options):
+    """Initialize test runner data structures.
 
     Args:
       options: a dictionary of command line options
-      paths: a list of paths to crawl looking for test files
-      platform_new_results_dir: name of leaf directory to put rebaselined files
-                                in.
     """
     self._options = options
-    self._platform_new_results_dir = platform_new_results_dir
 
     self._http_server = http_server.Lighttpd(options.results_directory)
+    self._websocket_server = websocket_server.PyWebSocket(
+        options.results_directory)
+    self._websocket_secure_server = websocket_server.PyWebSocket(
+        options.results_directory, use_tls=True, port=9323)
+
     # a list of TestType objects
     self._test_types = []
 
@@ -112,22 +141,6 @@ class TestRunner:
     self._test_files = set()
     self._test_files_list = None
     self._file_dir = path_utils.GetAbsolutePath(os.path.dirname(sys.argv[0]))
-
-    if options.lint_test_files:
-      # Creating the expecations for each platform/target pair does all the
-      # test list parsing and ensures it's correct syntax(e.g. no dupes).
-      self._ParseExpectations('win', is_debug_mode=True)
-      self._ParseExpectations('win', is_debug_mode=False)
-      self._ParseExpectations('mac', is_debug_mode=True)
-      self._ParseExpectations('mac', is_debug_mode=False)
-      self._ParseExpectations('linux', is_debug_mode=True)
-      self._ParseExpectations('linux', is_debug_mode=False)
-    else:
-      self._GatherTestFiles(paths)
-      self._expectations = self._ParseExpectations(
-          platform_utils.GetTestListPlatformName().lower(),
-          options.target == 'Debug')
-      self._PrepareListsAndPrintOutput()
 
   def __del__(self):
     logging.info("flushing stdout")
@@ -137,48 +150,19 @@ class TestRunner:
     logging.info("stopping http server")
     # Stop the http server.
     self._http_server.Stop()
+    # Stop the Web Socket / Web Socket Secure servers.
+    self._websocket_server.Stop()
+    self._websocket_secure_server.Stop()
 
-  def _GatherTestFiles(self, paths):
-    """Generate a set of test files and place them in self._test_files
+  def GatherFilePaths(self, paths):
+    """Find all the files to test.
 
-    Args:
-      paths: a list of command line paths relative to the webkit/tests
-             directory.  glob patterns are ok.
-    """
-    paths_to_walk = set()
-    # if paths is empty, provide a pre-defined list.
-    if not paths:
-        paths = TestRunner._shardable_directories
-    for path in paths:
-      # If there's an * in the name, assume it's a glob pattern.
-      path = os.path.join(path_utils.LayoutTestsDir(path), path)
-      if path.find('*') > -1:
-        filenames = glob.glob(path)
-        paths_to_walk.update(filenames)
-      else:
-        paths_to_walk.add(path)
-
-    # Now walk all the paths passed in on the command line and get filenames
-    for path in paths_to_walk:
-      if os.path.isfile(path) and self._HasSupportedExtension(path):
-        self._test_files.add(os.path.normpath(path))
-        continue
-
-      for root, dirs, files in os.walk(path):
-        # don't walk skipped directories and sub directories
-        if os.path.basename(root) in TestRunner._skipped_directories:
-          del dirs[:]
-          continue
-
-        for filename in files:
-          if self._HasSupportedExtension(filename):
-            filename = os.path.join(root, filename)
-            filename = os.path.normpath(filename)
-            self._test_files.add(filename)
-
+    args:
+      paths: a list of globs to use instead of the defaults."""
+    self._test_files = test_files.GatherTestFiles(paths)
     logging.info('Found: %d tests' % len(self._test_files))
 
-  def _ParseExpectations(self, platform, is_debug_mode):
+  def ParseExpectations(self, platform, is_debug_mode):
     """Parse the expectations from the test_list files and return a data
     structure holding them. Throws an error if the test_list files have invalid
     syntax.
@@ -189,17 +173,17 @@ class TestRunner:
       test_files = self._test_files
 
     try:
-      return test_expectations.TestExpectations(test_files,
-                                                self._file_dir,
-                                                platform,
-                                                is_debug_mode)
+      self._expectations = test_expectations.TestExpectations(test_files,
+          self._file_dir, platform, is_debug_mode,
+          self._options.lint_test_files)
+      return self._expectations
     except Exception, err:
       if self._options.lint_test_files:
         print str(err)
       else:
         raise err
 
-  def _PrepareListsAndPrintOutput(self):
+  def PrepareListsAndPrintOutput(self):
     """Create appropriate subsets of test lists and print test counts.
 
     Create appropriate subsets of self._tests_files in
@@ -212,7 +196,8 @@ class TestRunner:
     skipped = set()
     # If there was only one test file, we'll run it even if it was skipped.
     if len(self._test_files) > 1 and not self._options.force:
-      skipped = (self._expectations.GetSkipped() |
+      skipped = (self._expectations.GetFixableSkipped() |
+                 self._expectations.GetDeferredSkipped() |
                  self._expectations.GetWontFixSkipped())
       self._test_files -= skipped
 
@@ -229,6 +214,11 @@ class TestRunner:
       random.shuffle(self._test_files_list)
     else:
       self._test_files_list.sort(self.TestFilesSort)
+
+    # Chunking replaces self._expectations, which loses all the skipped test
+    # information. Keep the prechunk expectations for tracking number of
+    # skipped tests.
+    self.prechunk_expectations = self._expectations;
 
     # If the user specifies they just want to run a subset of the tests,
     # just grab a subset of the non-skipped tests.
@@ -273,22 +263,30 @@ class TestRunner:
       slice_end = min(num_tests, slice_start + chunk_len)
 
       files = test_files[slice_start:slice_end]
-      logging.info('Run: %d tests (chunk slice [%d:%d] of %d)' % (
-          (slice_end - slice_start), slice_start, slice_end, num_tests))
+      tests_run_msg = 'Run: %d tests (chunk slice [%d:%d] of %d)' % (
+          (slice_end - slice_start), slice_start, slice_end, num_tests)
+      logging.info(tests_run_msg)
 
       # If we reached the end and we don't have enough tests, we run some
       # from the beginning.
       if self._options.run_chunk and (slice_end - slice_start < chunk_len):
         extra = 1 + chunk_len - (slice_end - slice_start)
-        logging.info('   last chunk is partial, appending [0:%d]' % extra)
+        extra_msg = '   last chunk is partial, appending [0:%d]' % extra
+        logging.info(extra_msg)
+        tests_run_msg += "\n" + extra_msg
         files.extend(test_files[0:extra])
       self._test_files_list = files
       self._test_files = set(files)
 
+      tests_run_filename = os.path.join(self._options.results_directory,
+                                        "tests_run.txt")
+      tests_run_file = open(tests_run_filename, "w")
+      tests_run_file.write(tests_run_msg + "\n")
+      tests_run_file.close()
+
       # update expectations so that the stats are calculated correctly
-      self._expectations = self._ParseExpectations(
-          platform_utils.GetTestListPlatformName().lower(),
-          options.target == 'Debug')
+      self._expectations = self.ParseExpectations(
+          path_utils.PlatformName(), options.target == 'Debug')
     else:
       logging.info('Run: %d tests' % len(self._test_files))
 
@@ -309,12 +307,6 @@ class TestRunner:
                   len(self._expectations.GetDeferredTimeouts())))
     logging.info('Expected crashes: %d fixable tests' %
                  len(self._expectations.GetFixableCrashes()))
-
-  def _HasSupportedExtension(self, filename):
-    """Return true if filename is one of the file extensions we want to run a
-    test on."""
-    extension = os.path.splitext(filename)[1]
-    return extension in TestRunner._supported_file_extensions
 
   def AddTestType(self, test_type):
     """Add a TestType to the TestRunner."""
@@ -347,13 +339,20 @@ class TestRunner:
     test_file = test_file_parts[1]
 
     return_value = directory
-    while directory in TestRunner._shardable_directories:
+    while directory in test_files.SHARDABLE_DIRECTORIES:
       test_file_parts = test_file.split(os.sep, 1)
       directory = test_file_parts[0]
       return_value = os.path.join(return_value, directory)
       test_file = test_file_parts[1]
 
     return return_value
+
+  def _GetTestInfoForFile(self, test_file):
+    """Returns the appropriate TestInfo object for the file. Mostly this is used
+    for looking up the timeout value (in ms) to use for the given test."""
+    if self._expectations.HasModifier(test_file, test_expectations.SLOW):
+      return TestInfo(test_file, self._options.slow_time_out_ms)
+    return TestInfo(test_file, self._options.time_out_ms)
 
   def _GetTestFileQueue(self, test_files):
     """Create the thread safe queue of lists of (test filenames, test URIs)
@@ -367,19 +366,18 @@ class TestRunner:
     Return:
       The Queue of lists of TestInfo objects.
     """
+    if self._options.experimental_fully_parallel:
+      filename_queue = Queue.Queue()
+      for test_file in test_files:
+       filename_queue.put(('.', [self._GetTestInfoForFile(test_file)]))
+      return filename_queue
+
     tests_by_dir = {}
     for test_file in test_files:
       directory = self._GetDirForTestFile(test_file)
       if directory not in tests_by_dir:
         tests_by_dir[directory] = []
-
-      if self._expectations.HasModifier(test_file, test_expectations.SLOW):
-        timeout = str(10 * int(options.time_out_ms))
-      else:
-        timeout = self._options.time_out_ms
-
-      tests_by_dir[directory].append(TestInfo(test_file, timeout,
-          self._options.platform))
+      tests_by_dir[directory].append(self._GetTestInfoForFile(test_file))
 
     # Sort by the number of tests in the dir so that the ones with the most
     # tests get run first in order to maximize parallelization. Number of tests
@@ -432,6 +430,14 @@ class TestRunner:
 
     return (test_args, shell_args)
 
+  def _ContainWebSocketTest(self, test_files):
+    if not test_files:
+      return False
+    for test_file in test_files:
+      if test_file.find(self.WEBSOCKET_SUBDIR) >= 0:
+        return True
+    return False
+
   def _InstantiateTestShellThreads(self, test_shell_binary):
     """Instantitates and starts the TestShellThread(s).
 
@@ -451,8 +457,14 @@ class TestRunner:
     filename_queue = self._GetTestFileQueue(test_files)
 
     # If we have http tests, the first one will be an http test.
-    if test_files and test_files[0].find(self.HTTP_SUBDIR) >= 0:
+    if ((test_files and test_files[0].find(self.HTTP_SUBDIR) >= 0)
+        or self._options.randomize_order):
       self._http_server.Start()
+
+    # Start Web Socket server.
+    if (self._ContainWebSocketTest(test_files)):
+      self._websocket_server.Start()
+      self._websocket_secure_server.Start()
 
     # Instantiate TestShellThreads and start them.
     threads = []
@@ -461,8 +473,7 @@ class TestRunner:
       test_types = []
       for t in self._test_types:
         test_types.append(t(self._options.platform,
-                            self._options.results_directory,
-                            self._platform_new_results_dir))
+                            self._options.results_directory))
 
       test_args, shell_args = self._GetTestShellArgs(i)
       thread = test_shell_thread.TestShellThread(filename_queue,
@@ -496,7 +507,21 @@ class TestRunner:
     if not self._test_files:
       return 0
     start_time = time.time()
-    test_shell_binary = path_utils.TestShellBinaryPath(self._options.target)
+    test_shell_binary = path_utils.TestShellPath(self._options.target)
+
+    # Start up any helper needed
+    layout_test_helper_proc = None
+    if not options.no_pixel_tests:
+      helper_path = path_utils.LayoutTestHelperPath(self._options.target)
+      if len(helper_path):
+        logging.info("Starting layout helper %s" % helper_path)
+        layout_test_helper_proc = subprocess.Popen([helper_path],
+                                                   stdin=subprocess.PIPE,
+                                                   stdout=subprocess.PIPE,
+                                                   stderr=None)
+        is_ready = layout_test_helper_proc.stdout.readline()
+        if not is_ready.startswith('ready'):
+          logging.error("layout_test_helper failed to be ready")
 
     # Check that the system dependencies (themes, fonts, ...) are correct.
     if not self._options.nocheck_sys_deps:
@@ -509,31 +534,13 @@ class TestRunner:
 
     logging.info("Starting tests")
 
-    # Create the output directory if it doesn't already exist.
-    google.path_utils.MaybeMakeDirectory(self._options.results_directory)
-
-    # Start up any helper needed
-    layout_test_helper_proc = None
-    if sys.platform in ('darwin'):
-      # Mac uses a helper for manging the color sync profile for pixel tests.
-      if not options.no_pixel_tests:
-        helper_path = \
-            path_utils.LayoutTestHelperBinaryPath(self._options.target)
-        logging.info("Starting layout helper %s" % helper_path)
-        layout_test_helper_proc = subprocess.Popen([helper_path],
-                                                   stdin=subprocess.PIPE,
-                                                   stdout=subprocess.PIPE,
-                                                   stderr=None)
-        is_ready = layout_test_helper_proc.stdout.readline()
-        if is_ready != 'ready\n':
-          logging.error("layout_test_helper failed to be ready")
-
     threads = self._InstantiateTestShellThreads(test_shell_binary)
 
     # Wait for the threads to finish and collect test failures.
     failures = {}
     test_timings = {}
     individual_test_timings = []
+    thread_timings = []
     try:
       for thread in threads:
         while thread.isAlive():
@@ -543,6 +550,9 @@ class TestRunner:
           # be interruptible by KeyboardInterrupt.
           thread.join(1.0)
         failures.update(thread.GetFailures())
+        thread_timings.append({ 'name': thread.getName(),
+                                'num_tests': thread.GetNumTests(),
+                                'total_time': thread.GetTotalTime()});
         test_timings.update(thread.GetDirectoryTimingStats())
         individual_test_timings.extend(thread.GetIndividualTestStats())
     except KeyboardInterrupt:
@@ -562,7 +572,18 @@ class TestRunner:
 
     print
     end_time = time.time()
-    logging.info("%f total testing time" % (end_time - start_time))
+
+    logging.info("%6.2f total testing time" % (end_time - start_time))
+    cuml_time = 0
+    logging.debug("Thread timing:")
+    for t in thread_timings:
+      logging.debug("    %10s: %5d tests, %6.2f secs" %
+                    (t['name'], t['num_tests'], t['total_time']))
+      cuml_time += t['total_time']
+    logging.debug("")
+
+    logging.debug("   %6.2f cumulative, %6.2f optimal" %
+                  (cuml_time, cuml_time / int(self._options.num_test_shells)))
 
     print
     self._PrintTimingStatistics(test_timings, individual_test_timings, failures)
@@ -575,12 +596,16 @@ class TestRunner:
     print "-" * 78
 
     # Write summaries to stdout.
-    self._PrintResults(failures, sys.stdout)
+    result_summary = self._GetResultSummary(failures)
+    self._PrintResultSummary(result_summary, sys.stdout)
+
+    if self._options.verbose:
+      self._WriteJSONFiles(failures, individual_test_timings, result_summary);
 
     # Write the same data to a log file.
     out_filename = os.path.join(self._options.results_directory, "score.txt")
     output_file = open(out_filename, "w")
-    self._PrintResults(failures, output_file)
+    self._PrintResultSummary(result_summary, output_file)
     output_file.close()
 
     # Write the summary to disk (results.html) and maybe open the test_shell
@@ -592,6 +617,22 @@ class TestRunner:
     sys.stdout.flush()
     sys.stderr.flush()
     return len(regressions)
+
+  def _WriteJSONFiles(self, failures, individual_test_timings, result_summary):
+    logging.debug("Writing JSON files in %s." % self._options.results_directory)
+    # Write a json file of the test_expectations.txt file for the layout tests
+    # dashboard.
+    expectations_file = open(os.path.join(self._options.results_directory,
+        "expectations.json"), "w")
+    expectations_json = self._expectations.GetExpectationsJsonForAllPlatforms()
+    expectations_file.write(("ADD_EXPECTATIONS(" + expectations_json + ");"))
+    expectations_file.close()
+
+    json_results_generator.JSONResultsGenerator(self._options, failures,
+        individual_test_timings, self._options.results_directory,
+        self._test_files_list, result_summary)
+
+    logging.debug("Finished writing JSON files.")
 
   def _PrintTimingStatistics(self, directory_test_timings,
       individual_test_timings, failures):
@@ -726,27 +767,23 @@ class TestRunner:
         "99th percentile: %s, Standard deviation: %s\n" % (
         median, mean, percentile90, percentile99, std_deviation)))
 
-  def _PrintResults(self, failures, output):
-    """Print a short summary to stdout about how many tests passed.
+  def _GetResultSummary(self, failures):
+    """Returns a ResultSummary object with failure counts.
 
     Args:
-      failures is a dictionary mapping the test filename to a list of
-      TestFailure objects if the test failed
-
-      output is the file descriptor to write the results to. For example,
-      sys.stdout.
+      failures: dictionary mapping the test filename to a list of
+          TestFailure objects if the test failed
     """
-
-    failure_counts = {}
-    deferred_counts = {}
     fixable_counts = {}
-    non_ignored_counts = {}
+    deferred_counts = {}
+    wontfix_counts = {}
+
     fixable_failures = set()
     deferred_failures = set()
-    non_ignored_failures = set()
+    wontfix_failures = set()
 
     # Aggregate failures in a dictionary (TestFailure -> frequency),
-    # with known (fixable and ignored) failures separated out.
+    # with known (fixable and wontfix) failures separated out.
     def AddFailure(dictionary, key):
       if key in dictionary:
         dictionary[key] += 1
@@ -755,78 +792,107 @@ class TestRunner:
 
     for test, failures in failures.iteritems():
       for failure in failures:
-        AddFailure(failure_counts, failure.__class__)
+        # TODO(ojan): Now that we have IMAGE+TEXT, IMAGE and TEXT,
+        # we can avoid adding multiple failures per test since there should
+        # be a unique type of failure for each test. This would make the
+        # statistics printed at the end easier to grok.
         if self._expectations.IsDeferred(test):
-          AddFailure(deferred_counts, failure.__class__)
-          deferred_failures.add(test)
+          count_group = deferred_counts
+          failure_group = deferred_failures
+        elif self._expectations.IsIgnored(test):
+          count_group = wontfix_counts
+          failure_group = wontfix_failures
         else:
-          if self._expectations.IsFixable(test):
-            AddFailure(fixable_counts, failure.__class__)
-            fixable_failures.add(test)
-          if not self._expectations.IsIgnored(test):
-            AddFailure(non_ignored_counts, failure.__class__)
-            non_ignored_failures.add(test)
+          count_group = fixable_counts
+          failure_group = fixable_failures
 
-    # Print breakdown of tests we need to fix and want to pass.
+        AddFailure(count_group, failure.__class__)
+        failure_group.add(test)
+
+    # Here and below, use the prechuncked expectations object for numbers of
+    # skipped tests. Chunking removes the skipped tests before creating the
+    # expectations file.
+    #
+    # This is a bit inaccurate, since the number of skipped tests will be
+    # duplicated across all shard, but it's the best we can reasonably do.
+
+    deduped_fixable_count = len(fixable_failures |
+        self.prechunk_expectations.GetFixableSkipped())
+    all_fixable_count = len(self._test_files -
+        self._expectations.GetWontFix() - self._expectations.GetDeferred())
+
+    # Breakdown of tests we need to fix and want to pass.
     # Include skipped fixable tests in the statistics.
-    skipped = (self._expectations.GetSkipped() -
-        self._expectations.GetDeferredSkipped())
+    fixable_result_summary = ResultSummaryEntry(
+        self._expectations.GetFixable() | fixable_failures,
+        fixable_failures,
+        fixable_counts,
+        self.prechunk_expectations.GetFixableSkipped())
 
-    self._PrintResultSummary("=> Tests to be fixed for the current release",
-                             self._expectations.GetFixable(),
-                             fixable_failures,
-                             fixable_counts,
-                             skipped,
-                             output)
+    deferred_result_summary = ResultSummaryEntry(
+        self._expectations.GetDeferred(),
+        deferred_failures,
+        deferred_counts,
+        self.prechunk_expectations.GetDeferredSkipped())
 
-    self._PrintResultSummary("=> Tests we want to pass for the current release",
-                             (self._test_files -
-                              self._expectations.GetWontFix() -
-                              self._expectations.GetDeferred()),
-                             non_ignored_failures,
-                             non_ignored_counts,
-                             skipped,
-                             output)
+    wontfix_result_summary = ResultSummaryEntry(
+        self._expectations.GetWontFix(),
+        wontfix_failures,
+        wontfix_counts,
+        self.prechunk_expectations.GetWontFixSkipped())
 
-    self._PrintResultSummary("=> Tests to be fixed for a future release",
-                             self._expectations.GetDeferred(),
-                             deferred_failures,
-                             deferred_counts,
-                             self._expectations.GetDeferredSkipped(),
-                             output)
+    return ResultSummary(deferred_result_summary, wontfix_result_summary,
+        fixable_result_summary, deduped_fixable_count, all_fixable_count)
 
-    # Print breakdown of all tests including all skipped tests.
-    skipped |= self._expectations.GetWontFixSkipped()
-    self._PrintResultSummary("=> All tests",
-                             self._test_files,
-                             failures,
-                             failure_counts,
-                             skipped,
-                             output)
+  def _PrintResultSummary(self, result_summary, output):
+    """Print a short summary to stdout about how many tests passed.
+
+    Args:
+      result_summary: ResultSummary object with failure counts.
+      output: file descriptor to write the results to. For example, sys.stdout.
+    """
+    failed = result_summary.fixable_count
+    total = result_summary.all_fixable_count
+    passed = 0
+    if total > 0:
+      passed = float(total - failed) * 100 / total
+    output.write(
+        "\nTest summary: %.1f%% Passed | %s Failures | %s Tests to pass for "
+        "this release\n" % (
+        passed, failed, total))
+
+    self._PrintResultSummaryEntry(
+        "Tests to be fixed for the current release",
+        result_summary.fixable,
+        output)
+    self._PrintResultSummaryEntry(
+        "Tests to be fixed for a future release (DEFER)",
+        result_summary.deferred,
+        output)
+    self._PrintResultSummaryEntry("Tests never to be fixed (WONTFIX)",
+        result_summary.wontfix,
+        output)
     print
 
-  def _PrintResultSummary(self, heading, all, failed, failure_counts, skipped,
-                          output):
+  def _PrintResultSummaryEntry(self, heading, result_summary, output):
     """Print a summary block of results for a particular category of test.
 
     Args:
       heading: text to print before the block, followed by the total count
-      all: list of all tests in this category
-      failed: list of failing tests in this category
-      failure_counts: dictionary of (TestFailure -> frequency)
+      result_summary: ResultSummaryEntry object with the result counts
       output: file descriptor to write the results to
     """
-    total = len(all | skipped)
-    output.write("\n%s (%d):\n" % (heading, total))
-    skip_count = len(skipped)
-    pass_count = total - skip_count - len(failed)
-    self._PrintResultLine(pass_count, total, "Passed", output)
-    self._PrintResultLine(skip_count, total, "Skipped", output)
-    # Sort the failure counts and print them one by one.
-    sorted_keys = sorted(failure_counts.keys(),
+    output.write("\n=> %s (%d):\n" % (heading, result_summary.total_count))
+    self._PrintResultLine(result_summary.pass_count, result_summary.total_count,
+        "Passed", output)
+    self._PrintResultLine(result_summary.skip_count, result_summary.total_count,
+        "Skipped", output)
+    sorted_keys = sorted(result_summary.failure_counts.keys(),
                          key=test_failures.FailureSort.SortOrder)
     for failure in sorted_keys:
-      self._PrintResultLine(failure_counts[failure], total, failure.Message(),
+      self._PrintResultLine(result_summary.failure_counts[failure],
+                            result_summary.total_count,
+                            failure.Message(),
                             output)
 
   def _PrintResultLine(self, count, total, message, output):
@@ -916,7 +982,7 @@ class TestRunner:
     """Launches the test shell open to the results.html page."""
     results_filename = os.path.join(self._options.results_directory,
                                     "results.html")
-    subprocess.Popen([path_utils.TestShellBinaryPath(self._options.target),
+    subprocess.Popen([path_utils.TestShellPath(self._options.target),
                       path_utils.FilenameToUri(results_filename)])
 
 
@@ -955,25 +1021,18 @@ def main(options, args):
       options.target = "Release"
 
   if options.results_directory.startswith("/"):
-    # Assume it's an absolute path and normalize
+    # Assume it's an absolute path and normalize.
     options.results_directory = path_utils.GetAbsolutePath(
         options.results_directory)
   else:
     # If it's a relative path, make the output directory relative to Debug or
     # Release.
-    basedir = path_utils.WebKitRoot()
-    basedir = os.path.join(basedir, options.target)
-
+    basedir = path_utils.PathFromBase('webkit')
     options.results_directory = path_utils.GetAbsolutePath(
-        os.path.join(basedir, options.results_directory))
+        os.path.join(basedir, options.target, options.results_directory))
 
-  if options.platform is None:
-    options.platform = path_utils.PlatformDir()
-    platform_new_results_dir = path_utils.PlatformNewResultsDir()
-  else:
-    # If the user specified a platform on the command line then use
-    # that as the name of the output directory for rebaselined files.
-    platform_new_results_dir = options.platform
+  # Ensure platform is valid and force it to the form 'chromium-<platform>'.
+  options.platform = path_utils.PlatformName(options.platform)
 
   if not options.num_test_shells:
     cpus = 1
@@ -994,10 +1053,14 @@ def main(options, args):
   logging.info("Running %s test_shells in parallel" % options.num_test_shells)
 
   if not options.time_out_ms:
-    if options.num_test_shells > 1:
+    if options.target == "Debug":
       options.time_out_ms = str(2 * TestRunner.DEFAULT_TEST_TIMEOUT_MS)
     else:
       options.time_out_ms = str(TestRunner.DEFAULT_TEST_TIMEOUT_MS)
+
+  options.slow_time_out_ms = str(5 * int(options.time_out_ms))
+  logging.info("Regular timeout: %s, slow test timeout: %s" %
+      (options.time_out_ms, options.slow_time_out_ms))
 
   # Include all tests if none are specified.
   new_args = []
@@ -1011,16 +1074,42 @@ def main(options, args):
   if options.test_list:
     paths += ReadTestFiles(options.test_list)
 
-  test_runner = TestRunner(options, paths, platform_new_results_dir)
+  # Create the output directory if it doesn't already exist.
+  path_utils.MaybeMakeDirectory(options.results_directory)
+
+  test_runner = TestRunner(options)
+  test_runner.GatherFilePaths(paths)
 
   if options.lint_test_files:
-    # Just creating the TestRunner checks the syntax of the test lists.
+    # Creating the expecations for each platform/target pair does all the
+    # test list parsing and ensures it's correct syntax (e.g. no dupes).
+    for platform in test_expectations.TestExpectationsFile.PLATFORMS:
+      test_runner.ParseExpectations(platform, is_debug_mode=True)
+      test_runner.ParseExpectations(platform, is_debug_mode=False)
     print ("If there are no fail messages, errors or exceptions, then the "
         "lint succeeded.")
     return
+  else:
+    test_runner.ParseExpectations(options.platform, options.target == 'Debug')
+    test_runner.PrepareListsAndPrintOutput()
+
+  if options.find_baselines:
+    # Record where we found each baseline, then exit.
+    print("html,txt,checksum,png");
+    for t in test_runner._test_files:
+      (expected_txt_dir, expected_txt_file) = path_utils.ExpectedBaseline(
+          t, '.txt')[0]
+      (expected_png_dir, expected_png_file) = path_utils.ExpectedBaseline(
+          t, '.png')[0]
+      (expected_checksum_dir,
+          expected_checksum_file) = path_utils.ExpectedBaseline(
+          t, '.checksum')[0]
+      print("%s,%s,%s,%s" % (path_utils.RelativeTestFilename(t),
+            expected_txt_dir, expected_checksum_dir, expected_png_dir))
+    return
 
   try:
-    test_shell_binary_path = path_utils.TestShellBinaryPath(options.target)
+    test_shell_binary_path = path_utils.TestShellPath(options.target)
   except path_utils.PathNotFound:
     print "\nERROR: test_shell is not found. Be sure that you have built it"
     print "and that you are using the correct build. This script will run the"
@@ -1031,8 +1120,7 @@ def main(options, args):
   logging.info("Placing test results in %s" % options.results_directory)
   if options.new_baseline:
     logging.info("Placing new baselines in %s" %
-                 os.path.join(path_utils.PlatformResultsEnclosingDir(options.platform),
-                              platform_new_results_dir))
+                 path_utils.ChromiumBaselinePath(options.platform))
   logging.info("Using %s build at %s" %
                (options.target, test_shell_binary_path))
   if not options.no_pixel_tests:
@@ -1053,7 +1141,6 @@ def main(options, args):
     shutil.rmtree(cachedir)
 
   test_runner.AddTestType(text_diff.TestTextDiff)
-  test_runner.AddTestType(simplified_text_diff.SimplifiedTextDiff)
   if not options.no_pixel_tests:
     test_runner.AddTestType(image_diff.ImageDiff)
     if options.fuzzy_pixel_tests:
@@ -1155,5 +1242,24 @@ if '__main__' == __name__:
                            default=None,
                            help=("Run a the tests in batches (n), after every "
                                  "n tests, the test shell is relaunched."))
+  option_parser.add_option("", "--builder-name",
+                           default="DUMMY_BUILDER_NAME",
+                           help=("The name of the builder shown on the "
+                                 "waterfall running this script e.g. WebKit."))
+  option_parser.add_option("", "--build-name",
+                           default="DUMMY_BUILD_NAME",
+                           help=("The name of the builder used in it's path, "
+                                 "e.g. webkit-rel."))
+  option_parser.add_option("", "--build-number",
+                           default="DUMMY_BUILD_NUMBER",
+                           help=("The build number of the builder running"
+                                 "this script."))
+  option_parser.add_option("", "--find-baselines", action="store_true",
+                           default=False,
+                           help="Prints a table mapping tests to their "
+                                "expected results")
+  option_parser.add_option("", "--experimental-fully-parallel",
+                           action="store_true", default=False,
+                           help="run all tests in parallel")
   options, args = option_parser.parse_args()
   main(options, args)

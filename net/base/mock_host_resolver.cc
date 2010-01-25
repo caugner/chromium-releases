@@ -45,12 +45,13 @@ MockHostResolverBase::MockHostResolverBase(bool use_caching)
 int MockHostResolverBase::Resolve(const RequestInfo& info,
                                   AddressList* addresses,
                                   CompletionCallback* callback,
-                                  RequestHandle* out_req) {
+                                  RequestHandle* out_req,
+                                  LoadLog* load_log) {
   if (synchronous_mode_) {
     callback = NULL;
     out_req = NULL;
   }
-  return impl_->Resolve(info, addresses, callback, out_req);
+  return impl_->Resolve(info, addresses, callback, out_req, load_log);
 }
 
 void MockHostResolverBase::CancelRequest(RequestHandle req) {
@@ -63,6 +64,10 @@ void MockHostResolverBase::AddObserver(Observer* observer) {
 
 void MockHostResolverBase::RemoveObserver(Observer* observer) {
   impl_->RemoveObserver(observer);
+}
+
+HostCache* MockHostResolverBase::GetHostCache() {
+  return impl_->GetHostCache();
 }
 
 void MockHostResolverBase::Shutdown() {
@@ -164,11 +169,8 @@ int RuleBasedHostResolverProc::Resolve(const std::string& host,
   RuleList::iterator r;
   for (r = rules_.begin(); r != rules_.end(); ++r) {
     if (MatchPattern(host, r->host_pattern)) {
-      if (r->latency_ms != 0) {
+      if (r->latency_ms != 0)
         PlatformThread::Sleep(r->latency_ms);
-        // Hmm, this seems unecessary.
-        r->latency_ms = 1;
-      }
 
       // Remap to a new host.
       const std::string& effective_host =

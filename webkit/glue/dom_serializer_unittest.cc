@@ -31,14 +31,13 @@ MSVC_POP_WARNING();
 #include "net/url_request/url_request_context.h"
 #include "webkit/api/public/WebData.h"
 #include "webkit/api/public/WebURL.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/dom_operations_private.h"
 #include "webkit/glue/dom_serializer.h"
 #include "webkit/glue/dom_serializer_delegate.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
 
@@ -97,7 +96,7 @@ class DomSerializerTests : public TestShellTest,
   void LoadPageFromURL(const GURL& page_url) {
     // Load the test file.
     test_shell_->ResetTestController();
-    test_shell_->LoadURL(UTF8ToWide(page_url.spec()).c_str());
+    test_shell_->LoadURL(page_url);
     test_shell_->WaitTestFinished();
   }
 
@@ -109,13 +108,13 @@ class DomSerializerTests : public TestShellTest,
     test_shell_->ResetTestController();
     // If input encoding is empty, use UTF-8 as default encoding.
     if (encoding_info.isEmpty()) {
-      test_shell_->webView()->GetMainFrame()->LoadHTMLString(contents,
-                                                             base_url);
+      test_shell_->webView()->mainFrame()->loadHTMLString(contents, base_url);
     } else {
       // Do not use WebFrame.LoadHTMLString because it assumes that input
       // html contents use UTF-8 encoding.
+      // TODO(darin): This should use WebFrame::loadData.
       WebFrameImpl* web_frame =
-          static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+          static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
       ASSERT_TRUE(web_frame != NULL);
       int len = static_cast<int>(contents.size());
       RefPtr<WebCore::SharedBuffer> buf(
@@ -265,7 +264,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithDocType) {
                web_frame->frame()->loader()->encoding());
   // Make sure serialized contents still have document type.
   web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+      static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->doctype() != NULL);
 }
@@ -297,7 +296,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithoutDocType) {
                web_frame->frame()->loader()->encoding());
   // Make sure serialized contents do not have document type.
   web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+      static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->doctype() == NULL);
 }
@@ -399,7 +398,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
   // Make sure the first child of HEAD element is META which has charset
   // declaration in serialized contents.
   web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+      static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   ASSERT_TRUE(web_frame != NULL);
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->isHTMLDocument());
@@ -467,7 +466,7 @@ TEST_F(DomSerializerTests,
   // Make sure only first child of HEAD element is META which has charset
   // declaration in serialized contents.
   web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+      static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   ASSERT_TRUE(web_frame != NULL);
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->isHTMLDocument());
@@ -718,8 +717,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
   // Make sure all links are absolute URLs and doc there are some number of
   // BASE tags in serialized HTML data. Each of those BASE tags have same base
   // URL which is as same as URL of current test file.
-  web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+  web_frame = static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   ASSERT_TRUE(web_frame != NULL);
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->isHTMLDocument());
@@ -772,7 +770,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
 
   // Make sure the head tag is empty.
   WebFrameImpl* web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+      static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   ASSERT_TRUE(web_frame != NULL);
   WebCore::Document* doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->isHTMLDocument());
@@ -791,8 +789,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
   // Reload serialized contents and make sure there is only one META tag.
   LoadContents(serialized_contents, file_url,
                web_frame->frame()->loader()->encoding());
-  web_frame =
-      static_cast<WebFrameImpl*>(test_shell_->webView()->GetMainFrame());
+  web_frame = static_cast<WebFrameImpl*>(test_shell_->webView()->mainFrame());
   ASSERT_TRUE(web_frame != NULL);
   doc = web_frame->frame()->document();
   ASSERT_TRUE(doc->isHTMLDocument());

@@ -132,7 +132,7 @@ o3djs.event.getKeyIdentifier = function(charCode, keyCode) {
  * @return {number} the numeric Unicode code point represented.
  */
 o3djs.event.keyIdentifierToChar = function(keyIdent) {
-  if (keyIdent) {
+  if (keyIdent && typeof(keyIdent) == 'string') {
     switch (keyIdent) {
       case 'Enter': return 13;
       case 'Left': return 37;
@@ -140,8 +140,8 @@ o3djs.event.keyIdentifierToChar = function(keyIdent) {
       case 'Up': return 38;
       case 'Down': return 40;
     }
-  if (keyIdent.indexOf('U+') == 0)
-    return parseInt(keyIdent.substr(2).toUpperCase(), 16);
+    if (keyIdent.indexOf('U+') == 0)
+      return parseInt(keyIdent.substr(2).toUpperCase(), 16);
   }
   return 0;
 };
@@ -157,7 +157,7 @@ o3djs.event.getEventKeyChar = function(event) {
     event = window.event;
   }
   var charCode = 0;
-  if (event.keyIdentifier)
+  if (event.keyIdentifier) 
     charCode = o3djs.event.keyIdentifierToChar(event.keyIdentifier);
   if (!charCode)
     charCode = (window.event) ? window.event.keyCode : event.charCode;
@@ -204,8 +204,8 @@ o3djs.event.startKeyboardEventSynthesis = function(pluginObject) {
  * see http://www.w3.org/TR/DOM-Level-3-Events/events.html
  * #Events-KeyboardEvents-Interfaces
  * see http://developer.mozilla.org/en/DOM/event.initKeyEvent
- * @param {!Element} event an O3D event object.
- * @param {!o3d.Plugin} pluginObject the plugin object on the page.
+ * @param {!Event} event an O3D event object.
+ * @param {!Element} pluginObject the plugin object on the page.
  */
 o3djs.event.onKey = function(event, pluginObject) {
   var k_evt = o3djs.event.createKeyEvent(event.type, event.charCode,

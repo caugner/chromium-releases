@@ -5,6 +5,18 @@
 {
   'variables': {
     'chromium_code': 1,
+
+    'variables': {
+      'version_py_path': 'tools/build/version.py',
+      'version_path': 'VERSION',
+    },
+    'version_py_path': '<(version_py_path)',
+    'version_path': '<(version_path)',
+    'version_full':
+        '<!(python <(version_py_path) -f <(version_path) -t "@MAJOR@.@MINOR@.@BUILD@.@PATCH@")',
+    'version_build_patch':
+        '<!(python <(version_py_path) -f <(version_path) -t "@BUILD@.@PATCH@")',
+
     # Define the common dependencies that contain all the actual
     # Chromium functionality.  This list gets pulled in below by
     # the link of the actual chrome (or chromium) executable on
@@ -14,25 +26,70 @@
       'browser',
       'debugger',
       'renderer',
+      'syncapi',
       'utility',
+      'profile_import',
       'worker',
       '../printing/printing.gyp:printing',
       '../webkit/webkit.gyp:inspector_resources',
     ],
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
-    'browser_tests_sources': [
-      'browser/browser_browsertest.cc',
-      'browser/crash_recovery_browsertest.cc',
-      'browser/ssl/ssl_browser_tests.cc',
+    'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
+    'chrome_strings_grds': [
+      # Localizable resources.
+      'app/resources/locale_settings.grd',
+      'app/chromium_strings.grd',
+      'app/generated_resources.grd',
+      'app/google_chrome_strings.grd',
     ],
-    'browser_tests_sources_win_specific': [
-      'browser/extensions/extension_shelf_model_unittest.cc',
-      'browser/extensions/extension_startup_unittest.cc',
+    'chrome_resources_grds': [
+      # Data resources.
+      'browser/browser_resources.grd',
+      'common/common_resources.grd',
+      'renderer/renderer_resources.grd',
+    ],
+    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',],
+    'repack_locales_cmd': ['python', 'tools/build/repack_locales.py',],
+    # TODO: remove this helper when we have loops in GYP
+    'apply_locales_cmd': ['python', 'tools/build/apply_locales.py',],
+    'browser_tests_sources': [
+      'browser/autocomplete/autocomplete_browsertest.cc',
+      'browser/browser_browsertest.cc',
+      'browser/browser_init_browsertest.cc',
+      'browser/crash_recovery_browsertest.cc',
+      'browser/download/save_page_browsertest.cc',
+      'browser/extensions/autoupdate_interceptor.cc',
+      'browser/extensions/autoupdate_interceptor.h',
+      'browser/extensions/cross_origin_xhr_apitest.cc',
+      'browser/extensions/execute_script_apitest.cc',
+      'browser/extensions/extension_apitest.cc',
+      'browser/extensions/extension_apitest.h',
+      'browser/extensions/extension_bookmarks_apitest.cc',
+      'browser/extensions/extension_javascript_url_apitest.cc',
       'browser/extensions/extension_browsertest.cc',
       'browser/extensions/extension_browsertest.h',
       'browser/extensions/extension_browsertests_misc.cc',
+      'browser/extensions/extension_override_apitest.cc',
+      'browser/extensions/extension_toolstrip_apitest.cc',
+      'browser/extensions/isolated_world_apitest.cc',
+      'browser/gtk/bookmark_manager_browsertest.cc',
+      'browser/gtk/view_id_util_browsertest.cc',
+      'browser/net/ftp_browsertest.cc',
+      'browser/ssl/ssl_browser_tests.cc',
+    ],
+    'browser_tests_sources_win_specific': [
+      'browser/extensions/browser_action_apitest.cc',
+      'browser/extensions/extension_devtools_browsertest.cc',
+      'browser/extensions/extension_devtools_browsertest.h',
+      'browser/extensions/extension_devtools_browsertests.cc',
+      'browser/extensions/extension_shelf_model_unittest.cc',
+      'browser/extensions/extension_startup_unittest.cc',
+      'browser/extensions/extension_storage_apitest.cc',
+      'browser/extensions/extension_tabs_apitest.cc',
+      'browser/extensions/extension_i18n_apitest.cc',
+      'browser/extensions/page_action_apitest.cc',
       'browser/views/browser_views_accessibility_browsertest.cc',
-      'browser/views/find_bar_win_browsertest.cc',
+      'browser/views/find_bar_host_browsertest.cc',
       # TODO(jam): http://crbug.com/15101 These tests fail on Linux and Mac.
       'browser/child_process_security_policy_browser_test.cc',
       'browser/renderer_host/test/web_cache_manager_browsertest.cc',
@@ -41,36 +98,101 @@
       #                non win specific section.
       'browser/task_manager_browsertest.cc',
     ],
+    'browser_tests_sources_exclude_on_mac': [
+      'browser/extensions/cross_origin_xhr_apitest.cc',
+      'browser/extensions/execute_script_apitest.cc',
+      'browser/extensions/extension_apitest.cc',
+      'browser/extensions/extension_apitest.h',
+      'browser/extensions/extension_bookmarks_apitest.cc',
+      'browser/extensions/extension_javascript_url_apitest.cc',
+      'browser/extensions/extension_browsertest.cc',
+      'browser/extensions/extension_browsertest.h',
+      'browser/extensions/extension_browsertests_misc.cc',
+      'browser/extensions/extension_override_apitest.cc',
+      'browser/extensions/extension_toolstrip_apitest.cc',
+      'browser/extensions/isolated_world_apitest.cc',
+      'browser/ssl/ssl_browser_tests.cc',
+    ],
     # TODO(jcampan): move these vars to views.gyp.
     'views_unit_tests_sources': [
       '../views/view_unittest.cc',
+      '../views/focus/focus_manager_unittest.cc',
+      '../views/controls/label_unittest.cc',
     ],
     'views_unit_tests_sources_win_specific': [
       # TODO(jcampan): make the following tests work on Linux.
-      '../views/controls/label_unittest.cc',
       '../views/controls/table/table_view_unittest.cc',
-      '../views/focus/focus_manager_unittest.cc',
       '../views/grid_layout_unittest.cc',
-    ]    
-  },
-  'includes': [
-    '../build/common.gypi',
-  ],
+    ],
+    'conditions': [
+      ['OS=="win"', {
+        'nacl_defines': [
+          'NACL_WINDOWS=1',
+          'NACL_LINUX=0',
+          'NACL_OSX=0',
+        ],
+      },],
+      ['OS=="linux"', {
+        'nacl_defines': [
+          'NACL_WINDOWS=0',
+          'NACL_LINUX=1',
+          'NACL_OSX=0',
+        ],
+      },],
+      ['OS=="mac"', {
+        'tweak_info_plist_path': 'tools/build/mac/tweak_info_plist',
+        'nacl_defines': [
+          'NACL_WINDOWS=0',
+          'NACL_LINUX=0',
+          'NACL_OSX=1',
+        ],
+        'conditions': [
+          ['branding=="Chrome"', {
+            'mac_bundle_id': 'com.google.Chrome',
+            'mac_creator': 'rimZ',
+          }, {  # else: branding!="Chrome"
+            'mac_bundle_id': 'org.chromium.Chromium',
+            'mac_creator': 'Cr24',
+          }],  # branding
+        ],  # conditions
+      }],  # OS=="mac"
+      ['OS=="win" or OS=="mac"', {
+        # Whether or not browser sync code is built in.
+        'browser_sync%': 1,
+      }, {
+        'browser_sync%': 0,
+      }],  # OS=="win"
+      ['target_arch=="ia32"', {
+        'nacl_defines': [
+          # TODO(gregoryd): consider getting this from NaCl's common.gypi
+          'NACL_TARGET_SUBARCH=32',
+          'NACL_BUILD_SUBARCH=32',
+        ],
+      }],
+      ['target_arch=="x64"', {
+        'nacl_defines': [
+          # TODO(gregoryd): consider getting this from NaCl's common.gypi
+          'NACL_TARGET_SUBARCH=64',
+          'NACL_BUILD_SUBARCH=64',
+        ],
+      }],
+    ],  # conditions
+  },  # variables
   'target_defaults': {
     'sources/': [
       ['exclude', '/(cocoa|gtk|win)/'],
-      ['exclude', '_(cocoa|gtk|linux|mac|posix|skia|win|views|x)(_unittest)?\\.(cc|mm?)$'],
+      ['exclude', '_(cocoa|gtk|linux|mac|posix|skia|win|views|x)(_unittest)?(_mac)?\\.(cc|mm?)$'],
       ['exclude', '/(gtk|win|x11)_[^/]*\\.cc$'],
     ],
     'conditions': [
-      ['OS=="linux"', {'sources/': [
+      ['OS=="linux" or OS=="freebsd"', {'sources/': [
         ['include', '/gtk/'],
         ['include', '_(gtk|linux|posix|skia|x)(_unittest)?\\.cc$'],
         ['include', '/(gtk|x11)_[^/]*\\.cc$'],
       ]}],
       ['OS=="mac"', {'sources/': [
         ['include', '/cocoa/'],
-        ['include', '_(cocoa|mac|posix)(_unittest)?\\.(cc|mm?)$'],
+        ['include', '_(cocoa|mac|posix)(_unittest)?(_mac)?\\.(cc|mm?)$'],
       ]}, { # else: OS != "mac"
         'sources/': [
           ['exclude', '\\.mm?$'],
@@ -84,6 +206,11 @@
       ['OS=="linux" and toolkit_views==1', {'sources/': [
         ['include', '_views\\.cc$'],
       ]}],
+      ['browser_sync==0', {'sources/': [
+        ['exclude', '^(browser/sync|browser/views/sync).*cc$'],
+      ]}, {'defines': [
+        'BROWSER_SYNC=1',
+      ]}],
     ],
   },
   'targets': [
@@ -95,6 +222,11 @@
       'target_name': 'chrome_resources',
       'type': 'none',
       'msvs_guid': 'B95AB527-F7DB-41E9-AD91-EB51EE0F56BE',
+      'variables': {
+        'chrome_resources_inputs': [
+          '<!@(<(grit_info_cmd) --inputs <(chrome_resources_grds))',
+        ],
+      },
       'rules': [
         {
           'rule_name': 'grit',
@@ -114,25 +246,37 @@
             ],
           },
           'inputs': [
-            '../tools/grit/grit.py',
+            '<@(chrome_resources_inputs)',
           ],
           'outputs': [
             '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
             '<(grit_out_dir)/<(RULE_INPUT_ROOT).pak',
+            # TODO(bradnelson): move to something like this instead
+            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_resources_grds))',
+            # This currently cannot work because gyp only evaluates the
+            # outputs once (rather than per case where the rule applies).
+            # This means you end up with all the outputs from all the grd
+            # files, which angers scons and confuses vstudio.
+            # One alternative would be to turn this into several actions,
+            # but that would be rather verbose.
           ],
-          'action': ['python', '<@(_inputs)', '-i', '<(RULE_INPUT_PATH)',
+          'action': ['python', '../tools/grit/grit.py', '-i',
+            '<(RULE_INPUT_PATH)',
             'build', '-o', '<(grit_out_dir)',
             '-D', '<(chrome_build)',
             '-E', '<(branded_env)',
+          ],
+          'conditions': [
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
+            }],
           ],
           'message': 'Generating resources from <(RULE_INPUT_PATH)',
         },
       ],
       'sources': [
-        # Data resources.
-        'browser/browser_resources.grd',
-        'common/common_resources.grd',
-        'renderer/renderer_resources.grd',
+        '<@(chrome_resources_grds)',
+        '<@(chrome_resources_inputs)',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -151,8 +295,27 @@
       # of the static libraries currently have circular dependencies among
       # generated headers.
       'target_name': 'chrome_strings',
-      'type': 'none',
       'msvs_guid': 'D9DDAF60-663F-49CC-90DC-3D08CC3D1B28',
+      'conditions': [
+        ['OS=="win"', {
+          # HACK(nsylvain): We want to enforce a fake dependency on
+          # intaller_util_string.  install_util depends on both
+          # chrome_strings and installer_util_strings, but for some reasons
+          # Incredibuild does not enforce it (most likely a bug). By changing
+          # the type and making sure we depend on installer_util_strings, it
+          # will always get built before installer_util.
+          'type': 'dummy_executable',
+          'dependencies': ['../build/win/system.gyp:cygwin',
+                           'installer/installer.gyp:installer_util_strings',],
+        }, {
+          'type': 'none',
+        }],
+      ],
+      'variables': {
+        'chrome_strings_inputs': [
+          '<!@(<(grit_info_cmd) --inputs <(chrome_strings_grds))',
+        ],
+      },
       'rules': [
         {
           'rule_name': 'grit',
@@ -170,38 +333,40 @@
             ],
           },
           'inputs': [
-            '../tools/grit/grit.py',
+            '<@(chrome_strings_inputs)',
           ],
           'outputs': [
             '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT)_da.pak',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT)_en-US.pak',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT)_he.pak',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT)_zh-TW.pak',
+            # TODO: remove this helper when we have loops in GYP
+            '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(RULE_INPUT_ROOT)_ZZLOCALE.pak\' <(locales))',
+            # TODO(bradnelson): move to something like this
+            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_strings_grds))',
+            # See comment in chrome_resources as to why.
           ],
-          'action': ['python', '<@(_inputs)', '-i', '<(RULE_INPUT_PATH)',
-            'build', '-o', '<(grit_out_dir)',
-            '-D', '<(chrome_build)'],
+          'action': ['python', '../tools/grit/grit.py', '-i',
+                    '<(RULE_INPUT_PATH)',
+                    'build', '-o', '<(grit_out_dir)',
+                    '-D', '<(chrome_build)'],
+          'conditions': [
+            ['chromeos==1 or toolkit_views==1', {
+              'action': ['-D', 'chromeos'],
+            }],
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
+            }],
+          ],
           'message': 'Generating resources from <(RULE_INPUT_PATH)',
         },
       ],
       'sources': [
-        # Localizable resources.
-        'app/resources/locale_settings.grd',
-        'app/chromium_strings.grd',
-        'app/generated_resources.grd',
-        'app/google_chrome_strings.grd',
+        '<@(chrome_strings_grds)',
+        '<@(chrome_strings_inputs)',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           '<(grit_out_dir)',
         ],
       },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
     },
     {
       # theme_resources also generates a .cc file, so it can't use the rules above.
@@ -228,14 +393,10 @@
             ],
           },
           'inputs': [
-            '<(input_path)',
+            '<!@(<(grit_info_cmd) --inputs <(input_path))',
           ],
           'outputs': [
-            '<(grit_out_dir)/grit/theme_resources.h',
-            '<(grit_out_dir)/grit/theme_resources_map.cc',
-            '<(grit_out_dir)/grit/theme_resources_map.h',
-            '<(grit_out_dir)/theme_resources.pak',
-            '<(grit_out_dir)/theme_resources.rc',
+            '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
           ],
           'action': [
             'python', '<(grit_path)',
@@ -244,8 +405,11 @@
             '-D', '<(chrome_build)'
           ],
           'conditions': [
-            ['chromeos==1', {
+            ['chromeos==1 or toolkit_views==1', {
               'action': ['-D', 'chromeos'],
+            }],
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
             }],
           ],
           'message': 'Generating resources from <(input_path)',
@@ -279,26 +443,83 @@
         }],
       ],
     },
+     {
+      'target_name': 'common_constants',
+      'type': '<(library)',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'conditions': [
+        ['OS=="linux"', {
+          'dependencies': ['../build/linux/system.gyp:gtk'],
+        }],
+      ],
+      'sources': [
+        'common/chrome_constants.cc',
+        'common/chrome_constants.h',
+        'common/chrome_paths.cc',
+        'common/chrome_paths.h',
+        'common/chrome_paths_internal.h',
+        'common/chrome_paths_linux.cc',
+        'common/chrome_paths_mac.mm',
+        'common/chrome_paths_win.cc',
+        'common/chrome_switches.cc',
+        'common/chrome_switches.h',
+        'common/env_vars.cc',
+        'common/env_vars.h',
+        'common/json_value_serializer.cc',
+        'common/json_value_serializer.h',
+        'common/pref_names.cc',
+        'common/pref_names.h',
+      ],
+      'actions': [
+        {
+          'action_name': 'Make chrome_version.cc',
+          'variables': {
+            'make_version_cc_path': 'tools/build/make_version_cc.py',
+          },
+          'inputs': [
+            '<(make_version_cc_path)',
+            'VERSION',
+          ],
+          'outputs': [
+            '<(INTERMEDIATE_DIR)/chrome_version.cc',
+          ],
+          'action': [
+            'python',
+            '<(make_version_cc_path)',
+            '<@(_outputs)',
+            '<(version_full)',
+          ],
+          'process_outputs_as_sources': 1,
+        },
+      ],
+    },
     {
       'target_name': 'common',
       'type': '<(library)',
       'msvs_guid': '899F1280-3441-4D1F-BA04-CCD6208D9146',
       'dependencies': [
+        'common_constants',
         'chrome_resources',
         'chrome_strings',
         'theme_resources',
         '../app/app.gyp:app_base',
+        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
-        '../base/base.gyp:base_gfx',
+        '../base/base.gyp:base_i18n',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../ipc/ipc.gyp:ipc',
         '../net/net.gyp:net',
+        '../net/net.gyp:net_resources',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
+        '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
         '../third_party/npapi/npapi.gyp:npapi',
+        '../webkit/webkit.gyp:appcache',
         '../webkit/webkit.gyp:glue',
       ],
       'include_dirs': [
@@ -306,6 +527,8 @@
       ],
       'sources': [
         # All .cc, .h, and .mm files under chrome/common except for tests.
+        'common/desktop_notifications/active_notification_tracker.h',
+        'common/desktop_notifications/active_notification_tracker.cc',
         'common/extensions/extension.cc',
         'common/extensions/extension.h',
         'common/extensions/extension_constants.cc',
@@ -314,26 +537,37 @@
         'common/extensions/extension_error_reporter.h',
         'common/extensions/extension_error_utils.cc',
         'common/extensions/extension_error_utils.h',
+        'common/extensions/extension_action.cc',
+        'common/extensions/extension_action.h',
+        'common/extensions/extension_message_bundle.cc',
+        'common/extensions/extension_message_bundle.h',
+        'common/extensions/extension_resource.cc',
+        'common/extensions/extension_resource.h',
         'common/extensions/extension_unpacker.cc',
         'common/extensions/extension_unpacker.h',
+        'common/extensions/update_manifest.cc',
+        'common/extensions/update_manifest.h',
         'common/extensions/url_pattern.cc',
         'common/extensions/url_pattern.h',
         'common/extensions/user_script.cc',
         'common/extensions/user_script.h',
         'common/gfx/utils.h',
-        'common/net/cookie_monster_sqlite.cc',
-        'common/net/cookie_monster_sqlite.h',
         'common/net/dns.h',
+        'common/net/net_resource_provider.cc',
+        'common/net/net_resource_provider.h',
         'common/net/url_request_intercept_job.cc',
         'common/net/url_request_intercept_job.h',
         'common/web_resource/web_resource_unpacker.cc',
         'common/web_resource/web_resource_unpacker.h',
-        'common/app_cache/app_cache_context_impl.cc',
-        'common/app_cache/app_cache_context_impl.h',
-        'common/app_cache/app_cache_dispatcher.cc',
-        'common/app_cache/app_cache_dispatcher.h',
-        'common/app_cache/app_cache_dispatcher_host.cc',
-        'common/app_cache/app_cache_dispatcher_host.h',
+        'common/appcache/appcache_backend_proxy.cc',
+        'common/appcache/appcache_backend_proxy.h',
+        'common/appcache/appcache_dispatcher.cc',
+        'common/appcache/appcache_dispatcher.h',
+        'common/appcache/appcache_dispatcher_host.cc',
+        'common/appcache/appcache_dispatcher_host.h',
+        'common/appcache/appcache_frontend_proxy.cc',
+        'common/appcache/appcache_frontend_proxy.h',
+        'common/appcache/chrome_appcache_service.h',
         'common/automation_constants.cc',
         'common/automation_constants.h',
         'common/bindings_policy.h',
@@ -349,45 +583,37 @@
         'common/child_process_logging_win.cc',
         'common/child_thread.cc',
         'common/child_thread.h',
-        'common/chrome_constants.cc',
-        'common/chrome_constants.h',
         'common/chrome_counters.cc',
         'common/chrome_counters.h',
         'common/chrome_descriptors.h',
-        'common/chrome_paths.cc',
-        'common/chrome_paths.h',
-        'common/chrome_paths_internal.h',
-        'common/chrome_paths_linux.cc',
-        'common/chrome_paths_mac.mm',
-        'common/chrome_paths_win.cc',
         'common/chrome_plugin_api.h',
         'common/chrome_plugin_lib.cc',
         'common/chrome_plugin_lib.h',
         'common/chrome_plugin_util.cc',
         'common/chrome_plugin_util.h',
-        'common/chrome_switches.cc',
-        'common/chrome_switches.h',
         'common/classfactory.cc',
         'common/classfactory.h',
         'common/common_glue.cc',
         'common/common_param_traits.cc',
         'common/common_param_traits.h',
+        'common/css_colors.h',
+        'common/db_message_filter.cc',
+        'common/db_message_filter.h',
         'common/debug_flags.cc',
         'common/debug_flags.h',
         'common/devtools_messages.h',
         'common/devtools_messages_internal.h',
-        'common/env_vars.cc',
-        'common/env_vars.h',
+        'common/dom_storage_type.h',
         'common/filter_policy.h',
         'common/gears_api.h',
+        'common/gtk_tree.cc',
+        'common/gtk_tree.h',
         'common/gtk_util.cc',
         'common/gtk_util.h',
         'common/histogram_synchronizer.cc',
         'common/histogram_synchronizer.h',
         'common/important_file_writer.cc',
         'common/important_file_writer.h',
-        'common/json_value_serializer.cc',
-        'common/json_value_serializer.h',
         'common/jstemplate_builder.cc',
         'common/jstemplate_builder.h',
         'common/libxml_utils.cc',
@@ -397,8 +623,8 @@
         'common/main_function_params.h',
         'common/message_router.cc',
         'common/message_router.h',
-        'common/modal_dialog_event.h',
         'common/mru_cache.h',
+        'common/navigation_gesture.h',
         'common/navigation_types.h',
         'common/native_web_keyboard_event.h',
         'common/native_web_keyboard_event_linux.cc',
@@ -415,20 +641,18 @@
         'common/notification_type.h',
         'common/owned_widget_gtk.cc',
         'common/owned_widget_gtk.h',
-        'common/page_action.h',
-        'common/page_action.cc',
         'common/page_transition_types.h',
         'common/page_zoom.h',
         'common/platform_util.h',
         'common/platform_util_linux.cc',
         'common/platform_util_mac.mm',
         'common/platform_util_win.cc',
+        'common/plugin_carbon_interpose_constants_mac.h',
+        'common/plugin_carbon_interpose_constants_mac.cc',
         'common/plugin_messages.h',
         'common/plugin_messages_internal.h',
         'common/pref_member.cc',
         'common/pref_member.h',
-        'common/pref_names.cc',
-        'common/pref_names.h',
         'common/pref_service.cc',
         'common/pref_service.h',
         'common/process_watcher_posix.cc',
@@ -436,8 +660,6 @@
         'common/process_watcher.h',
         'common/property_bag.cc',
         'common/property_bag.h',
-        'common/quarantine_mac.h',
-        'common/quarantine_mac.mm',
         'common/ref_counted_util.h',
         'common/render_messages.h',
         'common/render_messages_internal.h',
@@ -447,8 +669,12 @@
         'common/result_codes.h',
         'common/sandbox_init_wrapper.cc',
         'common/sandbox_init_wrapper.h',
+        'common/sandbox_mac.h',
+        'common/sandbox_mac.mm',
         'common/security_filter_peer.cc',
         'common/security_filter_peer.h',
+        'common/nacl_messages.h',
+        'common/nacl_messages_internal.h',
         'common/sqlite_compiled_statement.cc',
         'common/sqlite_compiled_statement.h',
         'common/sqlite_utils.cc',
@@ -467,9 +693,12 @@
         'common/transport_dib_win.cc',
         'common/url_constants.cc',
         'common/url_constants.h',
+        'common/view_types.h',
         'common/visitedlink_common.cc',
         'common/visitedlink_common.h',
         'common/webkit_param_traits.h',
+        'common/webmessageportchannel_impl.cc',
+        'common/webmessageportchannel_impl.h',
         'common/win_safe_util.cc',
         'common/win_safe_util.h',
         'common/worker_messages.h',
@@ -482,9 +711,6 @@
         'common/zip.cc',  # Requires zlib directly.
         'common/zip.h',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
-
-        'tools/build/win/precompiled.cc',
-        'tools/build/win/precompiled.h',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -494,16 +720,13 @@
       'export_dependent_settings': [
         '../app/app.gyp:app_base',
       ],
-      'configurations': {
-        'Debug': {
-          'msvs_precompiled_header': 'tools/build/win/precompiled.h',
-          'msvs_precompiled_source': 'tools/build/win/precompiled.cc',
-        },
-      },
       'conditions': [
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+          ],
+          'export_dependent_settings': [
+            '../third_party/sqlite/sqlite.gyp:sqlite',
           ],
           'link_settings': {
             'libraries': [
@@ -517,17 +740,24 @@
             'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
           ],
         }],
+        ['OS=="linux" and selinux==1', {
+          'dependencies': [
+            '../build/linux/system.gyp:selinux',
+          ],
+        }],
         ['OS=="win"', {
           'include_dirs': [
             'third_party/wtl/include',
           ],
-          'sources!': [
-            'common/temp_scaffolding_stubs.cc',
-            'common/temp_scaffolding_stubs.h',
-          ],
         }, { # else: OS != "win"
           'sources!': [
             'common/classfactory.cc',
+          ],
+        }],
+        ['OS=="win" or (OS=="linux" and toolkit_views==0)', {
+          'sources!': [
+            'common/temp_scaffolding_stubs.cc',
+            'common/temp_scaffolding_stubs.h',
           ],
         }],
       ],
@@ -542,20 +772,25 @@
         'chrome_strings',
         'theme_resources',
         '../app/app.gyp:app_resources',
+        '../app/app.gyp:app_strings',
         '../media/media.gyp:media',
-        '../net/net.gyp:net_resources',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/bzip2/bzip2.gyp:bzip2',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/npapi/npapi.gyp:npapi',
-        'third_party/hunspell/hunspell.gyp:hunspell',
+        '../third_party/hunspell/hunspell.gyp:hunspell',
+        '../webkit/webkit.gyp:database',
         '../webkit/webkit.gyp:glue',
       ],
       'include_dirs': [
         '..',
         '<(INTERMEDIATE_DIR)',
+      ],
+      'defines': [
+        '<@(nacl_defines)',
       ],
       'sources': [
         # All .cc, .h, .m, and .mm files under browser except for tests and
@@ -591,8 +826,6 @@
         'browser/autocomplete/autocomplete_popup_view_gtk.h',
         'browser/autocomplete/autocomplete_popup_view_mac.h',
         'browser/autocomplete/autocomplete_popup_view_mac.mm',
-        'browser/autocomplete/autocomplete_popup_view_win.cc',
-        'browser/autocomplete/autocomplete_popup_view_win.h',
         'browser/autocomplete/history_contents_provider.cc',
         'browser/autocomplete/history_contents_provider.h',
         'browser/autocomplete/history_url_provider.cc',
@@ -609,12 +842,19 @@
         'browser/automation/extension_automation_constants.cc',
         'browser/automation/automation_extension_function.h',
         'browser/automation/automation_extension_function.cc',
+        'browser/automation/automation_profile_impl.cc',
+        'browser/automation/automation_profile_impl.h',
+        'browser/automation/automation_provider_gtk.cc',
+        'browser/automation/automation_provider_mac.mm',
+        'browser/automation/automation_provider_win.cc',
         'browser/automation/automation_provider.cc',
         'browser/automation/automation_provider.h',
         'browser/automation/automation_provider_list.cc',
         'browser/automation/automation_provider_list_generic.cc',
         'browser/automation/automation_provider_list_mac.mm',
         'browser/automation/automation_provider_list.h',
+        'browser/automation/automation_provider_observers.cc',
+        'browser/automation/automation_provider_observers.h',
         'browser/automation/automation_resource_message_filter.cc',
         'browser/automation/automation_resource_message_filter.h',
         'browser/automation/automation_resource_tracker.cc',
@@ -625,7 +865,8 @@
         'browser/automation/automation_window_tracker.h',
         'browser/automation/extension_port_container.cc',
         'browser/automation/extension_port_container.h',
-        'browser/automation/ui_controls.cc',
+        'browser/automation/ui_controls_linux.cc',
+        'browser/automation/ui_controls_win.cc',
         'browser/automation/ui_controls.h',
         'browser/back_forward_menu_model.cc',
         'browser/back_forward_menu_model.h',
@@ -651,6 +892,7 @@
         'browser/bookmarks/bookmark_manager.h',
         'browser/bookmarks/bookmark_model.cc',
         'browser/bookmarks/bookmark_model.h',
+        'browser/bookmarks/bookmark_model_observer.h',
         'browser/bookmarks/bookmark_service.h',
         'browser/bookmarks/bookmark_storage.cc',
         'browser/bookmarks/bookmark_storage.h',
@@ -668,6 +910,7 @@
         'browser/browser_accessibility_manager.h',
         'browser/browser_init.cc',
         'browser/browser_init.h',
+        'browser/browser_list_gtk.cc',
         'browser/browser_list.cc',
         'browser/browser_list.h',
         'browser/browser_main.cc',
@@ -696,6 +939,7 @@
         'browser/browsing_data_remover.h',
         'browser/browsing_instance.cc',
         'browser/browsing_instance.h',
+        'browser/bubble_positioner.h',
         'browser/cancelable_request.cc',
         'browser/cancelable_request.h',
         'browser/cert_store.cc',
@@ -704,12 +948,58 @@
         'browser/character_encoding.h',
         'browser/child_process_security_policy.cc',
         'browser/child_process_security_policy.h',
+        'browser/chrome_application_mac.h',
+        'browser/chrome_application_mac.mm',
         'browser/chrome_plugin_browsing_context.cc',
         'browser/chrome_plugin_browsing_context.h',
         'browser/chrome_plugin_host.cc',
         'browser/chrome_plugin_host.h',
         'browser/chrome_thread.cc',
         'browser/chrome_thread.h',
+        'browser/chromeos/browser_extender.cc',
+        'browser/chromeos/browser_extender.h',
+        'browser/chromeos/chromeos_version_loader.cc',
+        'browser/chromeos/chromeos_version_loader.h',
+        'browser/chromeos/clock_menu_button.cc',
+        'browser/chromeos/clock_menu_button.h',
+        'browser/chromeos/compact_navigation_bar.cc',
+        'browser/chromeos/compact_navigation_bar.h',
+        'browser/chromeos/cros_library.cc',
+        'browser/chromeos/cros_library.h',
+        'browser/chromeos/cros_network_library.cc',
+        'browser/chromeos/cros_network_library.h',
+        'browser/chromeos/cros_power_library.cc',
+        'browser/chromeos/cros_power_library.h',
+        'browser/chromeos/external_cookie_handler.cc',
+        'browser/chromeos/external_cookie_handler.h',
+        'browser/chromeos/gview_request_interceptor.cc',
+        'browser/chromeos/gview_request_interceptor.h',
+        'browser/chromeos/main_menu.cc',
+        'browser/chromeos/main_menu.h',
+        'browser/chromeos/network_menu_button.cc',
+        'browser/chromeos/network_menu_button.h',
+        'browser/chromeos/password_dialog_view.cc',
+        'browser/chromeos/password_dialog_view.h',
+        'browser/chromeos/pipe_reader.cc',
+        'browser/chromeos/pipe_reader.h',
+        'browser/chromeos/power_menu_button.cc',
+        'browser/chromeos/power_menu_button.h',
+        'browser/chromeos/preferences.cc',
+        'browser/chromeos/preferences.h',
+        'browser/chromeos/settings_contents_view.cc',
+        'browser/chromeos/settings_contents_view.h',
+        'browser/chromeos/settings_page_view.cc',
+        'browser/chromeos/settings_page_view.h',
+        'browser/chromeos/status_area_view.cc',
+        'browser/chromeos/status_area_view.h',
+        'browser/chromeos/touchpad.cc',
+        'browser/chromeos/touchpad.h',
+        'browser/cocoa/about_ipc_bridge.h',
+        'browser/cocoa/about_ipc_bridge.mm',
+        'browser/cocoa/about_ipc_controller.h',
+        'browser/cocoa/about_ipc_controller.mm',
+        'browser/cocoa/about_ipc_dialog.h',
+        'browser/cocoa/about_ipc_dialog.mm',
         'browser/cocoa/about_window_controller.h',
         'browser/cocoa/about_window_controller.mm',
         'browser/cocoa/autocomplete_text_field.h',
@@ -718,8 +1008,12 @@
         'browser/cocoa/autocomplete_text_field_cell.mm',
         'browser/cocoa/autocomplete_text_field_editor.h',
         'browser/cocoa/autocomplete_text_field_editor.mm',
+        'browser/cocoa/back_forward_menu_controller.h',
+        'browser/cocoa/back_forward_menu_controller.mm',
         'browser/cocoa/background_gradient_view.h',
         'browser/cocoa/background_gradient_view.mm',
+        'browser/cocoa/background_tile_view.h',
+        'browser/cocoa/background_tile_view.mm',
         'browser/cocoa/base_view.h',
         'browser/cocoa/base_view.mm',
         'browser/cocoa/browser_window_factory.mm',
@@ -727,30 +1021,56 @@
         'browser/cocoa/blocked_popup_container_controller.mm',
         'browser/cocoa/bookmark_bar_bridge.h',
         'browser/cocoa/bookmark_bar_bridge.mm',
+        'browser/cocoa/bookmark_bar_constants.h',
         'browser/cocoa/bookmark_bar_controller.h',
         'browser/cocoa/bookmark_bar_controller.mm',
         'browser/cocoa/bookmark_bar_view.h',
         'browser/cocoa/bookmark_bar_view.mm',
+        'browser/cocoa/bookmark_bar_toolbar_view.h',
+        'browser/cocoa/bookmark_bar_toolbar_view.mm',
+        'browser/cocoa/bookmark_bubble_controller.h',
+        'browser/cocoa/bookmark_bubble_controller.mm',
+        'browser/cocoa/bookmark_bubble_view.h',
+        'browser/cocoa/bookmark_bubble_view.mm',
+        'browser/cocoa/bookmark_bubble_window.h',
+        'browser/cocoa/bookmark_bubble_window.mm',
         'browser/cocoa/bookmark_button_cell.h',
         'browser/cocoa/bookmark_button_cell.mm',
+        'browser/cocoa/bookmark_editor_controller.h',
+        'browser/cocoa/bookmark_editor_controller.mm',
         'browser/cocoa/bookmark_menu_bridge.h',
         'browser/cocoa/bookmark_menu_bridge.mm',
         'browser/cocoa/bookmark_menu_cocoa_controller.h',
         'browser/cocoa/bookmark_menu_cocoa_controller.mm',
+        'browser/cocoa/bookmark_name_folder_controller.h',
+        'browser/cocoa/bookmark_name_folder_controller.mm',
         'browser/cocoa/browser_test_helper.h',
-        'browser/cocoa/browser_window.h',
-        'browser/cocoa/browser_window.mm',
+        'browser/cocoa/browser_frame_view.h',
+        'browser/cocoa/browser_frame_view.mm',
         'browser/cocoa/browser_window_cocoa.h',
         'browser/cocoa/browser_window_cocoa.mm',
         'browser/cocoa/browser_window_controller.h',
         'browser/cocoa/browser_window_controller.mm',
+        'browser/cocoa/bubble_view.h',
+        'browser/cocoa/bubble_view.mm',
+        'browser/cocoa/chrome_browser_window.h',
+        'browser/cocoa/chrome_browser_window.mm',
+        'browser/cocoa/chrome_event_processing_window.h',
+        'browser/cocoa/chrome_event_processing_window.mm',
         'browser/cocoa/clear_browsing_data_controller.h',
         'browser/cocoa/clear_browsing_data_controller.mm',
-        'browser/cocoa/cocoa_test_helper.h',
+        'browser/cocoa/clickhold_button_cell.h',
+        'browser/cocoa/clickhold_button_cell.mm',
         'browser/cocoa/command_observer_bridge.h',
         'browser/cocoa/command_observer_bridge.mm',
+        'browser/cocoa/constrained_window_mac.h',
+        'browser/cocoa/constrained_window_mac.mm',
         'browser/cocoa/custom_home_pages_model.h',
         'browser/cocoa/custom_home_pages_model.mm',
+        'browser/cocoa/delayedmenu_button.h',
+        'browser/cocoa/delayedmenu_button.mm',
+        'browser/cocoa/download_item_cell.h',
+        'browser/cocoa/download_item_cell.mm',
         'browser/cocoa/download_item_controller.h',
         'browser/cocoa/download_item_controller.mm',
         'browser/cocoa/download_item_mac.h',
@@ -761,22 +1081,51 @@
         'browser/cocoa/download_shelf_mac.mm',
         'browser/cocoa/download_shelf_view.h',
         'browser/cocoa/download_shelf_view.mm',
+        'browser/cocoa/download_started_animation_mac.mm',
+        'browser/cocoa/download_util_mac.h',
+        'browser/cocoa/download_util_mac.mm',
+        'browser/cocoa/edit_search_engine_cocoa_controller.h',
+        'browser/cocoa/edit_search_engine_cocoa_controller.mm',
         'browser/cocoa/encoding_menu_controller_delegate_mac.h',
         'browser/cocoa/encoding_menu_controller_delegate_mac.mm',
+        'browser/cocoa/event_utils.h',
+        'browser/cocoa/event_utils.mm',
+        'browser/cocoa/extension_shelf_controller.h',
+        'browser/cocoa/extension_shelf_controller.mm',
+        'browser/cocoa/extension_view_mac.h',
+        'browser/cocoa/extension_view_mac.mm',
+        'browser/cocoa/external_protocol_dialog.h',
+        'browser/cocoa/external_protocol_dialog.mm',
+        'browser/cocoa/file_metadata.h',
+        'browser/cocoa/file_metadata.mm',
         'browser/cocoa/find_bar_bridge.h',
         'browser/cocoa/find_bar_bridge.mm',
         'browser/cocoa/find_bar_cocoa_controller.h',
         'browser/cocoa/find_bar_cocoa_controller.mm',
         'browser/cocoa/find_bar_view.h',
         'browser/cocoa/find_bar_view.mm',
+        'browser/cocoa/find_pasteboard.h',
+        'browser/cocoa/find_pasteboard.mm',
         'browser/cocoa/first_run_dialog.h',
         'browser/cocoa/first_run_dialog.mm',
+        'browser/cocoa/focus_tracker.h',
+        'browser/cocoa/focus_tracker.mm',
         'browser/cocoa/fullscreen_window.h',
         'browser/cocoa/fullscreen_window.mm',
         'browser/cocoa/gradient_button_cell.h',
         'browser/cocoa/gradient_button_cell.mm',
+        'browser/cocoa/history_menu_bridge.h',
+        'browser/cocoa/history_menu_bridge.mm',
+        'browser/cocoa/history_menu_cocoa_controller.h',
+        'browser/cocoa/history_menu_cocoa_controller.mm',
+        'browser/cocoa/hyperlink_button_cell.h',
+        'browser/cocoa/hyperlink_button_cell.mm',
         'browser/cocoa/hung_renderer_controller.h',
         'browser/cocoa/hung_renderer_controller.mm',
+        'browser/cocoa/import_progress_dialog.h',
+        'browser/cocoa/import_progress_dialog.mm',
+        'browser/cocoa/importer_lock_dialog.h',
+        'browser/cocoa/importer_lock_dialog.mm',
         'browser/cocoa/infobar.h',
         'browser/cocoa/infobar_container_controller.h',
         'browser/cocoa/infobar_container_controller.mm',
@@ -787,22 +1136,26 @@
         'browser/cocoa/infobar_test_helper.h',
         'browser/cocoa/infobar_text_field.h',
         'browser/cocoa/infobar_text_field.mm',
+        'browser/cocoa/keyword_editor_cocoa_controller.h',
+        'browser/cocoa/keyword_editor_cocoa_controller.mm',
         'browser/cocoa/location_bar_view_mac.h',
         'browser/cocoa/location_bar_view_mac.mm',
-        'browser/cocoa/menu_localizer.h',
-        'browser/cocoa/menu_localizer.mm',
-        'browser/cocoa/nsimage_cache.h',
-        'browser/cocoa/nsimage_cache.mm',
+        'browser/cocoa/menu_button.h',
+        'browser/cocoa/menu_button.mm',
+        'browser/cocoa/multi_key_equivalent_button.h',
+        'browser/cocoa/multi_key_equivalent_button.mm',
+        'browser/cocoa/nswindow_local_state.h',
+        'browser/cocoa/nswindow_local_state.mm',
         'browser/cocoa/page_info_window_controller.h',
         'browser/cocoa/page_info_window_controller.mm',
         'browser/cocoa/page_info_window_mac.h',
         'browser/cocoa/page_info_window_mac.mm',
-        'browser/cocoa/preferences_localizer.h',
-        'browser/cocoa/preferences_localizer.mm',
         'browser/cocoa/preferences_window_controller.h',
         'browser/cocoa/preferences_window_controller.mm',
         'browser/cocoa/rwhvm_editcommand_helper.h',
         'browser/cocoa/rwhvm_editcommand_helper.mm',
+        'browser/cocoa/restart_browser.h',
+        'browser/cocoa/restart_browser.mm',
         'browser/cocoa/sad_tab_view.h',
         'browser/cocoa/sad_tab_view.mm',
         'browser/cocoa/search_engine_list_model.h',
@@ -810,8 +1163,6 @@
         'browser/cocoa/shell_dialogs_mac.mm',
         'browser/cocoa/status_bubble_mac.h',
         'browser/cocoa/status_bubble_mac.mm',
-        'browser/cocoa/tab_cell.h',
-        'browser/cocoa/tab_cell.mm',
         'browser/cocoa/tab_contents_controller.h',
         'browser/cocoa/tab_contents_controller.mm',
         'browser/cocoa/tab_controller.h',
@@ -826,22 +1177,38 @@
         'browser/cocoa/tab_view.mm',
         'browser/cocoa/tab_window_controller.h',
         'browser/cocoa/tab_window_controller.mm',
+        'browser/cocoa/task_manager_mac.h',
+        'browser/cocoa/task_manager_mac.mm',
+        'browser/cocoa/theme_install_bubble_view.h',
+        'browser/cocoa/theme_install_bubble_view.mm',
         'browser/cocoa/throbber_view.h',
         'browser/cocoa/throbber_view.mm',
         'browser/cocoa/toolbar_button_cell.h',
         'browser/cocoa/toolbar_button_cell.mm',
+        'browser/cocoa/toolbar_compressable.h',
         'browser/cocoa/toolbar_controller.h',
         'browser/cocoa/toolbar_controller.mm',
         'browser/cocoa/toolbar_view.h',
         'browser/cocoa/toolbar_view.mm',
+        'browser/cocoa/ui_localizer.h',
+        'browser/cocoa/ui_localizer.mm',
+        'browser/cocoa/view_resizer.h',
+        'browser/cocoa/web_drag_source.h',
+        'browser/cocoa/web_drag_source.mm',
         'browser/cocoa/web_drop_target.h',
         'browser/cocoa/web_drop_target.mm',
         'browser/command_updater.cc',
         'browser/command_updater.h',
+        'browser/cookies_table_model.cc',
+        'browser/cookies_table_model.h',
         'browser/cross_site_request_manager.cc',
         'browser/cross_site_request_manager.h',
         'browser/defaults.cc',
         'browser/defaults.h',
+        'browser/diagnostics/diagnostics_main.cc',
+        'browser/diagnostics/diagnostics_main.h',
+        'browser/diagnostics/sqlite_diagnostics.cc',
+        'browser/diagnostics/sqlite_diagnostics.h',
         'browser/dock_info_gtk.cc',
         'browser/dock_info_win.cc',
         'browser/dock_info.cc',
@@ -871,6 +1238,10 @@
         'browser/dom_ui/history_ui.h',
         'browser/dom_ui/html_dialog_ui.cc',
         'browser/dom_ui/html_dialog_ui.h',
+        'browser/dom_ui/most_visited_handler.cc',
+        'browser/dom_ui/most_visited_handler.h',
+        'browser/dom_ui/new_tab_page_sync_handler.cc',
+        'browser/dom_ui/new_tab_page_sync_handler.h',
         'browser/dom_ui/new_tab_ui.cc',
         'browser/dom_ui/new_tab_ui.h',
         'browser/dom_ui/print_ui.cc',
@@ -886,9 +1257,8 @@
         'browser/download/download_item_model.h',
         'browser/download/download_manager.cc',
         'browser/download/download_manager.h',
-        'browser/download/download_request_dialog_delegate.h',
-        'browser/download/download_request_dialog_delegate_win.cc',
-        'browser/download/download_request_dialog_delegate_win.h',
+        'browser/download/download_request_infobar_delegate.h',
+        'browser/download/download_request_infobar_delegate.cc',
         'browser/download/download_request_manager.cc',
         'browser/download/download_request_manager.h',
         'browser/download/download_shelf.cc',
@@ -907,18 +1277,32 @@
         'browser/download/save_types.h',
         'browser/encoding_menu_controller.cc',
         'browser/encoding_menu_controller.h',
+        'browser/extensions/crashed_extension_infobar.cc',
+        'browser/extensions/crashed_extension_infobar.h',
         'browser/extensions/crx_installer.cc',
         'browser/extensions/crx_installer.h',
         'browser/extensions/extension_bookmarks_module.cc',
         'browser/extensions/extension_bookmarks_module.h',
         'browser/extensions/extension_bookmarks_module_constants.cc',
         'browser/extensions/extension_bookmarks_module_constants.h',
+        'browser/extensions/extension_browser_actions_api.cc',
+        'browser/extensions/extension_browser_actions_api.h',
         'browser/extensions/extension_creator.cc',
         'browser/extensions/extension_creator.h',
+        'browser/extensions/extension_disabled_infobar_delegate.cc',
+        'browser/extensions/extension_disabled_infobar_delegate.h',
+        'browser/extensions/extension_devtools_bridge.cc',
+        'browser/extensions/extension_devtools_bridge.h',
+        'browser/extensions/extension_devtools_events.cc',
+        'browser/extensions/extension_devtools_events.h',
+        'browser/extensions/extension_devtools_manager.cc',
+        'browser/extensions/extension_devtools_manager.h',
         'browser/extensions/extension_dom_ui.cc',
         'browser/extensions/extension_dom_ui.h',
         'browser/extensions/extension_event_names.cc',
         'browser/extensions/extension_event_names.h',
+        'browser/extensions/execute_code_in_tab_function.cc',
+        'browser/extensions/execute_code_in_tab_function.h',
         'browser/extensions/extension_file_util.cc',
         'browser/extensions/extension_file_util.h',
         'browser/extensions/extension_function.cc',
@@ -929,10 +1313,14 @@
         'browser/extensions/extension_host.h',
         'browser/extensions/extension_install_ui.cc',
         'browser/extensions/extension_install_ui.h',
+        'browser/extensions/extension_l10n_util.cc',
+        'browser/extensions/extension_l10n_util.h',
         'browser/extensions/extension_message_service.cc',
         'browser/extensions/extension_message_service.h',
         'browser/extensions/extension_browser_event_router.cc',
         'browser/extensions/extension_browser_event_router.h',
+        'browser/extensions/extension_i18n_api.cc',
+        'browser/extensions/extension_i18n_api.h',
         'browser/extensions/extension_page_actions_module.cc',
         'browser/extensions/extension_page_actions_module.h',
         'browser/extensions/extension_page_actions_module_constants.cc',
@@ -949,6 +1337,10 @@
         'browser/extensions/extension_tabs_module.h',
         'browser/extensions/extension_tabs_module_constants.cc',
         'browser/extensions/extension_tabs_module_constants.h',
+        'browser/extensions/extension_test_api.cc',
+        'browser/extensions/extension_test_api.h',
+        'browser/extensions/extension_toolstrip_api.cc',
+        'browser/extensions/extension_toolstrip_api.h',
         'browser/extensions/extension_updater.cc',
         'browser/extensions/extension_updater.h',
         'browser/extensions/extensions_service.cc',
@@ -960,10 +1352,20 @@
         'browser/extensions/external_registry_extension_provider_win.h',
         'browser/extensions/external_pref_extension_provider.cc',
         'browser/extensions/external_pref_extension_provider.h',
+        'browser/extensions/file_reader.cc',
+        'browser/extensions/file_reader.h',
+        'browser/extensions/gtk_theme_installed_infobar_delegate.cc',
+        'browser/extensions/gtk_theme_installed_infobar_delegate.h',
+        'browser/extensions/image_loading_tracker.cc',
+        'browser/extensions/image_loading_tracker.h',
+        'browser/extensions/pack_extension_job.cc',
+        'browser/extensions/pack_extension_job.h',
         'browser/extensions/sandboxed_extension_unpacker.cc',
         'browser/extensions/sandboxed_extension_unpacker.h',
-        'browser/extensions/theme_preview_infobar_delegate.cc',
-        'browser/extensions/theme_preview_infobar_delegate.h',
+        'browser/extensions/theme_installed_infobar_delegate.cc',
+        'browser/extensions/theme_installed_infobar_delegate.h',
+        'browser/extensions/user_script_listener.cc',
+        'browser/extensions/user_script_listener.h',
         'browser/extensions/user_script_master.cc',
         'browser/extensions/user_script_master.h',
         'browser/external_protocol_handler.cc',
@@ -974,6 +1376,8 @@
         'browser/global_keyboard_shortcuts_mac.mm',
         'browser/fav_icon_helper.cc',
         'browser/fav_icon_helper.h',
+        'browser/favicon_service.cc',
+        'browser/favicon_service.h',
         'browser/find_bar.h',
         'browser/find_bar_controller.cc',
         'browser/find_bar_controller.h',
@@ -988,7 +1392,7 @@
         'browser/gears_integration.h',
         'browser/google_update.cc',
         'browser/google_update.h',
-        'browser/google_update_settings_linux.cc',
+        'browser/google_update_settings_posix.cc',
         'browser/google_update_settings_mac.mm',
         'browser/google_url_tracker.cc',
         'browser/google_url_tracker.h',
@@ -996,8 +1400,6 @@
         'browser/google_util.h',
         'browser/gtk/about_chrome_dialog.cc',
         'browser/gtk/about_chrome_dialog.h',
-        'browser/gtk/active_window_watcher.cc',
-        'browser/gtk/active_window_watcher.h',
         'browser/gtk/back_forward_button_gtk.cc',
         'browser/gtk/back_forward_button_gtk.h',
         'browser/gtk/back_forward_menu_model_gtk.cc',
@@ -1009,18 +1411,19 @@
         'browser/gtk/bookmark_bubble_gtk.cc',
         'browser/gtk/bookmark_bubble_gtk.h',
         'browser/gtk/bookmark_context_menu_gtk.cc',
-        'browser/gtk/bookmark_context_menu.cc',
-        'browser/gtk/bookmark_context_menu.h',
+        'browser/gtk/bookmark_context_menu_gtk.h',
         'browser/gtk/bookmark_editor_gtk.cc',
         'browser/gtk/bookmark_editor_gtk.h',
         'browser/gtk/bookmark_manager_gtk.cc',
         'browser/gtk/bookmark_manager_gtk.h',
         'browser/gtk/bookmark_menu_controller_gtk.cc',
         'browser/gtk/bookmark_menu_controller_gtk.h',
-        'browser/gtk/bookmark_utils_gtk.cc',
-        'browser/gtk/bookmark_utils_gtk.h',
         'browser/gtk/bookmark_tree_model.cc',
         'browser/gtk/bookmark_tree_model.h',
+        'browser/gtk/bookmark_utils_gtk.cc',
+        'browser/gtk/bookmark_utils_gtk.h',
+        'browser/gtk/browser_actions_toolbar_gtk.cc',
+        'browser/gtk/browser_actions_toolbar_gtk.h',
         'browser/gtk/browser_titlebar.cc',
         'browser/gtk/browser_titlebar.h',
         'browser/gtk/browser_toolbar_gtk.cc',
@@ -1028,13 +1431,19 @@
         'browser/gtk/browser_window_factory_gtk.cc',
         'browser/gtk/browser_window_gtk.cc',
         'browser/gtk/browser_window_gtk.h',
+        'browser/gtk/cairo_cached_surface.cc',
+        'browser/gtk/cairo_cached_surface.h',
         'browser/gtk/clear_browsing_data_dialog_gtk.cc',
         'browser/gtk/clear_browsing_data_dialog_gtk.h',
         'browser/gtk/constrained_window_gtk.cc',
         'browser/gtk/constrained_window_gtk.h',
+        'browser/gtk/create_application_shortcuts_dialog_gtk.cc',
+        'browser/gtk/create_application_shortcuts_dialog_gtk.h',
         'browser/gtk/custom_button.cc',
         'browser/gtk/custom_button.h',
         'browser/gtk/dialogs_gtk.cc',
+        'browser/gtk/download_in_progress_dialog_gtk.cc',
+        'browser/gtk/download_in_progress_dialog_gtk.h',
         'browser/gtk/download_item_gtk.cc',
         'browser/gtk/download_item_gtk.h',
         'browser/gtk/download_shelf_gtk.cc',
@@ -1042,20 +1451,27 @@
         'browser/gtk/download_started_animation_gtk.cc',
         'browser/gtk/edit_search_engine_dialog.cc',
         'browser/gtk/edit_search_engine_dialog.h',
+        'browser/gtk/extension_install_prompt_gtk.cc',
         'browser/gtk/extension_shelf_gtk.cc',
         'browser/gtk/extension_shelf_gtk.h',
+        'browser/gtk/extension_view_gtk.cc',
+        'browser/gtk/extension_view_gtk.h',
+        'browser/gtk/external_protocol_dialog_gtk.cc',
+        'browser/gtk/external_protocol_dialog_gtk.h',
+        'browser/gtk/find_bar_gtk.cc',
+        'browser/gtk/find_bar_gtk.h',
         'browser/gtk/first_run_bubble.cc',
         'browser/gtk/first_run_bubble.h',
         'browser/gtk/first_run_dialog.cc',
         'browser/gtk/first_run_dialog.h',
+        'browser/gtk/focus_store_gtk.cc',
+        'browser/gtk/focus_store_gtk.h',
         'browser/gtk/go_button_gtk.cc',
         'browser/gtk/go_button_gtk.h',
         'browser/gtk/gtk_chrome_button.cc',
         'browser/gtk/gtk_chrome_button.h',
         'browser/gtk/gtk_chrome_link_button.cc',
         'browser/gtk/gtk_chrome_link_button.h',
-        'browser/gtk/gtk_dnd_util.cc',
-        'browser/gtk/gtk_dnd_util.h',
         'browser/gtk/gtk_floating_container.cc',
         'browser/gtk/gtk_floating_container.h',
         'browser/gtk/gtk_theme_provider.cc',
@@ -1075,14 +1491,12 @@
         'browser/gtk/infobar_gtk.h',
         'browser/gtk/keyword_editor_view.cc',
         'browser/gtk/keyword_editor_view.h',
-        'browser/gtk/find_bar_gtk.cc',
-        'browser/gtk/find_bar_gtk.h',
-        'browser/gtk/focus_store_gtk.cc',
-        'browser/gtk/focus_store_gtk.h',
-        'browser/gtk/location_bar_view_gtk.cc',
-        'browser/gtk/location_bar_view_gtk.h',
         'browser/gtk/list_store_favicon_loader.cc',
         'browser/gtk/list_store_favicon_loader.h',
+        'browser/gtk/location_bar_view_gtk.cc',
+        'browser/gtk/location_bar_view_gtk.h',
+        'browser/gtk/menu_bar_helper.cc',
+        'browser/gtk/menu_bar_helper.h',
         'browser/gtk/menu_gtk.cc',
         'browser/gtk/menu_gtk.h',
         'browser/gtk/nine_box.cc',
@@ -1093,14 +1507,33 @@
         'browser/gtk/options/advanced_page_gtk.h',
         'browser/gtk/options/content_page_gtk.cc',
         'browser/gtk/options/content_page_gtk.h',
+        'browser/gtk/options/cookies_view.cc',
+        'browser/gtk/options/cookies_view.h',
+        'browser/gtk/options/exceptions_page_gtk.cc',
+        'browser/gtk/options/exceptions_page_gtk.h',
         'browser/gtk/options/fonts_languages_window_gtk.cc',
+        'browser/gtk/options/fonts_page_gtk.cc',
+        'browser/gtk/options/fonts_page_gtk.h',
         'browser/gtk/options/general_page_gtk.cc',
         'browser/gtk/options/general_page_gtk.h',
+        'browser/gtk/options/languages_page_gtk.cc',
+        'browser/gtk/options/languages_page_gtk.h',
         'browser/gtk/options/options_layout_gtk.cc',
         'browser/gtk/options/options_layout_gtk.h',
         'browser/gtk/options/options_window_gtk.cc',
+        'browser/gtk/options/passwords_exceptions_window_gtk.cc',
+        'browser/gtk/options/passwords_exceptions_window_gtk.h',
+        'browser/gtk/options/passwords_page_gtk.cc',
+        'browser/gtk/options/passwords_page_gtk.h',
         'browser/gtk/options/url_picker_dialog_gtk.cc',
         'browser/gtk/options/url_picker_dialog_gtk.h',
+        'browser/gtk/page_info_window_gtk.cc',
+        'browser/gtk/process_singleton_dialog.cc',
+        'browser/gtk/process_singleton_dialog.h',
+        'browser/gtk/repost_form_warning_gtk.cc',
+        'browser/gtk/repost_form_warning_gtk.h',
+        'browser/gtk/rounded_window.cc',
+        'browser/gtk/rounded_window.h',
         'browser/gtk/sad_tab_gtk.cc',
         'browser/gtk/sad_tab_gtk.h',
         'browser/gtk/slide_animator_gtk.cc',
@@ -1111,6 +1544,8 @@
         'browser/gtk/status_bubble_gtk.h',
         'browser/gtk/tab_contents_container_gtk.cc',
         'browser/gtk/tab_contents_container_gtk.h',
+        'browser/gtk/tab_contents_drag_source.cc',
+        'browser/gtk/tab_contents_drag_source.h',
         'browser/gtk/tabs/dragged_tab_controller_gtk.cc',
         'browser/gtk/tabs/dragged_tab_controller_gtk.h',
         'browser/gtk/tabs/dragged_tab_gtk.cc',
@@ -1123,8 +1558,12 @@
         'browser/gtk/tabs/tab_strip_gtk.h',
         'browser/gtk/task_manager_gtk.cc',
         'browser/gtk/task_manager_gtk.h',
+        'browser/gtk/theme_install_bubble_view_gtk.cc',
+        'browser/gtk/theme_install_bubble_view_gtk.h',
         'browser/gtk/toolbar_star_toggle_gtk.cc',
         'browser/gtk/toolbar_star_toggle_gtk.h',
+        'browser/gtk/view_id_util.cc',
+        'browser/gtk/view_id_util.h',
         'browser/hang_monitor/hung_plugin_action.cc',
         'browser/hang_monitor/hung_plugin_action.h',
         'browser/hang_monitor/hung_window_detector.cc',
@@ -1168,10 +1607,13 @@
         'browser/history/text_database_manager.h',
         'browser/history/thumbnail_database.cc',
         'browser/history/thumbnail_database.h',
+        'browser/history/top_sites.cc',
         'browser/history/url_database.cc',
         'browser/history/url_database.h',
         'browser/history/visit_database.cc',
         'browser/history/visit_database.h',
+        'browser/history/visit_log.cc',
+        'browser/history/visit_log.h',
         'browser/history/visit_tracker.cc',
         'browser/history/visit_tracker.h',
         'browser/history/visitsegment_database.cc',
@@ -1195,7 +1637,7 @@
         'browser/importer/firefox3_importer.h',
         'browser/importer/firefox_importer_utils.cc',
         'browser/importer/firefox_importer_utils_linux.cc',
-        'browser/importer/firefox_importer_utils_mac.cc',
+        'browser/importer/firefox_importer_utils_mac.mm',
         'browser/importer/firefox_importer_utils_win.cc',
         'browser/importer/firefox_importer_utils.h',
         'browser/importer/firefox_profile_lock.cc',
@@ -1206,14 +1648,34 @@
         'browser/importer/ie_importer.h',
         'browser/importer/importer.cc',
         'browser/importer/importer.h',
+        'browser/importer/importer_bridge.cc',
+        'browser/importer/importer_bridge.h',
+        'browser/importer/importer_list.cc',
+        'browser/importer/importer_list.h',
         'browser/importer/mork_reader.cc',
         'browser/importer/mork_reader.h',
+        'browser/importer/nss_decryptor.cc',
+        'browser/importer/nss_decryptor.h',
+        'browser/importer/nss_decryptor_linux.cc',
+        'browser/importer/nss_decryptor_linux.h',
+        'browser/importer/nss_decryptor_mac.h',
+        'browser/importer/nss_decryptor_mac.mm',
+        'browser/importer/nss_decryptor_win.cc',
+        'browser/importer/nss_decryptor_win.h',
+        'browser/importer/safari_importer.h',
+        'browser/importer/safari_importer.mm',
         'browser/importer/toolbar_importer.cc',
         'browser/importer/toolbar_importer.h',
         'browser/in_process_webkit/browser_webkitclient_impl.cc',
         'browser/in_process_webkit/browser_webkitclient_impl.h',
+        'browser/in_process_webkit/dom_storage_context.cc',
+        'browser/in_process_webkit/dom_storage_context.h',
         'browser/in_process_webkit/dom_storage_dispatcher_host.cc',
         'browser/in_process_webkit/dom_storage_dispatcher_host.h',
+        'browser/in_process_webkit/storage_area.cc',
+        'browser/in_process_webkit/storage_area.h',
+        'browser/in_process_webkit/storage_namespace.cc',
+        'browser/in_process_webkit/storage_namespace.h',
         'browser/in_process_webkit/webkit_context.cc',
         'browser/in_process_webkit/webkit_context.h',
         'browser/in_process_webkit/webkit_thread.cc',
@@ -1229,17 +1691,29 @@
         'browser/jsmessage_box_handler.h',
         'browser/keychain_mac.cc',
         'browser/keychain_mac.h',
+        'browser/language_combobox_model.cc',
+        'browser/language_combobox_model.h',
+        'browser/language_order_table_model.cc',
+        'browser/language_order_table_model.h',
         'browser/load_from_memory_cache_details.h',
         'browser/load_notification_details.h',
         'browser/location_bar.h',
+        'browser/login_model.h',
         'browser/login_prompt.cc',
         'browser/login_prompt.h',
         'browser/login_prompt_gtk.cc',
+        'browser/login_prompt_mac.h',
+        'browser/login_prompt_mac.mm',
         'browser/login_prompt_win.cc',
         'browser/memory_details.cc',
+        'browser/memory_details_linux.cc',
+        'browser/memory_details_win.cc',
         'browser/memory_details.h',
+        'browser/memory_purger.cc',
+        'browser/memory_purger.h',
         'browser/meta_table_helper.cc',
         'browser/meta_table_helper.h',
+        'browser/metrics/metric_event_duration_details.h',
         'browser/metrics/metrics_log.cc',
         'browser/metrics/metrics_log.h',
         'browser/metrics/metrics_response.cc',
@@ -1250,6 +1724,8 @@
         'browser/metrics/user_metrics.h',
         'browser/modal_html_dialog_delegate.cc',
         'browser/modal_html_dialog_delegate.h',
+        'browser/net/browser_url_util.cc',
+        'browser/net/browser_url_util.h',
         'browser/net/chrome_url_request_context.cc',
         'browser/net/chrome_url_request_context.h',
         'browser/net/dns_global.cc',
@@ -1266,6 +1742,9 @@
         'browser/net/resolve_proxy_msg_helper.h',
         'browser/net/sdch_dictionary_fetcher.cc',
         'browser/net/sdch_dictionary_fetcher.h',
+        'browser/net/sqlite_persistent_cookie_store.cc',
+        'browser/net/sqlite_persistent_cookie_store.h',
+        'browser/net/ssl_config_service_manager.h',
         'browser/net/url_fetcher.cc',
         'browser/net/url_fetcher.h',
         'browser/net/url_fetcher_protect.cc',
@@ -1278,12 +1757,31 @@
         # are currently used by production code in automation_provider.cc.
         'browser/net/url_request_mock_http_job.cc',
         'browser/net/url_request_mock_http_job.h',
+        'browser/net/url_request_mock_link_doctor_job.cc',
+        'browser/net/url_request_mock_link_doctor_job.h',
         'browser/net/url_request_mock_util.cc',
         'browser/net/url_request_mock_util.h',
         'browser/net/url_request_slow_download_job.cc',
         'browser/net/url_request_slow_download_job.h',
         'browser/net/url_request_slow_http_job.cc',
         'browser/net/url_request_slow_http_job.h',
+        'browser/net/url_request_tracking.cc',
+        'browser/net/url_request_tracking.h',
+        'browser/notifications/balloons.h',
+        'browser/notifications/desktop_notification_service.cc',
+        'browser/notifications/desktop_notification_service.h',
+        'browser/notifications/desktop_notification_service_linux.cc',
+        'browser/notifications/desktop_notification_service_mac.mm',
+        'browser/notifications/desktop_notification_service_win.cc',
+        'browser/notifications/notification.h',
+        'browser/notifications/notification_object_proxy.cc',
+        'browser/notifications/notification_object_proxy.h',
+        'browser/notifications/notifications_prefs_cache.cc',
+        'browser/notifications/notifications_prefs_cache.h',
+        'browser/ntp_background_util.cc',
+        'browser/ntp_background_util.h',
+        'browser/omnibox_search_hint.cc',
+        'browser/omnibox_search_hint.h',
         'browser/options_page_base.cc',
         'browser/options_page_base.h',
         'browser/options_util.cc',
@@ -1293,6 +1791,17 @@
         'browser/page_info_model.h',
         'browser/page_state.cc',
         'browser/page_state.h',
+        'browser/parsers/metadata_parser.h',
+        'browser/parsers/metadata_parser_factory.h',
+        'browser/parsers/metadata_parser_filebase.cc',
+        'browser/parsers/metadata_parser_filebase.h',
+        'browser/parsers/metadata_parser_jpeg.cc',
+        'browser/parsers/metadata_parser_jpeg.h',
+        'browser/parsers/metadata_parser_jpeg_factory.cc',
+        'browser/parsers/metadata_parser_jpeg_factory.h',
+        'browser/parsers/metadata_parser_manager.cc',
+        'browser/parsers/metadata_parser_manager.h',
+        'browser/parsers/metadata_parser.cc',
         'browser/password_manager/encryptor_linux.cc',
         'browser/password_manager/encryptor_mac.mm',
         'browser/password_manager/encryptor_win.cc',
@@ -1326,10 +1835,13 @@
         'browser/plugin_installer.h',
         'browser/plugin_process_host.cc',
         'browser/plugin_process_host.h',
+        'browser/plugin_process_host_mac.cc',
         'browser/plugin_service.cc',
         'browser/plugin_service.h',
         'browser/possible_url_model.cc',
         'browser/possible_url_model.h',
+        'browser/printing/print_dialog_gtk.cc',
+        'browser/printing/print_dialog_gtk.h',
         'browser/printing/print_job.cc',
         'browser/printing/print_job.h',
         'browser/printing/print_job_manager.cc',
@@ -1345,8 +1857,14 @@
         'browser/privacy_blacklist/blacklist.cc',
         'browser/privacy_blacklist/blacklist_io.h',
         'browser/privacy_blacklist/blacklist_io.cc',
+        'browser/privacy_blacklist/blacklist_observer.h',
+        'browser/privacy_blacklist/blacklist_observer.cc',
+        'browser/privacy_blacklist/blacklist_manager.h',
+        'browser/privacy_blacklist/blacklist_manager.cc',
         'browser/privacy_blacklist/blacklist_store.h',
         'browser/privacy_blacklist/blacklist_store.cc',
+        'browser/privacy_blacklist/blocked_response.h',
+        'browser/privacy_blacklist/blocked_response.cc',
         'browser/process_singleton.h',
         'browser/process_singleton_linux.cc',
         'browser/process_singleton_mac.cc',
@@ -1362,7 +1880,7 @@
         'browser/renderer_host/backing_store.h',
         'browser/renderer_host/backing_store_manager.cc',
         'browser/renderer_host/backing_store_manager.h',
-        'browser/renderer_host/backing_store_mac.cc',
+        'browser/renderer_host/backing_store_mac.mm',
         'browser/renderer_host/backing_store_win.cc',
         'browser/renderer_host/backing_store_x.cc',
         'browser/renderer_host/browser_render_process_host.cc',
@@ -1371,12 +1889,18 @@
         'browser/renderer_host/buffered_resource_handler.h',
         'browser/renderer_host/cross_site_resource_handler.cc',
         'browser/renderer_host/cross_site_resource_handler.h',
+        'browser/renderer_host/database_dispatcher_host.cc',
+        'browser/renderer_host/database_dispatcher_host.h',
         'browser/renderer_host/download_resource_handler.cc',
         'browser/renderer_host/download_resource_handler.h',
         'browser/renderer_host/download_throttling_resource_handler.cc',
         'browser/renderer_host/download_throttling_resource_handler.h',
         'browser/renderer_host/file_system_accessor.cc',
         'browser/renderer_host/file_system_accessor.h',
+        'browser/renderer_host/gtk_im_context_wrapper.cc',
+        'browser/renderer_host/gtk_im_context_wrapper.h',
+        'browser/renderer_host/gtk_key_bindings_handler.cc',
+        'browser/renderer_host/gtk_key_bindings_handler.h',
         'browser/renderer_host/render_process_host.cc',
         'browser/renderer_host/render_process_host.h',
         'browser/renderer_host/render_sandbox_host_linux.h',
@@ -1400,10 +1924,13 @@
         'browser/renderer_host/render_widget_host_view_win.h',
         'browser/renderer_host/resource_dispatcher_host.cc',
         'browser/renderer_host/resource_dispatcher_host.h',
+        'browser/renderer_host/resource_dispatcher_host_request_info.cc',
+        'browser/renderer_host/resource_dispatcher_host_request_info.h',
         'browser/renderer_host/resource_handler.h',
         'browser/renderer_host/resource_message_filter.cc',
         'browser/renderer_host/resource_message_filter.h',
         'browser/renderer_host/resource_message_filter_gtk.cc',
+        'browser/renderer_host/resource_message_filter_mac.mm',
         'browser/renderer_host/resource_message_filter_win.cc',
         'browser/renderer_host/resource_request_details.h',
         'browser/renderer_host/safe_browsing_resource_handler.cc',
@@ -1454,6 +1981,8 @@
         'browser/search_engines/template_url_prepopulate_data.h',
         'browser/search_engines/template_url_table_model.cc',
         'browser/search_engines/template_url_table_model.h',
+        'browser/nacl_process_host.cc',
+        'browser/nacl_process_host.h',
         'browser/session_startup_pref.cc',
         'browser/session_startup_pref.h',
         'browser/sessions/base_session_service.cc',
@@ -1477,6 +2006,7 @@
         'browser/shell_integration.h',
         'browser/shell_integration_mac.mm',
         'browser/shell_integration_linux.cc',
+        'browser/shell_integration_win.cc',
         'browser/spellcheck_worditerator.cc',
         'browser/spellcheck_worditerator.h',
         'browser/spellchecker.cc',
@@ -1500,14 +2030,33 @@
         'browser/ssl/ssl_host_state.h',
         'browser/ssl/ssl_manager.cc',
         'browser/ssl/ssl_manager.h',
-        'browser/ssl/ssl_mixed_content_handler.cc',
-        'browser/ssl/ssl_mixed_content_handler.h',
         'browser/ssl/ssl_policy.cc',
         'browser/ssl/ssl_policy.h',
         'browser/ssl/ssl_policy_backend.cc',
         'browser/ssl/ssl_policy_backend.h',
         'browser/ssl/ssl_request_info.h',
         'browser/status_bubble.h',
+        'browser/strict_transport_security_persister.cc',
+        'browser/strict_transport_security_persister.h',
+        'browser/sync/engine/syncapi.h',
+        'browser/sync/glue/bookmark_model_worker.cc',
+        'browser/sync/glue/bookmark_model_worker.h',
+        'browser/sync/glue/change_processor.cc',
+        'browser/sync/glue/change_processor.h',
+        'browser/sync/glue/http_bridge.cc',
+        'browser/sync/glue/http_bridge.h',
+        'browser/sync/glue/model_associator.cc',
+        'browser/sync/glue/model_associator.h',
+        'browser/sync/glue/sync_backend_host.cc',
+        'browser/sync/glue/sync_backend_host.h',
+        'browser/sync/profile_sync_service.cc',
+        'browser/sync/profile_sync_service.h',
+        'browser/sync/sync_setup_flow.cc',
+        'browser/sync/sync_setup_flow.h',
+        'browser/sync/sync_setup_wizard.cc',
+        'browser/sync/sync_setup_wizard.h',
+        'browser/sync/sync_status_ui_helper.cc',
+        'browser/sync/sync_status_ui_helper.h',
         'browser/tab_contents/constrained_window.h',
         'browser/tab_contents/infobar_delegate.cc',
         'browser/tab_contents/infobar_delegate.h',
@@ -1530,7 +2079,6 @@
         'browser/tab_contents/render_view_host_delegate_helper.h',
         'browser/tab_contents/render_view_host_manager.cc',
         'browser/tab_contents/render_view_host_manager.h',
-        'browser/tab_contents/repost_form_warning.h',
         'browser/tab_contents/security_style.h',
         'browser/tab_contents/tab_contents.cc',
         'browser/tab_contents/tab_contents.h',
@@ -1547,6 +2095,8 @@
         'browser/tab_contents/thumbnail_generator.h',
         'browser/tab_contents/web_drag_source.cc',
         'browser/tab_contents/web_drag_source.h',
+        'browser/tab_contents/web_drag_dest_gtk.cc',
+        'browser/tab_contents/web_drag_dest_gtk.h',
         'browser/tab_contents/web_drop_target.cc',
         'browser/tab_contents/web_drop_target.h',
         'browser/tabs/tab_strip_model.cc',
@@ -1574,12 +2124,18 @@
         'browser/views/about_ipc_dialog.h',
         'browser/views/about_network_dialog.cc',
         'browser/views/about_network_dialog.h',
+        'browser/views/accelerator_table_gtk.cc',
+        'browser/views/accelerator_table_gtk.h',
         'browser/views/autocomplete/autocomplete_popup_contents_view.cc',
         'browser/views/autocomplete/autocomplete_popup_contents_view.h',
         'browser/views/autocomplete/autocomplete_popup_win.cc',
         'browser/views/autocomplete/autocomplete_popup_win.h',
-        'browser/views/blocked_popup_container_view_win.cc',
-        'browser/views/blocked_popup_container_view_win.h',
+        'browser/views/autocomplete/autocomplete_popup_gtk.cc',
+        'browser/views/autocomplete/autocomplete_popup_gtk.h',
+        'browser/views/blacklist_error_dialog.cc',
+        'browser/views/blacklist_error_dialog.h',
+        'browser/views/blocked_popup_container_view_views.cc',
+        'browser/views/blocked_popup_container_view_views.h',
         'browser/views/bookmark_bar_view.cc',
         'browser/views/bookmark_bar_view.h',
         'browser/views/bookmark_bubble_view.cc',
@@ -1598,11 +2154,15 @@
         'browser/views/bookmark_menu_controller_views.h',
         'browser/views/bookmark_table_view.cc',
         'browser/views/bookmark_table_view.h',
+        'browser/views/browser_actions_container.cc',
+        'browser/views/browser_actions_container.h',
         'browser/views/browser_bubble.cc',
         'browser/views/browser_bubble.h',
         'browser/views/browser_bubble_gtk.cc',
         'browser/views/browser_bubble_win.cc',
         'browser/views/browser_dialogs.h',
+        'browser/views/bubble_border.cc',
+        'browser/views/bubble_border.h',
         'browser/views/bug_report_view.cc',
         'browser/views/bug_report_view.h',
         'browser/views/chrome_views_delegate.cc',
@@ -1613,6 +2173,8 @@
         'browser/views/constrained_window_win.h',
         'browser/views/confirm_message_box_dialog.cc',
         'browser/views/confirm_message_box_dialog.h',
+        'browser/views/detachable_toolbar_view.cc',
+        'browser/views/detachable_toolbar_view.h',
         'browser/views/dialog_stubs_gtk.cc',
         'browser/views/dom_view.cc',
         'browser/views/dom_view.h',
@@ -1626,16 +2188,20 @@
         'browser/views/event_utils.cc',
         'browser/views/event_utils.h',
         'browser/views/extensions/extension_install_prompt.cc',
+        'browser/views/extensions/extension_popup.cc',
+        'browser/views/extensions/extension_popup.h',
         'browser/views/extensions/extension_shelf.cc',
         'browser/views/extensions/extension_shelf.h',
         'browser/views/extensions/extension_view.cc',
         'browser/views/extensions/extension_view.h',
         'browser/views/external_protocol_dialog.cc',
         'browser/views/external_protocol_dialog.h',
+        'browser/views/find_bar_host.cc',
+        'browser/views/find_bar_host.h',
+        'browser/views/find_bar_host_gtk.cc',
+        'browser/views/find_bar_host_win.cc',
         'browser/views/find_bar_view.cc',
         'browser/views/find_bar_view.h',
-        'browser/views/find_bar_win.cc',
-        'browser/views/find_bar_win.h',
         'browser/views/first_run_bubble.cc',
         'browser/views/first_run_bubble.h',
         'browser/views/first_run_customize_view.cc',
@@ -1705,8 +2271,6 @@
         'browser/views/options/fonts_page_view.h',
         'browser/views/options/general_page_view.cc',
         'browser/views/options/general_page_view.h',
-        'browser/views/options/language_combobox_model.cc',
-        'browser/views/options/language_combobox_model.h',
         'browser/views/options/languages_page_view.cc',
         'browser/views/options/languages_page_view.h',
         'browser/views/options/options_group_view.cc',
@@ -1735,8 +2299,6 @@
         'browser/views/sad_tab_view.h',
         'browser/views/select_profile_dialog.cc',
         'browser/views/select_profile_dialog.h',
-        'browser/views/shelf_item_dialog.cc',
-        'browser/views/shelf_item_dialog.h',
         'browser/views/shell_dialogs_win.cc',
         'browser/views/star_toggle.cc',
         'browser/views/star_toggle.h',
@@ -1805,8 +2367,10 @@
         'browser/views/toolbar_star_toggle.h',
         'browser/views/toolbar_view.cc',
         'browser/views/toolbar_view.h',
-        'browser/views/uninstall_dialog.cc',
-        'browser/views/uninstall_dialog.h',
+        'browser/views/uninstall_view.cc',
+        'browser/views/uninstall_view.h',
+        'browser/views/url_picker.cc',
+        'browser/views/url_picker.h',
         'browser/views/user_data_dir_dialog.cc',
         'browser/views/user_data_dir_dialog.h',
         'browser/visitedlink_master.cc',
@@ -1826,14 +2390,14 @@
         'browser/window_sizer_mac.mm',
         'browser/window_sizer_linux.cc',
         'browser/window_sizer_win.cc',
+        'browser/worker_host/message_port_dispatcher.cc',
+        'browser/worker_host/message_port_dispatcher.h',
         'browser/worker_host/worker_process_host.cc',
         'browser/worker_host/worker_process_host.h',
         'browser/worker_host/worker_service.cc',
         'browser/worker_host/worker_service.h',
         'browser/zygote_host_linux.cc',
         'browser/zygote_main_linux.cc',
-        'tools/build/win/precompiled_wtl.h',
-        'tools/build/win/precompiled_wtl.cc',
 
         # This file is generated by GRIT.
         '<(grit_out_dir)/grit/theme_resources_map.cc',
@@ -1844,6 +2408,11 @@
             'CHROME_V8',
           ],
         }],
+        ['chromeos==0 and toolkit_views==0', {
+          'sources/': [
+            ['exclude', '^browser/chromeos'],
+          ],
+        }],
         ['OS=="linux"', {
           'dependencies': [
             # Temporarily disabled while we figure some stuff out.
@@ -1851,7 +2420,9 @@
             # '../build/linux/system.gyp:dbus-glib',
             # '../build/linux/system.gyp:gnome-keyring',
             '../build/linux/system.gyp:gtk',
+            '../build/linux/system.gyp:gtkprint',
             '../build/linux/system.gyp:nss',
+            '../base/base.gyp:linux_versioninfo',
           ],
           'sources!': [
             'browser/views/extensions/extension_shelf.cc',
@@ -1861,6 +2432,14 @@
                     # Windows-specific files.
             'browser/password_manager/password_store_win.cc',
             'browser/password_manager/password_store_win.h',
+          ],
+          'sources': [
+            'browser/net/ssl_config_service_manager_pref.cc',
+          ],
+          'sources/': [
+            # Exclude most of printing.
+            ['exclude', '^browser/printing/'],
+            ['include', '^browser/printing/page_(number|range|setup)\\.cc$'],
           ],
           'conditions': [
             ['linux_breakpad==1', {
@@ -1876,11 +2455,9 @@
                 # breakpad_linux.cc wants file_version_info_linux.h
                 '<(SHARED_INTERMEDIATE_DIR)',
               ],
-            }, {
+            }, {  # linux_breakpad==0
               'sources': [
                 'browser/renderer_host/render_crash_handler_host_linux_stub.cc',
-                'app/breakpad_linux_stub.cc',
-                'app/breakpad_linux.h',
               ],
             }],
             ['linux_sandbox_path != ""', {
@@ -1893,6 +2470,14 @@
         ['OS=="linux" and toolkit_views==0', {
           'sources!': [
             'browser/bookmarks/bookmark_drop_info.cc',
+            'browser/views/autocomplete/autocomplete_popup_gtk.cc',
+            'browser/views/autocomplete/autocomplete_popup_gtk.h'
+          ],
+        }],
+        ['OS=="freebsd"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+            '../build/linux/system.gyp:nss',
           ],
         }],
         ['OS=="mac"', {
@@ -1901,10 +2486,7 @@
             'browser/bookmarks/bookmark_context_menu.cc',
             'browser/bookmarks/bookmark_drop_info.cc',
             'browser/dock_info.cc',
-            'browser/download/download_exe.cc',
-            'browser/download/download_request_dialog_delegate_win.cc',
             'browser/jankometer.cc',
-            'browser/login_prompt.cc',
             'browser/password_manager/password_store_gnome.h',
             'browser/password_manager/password_store_gnome.cc',
             'browser/password_manager/password_store_kwallet.h',
@@ -1917,12 +2499,20 @@
             'browser/views/extensions/extension_view.h',
           ],
           'sources': [
+            'browser/net/ssl_config_service_manager_system.cc',
             # Build the necessary GTM sources
+            '../third_party/GTM/AppKit/GTMFadeTruncatingTextFieldCell.h',
+            '../third_party/GTM/AppKit/GTMFadeTruncatingTextFieldCell.m',
             '../third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.m',
             '../third_party/GTM/AppKit/GTMNSColor+Luminance.m',
             '../third_party/GTM/AppKit/GTMTheme.m',
             '../third_party/GTM/AppKit/GTMUILocalizer.h',
             '../third_party/GTM/AppKit/GTMUILocalizer.m',
+            '../third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h',
+            '../third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.m',
+            '../third_party/GTM/AppKit/GTMWindowSheetController.m',
+            '../third_party/GTM/Foundation/GTMNSNumber+64Bit.h',
+            '../third_party/GTM/Foundation/GTMNSNumber+64Bit.m',
             # Build necessary Mozilla sources
             '../third_party/mozilla/include/NSPasteboard+Utils.h',
             '../third_party/mozilla/include/NSPasteboard+Utils.mm',
@@ -1938,6 +2528,7 @@
           'include_dirs': [
             '../third_party/GTM',
             '../third_party/GTM/AppKit',
+            '../third_party/GTM/Foundation',
           ],
           'link_settings': {
             'libraries': [
@@ -1945,6 +2536,50 @@
               '$(SDKROOT)/System/Library/Frameworks/QuartzCore.framework',
             ],
           },
+          'actions': [
+            {
+              # This action is used to extract the localization data from xib
+              # files and generate table for the ui localizer from it.
+              'variables': {
+                'xib_localizer_tool_path':
+                    '<(DEPTH)/build/mac/generate_localizer',
+                'xib_files_to_scan': [
+                  # The xibs that need localization
+                  'app/nibs/About.xib',
+                  'app/nibs/BookmarkBar.xib',
+                  'app/nibs/BookmarkBubble.xib',
+                  'app/nibs/BookmarkEditor.xib',
+                  'app/nibs/BookmarkNameFolder.xib',
+                  'app/nibs/ClearBrowsingData.xib',
+                  'app/nibs/DownloadItem.xib',
+                  'app/nibs/EditSearchEngine.xib',
+                  'app/nibs/FirstRunDialog.xib',
+                  'app/nibs/HttpAuthLoginSheet.xib',
+                  'app/nibs/HungRendererDialog.xib',
+                  'app/nibs/ImportProgressDialog.xib',
+                  'app/nibs/KeywordEditor.xib',
+                  'app/nibs/MainMenu.xib',
+                  'app/nibs/PageInfo.xib',
+                  'app/nibs/Preferences.xib',
+                  'app/nibs/SaveAccessoryView.xib',
+                  'app/nibs/TabView.xib',
+                  'app/nibs/TaskManager.xib',
+                  'app/nibs/Toolbar.xib',
+                ],
+              },
+              'action_name': 'Process xibs for localization',
+              'inputs': [
+                '<(xib_localizer_tool_path)',
+                '<@(xib_files_to_scan)',
+              ],
+              'outputs': [
+                '<(INTERMEDIATE_DIR)/ui_localizer_table.h',
+              ],
+              'action': ['<(xib_localizer_tool_path)',
+                          '<@(_outputs)',
+                          '<@(xib_files_to_scan)'],
+            },
+          ],
         }],
         ['OS=="win"', {
           'defines': [
@@ -1956,16 +2591,18 @@
             'third_party/wtl/include',
           ],
           'dependencies': [
-            '../google_update/google_update.gyp:google_update',
-            'installer/installer.gyp:installer_util',
-            '../third_party/cld/cld.gyp:cld',
-            '../views/views.gyp:views',
             '../gears/gears.gyp:gears',
+            '../google_update/google_update.gyp:google_update',
+            '../third_party/cld/cld.gyp:cld',
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+            '../views/views.gyp:views',
+            'installer/installer.gyp:installer_util',
           ],
           'export_dependent_settings': [
             '../views/views.gyp:views',
           ],
           'sources': [
+            'browser/net/ssl_config_service_manager_system.cc',
             # Using built-in rule in vstudio for midl.
             'browser/history/history_indexer.idl',
           ],
@@ -1975,6 +2612,8 @@
             'browser/password_manager/password_store_gnome.cc',
             'browser/password_manager/password_store_kwallet.h',
             'browser/password_manager/password_store_kwallet.cc',
+            'browser/views/compact_navigation_bar.cc',
+            'browser/views/compact_navigation_bar.h',
             'browser/views/new_browser_window_widget.cc',
             'browser/views/new_browser_window_widget.h',
             'browser/views/panel_controller.cc',
@@ -2002,12 +2641,6 @@
             'browser/views/tabs/tab_overview_types.cc',
             'browser/views/tabs/tab_overview_types.h',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-            },
-          },
         }, {  # 'OS!="win"
           'sources/': [
             # Exclude all of hang_monitor.
@@ -2015,10 +2648,6 @@
 
             # Exclude parts of password_manager.
             ['exclude', '^browser/password_manager/ie7_password\\.cc$'],
-
-            # Exclude most of printing.
-            ['exclude', '^browser/printing/'],
-            ['include', '^browser/printing/page_(number|range|setup)\\.cc$'],
 
             # Exclude all of rlz.
             ['exclude', '^browser/rlz/'],
@@ -2033,19 +2662,35 @@
                 ['include', '^browser/dock_info.cc'],
                 ['include', '^browser/dock_info.h'],
                 ['include', '^browser/extensions/'],
+                ['include', '^browser/views/accelerator_table_gtk.cc'],
+                ['include', '^browser/views/accelerator_table_gtk.h'],
+                ['include', '^browser/views/autocomplete/autocomplete_popup_contents_view.cc'],
+                ['include', '^browser/views/autocomplete/autocomplete_popup_contents_view.h'],
+                ['include', '^browser/views/autocomplete/autocomplete_popup_gtk.cc'],
+                ['include', '^browser/views/autocomplete/autocomplete_popup_gtk.h'],
+                ['include', '^browser/views/blocked_popup_container_view_views.cc'],
+                ['include', '^browser/views/blocked_popup_container_view_views.h'],
                 ['include', '^browser/views/bookmark_bar_view.cc'],
                 ['include', '^browser/views/bookmark_bar_view.h'],
+                ['include', '^browser/views/bookmark_bubble_view.cc'],
+                ['include', '^browser/views/bookmark_bubble_view.h'],
                 ['include', '^browser/views/bookmark_context_menu.cc'],
                 ['include', '^browser/views/bookmark_context_menu.h'],
                 ['include', '^browser/views/bookmark_menu_button.cc'],
                 ['include', '^browser/views/bookmark_menu_button.h'],
                 ['include', '^browser/views/bookmark_menu_controller_views.cc'],
+                ['include', '^browser/views/browser_actions_container.cc'],
+                ['include', '^browser/views/browser_actions_container.h'],
                 ['include', '^browser/views/browser_bubble_gtk.cc'],
                 ['include', '^browser/views/browser_bubble.cc'],
                 ['include', '^browser/views/browser_bubble.h'],
+                ['include', '^browser/views/bubble_border.cc'],
+                ['include', '^browser/views/bubble_border.h'],
                 ['include', '^browser/views/chrome_views_delegate.cc'],
                 ['include', '^browser/views/clear_browsing_data.cc'],
                 ['include', '^browser/views/clear_browsing_data.h'],
+                ['include', '^browser/views/detachable_toolbar_view.h'],
+                ['include', '^browser/views/detachable_toolbar_view.cc'],
                 ['include', '^browser/views/dialog_stubs_gtk.cc'],
                 ['include', '^browser/views/download_item_view.cc'],
                 ['include', '^browser/views/download_item_view.h'],
@@ -2055,6 +2700,8 @@
                 ['include', '^browser/views/dragged_tab_controller.h'],
                 ['include', '^browser/views/event_utils.cc'],
                 ['include', '^browser/views/event_utils.h'],
+                ['include', '^browser/views/extensions/extension_popup.cc'],
+                ['include', '^browser/views/extensions/extension_popup.h'],
                 ['include', '^browser/views/extensions/extension_shelf.cc'],
                 ['include', '^browser/views/extensions/extension_shelf.h'],
                 ['include', '^browser/views/extensions/extension_view.cc'],
@@ -2063,8 +2710,11 @@
                 ['include', '^browser/views/extension_view.h'],
                 ['include', '^browser/views/find_bar_view.cc'],
                 ['include', '^browser/views/find_bar_view.h'],
-                ['include', '^browser/views/find_bar_win.cc'],
-                ['include', '^browser/views/find_bar_win.h'],
+                ['include', '^browser/views/find_bar_host_gtk.cc'],
+                ['include', '^browser/views/find_bar_host.cc'],
+                ['include', '^browser/views/find_bar_host.h'],
+                ['include', '^browser/views/fullscreen_exit_bubble.cc'],
+                ['include', '^browser/views/fullscreen_exit_bubble.h'],
                 ['include', '^browser/views/go_button.cc'],
                 ['include', '^browser/views/go_button.h'],
                 ['include', '^browser/views/toolbar_star_toggle.h'],
@@ -2090,6 +2740,8 @@
                 #['include', '^browser/views/panels/panel_scroller_container.h'],
                 #['include', '^browser/views/panels/panel_scroller_header.cc'],
                 #['include', '^browser/views/panels/panel_scroller_header.h'],
+                ['include', '^browser/views/sad_tab_view.cc'],
+                ['include', '^browser/views/sad_tab_view.h'],
                 ['include', '^browser/views/status_bubble_views.cc'],
                 ['include', '^browser/views/status_bubble_views.h'],
                 ['include', '^browser/views/tab_contents/native_tab_contents_container_gtk.cc'],
@@ -2128,8 +2780,22 @@
 
                 # Exclude all of browser/gtk, then include the things we want.
                 ['exclude', '^browser/gtk'],
+                ['include', '^browser/gtk/about_chrome_dialog.cc'],
+                ['include', '^browser/gtk/about_chrome_dialog.h'],
                 ['include', '^browser/gtk/autocomplete_edit_gtk.cc'],
                 ['include', '^browser/gtk/autocomplete_edit_gtk.h'],
+                ['include', '^browser/gtk/bookmark_context_menu_gtk.cc'],
+                ['include', '^browser/gtk/bookmark_context_menu_gtk.h'],
+                ['include', '^browser/gtk/bookmark_editor_gtk.cc'],
+                ['include', '^browser/gtk/bookmark_editor_gtk.h'],
+                ['include', '^browser/gtk/bookmark_manager_gtk.cc'],
+                ['include', '^browser/gtk/bookmark_manager_gtk.h'],
+                ['include', '^browser/gtk/bookmark_tree_model.cc'],
+                ['include', '^browser/gtk/bookmark_tree_model.h'],
+                ['include', '^browser/gtk/bookmark_utils_gtk.cc'],
+                ['include', '^browser/gtk/bookmark_utils_gtk.h'],
+                ['include', '^browser/gtk/cairo_cached_surface.cc'],
+                ['include', '^browser/gtk/cairo_cached_surface.h'],
                 ['include', '^browser/gtk/clear_browsing_data_dialog_gtk.cc'],
                 ['include', '^browser/gtk/clear_browsing_data_dialog_gtk.h'],
                 ['include', '^browser/gtk/dialogs_gtk.cc'],
@@ -2142,10 +2808,12 @@
                 ['include', '^browser/gtk/first_run_dialog.h'],
                 ['include', '^browser/gtk/focus_store_gtk.cc'],
                 ['include', '^browser/gtk/focus_store_gtk.h'],
+                ['include', '^browser/gtk/gtk_chrome_button.cc'],
+                ['include', '^browser/gtk/gtk_chrome_button.h'],
                 ['include', '^browser/gtk/gtk_chrome_link_button.cc'],
                 ['include', '^browser/gtk/gtk_chrome_link_button.h'],
-                ['include', '^browser/gtk/gtk_dnd_util.cc'],
-                ['include', '^browser/gtk/gtk_dnd_util.h'],
+                ['include', '^browser/gtk/gtk_theme_provider.cc'],
+                ['include', '^browser/gtk/gtk_theme_provider.h'],
                 ['include', '^browser/gtk/hung_renderer_dialog_gtk.cc'],
                 ['include', '^browser/gtk/hung_renderer_dialog_gtk.h'],
                 ['include', '^browser/gtk/import_dialog_gtk.cc'],
@@ -2160,21 +2828,42 @@
                 ['include', '^browser/gtk/list_store_favicon_loader.h'],
                 ['include', '^browser/gtk/menu_gtk.cc'],
                 ['include', '^browser/gtk/menu_gtk.h'],
+                ['include', '^browser/gtk/nine_box.cc'],
+                ['include', '^browser/gtk/nine_box.h'],
+                ['include', '^browser/gtk/options/'],
+                ['include', '^browser/gtk/repost_form_warning_gtk.cc'],
+                ['include', '^browser/gtk/repost_form_warning_gtk.h'],
+                ['include', '^browser/gtk/tab_contents_drag_source.cc'],
+                ['include', '^browser/gtk/tab_contents_drag_source.h'],
+                ['include', '^browser/gtk/task_manager_gtk.cc'],
+                ['include', '^browser/gtk/task_manager_gtk.h'],
+                ['include', '^browser/gtk/view_id_util.cc'],
+                ['include', '^browser/gtk/view_id_util.h'],
 
                 # Other excluded stuff.
-                ['exclude', '^browser/browser_theme_provider_gtk.cc'],
+                ['exclude', '^browser/autocomplete/autocomplete_popup_view_gtk.cc'],
+                ['exclude', '^browser/autocomplete/autocomplete_popup_view_gtk.h'],
                 ['exclude', '^browser/extensions/external_registry_extension_provider_win.cc'],
                 ['exclude', '^browser/tab_contents/tab_contents_view_gtk.cc'],
                 ['exclude', '^browser/tab_contents/tab_contents_view_gtk.h'],
                 ['exclude', '^browser/tab_contents/render_view_context_menu_gtk.cc'],
                 ['exclude', '^browser/tab_contents/render_view_context_menu_gtk.h'],
+                # Overlaps with browser/views/frame/browser_view.cc
+                ['exclude', '^browser/browser_list_gtk.cc'],
               ],
             }],
-            ['chromeos==1',{
+            ['OS=="linux" and toolkit_views==0', {
+              'sources/': [
+                ['include', '^browser/printing/print_dialog_gtk.cc'],
+                ['include', '^browser/printing/print_dialog_gtk.h'],
+              ],
+            }],
+            ['chromeos==1 or toolkit_views==1',{
               'dependencies': [
-                  '../third_party/protobuf2/protobuf.gyp:protobuf',
-                  '../third_party/protobuf2/protobuf.gyp:protoc',
-               ],
+                '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
+                '../third_party/protobuf2/protobuf.gyp:protoc',
+                '../third_party/cros/cros_api.gyp:cros_api',
+              ],
               'actions': [
                 {
                   'action_name': 'my_proto',
@@ -2208,8 +2897,14 @@
                 '<(INTERMEDIATE_DIR)/chrome',
               ],
               'sources/': [
+                ['include', 'browser/views/about_chrome_view.cc'],
+                ['include', 'browser/views/about_chrome_view.h'],
+                ['exclude', 'browser/gtk/about_chrome_dialog.cc'],
+                ['exclude', 'browser/gtk/about_chrome_dialog.h'],
                 ['include', 'browser/views/new_browser_window_widget.cc'],
                 ['include', 'browser/views/new_browser_window_widget.h'],
+                ['include', 'browser/views/options/options_page_view.cc'],
+                ['include', 'browser/views/options/options_page_view.h'],
                 ['include', 'browser/views/panel_controller.cc'],
                 ['include', 'browser/views/panel_controller.h'],
                 ['include', 'browser/views/panels/panel_container.cc'],
@@ -2240,14 +2935,11 @@
           # Exclude files that should be excluded for all non-Windows platforms.
           'sources!': [
             'browser/autocomplete/autocomplete_accessibility.cc',
-            'browser/automation/ui_controls.cc',
             'browser/bookmarks/bookmark_menu_controller.cc',
             'browser/bookmarks/bookmark_menu_controller.h',
             'browser/browser_accessibility.cc',
             'browser/browser_accessibility_manager.cc',
-            'browser/extensions/extension_creator.cc',
             'browser/dom_ui/html_dialog_contents.cc',
-            'browser/encoding_menu_controller_delegate.cc',
             'browser/external_tab_container.cc',
             'browser/google_update.cc',
             'browser/history/history_indexer.idl',
@@ -2256,12 +2948,15 @@
             'browser/ime_input.cc',
             'browser/importer/ie_importer.cc',
             'browser/jumplist.cc',
-            'browser/memory_details.cc',
-            'browser/modal_html_dialog_delegate.cc',
             'browser/sandbox_policy.cc',
-            'browser/shell_integration.cc',
             'browser/tab_contents/web_drag_source.cc',
             'browser/tab_contents/web_drop_target.cc',
+          ],
+        }],
+        # views depends on webkit headers.
+        ['OS=="win" or toolkit_views==1',{
+          'dependencies': [
+            '../third_party/WebKit/WebCore/WebCore.gyp/WebCore.gyp:webcore',
           ],
         }],
       ],
@@ -2275,8 +2970,8 @@
         'chrome_strings',
         'theme_resources',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
       ],
       'include_dirs': [
         '..',
@@ -2300,11 +2995,13 @@
         'browser/debugger/devtools_remote_service.h',
         'browser/debugger/devtools_window.cc',
         'browser/debugger/devtools_window.h',
+        'browser/debugger/extension_ports_remote_service.cc',
+        'browser/debugger/extension_ports_remote_service.h',
         'browser/debugger/inspectable_tab_proxy.cc',
         'browser/debugger/inspectable_tab_proxy.h',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['OS=="linux" or OS=="freebsd"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
           ],
@@ -2321,11 +3018,11 @@
         'chrome_strings',
         '../media/media.gyp:media',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/npapi/npapi.gyp:npapi',
-        'third_party/hunspell/hunspell.gyp:hunspell',
+        '../third_party/hunspell/hunspell.gyp:hunspell',
         '../webkit/webkit.gyp:glue',
       ],
       'include_dirs': [
@@ -2353,18 +3050,54 @@
         'plugin/webplugin_delegate_stub.h',
         'plugin/webplugin_proxy.cc',
         'plugin/webplugin_proxy.h',
-
-        'tools/build/win/precompiled.cc',
-        'tools/build/win/precompiled.h',
       ],
-      'configurations': {
-        'Debug': {
-          'msvs_precompiled_header': 'tools/build/win/precompiled.h',
-          'msvs_precompiled_source': 'tools/build/win/precompiled.cc',
-        },
-      },
       # These are layered in conditionals in the event other platforms
       # end up using this module as well.
+      'conditions': [
+        ['OS=="win"', {
+          'defines': [
+            '__STD_C',
+            '_CRT_SECURE_NO_DEPRECATE',
+            '_SCL_SECURE_NO_DEPRECATE',
+          ],
+          'include_dirs': [
+            'third_party/wtl/include',
+          ],
+        },],
+      ],
+    },
+    {
+      'target_name': 'nacl',
+      'type': '<(library)',
+      'msvs_guid': '83E86DAF-5763-4711-AD34-5FDAE395560C',
+      'dependencies': [
+        'common',
+        'chrome_resources',
+        'chrome_strings',
+        '../third_party/npapi/npapi.gyp:npapi',
+        '../webkit/webkit.gyp:glue',
+        '../native_client/src/trusted/plugin/plugin.gyp:npGoogleNaClPluginChrome',
+        '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel',
+        '../native_client/src/trusted/validator_x86/validator_x86.gyp:ncvalidate',
+        '../native_client/src/trusted/platform_qualify/platform_qualify.gyp:platform_qual_lib',
+      ],
+      'include_dirs': [
+        '<(INTERMEDIATE_DIR)',
+      ],
+      'defines': [
+        'NACL_BLOCK_SHIFT=5',
+        'NACL_BLOCK_SIZE=32',
+        '<@(nacl_defines)',
+      ],
+      'sources': [
+        # All .cc, .h, .m, and .mm files under nacl except for tests and
+        # mocks.
+        'nacl/sel_main.cc',
+        'nacl/nacl_main.cc',
+        'nacl/nacl_thread.cc',
+        'nacl/nacl_thread.h',
+      ],
+      # TODO(gregoryd): consider switching NaCl to use Chrome OS defines
       'conditions': [
         ['OS=="win"', {
           'defines': [
@@ -2389,14 +3122,18 @@
         'chrome_strings',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/npapi/npapi.gyp:npapi',
+        '../third_party/WebKit/WebCore/WebCore.gyp/WebCore.gyp:webcore',
         '../webkit/webkit.gyp:glue',
         '../webkit/webkit.gyp:webkit',
       ],
       'include_dirs': [
         '..',
+      ],
+      'defines': [
+        '<@(nacl_defines)',
       ],
       'sources': [
         # TODO(jrg): to link ipc_tests, these files need to be in renderer.a.
@@ -2411,6 +3148,8 @@
         'renderer/extensions/event_bindings.h',
         'renderer/extensions/extension_process_bindings.cc',
         'renderer/extensions/extension_process_bindings.h',
+        'renderer/extensions/js_only_v8_extensions.cc',
+        'renderer/extensions/js_only_v8_extensions.h',
         'renderer/extensions/renderer_extension_bindings.cc',
         'renderer/extensions/renderer_extension_bindings.h',
         'renderer/loadtimes_extension_bindings.h',
@@ -2422,6 +3161,7 @@
         'renderer/net/render_dns_queue.cc',
         'renderer/net/render_dns_queue.h',
         'renderer/resources/event_bindings.js',
+        'renderer/resources/extension_apitest.js',
         'renderer/resources/extension_process_bindings.js',
         'renderer/resources/greasemonkey_api.js',
         'renderer/resources/json_schema.js',
@@ -2438,24 +3178,29 @@
         'renderer/devtools_client.h',
         'renderer/dom_ui_bindings.cc',
         'renderer/dom_ui_bindings.h',
+        'renderer/extension_groups.h',
         'renderer/external_host_bindings.cc',
         'renderer/external_host_bindings.h',
         'renderer/external_extension.cc',
         'renderer/external_extension.h',
-        'renderer/js_only_v8_extensions.cc',
-        'renderer/js_only_v8_extensions.h',
         'renderer/localized_error.cc',
         'renderer/localized_error.h',
         'renderer/navigation_state.h',
+        'renderer/notification_provider.cc',
+        'renderer/notification_provider.h',
         'renderer/plugin_channel_host.cc',
         'renderer/plugin_channel_host.h',
         'renderer/print_web_view_helper.cc',
         'renderer/print_web_view_helper.h',
+        'renderer/print_web_view_helper_linux.cc',
+        'renderer/print_web_view_helper_mac.mm',
+        'renderer/print_web_view_helper_win.cc',
         'renderer/render_process.cc',
         'renderer/render_process.h',
         'renderer/render_thread.cc',
         'renderer/render_thread.h',
         'renderer/render_view.cc',
+        'renderer/render_view_linux.cc',
         'renderer/render_view.h',
         'renderer/render_widget.cc',
         'renderer/render_widget.h',
@@ -2471,40 +3216,49 @@
         'renderer/renderer_sandbox_support_linux.h',
         'renderer/renderer_webkitclient_impl.cc',
         'renderer/renderer_webkitclient_impl.h',
+        'renderer/renderer_webstoragearea_impl.cc',
+        'renderer/renderer_webstoragearea_impl.h',
+        'renderer/renderer_webstoragenamespace_impl.cc',
+        'renderer/renderer_webstoragenamespace_impl.h',
         'renderer/user_script_slave.cc',
         'renderer/user_script_slave.h',
         'renderer/visitedlink_slave.cc',
         'renderer/visitedlink_slave.h',
         'renderer/webplugin_delegate_proxy.cc',
         'renderer/webplugin_delegate_proxy.h',
+        'renderer/webplugin_delegate_pepper.cc',
+        'renderer/webplugin_delegate_pepper.h',
         'renderer/webworker_proxy.cc',
         'renderer/webworker_proxy.h',
-
-        'tools/build/win/precompiled_wtl.cc',
-        'tools/build/win/precompiled_wtl.h',
       ],
       'link_settings': {
         'mac_bundle_resources': [
           'renderer/renderer.sb',
         ],
       },
-      'configurations': {
-        'Debug': {
-          'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-          'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-        },
-      },
       'conditions': [
+        ['disable_nacl!=1', {
+          'dependencies': [
+            'nacl',
+          ],
+        }],
         # Linux-specific rules.
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../sandbox/sandbox.gyp:sandbox',
           ],
         }],
         # Windows-specific rules.
         ['OS=="win"', {
           'include_dirs': [
             'third_party/wtl/include',
+          ],
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+          'export_dependent_settings': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
           ],
         },],
       ],
@@ -2518,9 +3272,6 @@
         '../skia/skia.gyp:skia',
       ],
       'sources': [
-        'tools/build/win/precompiled.cc',
-        'tools/build/win/precompiled.h',
-
         'utility/utility_main.cc',
         'utility/utility_thread.cc',
         'utility/utility_thread.h',
@@ -2528,12 +3279,6 @@
       'include_dirs': [
         '..',
       ],
-      'configurations': {
-        'Debug': {
-          'msvs_precompiled_header': 'tools/build/win/precompiled.h',
-          'msvs_precompiled_source': 'tools/build/win/precompiled.cc',
-        },
-      },
       'conditions': [
         ['OS=="linux"', {
           'dependencies': [
@@ -2542,40 +3287,43 @@
         }],
       ],
     },
-        {
-          'target_name': 'worker',
-          'type': '<(library)',
-          'msvs_guid': 'C78D02D0-A366-4EC6-A248-AA8E64C4BA18',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../webkit/webkit.gyp:webkit',
-          ],
-          'sources': [
-            'tools/build/win/precompiled.cc',
-            'tools/build/win/precompiled.h',
-
-            'worker/nativewebworker_impl.cc',
-            'worker/nativewebworker_impl.h',
-            'worker/nativewebworker_stub.cc',
-            'worker/nativewebworker_stub.h',
-            'worker/webworkerclient_proxy.cc',
-            'worker/webworkerclient_proxy.h',
-            'worker/worker_main.cc',
-            'worker/worker_thread.cc',
-            'worker/worker_thread.h',
-            'worker/worker_webkitclient_impl.cc',
-            'worker/worker_webkitclient_impl.h',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled.cc',
-            },
-          },
-        },
+    {
+      'target_name': 'profile_import',
+      'type': '<(library)',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'profile_import/profile_import_main.cc',
+        'profile_import/profile_import_thread.cc',
+        'profile_import/profile_import_thread.h',
+      ],
+    },
+    {
+      'target_name': 'worker',
+      'type': '<(library)',
+      'msvs_guid': 'C78D02D0-A366-4EC6-A248-AA8E64C4BA18',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../webkit/webkit.gyp:webkit',
+      ],
+      'sources': [
+        'worker/nativewebworker_impl.cc',
+        'worker/nativewebworker_impl.h',
+        'worker/nativewebworker_stub.cc',
+        'worker/nativewebworker_stub.h',
+        'worker/webworkerclient_proxy.cc',
+        'worker/webworkerclient_proxy.h',
+        'worker/worker_main.cc',
+        'worker/worker_thread.cc',
+        'worker/worker_thread.h',
+        'worker/worker_webkitclient_impl.cc',
+        'worker/worker_webkitclient_impl.h',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+    },
     {
       'target_name': 'chrome',
       'type': 'executable',
@@ -2595,63 +3343,9 @@
         'app/google_update_client.h',
         'app/hard_error_handler_win.cc',
         'app/hard_error_handler_win.h',
-        'app/keystone_glue.h',
-        'app/keystone_glue.m',
         'app/scoped_ole_initializer.h',
       ],
-      'dependencies': [
-        '../build/util/support/support.gyp:*',
-      ],
       'mac_bundle_resources': [
-        # put any pdfs down in the sources block below so pdfsqueeze runs on
-        # them.
-        'app/nibs/About.xib',
-        'app/nibs/BookmarkBar.xib',
-        'app/nibs/BrowserWindow.xib',
-        'app/nibs/ClearBrowsingData.xib',
-        'app/nibs/DownloadItem.xib',
-        'app/nibs/DownloadShelf.xib',
-        'app/nibs/FindBar.xib',
-        'app/nibs/FirstRunDialog.xib',
-        'app/nibs/HungRendererDialog.xib',
-        'app/nibs/InfoBar.xib',
-        'app/nibs/InfoBarContainer.xib',
-        'app/nibs/MainMenu.xib',
-        'app/nibs/PageInfo.xib',
-        'app/nibs/Preferences.xib',
-        'app/nibs/SaveAccessoryView.xib',
-        'app/nibs/TabContents.xib',
-        'app/nibs/TabView.xib',
-        'app/nibs/Toolbar.xib',
-        'app/theme/back_Template.pdf',
-        'app/theme/close_bar.pdf',
-        'app/theme/close_bar_h.pdf',
-        'app/theme/close_bar_p.pdf',
-        'app/theme/forward_Template.pdf',
-        'app/theme/frozen_tab.png',
-        'app/theme/go_Template.pdf',
-        'app/theme/home_Template.pdf',
-        'app/theme/menu_chrome_rtl_Template.pdf',
-        'app/theme/menu_chrome_Template.pdf',
-        'app/theme/menu_page_rtl_Template.pdf',
-        'app/theme/menu_page_Template.pdf',
-        'app/theme/nav.pdf',
-        'app/theme/newtab.pdf',
-        'app/theme/o2_globe.png',
-        'app/theme/o2_history.png',
-        'app/theme/o2_more.png',
-        'app/theme/o2_search.png',
-        'app/theme/o2_star.png',
-        'app/theme/otr_icon.pdf',
-        'app/theme/pageinfo_bad.png',
-        'app/theme/pageinfo_good.png',
-        'app/theme/reload_Template.pdf',
-        'app/theme/sadtab.png',
-        'app/theme/star_Template.pdf',
-        'app/theme/starred.pdf',
-        'app/theme/stop_Template.pdf',
-        '../app/resources/throbber.png',
-        'app/theme/throbber_waiting.png',
         'app/app-Info.plist',
       ],
       # TODO(mark): Come up with a fancier way to do this.  It should only
@@ -2664,35 +3358,58 @@
         'INFOPLIST_FILE': 'app/app-Info.plist',
       },
       'conditions': [
-        ['OS=="linux"', {
-          'conditions': [
-            # All Chrome builds have breakpad symbols, but only process the
-            # symbols from official builds.
-            ['branding=="Chrome" and buildtype=="Official"', {
-              'actions': [
-                {
-                  'action_name': 'dump_symbols',
-                  'inputs': [
-                    '<(DEPTH)/build/linux/dump_app_syms',
-                    '<(DEPTH)/build/linux/dump_signature.py',
-                    '<(PRODUCT_DIR)/dump_syms',
-                    '<(PRODUCT_DIR)/chrome',
-                  ],
-                  'outputs': [
-                    '<(PRODUCT_DIR)/chrome.breakpad',
-                  ],
-                  'action': ['<(DEPTH)/build/linux/dump_app_syms',
-                             '<(PRODUCT_DIR)/dump_syms',
-                             '<(PRODUCT_DIR)/chrome', '<@(_outputs)'],
-                },
+        ['chrome_frame_define==1 and OS=="win"', {
+          'dependencies': [
+            '../chrome_frame/chrome_frame.gyp:npchrome_tab',
+          ],
+        }],
+        ['OS=="linux" or OS=="freebsd"', {
+          'actions': [
+            {
+              'action_name': 'manpage',
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                    'name': 'Google Chrome',
+                    'filename': 'google-chrome',
+                    'confdir': 'google-chrome',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                    'name': 'Chromium',
+                    'filename': 'chromium-browser',
+                    'confdir': 'chromium',
+                  },
+                }],
               ],
-            }],
+              'inputs': [
+                'tools/build/linux/sed.sh',
+                'app/resources/manpage.1.in',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/<(filename).1',
+              ],
+              'action': [
+                'tools/build/linux/sed.sh',
+                'app/resources/manpage.1.in',
+                '<@(_outputs)',
+                '-e', 's/@@NAME@@/<(name)/',
+                '-e', 's/@@FILENAME@@/<(filename)/',
+                '-e', 's/@@CONFDIR@@/<(confdir)/',
+              ],
+              'message': 'Generating manpage'
+            },
           ],
           'dependencies': [
+            # On Linux, link the dependencies (libraries) that make up actual
+            # Chromium functionality directly into the executable.
+            '<@(chromium_dependencies)',
             # Needed for chrome_dll_main.cc #include of gtk/gtk.h
             '../build/linux/system.gyp:gtk',
-            # Needed for chrome_dll_main.cc use of g_thread_init
-            '../build/linux/system.gyp:gthread',
+          ],
+          'sources': [
+            'app/chrome_dll_main.cc',
+            'app/chrome_dll_resource.h',
           ],
           'copies': [
             {
@@ -2713,11 +3430,9 @@
             },
             {
               'destination': '<(PRODUCT_DIR)/locales',
-              'files': ['<(INTERMEDIATE_DIR)/repack/da.pak',
-                        '<(INTERMEDIATE_DIR)/repack/en-US.pak',
-                        '<(INTERMEDIATE_DIR)/repack/he.pak',
-                        '<(INTERMEDIATE_DIR)/repack/zh-TW.pak',
-                        ],
+              'files': [
+                '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+              ],
             },
             {
               'destination': '<(PRODUCT_DIR)/themes',
@@ -2731,34 +3446,27 @@
           ],
         }],
         ['OS=="mac"', {
+          'variables': {
+            'mac_packaging_dir':
+                '<(PRODUCT_DIR)/<(mac_product_name) Packaging',
+            # <(PRODUCT_DIR) expands to $(BUILT_PRODUCTS_DIR), which doesn't
+            # work properly in a shell script, where ${BUILT_PRODUCTS_DIR} is
+            # needed.
+            'mac_packaging_sh_dir':
+                '${BUILT_PRODUCTS_DIR}/<(mac_product_name) Packaging',
+          },
           # 'branding' is a variable defined in common.gypi
           # (e.g. "Chromium", "Chrome")
           'conditions': [
             ['branding=="Chrome"', {
-              'mac_bundle_resources': ['app/theme/google_chrome/app.icns'],
-              'variables': {
-                'bundle_id': 'com.google.Chrome',
-              },
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/MacOS/',
-                  'files': ['../third_party/ffmpeg/binaries/chrome/libavcodec.52.dylib',
-                            '../third_party/ffmpeg/binaries/chrome/libavformat.52.dylib',
-                            '../third_party/ffmpeg/binaries/chrome/libavutil.50.dylib'],
-                },
+              'mac_bundle_resources': [
+                'app/theme/google_chrome/app.icns',
+                'app/theme/google_chrome/document.icns',
               ],
             }, {  # else: 'branding!="Chrome"
-              'mac_bundle_resources': ['app/theme/chromium/app.icns'],
-              'variables': {
-                'bundle_id': 'org.chromium.Chromium',
-              },
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/MacOS/',
-                  'files': ['../third_party/ffmpeg/binaries/chromium/libavcodec.52.dylib',
-                            '../third_party/ffmpeg/binaries/chromium/libavformat.52.dylib',
-                            '../third_party/ffmpeg/binaries/chromium/libavutil.50.dylib'],
-                },
+              'mac_bundle_resources': [
+                'app/theme/chromium/app.icns',
+                'app/theme/chromium/document.icns',
               ],
             }],
             ['mac_breakpad==1', {
@@ -2766,72 +3474,189 @@
                 # A real .dSYM is needed for dump_syms to operate on.
                 'mac_real_dsym': 1,
               },
-              'sources': [
-                'app/breakpad_mac.mm',
-                'app/breakpad_mac.h',
-              ],
               'dependencies': [
-                '../breakpad/breakpad.gyp:breakpad',
                 '../breakpad/breakpad.gyp:dump_syms',
                 '../breakpad/breakpad.gyp:symupload',
               ],
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/',
-                  'files': ['<(PRODUCT_DIR)/crash_inspector', '<(PRODUCT_DIR)/crash_report_sender.app'],
-                },
-              ],
-              'postbuilds': [
-                {
-                  'postbuild_name': 'Dump Symbols',
-                  'action': ['<(DEPTH)/build/mac/dump_app_syms',
-                             '<(branding)'],
-                },
-              ],
-            }, {
-              # no breakpad, put in the stubs
-              'sources': [
-                'app/breakpad_mac_stubs.mm',
-                'app/breakpad_mac.h',
+              # The "Dump Symbols" post-build step is in a target_conditions
+              # block so that it will follow the "Strip If Needed" step if that
+              # is also being used.  There is no standard configuration where
+              # both of these steps occur together, but Mark likes to use this
+              # configuraiton sometimes when testing Breakpad-enabled builds
+              # without the time overhead of creating real .dSYM files.  When
+              # both "Dump Symbols" and "Strip If Needed" are present, "Dump
+              # Symbols" must come second because "Strip If Needed" creates
+              # a fake .dSYM that dump_syms needs to fake dump.  Since
+              # "Strip If Needed" is added in a target_conditions block in
+              # common.gypi, "Dump Symbols" needs to be in an (always true)
+              # target_conditions block.
+              'target_conditions': [
+                ['1 == 1', {
+                  'postbuilds': [
+                    {
+                      'postbuild_name': 'Dump Symbols',
+                      'action': ['<(DEPTH)/build/mac/dump_app_syms',
+                                 '<(branding)'],
+                    },
+                  ],
+                }],
               ],
             }],  # mac_breakpad
             ['mac_keystone==1', {
               'copies': [
                 {
-                  'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Frameworks/',
-                  'files': ['../third_party/googlemac/Releases/Keystone/KeystoneRegistration.framework'],
+                  # Put keystone_install.sh where the packaging system will
+                  # find it.  The packager will copy this script to the
+                  # correct location on the disk image.
+                  'destination': '<(mac_packaging_dir)',
+                  'files': [
+                    'tools/build/mac/keystone_install.sh',
+                  ],
                 },
               ],
             }],  # mac_keystone
+            ['buildtype=="Official"', {
+              'actions': [
+                {
+                  # Create sign.sh, the script that the packaging system will
+                  # use to sign the .app bundle.
+                  'action_name': 'Make sign.sh',
+                  'variables': {
+                    'make_sign_sh_path': 'tools/build/mac/make_sign_sh',
+                    'sign_sh_in_path': 'tools/build/mac/sign.sh.in',
+                    'app_resource_rules_in_path':
+                        'tools/build/mac/app_resource_rules.plist.in',
+                  },
+                  'inputs': [
+                    '<(make_sign_sh_path)',
+                    '<(sign_sh_in_path)',
+                    '<(app_resource_rules_in_path)',
+                    '<(version_path)',
+                  ],
+                  'outputs': [
+                    '<(mac_packaging_dir)/sign.sh',
+                    '<(mac_packaging_dir)/app_resource_rules.plist',
+                  ],
+                  'action': [
+                    '<(make_sign_sh_path)',
+                    '<(mac_packaging_sh_dir)',
+                    '<(mac_product_name)',
+                    '<(version_full)',
+                  ],
+                },
+              ],
+            }],  # buildtype=="Official"
           ],
           'product_name': '<(mac_product_name)',
           'xcode_settings': {
             # chrome/app/app-Info.plist has:
             #   CFBundleIdentifier of CHROMIUM_BUNDLE_ID
             #   CFBundleName of CHROMIUM_SHORT_NAME
+            #   CFBundleSignature of CHROMIUM_CREATOR
             # Xcode then replaces these values with the branded values we set
             # as settings on the target.
-            'CHROMIUM_BUNDLE_ID': '<(bundle_id)',
+            'CHROMIUM_BUNDLE_ID': '<(mac_bundle_id)',
+            'CHROMIUM_CREATOR': '<(mac_creator)',
             'CHROMIUM_SHORT_NAME': '<(branding)',
           },
-          # Bring in pdfsqueeze and run it on all pdfs
           'dependencies': [
-            '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
+            'helper_app',
+            'infoplist_strings_tool',
+            # This library provides the real implementation for NaClSyscallSeg
+            '../native_client/src/trusted/service_runtime/arch/x86_32/service_runtime_x86_32.gyp:service_runtime_x86_32_chrome'
           ],
-          'rules': [
+          'actions': [
             {
-              'rule_name': 'pdfsqueeze',
-              'extension': 'pdf',
+              # Generate the InfoPlist.strings file
+              'action_name': 'Generating InfoPlist.strings files',
+              'variables': {
+                'tool_path': '<(PRODUCT_DIR)/infoplist_strings_tool',
+                # Unique dir to write to so the [lang].lproj/InfoPlist.strings
+                # for the main app and the helper app don't name collide.
+                'output_path': '<(INTERMEDIATE_DIR)/app_infoplist_strings',
+              },
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                     'branding_name': 'google_chrome_strings',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                     'branding_name': 'chromium_strings',
+                  },
+                }],
+              ],
               'inputs': [
-                '<(PRODUCT_DIR)/pdfsqueeze',
+                '<(tool_path)',
+                '<(version_path)',
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(branding_name)_ZZLOCALE.pak\' <(locales))',
               ],
               'outputs': [
-                '<(INTERMEDIATE_DIR)/pdfsqueeze/<(RULE_INPUT_ROOT).pdf',
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) -d \'<(output_path)/ZZLOCALE.lproj/InfoPlist.strings\' <(locales))',
               ],
-              'action': ['<(PRODUCT_DIR)/pdfsqueeze', '<(RULE_INPUT_PATH)', '<@(_outputs)'],
-              'message': 'Running pdfsqueeze on <(RULE_INPUT_PATH)',
+              'action': [
+                '<(tool_path)',
+                '-b', '<(branding_name)',
+                '-v', '<(version_path)',
+                '-g', '<(grit_out_dir)',
+                '-o', '<(output_path)',
+                '-t', 'main',
+                '<@(locales)',
+              ],
+              'message': 'Generating the language InfoPlist.strings files',
+              'process_outputs_as_mac_bundle_resources': 1,
             },
           ],
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Versions/<(version_full)',
+              'files': [
+                '<(PRODUCT_DIR)/<(mac_product_name) Helper.app',
+              ],
+            },
+          ],
+          'postbuilds': [
+            {
+              'postbuild_name': 'Copy <(mac_product_name) Framework.framework',
+              'action': [
+                'tools/build/mac/copy_framework_unversioned',
+                '${BUILT_PRODUCTS_DIR}/<(mac_product_name) Framework.framework',
+                '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Versions/<(version_full)',
+              ],
+            },
+            {
+              # Modify the Info.plist as needed.  The script explains why this
+              # is needed.  This is also done in the helper_app and chrome_dll
+              # targets.  Use -b0 and -k0 to not include any Breakpad or
+              # Keystone information; that all goes into the framework's
+              # Info.plist.  Use -s1 to include Subversion information.
+              'postbuild_name': 'Tweak Info.plist',
+              'action': ['<(tweak_info_plist_path)',
+                         '-b0',
+                         '-k0',
+                         '-s1',
+                         '<(branding)',
+                         '<(mac_bundle_id)'],
+            },
+            {
+              'postbuild_name': 'Tweak Mac lproj folders',
+              'action': ['app/tweak_mac_lproj_folders'],
+            },
+            {
+              # TODO(mark): Remove after October 20, 2009.
+              'postbuild_name': 'Clean up old resources',
+              'action': ['app/clean_mac_resources'],
+            },
+            {
+              'postbuild_name': 'Clean up old versions',
+              'action': [
+                'tools/build/mac/clean_up_old_versions',
+                '<(version_full)'
+              ],
+            },
+          ],  # postbuilds
         }, { # else: OS != "mac"
           'conditions': [
             ['branding=="Chrome"', {
@@ -2848,61 +3673,6 @@
             }],
           ],
         }],
-        ['OS=="mac"', {
-          'actions': [
-            {
-              # Mac addes an action to modify the Info.plist to meet our needs
-              # (see the script for why this is done).
-              'action_name': 'tweak_app_infoplist',
-              # We don't list any inputs or outputs because we always want
-              # the script to run.  Why?  Because it does thinks like record
-              # the svn revision into the info.plist, so there is no file to
-              # depend on that will change when ever that changes.
-              'inputs': [],
-              'outputs': [],
-              'action': ['<(DEPTH)/build/mac/tweak_app_infoplist',
-                         '-b<(mac_breakpad)',
-                         '-k<(mac_keystone)',
-                         '<(branding)'],
-            },
-            {
-              # TODO(tvl): delete this after it has been in a week or so since
-              # it will migrate bots/developers to the new layout instead of
-              # them getting errors with stale xib in the old dir.
-              'action_name': 'remove_stale_nibs',
-              'inputs': [],
-              'outputs': [],
-              'action': ['rm', '-rf',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/About.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/BookmarkBar.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/BrowserWindow.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/ClearBrowsingData.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/DownloadItem.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/DownloadShelf.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/FindBar.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/FirstRunDialog.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/HungRendererDialog.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/InfoBar.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/InfoBarContainer.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/MainMenu.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/PageInfo.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/Preferences.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/SaveAccessoryView.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/TabContents.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/TabView.nib',
-                '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources/en.lproj/Toolbar.nib'],
-            },
-          ],
-        }],
-        ['OS=="mac"', {
-          # Copy web inspector resources to the Contents/Resources folder.
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Resources',
-              'files': ['<(PRODUCT_DIR)/resources/inspector/'],
-            },
-          ],
-        }],
         ['OS=="linux"', {
           'conditions': [
             ['branding=="Chrome"', {
@@ -2910,21 +3680,27 @@
                 'installer/installer.gyp:installer_util',
               ],
             }],
+            ['selinux==0', {
+              'dependencies': [
+                '../sandbox/sandbox.gyp:sandbox',
+              ],
+            }],
+          ],
+        }],
+        ['OS=="mac" or OS=="win"', {
+          'dependencies': [
+            # On Windows and Mac, make sure we've built chrome_dll, which
+            # contains all of the library code with Chromium functionality.
+            'chrome_dll',
           ],
         }],
         ['OS=="win"', {
           'dependencies': [
-            # On Windows, make sure we've built chrome.dll, which
-            # contains all of the library code with Chromium
-            # functionality.
-            'chrome_dll',
             'installer/installer.gyp:installer_util',
             'installer/installer.gyp:installer_util_strings',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
             '../sandbox/sandbox.gyp:sandbox',
-            '../views/views.gyp:views',
-            'worker',
             'app/locales/locales.gyp:*',
           ],
           'sources': [
@@ -2956,8 +3732,6 @@
             {
               'action_name': 'version',
               'variables': {
-                'version_py': 'tools/build/version.py',
-                'version_path': 'VERSION',
                 'template_input_path': 'app/chrome_exe_version.rc.version',
               },
               'conditions': [
@@ -2981,7 +3755,7 @@
               ],
               'action': [
                 'python',
-                '<(version_py)',
+                '<(version_py_path)',
                 '-f', '<(version_path)',
                 '-f', '<(branding_path)',
                 '<(template_input_path)',
@@ -3002,21 +3776,20 @@
               'message': 'Copy first run complete sentinel file',
             },
           ],
-        },{  # 'OS!="win"
-          'dependencies': [
-            # On Linux and Mac, link the dependencies (libraries)
-            # that make up actual Chromium functionality directly
-            # into the executable.
-            '<@(chromium_dependencies)',
-          ],
-          'sources': [
-            'app/chrome_dll_main.cc',
-            'app/chrome_dll_resource.h',
-          ],
+        }, {  # 'OS!="win"
+          'sources!': [
+            'app/chrome_exe_main.cc',
+            'app/client_util.cc',
+            'app/google_update_client.cc',
+          ]
+        }],
+        ['OS=="linux" or OS=="freebsd"', {
           'variables': {
             'repack_path': '../tools/data_pack/repack.py',
           },
           'actions': [
+            # TODO(mark): These actions are duplicated for the Mac in the
+            # chrome_dll target.  Can they be unified?
             {
               'action_name': 'repack_chrome',
               'variables': {
@@ -3035,8 +3808,8 @@
               'outputs': [
                 '<(INTERMEDIATE_DIR)/repack/chrome.pak',
               ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
-              'process_outputs_as_mac_bundle_resources': 1,
+              'action': ['python', '<(repack_path)', '<@(_outputs)',
+                         '<@(pak_inputs)'],
             },
             {
               'action_name': 'repack_theme',
@@ -3051,199 +3824,45 @@
                 '<@(pak_inputs)',
               ],
               'outputs': [
-                '<(INTERMEDIATE_DIR)/repack/theme.pak',
+                '<(INTERMEDIATE_DIR)/repack/default.pak',
               ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
-              'process_outputs_as_mac_bundle_resources': 1,
-              'conditions': [
-                ['OS=="linux"', {
-                  'outputs=': [
-                    '<(INTERMEDIATE_DIR)/repack/default.pak',
-                  ]
-                }],
-              ],
+              'action': ['python', '<(repack_path)', '<@(_outputs)',
+                         '<@(pak_inputs)'],
             },
             {
-              # TODO(mark): Make this work with more languages than the
-              # hardcoded da, en-US, he, zh-TW.
-              'action_name': 'repack_locale_da',
+              'action_name': 'repack_locales',
               'variables': {
-                'pak_inputs': [
-                  '<(grit_out_dir)/generated_resources_da.pak',
-                  '<(grit_out_dir)/locale_settings_da.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_da.pak',
-                ],
                 'conditions': [
                   ['branding=="Chrome"', {
-                    'pak_inputs': [
-                        '<(grit_out_dir)/google_chrome_strings_da.pak',
-                      ]
+                    'branding_flag': ['-b', 'google_chrome',],
                   }, {  # else: branding!="Chrome"
-                    'pak_inputs': [
-                        '<(grit_out_dir)/chromium_strings_da.pak',
-                      ]
+                    'branding_flag': ['-b', 'chromium',],
                   }],
                 ],
               },
               'inputs': [
-                '<(repack_path)',
-                '<@(pak_inputs)',
+                'tools/build/repack_locales.py',
+                # NOTE: Ideally the common command args would be shared amongst
+                # inputs/outputs/action, but the args include shell variables
+                # which need to be passed intact, and command expansion wants
+                # to expand the shell variables. Adding the explicit quoting
+                # here was the only way it seemed to work.
+                '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
               ],
-              'conditions': [
-                ['OS=="mac"', {
-                  'outputs': [
-                    # TODO(port): We can't simply emit the strings file without
-                    # the nibs too, or the app fails to launch in this language.
-                    # Currently, this is only for ui_tests, which won't work on
-                    # the Mac anyway, so temporarily disable until we have the
-                    # full strategy figured out. This goes for he and zh below.
-                    # '<(INTERMEDIATE_DIR)/repack/da.lproj/locale.pak',
-                  ],
-                }, {  # else: OS!="mac"
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/da.pak',
-                  ],
-                }],
+              'outputs': [
+                '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
               ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
-            },
-            {
-              # TODO(mark): Make this work with more languages than the
-              # hardcoded da, en-US, he, zh-TW.
-              'action_name': 'repack_locale_en_us',
-              'variables': {
-                'pak_inputs': [
-                  '<(grit_out_dir)/generated_resources_en-US.pak',
-                  '<(grit_out_dir)/locale_settings_en-US.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
-                ],
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    'pak_inputs': [
-                        '<(grit_out_dir)/google_chrome_strings_en-US.pak',
-                      ]
-                  }, {  # else: branding!="Chrome"
-                    'pak_inputs': [
-                        '<(grit_out_dir)/chromium_strings_en-US.pak',
-                      ]
-                  }],
-                ],
-              },
-              'inputs': [
-                '<(repack_path)',
-                '<@(pak_inputs)',
+              'action': [
+                '<@(repack_locales_cmd)',
+                '<@(branding_flag)',
+                '-g', '<(grit_out_dir)',
+                '-s', '<(SHARED_INTERMEDIATE_DIR)',
+                '-x', '<(INTERMEDIATE_DIR)',
+                '<@(locales)',
               ],
-              'conditions': [
-                ['OS=="mac"', {
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/en.lproj/locale.pak',
-                  ],
-                }, {  # else: OS!="mac"
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/en-US.pak',
-                  ],
-                }],
-              ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
-              'process_outputs_as_mac_bundle_resources': 1,
-            },
-            {
-              # TODO(mark): Make this work with more languages than the
-              # hardcoded da, en-US, he, zh-TW.
-              'action_name': 'repack_locale_he',
-              'variables': {
-                'pak_inputs': [
-                  '<(grit_out_dir)/generated_resources_he.pak',
-                  '<(grit_out_dir)/locale_settings_he.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_he.pak',
-                ],
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    'pak_inputs': [
-                        '<(grit_out_dir)/google_chrome_strings_he.pak',
-                      ]
-                  }, {  # else: branding!="Chrome"
-                    'pak_inputs': [
-                        '<(grit_out_dir)/chromium_strings_he.pak',
-                      ]
-                  }],
-                ],
-              },
-              'inputs': [
-                '<(repack_path)',
-                '<@(pak_inputs)',
-              ],
-              'conditions': [
-                ['OS=="mac"', {
-                  'outputs': [
-                    # '<(INTERMEDIATE_DIR)/repack/he.lproj/locale.pak',
-                  ],
-                }, {  # else: OS!="mac"
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/he.pak',
-                  ],
-                }],
-              ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
-            },
-            {
-              # TODO(mark): Make this work with more languages than the
-              # hardcoded da, en-US, he, zh-TW.
-              'action_name': 'repack_locale_zh_tw',
-              'variables': {
-                'pak_inputs': [
-                  '<(grit_out_dir)/generated_resources_zh-TW.pak',
-                  '<(grit_out_dir)/locale_settings_zh-TW.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_zh-TW.pak',
-                ],
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    'pak_inputs': [
-                        '<(grit_out_dir)/google_chrome_strings_zh-TW.pak',
-                      ]
-                  }, {  # else: branding!="Chrome"
-                    'pak_inputs': [
-                        '<(grit_out_dir)/chromium_strings_zh-TW.pak',
-                      ]
-                  }],
-                ],
-              },
-              'inputs': [
-                '<(repack_path)',
-                '<@(pak_inputs)',
-              ],
-              'conditions': [
-                ['OS=="mac"', {
-                  'outputs': [
-                    # '<(INTERMEDIATE_DIR)/repack/zh.lproj/locale.pak',
-                  ],
-                }, {  # else: OS!="mac"
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/zh-TW.pak',
-                  ],
-                }],
-              ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)', '<@(pak_inputs)'],
             },
           ],
-          'sources!': [
-            'app/chrome_exe_main.cc',
-            'app/client_util.cc',
-            'app/google_update_client.cc',
-          ]
         }],
-      ],
-    },
-    {
-      'target_name': 'image_diff',
-      'type': 'executable',
-      'msvs_guid': '50B079C7-CD01-42D3-B8C4-9F8D9322E822',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../base/base.gyp:base_gfx',
-      ],
-      'sources': [
-        'tools/test/image_diff/image_diff.cc',
       ],
     },
     {
@@ -3258,9 +3877,13 @@
         'chrome_resources',
         'chrome_strings',
         'theme_resources',
+        '../base/base.gyp:test_support_base',
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+      ],
+      'export_dependent_settings': [
+        'renderer',
       ],
       'include_dirs': [
         '..',
@@ -3276,8 +3899,8 @@
         'browser/renderer_host/mock_render_process_host.h',
         'browser/renderer_host/test/test_render_view_host.cc',
         'browser/renderer_host/test/test_render_view_host.h',
-        'browser/tab_contents/test_web_contents.cc',
-        'browser/tab_contents/test_web_contents.h',
+        'browser/tab_contents/test_tab_contents.cc',
+        'browser/tab_contents/test_tab_contents.h',
         'common/ipc_test_sink.cc',
         'common/ipc_test_sink.h',
         'renderer/mock_keyboard.cc',
@@ -3307,10 +3930,11 @@
         'test/chrome_process_util_linux.cc',
         'test/chrome_process_util_mac.cc',
         'test/chrome_process_util_win.cc',
-        'test/in_process_browser_test.cc',
-        'test/in_process_browser_test.h',
-        'test/perf/mem_usage.cc',
+        'test/perf/mem_usage_linux.cc',
+        'test/perf/mem_usage_mac.cc',
+        'test/perf/mem_usage_win.cc',
         'test/perf/mem_usage.h',
+        'test/test_browser_window.h',
         'test/testing_profile.cc',
         'test/testing_profile.h',
         'test/ui_test_utils.cc',
@@ -3326,15 +3950,6 @@
           'include_dirs': [
             'third_party/wtl/include',
           ],
-        }, { # OS != "win"
-          'sources!': [
-            'test/in_process_browser_test.cc',
-            'test/in_process_browser_test.h',
-            'test/perf/mem_usage.cc',
-            'test/perf/mem_usage.h',
-            'test/ui_test_utils.cc',
-            'test/ui_test_utils.h',
-          ],
         }],
       ],
     },
@@ -3349,6 +3964,9 @@
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
       ],
+      'export_dependent_settings': [
+        'test_support_common',
+      ],
       'include_dirs': [
         '..',
       ],
@@ -3360,6 +3978,8 @@
         'test/ui/npapi_test_helper.cc',
         'test/ui/npapi_test_helper.h',
         'test/ui/run_all_unittests.cc',
+        'test/ui/ui_layout_test.cc',
+        'test/ui/ui_layout_test.h',
         'test/ui/ui_test.cc',
         'test/ui/ui_test.h',
         'test/ui/ui_test_suite.cc',
@@ -3405,6 +4025,45 @@
           ],
         }],
       ],
+     },
+    {
+      'target_name': 'automated_ui_tests',
+      'type': 'executable',
+      'msvs_guid': 'D2250C20-3A94-4FB9-AF73-11BC5B73884B',
+      'dependencies': [
+        'browser',
+        'renderer',
+        'test_support_common',
+        'test_support_ui',
+        'theme_resources',
+        '../base/base.gyp:base',
+        '../skia/skia.gyp:skia',
+        '../third_party/libxml/libxml.gyp:libxml',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'test/automated_ui_tests/automated_ui_test_interactive_test.cc',
+        'test/automated_ui_tests/automated_ui_tests.cc',
+        'test/automated_ui_tests/automated_ui_tests.h',
+      ],
+      'conditions': [
+        ['OS=="linux"', {
+          'dependencies': [
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+          ],
+        }],
+        ['OS=="win"', {
+          'include_dirs': [
+            'third_party/wtl/include',
+          ],
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+        }],
+      ],
     },
     {
       'target_name': 'ui_tests',
@@ -3417,14 +4076,15 @@
         'common',
         'chrome_resources',
         'chrome_strings',
+        'syncapi',
         'test_support_ui',
         '../base/base.gyp:base',
         '../net/net.gyp:net',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
       ],
       'include_dirs': [
@@ -3432,7 +4092,9 @@
       ],
       'sources': [
         'app/chrome_main_uitest.cc',
+        'browser/browser_encoding_uitest.cc',
         'browser/browser_uitest.cc',
+        'browser/dom_ui/new_tab_ui_uitest.cc',
         'browser/download/download_uitest.cc',
         'browser/download/save_page_uitest.cc',
         'browser/errorpage_uitest.cc',
@@ -3440,11 +4102,13 @@
         'browser/history/redirect_uitest.cc',
         'browser/iframe_uitest.cc',
         'browser/images_uitest.cc',
+        'browser/in_process_webkit/dom_storage_uitest.cc',
         'browser/locale_tests_uitest.cc',
         'browser/login_prompt_uitest.cc',
         'browser/media_uitest.cc',
         'browser/metrics/metrics_service_uitest.cc',
         'browser/printing/printing_layout_uitest.cc',
+        'browser/process_singleton_linux_uitest.cc',
         'browser/renderer_host/resource_dispatcher_host_uitest.cc',
         'browser/sanity_uitest.cc',
         'browser/session_history_uitest.cc',
@@ -3452,15 +4116,15 @@
         'browser/tab_contents/view_source_uitest.cc',
         'browser/tab_restore_uitest.cc',
         'browser/unload_uitest.cc',
-        'browser/views/find_bar_win_uitest.cc',
+        'browser/views/find_bar_host_uitest.cc',
         'common/logging_chrome_uitest.cc',
         'common/pref_service_uitest.cc',
         'test/automation/automation_proxy_uitest.cc',
         'test/automated_ui_tests/automated_ui_test_test.cc',
         'test/chrome_process_util_uitest.cc',
-        'test/reliability/page_load_test.cc',
-        'test/reliability/page_load_test.h',
         'test/ui/dom_checker_uitest.cc',
+        'test/ui/dromaeo_benchmark_uitest.cc',
+        'test/ui/fast_shutdown_uitest.cc',
         'test/ui/history_uitest.cc',
         'test/ui/layout_plugin_uitest.cc',
         'test/ui/npapi_uitest.cc',
@@ -3469,20 +4133,21 @@
         'test/ui/sunspider_uitest.cc',
         'test/ui/v8_benchmark_uitest.cc',
         'worker/worker_uitest.cc',
-
-        'tools/build/win/precompiled_wtl.h',
-        'tools/build/win/precompiled_wtl.cc',
       ],
       'conditions': [
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
           'sources!': [
             # TODO(port)
             'browser/login_prompt_uitest.cc',
-            'test/reliability/page_load_test.cc',
             'test/ui/layout_plugin_uitest.cc',
+          ],
+        }, { # else: OS != "linux"
+          'sources!': [
+            'browser/process_singleton_linux_uitest.cc',
           ],
         }],
         ['OS=="linux" and toolkit_views==1', {
@@ -3491,6 +4156,11 @@
           ],
         }],
         ['OS=="mac"', {
+          'sources': [
+            'app/keystone_glue.h',
+            'app/keystone_glue.mm',
+            'app/breakpad_mac_stubs.mm',
+          ],
           'sources!': [
             # TODO(port)
             'app/chrome_main_uitest.cc',
@@ -3500,7 +4170,7 @@
             'browser/sessions/session_restore_uitest.cc',
             # puts up modal dialogs.
             'browser/unload_uitest.cc',
-            'test/reliability/page_load_test.cc',
+            'test/ui/fast_shutdown_uitest.cc',
             'test/ui/layout_plugin_uitest.cc',
             'test/ui/omnibox_uitest.cc',
           ],
@@ -3517,6 +4187,7 @@
             '../views/views.gyp:views',
             # run time dependency
             '../webkit/tools/test_shell/test_shell.gyp:npapi_test_plugin',
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
           ],
           'link_settings': {
             'libraries': [
@@ -3525,8 +4196,11 @@
           },
           'configurations': {
             'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
             },
           },
         }, { # else: OS != "win"
@@ -3535,12 +4209,71 @@
             'browser/extensions/extension_uitest.cc',
             'browser/media_uitest.cc',
             'browser/printing/printing_layout_uitest.cc',
-            'browser/views/find_bar_win_uitest.cc',
+            'browser/views/find_bar_host_uitest.cc',
             'common/logging_chrome_uitest.cc',
             'test/ui/npapi_uitest.cc',
             'test/ui/sandbox_uitests.cc',
-            'worker/worker_uitest.cc',
           ],
+        }],
+      ],
+    },
+    {
+      'target_name': 'nacl_ui_tests',
+      'type': 'executable',
+      'msvs_guid': '43E2004F-CD62-4595-A8A6-31E9BFA1EE5E',
+      'dependencies': [
+        'chrome',
+        'browser',
+        'debugger',
+        'common',
+        'chrome_resources',
+        'chrome_strings',
+        'syncapi',
+        'test_support_ui',
+        '../base/base.gyp:base',
+        '../net/net.gyp:net',
+        '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../skia/skia.gyp:skia',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        '../third_party/libxml/libxml.gyp:libxml',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'test/nacl/nacl_test.cc',
+      ],
+      'conditions': [
+        # TODO(gregoryd): This test will run on Windows only at first.
+        # Refer to ui_tests target above if any problems appear when trying
+        # to enable it on other platforms.
+        ['OS=="win"', {
+          'dependencies': [
+            'crash_service',  # run time dependency
+            'security_tests',  # run time dependency
+            'test_support_common',
+            '../google_update/google_update.gyp:google_update',
+            '../views/views.gyp:views',
+            # run time dependency
+            '../webkit/tools/test_shell/test_shell.gyp:npapi_test_plugin',
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-lOleAcc.lib',
+            ],
+          },
+          'configurations': {
+            'Debug': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
+            },
+          },
         }],
       ],
     },
@@ -3556,13 +4289,12 @@
         'common',
         'debugger',
         'renderer',
+        'syncapi',
         'test_support_unit',
         'utility',
+        '../app/app.gyp:app_base',
         '../app/app.gyp:app_resources',
         '../ipc/ipc.gyp:ipc',
-        # TODO(jamesr): this is required for the release builders to build
-        # ipc_tests.exe. However, it's probably not what we really want.
-        '../ipc/ipc.gyp:ipc_tests',
         '../net/net.gyp:net_resources',
         '../net/net.gyp:net_test_support',
         '../printing/printing.gyp:printing',
@@ -3571,8 +4303,9 @@
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/bzip2/bzip2.gyp:bzip2',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/npapi/npapi.gyp:npapi',
       ],
@@ -3591,10 +4324,11 @@
         'app/breakpad_mac_stubs.mm',
         # *NO* files in chrome/app have unit tests (except keystone_glue)!!!
         # It seems a waste to have an app_unittests target, so for now
-        # I add keystone_glue.m explicitly to this target.
-        'app/keystone_glue.m',
+        # I add keystone_glue.mm explicitly to this target.
+        'app/keystone_glue.mm',
         'app/keystone_glue_unittest.mm',
         # All unittests in browser, common, and renderer.
+        'browser/app_controller_mac_unittest.mm',
         'browser/autocomplete/autocomplete_edit_view_mac_unittest.mm',
         'browser/autocomplete/autocomplete_unittest.cc',
         'browser/autocomplete/autocomplete_popup_view_mac_unittest.mm',
@@ -3617,82 +4351,130 @@
         'browser/browser_commands_unittest.cc',
         'browser/browser_theme_provider_unittest.cc',
         'browser/browser_unittest.cc',
+        'browser/chrome_application_mac_unittest.mm',
         'browser/debugger/devtools_remote_message_unittest.cc',
         'browser/debugger/devtools_remote_listen_socket_unittest.cc',
         'browser/debugger/devtools_remote_listen_socket_unittest.h',
         'browser/child_process_security_policy_unittest.cc',
         'browser/chrome_thread_unittest.cc',
+        'browser/chromeos/chromeos_version_loader_unittest.cc',
+        'browser/chromeos/pipe_reader_unittest.cc',
+        'browser/chromeos/external_cookie_handler_unittest.cc',
+        'browser/chromeos/gview_request_interceptor_unittest.cc',
         # It is safe to list */cocoa/* files in the "common" file list
         # without an explicit exclusion since gyp is smart enough to
         # exclude them from non-Mac builds.
+        'browser/cocoa/about_ipc_controller_unittest.mm',
         'browser/cocoa/about_window_controller_unittest.mm',
         'browser/cocoa/autocomplete_text_field_cell_unittest.mm',
         'browser/cocoa/autocomplete_text_field_editor_unittest.mm',
         'browser/cocoa/autocomplete_text_field_unittest.mm',
+        'browser/cocoa/autocomplete_text_field_unittest_helper.mm',
         'browser/cocoa/base_view_unittest.mm',
         'browser/cocoa/background_gradient_view_unittest.mm',
+        'browser/cocoa/background_tile_view_unittest.mm',
         'browser/cocoa/blocked_popup_container_controller_unittest.mm',
         'browser/cocoa/bookmark_bar_bridge_unittest.mm',
         'browser/cocoa/bookmark_bar_controller_unittest.mm',
+        'browser/cocoa/bookmark_bar_toolbar_view_unittest.mm',
         'browser/cocoa/bookmark_bar_view_unittest.mm',
+        'browser/cocoa/bookmark_bubble_controller_unittest.mm',
+        'browser/cocoa/bookmark_bubble_view_unittest.mm',
+        'browser/cocoa/bookmark_bubble_window_unittest.mm',
         'browser/cocoa/bookmark_button_cell_unittest.mm',
+        'browser/cocoa/bookmark_editor_controller_unittest.mm',
         'browser/cocoa/bookmark_menu_bridge_unittest.mm',
         'browser/cocoa/bookmark_menu_cocoa_controller_unittest.mm',
+        'browser/cocoa/bookmark_name_folder_controller_unittest.mm',
+        'browser/cocoa/browser_frame_view_unittest.mm',
         'browser/cocoa/browser_window_cocoa_unittest.mm',
         'browser/cocoa/browser_window_controller_unittest.mm',
+        'browser/cocoa/bubble_view_unittest.mm',
+        'browser/cocoa/chrome_browser_window_unittest.mm',
+        'browser/cocoa/chrome_event_processing_window_unittest.mm',
         'browser/cocoa/clear_browsing_data_controller_unittest.mm',
+        'browser/cocoa/clickhold_button_cell_unittest.mm',
+        'browser/cocoa/cocoa_test_helper.h',
+        'browser/cocoa/cocoa_test_helper.mm',
         'browser/cocoa/command_observer_bridge_unittest.mm',
         'browser/cocoa/custom_home_pages_model_unittest.mm',
+        'browser/cocoa/delayedmenu_button_unittest.mm',
         'browser/cocoa/download_shelf_mac_unittest.mm',
+        'browser/cocoa/download_shelf_view_unittest.mm',
+        'browser/cocoa/download_util_mac_unittest.mm',
+        'browser/cocoa/edit_search_engine_cocoa_controller_unittest.mm',
+        'browser/cocoa/extension_shelf_controller_unittest.mm',
+        'browser/cocoa/event_utils_unittest.mm',
         'browser/cocoa/find_bar_bridge_unittest.mm',
         'browser/cocoa/find_bar_cocoa_controller_unittest.mm',
         'browser/cocoa/find_bar_view_unittest.mm',
+        'browser/cocoa/find_pasteboard_unittest.mm',
+        'browser/cocoa/focus_tracker_unittest.mm',
         'browser/cocoa/fullscreen_window_unittest.mm',
         'browser/cocoa/hung_renderer_controller_unittest.mm',
         'browser/cocoa/infobar_container_controller_unittest.mm',
         'browser/cocoa/infobar_controller_unittest.mm',
         'browser/cocoa/infobar_gradient_view_unittest.mm',
         'browser/cocoa/infobar_text_field_unittest.mm',
+        'browser/cocoa/keyword_editor_cocoa_controller_unittest.mm',
         'browser/cocoa/location_bar_view_mac_unittest.mm',
         'browser/cocoa/gradient_button_cell_unittest.mm',
+        'browser/cocoa/history_menu_bridge_unittest.mm',
+        'browser/cocoa/history_menu_cocoa_controller_unittest.mm',
+        'browser/cocoa/hyperlink_button_cell_unittest.mm',
+        'browser/cocoa/menu_button_unittest.mm',
         'browser/cocoa/nsimage_cache_unittest.mm',
+        'browser/cocoa/nswindow_local_state_unittest.mm',
+        'browser/cocoa/page_info_window_controller_unittest.mm',
         'browser/cocoa/preferences_window_controller_unittest.mm',
         'browser/cocoa/rwhvm_editcommand_helper_unittest.mm',
         'browser/cocoa/sad_tab_view_unittest.mm',
         'browser/cocoa/search_engine_list_model_unittest.mm',
         'browser/cocoa/status_bubble_mac_unittest.mm',
-        'browser/cocoa/tab_cell_unittest.mm',
         'browser/cocoa/tab_controller_unittest.mm',
         'browser/cocoa/tab_strip_controller_unittest.mm',
         'browser/cocoa/tab_strip_view_unittest.mm',
         'browser/cocoa/tab_view_unittest.mm',
+        'browser/cocoa/task_manager_mac_unittest.mm',
+        'browser/cocoa/test_event_utils.h',
+        'browser/cocoa/test_event_utils.mm',
         'browser/cocoa/throbber_view_unittest.mm',
         'browser/cocoa/toolbar_button_cell_unittest.mm',
         'browser/cocoa/toolbar_controller_unittest.mm',
         'browser/cocoa/toolbar_view_unittest.mm',
+        'browser/cocoa/view_resizer_pong.h',
+        'browser/cocoa/view_resizer_pong.mm',
         'browser/cocoa/web_drop_target_unittest.mm',
         'browser/command_updater_unittest.cc',
         'browser/debugger/devtools_manager_unittest.cc',
         'browser/dom_ui/dom_ui_theme_source_unittest.cc',
         'browser/dom_ui/dom_ui_unittest.cc',
         'browser/download/download_manager_unittest.cc',
+        'browser/download/download_request_infobar_delegate_unittest.cc',
         'browser/download/download_request_manager_unittest.cc',
         'browser/download/save_package_unittest.cc',
         'browser/encoding_menu_controller_unittest.cc',
         'browser/extensions/extension_file_util_unittest.cc',
+        'browser/extensions/extension_l10n_util_unittest.cc',
         'browser/extensions/extension_messages_unittest.cc',
         'browser/extensions/extension_process_manager_unittest.cc',
         'browser/extensions/extension_ui_unittest.cc',
         'browser/extensions/extension_updater_unittest.cc',
         'browser/extensions/extensions_service_unittest.cc',
+        'browser/extensions/file_reader_unittest.cc',
+        'browser/extensions/user_script_listener_unittest.cc',
         'browser/extensions/user_script_master_unittest.cc',
         'browser/find_backend_unittest.cc',
         'browser/global_keyboard_shortcuts_mac_unittest.cc',
         'browser/google_url_tracker_unittest.cc',
-        'browser/google_update_settings_linux_unittest.cc',
-        'browser/google_update_settings_mac_unittest.mm',
+        'browser/google_update_settings_posix_unittest.cc',
+        'browser/gtk/bookmark_bar_gtk_unittest.cc',
         'browser/gtk/bookmark_editor_gtk_unittest.cc',
+        'browser/gtk/gtk_theme_provider_unittest.cc',
         'browser/gtk/go_button_gtk_unittest.cc',
+        'browser/gtk/keyword_editor_view_unittest.cc',
+        'browser/gtk/options/cookies_view_unittest.cc',
+        'browser/gtk/options/languages_page_gtk_unittest.cc',
         'browser/gtk/tabs/tab_renderer_gtk_unittest.cc',
         'browser/history/expire_history_backend_unittest.cc',
         'browser/history/history_backend_unittest.cc',
@@ -3705,12 +4487,18 @@
         'browser/history/text_database_manager_unittest.cc',
         'browser/history/text_database_unittest.cc',
         'browser/history/thumbnail_database_unittest.cc',
+        'browser/history/top_sites_unittest.cc',
         'browser/thumbnail_store_unittest.cc',
         'browser/history/url_database_unittest.cc',
         'browser/history/visit_database_unittest.cc',
+        'browser/history/visit_log_unittest.cc',
         'browser/history/visit_tracker_unittest.cc',
+        'browser/importer/firefox_importer_unittest_messages_internal.h',
         'browser/importer/firefox_importer_unittest.cc',
+        'browser/importer/firefox_importer_unittest_utils.h',
+        'browser/importer/firefox_importer_unittest_utils_mac.cc',
         'browser/importer/importer_unittest.cc',
+        'browser/importer/safari_importer_unittest.mm',
         'browser/importer/toolbar_importer_unittest.cc',
         'browser/importer/firefox_profile_lock_unittest.cc',
         'browser/in_process_webkit/dom_storage_dispatcher_host_unittest.cc',
@@ -3736,6 +4524,7 @@
         'browser/password_manager/password_form_manager_unittest.cc',
         'browser/password_manager/password_store_mac_unittest.cc',
         'browser/printing/print_job_unittest.cc',
+        'browser/privacy_blacklist/blacklist_manager_unittest.cc',
         'browser/privacy_blacklist/blacklist_unittest.cc',
         'browser/privacy_blacklist/blacklist_io_unittest.cc',
         'browser/profile_manager_unittest.cc',
@@ -3765,8 +4554,13 @@
         'browser/sessions/session_service_test_helper.h',
         'browser/sessions/session_service_unittest.cc',
         'browser/sessions/tab_restore_service_unittest.cc',
+        'browser/shell_integration_unittest.cc',
         'browser/spellcheck_unittest.cc',
         'browser/ssl/ssl_host_state_unittest.cc',
+        'browser/sync/glue/bookmark_model_worker_unittest.cc',
+        'browser/sync/glue/http_bridge_unittest.cc',
+        'browser/sync/profile_sync_service_unittest.cc',
+        'browser/sync/sync_setup_wizard_unittest.cc',
         'browser/tab_contents/navigation_controller_unittest.cc',
         'browser/tab_contents/navigation_entry_unittest.cc',
         'browser/tab_contents/render_view_host_manager_unittest.cc',
@@ -3785,7 +4579,10 @@
         'common/child_process_logging_mac_unittest.mm',
         'common/chrome_plugin_unittest.cc',
         'common/common_param_traits_unittest.cc',
+        'common/extensions/extension_resource_unittest.cc',
         'common/extensions/extension_unittest.cc',
+        'common/extensions/extension_message_bundle_unittest.cc',
+        'common/extensions/update_manifest_unittest.cc',
         'common/extensions/url_pattern_unittest.cc',
         'common/extensions/user_script_unittest.cc',
         'common/important_file_writer_unittest.cc',
@@ -3797,6 +4594,7 @@
         'common/pref_service_unittest.cc',
         'common/property_bag_unittest.cc',
         'common/resource_dispatcher_unittest.cc',
+        'common/thumbnail_score_unittest.cc',
         'common/time_format_unittest.cc',
         'common/worker_thread_ticker_unittest.cc',
         'common/zip_unittest.cc',
@@ -3808,36 +4606,47 @@
         'renderer/render_process_unittest.cc',
         'renderer/render_thread_unittest.cc',
         'renderer/render_view_unittest.cc',
+        'renderer/render_view_unittest_mac.mm',
         'renderer/render_widget_unittest.cc',
         'renderer/renderer_main_unittest.cc',
         'test/browser_with_test_window_test.cc',
         'test/browser_with_test_window_test.h',
-        'test/file_test_utils.h',
         'test/file_test_utils.cc',
+        'test/file_test_utils.h',
         'test/render_view_test.cc',
         'test/render_view_test.h',
+        'test/sync/test_http_bridge_factory.h',
         'test/test_notification_tracker.cc',
         'test/test_notification_tracker.h',
         'test/v8_unit_test.cc',
         'test/v8_unit_test.h',
         '../third_party/cld/bar/toolbar/cld/i18n/encodings/compact_lang_det/compact_lang_det_unittest_small.cc',
-
-        'tools/build/win/precompiled_wtl.h',
-        'tools/build/win/precompiled_wtl.cc',
       ],
       'conditions': [
+        ['chromeos==0 and toolkit_views==0', {
+          'sources/': [
+            ['exclude', '^browser/chromeos'],
+          ],
+        }],
+        ['OS=="linux" and selinux==0', {
+          'dependencies': [
+            '../sandbox/sandbox.gyp:*',
+          ],
+        }],
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:nss',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+          ],
+          'sources': [
+            'browser/renderer_host/gtk_key_bindings_handler_unittest.cc',
           ],
           'sources!': [
-            # This test is mostly about renaming downloads to safe file
-            # names. As such we don't need/want to port it to linux. We
-            # might want to write our own tests for the download manager
-            # on linux, though.
-            'browser/download/download_manager_unittest.cc',
+            # TODO(akalin): Figure out why this unittest fails on linux.
+            'browser/browser_commands_unittest.cc',
             'browser/views/bookmark_context_menu_test.cc',
+            'browser/gtk/options/cookies_view_unittest.cc',
             # Compact Language Detection (cld) is not supported in linux yet.
             '../third_party/cld/bar/toolbar/cld/i18n/encodings/compact_lang_det/compact_lang_det_unittest_small.cc',
           ],
@@ -3853,9 +4662,20 @@
           # target-default 'sources/' including gtk_unittest and 'source/' takes
           # precedence over 'sources!'.
           'sources/': [
+             ['exclude', 'browser/gtk/bookmark_bar_gtk_unittest\\.cc$'],
              ['exclude', 'browser/gtk/bookmark_editor_gtk_unittest\\.cc$'],
              ['exclude', 'browser/gtk/go_button_gtk_unittest\\.cc$'],
              ['exclude', 'browser/gtk/tabs/tab_renderer_gtk_unittest\\.cc$'],
+             ['exclude', 'browser/gtk/options/cookies_view_unittest\\.cc$'],
+             ['exclude', 'browser/gtk/options/languages_page_gtk_unittest\\.cc$'],
+             ['exclude', 'browser/gtk/gtk_theme_provider_unittest\\.cc$'],
+          ],
+          'conditions': [
+            ['chromeos==0', {
+              'sources/': [
+                 ['include', 'browser/views/bookmark_context_menu_test.cc$'],
+              ],
+            }]
           ],
         }],
         ['OS=="mac"', {
@@ -3863,6 +4683,7 @@
            # exist on disk so it can pull from it.
           'dependencies': [
             'chrome',
+            '../third_party/ocmock/ocmock.gyp:ocmock',
           ],
           'include_dirs': [
             '../third_party/GTM',
@@ -3876,7 +4697,7 @@
             'browser/gtk/tabs/tab_renderer_gtk_unittest.cc',
             'browser/tab_contents/navigation_controller_unittest.cc',
             'browser/task_manager_unittest.cc',
-            'third_party/hunspell/google/hunspell_tests.cc',
+            '../third_party/hunspell/google/hunspell_tests.cc',
 
             # Compact Language Detection (cld) is not supported in mac yet.
             '../third_party/cld/bar/toolbar/cld/i18n/encodings/compact_lang_det/compact_lang_det_unittest_small.cc',
@@ -3888,7 +4709,7 @@
         }, { # OS != "mac"
           'dependencies': [
             'convert_dict_lib',
-            'third_party/hunspell/hunspell.gyp:hunspell',
+            '../third_party/hunspell/hunspell.gyp:hunspell',
           ],
         }],
         ['OS=="win"', {
@@ -3902,6 +4723,7 @@
             'installer/installer.gyp:installer_util_strings',
             '../views/views.gyp:views',
             'test_chrome_plugin',  # run time dependency
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
           ],
           'include_dirs': [
             'third_party/wtl/include',
@@ -3939,11 +4761,9 @@
           },
           'configurations': {
             'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
                 },
               },
             },
@@ -3954,25 +4774,20 @@
             'browser/bookmarks/bookmark_drag_data_unittest.cc',
             'browser/bookmarks/bookmark_folder_tree_model_unittest.cc',
             'browser/bookmarks/bookmark_table_model_unittest.cc',
-            # Need to port browser_with_test_window_test.* first
-            'browser/browser_commands_unittest.cc',
             'browser/browser_unittest.cc',
-            # Need to port browser/automation/ui_controls.h
             'browser/extensions/extension_process_manager_unittest.cc',
-            'browser/importer/firefox_importer_unittest.cc',
             'browser/importer/importer_unittest.cc',
             'browser/login_prompt_unittest.cc',
             'browser/printing/print_job_unittest.cc',
             'browser/rlz/rlz_unittest.cc',
             'browser/safe_browsing/safe_browsing_blocking_page_unittest.cc',
             'browser/search_engines/template_url_scraper_unittest.cc',
+            'browser/sync/profile_sync_service_unittest.cc',
             'browser/views/bookmark_editor_view_unittest.cc',
-            'browser/views/find_bar_win_unittest.cc',
+            'browser/views/find_bar_host_unittest.cc',
             'browser/views/keyword_editor_view_unittest.cc',
             'common/chrome_plugin_unittest.cc',
             'common/net/url_util_unittest.cc',
-            'test/browser_with_test_window_test.cc',
-            'test/browser_with_test_window_test.h',
           ],
         }],
       ],
@@ -3984,10 +4799,12 @@
       'dependencies': [
         'chrome',
         'browser',
+        'debugger',
         'common',
         'chrome_resources',
         'chrome_strings',
         'test_support_ui',
+        '../app/app.gyp:app_base',
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
@@ -3995,18 +4812,100 @@
       'sources': [
         'test/startup/feature_startup_test.cc',
         'test/startup/startup_test.cc',
-        'tools/build/win/precompiled.cc',
-        'tools/build/win/precompiled.h',
       ],
       'conditions': [
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
         ['OS=="linux" and toolkit_views==1', {
           'dependencies': [
             '../views/views.gyp:views',
+          ],
+        }],
+        ['OS=="win"', {
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+        },],
+      ],
+    },
+    {
+      # To run the tests from page_load_test.cc on Linux, we need to:
+      #
+      #   a) Build with Breakpad (GYP_DEFINES="linux_chromium_breakpad=1")
+      #   b) Run with CHROME_HEADLESS=1 to generate crash dumps.
+      #   c) Strip the binary if it's a debug build. (binary may be over 2GB)
+      'target_name': 'reliability_tests',
+      'type': 'executable',
+      'msvs_guid': '8A3E1774-1DE9-445C-982D-3EE37C8A752A',
+      'dependencies': [
+        'browser',
+        'chrome',
+        'test_support_common',
+        'test_support_ui',
+        'theme_resources',
+        '../skia/skia.gyp:skia',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'test/reliability/page_load_test.cc',
+        'test/reliability/page_load_test.h',
+        'test/reliability/reliability_test_suite.h',
+        'test/reliability/run_all_unittests.cc',
+      ],
+      'conditions': [
+        ['OS=="win"', {
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+        },],
+        ['OS=="linux"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+          ],
+        },],
+      ],
+    },
+    {
+      # Provides a syncapi dynamic library target from checked-in binaries,
+      # or from compiling a stub implementation.
+      'target_name': 'syncapi',
+
+      'conditions': [
+        ['browser_sync==0', {
+          # Empty target.
+          'type': 'none',
+        }, {
+          # Build sync.
+          'type': '<(library)',
+          'sources': [
+            'browser/sync/engine/syncapi.cc',
+          ],
+          'include_dirs': [
+            '..',
+            '<(protoc_out_dir)',
+          ],
+          'defines' : [
+            '_CRT_SECURE_NO_WARNINGS',
+            '_USE_32BIT_TIME_T',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../build/temp_gyp/googleurl.gyp:googleurl',
+            '../net/net.gyp:net',
+            '../third_party/icu/icu.gyp:icuuc',
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+            '../third_party/sqlite/sqlite.gyp:sqlite',
+            'common',
+            'notifier',
+            'sync',
+            'sync_proto',
           ],
         }],
       ],
@@ -4028,13 +4927,12 @@
       ],
       'sources': [
         'test/page_cycler/page_cycler_test.cc',
-        'tools/build/win/precompiled.cc',
-        'tools/build/win/precompiled.h',
       ],
       'conditions': [
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
         ['OS=="win" or (OS=="linux" and toolkit_views==1)', {
@@ -4050,9 +4948,11 @@
       'msvs_guid': 'A34770EA-A574-43E8-9327-F79C04770E98',
       'dependencies': [
         'chrome',
+        'debugger',
         'test_support_common',
         'test_support_ui',
         'theme_resources',
+        '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
       ],
@@ -4066,8 +4966,14 @@
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
+        ['OS=="win"', {
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+          ],
+        },],
       ],
     },
     {
@@ -4076,9 +4982,11 @@
       'msvs_guid': 'A5F831FD-9B9C-4FEF-9FBA-554817B734CE',
       'dependencies': [
         'chrome',
+        'debugger',
         'test_support_common',
         'test_support_ui',
         'theme_resources',
+        '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
       ],
@@ -4092,6 +5000,7 @@
         ['OS=="linux"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
       ],
@@ -4102,9 +5011,11 @@
       'msvs_guid': '7EFD0C91-198E-4043-9E71-4A4C7879B929',
       'dependencies': [
         'chrome',
+        'debugger',
         'test_support_common',
         'test_support_ui',
         'theme_resources',
+        '../base/base.gyp:base',
         '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
@@ -4120,77 +5031,575 @@
           'include_dirs': [
             'third_party/wtl/include',
           ],
-          'sources': [
-            'tools/build/win/precompiled_wtl.cc',
-            'tools/build/win/precompiled_wtl.h',
+          'dependencies': [
+            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-            },
-          },
         }], # OS="win"
       ], # conditions
     },
   ],
   'conditions': [
-    ['OS=="mac"', {
-      'conditions': [
-        # We need the Mac app name on disk, so we stick this into a variable so
-        # the different places that need it can use the common variable.
-        # NOTE: chrome/app/theme/chromium/BRANDING and
-        # chrome/app/theme/google_chrome/BRANDING have the short names, etc.;
-        # but extracting from there still means xcodeproject are out of date until
-        # the next project regeneration.
-        ['branding=="Chrome"', {
-          'variables': {
-            'mac_product_name%': 'Google Chrome',
-          }
-        }, {
-          'variables': {
-            'mac_product_name%': 'Chromium',
-          }
-        }],
-        # We set feature variables so the different parts of the gyp file use
-        # these vars in conditions instead of repeating the check of branding
-        # and buildtype.
-        ['branding=="Chrome" and buildtype=="Official"', {
-          'variables': {
-            'mac_breakpad%': 1,
-            'mac_keystone%': 1,
-          }
-        }, {
-          'variables': {
-            'mac_breakpad%': 0,
-            'mac_keystone%': 0,
-          }
-        }],
-      ],
-    }],
-    ['OS=="linux"', {
-      'conditions': [
-        # Only Chrome builds get breakpad since crash processing is internal.
-        ['branding=="Chrome"', {
-          'variables': {
-            'linux_breakpad%': 1,
-          },
-        }, {
-          'variables': {
-            'linux_breakpad%': 0,
-          },
-        }],
-      ],
-    }],
+    ['OS=="mac" or OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'chrome_dll',
+          'type': 'shared_library',
+          'dependencies': [
+            '<@(chromium_dependencies)',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'product_name': 'chrome',
+              'msvs_guid': 'C0A7EE2C-2A6D-45BE-BA78-6D006FDF52D9',
+              'include_dirs': [
+                'third_party/wtl/include',
+              ],
+              'dependencies': [
+                # On Windows, link the dependencies (libraries) that make
+                # up actual Chromium functionality into this .dll.
+                'chrome_dll_version',
+                'chrome_resources',
+                'installer/installer.gyp:installer_util_strings',
+                'theme_dll',
+                'worker',
+                '../printing/printing.gyp:printing',
+                '../net/net.gyp:net_resources',
+                '../build/util/support/support.gyp:*',
+                '../third_party/cld/cld.gyp:cld',
+                '../views/views.gyp:views',
+                '../webkit/webkit.gyp:webkit_resources',
+                '../gears/gears.gyp:gears',
+              ],
+              'defines': [
+                'CHROME_DLL',
+                'BROWSER_DLL',
+                'RENDERER_DLL',
+                'PLUGIN_DLL',
+              ],
+              'sources': [
+                'app/chrome_dll.rc',
+                'app/chrome_dll_main.cc',
+                'app/chrome_dll_resource.h',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
+
+                '../webkit/glue/resources/aliasb.cur',
+                '../webkit/glue/resources/cell.cur',
+                '../webkit/glue/resources/col_resize.cur',
+                '../webkit/glue/resources/copy.cur',
+                '../webkit/glue/resources/row_resize.cur',
+                '../webkit/glue/resources/vertical_text.cur',
+                '../webkit/glue/resources/zoom_in.cur',
+                '../webkit/glue/resources/zoom_out.cur',
+
+                # TODO:  It would be nice to have these pulled in
+                # automatically from direct_dependent_settings in
+                # their various targets (net.gyp:net_resources, etc.),
+                # but that causes errors in other targets when
+                # resulting .res files get referenced multiple times.
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
+
+                # TODO(sgk):  left-over from pre-gyp build, figure out
+                # if we still need them and/or how to update to gyp.
+                #'app/check_dependents.bat',
+                #'app/chrome.dll.deps',
+              ],
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'BaseAddress': '0x01c30000',
+                  'DelayLoadDLLs': [
+                    'crypt32.dll',
+                    'cryptui.dll',
+                    'winhttp.dll',
+                    'wininet.dll',
+                    'wsock32.dll',
+                    'ws2_32.dll',
+                    'winspool.drv',
+                    'comdlg32.dll',
+                    'imagehlp.dll',
+                    'psapi.dll',
+                    'urlmon.dll',
+                    'imm32.dll',
+                    'iphlpapi.dll',
+                  ],
+                  'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
+                  'ProgramDatabaseFile': '$(OutDir)\\chrome_dll.pdb',
+                  # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
+                  'SubSystem': '2',
+                },
+                'VCManifestTool': {
+                  'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.dll.manifest',
+                },
+              },
+              'configurations': {
+                'Debug': {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                    },
+                  },
+                },
+              },
+            }],  # OS=="win"
+            ['OS=="mac"', {
+              # The main browser executable's name is <(mac_product_name).
+              # Certain things will get confused if two modules in the
+              # executable share the same name, so append " Framework" to the
+              # product_name used for the framework.  This will result in
+              # a name like "Chromium Framework.framework".
+              'product_name': '<(mac_product_name) Framework',
+              'mac_bundle': 1,
+              'xcode_settings': {
+                'CHROMIUM_BUNDLE_ID': '<(mac_bundle_id)',
+                # The dylib versions are of the form a[.b[.c]], where a is a
+                # 16-bit unsigned integer, and b and c are 8-bit unsigned
+                # integers.  Any missing component is taken to be 0.  The
+                # best mapping from product version numbers into this scheme
+                # is to just use the build and patch numbers.  There is no
+                # ambiguity in this scheme because the build number is
+                # guaranteed unique even across distinct major and minor
+                # version numbers.
+                'DYLIB_COMPATIBILITY_VERSION': '<(version_build_patch)',
+                'DYLIB_CURRENT_VERSION': '<(version_build_patch)',
+                # See tools/build/mac/copy_framework_unversioned for
+                # The framework is placed within the .app's versioned
+                # directory.
+                'DYLIB_INSTALL_NAME_BASE':
+                    '@executable_path/../Versions/<(version_full)',
+                # information on LD_DYLIB_INSTALL_NAME.
+                'LD_DYLIB_INSTALL_NAME':
+                    '$(DYLIB_INSTALL_NAME_BASE:standardizepath)/$(WRAPPER_NAME)/$(PRODUCT_NAME)',
+                'INFOPLIST_FILE': 'app/framework-Info.plist',
+              },
+              'sources': [
+                'app/chrome_dll_main.cc',
+                'app/chrome_dll_resource.h',
+                'app/chrome_exe_main.mm',
+                'app/keystone_glue.h',
+                'app/keystone_glue.mm',
+              ],
+              # TODO(mark): Come up with a fancier way to do this.  It should
+              # only be necessary to list framework-Info.plist once, not the
+              # three times it is listed here.
+              'mac_bundle_resources': [
+                'app/framework-Info.plist',
+                'app/nibs/About.xib',
+                'app/nibs/AboutIPC.xib',
+                'app/nibs/BookmarkBar.xib',
+                'app/nibs/BookmarkBubble.xib',
+                'app/nibs/BookmarkEditor.xib',
+                'app/nibs/BookmarkNameFolder.xib',
+                'app/nibs/BrowserWindow.xib',
+                'app/nibs/ClearBrowsingData.xib',
+                'app/nibs/DownloadItem.xib',
+                'app/nibs/DownloadShelf.xib',
+                'app/nibs/EditSearchEngine.xib',
+                'app/nibs/ExtensionShelf.xib',
+                'app/nibs/FindBar.xib',
+                'app/nibs/FirstRunDialog.xib',
+                'app/nibs/HungRendererDialog.xib',
+                'app/nibs/HttpAuthLoginSheet.xib',
+                'app/nibs/InfoBar.xib',
+                'app/nibs/InfoBarContainer.xib',
+                'app/nibs/ImportProgressDialog.xib',
+                'app/nibs/KeywordEditor.xib',
+                'app/nibs/MainMenu.xib',
+                'app/nibs/PageInfo.xib',
+                'app/nibs/Preferences.xib',
+                'app/nibs/SaveAccessoryView.xib',
+                'app/nibs/TabContents.xib',
+                'app/nibs/TabView.xib',
+                'app/nibs/TaskManager.xib',
+                'app/nibs/Toolbar.xib',
+                'app/theme/back_Template.pdf',
+                'app/theme/chevron.png',  # TODO(jrg): get and use a pdf version
+                'app/theme/close_bar.pdf',
+                'app/theme/close_bar_h.pdf',
+                'app/theme/close_bar_p.pdf',
+                'app/theme/find_next_Template.pdf',
+                'app/theme/find_prev_Template.pdf',
+                'app/theme/forward_Template.pdf',
+                'app/theme/go_Template.pdf',
+                'app/theme/home_Template.pdf',
+                'app/theme/menu_chrome_rtl_Template.pdf',
+                'app/theme/menu_chrome_Template.pdf',
+                'app/theme/menu_page_rtl_Template.pdf',
+                'app/theme/menu_page_Template.pdf',
+                'app/theme/nav.pdf',
+                'app/theme/newtab.pdf',
+                'app/theme/otr_icon.pdf',
+                'app/theme/reload_Template.pdf',
+                'app/theme/star_Template.pdf',
+                'app/theme/starred.pdf',
+                'app/theme/stop_Template.pdf',
+              ],
+              'mac_bundle_resources!': [
+                'app/framework-Info.plist',
+              ],
+              'dependencies': [
+                # Bring in pdfsqueeze and run it on all pdfs
+                '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
+                '../build/util/support/support.gyp:*',
+              ],
+              'rules': [
+                {
+                  'rule_name': 'pdfsqueeze',
+                  'extension': 'pdf',
+                  'inputs': [
+                    '<(PRODUCT_DIR)/pdfsqueeze',
+                  ],
+                  'outputs': [
+                    '<(INTERMEDIATE_DIR)/pdfsqueeze/<(RULE_INPUT_ROOT).pdf',
+                  ],
+                  'action': ['<(PRODUCT_DIR)/pdfsqueeze',
+                             '<(RULE_INPUT_PATH)', '<@(_outputs)'],
+                  'message': 'Running pdfsqueeze on <(RULE_INPUT_PATH)',
+                },
+              ],
+              'variables': {
+                'repack_path': '../tools/data_pack/repack.py',
+              },
+              'actions': [
+                # TODO(mark): These actions are duplicated for Linux and
+                # and FreeBSD in the chrome target.  Can they be unified?
+                {
+                  'action_name': 'repack_chrome',
+                  'variables': {
+                    'pak_inputs': [
+                      '<(grit_out_dir)/browser_resources.pak',
+                      '<(grit_out_dir)/common_resources.pak',
+                      '<(grit_out_dir)/renderer_resources.pak',
+                      '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
+                      '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+                    ],
+                  },
+                  'inputs': [
+                    '<(repack_path)',
+                    '<@(pak_inputs)',
+                  ],
+                  'outputs': [
+                    '<(INTERMEDIATE_DIR)/repack/chrome.pak',
+                  ],
+                  'action': ['python', '<(repack_path)', '<@(_outputs)',
+                             '<@(pak_inputs)'],
+                  'process_outputs_as_mac_bundle_resources': 1,
+                },
+                {
+                  'action_name': 'repack_theme',
+                  'variables': {
+                    'pak_inputs': [
+                      '<(SHARED_INTERMEDIATE_DIR)/app/app_resources.pak',
+                      '<(grit_out_dir)/theme_resources.pak',
+                    ],
+                  },
+                  'inputs': [
+                    '<(repack_path)',
+                    '<@(pak_inputs)',
+                  ],
+                  'outputs': [
+                    '<(INTERMEDIATE_DIR)/repack/theme.pak',
+                  ],
+                  'action': ['python', '<(repack_path)', '<@(_outputs)',
+                             '<@(pak_inputs)'],
+                  'process_outputs_as_mac_bundle_resources': 1,
+                },
+                {
+                  'action_name': 'repack_locales',
+                  'process_outputs_as_mac_bundle_resources': 1,
+                  'variables': {
+                    'conditions': [
+                      ['branding=="Chrome"', {
+                        'branding_flag': ['-b', 'google_chrome',],
+                      }, {  # else: branding!="Chrome"
+                        'branding_flag': ['-b', 'chromium',],
+                      }],
+                    ],
+                  },
+                  'inputs': [
+                    'tools/build/repack_locales.py',
+                    # NOTE: Ideally the common command args would be shared
+                    # amongst inputs/outputs/action, but the args include shell
+                    # variables which need to be passed intact, and command
+                    # expansion wants to expand the shell variables. Adding the
+                    # explicit quoting here was the only way it seemed to work.
+                    '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+                  ],
+                  'outputs': [
+                    '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+                  ],
+                  'action': [
+                    '<@(repack_locales_cmd)',
+                    '<@(branding_flag)',
+                    '-g', '<(grit_out_dir)',
+                    '-s', '<(SHARED_INTERMEDIATE_DIR)',
+                    '-x', '<(INTERMEDIATE_DIR)',
+                    '<@(locales)',
+                  ],
+                },
+              ],
+              'postbuilds': [
+                {
+                  # Modify the Info.plist as needed.  The script explains why
+                  # this is needed.  This is also done in the chrome target.
+                  # The framework needs the Breakpad and Keystone keys if
+                  # those features are enabled.  It doesn't currently use the
+                  # Subversion keys for anything, but this seems like a really
+                  # good place to store them.
+                  'postbuild_name': 'Tweak Info.plist',
+                  'action': ['<(tweak_info_plist_path)',
+                             '-b<(mac_breakpad)',
+                             '-k<(mac_keystone)',
+                             '-s1',
+                             '<(branding)',
+                             '<(mac_bundle_id)'],
+                },
+                {
+                  'postbuild_name': 'Tweak Mac lproj folders',
+                  'action': ['app/tweak_mac_lproj_folders'],
+                },
+                {
+                  'postbuild_name': 'Symlink Libraries',
+                  'action': [
+                    'ln',
+                    '-fhs',
+                    'Versions/Current/Libraries',
+                    '${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Libraries'
+                  ],
+                },
+              ],
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
+                  'files': [
+                    '<(PRODUCT_DIR)/resources/inspector/'
+                  ],
+                  'conditions': [
+                    ['mac_breakpad==1', {
+                      'files': [
+                        '<(PRODUCT_DIR)/crash_inspector',
+                        '<(PRODUCT_DIR)/crash_report_sender.app'
+                      ],
+                    }],
+                  ],
+                },
+              ],
+              'conditions': [
+                ['mac_breakpad==1', {
+                  'variables': {
+                    # A real .dSYM is needed for dump_syms to operate on.
+                    'mac_real_dsym': 1,
+                  },
+                  'sources': [
+                    'app/breakpad_mac.mm',
+                    'app/breakpad_mac.h',
+                  ],
+                  'dependencies': [
+                    '../breakpad/breakpad.gyp:breakpad',
+                  ],
+                }, {  # else: mac_breakpad!=1
+                  # No Breakpad, put in the stubs.
+                  'sources': [
+                    'app/breakpad_mac_stubs.mm',
+                    'app/breakpad_mac.h',
+                  ],
+                }],  # mac_breakpad
+                ['mac_keystone==1', {
+                  'postbuilds': [
+                    {
+                      'postbuild_name': 'Copy KeystoneRegistration.framework',
+                      'action': [
+                        'tools/build/mac/copy_framework_unversioned',
+                        '../third_party/googlemac/Releases/Keystone/KeystoneRegistration.framework',
+                        '${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks',
+                      ],
+                    },
+                    {
+                      'postbuild_name': 'Symlink Frameworks',
+                      'action': [
+                        'ln',
+                        '-fhs',
+                        'Versions/Current/Frameworks',
+                        '${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Frameworks'
+                      ],
+                    },
+                  ],
+                }],  # mac_keystone
+                ['branding=="Chrome"', {
+                  'copies': [
+                    {
+                      'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
+                      # TODO(ajwong): This, and the parallel chromium stanza
+                      # below really should find a way to share file paths with
+                      # ffmpeg.gyp so they don't diverge. (BUG=23602)
+                      'files': [
+                        '../third_party/ffmpeg/binaries/chrome/mac/ia32/libavcodec.52.dylib',
+                        '../third_party/ffmpeg/binaries/chrome/mac/ia32/libavformat.52.dylib',
+                        '../third_party/ffmpeg/binaries/chrome/mac/ia32/libavutil.50.dylib',
+                      ],
+                    },
+                  ],
+                }, {  # else: 'branding!="Chrome"
+                  'copies': [
+                    {
+                      'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
+                      'files': [
+                        '../third_party/ffmpeg/binaries/chromium/mac/ia32/libavcodec.52.dylib',
+                        '../third_party/ffmpeg/binaries/chromium/mac/ia32/libavformat.52.dylib',
+                        '../third_party/ffmpeg/binaries/chromium/mac/ia32/libavutil.50.dylib',
+                      ],
+                    },
+                  ],
+                }],  # branding
+              ],  # conditions
+            }],  # OS=="mac"
+          ],  # conditions
+        },  # target chrome_dll
+      ],  # targets
+    }],  # OS=="mac" or OS=="win"
     ['OS=="mac"',
-      # On Mac only, add a project target called "build_app_dmg" that only
-      # builds a DMG out of the App (eventually will completely replace
-      # "package_app").
       { 'targets': [
         {
+          'target_name': 'helper_app',
+          'type': 'executable',
+          'product_name': '<(mac_product_name) Helper',
+          'mac_bundle': 1,
+          'dependencies': [
+            'chrome_dll',
+            'interpose_dependency_shim',
+            'infoplist_strings_tool',
+          ],
+          'sources': [
+            # chrome_exe_main.mm's main() is the entry point for the "chrome"
+            # (browser app) target.  All it does is jump to chrome_dll's
+            # ChromeMain.  This is appropriate for helper processes too,
+            # because the logic to discriminate between process types at run
+            # time is actually directed by the --type command line argument
+            # processed by ChromeMain.  Sharing chrome_exe_main.mm with the
+            # browser app will suffice for now.
+            'app/chrome_exe_main.mm',
+            'app/helper-Info.plist',
+          ],
+          # TODO(mark): Come up with a fancier way to do this.  It should only
+          # be necessary to list helper-Info.plist once, not the three times it
+          # is listed here.
+          'mac_bundle_resources!': [
+            'app/helper-Info.plist',
+          ],
+          # TODO(mark): For now, don't put any resources into this app.  Its
+          # resources directory will be a symbolic link to the browser app's
+          # resources directory.
+          'mac_bundle_resources/': [
+            ['exclude', '.*'],
+          ],
+          'xcode_settings': {
+            'CHROMIUM_BUNDLE_ID': '<(mac_bundle_id)',
+            'CHROMIUM_SHORT_NAME': '<(branding)',
+            'INFOPLIST_FILE': 'app/helper-Info.plist',
+          },
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)/<(mac_product_name) Helper.app/Contents/MacOS',
+              'files': [
+                '<(PRODUCT_DIR)/plugin_carbon_interpose.dylib',
+              ],
+            },
+          ],
+          'actions': [
+            {
+              # Generate the InfoPlist.strings file
+              'action_name': 'Generating InfoPlist.strings files',
+              'variables': {
+                'tool_path': '<(PRODUCT_DIR)/infoplist_strings_tool',
+                # Unique dir to write to so the [lang].lproj/InfoPlist.strings
+                # for the main app and the helper app don't name collide.
+                'output_path': '<(INTERMEDIATE_DIR)/helper_infoplist_strings',
+              },
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                     'branding_name': 'google_chrome_strings',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                     'branding_name': 'chromium_strings',
+                  },
+                }],
+              ],
+              'inputs': [
+                '<(tool_path)',
+                '<(version_path)',
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(branding_name)_ZZLOCALE.pak\' <(locales))',
+              ],
+              'outputs': [
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) -d \'<(output_path)/ZZLOCALE.lproj/InfoPlist.strings\' <(locales))',
+              ],
+              'action': [
+                '<(tool_path)',
+                '-b', '<(branding_name)',
+                '-v', '<(version_path)',
+                '-g', '<(grit_out_dir)',
+                '-o', '<(output_path)',
+                '-t', 'helper',
+                '<@(locales)',
+              ],
+              'message': 'Generating the language InfoPlist.strings files',
+              'process_outputs_as_mac_bundle_resources': 1,
+            },
+          ],
+          'postbuilds': [
+            {
+              # The framework (chrome_dll) defines its load-time path
+              # (DYLIB_INSTALL_NAME_BASE) relative to the main executable
+              # (chrome).  A different relative path needs to be used in
+              # helper_app.
+              'postbuild_name': 'Fix Framework Link',
+              'action': [
+                'install_name_tool',
+                '-change',
+                '@executable_path/../Versions/<(version_full)/<(mac_product_name) Framework.framework/<(mac_product_name) Framework',
+                '@executable_path/../../../<(mac_product_name) Framework.framework/<(mac_product_name) Framework',
+                '${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}'
+              ],
+            },
+            {
+              # Modify the Info.plist as needed.  The script explains why this
+              # is needed.  This is also done in the chrome and chrome_dll
+              # targets.  In this case, -b0 and -k0 are used because Breakpad
+              # and Keystone keys are never placed into the helper, only into
+              # the framework.  -s0 is used because Subversion keys are only
+              # placed into the main app.
+              'postbuild_name': 'Tweak Info.plist',
+              'action': ['<(tweak_info_plist_path)',
+                         '-b0',
+                         '-k0',
+                         '-s0',
+                         '<(branding)',
+                         '<(mac_bundle_id)'],
+            },
+            {
+              'postbuild_name': 'Tweak Mac lproj folders',
+              'action': ['app/tweak_mac_lproj_folders'],
+            },
+          ],
+          'conditions': [
+            ['mac_breakpad==1', {
+              'variables': {
+                # A real .dSYM is needed for dump_syms to operate on.
+                'mac_real_dsym': 1,
+              },
+            }],
+          ],
+        },  # target helper_app
+        {
+          # Convenience target to build a disk image.
           'target_name': 'build_app_dmg',
-          # do NOT place this in the 'all' list; most won't want it.
-          # In gyp, booleans are 0/1 not True/False.
+          # Don't place this in the 'all' list; most won't want it.
+          # In GYP, booleans are 0/1, not True/False.
           'suppress_wildcard': 1,
           'type': 'none',
           'dependencies': [
@@ -4213,7 +5622,85 @@
             },
           ],  # 'actions'
         },
-      ]
+        {
+          # Dummy target to allow chrome to require plugin_carbon_interpose to
+          # build without actually linking to the resulting library.
+          'target_name': 'interpose_dependency_shim',
+          'type': 'executable',
+          'dependencies': [
+            'plugin_carbon_interpose',
+          ],
+          # In release, we end up with a strip step that is unhappy if there is
+          # no binary. Rather than check in a new file for this temporary hack,
+          # just generate a source file on the fly.
+          'actions': [
+            {
+              'action_name': 'generate_stub_main',
+              'process_outputs_as_sources': 1,
+              'inputs': [],
+              'outputs': [ '<(INTERMEDIATE_DIR)/dummy_main.c' ],
+              'action': [
+                'bash', '-c',
+                'echo "int main() { return 0; }" > <(INTERMEDIATE_DIR)/dummy_main.c'
+              ],
+            },
+          ],
+        },
+        {
+          # dylib for interposing Carbon calls in the plugin process.
+          'target_name': 'plugin_carbon_interpose',
+          'type': 'shared_library',
+          'dependencies': [
+            'chrome_dll',
+          ],
+          'sources': [
+            'browser/plugin_carbon_interpose_mac.cc',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
+            ],
+          },
+          'xcode_settings': {
+            'DYLIB_COMPATIBILITY_VERSION': '<(version_build_patch)',
+            'DYLIB_CURRENT_VERSION': '<(version_build_patch)',
+            'DYLIB_INSTALL_NAME_BASE': '@executable_path',
+          },
+          'postbuilds': [
+            {
+              # The framework (chrome_dll) defines its load-time path
+              # (DYLIB_INSTALL_NAME_BASE) relative to the main executable
+              # (chrome).  A different relative path needs to be used in
+              # plugin_carbon_interpose, which runs in the helper_app.
+              'postbuild_name': 'Fix Framework Link',
+              'action': [
+                'install_name_tool',
+                '-change',
+                '@executable_path/../Versions/<(version_full)/<(mac_product_name) Framework.framework/<(mac_product_name) Framework',
+                '@executable_path/../../../<(mac_product_name) Framework.framework/<(mac_product_name) Framework',
+                '${BUILT_PRODUCTS_DIR}/${EXECUTABLE_PATH}'
+              ],
+            },
+          ],
+        },
+        {
+          'target_name': 'infoplist_strings_tool',
+          'type': 'executable',
+          'dependencies': [
+            'chrome_strings',
+            '../base/base.gyp:base',
+          ],
+          'include_dirs': [
+            '<(grit_out_dir)',
+          ],
+          'sources': [
+            'tools/mac_helpers/infoplist_strings_util.mm',
+          ],
+        },
+      ],  # targets
     }, { # else: OS != "mac"
       'targets': [
         {
@@ -4222,8 +5709,9 @@
           'msvs_guid': '42ECD5EC-722F-41DE-B6B8-83764C8016DF',
           'dependencies': [
             '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
             'convert_dict_lib',
-            'third_party/hunspell/hunspell.gyp:hunspell',
+            '../third_party/hunspell/hunspell.gyp:hunspell',
           ],
           'sources': [
             'tools/convert_dict/convert_dict.cc',
@@ -4252,6 +5740,7 @@
           'msvs_guid': '4539AFB3-B8DC-47F3-A491-6DAC8FD26657',
           'dependencies': [
             '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
           ],
           'sources': [
             'tools/perf/flush_cache/flush_cache.cc',
@@ -4262,11 +5751,22 @@
           'type': 'executable',
           'msvs_guid': '265C427B-D1FF-4922-A47C-0754DDFF52E1',
           'dependencies': [
+            '../app/app.gyp:app_base',
             '../base/base.gyp:base',
+            '../webkit/webkit.gyp:glue',
+            'debugger',
+            'renderer',
             'browser'
           ],
           'sources': [
             'tools/pbl_tool/pbl_tool.cc',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+            },],
           ],
         },
         {
@@ -4278,10 +5778,13 @@
             'common',
             'debugger',
             'renderer',
+            'syncapi',
             'chrome_resources',
             'chrome_strings',
+            '../app/app.gyp:app_base',
             '../base/base.gyp:base',
             '../base/base.gyp:test_support_base',
+            '../base/base.gyp:test_support_perf',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
             '../webkit/webkit.gyp:glue',
@@ -4298,6 +5801,7 @@
             ['OS=="linux"', {
               'dependencies': [
                 '../build/linux/system.gyp:gtk',
+                '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
               ],
               'sources!': [
                 # TODO(port):
@@ -4310,19 +5814,65 @@
                 '../views/views.gyp:views',
               ],
             }],
-          ],
-          'configurations': {
-            'Debug': {
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
+            ['OS=="win"', {
+              'configurations': {
+                'Debug': {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                    },
+                  },
                 },
               },
-            },
-          },
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+            }],
+          ],
+        },
+        # TODO(port): enable on mac.
+        {
+          'includes': ['test/interactive_ui/interactive_ui_tests.gypi']
         },
       ],
-    }],  # OS!="mac"
+    },],  # OS!="mac"
+    ['OS=="linux"',
+      { 'targets': [
+        {
+          'target_name': 'linux_symbols',
+          'type': 'none',
+          'conditions': [
+            ['linux_dump_symbols==1', {
+              'actions': [
+                {
+                  'action_name': 'dump_symbols',
+                  'inputs': [
+                    '<(DEPTH)/build/linux/dump_app_syms',
+                    '<(DEPTH)/build/linux/dump_signature.py',
+                    '<(PRODUCT_DIR)/dump_syms',
+                    '<(PRODUCT_DIR)/chrome',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/chrome.breakpad.<(target_arch)',
+                  ],
+                  'action': ['<(DEPTH)/build/linux/dump_app_syms',
+                             '<(PRODUCT_DIR)/dump_syms',
+                             '<(linux_strip_binary)',
+                             '<(PRODUCT_DIR)/chrome',
+                             '<@(_outputs)'],
+                  'message': 'Dumping breakpad symbols to <(_outputs)',
+                  'process_outputs_as_sources': 1,
+                },
+              ],
+              'dependencies': [
+                'chrome',
+                '../breakpad/breakpad.gyp:dump_syms',
+              ],
+            }],
+          ],
+        }
+      ],
+    },],  # OS=="linux"
     ['OS!="win"',
       { 'targets': [
         {
@@ -4333,25 +5883,31 @@
             'browser',
             'chrome',
             'chrome_resources',
+            'chrome_strings',
             'debugger',
+            'syncapi',
             'test_support_common',
+            '../app/app.gyp:app_base',
+            '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
+            '../base/base.gyp:test_support_base',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
-            '../third_party/icu38/icu38.gyp:icui18n',
-            '../third_party/icu38/icu38.gyp:icuuc',
+            '../third_party/icu/icu.gyp:icui18n',
+            '../third_party/icu/icu.gyp:icuuc',
           ],
           'include_dirs': [
             '..',
           ],
+          'defines': [ 'ALLOW_IN_PROC_BROWSER_TEST' ],
           'sources': [
-            'test/browser/run_all_unittests.cc',
             'test/in_process_browser_test.cc',
             'test/in_process_browser_test.h',
-            'test/browser/browser_test_launcher_out_of_proc.cc',
-            'test/browser/browser_test_runner.cc',
-            'test/browser/browser_test_runner.h',
+            'test/test_launcher/out_of_proc_test_runner.cc',
+            'test/test_launcher/test_runner.cc',
+            'test/test_launcher/test_runner.h',
+            'test/test_launcher/run_all_unittests.cc',
             'test/unit/chrome_test_suite.h',
-            'test/ui_test_utils.cc',
             # browser_tests_sources is defined in 'variables' at the top of the
             # file.
             '<@(browser_tests_sources)',
@@ -4360,28 +5916,37 @@
             ['OS=="linux"', {
               'dependencies': [
                 '../build/linux/system.gyp:gtk',
+                '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+            ['OS=="linux" and (toolkit_views==1 or chromeos==1)', {
+              'dependencies': [
+                '../views/views.gyp:views',
               ],
             }],
             ['OS=="mac"', {
-              # The test fetches resources which means Mac need the app bundle to
-              # exist on disk so it can pull from it.
-              'dependencies': [
-                'chrome',
-              ],
               'sources': [
                 'app/breakpad_mac_stubs.mm',
                 'app/keystone_glue.h',
-                'app/keystone_glue.m',
+                'app/keystone_glue.mm',
               ],
-              # TODO(mark): We really want this for all non-static library targets,
-              # but when we tried to pull it up to the common.gypi level, it broke
-              # other things like the ui, startup, and page_cycler tests. *shrug*
-              'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-ObjC']},
+              'sources!': [
+                '<@(browser_tests_sources_exclude_on_mac)',
+              ],
+              # TODO(mark): We really want this for all non-static library
+              # targets, but when we tried to pull it up to the common.gypi
+              # level, it broke other things like the ui, startup, and
+              # page_cycler tests. *shrug*
+              'xcode_settings': {
+                'OTHER_LDFLAGS': [
+                  '-Wl,-ObjC',
+                ],
+              },
             }],
-          ],
-        },
-      ]
-    }],
+          ],  # conditions
+        },  # target browser_tests
+      ],  # targets
+    }],  # OS!="win"
     ['OS=="win"',
       { 'targets': [
         {
@@ -4394,6 +5959,7 @@
             'installer/installer.gyp:*',
             '../app/app.gyp:*',
             '../base/base.gyp:*',
+            '../ipc/ipc.gyp:*',
             '../media/media.gyp:*',
             '../net/net.gyp:*',
             '../printing/printing.gyp:*',
@@ -4407,7 +5973,7 @@
             '../third_party/bzip2/bzip2.gyp:*',
             '../third_party/cld/cld.gyp:cld',
             '../third_party/codesighs/codesighs.gyp:*',
-            '../third_party/icu38/icu38.gyp:*',
+            '../third_party/icu/icu.gyp:*',
             '../third_party/libjpeg/libjpeg.gyp:*',
             '../third_party/libpng/libpng.gyp:*',
             '../third_party/libxml/libxml.gyp:*',
@@ -4429,109 +5995,15 @@
             '../rlz/rlz.gyp:*',
             '../sandbox/sandbox.gyp:*',
             '../tools/memory_watcher/memory_watcher.gyp:*',
-            '../webkit/activex_shim/activex_shim.gyp:*',
-            '../webkit/activex_shim_dll/activex_shim_dll.gyp:*',
             '../v8/tools/gyp/v8.gyp:v8_shell',
           ],
-        },
-        {
-          'target_name': 'chrome_dll',
-          'type': 'shared_library',
-          'product_name': 'chrome',
-          'msvs_guid': 'C0A7EE2C-2A6D-45BE-BA78-6D006FDF52D9',
-          'include_dirs': [
-            'third_party/wtl/include',
-          ],
-          'dependencies': [
-            # On Windows, link the dependencies (libraries) that make
-            # up actual Chromium functionality into this .dll.
-            '<@(chromium_dependencies)',
-            'chrome_dll_version',
-            'chrome_resources',
-            'installer/installer.gyp:installer_util_strings',
-            'theme_dll',
-            'worker',
-            '../printing/printing.gyp:printing',
-            '../net/net.gyp:net_resources',
-            '../build/util/support/support.gyp:*',
-            '../third_party/cld/cld.gyp:cld',
-            '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
-            '../views/views.gyp:views',
-            '../webkit/webkit.gyp:webkit_resources',
-            '../gears/gears.gyp:gears',
-          ],
-          'defines': [
-            'CHROME_DLL',
-            'BROWSER_DLL',
-            'RENDERER_DLL',
-            'PLUGIN_DLL',
-          ],
-          'sources': [
-            'app/chrome_dll.rc',
-            'app/chrome_dll_main.cc',
-            'app/chrome_dll_resource.h',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
-
-            '../webkit/glue/resources/aliasb.cur',
-            '../webkit/glue/resources/cell.cur',
-            '../webkit/glue/resources/col_resize.cur',
-            '../webkit/glue/resources/copy.cur',
-            '../webkit/glue/resources/row_resize.cur',
-            '../webkit/glue/resources/vertical_text.cur',
-            '../webkit/glue/resources/zoom_in.cur',
-            '../webkit/glue/resources/zoom_out.cur',
-
-            # TODO:  It would be nice to have these pulled in
-            # automatically from direct_dependent_settings in
-            # their various targets (net.gyp:net_resources, etc.),
-            # but that causes errors in other targets when
-            # resulting .res files get referenced multiple times.
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
-
-            # TODO(sgk):  left-over from pre-gyp build, figure out
-            # if we still need them and/or how to update to gyp.
-            #'app/check_dependents.bat',
-            #'app/chrome.dll.deps',
-          ],
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'BaseAddress': '0x01c30000',
-              'DelayLoadDLLs': [
-                'crypt32.dll',
-                'cryptui.dll',
-                'winhttp.dll',
-                'wininet.dll',
-                'wsock32.dll',
-                'ws2_32.dll',
-                'winspool.drv',
-                'comdlg32.dll',
-                'imagehlp.dll',
-                'psapi.dll',
-                'urlmon.dll',
-                'imm32.dll',
+          'conditions': [
+            ['chrome_frame_define==1', {
+              'dependencies': [
+                '../chrome_frame/chrome_frame.gyp:*',
               ],
-              'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
-              'ProgramDatabaseFile': '$(OutDir)\\chrome_dll.pdb',
-              # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
-              'SubSystem': '2',
-            },
-            'VCManifestTool': {
-              'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.dll.manifest',
-            },
-          },
-          'configurations': {
-            'Debug': {
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
-                },
-              },
-            },
-          },
+            }],
+          ],
         },
         {
           'target_name': 'chrome_dll_version',
@@ -4551,8 +6023,6 @@
               'variables': {
                 'lastchange_path':
                   '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-                'version_py': 'tools/build/version.py',
-                'version_path': 'VERSION',
                 'template_input_path': 'app/chrome_dll_version.rc.version',
               },
               'conditions': [
@@ -4577,7 +6047,7 @@
               ],
               'action': [
                 'python',
-                '<(version_py)',
+                '<(version_py_path)',
                 '-f', '<(version_path)',
                 '-f', '<(branding_path)',
                 '-f', '<(lastchange_path)',
@@ -4587,65 +6057,6 @@
               'message': 'Generating version information in <(_outputs)'
             },
           ],
-        },
-        {
-          'target_name': 'activex_test_control',
-          'type': 'shared_library',
-          'msvs_guid': '414D4D24-5D65-498B-A33F-3A29AD3CDEDC',
-          'include_dirs': [
-            '..',
-            '<(INTERMEDIATE_DIR)',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-lcomsuppw.lib',
-            ],
-          },
-          'sources': [
-            'test/activex_test_control/activex_test_control.cc',
-            'test/activex_test_control/activex_test_control.def',
-            'test/activex_test_control/activex_test_control.idl',
-            'test/activex_test_control/activex_test_control.rc',
-            'test/activex_test_control/activex_test_control.rgs',
-            'test/activex_test_control/chrome_test_control.bmp',
-            'test/activex_test_control/chrome_test_control.cc',
-            'test/activex_test_control/chrome_test_control.h',
-            'test/activex_test_control/chrome_test_control.rgs',
-            'test/activex_test_control/chrome_test_control_cp.h',
-            'test/activex_test_control/resource.h',
-          ],
-        },
-        {
-          'target_name': 'automated_ui_tests',
-          'type': 'executable',
-          'msvs_guid': 'D2250C20-3A94-4FB9-AF73-11BC5B73884B',
-          'dependencies': [
-            'browser',
-            'renderer',
-            'test_support_common',
-            'test_support_ui',
-            'theme_resources',
-            '../base/base.gyp:base',
-            '../skia/skia.gyp:skia',
-            '../third_party/libxml/libxml.gyp:libxml',
-            '../testing/gtest.gyp:gtest',
-          ],
-          'include_dirs': [
-            '..',
-            'third_party/wtl/include',
-          ],
-          'sources': [
-            'test/automated_ui_tests/automated_ui_tests.cc',
-            'test/automated_ui_tests/automated_ui_tests.h',
-            'tools/build/win/precompiled_wtl.h',
-            'tools/build/win/precompiled_wtl.cc',
-          ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-            },
-          },
         },
         {
           'target_name': 'automation',
@@ -4677,6 +6088,103 @@
           ],
         },
         {
+          # Windows-only for now; this has issues with scons
+          # regarding use of run_all_unittests.cc.
+          # TODO(zork): add target to linux build.
+          'target_name': 'sync_integration_tests',
+          'type': 'executable',
+            'dependencies': [
+              'browser',
+              'chrome',
+              'chrome_resources',
+              'common',
+              'debugger',
+              'renderer',
+              'chrome_resources',
+              'chrome_strings',
+              'syncapi',
+              'test_support_unit',
+              '../printing/printing.gyp:printing',
+              '../webkit/webkit.gyp:webkit',
+              '../skia/skia.gyp:skia',
+              '../testing/gtest.gyp:gtest',
+              '../third_party/icu/icu.gyp:icui18n',
+              '../third_party/icu/icu.gyp:icuuc',
+              '../third_party/libxml/libxml.gyp:libxml',
+              '../third_party/npapi/npapi.gyp:npapi',
+            ],
+            'include_dirs': [
+              '..',
+              '<(INTERMEDIATE_DIR)',
+            ],
+            # TODO(phajdan.jr): Only temporary, to make transition easier.
+            'defines': [ 'ALLOW_IN_PROC_BROWSER_TEST' ],
+            'sources': [
+              'app/chrome_dll.rc',
+              'app/chrome_dll_resource.h',
+              'app/chrome_dll_version.rc.version',
+              'test/in_process_browser_test.cc',
+              'test/in_process_browser_test.h',
+              'test/live_sync/bookmark_model_verifier.cc',
+              'test/live_sync/bookmark_model_verifier.h',
+              'test/live_sync/live_bookmarks_sync_test.cc',
+              'test/live_sync/live_bookmarks_sync_test.h',
+              'test/live_sync/profile_sync_service_test_harness.cc',
+              'test/live_sync/profile_sync_service_test_harness.h',
+              'test/live_sync/single_client_live_bookmarks_sync_unittest.cc',
+              'test/live_sync/two_client_live_bookmarks_sync_test.cc',
+              'test/test_launcher/run_all_unittests.cc',
+              'test/test_notification_tracker.cc',
+              'test/test_notification_tracker.h',
+              'test/testing_browser_process.h',
+              'test/ui_test_utils.cc',
+              'test/ui_test_utils.h',
+              'test/data/resource.h',
+              'test/data/resource.rc',
+              '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
+              '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
+              '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
+            ],
+            'conditions': [
+              # Plugin code.
+              ['OS=="linux" or OS=="win"', {
+                'dependencies': [
+                  'plugin',
+                 ],
+                'export_dependent_settings': [
+                  'plugin',
+                ],
+              }],
+              # Linux-specific rules.
+              ['OS=="linux"', {
+                 'dependencies': [
+                   '../build/linux/system.gyp:gtk',
+                 ],
+              }],
+              # Windows-specific rules.
+              ['OS=="win"', {
+                'include_dirs': [
+                  'third_party/wtl/include',
+                 ],
+                'dependencies': [
+                  'chrome_dll_version',
+                  'installer/installer.gyp:installer_util_strings',
+                  '../views/views.gyp:views',
+                  '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+                ],
+                'configurations': {
+                  'Debug': {
+                    'msvs_settings': {
+                      'VCLinkerTool': {
+                        'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                      },
+                    },
+                  },
+                },
+              }],
+            ],
+        },
+        {
           # Shared library used by the in-proc browser tests.
           'target_name': 'browser_tests_dll',
           'type': 'shared_library',
@@ -4690,10 +6198,12 @@
             'installer/installer.gyp:installer_util_strings',
             'debugger',
             'renderer',
+            'syncapi',
+            '../base/base.gyp:test_support_base',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
-            '../third_party/icu38/icu38.gyp:icui18n',
-            '../third_party/icu38/icu38.gyp:icuuc',
+            '../third_party/icu/icu.gyp:icui18n',
+            '../third_party/icu/icu.gyp:icuuc',
           ],
           'include_dirs': [
             '..',
@@ -4701,26 +6211,23 @@
           ],
           'configurations': {
             'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
                 },
               },
             },
           },
+          'defines': [ 'ALLOW_IN_PROC_BROWSER_TEST' ],
           'sources': [
-            'test/browser/run_all_unittests.cc',
             'test/in_process_browser_test.cc',
             'test/in_process_browser_test.h',
+            'test/test_launcher/run_all_unittests.cc',
             'test/unit/chrome_test_suite.h',
             'test/ui_test_utils.cc',
             'app/chrome_dll.rc',
             'app/chrome_dll_resource.h',
             'app/chrome_dll_version.rc.version',
-            'tools/build/win/precompiled_wtl.h',
-            'tools/build/win/precompiled_wtl.cc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
@@ -4728,6 +6235,13 @@
             # defined in 'variables' at the top of the file.
             '<@(browser_tests_sources)',
             '<@(browser_tests_sources_win_specific)',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+            },],
           ],
         },
         {
@@ -4743,9 +6257,9 @@
             '..',
           ],
           'sources': [
-            'test/browser/browser_test_launcher_in_proc.cc',
-            'test/browser/browser_test_runner.cc',
-            'test/browser/browser_test_runner.h',
+            'test/test_launcher/in_proc_test_runner.cc',
+            'test/test_launcher/test_runner.cc',
+            'test/test_launcher/test_runner.h',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
@@ -4755,11 +6269,28 @@
           },
         },
         {
+          # Executable that runs the tests in-process (tests are bundled in a DLL).
+          'target_name': 'test_launcher',
+          'type': 'executable',
+          'msvs_guid': 'FA94F5AA-BC73-4926-A189-71FAA986C905',
+          'dependencies': [
+            '../base/base.gyp:base',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'test/test_launcher/in_proc_test_runner.cc',
+            'test/test_launcher/test_runner.cc',
+            'test/test_launcher/test_runner.h',
+          ],
+        },
+        {
           'target_name': 'crash_service',
           'type': 'executable',
           'msvs_guid': '89C1C190-A5D1-4EC4-BD6A-67FF2195C7CC',
           'dependencies': [
-            'common',
+            'common_constants',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
@@ -4786,6 +6317,7 @@
             'browser',
             'debugger',
             'renderer',
+            'syncapi',
             '../base/base.gyp:base',
             '../skia/skia.gyp:skia',
           ],
@@ -4796,88 +6328,22 @@
             'tools/profiles/generate_profile.cc',
             'tools/profiles/thumbnail-inl.h',
           ],
-        },
-        {
-          'target_name': 'interactive_ui_tests',
-          'type': 'executable',
-          'msvs_guid': '018D4F38-6272-448F-A864-976DA09F05D0',
-          'dependencies': [
-            'chrome_dll_version',
-            'chrome_resources',
-            'chrome_strings',
-            'crash_service',  # run time dependency
-            'debugger',
-            'installer/installer.gyp:installer_util_strings',
-            'test_support_common',
-            'test_support_ui',
-            'third_party/hunspell/hunspell.gyp:hunspell',
-            '../net/net.gyp:net_resources',
-            '../skia/skia.gyp:skia',
-            '../third_party/icu38/icu38.gyp:icui18n',
-            '../third_party/libpng/libpng.gyp:libpng',
-            '../third_party/libxml/libxml.gyp:libxml',
-            '../third_party/zlib/zlib.gyp:zlib',
-            '../testing/gtest.gyp:gtest',
-            '../third_party/npapi/npapi.gyp:npapi',
-            '../views/views.gyp:views',
-            # run time dependency
-            '../webkit/tools/test_shell/test_shell.gyp:npapi_test_plugin',
-            '../webkit/webkit.gyp:webkit_resources',
-          ],
-          'include_dirs': [
-            '..',
-            'third_party/wtl/include',
-          ],
-          'sources': [
-            'browser/browser_focus_uitest.cc',
-            'browser/debugger/devtools_sanity_unittest.cc',
-            'browser/views/bookmark_bar_view_test.cc',
-            'browser/blocked_popup_container_interactive_uitest.cc',
-            'browser/views/find_bar_win_interactive_uitest.cc',
-            'browser/views/tabs/tab_dragging_test.cc',
-            'test/interactive_ui/npapi_interactive_test.cc',
-            'test/interactive_ui/view_event_test_base.cc',
-            'test/interactive_ui/view_event_test_base.h',
-
-            # Windows-only below here, will need addressing if/when
-            # this gets ported.
-            '../webkit/glue/resources/aliasb.cur',
-            '../webkit/glue/resources/cell.cur',
-            '../webkit/glue/resources/col_resize.cur',
-            '../webkit/glue/resources/copy.cur',
-            '../webkit/glue/resources/row_resize.cur',
-            '../webkit/glue/resources/vertical_text.cur',
-            '../webkit/glue/resources/zoom_in.cur',
-            '../webkit/glue/resources/zoom_out.cur',
-
-            'app/chrome_dll.rc',
-            'test/data/resource.rc',
-
-            # TODO:  It would be nice to have these pulled in
-            # automatically from direct_dependent_settings in
-            # their various targets (net.gyp:net_resources, etc.),
-            # but that causes errors in other targets when
-            # resulting .res files get referenced multiple times.
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
-
-            'tools/build/win/precompiled_wtl.h',
-            'tools/build/win/precompiled_wtl.cc',
-          ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+              'configurations': {
+                'Debug': {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                    },
+                  },
                 },
               },
-            },
-          },
+            }],
+          ],
         },
         {
           'target_name': 'plugin_tests',
@@ -4901,35 +6367,13 @@
           ],
           'sources': [
             'test/plugin/plugin_test.cpp',
-            'tools/build/win/precompiled_wtl.h',
-            'tools/build/win/precompiled_wtl.cc',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-            },
-          },
-        },
-        {
-          'target_name': 'reliability_tests',
-          'type': 'executable',
-          'msvs_guid': '8A3E1774-1DE9-445C-982D-3EE37C8A752A',
-          'dependencies': [
-            'test_support_common',
-            'test_support_ui',
-            'theme_resources',
-            '../skia/skia.gyp:skia',
-            '../testing/gtest.gyp:gtest',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'test/reliability/page_load_test.cc',
-            'test/reliability/page_load_test.h',
-            'test/reliability/reliability_test_suite.h',
-            'test/reliability/run_all_unittests.cc',
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+            },],
           ],
         },
         {
@@ -4966,15 +6410,14 @@
           ],
           'sources': [
             'test/selenium/selenium_test.cc',
-            'tools/build/win/precompiled_wtl.h',
-            'tools/build/win/precompiled_wtl.cc',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tools/build/win/precompiled_wtl.h',
-              'msvs_precompiled_source': 'tools/build/win/precompiled_wtl.cc',
-            },
-          },
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+            },],
+          ],
         },
         {
           'target_name': 'test_chrome_plugin',
@@ -5022,10 +6465,17 @@
             'Debug': {
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'LinkIncremental': '1',       # /INCREMENTAL:NO
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
                 },
               },
             },
+            'Release': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkTimeCodeGeneration': '1',
+                },
+              },
+            }
           },
         },
       ]},  # 'targets'
@@ -5075,5 +6525,383 @@
         },
       ]
     }],
+    ['browser_sync==1', {
+      # These targets get built only where sync is supported.
+      'targets': [
+        {
+          # Protobuf compiler / generate rule for sync.proto
+          'target_name': 'sync_proto',
+          'type': 'none',
+          'actions': [
+            {
+              'action_name': 'compiling sync.proto',
+              'inputs': [
+                '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+                'browser/sync/protocol/sync.proto',
+              ],
+              'outputs': [
+                '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.cc',
+                '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.h',
+              ],
+              'action': [
+                '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+                '--proto_path=browser/sync/protocol',
+                'browser/sync/protocol/sync.proto',
+                '--cpp_out=<(protoc_out_dir)/chrome/browser/sync/protocol',
+              ],
+            },
+          ],
+          'dependencies': [
+            '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
+            '../third_party/protobuf2/protobuf.gyp:protoc',
+          ],
+          'export_dependent_settings': [
+            '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
+          ],
+        },
+        {
+          'target_name': 'notifier',
+          'type': '<(library)',
+          'sources': [
+            'browser/sync/notifier/base/async_dns_lookup.cc',
+            'browser/sync/notifier/base/async_dns_lookup.h',
+            'browser/sync/notifier/base/async_network_alive.h',
+            'browser/sync/notifier/base/fastalloc.h',
+            'browser/sync/notifier/base/linux/network_status_detector_task_linux.cc',
+            'browser/sync/notifier/base/linux/time_linux.cc',
+            'browser/sync/notifier/base/mac/network_status_detector_task_mac.cc',
+            'browser/sync/notifier/base/mac/time_mac.cc',
+            'browser/sync/notifier/base/nethelpers.cc',
+            'browser/sync/notifier/base/nethelpers.h',
+            'browser/sync/notifier/base/network_status_detector_task.cc',
+            'browser/sync/notifier/base/network_status_detector_task.h',
+            'browser/sync/notifier/base/network_status_detector_task_mt.cc',
+            'browser/sync/notifier/base/network_status_detector_task_mt.h',
+            'browser/sync/notifier/base/posix/time_posix.cc',
+            'browser/sync/notifier/base/signal_thread_task.h',
+            'browser/sync/notifier/base/static_assert.h',
+            'browser/sync/notifier/base/task_pump.cc',
+            'browser/sync/notifier/base/task_pump.h',
+            'browser/sync/notifier/base/time.cc',
+            'browser/sync/notifier/base/time.h',
+            'browser/sync/notifier/base/timer.cc',
+            'browser/sync/notifier/base/timer.h',
+            'browser/sync/notifier/base/utils.h',
+            'browser/sync/notifier/base/win/async_network_alive_win32.cc',
+            'browser/sync/notifier/base/win/time_win32.cc',
+            'browser/sync/notifier/communicator/auth_task.cc',
+            'browser/sync/notifier/communicator/auth_task.h',
+            'browser/sync/notifier/communicator/auto_reconnect.cc',
+            'browser/sync/notifier/communicator/auto_reconnect.h',
+            'browser/sync/notifier/communicator/connection_options.cc',
+            'browser/sync/notifier/communicator/connection_options.h',
+            'browser/sync/notifier/communicator/connection_settings.cc',
+            'browser/sync/notifier/communicator/connection_settings.h',
+            'browser/sync/notifier/communicator/const_communicator.h',
+            'browser/sync/notifier/communicator/login.cc',
+            'browser/sync/notifier/communicator/login.h',
+            'browser/sync/notifier/communicator/login_failure.cc',
+            'browser/sync/notifier/communicator/login_failure.h',
+            'browser/sync/notifier/communicator/login_settings.cc',
+            'browser/sync/notifier/communicator/login_settings.h',
+            'browser/sync/notifier/communicator/product_info.cc',
+            'browser/sync/notifier/communicator/product_info.h',
+            'browser/sync/notifier/communicator/single_login_attempt.cc',
+            'browser/sync/notifier/communicator/single_login_attempt.h',
+            'browser/sync/notifier/communicator/talk_auth_task.cc',
+            'browser/sync/notifier/communicator/talk_auth_task.h',
+            'browser/sync/notifier/communicator/xmpp_connection_generator.cc',
+            'browser/sync/notifier/communicator/xmpp_connection_generator.h',
+            'browser/sync/notifier/communicator/xmpp_log.cc',
+            'browser/sync/notifier/communicator/xmpp_log.h',
+            'browser/sync/notifier/communicator/xmpp_socket_adapter.cc',
+            'browser/sync/notifier/communicator/xmpp_socket_adapter.h',
+            'browser/sync/notifier/gaia_auth/gaiaauth.cc',
+            'browser/sync/notifier/gaia_auth/gaiaauth.h',
+            'browser/sync/notifier/gaia_auth/gaiahelper.cc',
+            'browser/sync/notifier/gaia_auth/gaiahelper.h',
+            'browser/sync/notifier/gaia_auth/inet_aton.h',
+            'browser/sync/notifier/gaia_auth/sigslotrepeater.h',
+            'browser/sync/notifier/gaia_auth/win/win32window.cc',
+            'browser/sync/notifier/listener/listen_task.cc',
+            'browser/sync/notifier/listener/listen_task.h',
+            'browser/sync/notifier/listener/mediator_thread.h',
+            'browser/sync/notifier/listener/mediator_thread_impl.cc',
+            'browser/sync/notifier/listener/mediator_thread_impl.h',
+            'browser/sync/notifier/listener/mediator_thread_mock.h',
+            'browser/sync/notifier/listener/send_update_task.cc',
+            'browser/sync/notifier/listener/send_update_task.h',
+            'browser/sync/notifier/listener/subscribe_task.cc',
+            'browser/sync/notifier/listener/subscribe_task.h',
+            'browser/sync/notifier/listener/talk_mediator.h',
+            'browser/sync/notifier/listener/talk_mediator_impl.cc',
+            'browser/sync/notifier/listener/talk_mediator_impl.h',
+          ],
+          'include_dirs': [
+            '..',
+            '<(protoc_out_dir)',
+          ],
+          'defines' : [
+            '_CRT_SECURE_NO_WARNINGS',
+            '_USE_32BIT_TIME_T',
+            'kXmppProductName="chromium-sync"',
+          ],
+          'dependencies': [
+            '../third_party/expat/expat.gyp:expat',
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+            'sync_proto',
+          ],
+          'conditions': [
+            ['OS=="linux"', {
+              'defines': [
+                'POSIX',
+                'OS_LINUX',
+              ],
+            }],
+          ],
+        },
+        {
+          'target_name': 'sync_unit_tests',
+          'type': 'executable',
+          'sources': [
+            'browser/sync/engine/all_status_unittest.cc',
+            'browser/sync/engine/apply_updates_command_unittest.cc',
+            'browser/sync/engine/auth_watcher_unittest.cc',
+            'browser/sync/engine/net/gaia_authenticator_unittest.cc',
+            'browser/sync/engine/syncer_proto_util_unittest.cc',
+            'browser/sync/engine/syncer_thread_unittest.cc',
+            'browser/sync/engine/syncer_unittest.cc',
+            'browser/sync/engine/syncproto_unittest.cc',
+            'browser/sync/notifier/listener/talk_mediator_unittest.cc',
+            'browser/sync/syncable/syncable_id_unittest.cc',
+            'browser/sync/syncable/syncable_unittest.cc',
+            'browser/sync/util/character_set_converters_unittest.cc',
+            'browser/sync/util/crypto_helpers_unittest.cc',
+            'browser/sync/util/data_encryption_unittest.cc',
+            'browser/sync/util/event_sys_unittest.cc',
+            'browser/sync/util/highres_timer_unittest.cc',
+            'browser/sync/util/path_helpers_unittest.cc',
+            'browser/sync/util/query_helpers_unittest.cc',
+            'browser/sync/util/user_settings_unittest.cc',
+            'test/sync/engine/mock_gaia_authenticator.cc',
+            'test/sync/engine/mock_gaia_authenticator.h',
+            'test/sync/engine/mock_gaia_authenticator_unittest.cc',
+            'test/sync/engine/mock_server_connection.cc',
+            'test/sync/engine/mock_server_connection.h',
+            'test/sync/engine/test_directory_setter_upper.cc',
+            'test/sync/engine/test_directory_setter_upper.h',
+            'test/sync/engine/test_id_factory.h',
+          ],
+          'include_dirs': [
+            '..',
+            '<(protoc_out_dir)',
+          ],
+          'defines' : [
+            'SYNC_ENGINE_VERSION_STRING="Unknown"',
+            '_CRT_SECURE_NO_WARNINGS',
+            '_USE_32BIT_TIME_T',
+          ],
+          'dependencies': [
+            '../testing/gtest.gyp:gtest',
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+            'notifier',
+            'sync',
+            'sync_proto',
+            'test_support_unit',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '-lcrypt32.lib',
+                  '-lws2_32.lib',
+                  '-lsecur32.lib',
+                ],
+              },
+            }, { # else: OS != "win"
+              'sources!': [
+                'browser/sync/util/data_encryption_unittest.cc',
+              ],
+            }],
+            ['OS=="linux"', {
+              'defines': [
+                'POSIX',
+              ],
+            }],
+          ],
+        },
+        {
+          'target_name': 'sync',
+          'type': '<(library)',
+          'sources': [
+            '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.cc',
+            '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.h',
+            'browser/sync/engine/all_status.cc',
+            'browser/sync/engine/all_status.h',
+            'browser/sync/engine/apply_updates_command.cc',
+            'browser/sync/engine/apply_updates_command.h',
+            'browser/sync/engine/auth_watcher.cc',
+            'browser/sync/engine/auth_watcher.h',
+            'browser/sync/engine/authenticator.cc',
+            'browser/sync/engine/authenticator.h',
+            'browser/sync/engine/build_and_process_conflict_sets_command.cc',
+            'browser/sync/engine/build_and_process_conflict_sets_command.h',
+            'browser/sync/engine/build_commit_command.cc',
+            'browser/sync/engine/build_commit_command.h',
+            'browser/sync/engine/change_reorder_buffer.cc',
+            'browser/sync/engine/change_reorder_buffer.h',
+            'browser/sync/engine/client_command_channel.h',
+            'browser/sync/engine/conflict_resolution_view.cc',
+            'browser/sync/engine/conflict_resolution_view.h',
+            'browser/sync/engine/conflict_resolver.cc',
+            'browser/sync/engine/conflict_resolver.h',
+            'browser/sync/engine/download_updates_command.cc',
+            'browser/sync/engine/download_updates_command.h',
+            'browser/sync/engine/get_commit_ids_command.cc',
+            'browser/sync/engine/get_commit_ids_command.h',
+            'browser/sync/engine/model_changing_syncer_command.cc',
+            'browser/sync/engine/model_changing_syncer_command.h',
+            'browser/sync/engine/model_safe_worker.h',
+            'browser/sync/engine/net/gaia_authenticator.cc',
+            'browser/sync/engine/net/gaia_authenticator.h',
+            'browser/sync/engine/net/http_return.h',
+            'browser/sync/engine/net/server_connection_manager.cc',
+            'browser/sync/engine/net/server_connection_manager.h',
+            'browser/sync/engine/net/syncapi_server_connection_manager.cc',
+            'browser/sync/engine/net/syncapi_server_connection_manager.h',
+            'browser/sync/engine/net/url_translator.cc',
+            'browser/sync/engine/net/url_translator.h',
+            'browser/sync/engine/post_commit_message_command.cc',
+            'browser/sync/engine/post_commit_message_command.h',
+            'browser/sync/engine/process_commit_response_command.cc',
+            'browser/sync/engine/process_commit_response_command.h',
+            'browser/sync/engine/process_updates_command.cc',
+            'browser/sync/engine/process_updates_command.h',
+            'browser/sync/engine/resolve_conflicts_command.cc',
+            'browser/sync/engine/resolve_conflicts_command.h',
+            'browser/sync/engine/sync_cycle_state.h',
+            'browser/sync/engine/sync_process_state.cc',
+            'browser/sync/engine/sync_process_state.h',
+            'browser/sync/engine/syncapi.h',
+            'browser/sync/engine/syncer.cc',
+            'browser/sync/engine/syncer.h',
+            'browser/sync/engine/syncer_command.cc',
+            'browser/sync/engine/syncer_command.h',
+            'browser/sync/engine/syncer_end_command.cc',
+            'browser/sync/engine/syncer_end_command.h',
+            'browser/sync/engine/syncer_proto_util.cc',
+            'browser/sync/engine/syncer_proto_util.h',
+            'browser/sync/engine/syncer_session.h',
+            'browser/sync/engine/syncer_status.cc',
+            'browser/sync/engine/syncer_status.h',
+            'browser/sync/engine/syncer_thread.cc',
+            'browser/sync/engine/syncer_thread.h',
+            'browser/sync/engine/syncer_thread_timed_stop.cc',
+            'browser/sync/engine/syncer_thread_timed_stop.h',
+            'browser/sync/engine/syncer_types.h',
+            'browser/sync/engine/syncer_util.cc',
+            'browser/sync/engine/syncer_util.h',
+            'browser/sync/engine/syncproto.h',
+            'browser/sync/engine/update_applicator.cc',
+            'browser/sync/engine/update_applicator.h',
+            'browser/sync/engine/verify_updates_command.cc',
+            'browser/sync/engine/verify_updates_command.h',
+            'browser/sync/protocol/service_constants.h',
+            'browser/sync/syncable/blob.h',
+            'browser/sync/syncable/dir_open_result.h',
+            'browser/sync/syncable/directory_backing_store.cc',
+            'browser/sync/syncable/directory_backing_store.h',
+            'browser/sync/syncable/directory_event.h',
+            'browser/sync/syncable/directory_manager.cc',
+            'browser/sync/syncable/directory_manager.h',
+            'browser/sync/syncable/path_name_cmp.h',
+            'browser/sync/syncable/syncable-inl.h',
+            'browser/sync/syncable/syncable.cc',
+            'browser/sync/syncable/syncable.h',
+            'browser/sync/syncable/syncable_changes_version.h',
+            'browser/sync/syncable/syncable_columns.h',
+            'browser/sync/syncable/syncable_id.cc',
+            'browser/sync/syncable/syncable_id.h',
+            'browser/sync/util/character_set_converters.cc',
+            'browser/sync/util/character_set_converters.h',
+            'browser/sync/util/character_set_converters_posix.cc',
+            'browser/sync/util/character_set_converters_win.cc',
+            'browser/sync/util/closure.h',
+            'browser/sync/util/compat_file.h',
+            'browser/sync/util/compat_file_posix.cc',
+            'browser/sync/util/compat_file_win.cc',
+            'browser/sync/util/crypto_helpers.cc',
+            'browser/sync/util/crypto_helpers.h',
+            'browser/sync/util/dbgq.h',
+            'browser/sync/util/event_sys-inl.h',
+            'browser/sync/util/event_sys.h',
+            'browser/sync/util/fast_dump.h',
+            'browser/sync/util/highres_timer.h',
+            'browser/sync/util/highres_timer_linux.cc',
+            'browser/sync/util/highres_timer_linux.h',
+            'browser/sync/util/highres_timer_mac.cc',
+            'browser/sync/util/highres_timer_mac.h',
+            'browser/sync/util/highres_timer_win.cc',
+            'browser/sync/util/highres_timer_win.h',
+            'browser/sync/util/path_helpers.h',
+            'browser/sync/util/path_helpers_linux.cc',
+            'browser/sync/util/path_helpers_mac.cc',
+            'browser/sync/util/path_helpers_posix.cc',
+            'browser/sync/util/query_helpers.cc',
+            'browser/sync/util/query_helpers.h',
+            'browser/sync/util/row_iterator.h',
+            'browser/sync/util/signin.h',
+            'browser/sync/util/sync_types.h',
+            'browser/sync/util/user_settings.cc',
+            'browser/sync/util/user_settings.h',
+            'browser/sync/util/user_settings_posix.cc',
+            'browser/sync/util/user_settings_win.cc',
+          ],
+          'include_dirs': [
+            '..',
+            '<(protoc_out_dir)',
+          ],
+          'defines' : [
+            'SYNC_ENGINE_VERSION_STRING="Unknown"',
+            '_CRT_SECURE_NO_WARNINGS',
+            '_USE_32BIT_TIME_T',
+          ],
+          'dependencies': [
+            '../third_party/libjingle/libjingle.gyp:libjingle',
+            'sync_proto',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'sources' : [
+                'browser/sync/util/data_encryption.cc',
+                'browser/sync/util/data_encryption.h',
+                'browser/sync/util/path_helpers.cc',
+              ],
+            }],
+            ['OS=="linux"', {
+              'defines': [
+                'POSIX',
+              ],
+            }],
+            ['OS=="mac"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/System/Library/Frameworks/IOKit.framework',
+                ],
+              },
+            }],
+          ],
+        },
+      ],  # targets when browser_sync==1
+    }],
   ],  # 'conditions'
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

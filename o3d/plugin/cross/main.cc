@@ -49,10 +49,10 @@ namespace o3d {
 NPError NP_GetValue(void *instance, NPPVariable variable, void *value) {
   switch (variable) {
     case NPPVpluginNameString:
-      *static_cast<char **>(value) = O3D_PLUGIN_NAME;
+      *static_cast<char **>(value) = const_cast<char*>(O3D_PLUGIN_NAME);
       break;
     case NPPVpluginDescriptionString:
-      *static_cast<char **>(value) = O3D_PLUGIN_DESCRIPTION;
+      *static_cast<char **>(value) = const_cast<char*>(O3D_PLUGIN_DESCRIPTION);
       break;
     default:
       return NPERR_INVALID_PARAM;
@@ -148,7 +148,7 @@ namespace o3d {
 extern "C" {
 #endif
 
-NPError OSCALL NP_GetEntryPoints(NPPluginFuncs *pluginFuncs) {
+NPError EXPORT_SYMBOL OSCALL NP_GetEntryPoints(NPPluginFuncs *pluginFuncs) {
   HANDLE_CRASHES;
   pluginFuncs->version = 11;
   pluginFuncs->size = sizeof(*pluginFuncs);
@@ -169,15 +169,16 @@ NPError OSCALL NP_GetEntryPoints(NPPluginFuncs *pluginFuncs) {
   return NPERR_NO_ERROR;
 }
 
-char *NP_GetMIMEDescription(void) {
-  return O3D_PLUGIN_MIME_TYPE "::O3D MIME";
+char* NP_GetMIMEDescription(void) {
+  return const_cast<char*>(O3D_PLUGIN_MIME_TYPE "::O3D MIME");
 }
 
 }  // namespace o3d / extern "C"
 
 #if !defined(O3D_INTERNAL_PLUGIN)
 extern "C" {
-NPError NP_GetValue(void *instance, NPPVariable variable, void *value) {
+NPError EXPORT_SYMBOL NP_GetValue(void *instance, NPPVariable variable,
+                                  void *value) {
   return o3d::NP_GetValue(instance, variable, value);
 }
 }

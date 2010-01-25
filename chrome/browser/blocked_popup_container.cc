@@ -11,6 +11,9 @@
 #include "chrome/common/notification_service.h"
 
 // static
+const size_t BlockedPopupContainer::kImpossibleNumberOfPopups = 30;
+
+// static
 BlockedPopupContainer* BlockedPopupContainer::Create(
     TabContents* owner, Profile* profile) {
   BlockedPopupContainer* container =
@@ -58,7 +61,7 @@ void BlockedPopupContainer::AddTabContents(TabContents* tab_contents,
 
     unblocked_popups_[tab_contents] = host;
   } else {
-    if (blocked_popups_.size() >= kImpossibleNumberOfPopups) {
+    if (blocked_popups_.size() == (kImpossibleNumberOfPopups - 1)) {
       delete tab_contents;
       LOG(INFO) << "Warning: Renderer is sending more popups to us than should "
           "be possible. Renderer compromised?";
@@ -105,13 +108,45 @@ void BlockedPopupContainer::LaunchPopupAtIndex(size_t index) {
   EraseDataForPopupAndUpdateUI(i);
 }
 
+void BlockedPopupContainer::AddBlockedNotice(const GURL& url,
+                                             const string16& reason) {
+  // Nothing to show after we have been dismissed.
+  if (has_been_dismissed_)
+    return;
+
+  // Don't notify for hosts which are already shown. Too much noise otherwise.
+  // TODO(idanan): Figure out what to do for multiple reasons of blocking the
+  // same host.
+  if (notice_hosts_.find(url.host()) != notice_hosts_.end())
+    return;
+
+  notice_hosts_.insert(url.host());
+  blocked_notices_.push_back(BlockedNotice(url, reason));
+
+  UpdateView();
+  view_->ShowView();
+  owner_->PopupNotificationVisibilityChanged(true);
+}
+
+void BlockedPopupContainer::GetHostAndReasonForNotice(size_t index,
+                                                      std::string* host,
+                                                      string16* reason) const {
+  DCHECK(host);
+  DCHECK(reason);
+  *host = blocked_notices_[index].url_.host();
+  *reason = blocked_notices_[index].reason_;
+}
+
 size_t BlockedPopupContainer::GetBlockedPopupCount() const {
   return blocked_popups_.size();
 }
 
+size_t BlockedPopupContainer::GetBlockedNoticeCount() const {
+  return blocked_notices_.size();
+}
+
 bool BlockedPopupContainer::IsHostWhitelisted(size_t index) const {
-  PopupHosts::const_iterator i(ConvertHostIndexToIterator(index));
-  return (i == popup_hosts_.end()) ? false : i->second;
+  return ConvertHostIndexToIterator(index)->second;
 }
 
 void BlockedPopupContainer::ToggleWhitelistingForHost(size_t index) {
@@ -367,7 +402,8 @@ BlockedPopupContainer::BlockedPopupContainer(TabContents* owner,
 }
 
 void BlockedPopupContainer::UpdateView() {
-  if (blocked_popups_.empty() && unblocked_popups_.empty())
+  if (blocked_popups_.empty() && unblocked_popups_.empty() &&
+      blocked_notices_.empty())
     HideSelf();
   else
     view_->UpdateLabel();

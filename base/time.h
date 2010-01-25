@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,9 @@ class TimeDelta {
 
   // Returns the time delta in some unit. The F versions return a floating
   // point value, the "regular" versions return a rounded-down value.
+  //
+  // InMillisecondsRoundedUp() instead returns an integer that is rounded up
+  // to the next full millisecond.
   int InDays() const;
   int InHours() const;
   int InMinutes() const;
@@ -71,6 +74,7 @@ class TimeDelta {
   int64 InSeconds() const;
   double InMillisecondsF() const;
   int64 InMilliseconds() const;
+  int64 InMillisecondsRoundedUp() const;
   int64 InMicroseconds() const;
 
   TimeDelta& operator=(TimeDelta other) {
@@ -177,6 +181,15 @@ class Time {
   static const int64 kNanosecondsPerMicrosecond = 1000;
   static const int64 kNanosecondsPerSecond = kNanosecondsPerMicrosecond *
                                              kMicrosecondsPerSecond;
+
+#if !defined(OS_WIN)
+  // On Mac & Linux, this value is the delta from the Windows epoch of 1601 to
+  // the Posix delta of 1970. This is used for migrating between the old
+  // 1970-based epochs to the new 1601-based ones. It should be removed from
+  // this global header and put in the platform-specific ones when we remove the
+  // migration code.
+  static const int64 kWindowsEpochDeltaMicroseconds;
+#endif
 
   // Represents an exploded time that can be formatted nicely. This is kind of
   // like the Win32 SYSTEMTIME structure or the Unix "struct tm" with a few
@@ -304,10 +317,10 @@ class Time {
 
   // Return a new time modified by some delta.
   Time operator+(TimeDelta delta) const {
-    return us_ + delta.delta_;
+    return Time(us_ + delta.delta_);
   }
   Time operator-(TimeDelta delta) const {
-    return us_ - delta.delta_;
+    return Time(us_ - delta.delta_);
   }
 
   // Comparison operators
@@ -341,7 +354,7 @@ class Time {
   // |is_local = true| or UTC |is_local = false|.
   static Time FromExploded(bool is_local, const Exploded& exploded);
 
-  Time(int64 us) : us_(us) {
+  explicit Time(int64 us) : us_(us) {
   }
 
   // The representation of Jan 1, 1970 UTC in microseconds since the

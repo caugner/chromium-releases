@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "app/l10n_util.h"
 #include "base/basictypes.h"
+#include "base/i18n/number_formatting.h"
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/history_contents_provider.h"
@@ -82,7 +83,7 @@ std::string AutocompleteInput::TypeToString(Type type) {
   }
 }
 
-//static
+// static
 AutocompleteInput::Type AutocompleteInput::Parse(
     const std::wstring& text,
     const std::wstring& desired_tld,
@@ -113,8 +114,14 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     return URL;
   }
 
-  // If the user typed a scheme, determine our available actions based on that.
-  if (parts->scheme.is_valid()) {
+  // If the user typed a scheme, and it's HTTP or HTTPS, we know how to parse it
+  // well enough that we can fall through to the heuristics below.  If it's
+  // something else, we can just determine our action based on what we do with
+  // any input of this scheme.  In theory we could do better with some schemes
+  // (e.g. "ftp" or "view-source") but I'll wait to spend the effort on that
+  // until I run into some cases that really need it.
+  if (parts->scheme.is_nonempty() &&
+      (parsed_scheme != L"http") && (parsed_scheme != L"https")) {
     // See if we know how to handle the URL internally.
     if (URLRequest::IsHandledProtocol(WideToASCII(parsed_scheme)))
       return URL;
@@ -152,63 +159,79 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     }
   }
 
-  // The user didn't type a scheme.  Assume that this is either an HTTP URL or
-  // not a URL at all; try to determine which.
+  // Either the user didn't type a scheme, in which case we need to distinguish
+  // between an HTTP URL and a query, or the scheme is HTTP or HTTPS, in which
+  // case we should reject invalid formulations.
 
-  // It's not clear that we can reach here with an empty "host" (maybe on some
-  // kinds of garbage input?), but if we did, it couldn't be a URL.
+  // If we have an empty host it can't be a URL.
   if (!parts->host.is_nonempty())
     return QUERY;
-  // (We use the registry length later below but ask for it here so we can check
-  // the host's validity at this point.)
+
+  // Likewise, the RCDS can reject certain obviously-invalid hosts.  (We also
+  // use the registry length later below.)
   const std::wstring host(text.substr(parts->host.begin, parts->host.len));
   const size_t registry_length =
       net::RegistryControlledDomainService::GetRegistryLength(host, false);
   if (registry_length == std::wstring::npos)
     return QUERY;  // Could be a broken IP address, etc.
 
-  // A space in the "host" means this is a query.  (Technically, IE and GURL
-  // allow hostnames with spaces for wierd intranet machines, but it's supposed
-  // to be illegal and I'm not worried about users trying to type these in.)
-  if (host.find(' ') != std::wstring::npos)
+  // See if the hostname is valid per RFC 1738.  While IE and GURL allow
+  // hostnames to contain many other characters (perhaps for weird intranet
+  // machines), it's extremely unlikely that a user would be trying to type
+  // those in for anything other than a search query.
+  url_canon::CanonHostInfo host_info;
+  const std::string canonicalized_host(net::CanonicalizeHost(host, &host_info));
+  if ((host_info.family == url_canon::CanonHostInfo::NEUTRAL) &&
+      !net::IsCanonicalizedHostRFC1738Compliant(canonicalized_host))
     return QUERY;
 
-  // Presence of a password/port mean this is almost certainly a URL.  We don't
-  // treat usernames (without passwords) as indicating a URL, because this could
-  // be an email address like "user@mail.com" which is more likely a search than
-  // an HTTP auth login attempt.
-  if (parts->password.is_nonempty() || parts->port.is_nonempty())
+  // Presence of a port means this is likely a URL, if the port is really a port
+  // number.  If it's just garbage after a colon, this is a query.
+  if (parts->port.is_nonempty()) {
+    int port;
+    return (StringToInt(WideToUTF16(
+                text.substr(parts->port.begin, parts->port.len)), &port) &&
+            (port >= 0) && (port <= 65535)) ? URL : QUERY;
+  }
+
+  // Presence of a username could either indicate a URL or an email address
+  // ("user@mail.com").  E-mail addresses are likely queries so we only open
+  // this as a URL if the user explicitly typed a scheme.
+  if (parts->username.is_nonempty() && parts->scheme.is_nonempty())
+    return URL;
+
+  // Presence of a password means this is likely a URL.  Note that unless the
+  // user has typed an explicit "http://" or similar, we'll probably think that
+  // the username is some unknown scheme, and bail out in the scheme-handling
+  // code above.
+  if (parts->password.is_nonempty())
     return URL;
 
   // See if the host is an IP address.
-  url_canon::CanonHostInfo host_info;
-  net::CanonicalizeHost(host, &host_info);
   if (host_info.family == url_canon::CanonHostInfo::IPV4) {
     // If the user originally typed a host that looks like an IP address (a
     // dotted quad), they probably want to open it.  If the original input was
     // something else (like a single number), they probably wanted to search for
-    // it.  This is true even if the URL appears to have a path: "1.2/45" is
-    // more likely a search (for the answer to a math problem) than a URL.
-    if (host_info.num_ipv4_components == 4)
+    // it, unless they explicitly typed a scheme.  This is true even if the URL
+    // appears to have a path: "1.2/45" is more likely a search (for the answer
+    // to a math problem) than a URL.
+    if ((host_info.num_ipv4_components == 4) || parts->scheme.is_nonempty())
       return URL;
     return desired_tld.empty() ? UNKNOWN : REQUESTED_URL;
   }
-
-  if (host_info.family == url_canon::CanonHostInfo::IPV6) {
-    // If the user typed a valid bracketed IPv6 address, treat it as a URL.
+  if (host_info.family == url_canon::CanonHostInfo::IPV6)
     return URL;
-  }
 
   // The host doesn't look like a number, so see if the user's given us a path.
   if (parts->path.is_nonempty()) {
     // Most inputs with paths are URLs, even ones without known registries (e.g.
-    // intranet URLs).  However, if there's no known registry, and the path has
-    // a space, this is more likely a query with a slash in the first term (e.g.
-    // "ps/2 games") than a URL.  We can still open URLs with spaces in the path
-    // by escaping the space, and we will still inline autocomplete them if
-    // users have typed them in the past, but we default to searching since
-    // that's the common case.
-    return ((registry_length == 0) &&
+    // intranet URLs).  However, if the user didn't type a scheme, there's no
+    // known registry, and the path has a space, this is more likely a query
+    // with a slash in the first term (e.g. "ps/2 games") than a URL.  We can
+    // still open URLs with spaces in the path by escaping the space, and we
+    // will still inline autocomplete them if users have typed them in the past,
+    // but we default to searching since that's the common case.
+    return (!parts->scheme.is_nonempty() && (registry_length == 0) &&
             (text.substr(parts->path.begin, parts->path.len).find(' ') !=
                 std::wstring::npos)) ? UNKNOWN : URL;
   }
@@ -219,9 +242,9 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   if (parts->username.is_nonempty())
     return UNKNOWN;
 
-  // We have a bare host string.  See if it has a known TLD.  If so, it's
-  // probably a URL.
-  if (registry_length != 0)
+  // We have a bare host string.  See if it has a known TLD or the user typed a
+  // scheme.  If so, it's probably a URL.
+  if (parts->scheme.is_nonempty() || (registry_length != 0))
     return URL;
 
   // No TLD that we know about.  This could be:
@@ -646,6 +669,8 @@ AutocompleteController::~AutocompleteController() {
 void AutocompleteController::SetProfile(Profile* profile) {
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
     (*i)->SetProfile(profile);
+  input_.Clear();  // Ensure we don't try to do a "minimal_changes" query on a
+                   // different profile.
 }
 
 void AutocompleteController::Start(const std::wstring& text,
@@ -710,19 +735,26 @@ void AutocompleteController::Stop(bool clear_result) {
   updated_latest_result_ = false;
   delay_interval_has_passed_ = false;
   done_ = true;
-  if (clear_result)
+  if (clear_result) {
     result_.Reset();
+    NotificationService::current()->Notify(
+        NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
+        Source<AutocompleteController>(this),
+        Details<const AutocompleteResult>(&result_));
+    // NOTE: We don't notify AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED since
+    // we're trying to only clear the popup, not touch the edit... this is all
+    // a mess and should be cleaned up :(
+  }
   latest_result_.CopyFrom(result_);
 }
 
 void AutocompleteController::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.deletable);
-  match.provider->DeleteMatch(match);  // This will synchronously call back to
+  match.provider->DeleteMatch(match);  // This may synchronously call back to
                                        // OnProviderUpdate().
-
-  // Notify observers of this change immediately, so the UI feels responsive to
-  // the user's action.
-  CommitResult();
+  CommitResult();  // Ensure any new result gets committed immediately.  If it
+                   // was committed already or hasn't been modified, this is
+                   // harmless.
 }
 
 void AutocompleteController::OnProviderUpdate(bool updated_matches) {
@@ -759,7 +791,7 @@ void AutocompleteController::UpdateLatestResult(bool is_synchronous_pass) {
     }
 
     NotificationService::current()->Notify(
-        NotificationType::AUTOCOMPLETE_CONTROLLER_SYNCHRONOUS_MATCHES_AVAILABLE,
+        NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
         Source<AutocompleteController>(this),
         Details<const AutocompleteResult>(&latest_result_));
   }
@@ -776,7 +808,6 @@ void AutocompleteController::UpdateLatestResult(bool is_synchronous_pass) {
 
 void AutocompleteController::DelayTimerFired() {
   delay_interval_has_passed_ = true;
-  update_delay_timer_.Reset();
   CommitResult();
 }
 
@@ -796,6 +827,13 @@ void AutocompleteController::CommitResult() {
   result_.CopyFrom(latest_result_);
   NotificationService::current()->Notify(
       NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
+      Source<AutocompleteController>(this),
+      Details<const AutocompleteResult>(&result_));
+  // This notification must be sent after the other so the popup has time to
+  // update its state before the edit calls into it.
+  // TODO(pkasting): Eliminate this ordering requirement.
+  NotificationService::current()->Notify(
+      NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
       Source<AutocompleteController>(this),
       Details<const AutocompleteResult>(&result_));
   if (!done_)
@@ -864,12 +902,12 @@ void AutocompleteController::AddHistoryContentsShortcut() {
   } else {
     // We can report exact matches when there aren't too many.
     std::vector<size_t> content_param_offsets;
-    match.contents =
-        l10n_util::GetStringF(IDS_OMNIBOX_RECENT_HISTORY,
-                              FormatNumber(history_contents_provider_->
-                                           db_match_count()),
-                              input_.text(),
-                              &content_param_offsets);
+    match.contents = l10n_util::GetStringF(
+        IDS_OMNIBOX_RECENT_HISTORY,
+        UTF16ToWide(base::FormatNumber(history_contents_provider_->
+                                           db_match_count())),
+        input_.text(),
+        &content_param_offsets);
 
     // content_param_offsets is ordered based on supplied params, we expect
     // that the second one contains the query (first is the number).

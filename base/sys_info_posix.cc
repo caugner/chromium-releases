@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/sys_info.h"
-#include "base/basictypes.h"
 
 #include <errno.h>
 #include <string.h>
@@ -12,6 +11,7 @@
 #include <unistd.h>
 
 #if defined(OS_MACOSX)
+#include <ApplicationServices/ApplicationServices.h>
 #include <mach/mach_host.h>
 #include <mach/mach_init.h>
 #endif
@@ -21,8 +21,10 @@
 #include <sys/sysctl.h>
 #endif
 
+#include "base/basictypes.h"
+#include "base/file_util.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace base {
 
@@ -51,7 +53,8 @@ int SysInfo::NumberOfProcessors() {
 
 // static
 int64 SysInfo::AmountOfPhysicalMemory() {
-  // _SC_PHYS_PAGES is not part of POSIX and not available on OS X
+  // _SC_PHYS_PAGES is not part of POSIX and not available on OS X or
+  // FreeBSD
 #if defined(OS_MACOSX)
   struct host_basic_info hostinfo;
   mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
@@ -66,6 +69,10 @@ int64 SysInfo::AmountOfPhysicalMemory() {
   }
 
   return static_cast<int64>(hostinfo.max_mem);
+#elif defined(OS_FREEBSD)
+  // TODO(benl): I have no idea how to get this
+  NOTIMPLEMENTED();
+  return 0;
 #else
   long pages = sysconf(_SC_PHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
@@ -79,9 +86,9 @@ int64 SysInfo::AmountOfPhysicalMemory() {
 }
 
 // static
-int64 SysInfo::AmountOfFreeDiskSpace(const std::wstring& path) {
+int64 SysInfo::AmountOfFreeDiskSpace(const FilePath& path) {
   struct statvfs stats;
-  if (statvfs(WideToUTF8(path).c_str(), &stats) != 0) {
+  if (statvfs(path.value().c_str(), &stats) != 0) {
     return -1;
   }
   return static_cast<int64>(stats.f_bavail) * stats.f_frsize;
@@ -98,7 +105,7 @@ std::wstring SysInfo::GetEnvVar(const wchar_t* var) {
   std::string var_utf8 = WideToUTF8(std::wstring(var));
   char* value = getenv(var_utf8.c_str());
   if (!value) {
-    return L"";
+    return std::wstring();
   } else {
     return UTF8ToWide(value);
   }
@@ -136,18 +143,83 @@ std::string SysInfo::CPUArchitecture() {
 
 // static
 void SysInfo::GetPrimaryDisplayDimensions(int* width, int* height) {
+#if defined(OS_MACOSX)
+  CGDirectDisplayID main_display = CGMainDisplayID();
+  if (width)
+    *width = CGDisplayPixelsWide(main_display);
+  if (height)
+    *height = CGDisplayPixelsHigh(main_display);
+#else
+  // TODO(port): http://crbug.com/21732
   NOTIMPLEMENTED();
+  if (width)
+    *width = 0;
+  if (height)
+    *height = 0;
+#endif
 }
 
 // static
 int SysInfo::DisplayCount() {
+#if defined(OS_MACOSX)
+  // Don't just return the number of online displays.  It includes displays
+  // that mirror other displays, which are not desired in the count.  It's
+  // tempting to use the count returned by CGGetActiveDisplayList, but active
+  // displays exclude sleeping displays, and those are desired in the count.
+
+  // It would be ridiculous to have this many displays connected, but
+  // CGDirectDisplayID is just an integer, so supporting up to this many
+  // doesn't hurt.
+  CGDirectDisplayID online_displays[128];
+  CGDisplayCount online_display_count = 0;
+  if (CGGetOnlineDisplayList(arraysize(online_displays),
+                             online_displays,
+                             &online_display_count) != kCGErrorSuccess) {
+    // 1 is a reasonable assumption.
+    return 1;
+  }
+
+  int display_count = 0;
+  for (CGDisplayCount online_display_index = 0;
+       online_display_index < online_display_count;
+       ++online_display_index) {
+    CGDirectDisplayID online_display = online_displays[online_display_index];
+    if (CGDisplayMirrorsDisplay(online_display) == kCGNullDirectDisplay) {
+      // If this display doesn't mirror any other, include it in the count.
+      // The primary display in a mirrored set will be counted, but those that
+      // mirror it will not be.
+      ++display_count;
+    }
+  }
+
+  return display_count;
+#else
+  // TODO(port): http://crbug.com/21732
   NOTIMPLEMENTED();
   return 1;
+#endif
 }
 
 // static
 size_t SysInfo::VMAllocationGranularity() {
   return getpagesize();
 }
+
+#if defined(OS_LINUX)
+// static
+size_t SysInfo::MaxSharedMemorySize() {
+  static size_t limit;
+  static bool limit_valid = false;
+
+  if (!limit_valid) {
+    std::string contents;
+    file_util::ReadFileToString(FilePath("/proc/sys/kernel/shmmax"), &contents);
+    limit = strtoul(contents.c_str(), NULL, 0);
+    limit_valid = true;
+  }
+
+  return limit;
+}
+#endif
 
 }  // namespace base

@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
-#include <fts.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,6 +17,10 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#if defined(OS_MACOSX)
+#include <AvailabilityMacros.h>
+#endif
 
 #include <fstream>
 
@@ -31,88 +34,24 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
-#include "unicode/coll.h"
-
-namespace {
-
-bool IsDirectory(const FTSENT* file) {
-  switch (file->fts_info) {
-    case FTS_D:
-    case FTS_DC:
-    case FTS_DNR:
-    case FTS_DOT:
-    case FTS_DP:
-      return true;
-    default:
-      return false;
-  }
-}
-
-class LocaleAwareComparator {
- public:
-  LocaleAwareComparator() {
-    UErrorCode error_code = U_ZERO_ERROR;
-    // Use the default collator. The default locale should have been properly
-    // set by the time this constructor is called.
-    collator_.reset(icu::Collator::createInstance(error_code));
-    DCHECK(U_SUCCESS(error_code));
-    // Make it case-sensitive.
-    collator_->setStrength(icu::Collator::TERTIARY);
-    // Note: We do not set UCOL_NORMALIZATION_MODE attribute. In other words, we
-    // do not pay performance penalty to guarantee sort order correctness for
-    // non-FCD (http://unicode.org/notes/tn5/#FCD) file names. This should be a
-    // reasonable tradeoff because such file names should be rare and the sort
-    // order doesn't change much anyway.
-  }
-
-  // Note: A similar function is available in l10n_util.
-  // We cannot use it because base should not depend on l10n_util.
-  // TODO(yuzo): Move some of l10n_util to base.
-  int Compare(const string16& a, const string16& b) {
-    // We are not sure if Collator::compare is thread-safe.
-    // Use an AutoLock just in case.
-    AutoLock auto_lock(lock_);
-
-    UErrorCode error_code = U_ZERO_ERROR;
-    UCollationResult result = collator_->compare(
-        static_cast<const UChar*>(a.c_str()),
-        static_cast<int>(a.length()),
-        static_cast<const UChar*>(b.c_str()),
-        static_cast<int>(b.length()),
-        error_code);
-    DCHECK(U_SUCCESS(error_code));
-    return result;
-  }
-
- private:
-  scoped_ptr<icu::Collator> collator_;
-  Lock lock_;
-  friend struct DefaultSingletonTraits<LocaleAwareComparator>;
-
-  DISALLOW_COPY_AND_ASSIGN(LocaleAwareComparator);
-};
-
-int CompareFiles(const FTSENT** a, const FTSENT** b) {
-  // Order lexicographically with directories before other files.
-  const bool a_is_dir = IsDirectory(*a);
-  const bool b_is_dir = IsDirectory(*b);
-  if (a_is_dir != b_is_dir)
-    return a_is_dir ? -1 : 1;
-
-  // On linux, the file system encoding is not defined. We assume
-  // SysNativeMBToWide takes care of it.
-  //
-  // ICU's collator can take strings in OS native encoding. But we convert the
-  // strings to UTF-16 ourselves to ensure conversion consistency.
-  // TODO(yuzo): Perhaps we should define SysNativeMBToUTF16?
-  return Singleton<LocaleAwareComparator>()->Compare(
-      WideToUTF16(base::SysNativeMBToWide((*a)->fts_name)),
-      WideToUTF16(base::SysNativeMBToWide((*b)->fts_name)));
-}
-
-}  // namespace
+#include "base/utf_string_conversions.h"
 
 namespace file_util {
+
+#if defined(OS_FREEBSD) || \
+    (defined(OS_MACOSX) && \
+     MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5)
+typedef struct stat stat_wrapper_t;
+static int CallStat(const char *path, stat_wrapper_t *sb) {
+  return stat(path, sb);
+}
+#else
+typedef struct stat64 stat_wrapper_t;
+static int CallStat(const char *path, stat_wrapper_t *sb) {
+  return stat64(path, sb);
+}
+#endif
+
 
 #if defined(GOOGLE_CHROME_BUILD)
 static const char* kTempFileName = "com.google.chrome.XXXXXX";
@@ -122,9 +61,9 @@ static const char* kTempFileName = "org.chromium.XXXXXX";
 
 std::wstring GetDirectoryFromPath(const std::wstring& path) {
   if (EndsWithSeparator(path)) {
-    std::wstring dir = path;
-    TrimTrailingSeparator(&dir);
-    return dir;
+    return FilePath::FromWStringHack(path)
+        .StripTrailingSeparators()
+        .ToWStringHack();
   } else {
     char full_path[PATH_MAX];
     base::strlcpy(full_path, WideToUTF8(path).c_str(), arraysize(full_path));
@@ -146,6 +85,10 @@ int CountFilesCreatedAfter(const FilePath& path,
 
   DIR* dir = opendir(path.value().c_str());
   if (dir) {
+#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD)
+  #error Depending on the definition of struct dirent, additional space for \
+      pathname may be needed
+#endif
     struct dirent ent_buf;
     struct dirent* ent;
     while (readdir_r(dir, &ent_buf, &ent) == 0 && ent) {
@@ -153,10 +96,10 @@ int CountFilesCreatedAfter(const FilePath& path,
           (strcmp(ent->d_name, "..") == 0))
         continue;
 
-      struct stat64 st;
-      int test = stat64(path.Append(ent->d_name).value().c_str(), &st);
+      stat_wrapper_t st;
+      int test = CallStat(path.Append(ent->d_name).value().c_str(), &st);
       if (test != 0) {
-        LOG(ERROR) << "stat64 failed: " << strerror(errno);
+        PLOG(ERROR) << "stat64 failed";
         continue;
       }
       // Here, we use Time::TimeT(), which discards microseconds. This
@@ -188,8 +131,8 @@ int CountFilesCreatedAfter(const FilePath& path,
 // here.
 bool Delete(const FilePath& path, bool recursive) {
   const char* path_str = path.value().c_str();
-  struct stat64 file_info;
-  int test = stat64(path_str, &file_info);
+  stat_wrapper_t file_info;
+  int test = CallStat(path_str, &file_info);
   if (test != 0) {
     // The Windows version defines this condition as success.
     bool ret = (errno == ENOENT || errno == ENOTDIR);
@@ -201,47 +144,45 @@ bool Delete(const FilePath& path, bool recursive) {
     return (rmdir(path_str) == 0);
 
   bool success = true;
-  int ftsflags = FTS_PHYSICAL | FTS_NOSTAT;
-  char top_dir[PATH_MAX];
-  if (base::strlcpy(top_dir, path_str,
-                    arraysize(top_dir)) >= arraysize(top_dir)) {
-    return false;
+  std::stack<std::string> directories;
+  directories.push(path.value());
+  FileEnumerator traversal(path, true, static_cast<FileEnumerator::FILE_TYPE>(
+        FileEnumerator::FILES | FileEnumerator::DIRECTORIES |
+        FileEnumerator::SHOW_SYM_LINKS));
+  for (FilePath current = traversal.Next(); success && !current.empty();
+       current = traversal.Next()) {
+    FileEnumerator::FindInfo info;
+    traversal.GetFindInfo(&info);
+
+    if (S_ISDIR(info.stat.st_mode))
+      directories.push(current.value());
+    else
+      success = (unlink(current.value().c_str()) == 0);
   }
-  char* dir_list[2] = { top_dir, NULL };
-  FTS* fts = fts_open(dir_list, ftsflags, NULL);
-  if (fts) {
-    FTSENT* fts_ent = fts_read(fts);
-    while (success && fts_ent != NULL) {
-      switch (fts_ent->fts_info) {
-        case FTS_DNR:
-        case FTS_ERR:
-          // log error
-          success = false;
-          continue;
-          break;
-        case FTS_DP:
-          success = (rmdir(fts_ent->fts_accpath) == 0);
-          break;
-        case FTS_D:
-          break;
-        case FTS_NSOK:
-        case FTS_F:
-        case FTS_SL:
-        case FTS_SLNONE:
-          success = (unlink(fts_ent->fts_accpath) == 0);
-          break;
-        default:
-          DCHECK(false);
-          break;
-      }
-      fts_ent = fts_read(fts);
-    }
-    fts_close(fts);
+
+  while (success && !directories.empty()) {
+    FilePath dir = FilePath(directories.top());
+    directories.pop();
+    success = (rmdir(dir.value().c_str()) == 0);
   }
+
   return success;
 }
 
 bool Move(const FilePath& from_path, const FilePath& to_path) {
+  // Windows compatibility: if to_path exists, from_path and to_path
+  // must be the same type, either both files, or both directories.
+  stat_wrapper_t to_file_info;
+  if (CallStat(to_path.value().c_str(), &to_file_info) == 0) {
+    stat_wrapper_t from_file_info;
+    if (CallStat(from_path.value().c_str(), &from_file_info) == 0) {
+      if (S_ISDIR(to_file_info.st_mode) != S_ISDIR(from_file_info.st_mode))
+        return false;
+    } else {
+      return false;
+    }
+  }
+
   if (rename(from_path.value().c_str(), to_path.value().c_str()) == 0)
     return true;
 
@@ -272,108 +213,105 @@ bool CopyDirectory(const FilePath& from_path,
     return false;
   }
 
-  char* dir_list[] = { top_dir, NULL };
-  FTS* fts = fts_open(dir_list, FTS_PHYSICAL | FTS_NOSTAT, NULL);
-  if (!fts) {
-    LOG(ERROR) << "fts_open failed: " << strerror(errno);
+  // This function does not properly handle destinations within the source
+  FilePath real_to_path = to_path;
+  if (PathExists(real_to_path)) {
+    if (!AbsolutePath(&real_to_path))
+      return false;
+  } else {
+    real_to_path = real_to_path.DirName();
+    if (!AbsolutePath(&real_to_path))
+      return false;
+  }
+  FilePath real_from_path = from_path;
+  if (!AbsolutePath(&real_from_path))
     return false;
+  if (real_to_path.value().size() >= real_from_path.value().size() &&
+      real_to_path.value().compare(0, real_from_path.value().size(),
+      real_from_path.value()) == 0)
+    return false;
+
+  bool success = true;
+  FileEnumerator::FILE_TYPE traverse_type =
+      static_cast<FileEnumerator::FILE_TYPE>(FileEnumerator::FILES |
+      FileEnumerator::SHOW_SYM_LINKS);
+  if (recursive)
+    traverse_type = static_cast<FileEnumerator::FILE_TYPE>(
+        traverse_type | FileEnumerator::DIRECTORIES);
+  FileEnumerator traversal(from_path, recursive, traverse_type);
+
+  // We have to mimic windows behavior here. |to_path| may not exist yet,
+  // start the loop with |to_path|.
+  FileEnumerator::FindInfo info;
+  FilePath current = from_path;
+  if (stat(from_path.value().c_str(), &info.stat) < 0) {
+    LOG(ERROR) << "CopyDirectory() couldn't stat source directory: " <<
+        from_path.value() << " errno = " << errno;
+    success = false;
+  }
+  struct stat to_path_stat;
+  FilePath from_path_base = from_path;
+  if (recursive && stat(to_path.value().c_str(), &to_path_stat) == 0 &&
+      S_ISDIR(to_path_stat.st_mode)) {
+    // If the destination already exists and is a directory, then the
+    // top level of source needs to be copied.
+    from_path_base = from_path.DirName();
   }
 
-  int error = 0;
-  FTSENT* ent;
-  while (!error && (ent = fts_read(fts)) != NULL) {
-    // ent->fts_path is the source path, including from_path, so paste
+  // The Windows version of this function assumes that non-recursive calls
+  // will always have a directory for from_path.
+  DCHECK(recursive || S_ISDIR(info.stat.st_mode));
+
+  while (success && !current.empty()) {
+    // current is the source path, including from_path, so paste
     // the suffix after from_path onto to_path to create the target_path.
-    std::string suffix(&ent->fts_path[from_path.value().size()]);
+    std::string suffix(&current.value().c_str()[from_path_base.value().size()]);
     // Strip the leading '/' (if any).
     if (!suffix.empty()) {
       DCHECK_EQ('/', suffix[0]);
       suffix.erase(0, 1);
     }
     const FilePath target_path = to_path.Append(suffix);
-    switch (ent->fts_info) {
-      case FTS_D:  // Preorder directory.
-        // If we encounter a subdirectory in a non-recursive copy, prune it
-        // from the traversal.
-        if (!recursive && ent->fts_level > 0) {
-          if (fts_set(fts, ent, FTS_SKIP) != 0)
-            error = errno;
-          continue;
-        }
 
-        // Try creating the target dir, continuing on it if it exists already.
-        if (mkdir(target_path.value().c_str(), 0700) != 0) {
-          if (errno != EEXIST)
-            error = errno;
-        }
-        break;
-      case FTS_F:     // Regular file.
-      case FTS_NSOK:  // File, no stat info requested.
-        errno = 0;
-        if (!CopyFile(FilePath(ent->fts_path), target_path))
-          error = errno ? errno : EINVAL;
-        break;
-      case FTS_DP:   // Postorder directory.
-      case FTS_DOT:  // "." or ".."
-        // Skip it.
-        continue;
-      case FTS_DC:   // Directory causing a cycle.
-        // Skip this branch.
-        if (fts_set(fts, ent, FTS_SKIP) != 0)
-          error = errno;
-        break;
-      case FTS_DNR:  // Directory cannot be read.
-      case FTS_ERR:  // Error.
-      case FTS_NS:   // Stat failed.
-        // Abort with the error.
-        error = ent->fts_errno;
-        break;
-      case FTS_SL:      // Symlink.
-      case FTS_SLNONE:  // Symlink with broken target.
-        LOG(WARNING) << "CopyDirectory() skipping symbolic link: " <<
-            ent->fts_path;
-        continue;
-      case FTS_DEFAULT:  // Some other sort of file.
-        LOG(WARNING) << "CopyDirectory() skipping file of unknown type: " <<
-            ent->fts_path;
-        continue;
-      default:
-        NOTREACHED();
-        continue;  // Hope for the best!
+    if (S_ISDIR(info.stat.st_mode)) {
+      if (mkdir(target_path.value().c_str(), info.stat.st_mode & 01777) != 0 &&
+          errno != EEXIST) {
+        LOG(ERROR) << "CopyDirectory() couldn't create directory: " <<
+            target_path.value() << " errno = " << errno;
+        success = false;
+      }
+    } else if (S_ISREG(info.stat.st_mode)) {
+      if (!CopyFile(current, target_path)) {
+        LOG(ERROR) << "CopyDirectory() couldn't create file: " <<
+            target_path.value();
+        success = false;
+      }
+    } else {
+      LOG(WARNING) << "CopyDirectory() skipping non-regular file: " <<
+          current.value();
     }
-  }
-  // fts_read may have returned NULL and set errno to indicate an error.
-  if (!error && errno != 0)
-    error = errno;
 
-  if (!fts_close(fts)) {
-    // If we already have an error, let's use that error instead of the error
-    // fts_close set.
-    if (!error)
-      error = errno;
+    current = traversal.Next();
+    traversal.GetFindInfo(&info);
   }
 
-  if (error) {
-    LOG(ERROR) << "CopyDirectory(): " << strerror(error);
-    return false;
-  }
-  return true;
+  return success;
 }
 
 bool PathExists(const FilePath& path) {
-  struct stat64 file_info;
-  return (stat64(path.value().c_str(), &file_info) == 0);
+  stat_wrapper_t file_info;
+  return CallStat(path.value().c_str(), &file_info) == 0;
 }
 
 bool PathIsWritable(const FilePath& path) {
   FilePath test_path(path);
-  struct stat64 file_info;
-  if (stat64(test_path.value().c_str(), &file_info) != 0) {
+  stat_wrapper_t file_info;
+  if (CallStat(test_path.value().c_str(), &file_info) != 0) {
     // If the path doesn't exist, test the parent dir.
     test_path = test_path.DirName();
     // If the parent dir doesn't exist, then return false (the path is not
     // directly writable).
-    if (stat64(test_path.value().c_str(), &file_info) != 0)
+    if (CallStat(test_path.value().c_str(), &file_info) != 0)
       return false;
   }
   if (S_IWOTH & file_info.st_mode)
@@ -386,8 +324,8 @@ bool PathIsWritable(const FilePath& path) {
 }
 
 bool DirectoryExists(const FilePath& path) {
-  struct stat64 file_info;
-  if (stat64(path.value().c_str(), &file_info) == 0)
+  stat_wrapper_t file_info;
+  if (CallStat(path.value().c_str(), &file_info) == 0)
     return S_ISDIR(file_info.st_mode);
   return false;
 }
@@ -433,10 +371,8 @@ bool ReadFromFD(int fd, char* buffer, size_t bytes) {
 }
 
 // Creates and opens a temporary file in |directory|, returning the
-// file descriptor.  |path| is set to the temporary file path.
-// Note TODO(erikkay) comment in header for BlahFileName() calls; the
-// intent is to rename these files BlahFile() (since they create
-// files, not filenames).  This function does NOT unlink() the file.
+// file descriptor. |path| is set to the temporary file path.
+// This function does NOT unlink() the file.
 int CreateAndOpenFdForTemporaryFile(FilePath directory, FilePath* path) {
   *path = directory.Append(kTempFileName);
   const std::string& tmpdir_string = path->value();
@@ -446,7 +382,7 @@ int CreateAndOpenFdForTemporaryFile(FilePath directory, FilePath* path) {
   return mkstemp(buffer);
 }
 
-bool CreateTemporaryFileName(FilePath* path) {
+bool CreateTemporaryFile(FilePath* path) {
   FilePath directory;
   if (!GetTempDir(&directory))
     return false;
@@ -473,11 +409,9 @@ FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* path) {
   return fdopen(fd, "a+");
 }
 
-bool CreateTemporaryFileNameInDir(const std::wstring& dir,
-                                  std::wstring* temp_file) {
-  // Not implemented yet.
-  NOTREACHED();
-  return false;
+bool CreateTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
+  int fd = CreateAndOpenFdForTemporaryFile(dir, temp_file);
+  return ((fd >= 0) && !close(fd));
 }
 
 bool CreateNewTempDirectory(const FilePath::StringType& prefix,
@@ -520,11 +454,12 @@ bool CreateDirectory(const FilePath& full_path) {
 }
 
 bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
-  struct stat64 file_info;
-  if (stat64(file_path.value().c_str(), &file_info) != 0)
+  stat_wrapper_t file_info;
+  if (CallStat(file_path.value().c_str(), &file_info) != 0)
     return false;
   results->is_directory = S_ISDIR(file_info.st_mode);
   results->size = file_info.st_size;
+  results->last_modified = base::Time::FromTimeT(file_info.st_mtime);
   return true;
 }
 
@@ -561,20 +496,23 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   if (fd < 0)
     return -1;
 
-  // Allow for partial writes
-  ssize_t bytes_written_total = 0;
-  do {
-    ssize_t bytes_written_partial =
-      HANDLE_EINTR(write(fd, data + bytes_written_total,
-                         size - bytes_written_total));
-    if (bytes_written_partial < 0) {
-      HANDLE_EINTR(close(fd));
-      return -1;
-    }
-    bytes_written_total += bytes_written_partial;
-  } while (bytes_written_total < size);
-
+  int rv = WriteFileDescriptor(fd, data, size);
   HANDLE_EINTR(close(fd));
+  return rv;
+}
+
+int WriteFileDescriptor(const int fd, const char* data, int size) {
+  // Allow for partial writes.
+  ssize_t bytes_written_total = 0;
+  for (ssize_t bytes_written_partial = 0; bytes_written_total < size;
+       bytes_written_total += bytes_written_partial) {
+    bytes_written_partial =
+        HANDLE_EINTR(write(fd, data + bytes_written_total,
+                           size - bytes_written_total));
+    if (bytes_written_partial < 0)
+      return -1;
+  }
+
   return bytes_written_total;
 }
 
@@ -601,10 +539,11 @@ bool SetCurrentDirectory(const FilePath& path) {
 FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type)
-    : recursive_(recursive),
+    : root_path_(root_path),
+      recursive_(recursive),
       file_type_(file_type),
       is_in_find_op_(false),
-      fts_(NULL) {
+      current_directory_entry_(0) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
   pending_paths_.push(root_path);
@@ -614,101 +553,114 @@ FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type,
                                const FilePath::StringType& pattern)
-    : recursive_(recursive),
+    : root_path_(root_path),
+      recursive_(recursive),
       file_type_(file_type),
-      pattern_(root_path.value()),
+      pattern_(root_path.Append(pattern)),
       is_in_find_op_(false),
-      fts_(NULL) {
+      current_directory_entry_(0) {
   // INCLUDE_DOT_DOT must not be specified if recursive.
   DCHECK(!(recursive && (INCLUDE_DOT_DOT & file_type_)));
-  // The Windows version of this code only matches against items in the top-most
-  // directory, and we're comparing fnmatch against full paths, so this is the
-  // easiest way to get the right pattern.
-  pattern_ = pattern_.Append(pattern);
+  // The Windows version of this code appends the pattern to the root_path,
+  // potentially only matching against items in the top-most directory.
+  // Do the same here.
+  if (pattern.size() == 0)
+    pattern_ = FilePath();
   pending_paths_.push(root_path);
 }
 
 FileEnumerator::~FileEnumerator() {
-  if (fts_)
-    fts_close(fts_);
 }
 
 void FileEnumerator::GetFindInfo(FindInfo* info) {
   DCHECK(info);
 
-  if (!is_in_find_op_)
+  if (current_directory_entry_ >= directory_entries_.size())
     return;
 
-  memcpy(&(info->stat), fts_ent_->fts_statp, sizeof(info->stat));
-  info->filename.assign(fts_ent_->fts_name);
+  DirectoryEntryInfo* cur_entry = &directory_entries_[current_directory_entry_];
+  memcpy(&(info->stat), &(cur_entry->stat), sizeof(info->stat));
+  info->filename.assign(cur_entry->filename.value());
 }
 
-// As it stands, this method calls itself recursively when the next item of
-// the fts enumeration doesn't match (type, pattern, etc.).  In the case of
-// large directories with many files this can be quite deep.
-// TODO(erikkay) - get rid of this recursive pattern
 FilePath FileEnumerator::Next() {
-  if (!is_in_find_op_) {
+  ++current_directory_entry_;
+
+  // While we've exhausted the entries in the current directory, do the next
+  while (current_directory_entry_ >= directory_entries_.size()) {
     if (pending_paths_.empty())
       return FilePath();
 
-    // The last find FindFirstFile operation is done, prepare a new one.
     root_path_ = pending_paths_.top();
     root_path_ = root_path_.StripTrailingSeparators();
     pending_paths_.pop();
 
-    // Start a new find operation.
-    int ftsflags = FTS_LOGICAL | FTS_SEEDOT;
-    char top_dir[PATH_MAX];
-    base::strlcpy(top_dir, root_path_.value().c_str(), arraysize(top_dir));
-    char* dir_list[2] = { top_dir, NULL };
-    fts_ = fts_open(dir_list, ftsflags, CompareFiles);
-    if (!fts_)
-      return Next();
-    is_in_find_op_ = true;
-  }
+    std::vector<DirectoryEntryInfo> entries;
+    if (!ReadDirectory(&entries, root_path_, file_type_ & SHOW_SYM_LINKS))
+      continue;
 
-  fts_ent_ = fts_read(fts_);
-  if (fts_ent_ == NULL) {
-    fts_close(fts_);
-    fts_ = NULL;
-    is_in_find_op_ = false;
-    return Next();
-  }
+    directory_entries_.clear();
+    current_directory_entry_ = 0;
+    for (std::vector<DirectoryEntryInfo>::const_iterator
+        i = entries.begin(); i != entries.end(); ++i) {
+      FilePath full_path = root_path_.Append(i->filename);
+      if (ShouldSkip(full_path))
+        continue;
 
-  // Level 0 is the top, which is always skipped.
-  if (fts_ent_->fts_level == 0)
-    return Next();
+      if (pattern_.value().size() &&
+          fnmatch(pattern_.value().c_str(), full_path.value().c_str(),
+              FNM_NOESCAPE))
+        continue;
 
-  // Patterns are only matched on the items in the top-most directory.
-  // (see Windows implementation)
-  if (fts_ent_->fts_level == 1 && pattern_.value().length() > 0) {
-    if (fnmatch(pattern_.value().c_str(), fts_ent_->fts_path, 0) != 0) {
-      if (fts_ent_->fts_info == FTS_D)
-        fts_set(fts_, fts_ent_, FTS_SKIP);
-      return Next();
+      if (recursive_ && S_ISDIR(i->stat.st_mode))
+        pending_paths_.push(full_path);
+
+      if ((S_ISDIR(i->stat.st_mode) && (file_type_ & DIRECTORIES)) ||
+          (!S_ISDIR(i->stat.st_mode) && (file_type_ & FILES)))
+        directory_entries_.push_back(*i);
     }
   }
 
-  FilePath cur_file(fts_ent_->fts_path);
-  if (ShouldSkip(cur_file))
-    return Next();
+  return root_path_.Append(directory_entries_[current_directory_entry_
+      ].filename);
+}
 
-  if (fts_ent_->fts_info == FTS_D) {
-    // If not recursive, then prune children.
-    if (!recursive_)
-      fts_set(fts_, fts_ent_, FTS_SKIP);
-    return (file_type_ & FileEnumerator::DIRECTORIES) ? cur_file : Next();
-  } else if (fts_ent_->fts_info == FTS_F) {
-    return (file_type_ & FileEnumerator::FILES) ? cur_file : Next();
-  } else if (fts_ent_->fts_info == FTS_DOT) {
-    if ((file_type_ & FileEnumerator::DIRECTORIES) && IsDotDot(cur_file)) {
-      return cur_file;
+bool FileEnumerator::ReadDirectory(std::vector<DirectoryEntryInfo>* entries,
+                                   const FilePath& source, bool show_links) {
+  DIR* dir = opendir(source.value().c_str());
+  if (!dir)
+    return false;
+
+#if !defined(OS_LINUX) && !defined(OS_MACOSX) && !defined(OS_FREEBSD)
+  #error Depending on the definition of struct dirent, additional space for \
+      pathname may be needed
+#endif
+  struct dirent dent_buf;
+  struct dirent* dent;
+  while (readdir_r(dir, &dent_buf, &dent) == 0 && dent) {
+    DirectoryEntryInfo info;
+    info.filename = FilePath(dent->d_name);
+
+    FilePath full_name = source.Append(dent->d_name);
+    int ret;
+    if (show_links)
+      ret = lstat(full_name.value().c_str(), &info.stat);
+    else
+      ret = stat(full_name.value().c_str(), &info.stat);
+    if (ret < 0) {
+      // Print the stat() error message unless it was ENOENT and we're
+      // following symlinks.
+      if (!(ret == ENOENT && !show_links)) {
+        PLOG(ERROR) << "Couldn't stat "
+                    << source.Append(dent->d_name).value();
+      }
+      memset(&info.stat, 0, sizeof(info.stat));
     }
-    return Next();
+    entries->push_back(info);
   }
-  // TODO(erikkay) - verify that the other fts_info types aren't interesting
-  return Next();
+
+  closedir(dir);
+  return true;
 }
 
 ///////////////////////////////////////////////

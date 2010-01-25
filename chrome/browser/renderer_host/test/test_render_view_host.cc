@@ -6,16 +6,15 @@
 
 #include "base/gfx/rect.h"
 #include "chrome/browser/renderer_host/backing_store.h"
-#include "chrome/browser/tab_contents/test_web_contents.h"
+#include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/common/render_messages.h"
 
 using webkit_glue::PasswordForm;
 
 TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                                        RenderViewHostDelegate* delegate,
-                                       int routing_id,
-                                       base::WaitableEvent* modal_dialog_event)
-    : RenderViewHost(instance, delegate, routing_id, modal_dialog_event),
+                                       int routing_id)
+    : RenderViewHost(instance, delegate, routing_id),
       render_view_created_(false),
       delete_counter_(NULL) {
   set_view(new TestRenderWidgetHostView(this));
@@ -32,6 +31,7 @@ TestRenderViewHost::~TestRenderViewHost() {
 bool TestRenderViewHost::CreateRenderView() {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
+  process()->ViewCreated();
   return true;
 }
 
@@ -84,6 +84,10 @@ gfx::Rect TestRenderWidgetHostView::GetWindowRect() {
 
 gfx::Rect TestRenderWidgetHostView::GetRootWindowRect() {
   return gfx::Rect();
+}
+
+void TestRenderWidgetHostView::SetActive(bool active) {
+  // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
 #endif
 

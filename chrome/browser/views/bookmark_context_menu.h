@@ -6,19 +6,19 @@
 #define CHROME_BROWSER_VIEWS_BOOKMARK_CONTEXT_MENU_H_
 
 #include "chrome/browser/bookmarks/bookmark_context_menu_controller.h"
-#include "views/controls/menu/chrome_menu.h"
+#include "views/controls/menu/menu_delegate.h"
 
 class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
                             public views::MenuDelegate {
  public:
   BookmarkContextMenu(
-      gfx::NativeView parent_window,
+      gfx::NativeWindow parent_window,
       Profile* profile,
       PageNavigator* page_navigator,
       const BookmarkNode* parent,
       const std::vector<const BookmarkNode*>& selection,
       BookmarkContextMenuController::ConfigurationType configuration);
-  virtual ~BookmarkContextMenu() {}
+  virtual ~BookmarkContextMenu();
 
   // Shows the context menu at the specified point.
   void RunMenuAt(const gfx::Point& point);
@@ -41,7 +41,7 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerDelegate,
   scoped_ptr<BookmarkContextMenuController> controller_;
 
   // The parent of dialog boxes opened from the context menu.
-  gfx::NativeView parent_window_;
+  gfx::NativeWindow parent_window_;
 
   // The menu itself.
   scoped_ptr<views::MenuItemView> menu_;

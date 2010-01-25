@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
+#include "chrome/browser/browser_main.h"
 
 #include <algorithm>
 
@@ -13,6 +13,7 @@
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/lazy_instance.h"
+#include "base/linux_util.h"
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -30,14 +31,17 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/first_run.h"
+#include "chrome/browser/memory_purger.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/net/metadata_url_request.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/plugin_service.h"
+#include "chrome/browser/privacy_blacklist/blacklist.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
@@ -49,6 +53,7 @@
 #include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/result_codes.h"
@@ -56,22 +61,25 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/net_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/http/http_network_session.h"
+#include "net/socket/client_socket_pool_base.h"
 
 #if defined(OS_POSIX)
 // TODO(port): get rid of this include. It's used just to provide declarations
 // and stub definitions for classes we encouter during the porting effort.
-#include "chrome/common/temp_scaffolding_stubs.h"
 #include <errno.h>
 #include <signal.h>
 #include <sys/resource.h>
 #endif
 
-#if defined(OS_LINUX)
+#if defined(USE_LINUX_BREAKPAD)
 #include "chrome/app/breakpad_linux.h"
+#endif
+
+#if defined(OS_LINUX)
+#include "chrome/common/gtk_util.h"
 #endif
 
 // TODO(port): several win-only methods have been pulled out of this, but
@@ -94,6 +102,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/rlz/rlz.h"
+#include "chrome/browser/views/blacklist_error_dialog.h"
 #include "chrome/browser/views/user_data_dir_dialog.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/helper.h"
@@ -106,33 +115,16 @@
 #include "net/http/http_network_layer.h"
 #include "printing/printed_document.h"
 #include "sandbox/src/sandbox.h"
-#include "views/widget/accelerator_handler.h"
 #endif  // defined(OS_WIN)
 
-#if defined(TOOLKIT_GTK)
-#include "chrome/common/gtk_util.h"
-#elif defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/views/chrome_views_delegate.h"
+#include "views/focus/accelerator_handler.h"
 #endif
 
-namespace Platform {
-
-void WillInitializeMainMessageLoop(const CommandLine & command_line);
-void WillTerminate();
-
-#if defined(OS_WIN) || defined(OS_LINUX)
-// Perform any platform-specific work that needs to be done before the main
-// message loop is created and initialized.
-void WillInitializeMainMessageLoop(const CommandLine & command_line) {
-}
-
-// Perform platform-specific work that needs to be done after the main event
-// loop has ended.
-void WillTerminate() {
-}
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/external_cookie_handler.h"
 #endif
-
-}  // namespace Platform
 
 namespace {
 
@@ -151,55 +143,61 @@ void HandleErrorTestParameters(const CommandLine& command_line) {
   }
 }
 
-// The net module doesn't have access to this HTML or the strings that need to
-// be localized.  The Chrome locale will never change while we're running, so
-// it's safe to have a static string that we always return a pointer into.
-// This allows us to have the ResourceProvider return a pointer into the actual
-// resource (via a StringPiece), instead of always copying resources.
-struct LazyDirectoryListerCacher {
-  LazyDirectoryListerCacher() {
-    DictionaryValue value;
-    value.SetString(L"header",
-                    l10n_util::GetString(IDS_DIRECTORY_LISTING_HEADER));
-    value.SetString(L"parentDirText",
-                    l10n_util::GetString(IDS_DIRECTORY_LISTING_PARENT));
-    value.SetString(L"headerName",
-                    l10n_util::GetString(IDS_DIRECTORY_LISTING_NAME));
-    value.SetString(L"headerSize",
-                    l10n_util::GetString(IDS_DIRECTORY_LISTING_SIZE));
-    value.SetString(L"headerDateModified",
-                    l10n_util::GetString(IDS_DIRECTORY_LISTING_DATE_MODIFIED));
-    html_data = jstemplate_builder::GetI18nTemplateHtml(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_DIR_HEADER_HTML),
-        &value);
-  }
-
-  std::string html_data;
-};
-
-base::LazyInstance<LazyDirectoryListerCacher> lazy_dir_lister(
-    base::LINKER_INITIALIZED);
-
-// This is called indirectly by the network layer to access resources.
-StringPiece NetResourceProvider(int key) {
-  if (IDR_DIR_HEADER_HTML == key)
-    return StringPiece(lazy_dir_lister.Pointer()->html_data);
-
-  return ResourceBundle::GetSharedInstance().GetRawDataResource(key);
-}
-
 void RunUIMessageLoop(BrowserProcess* browser_process) {
-#if defined(OS_WIN)
-  MessageLoopForUI::current()->Run(browser_process->accelerator_handler());
+#if defined(TOOLKIT_VIEWS)
+  views::AcceleratorHandler accelerator_handler;
+  MessageLoopForUI::current()->Run(&accelerator_handler);
+#elif defined(OS_LINUX)
+  MessageLoopForUI::current()->Run(NULL);
 #elif defined(OS_POSIX)
   MessageLoopForUI::current()->Run();
 #endif
 }
 
 #if defined(OS_POSIX)
-// See comment below, where sigaction is called.
+// See comment in BrowserMain, where sigaction is called.
 void SIGCHLDHandler(int signal) {
+}
+
+// See comment in BrowserMain, where sigaction is called.
+void SIGTERMHandler(int signal) {
+  DCHECK_EQ(signal, SIGTERM);
+  LOG(WARNING) << "Addressing SIGTERM on " << PlatformThread::CurrentId();
+
+  MessageLoop* main_loop = ChromeThread::GetMessageLoop(ChromeThread::UI);
+  if (main_loop) {
+    // Post the exit task to the main thread.
+    main_loop->PostTask(
+        FROM_HERE, NewRunnableFunction(BrowserList::CloseAllBrowsersAndExit));
+    LOG(WARNING) << "Posted task to UI thread; resetting SIGTERM handler";
+  }
+
+  // Reinstall the default handler.  We had one shot at graceful shutdown.
+  struct sigaction term_action;
+  memset(&term_action, 0, sizeof(term_action));
+  term_action.sa_handler = SIG_DFL;
+  CHECK(sigaction(SIGTERM, &term_action, NULL) == 0);
+
+  if (!main_loop) {
+    // Without a UI thread to post the exit task to, there aren't many
+    // options.  Raise the signal again.  The default handler will pick it up
+    // and cause an ungraceful exit.
+    LOG(WARNING) << "No UI thread, exiting ungracefully";
+    kill(getpid(), signal);
+
+    // The signal may be handled on another thread.  Give that a chance to
+    // happen.
+    sleep(3);
+
+    // We really should be dead by now.  For whatever reason, we're not. Exit
+    // immediately, with the exit status set to the signal number with bit 8
+    // set.  On the systems that we care about, this exit status is what is
+    // normally used to indicate an exit by this signal's default handler.
+    // This mechanism isn't a de jure standard, but even in the worst case, it
+    // should at least result in an immediate exit.
+    LOG(WARNING) << "Still here, exiting really ungracefully";
+    _exit(signal | (1 << 7));
+  }
 }
 
 // Sets the file descriptor soft limit to |max_descriptors| or the OS hard
@@ -213,10 +211,10 @@ void SetFileDescriptorLimit(unsigned int max_descriptors) {
     }
     limits.rlim_cur = new_limit;
     if (setrlimit(RLIMIT_NOFILE, &limits) != 0) {
-      LOG(INFO) << "Failed to set file descriptor limit: " << strerror(errno);
+      PLOG(INFO) << "Failed to set file descriptor limit";
     }
   } else {
-    LOG(INFO) << "Failed to get file descriptor limit: " << strerror(errno);
+    PLOG(INFO) << "Failed to get file descriptor limit";
   }
 }
 #endif
@@ -239,17 +237,24 @@ void AddFirstRunNewTabs(BrowserInit* browser_init,
 }
 #endif
 
+#if defined(USE_LINUX_BREAKPAD)
+class GetLinuxDistroTask : public Task {
+ public:
+  explicit GetLinuxDistroTask() {}
+
+  virtual void Run() {
+    base::GetLinuxDistro();  // Initialize base::linux_distro if needed.
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(GetLinuxDistroTask);
+};
+#endif  // USE_LINUX_BREAKPAD
 }  // namespace
 
 // Main routine for running as the Browser process.
 int BrowserMain(const MainFunctionParams& parameters) {
   const CommandLine& parsed_command_line = parameters.command_line_;
   base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
-
-#if defined(OS_LINUX)
-  // Needs to be called after we have chrome::DIR_USER_DATA.
-  InitCrashReporter();
-#endif
 
   // WARNING: If we get a WM_ENDSESSION objects created on the stack here
   // are NOT deleted. If you need something to run during WM_ENDSESSION add it
@@ -273,6 +278,13 @@ int BrowserMain(const MainFunctionParams& parameters) {
   action.sa_handler = SIGCHLDHandler;
   CHECK(sigaction(SIGCHLD, &action, NULL) == 0);
 
+  // We need to handle SIGTERM, because that is how many POSIX-based distros ask
+  // processes to quit gracefully at shutdown time.
+  struct sigaction term_action;
+  memset(&term_action, 0, sizeof(term_action));
+  term_action.sa_handler = SIGTERMHandler;
+  CHECK(sigaction(SIGTERM, &term_action, NULL) == 0);
+
   const std::wstring fd_limit_string =
       parsed_command_line.GetSwitchValue(switches::kFileDescriptorLimit);
   int fd_limit = 0;
@@ -294,7 +306,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Do platform-specific things (such as finishing initializing Cocoa)
   // prior to instantiating the message loop. This could be turned into a
   // broadcast notification.
-  Platform::WillInitializeMainMessageLoop(parsed_command_line);
+  Platform::WillInitializeMainMessageLoop(parameters);
 
   MessageLoop main_message_loop(MessageLoop::TYPE_UI);
 
@@ -305,6 +317,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // timer settings. But it's necessary only on Windows.
   base::Time::StartSystemMonitorObserver();
 #endif  // defined(OS_WIN)
+  // Start the MemoryPurger, which observes the SystemMonitor as well.
+  MemoryPurger::GetSingleton();
 
   // Initialize statistical testing infrastructure.
   FieldTrialList field_trial;
@@ -315,10 +329,23 @@ int BrowserMain(const MainFunctionParams& parameters) {
   const char* thread_name = thread_name_string.c_str();
   PlatformThread::SetName(thread_name);
   main_message_loop.set_thread_name(thread_name);
-  bool already_running = Upgrade::IsBrowserAlreadyRunning();
+
+  // Register the main thread by instantiating it, but don't call any methods.
+  ChromeThread main_thread;
 
   FilePath user_data_dir;
+#if defined(OS_WIN)
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+#else
+  // Getting the user data dir can fail if the directory isn't
+  // creatable, for example; on Windows in code below we bring up a
+  // dialog prompting the user to pick a different directory.
+  // However, ProcessSingleton needs a real user_data_dir on Mac/Linux,
+  // so it's better to fail here than fail mysteriously elsewhere.
+  CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+      << "Must be able to get user data directory!";
+#endif
+
   ProcessSingleton process_singleton(user_data_dir);
 
   bool is_first_run = FirstRun::IsChromeFirstRun() ||
@@ -338,6 +365,14 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // BrowserProcessImpl's constructor should set g_browser_process.
   DCHECK(g_browser_process);
+
+#if defined(USE_LINUX_BREAKPAD)
+  // Needs to be called after we have chrome::DIR_USER_DATA and
+  // g_browser_process.
+  g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
+      new GetLinuxDistroTask());
+  InitCrashReporter();
+#endif
 
 #if defined(OS_WIN)
   // IMPORTANT: This piece of code needs to run as early as possible in the
@@ -360,7 +395,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   }
 #endif
 
-  std::wstring local_state_path;
+  FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   bool local_state_file_exists = file_util::PathExists(local_state_path);
 
@@ -387,13 +422,16 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #endif
 
 
-  // During first run we read the google_update registry key to find what
-  // language the user selected when downloading the installer. This
-  // becomes our default language in the prefs.
   if (is_first_run) {
+#if defined(OS_WIN)
+    // During first run we read the google_update registry key to find what
+    // language the user selected when downloading the installer. This
+    // becomes our default language in the prefs.
+    // Other platforms obey the system locale.
     std::wstring install_lang;
     if (GoogleUpdateSettings::GetLanguage(&install_lang))
       local_state->SetString(prefs::kApplicationLocale, install_lang);
+#endif  // defined(OS_WIN)
     if (GoogleUpdateSettings::GetCollectStatsConsent())
       local_state->SetBoolean(prefs::kMetricsReportingEnabled, true);
   }
@@ -422,12 +460,21 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // If we're running tests (ui_task is non-null), then the ResourceBundle
   // has already been initialized.
+  // Mac starts it earlier in Platform::WillInitializeMainMessageLoop (because
+  // it is needed when loading the MainMenu.nib and the language doesn't depend
+  // on anything since it comes from Cocoa.
+#if !defined(OS_MACOSX)
   if (!parameters.ui_task) {
     ResourceBundle::InitSharedInstance(
         local_state->GetString(prefs::kApplicationLocale));
     // We only load the theme dll in the browser process.
     ResourceBundle::GetSharedInstance().LoadThemeResources();
   }
+#endif  // !defined(OS_MACOSX)
+
+#if defined(OS_LINUX)
+  gtk_util::SetDefaultWindowIcon();
+#endif
 
 #if defined(OS_WIN)
   // This is experimental code. See first_run_win.cc for more info.
@@ -446,16 +493,17 @@ int BrowserMain(const MainFunctionParams& parameters) {
   BrowserInit browser_init;
 
   int rlz_ping_delay = 0;
+  bool homepage_defined = false;
   int import_items = 0;
   int dont_import_items = 0;
   if (is_first_run) {
-    // On first run, we  need to process the master preferences before the
+    // On first run, we need to process the master preferences before the
     // browser's profile_manager object is created, but after ResourceBundle
     // is initialized.
     std::vector<std::wstring> first_run_tabs;
     first_run_ui_bypass = !FirstRun::ProcessMasterPreferences(user_data_dir,
-        FilePath(), &first_run_tabs, &rlz_ping_delay, &import_items,
-        &dont_import_items);
+        FilePath(), &first_run_tabs, &rlz_ping_delay, &homepage_defined,
+        &import_items, &dont_import_items);
     // The master prefs might specify a set of urls to display.
     if (first_run_tabs.size())
       AddFirstRunNewTabs(&browser_init, first_run_tabs);
@@ -498,19 +546,14 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Try to create/load the profile.
   ProfileManager* profile_manager = browser_process->profile_manager();
   Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+#if defined(OS_WIN)
   if (!profile) {
     // Ideally, we should be able to run w/o access to disk.  For now, we
     // prompt the user to pick a different user-data-dir and restart chrome
     // with the new dir.
     // http://code.google.com/p/chromium/issues/detail?id=11510
-#if defined(OS_WIN)
     user_data_dir = FilePath::FromWStringHack(
         UserDataDirDialog::RunUserDataDirDialog(user_data_dir.ToWStringHack()));
-#elif defined(OS_LINUX)
-    // TODO(port): fix this.
-    user_data_dir = FilePath("/tmp");
-#endif
-#if defined(OS_WIN) || defined(OS_LINUX)
     if (!parameters.ui_task && browser_shutdown::delete_resources_on_shutdown) {
       // Only delete the resources if we're not running tests. If we're running
       // tests the resources need to be reused as many places in the UI cache
@@ -530,8 +573,26 @@ int BrowserMain(const MainFunctionParams& parameters) {
     }
 
     return ResultCodes::NORMAL_EXIT;
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
   }
+#else
+  // TODO(port): fix this.  See comments near the definition of
+  // user_data_dir.  It is better to CHECK-fail here than it is to
+  // silently exit because of missing code in the above test.
+  CHECK(profile) << "Cannot get default profile.";
+#endif
+
+  if (profile->GetBlacklist() && !profile->GetBlacklist()->is_good()) {
+    // TODO(idanan): Enable this for other platforms once the dispatching
+    // support code has been ported. See ifdefs in message_loop.h.
+#if defined(OS_WIN)
+    bool accepted = BlacklistErrorDialog::RunBlacklistErrorDialog();
+    if (!accepted)
+      return ResultCodes::NORMAL_EXIT;
+#else
+    return ResultCodes::NORMAL_EXIT;
+#endif
+  }
+
 
   PrefService* user_prefs = profile->GetPrefs();
   DCHECK(user_prefs);
@@ -550,13 +611,20 @@ int BrowserMain(const MainFunctionParams& parameters) {
                           base::Time::Now().ToTimeT());
   }
 
+#if defined(OS_WIN)
   // Record last shutdown time into a histogram.
   browser_shutdown::ReadLastShutdownInfo();
+
+  // On Windows, we use our startup as an opportunity to do upgrade/uninstall
+  // tasks.  Those care whether the browser is already running.  On Linux/Mac,
+  // upgrade/uninstall happen separately.
+  bool already_running = Upgrade::IsBrowserAlreadyRunning();
 
   // If the command line specifies 'uninstall' then we need to work here
   // unless we detect another chrome browser running.
   if (parsed_command_line.HasSwitch(switches::kUninstall))
     return DoUninstallTasks(already_running);
+#endif
 
   if (parsed_command_line.HasSwitch(switches::kHideIcons) ||
       parsed_command_line.HasSwitch(switches::kShowIcons)) {
@@ -575,18 +643,31 @@ int BrowserMain(const MainFunctionParams& parameters) {
     return FirstRun::ImportNow(profile, parsed_command_line);
 
   // When another process is running, use it instead of starting us.
-  if (process_singleton.NotifyOtherProcess()) {
+  switch (process_singleton.NotifyOtherProcess()) {
+    case ProcessSingleton::PROCESS_NONE:
+      // No process already running, fall through to starting a new one.
+      break;
+
+    case ProcessSingleton::PROCESS_NOTIFIED:
 #if defined(OS_LINUX)
-    printf("%s\n", base::SysWideToNativeMB(
-               l10n_util::GetString(IDS_USED_EXISTING_BROWSER)).c_str());
+      printf("%s\n", base::SysWideToNativeMB(
+                 l10n_util::GetString(IDS_USED_EXISTING_BROWSER)).c_str());
 #endif
-    return ResultCodes::NORMAL_EXIT;
+      return ResultCodes::NORMAL_EXIT;
+
+    case ProcessSingleton::PROFILE_IN_USE:
+      return ResultCodes::PROFILE_IN_USE;
+
+    default:
+      NOTREACHED();
   }
 
+#if defined(OS_WIN)
   // Do the tasks if chrome has been upgraded while it was last running.
   if (!already_running && DoUpgradeTasks(parsed_command_line)) {
     return ResultCodes::NORMAL_EXIT;
   }
+#endif
 
   // Check if there is any machine level Chrome installed on the current
   // machine. If yes and the current Chrome process is user level, we do not
@@ -607,11 +688,20 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // touches reads preferences.
   if (is_first_run) {
     if (!first_run_ui_bypass) {
-      if (!OpenFirstRunDialog(profile, import_items,
+      if (!OpenFirstRunDialog(profile, homepage_defined, import_items,
                               dont_import_items, &process_singleton)) {
         // The user cancelled the first run dialog box, we should exit Chrome.
         return ResultCodes::NORMAL_EXIT;
       }
+#if defined(OS_POSIX)
+      // On Windows, the download is tagged with enable/disable stats so there
+      // is no need for this code.
+
+      // If stats reporting was turned on by the first run dialog then toggle
+      // the pref.
+      if (GoogleUpdateSettings::GetCollectStatsConsent())
+        local_state->SetBoolean(prefs::kMetricsReportingEnabled, true);
+#endif  // OS_POSIX
     }
     Browser::SetNewHomePagePrefs(user_prefs);
   }
@@ -629,6 +719,28 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Initialize and maintain DNS prefetcher module.
   chrome_browser_net::DnsPrefetcherInit dns_prefetch(user_prefs, local_state);
 
+  scoped_refptr<FieldTrial> http_prioritization_trial =
+      new FieldTrial("HttpPrioritization", 100);
+  // Put 10% of people in the fallback experiment with the http prioritization
+  // code disabled.
+  const int holdback_group =
+      http_prioritization_trial->AppendGroup("_no_http_prioritization", 10);
+  if (http_prioritization_trial->group() == holdback_group) {
+    ResourceDispatcherHost::DisableHttpPrioritization();
+  }
+
+  scoped_refptr<FieldTrial> socket_late_binding_trial =
+      new FieldTrial("SocketLateBinding", 100);
+  socket_late_binding_trial->AppendGroup("_disable_late_binding", 50);
+  const int late_binding_group =
+      socket_late_binding_trial->AppendGroup("_enable_late_binding", 50);
+  if (socket_late_binding_trial->group() == late_binding_group)
+    net::EnableLateBindingOfSockets(true);
+
+  scoped_refptr<FieldTrial> trial = new FieldTrial("AsyncSlowStart", 100);
+  trial->AppendGroup("_AsyncSlowStart", 50);
+  trial->AppendGroup("_AsyncSlowStart_off", 50);
+
 #if defined(OS_WIN)
   // Init common control sex.
   INITCOMMONCONTROLSEX config;
@@ -644,8 +756,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
   RLZTracker::InitRlzDelayed(base::DIR_MODULE, is_first_run, rlz_ping_delay);
 #endif
 
-  // Config the network module so it has access to resources.
-  net::NetModule::SetResourceProvider(NetResourceProvider);
+  // Configure the network module so it has access to resources.
+  net::NetModule::SetResourceProvider(chrome_common_net::NetResourceProvider);
 
   // Register our global network handler for chrome:// and
   // chrome-extension:// URLs.
@@ -675,8 +787,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Perform A/B test to measure global impact of SDCH support.
   // Set up a field trial to see what disabling SDCH does to latency of page
   // layout globally.
-  FieldTrial::Probability kSDCH_DIVISOR = 10000;
-  FieldTrial::Probability kSDCH_PROBABILITY_PER_GROUP = 5;  // .05% probability.
+  FieldTrial::Probability kSDCH_DIVISOR = 100;
+  FieldTrial::Probability kSDCH_PROBABILITY_PER_GROUP = 50;  // 50% probability.
   scoped_refptr<FieldTrial> sdch_trial =
       new FieldTrial("GlobalSdch", kSDCH_DIVISOR);
 
@@ -689,7 +801,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
     sdch_trial->AppendGroup("_global_disable_sdch",
                             kSDCH_PROBABILITY_PER_GROUP);
     int sdch_enabled = sdch_trial->AppendGroup("_global_enable_sdch",
-        FieldTrial::kAllRemainingProbability);
+                                               kSDCH_PROBABILITY_PER_GROUP);
     if (sdch_enabled != sdch_trial->group())
       sdch_supported_domain = "never_enabled_sdch_for_any_domain";
   }
@@ -738,13 +850,21 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #endif
 
   HandleErrorTestParameters(parsed_command_line);
-  RecordBreakpadStatusUMA(metrics);
+  Platform::RecordBreakpadStatusUMA(metrics);
   // Start up the extensions service. This should happen before Start().
   profile->InitExtensions();
   // Start up the web resource service.  This starts loading data after a
   // short delay so as not to interfere with startup time.
   if (!parsed_command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitWebResources();
+
+#if defined(OS_CHROMEOS)
+  ExternalCookieHandler::GetCookies(parsed_command_line, profile);
+#endif
+
+  // Stat the directory with the inspector's files so that we can know if we
+  // should display the entry in the context menu or not.
+  browser_process->CheckForInspectorFiles();
 
   int result_code = ResultCodes::NORMAL_EXIT;
   if (parameters.ui_task) {
@@ -766,7 +886,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
     }
   }
 
-  Platform::WillTerminate();
+  process_singleton.Cleanup();
+
+  Platform::DidEndMainMessageLoop();
 
   if (metrics)
     metrics->Stop();

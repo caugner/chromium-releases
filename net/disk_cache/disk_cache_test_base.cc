@@ -52,20 +52,19 @@ void DiskCacheTestWithCache::InitMemoryCache() {
 }
 
 void DiskCacheTestWithCache::InitDiskCache() {
-  std::wstring path = GetCachePath();
+  FilePath path = GetCacheFilePath();
   if (first_cleanup_)
-    ASSERT_TRUE(DeleteCache(path.c_str()));
+    ASSERT_TRUE(DeleteCache(path));
 
-  if (!implementation_) {
-    cache_ = disk_cache::CreateCacheBackend(path, force_creation_, size_,
-                                            net::DISK_CACHE);
-    return;
-  }
+  if (implementation_)
+    return InitDiskCacheImpl(path);
 
-  InitDiskCacheImpl(path);
+  cache_ = disk_cache::BackendImpl::CreateBackend(path, force_creation_, size_,
+                                                  net::DISK_CACHE,
+                                                  disk_cache::kNoRandom);
 }
 
-void DiskCacheTestWithCache::InitDiskCacheImpl(const std::wstring& path) {
+void DiskCacheTestWithCache::InitDiskCacheImpl(const FilePath& path) {
   if (mask_)
     cache_impl_ = new disk_cache::BackendImpl(path, mask_);
   else
@@ -80,6 +79,7 @@ void DiskCacheTestWithCache::InitDiskCacheImpl(const std::wstring& path) {
   if (new_eviction_)
     cache_impl_->SetNewEviction();
 
+  cache_impl_->SetFlags(disk_cache::kNoRandom);
   ASSERT_TRUE(cache_impl_->Init());
 }
 
@@ -88,7 +88,7 @@ void DiskCacheTestWithCache::TearDown() {
   delete cache_;
 
   if (!memory_only_ && integrity_) {
-    std::wstring path = GetCachePath();
+    FilePath path = GetCacheFilePath();
     EXPECT_TRUE(CheckCacheIntegrity(path, new_eviction_));
   }
 
@@ -101,7 +101,7 @@ void DiskCacheTestWithCache::SimulateCrash() {
   cache_impl_->ClearRefCountForTest();
 
   delete cache_impl_;
-  std::wstring path = GetCachePath();
+  FilePath path = GetCacheFilePath();
   EXPECT_TRUE(CheckCacheIntegrity(path, new_eviction_));
 
   InitDiskCacheImpl(path);

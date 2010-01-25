@@ -6,10 +6,13 @@
 
 #include "chrome/common/child_thread.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/common/worker_messages.h"
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebWorkerClient.h"
 
+using WebKit::WebMessagePortChannel;
+using WebKit::WebMessagePortChannelArray;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebWorkerClient;
@@ -73,13 +76,28 @@ void WebWorkerProxy::terminateWorkerContext() {
 }
 
 void WebWorkerProxy::postMessageToWorkerContext(
-    const WebString& message) {
-  Send(new WorkerMsg_PostMessageToWorkerContext(route_id_, message));
+    const WebString& message, const WebMessagePortChannelArray& channels) {
+  std::vector<int> message_port_ids(channels.size());
+  std::vector<int> routing_ids(channels.size());
+  for (size_t i = 0; i < channels.size(); ++i) {
+    WebMessagePortChannelImpl* webchannel =
+        static_cast<WebMessagePortChannelImpl*>(channels[i]);
+    message_port_ids[i] = webchannel->message_port_id();
+    webchannel->QueueMessages();
+    routing_ids[i] = MSG_ROUTING_NONE;
+    DCHECK(message_port_ids[i] != MSG_ROUTING_NONE);
+  }
+
+  Send(new WorkerMsg_PostMessage(
+      route_id_, message, message_port_ids, routing_ids));
 }
 
 void WebWorkerProxy::workerObjectDestroyed() {
   Send(new WorkerMsg_WorkerObjectDestroyed(route_id_));
   delete this;
+}
+
+void WebWorkerProxy::clientDestroyed() {
 }
 
 bool WebWorkerProxy::Send(IPC::Message* message) {
@@ -107,9 +125,7 @@ void WebWorkerProxy::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(WebWorkerProxy, message)
     IPC_MESSAGE_HANDLER(ViewMsg_DedicatedWorkerCreated,
                         OnDedicatedWorkerCreated)
-    IPC_MESSAGE_FORWARD(WorkerHostMsg_PostMessageToWorkerObject,
-                        client_,
-                        WebWorkerClient::postMessageToWorkerObject)
+    IPC_MESSAGE_HANDLER(WorkerMsg_PostMessage, OnPostMessage)
     IPC_MESSAGE_FORWARD(WorkerHostMsg_PostExceptionToWorkerObject,
                         client_,
                         WebWorkerClient::postExceptionToWorkerObject)
@@ -135,6 +151,20 @@ void WebWorkerProxy::OnDedicatedWorkerCreated() {
     queued_messages[i]->set_routing_id(route_id_);
     Send(queued_messages[i]);
   }
+}
+
+void WebWorkerProxy::OnPostMessage(
+    const string16& message,
+    const std::vector<int>& sent_message_port_ids,
+    const std::vector<int>& new_routing_ids) {
+  DCHECK(new_routing_ids.size() == sent_message_port_ids.size());
+  WebMessagePortChannelArray channels(sent_message_port_ids.size());
+  for (size_t i = 0; i < sent_message_port_ids.size(); ++i) {
+    channels[i] = new WebMessagePortChannelImpl(
+        new_routing_ids[i], sent_message_port_ids[i]);
+  }
+
+  client_->postMessageToWorkerObject(message, channels);
 }
 
 void WebWorkerProxy::OnPostConsoleMessageToWorkerObject(

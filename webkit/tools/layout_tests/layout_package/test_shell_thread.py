@@ -1,4 +1,4 @@
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,7 +22,6 @@ import threading
 import time
 
 import path_utils
-import platform_utils
 import test_failures
 
 def ProcessOutput(proc, test_info, test_types, test_args, target):
@@ -190,6 +189,9 @@ class TestShellThread(threading.Thread):
     self._exception_info = None
     self._directory_timing_stats = {}
     self._test_stats = []
+    self._num_tests = 0
+    self._start_time = 0
+    self._stop_time = 0
 
     # Current directory of tests we're running.
     self._current_dir = None
@@ -224,16 +226,31 @@ class TestShellThread(threading.Thread):
     joining this thread."""
     return self._exception_info
 
+  def GetTotalTime(self):
+    return max(self._stop_time - self._start_time, 0.0)
+
+  def GetNumTests(self):
+    return self._num_tests
+
   def run(self):
     """Delegate main work to a helper method and watch for uncaught
     exceptions."""
+    self._start_time = time.time()
+    self._num_tests = 0
     try:
+      logging.debug('thread %s starting' % (self.getName()))
       self._Run()
+      logging.debug('thread %s done (%d tests)' % (self.getName(),
+                    self.GetNumTests()))
     except:
       # Save the exception for our caller to see.
       self._exception_info = sys.exc_info()
+      self._stop_time = time.time()
       # Re-raise it and die.
+      logging.error('thread %s dying: %s' % (self.getName(),
+                    self._exception_info))
       raise
+    self._stop_time = time.time()
 
   def _Run(self):
     """Main work entry point of the thread. Basically we pull urls from the
@@ -246,9 +263,17 @@ class TestShellThread(threading.Thread):
       except:
         logging.info("Ignoring invalid batch size '%s'" %
                      self._options.batch_size)
+
+    # Append tests we're running to the existing tests_run.txt file.
+    # This is created in run_webkit_tests.py:_PrepareListsAndPrintOutput.
+    tests_run_filename = os.path.join(self._options.results_directory,
+                                      "tests_run.txt")
+    tests_run_file = open(tests_run_filename, "a")
+
     while True:
       if self._canceled:
         logging.info('Testing canceled')
+        tests_run_file.close()
         return
 
       if len(self._filename_list) is 0:
@@ -263,6 +288,7 @@ class TestShellThread(threading.Thread):
         except Queue.Empty:
           self._KillTestShell()
           logging.debug("queue empty, quitting test shell thread")
+          tests_run_file.close()
           return
 
         self._num_tests_in_current_dir = len(self._filename_list)
@@ -272,12 +298,14 @@ class TestShellThread(threading.Thread):
 
       # We have a url, run tests.
       batch_count += 1
+      self._num_tests += 1
       if self._options.run_singly:
         failures = self._RunTestSingly(test_info)
       else:
         failures = self._RunTest(test_info)
 
       filename = test_info.filename
+      tests_run_file.write(filename + "\n")
       if failures:
         # Check and kill test shell if we need too.
         if len([1 for f in failures if f.ShouldKillTestShell()]):
@@ -297,7 +325,6 @@ class TestShellThread(threading.Thread):
         # Bounce the shell and reset count.
         self._KillTestShell()
         batch_count = 0
-
 
   def _RunTestSingly(self, test_info):
     """Run a test in a separate thread, enforcing a hard time limit.
@@ -333,9 +360,7 @@ class TestShellThread(threading.Thread):
       # introducing spurious crashes. We accept that tradeoff in order to
       # avoid losing the rest of this thread's results.
       logging.error('Test thread hung: killing all test_shells')
-      # PlatformUtility() wants a base_dir, but it doesn't matter here.
-      platform_util = platform_utils.PlatformUtility('')
-      platform_util.KillAllTestShells()
+      path_utils.KillAllTestShells()
 
     try:
       stats = worker.GetTestStats()

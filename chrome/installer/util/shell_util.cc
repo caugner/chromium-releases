@@ -25,11 +25,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/master_preferences.h"
-#include "chrome/installer/util/set_reg_value_work_item.h"
-#include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/work_item.h"
 
 #include "installer_util_strings.h"
 
@@ -63,19 +59,6 @@ class RegistryEntry {
     entries->push_front(new RegistryEntry(
         chrome_html_prog_id + ShellUtil::kRegShellOpen, open_cmd));
 
-    // Chrome Extension ProgId
-    std::wstring ext_prog_id(ShellUtil::kRegClasses);
-    file_util::AppendToPath(&ext_prog_id, ShellUtil::kChromeExtProgId);
-    ext_prog_id.append(suffix);
-    entries->push_front(new RegistryEntry(
-        ext_prog_id, ShellUtil::kChromeExtProgIdDesc));
-    entries->push_front(new RegistryEntry(
-        ext_prog_id + ShellUtil::kRegDefaultIcon, icon_path));
-    std::wstring install_cmd =
-        ShellUtil::GetChromeInstallExtensionCmd(chrome_exe);
-    entries->push_front(new RegistryEntry(
-        ext_prog_id + ShellUtil::kRegShellOpen, install_cmd));
-
     return true;
   }
 
@@ -98,12 +81,13 @@ class RegistryEntry {
         start_menu_entry + ShellUtil::kRegDefaultIcon, icon_path));
 
     std::wstring install_info(start_menu_entry + L"\\InstallInfo");
+    // TODO: use CommandLine API instead of constructing command lines.
     entries->push_front(new RegistryEntry(install_info, L"ReinstallCommand",
-        quoted_exe_path + L" --" + switches::kMakeDefaultBrowser));
+        quoted_exe_path + L" --" + ASCIIToWide(switches::kMakeDefaultBrowser)));
     entries->push_front(new RegistryEntry(install_info, L"HideIconsCommand",
-        quoted_exe_path + L" --" + switches::kHideIcons));
+        quoted_exe_path + L" --" + ASCIIToWide(switches::kHideIcons)));
     entries->push_front(new RegistryEntry(install_info, L"ShowIconsCommand",
-        quoted_exe_path + L" --" + switches::kShowIcons));
+        quoted_exe_path + L" --" + ASCIIToWide(switches::kShowIcons)));
     entries->push_front(new RegistryEntry(install_info, L"IconsVisible", 1));
 
     std::wstring capabilities(start_menu_entry + L"\\Capabilities");
@@ -131,11 +115,6 @@ class RegistryEntry {
           capabilities + L"\\URLAssociations",
           ShellUtil::kProtocolAssociations[i], html_prog_id));
     }
-    std::wstring ext_prog_id(ShellUtil::kChromeExtProgId);
-    ext_prog_id.append(suffix);
-    entries->push_front(new RegistryEntry(
-        capabilities + L"\\FileAssociations",
-        chrome::kExtensionFileExtension, ext_prog_id));
 
     FilePath chrome_path(chrome_exe);
     std::wstring app_path_key(ShellUtil::kAppPathsRegistryKey);
@@ -161,14 +140,6 @@ class RegistryEntry {
       file_util::AppendToPath(&ext_key, ShellUtil::kFileAssociations[i]);
       entries->push_front(new RegistryEntry(ext_key, html_prog_id));
     }
-
-    // .crx file type extension.
-    std::wstring ext_key(ShellUtil::kRegClasses);
-    ext_key.append(L".");
-    ext_key.append(chrome::kExtensionFileExtension);
-    std::wstring ext_prog_id(ShellUtil::kChromeExtProgId);
-    ext_prog_id.append(suffix);
-    entries->push_front(new RegistryEntry(ext_key, ext_prog_id));
 
     // Protocols associations.
     std::wstring chrome_open = ShellUtil::GetChromeShellOpenCmd(chrome_exe);
@@ -253,29 +224,31 @@ class RegistryEntry {
   DISALLOW_COPY_AND_ASSIGN(RegistryEntry);
 
   // Create a object that represent default value of a key
-  RegistryEntry(const std::wstring& key_path, const std::wstring& value) :
-                _key_path(key_path), _name(L""), _value(value),
-                _is_string(true) {
+  RegistryEntry(const std::wstring& key_path, const std::wstring& value)
+      : _key_path(key_path), _name(),
+        _is_string(true), _value(value), _int_value(0) {
   }
 
   // Create a object that represent a key of type REG_SZ
   RegistryEntry(const std::wstring& key_path, const std::wstring& name,
-                const std::wstring& value) : _key_path(key_path),
-                _name(name), _value(value), _is_string(true) {
+                const std::wstring& value)
+      : _key_path(key_path), _name(name),
+        _is_string(true), _value(value), _int_value(0) {
   }
 
   // Create a object that represent a key of integer type
   RegistryEntry(const std::wstring& key_path, const std::wstring& name,
-                DWORD value) : _key_path(key_path),
-                _name(name), _int_value(value), _is_string(false) {
+                DWORD value)
+      : _key_path(key_path), _name(name),
+        _is_string(false), _value(), _int_value(value) {
   }
 
-  bool _is_string;         // true if current registry entry is of type REG_SZ
   std::wstring _key_path;  // key path for the registry entry
   std::wstring _name;      // name of the registry entry
+  bool _is_string;         // true if current registry entry is of type REG_SZ
   std::wstring _value;     // string value (useful if _is_string = true)
   DWORD _int_value;        // integer value (useful if _is_string = false)
-}; // class RegistryEntry
+};  // class RegistryEntry
 
 
 // This method converts all the RegistryEntries from the given list to
@@ -322,7 +295,7 @@ bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
                               const std::wstring& suffix) {
   std::wstring exe_path(file_util::GetDirectoryFromPath(chrome_exe));
   file_util::AppendToPath(&exe_path, installer_util::kSetupExe);
-  if (!file_util::PathExists(exe_path)) {
+  if (!file_util::PathExists(FilePath::FromWStringHack(exe_path))) {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     HKEY reg_root = InstallUtil::IsPerUserInstall(chrome_exe.c_str()) ?
         HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
@@ -332,12 +305,12 @@ bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
     command_line.ParseFromString(exe_path);
     exe_path = command_line.program();
   }
-  if (file_util::PathExists(exe_path)) {
+  if (file_util::PathExists(FilePath::FromWStringHack(exe_path))) {
     std::wstring params(L"--");
     params.append(installer_util::switches::kRegisterChromeBrowser);
     params.append(L"=\"" + chrome_exe + L"\"");
     if (!suffix.empty()) {
-      params.append(L"--");
+      params.append(L" --");
       params.append(installer_util::switches::kRegisterChromeBrowserSuffix);
       params.append(L"=\"" + suffix + L"\"");
     }
@@ -347,20 +320,6 @@ bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
       return true;
   }
   return false;
-}
-
-// This method checks if user specific default browser registry entry exists.
-// (i.e. Software\Clients\StartMenuInternet\Chromium.<user>)
-bool UserSpecificDefaultBrowserEntryExists() {
-  std::wstring suffix;
-  if (!ShellUtil::GetUserSpecificDefaultBrowserSuffix(&suffix))
-    return false;
-
-  std::wstring start_menu_entry(ShellUtil::kRegStartMenuInternet);
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  start_menu_entry.append(L"\\" + dist->GetApplicationName() + suffix);
-  RegKey key(HKEY_LOCAL_MACHINE, start_menu_entry.c_str());
-  return key.Valid();
 }
 
 // This method tries to figure out if another user has already registered her
@@ -436,11 +395,9 @@ const wchar_t* ShellUtil::kAppPathsRegistryKey =
 const wchar_t* ShellUtil::kAppPathsRegistryPathName = L"Path";
 
 #if defined(GOOGLE_CHROME_BUILD)
-const wchar_t* ShellUtil::kChromeExtProgId = L"ChromeExt";
 const wchar_t* ShellUtil::kChromeHTMLProgId = L"ChromeHTML";
 const wchar_t* ShellUtil::kChromeHTMLProgIdDesc = L"Chrome HTML Document";
 #else
-const wchar_t* ShellUtil::kChromeExtProgId = L"ChromiumExt";
 const wchar_t* ShellUtil::kChromeHTMLProgId = L"ChromiumHTML";
 const wchar_t* ShellUtil::kChromeHTMLProgIdDesc = L"Chromium HTML Document";
 #endif
@@ -451,17 +408,10 @@ const wchar_t* ShellUtil::kProtocolAssociations[] = {L"ftp", L"http", L"https",
     NULL};
 const wchar_t* ShellUtil::kRegUrlProtocol = L"URL Protocol";
 
-const wchar_t* ShellUtil::kChromeExtProgIdDesc = L"Chrome Extension Installer";
-
-bool ShellUtil::AdminNeededForRegistryCleanup() {
+bool ShellUtil::AdminNeededForRegistryCleanup(const std::wstring& suffix) {
   bool cleanup_needed = false;
   std::list<RegistryEntry*> entries;
   STLElementDeleter<std::list<RegistryEntry*>> entries_deleter(&entries);
-  RegistryEntry::GetProgIdEntries(L"chrome.exe", L"", &entries);
-  RegistryEntry::GetSystemEntries(L"chrome.exe", L"", &entries);
-
-  std::wstring suffix;
-  GetUserSpecificDefaultBrowserSuffix(&suffix);
   RegistryEntry::GetProgIdEntries(L"chrome.exe", suffix, &entries);
   RegistryEntry::GetSystemEntries(L"chrome.exe", suffix, &entries);
   for (std::list<RegistryEntry*>::const_iterator itr = entries.begin();
@@ -547,11 +497,6 @@ std::wstring ShellUtil::GetChromeIcon(const std::wstring& chrome_exe) {
   return chrome_icon;
 }
 
-std::wstring ShellUtil::GetChromeInstallExtensionCmd(
-    const std::wstring& chrome_exe) {
-  return L"\"" + chrome_exe + L"\" --install-extension=\"%1\"";
-}
-
 std::wstring ShellUtil::GetChromeShellOpenCmd(const std::wstring& chrome_exe) {
   return L"\"" + chrome_exe + L"\" -- \"%1\"";
 }
@@ -604,6 +549,32 @@ bool ShellUtil::GetQuickLaunchPath(bool system_level, std::wstring* path) {
   return true;
 }
 
+void ShellUtil::GetRegisteredBrowsers(std::map<std::wstring,
+                                      std::wstring>* browsers) {
+  std::wstring base_key(ShellUtil::kRegStartMenuInternet);
+  HKEY root = HKEY_LOCAL_MACHINE;
+  for (RegistryKeyIterator iter(root, base_key.c_str()); iter.Valid(); ++iter) {
+    std::wstring key = base_key + L"\\" + iter.Name();
+    RegKey capabilities(root, (key + L"\\Capabilities").c_str());
+    std::wstring name;
+    if (!capabilities.Valid() ||
+        !capabilities.ReadValue(L"ApplicationName", &name)) {
+      RegKey base_key(root, key.c_str());
+      if (!base_key.ReadValue(L"", &name))
+        continue;
+    }
+    RegKey install_info(root, (key + L"\\InstallInfo").c_str());
+    std::wstring command;
+    if (!install_info.Valid() ||
+        !install_info.ReadValue(L"ReinstallCommand", &command))
+      continue;
+    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+    if (!name.empty() && !command.empty() &&
+        name.find(dist->GetApplicationName()) == std::wstring::npos)
+      (*browsers)[name] = command;
+  }
+}
+
 bool ShellUtil::GetUserSpecificDefaultBrowserSuffix(std::wstring* entry) {
   wchar_t user_name[256];
   DWORD size = _countof(user_name);
@@ -611,7 +582,12 @@ bool ShellUtil::GetUserSpecificDefaultBrowserSuffix(std::wstring* entry) {
     return false;
   entry->assign(L".");
   entry->append(user_name);
-  return true;
+
+  std::wstring start_menu_entry(ShellUtil::kRegStartMenuInternet);
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  start_menu_entry.append(L"\\" + dist->GetApplicationName() + *entry);
+  RegKey key(HKEY_LOCAL_MACHINE, start_menu_entry.c_str());
+  return key.Valid();
 }
 
 bool ShellUtil::MakeChromeDefault(int shell_change,
@@ -630,7 +606,12 @@ bool ShellUtil::MakeChromeDefault(int shell_change,
         (void**)&pAAR);
     if (SUCCEEDED(hr)) {
       BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-      hr = pAAR->SetAppAsDefaultAll(dist->GetApplicationName().c_str());
+      std::wstring app_name = dist->GetApplicationName();
+      std::wstring suffix;
+      if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(&suffix))
+        app_name += suffix;
+
+      hr = pAAR->SetAppAsDefaultAll(app_name.c_str());
       pAAR->Release();
     }
     if (!SUCCEEDED(hr)) {
@@ -647,8 +628,8 @@ bool ShellUtil::MakeChromeDefault(int shell_change,
   std::list<RegistryEntry*> entries;
   STLElementDeleter<std::list<RegistryEntry*>> entries_deleter(&entries);
   std::wstring suffix;
-  if (UserSpecificDefaultBrowserEntryExists())
-    GetUserSpecificDefaultBrowserSuffix(&suffix);
+  if (!GetUserSpecificDefaultBrowserSuffix(&suffix))
+    suffix = L"";
   RegistryEntry::GetUserEntries(chrome_exe, suffix, &entries);
   // Change the default browser for current user.
   if ((shell_change & ShellUtil::CURRENT_USER) &&
@@ -675,9 +656,9 @@ bool ShellUtil::RegisterChromeBrowser(const std::wstring& chrome_exe,
   if (!unique_suffix.empty()) {
     suffix = unique_suffix;
   } else if (InstallUtil::IsPerUserInstall(chrome_exe.c_str()) &&
-             (UserSpecificDefaultBrowserEntryExists() ||
-              AnotherUserHasDefaultBrowser(chrome_exe))) {
-    GetUserSpecificDefaultBrowserSuffix(&suffix);
+             !GetUserSpecificDefaultBrowserSuffix(&suffix) &&
+             !AnotherUserHasDefaultBrowser(chrome_exe)) {
+    suffix = L"";
   }
 
   // Check if Chromium is already registered with this suffix.
@@ -772,15 +753,15 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
                                      bool create_new) {
   std::wstring chrome_path = file_util::GetDirectoryFromPath(chrome_exe);
 
-  FilePath prefs_path(chrome_path);
-  prefs_path = prefs_path.Append(installer_util::kDefaultMasterPrefs);
-  scoped_ptr<DictionaryValue> prefs(
-      installer_util::ParseDistributionPreferences(prefs_path));
-  int icon_index = 0;
-  installer_util::GetDistroIntegerPreference(prefs.get(),
-      installer_util::master_preferences::kChromeShortcutIconIndex,
-      &icon_index);
   if (create_new) {
+    FilePath prefs_path(chrome_path);
+    prefs_path = prefs_path.Append(installer_util::kDefaultMasterPrefs);
+    scoped_ptr<DictionaryValue> prefs(
+        installer_util::ParseDistributionPreferences(prefs_path));
+    int icon_index = 0;
+    installer_util::GetDistroIntegerPreference(prefs.get(),
+        installer_util::master_preferences::kChromeShortcutIconIndex,
+        &icon_index);
     return file_util::CreateShortcutLink(chrome_exe.c_str(),      // target
                                          shortcut.c_str(),        // shortcut
                                          chrome_path.c_str(),     // working dir
@@ -795,6 +776,6 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
                                          NULL,                    // arguments
                                          description.c_str(),     // description
                                          chrome_exe.c_str(),      // icon file
-                                         icon_index);             // icon index
+                                         0);                      // icon index
   }
 }

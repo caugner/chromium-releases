@@ -106,7 +106,9 @@ void DumpBlockHeader(const std::wstring& name) {
 class CacheDumper {
  public:
   explicit CacheDumper(const std::wstring& path)
-      : path_(path), block_files_(path), index_(NULL) {}
+      : path_(path),
+        block_files_(FilePath::FromWStringHack(path)),
+        index_(NULL) {}
 
   bool Init();
 
@@ -138,8 +140,8 @@ bool CacheDumper::Init() {
   std::wstring index_name(path_);
   file_util::AppendToPath(&index_name, kIndexName);
   index_file_ = new disk_cache::MappedFile;
-  index_ =
-      reinterpret_cast<disk_cache::Index*>(index_file_->Init(index_name, 0));
+  index_ = reinterpret_cast<disk_cache::Index*>(index_file_->Init(
+      FilePath::FromWStringHack(index_name), 0));
   if (!index_) {
     printf("Unable to map index\n");
     return false;
@@ -243,7 +245,7 @@ void DumpRankings(const disk_cache::RankingsNode& rankings) {
   printf("prev: 0x%x\n", rankings.prev);
   printf("entry: 0x%x\n", rankings.contents);
   printf("dirty: %d\n", rankings.dirty);
-  printf("pointer: 0x%x\n", rankings.pointer);
+  printf("pointer: 0x%x\n", rankings.dummy);
   printf("----------\n\n");
 }
 

@@ -6,16 +6,17 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
-#include "base/gfx/gtk_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/info_bubble_gtk.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
@@ -84,7 +85,7 @@ std::vector<const BookmarkNode*> PopulateFolderCombo(BookmarkModel* model,
 }  // namespace
 
 // static
-void BookmarkBubbleGtk::Show(GtkWindow* transient_toplevel,
+void BookmarkBubbleGtk::Show(GtkWindow* toplevel_window,
                              const gfx::Rect& rect,
                              Profile* profile,
                              const GURL& url,
@@ -95,7 +96,7 @@ void BookmarkBubbleGtk::Show(GtkWindow* transient_toplevel,
   // think that closing the previous bubble and opening the new one would make
   // more sense, but I guess then you would commit the bubble's changes.
   DCHECK(!g_bubble);
-  g_bubble = new BookmarkBubbleGtk(transient_toplevel, rect, profile,
+  g_bubble = new BookmarkBubbleGtk(toplevel_window, rect, profile,
                                    url, newly_bookmarked);
 }
 
@@ -112,14 +113,37 @@ void BookmarkBubbleGtk::InfoBubbleClosing(InfoBubbleGtk* info_bubble,
       NotificationService::NoDetails());
 }
 
-BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
+void BookmarkBubbleGtk::Observe(NotificationType type,
+                                const NotificationSource& source,
+                                const NotificationDetails& details) {
+  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+
+  gtk_chrome_link_button_set_use_gtk_theme(
+      GTK_CHROME_LINK_BUTTON(remove_button_),
+      theme_provider_->UseGtkTheme());
+
+  if (theme_provider_->UseGtkTheme()) {
+    for (std::vector<GtkWidget*>::iterator it = labels_.begin();
+         it != labels_.end(); ++it) {
+      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, NULL);
+    }
+  } else {
+    for (std::vector<GtkWidget*>::iterator it = labels_.begin();
+         it != labels_.end(); ++it) {
+      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, &gfx::kGdkBlack);
+    }
+  }
+}
+
+BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* toplevel_window,
                                      const gfx::Rect& rect,
                                      Profile* profile,
                                      const GURL& url,
                                      bool newly_bookmarked)
     : url_(url),
       profile_(profile),
-      transient_toplevel_(transient_toplevel),
+      theme_provider_(GtkThemeProvider::GetFrom(profile_)),
+      toplevel_window_(toplevel_window),
       content_(NULL),
       name_entry_(NULL),
       folder_combo_(NULL),
@@ -131,15 +155,15 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
   GtkWidget* label = gtk_label_new(l10n_util::GetStringUTF8(
       newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
                           IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK).c_str());
-  gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &gfx::kGdkBlack);
-  GtkWidget* remove_button = gtk_chrome_link_button_new(
+  labels_.push_back(label);
+  remove_button_ = gtk_chrome_link_button_new(
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK).c_str());
   GtkWidget* edit_button = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_OPTIONS).c_str());
   GtkWidget* close_button = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_CLOSE).c_str());
 
-  // Our content is arrange in 3 rows.  |top| contains a left justified
+  // Our content is arranged in 3 rows.  |top| contains a left justified
   // message, and a right justified remove link button.  |table| is the middle
   // portion with the name entry and the folder combo.  |bottom| is the final
   // row with a spacer, and the edit... and close buttons on the right.
@@ -149,7 +173,7 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
   gtk_misc_set_alignment(GTK_MISC(label), 0, 1);
   gtk_box_pack_start(GTK_BOX(top), label,
                      TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX(top), remove_button,
+  gtk_box_pack_start(GTK_BOX(top), remove_button_,
                      FALSE, FALSE, 0);
 
   // TODO(deanm): We should show the bookmark bar folder along with the top
@@ -166,7 +190,7 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
   // We use a table to allow the labels to line up with each other, along
   // with the entry and folder combo lining up.
   GtkWidget* table = gtk_util::CreateLabeledControlsGroup(
-      &gfx::kGdkBlack,
+      &labels_,
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_TITLE_TEXT).c_str(),
       name_entry_,
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_FOLDER_TEXT).c_str(),
@@ -189,8 +213,11 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
   // We want the focus to start on the entry, not on the remove button.
   gtk_container_set_focus_child(GTK_CONTAINER(content), table);
 
-  bubble_ = InfoBubbleGtk::Show(transient_toplevel_,
-                                rect, content, this);
+  bubble_ = InfoBubbleGtk::Show(toplevel_window_,
+                                rect,
+                                content,
+                                theme_provider_,
+                                this);  // delegate
   if (!bubble_) {
     NOTREACHED();
     return;
@@ -202,12 +229,18 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* transient_toplevel,
                    G_CALLBACK(&HandleNameActivateThunk), this);
   g_signal_connect(folder_combo_, "changed",
                    G_CALLBACK(&HandleFolderChangedThunk), this);
+  g_signal_connect(folder_combo_, "notify::popup-shown",
+                   G_CALLBACK(&HandleFolderPopupShownThunk), this);
   g_signal_connect(edit_button, "clicked",
                    G_CALLBACK(&HandleEditButtonThunk), this);
   g_signal_connect(close_button, "clicked",
                    G_CALLBACK(&HandleCloseButtonThunk), this);
-  g_signal_connect(remove_button, "clicked",
+  g_signal_connect(remove_button_, "clicked",
                    G_CALLBACK(&HandleRemoveButtonThunk), this);
+
+  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+                 NotificationService::AllSources());
+  theme_provider_->InitThemesFor(this);
 }
 
 BookmarkBubbleGtk::~BookmarkBubbleGtk() {
@@ -248,6 +281,17 @@ void BookmarkBubbleGtk::HandleFolderChanged() {
     MessageLoop::current()->PostTask(FROM_HERE,
         factory_.NewRunnableMethod(&BookmarkBubbleGtk::ShowEditor));
   }
+}
+
+void BookmarkBubbleGtk::HandleFolderPopupShown() {
+  // GtkComboBox grabs the keyboard and pointer when it displays its popup,
+  // which steals the grabs that InfoBubbleGtk had installed.  When the popup is
+  // hidden, we notify InfoBubbleGtk so it can try to reacquire the grabs
+  // (otherwise, GTK won't activate our widgets when the user clicks in them).
+  gboolean popup_shown = FALSE;
+  g_object_get(G_OBJECT(folder_combo_), "popup-shown", &popup_shown, NULL);
+  if (!popup_shown)
+    bubble_->HandlePointerAndKeyboardUngrabbedByContent();
 }
 
 void BookmarkBubbleGtk::HandleEditButton() {
@@ -319,13 +363,14 @@ void BookmarkBubbleGtk::ShowEditor() {
 
   // Closing might delete us, so we'll cache what we want we need on the stack.
   Profile* profile = profile_;
-  GtkWidget* toplevel = GTK_WIDGET(transient_toplevel_);
+  GtkWindow* toplevel = toplevel_window_;
 
   // Close the bubble, deleting the C++ objects, etc.
   bubble_->Close();
 
   if (node) {
-    BookmarkEditor::Show(toplevel, profile, NULL, node,
+    BookmarkEditor::Show(toplevel, profile, NULL,
+                         BookmarkEditor::EditDetails(node),
                          BookmarkEditor::SHOW_TREE, NULL);
   }
 }

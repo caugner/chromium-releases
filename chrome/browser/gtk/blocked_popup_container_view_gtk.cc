@@ -4,35 +4,32 @@
 
 #include "chrome/browser/gtk/blocked_popup_container_view_gtk.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
-#include "base/gfx/gtk_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/gtk/custom_button.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/rounded_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
 #include "chrome/common/gtk_util.h"
+#include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
 namespace {
+
 // The minimal border around the edge of the notification.
 const int kSmallPadding = 2;
-
-// Size of the border painted in kBorderColor
-const int kBorderPadding = 1;
-
-// Color of the border.
-const double kBorderColor[] = { 190.0 / 255, 205.0 / 255, 223.0 / 255 };
 
 // Color of the gradient in the background.
 const double kBackgroundColorTop[] = { 246.0 / 255, 250.0 / 255, 1.0 };
 const double kBackgroundColorBottom[] = { 219.0 / 255, 235.0 / 255, 1.0 };
 
 // Rounded corner radius (in pixels).
-const int kBackgroundCornerRadius = 4;
+const int kCornerSize = 4;
 
 }  // namespace
 
@@ -72,14 +69,26 @@ void BlockedPopupContainerViewGtk::ShowView() {
 }
 
 void BlockedPopupContainerViewGtk::UpdateLabel() {
-  size_t blocked_popups = model_->GetBlockedPopupCount();
+  size_t blocked_notices = model_->GetBlockedNoticeCount();
+  size_t blocked_items = model_->GetBlockedPopupCount() + blocked_notices;
 
-  gtk_button_set_label(
-      GTK_BUTTON(menu_button_),
-      (blocked_popups > 0) ?
-      l10n_util::GetStringFUTF8(IDS_POPUPS_BLOCKED_COUNT,
-                                UintToString16(blocked_popups)).c_str() :
-      l10n_util::GetStringUTF8(IDS_POPUPS_UNBLOCKED).c_str());
+  GtkWidget* label = gtk_bin_get_child(GTK_BIN(menu_button_));
+  if (!label) {
+    label = gtk_label_new("");
+    gtk_container_add(GTK_CONTAINER(menu_button_), label);
+  }
+
+  std::string label_text;
+  if (blocked_items == 0) {
+    label_text = l10n_util::GetStringUTF8(IDS_POPUPS_UNBLOCKED);
+  } else if (blocked_notices == 0) {
+    label_text = l10n_util::GetStringFUTF8(IDS_POPUPS_BLOCKED_COUNT,
+                                           UintToString16(blocked_items));
+  } else {
+    label_text = l10n_util::GetStringFUTF8(IDS_BLOCKED_NOTICE_COUNT,
+                                           UintToString16(blocked_items));
+  }
+  gtk_label_set_text(GTK_LABEL(label), label_text.c_str());
 }
 
 void BlockedPopupContainerViewGtk::HideView() {
@@ -92,16 +101,41 @@ void BlockedPopupContainerViewGtk::Destroy() {
   delete this;
 }
 
+void BlockedPopupContainerViewGtk::Observe(NotificationType type,
+                                           const NotificationSource& source,
+                                           const NotificationDetails& details) {
+  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+
+  // Make sure the label exists (so we can change its colors).
+  UpdateLabel();
+
+  // Update the label's colors.
+  GtkWidget* label = gtk_bin_get_child(GTK_BIN(menu_button_));
+  if (theme_provider_->UseGtkTheme()) {
+    gtk_util::SetLabelColor(label, NULL);
+  } else {
+    GdkColor color = theme_provider_->GetGdkColor(
+        BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
+    gtk_util::SetLabelColor(label, &color);
+  }
+
+  GdkColor color = theme_provider_->GetBorderColor();
+  gtk_util::SetRoundedWindowBorderColor(container_.get(), color);
+}
+
 bool BlockedPopupContainerViewGtk::IsCommandEnabled(int command_id) const {
   return true;
 }
 
 bool BlockedPopupContainerViewGtk::IsItemChecked(int id) const {
+  // |id| should be > 0 since all index based commands have 1 added to them.
   DCHECK_GT(id, 0);
   size_t id_size_t = static_cast<size_t>(id);
+
   if (id_size_t > BlockedPopupContainer::kImpossibleNumberOfPopups) {
-    return model_->IsHostWhitelisted(
-        id_size_t - BlockedPopupContainer::kImpossibleNumberOfPopups - 1);
+    id_size_t -= BlockedPopupContainer::kImpossibleNumberOfPopups + 1;
+    if (id_size_t < model_->GetPopupHostCount())
+      return model_->IsHostWhitelisted(id_size_t);
   }
 
   return false;
@@ -110,22 +144,44 @@ bool BlockedPopupContainerViewGtk::IsItemChecked(int id) const {
 void BlockedPopupContainerViewGtk::ExecuteCommand(int id) {
   DCHECK_GT(id, 0);
   size_t id_size_t = static_cast<size_t>(id);
-  if (id_size_t > BlockedPopupContainer::kImpossibleNumberOfPopups) {
-    // Decrement id since all index based commands have 1 added to them. (See
-    // ButtonPressed() for detail).
-    model_->ToggleWhitelistingForHost(
-        id_size_t - BlockedPopupContainer::kImpossibleNumberOfPopups - 1);
-  } else {
+
+  // Is this a click on a popup?
+  if (id_size_t < BlockedPopupContainer::kImpossibleNumberOfPopups) {
     model_->LaunchPopupAtIndex(id_size_t - 1);
+    return;
   }
+
+  // |id| shouldn't be == kImpossibleNumberOfPopups since the popups end before
+  // this and the hosts start after it.  (If it is used, it is as a separator.)
+  DCHECK_NE(id_size_t, BlockedPopupContainer::kImpossibleNumberOfPopups);
+  id_size_t -= BlockedPopupContainer::kImpossibleNumberOfPopups + 1;
+
+  // Is this a click on a host?
+  size_t host_count = model_->GetPopupHostCount();
+  if (id_size_t < host_count) {
+    model_->ToggleWhitelistingForHost(id_size_t);
+    return;
+  }
+
+  // |id shouldn't be == host_count since this is the separator between hosts
+  // and notices.
+  DCHECK_NE(id_size_t, host_count);
+  id_size_t -= host_count + 1;
+
+  // Nothing to do for now for notices.
 }
 
 BlockedPopupContainerViewGtk::BlockedPopupContainerViewGtk(
     BlockedPopupContainer* container)
     : model_(container),
       theme_provider_(GtkThemeProvider::GetFrom(container->profile())),
-      close_button_(CustomDrawButton::CloseButton()) {
+      close_button_(CustomDrawButton::CloseButton(theme_provider_)) {
   Init();
+
+  registrar_.Add(this,
+                 NotificationType::BROWSER_THEME_CHANGED,
+                 NotificationService::AllSources());
+  theme_provider_->InitThemesFor(this);
 }
 
 void BlockedPopupContainerViewGtk::Init() {
@@ -142,10 +198,14 @@ void BlockedPopupContainerViewGtk::Init() {
 
   container_.Own(gtk_util::CreateGtkBorderBin(hbox, NULL,
       kSmallPadding, kSmallPadding, kSmallPadding, kSmallPadding));
-  // Manually paint the event box.
-  gtk_widget_set_app_paintable(container_.get(), TRUE);
+  // Connect an expose signal that draws the background. Most connect before
+  // the ActAsRoundedWindow one.
   g_signal_connect(container_.get(), "expose-event",
-                   G_CALLBACK(OnContainerExpose), this);
+                   G_CALLBACK(OnRoundedExposeCallback), this);
+  gtk_util::ActAsRoundedWindow(
+      container_.get(), gfx::kGdkBlack, kCornerSize,
+      gtk_util::ROUNDED_TOP_LEFT | gtk_util::ROUNDED_TOP_RIGHT,
+      gtk_util::BORDER_LEFT | gtk_util::BORDER_TOP | gtk_util::BORDER_RIGHT);
 
   ContainingView()->AttachBlockedPopupView(this);
 }
@@ -166,15 +226,30 @@ void BlockedPopupContainerViewGtk::OnMenuButtonClicked(
   }
 
   // Set items (kImpossibleNumberOfPopups + 1) ..
-  // (kImpossibleNumberOfPopups + 1 + hosts.size()) as hosts.
+  // (kImpossibleNumberOfPopups + hosts.size()) as hosts.
   std::vector<std::string> hosts(container->model_->GetHosts());
   if (!hosts.empty() && (popup_count > 0))
     container->launch_menu_->AppendSeparator();
+  size_t first_host = BlockedPopupContainer::kImpossibleNumberOfPopups + 1;
   for (size_t i = 0; i < hosts.size(); ++i) {
-    container->launch_menu_->AppendCheckMenuItemWithLabel(
-        BlockedPopupContainer::kImpossibleNumberOfPopups + i + 1,
+    container->launch_menu_->AppendCheckMenuItemWithLabel(first_host + i,
         l10n_util::GetStringFUTF8(IDS_POPUP_HOST_FORMAT,
                                   UTF8ToUTF16(hosts[i])));
+  }
+
+  // Set items (kImpossibleNumberOfPopups + hosts.size() + 2) ..
+  // (kImpossibleNumberOfPopups + hosts.size() + 1 + notice_count) as notices.
+  size_t notice_count = container->model_->GetBlockedNoticeCount();
+  if (notice_count && (!hosts.empty() || (popup_count > 0)))
+    container->launch_menu_->AppendSeparator();
+  size_t first_notice = first_host + hosts.size() + 1;
+  for (size_t i = 0; i < notice_count; ++i) {
+    std::string host;
+    string16 reason;
+    container->model_->GetHostAndReasonForNotice(i, &host, &reason);
+    container->launch_menu_->AppendMenuItemWithLabel(first_notice + i,
+        l10n_util::GetStringFUTF8(IDS_NOTICE_TITLE_FORMAT, UTF8ToUTF16(host),
+                                  reason));
   }
 
   container->launch_menu_->PopupAsContext(gtk_get_current_event_time());
@@ -186,19 +261,19 @@ void BlockedPopupContainerViewGtk::OnCloseButtonClicked(
   container->model_->CloseAll();
 }
 
-gboolean BlockedPopupContainerViewGtk::OnContainerExpose(
+gboolean BlockedPopupContainerViewGtk::OnRoundedExposeCallback(
     GtkWidget* widget, GdkEventExpose* event,
     BlockedPopupContainerViewGtk* container) {
-  int width = widget->allocation.width;
-  int height = widget->allocation.height;
-
-  // Clip to our damage rect
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(widget->window));
-  cairo_rectangle(cr, event->area.x, event->area.y,
-                  event->area.width, event->area.height);
-  cairo_clip(cr);
-
   if (!container->theme_provider_->UseGtkTheme()) {
+    int width = widget->allocation.width;
+    int height = widget->allocation.height;
+
+    // Clip to our damage rect.
+    cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(event->window));
+    cairo_rectangle(cr, event->area.x, event->area.y,
+                    event->area.width, event->area.height);
+    cairo_clip(cr);
+
     // TODO(erg): We draw the gradient background only when GTK themes are
     // off. This isn't a perfect solution as this isn't themed! The views
     // version doesn't appear to be themed either, so at least for now,
@@ -216,30 +291,9 @@ gboolean BlockedPopupContainerViewGtk::OnContainerExpose(
     cairo_set_source(cr, pattern);
     cairo_paint(cr);
     cairo_pattern_destroy(pattern);
+
+    cairo_destroy(cr);
   }
 
-  // TODO(erg): We need to figure out the border situation, too. We aren't
-  // provided a color from the theme system and the Windows implementation
-  // still uses constants for color. See the status bubble, too.
-
-  // Sets up our stroke pen.
-  cairo_set_source_rgb(cr, kBorderColor[0], kBorderColor[1], kBorderColor[2]);
-  cairo_set_line_width(cr, 1.5);
-
-  // Draws rounded corners around the edge of the notification, clockwise
-  // starting from the bottom left. (A bezier curve with control points at 90
-  // degree angles forms a circular arc.)
-  cairo_move_to(cr, 0, height);
-  cairo_line_to(cr, 0, kBackgroundCornerRadius);
-  cairo_curve_to(cr, 0, kBackgroundCornerRadius,
-                 0, 0, kBackgroundCornerRadius, 0);
-  cairo_line_to(cr, width - kBackgroundCornerRadius, 0);
-  cairo_curve_to(cr, width - kBackgroundCornerRadius, 0,
-                 width, 0, width, kBackgroundCornerRadius);
-  cairo_line_to(cr, width, height);
-  cairo_stroke(cr);
-
-  cairo_destroy(cr);
-
-  return FALSE;  // Allow subwidgets to paint.
+  return FALSE;
 }

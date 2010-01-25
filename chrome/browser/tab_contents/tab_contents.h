@@ -12,12 +12,13 @@
 #include <string>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/fav_icon_helper.h"
 #include "chrome/browser/find_notification_details.h"
@@ -29,19 +30,20 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/render_view_host_manager.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/gears_api.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/page_action.h"
 #include "chrome/common/property_bag.h"
+#include "chrome/common/renderer_preferences.h"
 #include "net/base/load_states.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/webpreferences.h"
 
-#if defined(OS_MACOSX) || defined(OS_LINUX)
+#if defined(OS_LINUX)
 // Remove when we've finished porting the supporting classes.
 #include "chrome/common/temp_scaffolding_stubs.h"
-#elif defined(OS_WIN)
+#elif defined(OS_WIN) || defined(OS_MACOSX)
 #include "chrome/browser/printing/print_view_manager.h"
 #endif
 
@@ -70,9 +72,9 @@ class Message;
 class AutofillManager;
 class BlockedPopupContainer;
 class DOMUI;
-class DOMUIContents;
 class DownloadItem;
 class LoadNotificationDetails;
+class OmniboxSearchHint;
 class PageAction;
 class PasswordManager;
 class PluginInstaller;
@@ -102,18 +104,24 @@ class TabContents : public PageNavigator,
   // Flags passed to the TabContentsDelegate.NavigationStateChanged to tell it
   // what has changed. Combine them to update more than one thing.
   enum InvalidateTypes {
-    INVALIDATE_URL = 1,           // The URL has changed.
-    INVALIDATE_TAB = 2,           // The tab (favicon, title, etc.) has changed
-    INVALIDATE_LOAD = 4,          // The loading state has changed.
-    INVALIDATE_PAGE_ACTIONS = 8,  // Page action icons have changed.
-    // Helper for forcing a refresh.
-    INVALIDATE_EVERYTHING = 0xFFFFFFFF
+    INVALIDATE_URL             = 1 << 0,  // The URL has changed.
+    INVALIDATE_TAB             = 1 << 1,  // The tab (favicon, title, etc.) has
+                                          // changed.
+    INVALIDATE_LOAD            = 1 << 2,  // The loading state has changed.
+    INVALIDATE_PAGE_ACTIONS    = 1 << 3,  // Page action icons have changed.
+    INVALIDATE_BOOKMARK_BAR    = 1 << 4,  // State of ShouldShowBookmarkBar
+                                          // changed.
+    INVALIDATE_EXTENSION_SHELF = 1 << 5,  // State of
+                                          // IsExtensionShelfAlwaysVisible
+                                          // changed.
   };
 
+  // |base_tab_contents| is used if we want to size the new tab contents view
+  // based on an existing tab contents view.  This can be NULL if not needed.
   TabContents(Profile* profile,
               SiteInstance* site_instance,
               int routing_id,
-              base::WaitableEvent* modal_dialog_event);
+              const TabContents* base_tab_contents);
   virtual ~TabContents();
 
   static void RegisterUserPrefs(PrefService* prefs);
@@ -125,9 +133,6 @@ class TabContents : public PageNavigator,
   // rather than a reference since the PropertyAccessors expect this.
   const PropertyBag* property_bag() const { return &property_bag_; }
   PropertyBag* property_bag() { return &property_bag_; }
-
-  // Returns this object as a DOMUIContents if it is one, and NULL otherwise.
-  virtual DOMUIContents* AsDOMUIContents() { return NULL; }
 
   TabContentsDelegate* delegate() const { return delegate_; }
   void set_delegate(TabContentsDelegate* d) { delegate_ = d; }
@@ -212,6 +217,9 @@ class TabContents : public PageNavigator,
   // entry.
   SkBitmap GetFavIcon() const;
 
+  // Returns true if we are not using the default favicon.
+  bool FavIconIsValid() const;
+
   // Returns whether the favicon should be displayed. If this returns false, no
   // space is provided for the favicon, and the favicon is never displayed.
   virtual bool ShouldDisplayFavIcon();
@@ -229,9 +237,10 @@ class TabContents : public PageNavigator,
 
   bool is_starred() const { return is_starred_; }
 
-  const std::wstring& encoding() const { return encoding_; }
-  void set_encoding(const std::wstring& encoding) {
-    encoding_ = encoding;
+  const std::string& encoding() const { return encoding_; }
+  void set_encoding(const std::string& encoding);
+  void reset_encoding() {
+    encoding_.clear();
   }
 
   // Internal state ------------------------------------------------------------
@@ -250,14 +259,25 @@ class TabContents : public PageNavigator,
   // this tab. The parameter |title| (if not empty) can be used to override the
   // page action title for this tab and |icon_id| specifies an icon index
   // (defined in the manifest) to use instead of the first icon (for this tab).
-  void SetPageActionEnabled(const PageAction* page_action, bool enable,
+  void SetPageActionEnabled(const ExtensionAction* page_action, bool enable,
                             const std::string& title, int icon_id);
 
   // Returns the page action state for this tab. The pair returns contains
   // the title (string) for the page action and the icon index to use (int).
   // If this function returns NULL it means the page action is not enabled for
   // this tab.
-  const PageActionState* GetPageActionState(const PageAction* page_action);
+  const ExtensionActionState* GetPageActionState(
+      const ExtensionAction* page_action);
+
+  // Same as above, but creates an enable state if it doesn't exist. The return
+  // value can be updated. The caller should call PageActionStateChanged when
+  // done modifying the state.
+  ExtensionActionState* GetOrCreatePageActionState(
+      const ExtensionAction* page_action);
+
+  // Call this after updating a ExtensionActionState object returned by
+  // GetOrCreatePageActionState to notify clients about the changes.
+  void PageActionStateChanged();
 
   // Whether the tab is in the process of being destroyed.
   // Added as a tentative work-around for focus related bug #4633.  This allows
@@ -316,6 +336,9 @@ class TabContents : public PageNavigator,
   // cut/copy/paste focus. (http://b/1117225)
   virtual void Cut();
   virtual void Copy();
+#if defined(OS_MACOSX)
+  virtual void CopyToFindPboard();
+#endif
   virtual void Paste();
 
   // Called on a TabContents when it isn't a popup, but a new window.
@@ -335,7 +358,6 @@ class TabContents : public PageNavigator,
 
   // Window management ---------------------------------------------------------
 
-#if defined(OS_WIN) || defined(OS_LINUX)
   // Create a new window constrained to this TabContents' clip and visibility.
   // The window is initialized by using the supplied delegate to obtain basic
   // window characteristics, and the supplied view for the content. The window
@@ -343,7 +365,6 @@ class TabContents : public PageNavigator,
   // within the contents.
   ConstrainedWindow* CreateConstrainedDialog(
       ConstrainedWindowDelegate* delegate);
-#endif
 
   // Adds a new tab or window with the given already-created contents
   void AddNewContents(TabContents* new_contents,
@@ -358,18 +379,32 @@ class TabContents : public PageNavigator,
   // of unwanted popups.
   void CloseAllSuppressedPopups();
 
+  // Execute code in this tab.
+  void ExecuteCode(int request_id, const std::string& extension_id,
+                   bool is_js_code, const std::string& code_string);
+
   // Called when the blocked popup notification is shown or hidden.
   virtual void PopupNotificationVisibilityChanged(bool visible);
 
   // Returns the number of constrained windows in this tab.  Used by tests.
   size_t constrained_window_count() { return child_windows_.size(); }
 
+  typedef std::vector<ConstrainedWindow*> ConstrainedWindowList;
+
+  // Return an iterator for the first constrained window in this tab contents.
+  ConstrainedWindowList::iterator constrained_window_begin()
+  { return child_windows_.begin(); }
+
+  // Return an iterator for the last constrained window in this tab contents.
+  ConstrainedWindowList::iterator constrained_window_end()
+  { return child_windows_.end(); }
+
   // Views and focus -----------------------------------------------------------
   // TODO(brettw): Most of these should be removed and the caller should call
   // the view directly.
 
   // Returns the actual window that is focused when this TabContents is shown.
-  gfx::NativeView GetContentNativeView();
+  gfx::NativeView GetContentNativeView() const;
 
   // Returns the NativeView associated with this TabContents. Outside of
   // automation in the context of the UI, this is required to be implemented.
@@ -411,8 +446,11 @@ class TabContents : public PageNavigator,
 
   // Toolbars and such ---------------------------------------------------------
 
-  // Returns whether the bookmark bar should be visible.
-  virtual bool IsBookmarkBarAlwaysVisible();
+  // Returns true if a Bookmark Bar should be shown for this tab.
+  virtual bool ShouldShowBookmarkBar();
+
+  // Returns whether the extension shelf should be visible.
+  virtual bool IsExtensionShelfAlwaysVisible();
 
   // Notifies the delegate that a download started.
   void OnStartDownload(DownloadItem* download);
@@ -519,16 +557,13 @@ class TabContents : public PageNavigator,
                                     bool success,
                                     const std::wstring& prompt);
 
-  // AppModalDialog calls this when the javascript dialog has been destroyed.
-  void OnJavaScriptMessageBoxWindowDestroyed();
-
   // Prepare for saving the current web page to disk.
   void OnSavePage();
 
   // Save page with the main HTML file path, the directory for saving resources,
-  // and the save type: HTML only or complete web page.
-  void SavePage(const std::wstring& main_file,
-                const std::wstring& dir_path,
+  // and the save type: HTML only or complete web page. Returns true if the
+  // saving process has been initiated successfully.
+  bool SavePage(const FilePath& main_file, const FilePath& dir_path,
                 SavePackage::SavePackageType save_type);
 
   // Displays asynchronously a print preview (generated by the renderer) if not
@@ -561,9 +596,15 @@ class TabContents : public PageNavigator,
   // the opposite of this, by which 'browser' is notified of
   // the encoding of the current tab from 'renderer' (determined by
   // auto-detect, http header, meta, bom detection, etc).
-  void override_encoding(const std::wstring& encoding) {
+  void override_encoding(const std::string& encoding) {
     set_encoding(encoding);
     render_view_host()->SetPageEncoding(encoding);
+  }
+  // Remove any user-defined override encoding and reload by sending down
+  // ViewMsg_ResetPageEncodingToDefault to the renderer.
+  void reset_override_encoding() {
+    reset_encoding();
+    render_view_host()->ResetPageEncodingToDefault();
   }
 
   void WindowMoveOrResizeStarted() {
@@ -573,6 +614,28 @@ class TabContents : public PageNavigator,
   BlockedPopupContainer* blocked_popup_container() const {
     return blocked_popups_;
   }
+
+  RendererPreferences* GetMutableRendererPrefs() {
+    return &renderer_preferences_;
+  }
+
+  void set_opener_dom_ui_type(DOMUITypeID opener_dom_ui_type) {
+    opener_dom_ui_type_ = opener_dom_ui_type;
+  }
+
+  // We want to time how long it takes to create a new tab page.  This method
+  // gets called as parts of the new tab page have loaded.
+  void LogNewTabTime(const std::string& event_name);
+
+  // Set the time when we started to create the new tab page.  This time is
+  // from before we created this TabContents.
+  void set_new_tab_start_time(const base::TimeTicks& time) {
+    new_tab_start_time_ = time;
+  }
+
+  // Notification that tab closing has started.  This can be called multiple
+  // times, subsequent calls are ignored.
+  void OnCloseStarted();
 
  private:
   friend class NavigationController;
@@ -653,7 +716,6 @@ class TabContents : public PageNavigator,
   // up at the next animation step if the throbber is going.
   void SetNotWaitingForResponse() { waiting_for_response_ = false; }
 
-  typedef std::vector<ConstrainedWindow*> ConstrainedWindowList;
   ConstrainedWindowList child_windows_;
 
   // Expires InfoBars that need to be expired, according to the state carried
@@ -713,7 +775,7 @@ class TabContents : public PageNavigator,
 
   // Called by OnMsgNavigate to update history state. Overridden by subclasses
   // that don't want to be added to history.
-  virtual void UpdateHistoryForNavigation(const GURL& display_url,
+  virtual void UpdateHistoryForNavigation(const GURL& virtual_url,
       const NavigationController::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params);
 
@@ -772,6 +834,8 @@ class TabContents : public PageNavigator,
       const std::string& frame_origin,
       const std::string& main_frame_origin,
       const std::string& security_info);
+  virtual void DidDisplayInsecureContent();
+  virtual void DidRunInsecureContent(const std::string& security_origin);
   virtual void DidFailProvisionalLoadWithError(
       RenderViewHost* render_view_host,
       bool is_main_frame,
@@ -792,6 +856,9 @@ class TabContents : public PageNavigator,
   virtual RenderViewHostDelegate::FavIcon* GetFavIconDelegate();
   virtual RenderViewHostDelegate::Autofill* GetAutofillDelegate();
   virtual TabContents* GetAsTabContents();
+  virtual void AddBlockedNotice(const GURL& url, const string16& reason);
+  virtual ViewType::Type GetRenderViewType() const;
+  virtual int GetBrowserWindowID() const;
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void RenderViewReady(RenderViewHost* render_view_host);
   virtual void RenderViewGone(RenderViewHost* render_view_host);
@@ -805,22 +872,22 @@ class TabContents : public PageNavigator,
                            int32 page_id,
                            const std::wstring& title);
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
-                              const std::wstring& encoding);
+                              const std::string& encoding);
   virtual void UpdateTargetURL(int32 page_id, const GURL& url);
   virtual void UpdateThumbnail(const GURL& url,
                                const SkBitmap& bitmap,
                                const ThumbnailScore& score);
-  virtual void UpdateInspectorSettings(const std::wstring& raw_settings);
+  virtual void UpdateInspectorSettings(const std::string& raw_settings);
   virtual void Close(RenderViewHost* render_view_host);
   virtual void RequestMove(const gfx::Rect& new_bounds);
-  virtual void DidStartLoading(RenderViewHost* render_view_host);
-  virtual void DidStopLoading(RenderViewHost* render_view_host);
+  virtual void DidStartLoading();
+  virtual void DidStopLoading();
   virtual void RequestOpenURL(const GURL& url, const GURL& referrer,
                               WindowOpenDisposition disposition);
   virtual void DomOperationResponse(const std::string& json_string,
                                     int automation_id);
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const std::string& content,
+                                   const Value* content,
                                    int request_id,
                                    bool has_callback);
   virtual void ProcessExternalHostMessage(const std::string& message,
@@ -855,9 +922,11 @@ class TabContents : public PageNavigator,
   virtual void RendererUnresponsive(RenderViewHost* render_view_host,
                                     bool is_during_unload);
   virtual void RendererResponsive(RenderViewHost* render_view_host);
-  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state);
+  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state,
+                                uint64 upload_position, uint64 upload_size);
   virtual bool IsExternalTabContainer() const;
   virtual void DidInsertCSS();
+  virtual void FocusedNodeChanged();
 
   // SelectFileDialog::Listener ------------------------------------------------
 
@@ -873,7 +942,7 @@ class TabContents : public PageNavigator,
       bool* proceed_to_fire_unload);
   virtual void DidStartLoadingFromRenderManager(
       RenderViewHost* render_view_host) {
-    DidStartLoading(render_view_host);
+    DidStartLoading();
   }
   virtual void RenderViewGoneFromRenderManager(
       RenderViewHost* render_view_host) {
@@ -980,6 +1049,10 @@ class TabContents : public PageNavigator,
   // The current load state and the URL associated with it.
   net::LoadState load_state_;
   std::wstring load_state_host_;
+  // Upload progress, for displaying in the status bar.
+  // Set to zero when there is no significant upload happening.
+  uint64 upload_size_;
+  uint64 upload_position_;
 
   // Data for current page -----------------------------------------------------
 
@@ -997,7 +1070,7 @@ class TabContents : public PageNavigator,
   std::string contents_mime_type_;
 
   // Character encoding. TODO(jungshik) : convert to std::string
-  std::wstring encoding_;
+  std::string encoding_;
 
   // Data for shelves and stuff ------------------------------------------------
 
@@ -1048,12 +1121,13 @@ class TabContents : public PageNavigator,
 
   // Data for Page Actions -----------------------------------------------------
 
-  // A map of page actions that are enabled in this tab (and a state object
-  // that can be used to override the title and icon used for the page action).
-  // This map is cleared every time the mainframe navigates and populated by the
-  // PageAction extension API.
-  std::map< const PageAction*, linked_ptr<PageActionState> >
-      enabled_page_actions_;
+  // A map of page actions that this tab knows about (and a state object that
+  // can be used to update the title, icon, visibilty, etc used for the page
+  // action). This map is cleared every time the mainframe navigates and
+  // populated by the PageAction extension API.
+  typedef std::map< const ExtensionAction*, linked_ptr<ExtensionActionState> >
+      PageActionStateMap;
+  PageActionStateMap page_actions_;
 
   // Data for misc internal state ----------------------------------------------
 
@@ -1070,7 +1144,7 @@ class TabContents : public PageNavigator,
   bool notify_disconnection_;
 
   // Maps from handle to page_id.
-  typedef std::map<HistoryService::Handle, int32> HistoryRequestMap;
+  typedef std::map<FaviconService::Handle, int32> HistoryRequestMap;
   HistoryRequestMap history_requests_;
 
 #if defined(OS_WIN)
@@ -1086,6 +1160,28 @@ class TabContents : public PageNavigator,
   // True if the user has decided to block future javascript messages. This is
   // reset on navigations to false on navigations.
   bool suppress_javascript_messages_;
+
+  // Set to true when there is an active "before unload" dialog.  When true,
+  // we've forced the throbber to start in Navigate, and we need to remember to
+  // turn it off in OnJavaScriptMessageBoxClosed if the navigation is canceled.
+  bool is_showing_before_unload_dialog_;
+
+  // Shows an info-bar to users when they search from a known search engine and
+  // have never used the monibox for search before.
+  scoped_ptr<OmniboxSearchHint> omnibox_search_hint_;
+
+  // Settings that get passed to the renderer process.
+  RendererPreferences renderer_preferences_;
+
+  // If this tab was created from a renderer using window.open, this will be
+  // non-NULL and represent the DOMUI of the opening renderer.
+  DOMUITypeID opener_dom_ui_type_;
+
+  // The time that we started to create the new tab page.
+  base::TimeTicks new_tab_start_time_;
+
+  // The time that we started to close the tab.
+  base::TimeTicks tab_close_start_time_;
 
   // ---------------------------------------------------------------------------
 

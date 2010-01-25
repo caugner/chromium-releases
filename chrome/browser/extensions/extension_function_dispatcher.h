@@ -13,10 +13,13 @@
 #include "googleurl/src/gurl.h"
 
 class Browser;
+class Extension;
 class ExtensionFunction;
+class ExtensionHost;
 class Profile;
 class RenderViewHost;
 class RenderViewHostDelegate;
+class Value;
 
 // A factory function for creating new ExtensionFunction instances.
 typedef ExtensionFunction* (*ExtensionFunctionFactory)();
@@ -29,6 +32,7 @@ class ExtensionFunctionDispatcher {
   class Delegate {
    public:
     virtual Browser* GetBrowser() = 0;
+    virtual ExtensionHost* GetExtensionHost() { return NULL; }
   };
 
   // The peer object allows us to notify ExtensionFunctions when we are
@@ -58,7 +62,7 @@ class ExtensionFunctionDispatcher {
   ~ExtensionFunctionDispatcher();
 
   // Handle a request to execute an extension function.
-  void HandleRequest(const std::string& name, const std::string& args,
+  void HandleRequest(const std::string& name, const Value* args,
                      int request_id, bool has_callback);
 
   // Send a response to a function.
@@ -67,6 +71,14 @@ class ExtensionFunctionDispatcher {
   // Gets the browser extension functions should operate relative to. For
   // example, for positioning windows, or alert boxes, or creating tabs.
   Browser* GetBrowser();
+
+  // Gets the ExtensionHost associated with this object.  In the case of
+  // tab hosted extension pages, this will return NULL.
+  ExtensionHost* GetExtensionHost();
+
+  // Gets the extension the function is being invoked by. This should not ever
+  // return NULL.
+  Extension* GetExtension();
 
   // Handle a malformed message.  Possibly the result of an attack, so kill
   // the renderer.

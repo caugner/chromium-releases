@@ -44,8 +44,8 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   JSONFileValueSerializer serializer(extensions_path);
   scoped_ptr<DictionaryValue> valid_value(
       static_cast<DictionaryValue*>(serializer.Deserialize(&error)));
+  EXPECT_EQ("", error);
   ASSERT_TRUE(valid_value.get());
-  ASSERT_EQ("", error);
   ASSERT_TRUE(extension.InitFromValue(*valid_value, true, &error));
   ASSERT_EQ("", error);
 
@@ -182,11 +182,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   permissions = new ListValue;
   input_value->Set(keys::kPermissions, permissions);
   EXPECT_TRUE(extension.InitFromValue(*input_value, true, &error));
-  const std::vector<std::string>* error_vector =
-      ExtensionErrorReporter::GetInstance()->GetErrors();
-  const std::string log_error = error_vector->at(error_vector->size() - 1);
-  EXPECT_TRUE(MatchPattern(log_error,
-      errors::kInvalidPermissionCountWarning));
+  EXPECT_EQ(0u, ExtensionErrorReporter::GetInstance()->GetErrors()->size());
 
   input_value->Set(keys::kPermissions, Value::CreateIntegerValue(9));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
@@ -208,6 +204,39 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   permissions->Set(0, Value::CreateStringValue("file:///C:/foo.txt"));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermissionScheme));
+
+  // Test invalid privacy blacklists list.
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  input_value->SetInteger(keys::kPrivacyBlacklists, 42);
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_EQ(errors::kInvalidPrivacyBlacklists, error);
+
+  // Test invalid privacy blacklists list item.
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  ListValue* privacy_blacklists = NULL;
+  input_value->GetList(keys::kPrivacyBlacklists, &privacy_blacklists);
+  ASSERT_FALSE(NULL == privacy_blacklists);
+  privacy_blacklists->Set(0, Value::CreateIntegerValue(42));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPrivacyBlacklistsPath));
+
+  // Test invalid UI surface count (both page action and browser action).
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  DictionaryValue* action = new DictionaryValue;
+  action->SetString(keys::kPageActionId, "MyExtensionActionId");
+  action->SetString(keys::kName, "MyExtensionActionName");
+  ListValue* action_list = new ListValue;
+  action_list->Append(action->DeepCopy());
+  input_value->Set(keys::kPageActions, action_list);
+  input_value->Set(keys::kBrowserAction, action);
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_STREQ(error.c_str(), errors::kOneUISurfaceOnly);
+
+  // Test invalid options page url.
+  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
+  input_value->Set(keys::kOptionsPage, Value::CreateNullValue());
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPattern(error, errors::kInvalidOptionsPage));
 }
 
 TEST(ExtensionTest, InitFromValueValid) {
@@ -216,8 +245,6 @@ TEST(ExtensionTest, InitFromValueValid) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension::ResetGeneratedIdCounter();
-
   Extension extension(path);
   std::string error;
   DictionaryValue input_value;
@@ -228,12 +255,18 @@ TEST(ExtensionTest, InitFromValueValid) {
 
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
-  EXPECT_EQ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", extension.id());
+  EXPECT_TRUE(Extension::IdIsValid(extension.id()));
   EXPECT_EQ("1.0.0.0", extension.VersionString());
   EXPECT_EQ("my extension", extension.name());
-  EXPECT_EQ("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
-            extension.url().spec());
+  EXPECT_EQ(extension.id(), extension.url().host());
   EXPECT_EQ(path.value(), extension.path().value());
+
+  // Test with an options page.
+  input_value.SetString(keys::kOptionsPage, "options.html");
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_EQ("", error);
+  EXPECT_EQ("chrome-extension", extension.options_url().scheme());
+  EXPECT_EQ("/options.html", extension.options_url().path());
 }
 
 TEST(ExtensionTest, GetResourceURLAndPath) {
@@ -254,35 +287,38 @@ TEST(ExtensionTest, GetResourceURLAndPath) {
             Extension::GetResourceURL(extension.url(), "bar/../baz.js").spec());
   EXPECT_EQ(extension.url().spec() + "baz.js",
             Extension::GetResourceURL(extension.url(), "../baz.js").spec());
-
-  EXPECT_EQ(path.Append(FILE_PATH_LITERAL("bar"))
-                .Append(FILE_PATH_LITERAL("baz.js")).value(),
-            Extension::GetResourcePath(extension.path(), "bar/baz.js").value());
-  EXPECT_EQ(path.Append(FILE_PATH_LITERAL("baz.js")).value(),
-            Extension::GetResourcePath(extension.path(), "bar/../baz.js")
-                .value());
-  EXPECT_EQ(FilePath().value(),
-            Extension::GetResourcePath(extension.path(), "../baz.js").value());
 }
 
 TEST(ExtensionTest, LoadPageActionHelper) {
-  Extension extension;
+#if defined(OS_WIN)
+    FilePath path(StringPrintf(L"c:\\extension"));
+#else
+    FilePath path(StringPrintf("/extension"));
+#endif
+  Extension extension(path);
   std::string error_msg;
-  scoped_ptr<PageAction> page_action;
+  scoped_ptr<ExtensionAction> action;
   DictionaryValue input;
 
   // First try with an empty dictionary. We should get nothing back.
-  ASSERT_EQ(NULL, extension.LoadPageActionHelper(&input, 0, &error_msg));
+  ASSERT_TRUE(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::PAGE_ACTION) == NULL);
+  ASSERT_STRNE("", error_msg.c_str());
+  error_msg = "";
+
+  // Now try the same, but as a browser action. Ensure same results.
+  ASSERT_TRUE(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::BROWSER_ACTION) == NULL);
   ASSERT_STRNE("", error_msg.c_str());
   error_msg = "";
 
   // Now setup some values to use in the page action.
-  const std::string id("MyPageActionId");
-  const std::string name("MyPageActionName");
+  const std::string id("MyExtensionActionId");
+  const std::string name("MyExtensionActionName");
   std::string img1("image1.png");
   std::string img2("image2.png");
 
-  // Add the page_actions dictionary.
+  // Add the dictionary for the contextual action.
   input.SetString(keys::kPageActionId, id);
   input.SetString(keys::kName, name);
   ListValue* icons = new ListValue;
@@ -290,31 +326,46 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   icons->Set(1, Value::CreateStringValue(img2));
   input.Set(keys::kPageActionIcons, icons);
 
-  // Parse the page action and read back the values from the object.
-  page_action.reset(extension.LoadPageActionHelper(&input, 0, &error_msg));
-  ASSERT_TRUE(NULL != page_action.get());
+  // Parse as page action and read back the values from the object.
+  action.reset(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(NULL != action.get());
   ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_STREQ(id.c_str(), page_action->id().c_str());
-  ASSERT_STREQ(name.c_str(), page_action->name().c_str());
-  ASSERT_EQ(2u, page_action->icon_paths().size());
-  ASSERT_STREQ(img1.c_str(), page_action->icon_paths()[0].c_str());
-  ASSERT_STREQ(img2.c_str(), page_action->icon_paths()[1].c_str());
-  // Type hasn't been set, but it defaults to PERMANENT.
-  ASSERT_EQ(PageAction::PERMANENT, page_action->type());
+  ASSERT_STREQ(id.c_str(), action->id().c_str());
+  ASSERT_STREQ(name.c_str(), action->title().c_str());
+  ASSERT_EQ(2u, action->icon_paths().size());
+  ASSERT_STREQ(img1.c_str(), action->icon_paths()[0].c_str());
+  ASSERT_STREQ(img2.c_str(), action->icon_paths()[1].c_str());
+  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
+
+  // Now try the same, but as a browser action.
+  action.reset(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::BROWSER_ACTION));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_STREQ("", error_msg.c_str());
+  // Browser actions don't have an id, page actions do.
+  ASSERT_STREQ("", action->id().c_str());
+  ASSERT_STREQ(name.c_str(), action->title().c_str());
+  ASSERT_EQ(2u, action->icon_paths().size());
+  ASSERT_STREQ(img1.c_str(), action->icon_paths()[0].c_str());
+  ASSERT_STREQ(img2.c_str(), action->icon_paths()[1].c_str());
+  ASSERT_EQ(ExtensionAction::BROWSER_ACTION, action->type());
 
   // Explicitly set the same type and parse again.
-  input.SetString(keys::kType, values::kPageActionTypePermanent);
-  page_action.reset(extension.LoadPageActionHelper(&input, 0, &error_msg));
-  ASSERT_TRUE(NULL != page_action.get());
-  ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_EQ(PageAction::PERMANENT, page_action->type());
-
-  // Explicitly set the TAB type and parse again.
   input.SetString(keys::kType, values::kPageActionTypeTab);
-  page_action.reset(extension.LoadPageActionHelper(&input, 0, &error_msg));
-  ASSERT_TRUE(NULL != page_action.get());
+  action.reset(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::BROWSER_ACTION));
+  ASSERT_TRUE(NULL != action.get());
   ASSERT_STREQ("", error_msg.c_str());
-  ASSERT_EQ(PageAction::TAB, page_action->type());
+  ASSERT_EQ(ExtensionAction::BROWSER_ACTION, action->type());
+
+  // Explicitly set the PAGE_ACTION type and parse again.
+  input.SetString(keys::kType, values::kPageActionTypePermanent);
+  action.reset(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_STREQ("", error_msg.c_str());
+  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
 
   // Make a deep copy of the input and remove one key at a time and see if we
   // get the right error.
@@ -323,34 +374,77 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   // First remove id key.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kPageActionId, NULL);
-  page_action.reset(extension.LoadPageActionHelper(copy.get(), 0, &error_msg));
-  ASSERT_TRUE(NULL == page_action.get());
-  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidPageActionId));
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_STREQ("", error_msg.c_str());
+  error_msg = "";
+
+  // Same test (id key), but with browser action.
+  copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
+  copy->Remove(keys::kPageActionId, NULL);
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
+  // Having no id is valid for browser actions.
+  ASSERT_TRUE(NULL != action.get());
+  ASSERT_STREQ("", error_msg.c_str());
+  error_msg = "";
 
   // Then remove the name key.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kName, NULL);
-  page_action.reset(extension.LoadPageActionHelper(copy.get(), 0, &error_msg));
-  ASSERT_TRUE(NULL == page_action.get());
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(NULL == action.get());
   ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidName));
+                           errors::kInvalidPageActionDefaultTitle));
+  error_msg = "";
+
+  // Same test (name key), but with browser action.
+  copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
+  copy->Remove(keys::kName, NULL);
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
+  ASSERT_TRUE(NULL == action.get());
+  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
+                           errors::kInvalidPageActionDefaultTitle));
+  error_msg = "";
 
   // Then remove the icon paths key.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
   copy->Remove(keys::kPageActionIcons, NULL);
-  page_action.reset(extension.LoadPageActionHelper(copy.get(), 0, &error_msg));
-  ASSERT_TRUE(NULL == page_action.get());
-  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidPageActionIconPaths));
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(NULL != action.get());
+  error_msg = "";
 
-  // Then set the type to something bogus.
+  // Same test (name key), but with browser action.
   copy.reset(static_cast<DictionaryValue*>(input.DeepCopy()));
-  copy->SetString(keys::kType, "something_bogus");
-  page_action.reset(extension.LoadPageActionHelper(copy.get(), 0, &error_msg));
-  ASSERT_TRUE(NULL == page_action.get());
-  ASSERT_TRUE(MatchPattern(error_msg.c_str(),
-                           errors::kInvalidPageActionTypeValue));
+  copy->Remove(keys::kPageActionIcons, NULL);
+  action.reset(extension.LoadExtensionActionHelper(
+      copy.get(), &error_msg, ExtensionAction::BROWSER_ACTION));
+  ASSERT_TRUE(NULL != action.get());
+
+  // Now test that we can parse the new format for page actions.
+
+  // Now setup some values to use in the page action.
+  const std::string kTitle("MyExtensionActionTitle");
+  const std::string kIcon("image1.png");
+
+  // Add the dictionary for the contextual action.
+  input.Clear();
+  input.SetString(keys::kPageActionDefaultTitle, kTitle);
+  input.SetString(keys::kPageActionDefaultIcon, kIcon);
+
+  // Parse as page action and read back the values from the object.
+  action.reset(extension.LoadExtensionActionHelper(
+      &input, &error_msg, ExtensionAction::PAGE_ACTION));
+  ASSERT_TRUE(action.get());
+  ASSERT_STREQ("", error_msg.c_str());
+  ASSERT_EQ(kTitle, action->title());
+  ASSERT_EQ(1u, action->icon_paths().size());
+  ASSERT_EQ(kIcon, action->icon_paths()[0]);
+  ASSERT_EQ(ExtensionAction::PAGE_ACTION, action->type());
 }
 
 TEST(ExtensionTest, IdIsValid) {
@@ -365,7 +459,7 @@ TEST(ExtensionTest, IdIsValid) {
   EXPECT_FALSE(Extension::IdIsValid("abcdefghijklmnopabcdefghijklmno0"));
 }
 
-TEST(ExtensionTest, GenerateIDFromPublicKey) {
+TEST(ExtensionTest, GenerateID) {
   const uint8 public_key_info[] = {
     0x30, 0x81, 0x9f, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7,
     0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x81, 0x8d, 0x00, 0x30, 0x81,
@@ -385,7 +479,7 @@ TEST(ExtensionTest, GenerateIDFromPublicKey) {
 
   std::string extension_id;
   EXPECT_TRUE(
-      Extension::GenerateIdFromPublicKey(
+      Extension::GenerateId(
           std::string(reinterpret_cast<const char*>(&public_key_info[0]),
                       arraysize(public_key_info)),
           &extension_id));
@@ -404,7 +498,12 @@ TEST(ExtensionTest, UpdateUrls) {
     EXPECT_TRUE(url.is_valid());
 
     DictionaryValue input_value;
-    Extension extension;
+#if defined(OS_WIN)
+    FilePath path(StringPrintf(L"c:\\extension%i", i));
+#else
+    FilePath path(StringPrintf("/extension%i", i));
+#endif
+    Extension extension(path);
     std::string error;
 
     input_value.SetString(keys::kVersion, "1.0");
@@ -421,7 +520,12 @@ TEST(ExtensionTest, UpdateUrls) {
   valid.push_back("http://test.com/update#whatever");
   for (size_t i = 0; i < invalid.size(); i++) {
     DictionaryValue input_value;
-    Extension extension;
+#if defined(OS_WIN)
+    FilePath path(StringPrintf(L"c:\\extension%i", i));
+#else
+    FilePath path(StringPrintf("/extension%i", i));
+#endif
+    Extension extension(path);
     std::string error;
     input_value.SetString(keys::kVersion, "1.0");
     input_value.SetString(keys::kName, "Test");
@@ -454,4 +558,145 @@ TEST(ExtensionTest, MimeTypeSniffing) {
   EXPECT_TRUE(net::SniffMimeType(data.c_str(), data.size(),
               GURL("http://www.example.com/foo.crx"), "", &result));
   EXPECT_EQ("application/octet-stream", result);
+}
+
+static Extension* LoadManifest(const std::string& dir,
+                               const std::string& test_file) {
+  FilePath path;
+  PathService::Get(chrome::DIR_TEST_DATA, &path);
+  path = path.AppendASCII("extensions")
+             .AppendASCII(dir)
+             .AppendASCII(test_file);
+
+  JSONFileValueSerializer serializer(path);
+  scoped_ptr<Value> result(serializer.Deserialize(NULL));
+  if (!result.get())
+    return NULL;
+
+  std::string error;
+  scoped_ptr<Extension> extension(new Extension(path.DirName()));
+  extension->InitFromValue(*static_cast<DictionaryValue*>(result.get()),
+                           false, &error);
+
+  return extension.release();
+}
+
+TEST(ExtensionTest, EffectiveHostPermissions) {
+  scoped_ptr<Extension> extension;
+  std::set<std::string> hosts;
+
+  extension.reset(LoadManifest("effective_host_permissions", "empty.json"));
+  EXPECT_EQ(0u, extension->GetEffectiveHostPermissions().size());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions", "one_host.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(1u, hosts.size());
+  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "one_host_wildcard.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(1u, hosts.size());
+  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "two_hosts.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(2u, hosts.size());
+  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "duplicate_host.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(1u, hosts.size());
+  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "https_not_considered.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(1u, hosts.size());
+  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "two_content_scripts.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(3u, hosts.size());
+  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
+  EXPECT_TRUE(hosts.find("news.ycombinator.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "duplicate_content_script.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(2u, hosts.size());
+  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
+  EXPECT_FALSE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "all_hosts.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(1u, hosts.size());
+  EXPECT_TRUE(hosts.find("") != hosts.end());
+  EXPECT_TRUE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "all_hosts2.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(2u, hosts.size());
+  EXPECT_TRUE(hosts.find("") != hosts.end());
+  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_TRUE(extension->HasAccessToAllHosts());
+
+  extension.reset(LoadManifest("effective_host_permissions",
+                               "all_hosts3.json"));
+  hosts = extension->GetEffectiveHostPermissions();
+  EXPECT_EQ(2u, hosts.size());
+  EXPECT_TRUE(hosts.find("") != hosts.end());
+  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_TRUE(extension->HasAccessToAllHosts());
+}
+
+TEST(ExtensionTest, IsPrivilegeIncrease) {
+  const struct {
+    const char* base_name;
+    bool expect_success;
+  } kTests[] = {
+    { "allhosts1", false },  // all -> all
+    { "allhosts2", false },  // all -> one
+    { "allhosts3", true },  // one -> all
+    { "hosts1", false },  // http://a,http://b -> http://a,http://b
+    { "hosts2", false },  // http://a,http://b -> https://a,http://*.b
+    { "hosts3", false },  // http://a,http://b -> http://a
+    { "hosts4", true },  // http://a -> http://a,http://b
+    { "permissions1", false },  // tabs -> tabs
+    { "permissions2", false },  // tabs -> tabs,bookmarks
+    { "permissions3", true },  // http://a -> http://a,tabs
+    { "permissions4", false },  // plugin -> plugin,tabs
+    { "plugin1", false },  // plugin -> plugin
+    { "plugin2", false },  // plugin -> none
+    { "plugin3", true }  // none -> plugin
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
+    scoped_ptr<Extension> old_extension(
+        LoadManifest("allow_silent_upgrade",
+                     std::string(kTests[i].base_name) + "_old.json"));
+    scoped_ptr<Extension> new_extension(
+        LoadManifest("allow_silent_upgrade",
+                     std::string(kTests[i].base_name) + "_new.json"));
+
+    EXPECT_EQ(kTests[i].expect_success,
+              Extension::IsPrivilegeIncrease(old_extension.get(),
+                                             new_extension.get()))
+        << kTests[i].base_name;
+  }
 }

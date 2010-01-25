@@ -27,6 +27,7 @@ class NSFont;
 #endif
 typedef NSFont* NativeFont;
 #elif defined(OS_LINUX)
+typedef struct _PangoFontDescription PangoFontDescription;
 class SkTypeface;
 typedef SkTypeface* NativeFont;
 #else  // null port.
@@ -124,12 +125,17 @@ class Font {
     return dlus * font_ref_->height() / 8;
   }
 #elif defined(OS_LINUX)
+  static Font CreateFont(PangoFontDescription* desc);
   // We need a copy constructor and assignment operator to deal with
   // the Skia reference counting.
   Font(const Font& other);
   Font& operator=(const Font& other);
   // Setup a Skia context to use the current typeface
   void PaintSetup(SkPaint* paint) const;
+
+  // Converts |gfx_font| to a new pango font. Free the returned font with
+  // pango_font_description_free().
+  static PangoFontDescription* PangoFontFromGfxFont(const gfx::Font& gfx_font);
 #endif
 
  private:
@@ -200,6 +206,9 @@ class Font {
   // The default font, used for the default constructor.
   static Font* default_font_;
 
+  // The average width of a character, initialized and cached if needed.
+  double avg_width();
+
   // These two both point to the same SkTypeface. We use the SkAutoUnref to
   // handle the reference counting, but without @typeface_ we would have to
   // cast the SkRefCnt from @typeface_helper_ every time.
@@ -215,7 +224,7 @@ class Font {
   // Cached metrics, generated at construction
   int height_;
   int ascent_;
-  int avg_width_;
+  double avg_width_;
 #elif defined(OS_MACOSX)
   explicit Font(const std::wstring& font_name, int font_size, int style);
 

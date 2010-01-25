@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #import <Carbon/Carbon.h>
 
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -158,6 +156,8 @@ bool GetSTRResource(CFBundleRef bundle, short res_id,
         (unsigned char*)pointer,
         GetApplicationTextEncoding(),  // is this right?
         kCFAllocatorNull));            // perhaps CFStringGetSystemEncoding?
+    if (!str.get())
+      return false;
     contents->push_back(base::SysCFStringRefToUTF8(str.get()));
     pointer += 1+*pointer;
   }

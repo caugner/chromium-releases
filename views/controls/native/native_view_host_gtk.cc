@@ -5,9 +5,11 @@
 #include "views/controls/native/native_view_host_gtk.h"
 
 #include <gtk/gtk.h>
+#include <algorithm>
 
 #include "base/logging.h"
 #include "views/controls/native/native_view_host.h"
+#include "views/focus/focus_manager.h"
 #include "views/widget/widget_gtk.h"
 
 namespace views {
@@ -18,10 +20,15 @@ namespace views {
 NativeViewHostGtk::NativeViewHostGtk(NativeViewHost* host)
     : host_(host),
       installed_clip_(false),
-      destroy_signal_id_(0) {
+      destroy_signal_id_(0),
+      focus_signal_id_(0),
+      fixed_(NULL) {
+  CreateFixed(false);
 }
 
 NativeViewHostGtk::~NativeViewHostGtk() {
+  if (fixed_)
+    gtk_widget_destroy(fixed_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,11 +36,10 @@ NativeViewHostGtk::~NativeViewHostGtk() {
 
 void NativeViewHostGtk::NativeViewAttached() {
   DCHECK(host_->native_view());
-
   if (gtk_widget_get_parent(host_->native_view()))
-    GetHostWidget()->ReparentChild(host_->native_view());
+    gtk_widget_reparent(host_->native_view(), fixed_);
   else
-    GetHostWidget()->AddChild(host_->native_view());
+    gtk_container_add(GTK_CONTAINER(fixed_), host_->native_view());
 
   if (!destroy_signal_id_) {
     destroy_signal_id_ = g_signal_connect(G_OBJECT(host_->native_view()),
@@ -41,8 +47,18 @@ void NativeViewHostGtk::NativeViewAttached() {
                                           this);
   }
 
+  if (!focus_signal_id_) {
+    focus_signal_id_ = g_signal_connect(G_OBJECT(host_->native_view()),
+                                        "focus-in-event",
+                                        G_CALLBACK(CallFocusIn), this);
+  }
+
   // Always layout though.
   host_->Layout();
+
+  // We own the native view as long as it's attached, so that we can safely
+  // reparent it in multiple passes.
+  gtk_widget_ref(host_->native_view());
 
   // TODO(port): figure out focus.
 }
@@ -54,29 +70,35 @@ void NativeViewHostGtk::NativeViewDetaching() {
                               destroy_signal_id_);
   destroy_signal_id_ = 0;
 
-  // TODO(port): focus.
-  // FocusManager::UninstallFocusSubclass(native_view());
+  g_signal_handler_disconnect(G_OBJECT(host_->native_view()),
+                              focus_signal_id_);
+  focus_signal_id_ = 0;
+
   installed_clip_ = false;
+
+  g_object_unref(G_OBJECT(host_->native_view()));
 }
 
 void NativeViewHostGtk::AddedToWidget() {
+  if (!fixed_)
+    CreateFixed(false);
+  if (gtk_widget_get_parent(fixed_))
+    GetHostWidget()->ReparentChild(fixed_);
+  else
+    GetHostWidget()->AddChild(fixed_);
+
   if (!host_->native_view())
     return;
-  WidgetGtk* parent_widget = GetHostWidget();
-  GtkWidget* widget_parent = gtk_widget_get_parent(host_->native_view());
-  GtkWidget* parent_widget_widget = parent_widget->window_contents();
-  if (widget_parent != parent_widget_widget) {
-    g_object_ref(host_->native_view());
-    if (widget_parent)
-      gtk_container_remove(GTK_CONTAINER(widget_parent), host_->native_view());
-    gtk_container_add(GTK_CONTAINER(parent_widget_widget),
-                      host_->native_view());
-    g_object_unref(host_->native_view());
-  }
-  if (host_->IsVisibleInRootView())
-    gtk_widget_show(host_->native_view());
+
+  if (gtk_widget_get_parent(host_->native_view()))
+    gtk_widget_reparent(host_->native_view(), fixed_);
   else
-    gtk_widget_hide(host_->native_view());
+    gtk_container_add(GTK_CONTAINER(fixed_), host_->native_view());
+
+  if (host_->IsVisibleInRootView())
+    gtk_widget_show(fixed_);
+  else
+    gtk_widget_hide(fixed_);
   host_->Layout();
 }
 
@@ -84,41 +106,19 @@ void NativeViewHostGtk::RemovedFromWidget() {
   if (!host_->native_view())
     return;
 
-  WidgetGtk* parent_widget = GetHostWidget();
-  gtk_widget_hide(host_->native_view());
-  if (parent_widget) {
-    gtk_container_remove(GTK_CONTAINER(parent_widget->window_contents()),
-                         host_->native_view());
-  }
+  DestroyFixed();
 }
 
 void NativeViewHostGtk::InstallClip(int x, int y, int w, int h) {
   DCHECK(w > 0 && h > 0);
-
-  bool has_window =
-      (GTK_WIDGET_FLAGS(host_->native_view()) & GTK_NO_WINDOW) == 0;
-  if (!has_window) {
-    // Clip is only supported on GtkWidgets that have windows. If this becomes
-    // an issue (as it may be in the options dialog) we'll need to wrap the
-    // widget in a GtkFixed with a window. We have to do this as not all widgets
-    // support turning on GTK_NO_WINDOW (for example, buttons don't appear to
-    // draw anything when they have a window).
-    // NOTREACHED();
-    return;
-  }
-  DCHECK(has_window);
-  // Unset the current region.
-  gdk_window_shape_combine_region(host_->native_view()->window, NULL, 0, 0);
-
-  // Set a new region.
-  // TODO: using shapes is a bit expensive. Should investigated if there is
-  // another more efficient way to accomplish this.
-  GdkRectangle clip_rect = { x, y, w, h };
-  GdkRegion* clip_region = gdk_region_rectangle(&clip_rect);
-  gdk_window_shape_combine_region(host_->native_view()->window, clip_region, x,
-                                  y);
-  gdk_region_destroy(clip_region);
+  installed_clip_bounds_.SetRect(x, y, w, h);
   installed_clip_ = true;
+
+  // We only re-create the fixed with a window when a cliprect is installed.
+  // Because the presence of a X Window will prevent transparency from working
+  // properly, we only want it to be active for the duration of a clip
+  // (typically during animations and scrolling.)
+  CreateFixed(true);
 }
 
 bool NativeViewHostGtk::HasInstalledClip() {
@@ -126,25 +126,84 @@ bool NativeViewHostGtk::HasInstalledClip() {
 }
 
 void NativeViewHostGtk::UninstallClip() {
-  gtk_widget_shape_combine_mask(host_->native_view(), NULL, 0, 0);
   installed_clip_ = false;
+  // We now re-create the fixed without a X Window so transparency works again.
+  CreateFixed(false);
 }
 
 void NativeViewHostGtk::ShowWidget(int x, int y, int w, int h) {
-  GetHostWidget()->PositionChild(host_->native_view(), x, y, w, h);
+  // x and y are the desired position of host_ in WidgetGtk coordiantes.
+  int fixed_x = x;
+  int fixed_y = y;
+  int fixed_w = w;
+  int fixed_h = h;
+  int child_x = 0;
+  int child_y = 0;
+  int child_w = w;
+  int child_h = h;
+  if (installed_clip_) {
+    child_x = -installed_clip_bounds_.x();
+    child_y = -installed_clip_bounds_.y();
+    fixed_x += -child_x;
+    fixed_y += -child_y;
+    fixed_w = std::min(installed_clip_bounds_.width(), w);
+    fixed_h = std::min(installed_clip_bounds_.height(), h);
+  }
+
+  // Size and place the fixed_.
+  GetHostWidget()->PositionChild(fixed_, fixed_x, fixed_y, fixed_w, fixed_h);
+
+  // Size and place the hosted NativeView.
+  gtk_widget_set_size_request(host_->native_view(), child_w, child_h);
+  gtk_fixed_move(GTK_FIXED(fixed_), host_->native_view(), child_x, child_y);
+
+  gtk_widget_show(fixed_);
   gtk_widget_show(host_->native_view());
 }
 
 void NativeViewHostGtk::HideWidget() {
-  gtk_widget_hide(host_->native_view());
+  gtk_widget_hide(fixed_);
 }
 
 void NativeViewHostGtk::SetFocus() {
-  NOTIMPLEMENTED();
+  DCHECK(host_->native_view());
+  gtk_widget_grab_focus(host_->native_view());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHostGtk, private:
+
+void NativeViewHostGtk::CreateFixed(bool needs_window) {
+  DestroyFixed();
+
+  fixed_ = gtk_fixed_new();
+  gtk_fixed_set_has_window(GTK_FIXED(fixed_), needs_window);
+  // Defeat refcounting. We need to own the fixed.
+  gtk_widget_ref(fixed_);
+
+  WidgetGtk* widget_gtk = GetHostWidget();
+  if (widget_gtk)
+    widget_gtk->AddChild(fixed_);
+  if (host_->native_view())
+    gtk_container_add(GTK_CONTAINER(fixed_), host_->native_view());
+}
+
+void NativeViewHostGtk::DestroyFixed() {
+  if (!fixed_)
+    return;
+
+  gtk_widget_hide(fixed_);
+  GetHostWidget()->RemoveChild(fixed_);
+
+  if (host_->native_view()) {
+    // We can safely remove the widget from its container since we own the
+    // widget from the moment it is attached.
+    gtk_container_remove(GTK_CONTAINER(fixed_), host_->native_view());
+  }
+
+  gtk_widget_destroy(fixed_);
+  fixed_ = NULL;
+}
 
 WidgetGtk* NativeViewHostGtk::GetHostWidget() const {
   return static_cast<WidgetGtk*>(host_->GetWidget());
@@ -153,7 +212,23 @@ WidgetGtk* NativeViewHostGtk::GetHostWidget() const {
 // static
 void NativeViewHostGtk::CallDestroy(GtkObject* object,
                                     NativeViewHostGtk* host) {
-  return host->host_->NativeViewDestroyed();
+  host->host_->NativeViewDestroyed();
+}
+
+// static
+void NativeViewHostGtk::CallFocusIn(GtkWidget* widget,
+                                    GdkEventFocus* event,
+                                    NativeViewHostGtk* host) {
+  FocusManager* focus_manager =
+      FocusManager::GetFocusManagerForNativeView(widget);
+  if (!focus_manager) {
+    // TODO(jcampan): http://crbug.com/21378 Reenable this NOTREACHED() when the
+    // options page is only based on views.
+    // NOTREACHED();
+    NOTIMPLEMENTED();
+    return;
+  }
+  focus_manager->SetFocusedView(host->host_->focus_view());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

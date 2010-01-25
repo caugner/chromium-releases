@@ -6,21 +6,30 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/bindings_policy.h"
+#if defined(TOOLKIT_GTK)
+#include "chrome/common/gtk_util.h"
+#endif
 #include "chrome/common/notification_service.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "views/window/window_delegate.h"
+
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationsMask;
 
 namespace {
 
@@ -72,8 +81,7 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   explicit InterstitialPageRVHViewDelegate(InterstitialPage* page);
 
   // RenderViewHostDelegate::View implementation:
-  virtual void CreateNewWindow(int route_id,
-                               base::WaitableEvent* modal_dialog_event);
+  virtual void CreateNewWindow(int route_id);
   virtual void CreateNewWidget(int route_id, bool activatable);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -83,10 +91,12 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos);
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebDragOperationsMask operations_allowed);
+  virtual void UpdateDragCursor(WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
   virtual void HandleMouseEvent();
   virtual void HandleMouseLeave();
@@ -95,7 +105,7 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
                            const gfx::Rect& selection_rect,
                            int active_match_ordinal,
                            bool final_update);
-  virtual void UpdatePreferredWidth(int pref_width);
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
  private:
   InterstitialPage* interstitial_page_;
@@ -117,7 +127,7 @@ InterstitialPage::InterstitialPage(TabContents* tab,
       enabled_(true),
       action_taken_(false),
       render_view_host_(NULL),
-      original_rvh_process_id_(tab->render_view_host()->process()->pid()),
+      original_child_id_(tab->render_view_host()->process()->id()),
       original_rvh_id_(tab->render_view_host()->routing_id()),
       should_revert_tab_title_(false),
       resource_dispatcher_host_notified_(false),
@@ -130,6 +140,10 @@ InterstitialPage::InterstitialPage(TabContents* tab,
   // a page) when we have a pending entry (in the process of loading a new top
   // frame).
   DCHECK(new_navigation || !tab->controller().pending_entry());
+
+#if defined(TOOLKIT_GTK)
+  gtk_util::InitRendererPrefsFromGtkSettings(&renderer_preferences_);
+#endif
 }
 
 InterstitialPage::~InterstitialPage() {
@@ -180,7 +194,7 @@ void InterstitialPage::Show() {
   if (new_navigation_) {
     NavigationEntry* entry = new NavigationEntry;
     entry->set_url(url_);
-    entry->set_display_url(url_);
+    entry->set_virtual_url(url_);
     entry->set_page_type(NavigationEntry::INTERSTITIAL_PAGE);
 
     // Give sub-classes a chance to set some states on the navigation entry.
@@ -256,7 +270,7 @@ void InterstitialPage::Observe(NotificationType type,
         // The RenderViewHost is being destroyed (as part of the tab being
         // closed), make sure we clear the blocked requests.
         RenderViewHost* rvh = Source<RenderViewHost>(source).ptr();
-        DCHECK(rvh->process()->pid() == original_rvh_process_id_ &&
+        DCHECK(rvh->process()->id() == original_child_id_ &&
                rvh->routing_id() == original_rvh_id_);
         TakeActionOnResourceDispatcher(CANCEL);
       }
@@ -301,7 +315,7 @@ void InterstitialPage::DidNavigate(
   // A fast user could have navigated away from the page that triggered the
   // interstitial while the interstitial was loading, that would have disabled
   // us. In that case we can dismiss ourselves.
-  if (!enabled_){
+  if (!enabled_) {
     DontProceed();
     return;
   }
@@ -367,7 +381,7 @@ void InterstitialPage::DomOperationResponse(const std::string& json_string,
 RenderViewHost* InterstitialPage::CreateRenderViewHost() {
   RenderViewHost* render_view_host = new RenderViewHost(
       SiteInstance::CreateSiteInstance(tab()->profile()),
-      this, MSG_ROUTING_NONE, NULL);
+      this, MSG_ROUTING_NONE);
   return render_view_host;
 }
 
@@ -483,11 +497,11 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   // NOTIFY_RENDER_WIDGET_HOST_DESTROYED.
   // Also we need to test there is an IO thread, as when unit-tests we don't
   // have one.
-  RenderViewHost* rvh = RenderViewHost::FromID(original_rvh_process_id_,
+  RenderViewHost* rvh = RenderViewHost::FromID(original_child_id_,
                                                original_rvh_id_);
   if (rvh && g_browser_process->io_thread()) {
     g_browser_process->io_thread()->message_loop()->PostTask(
-        FROM_HERE, new ResourceRequestTask(original_rvh_process_id_,
+        FROM_HERE, new ResourceRequestTask(original_child_id_,
                                            original_rvh_id_,
                                            action));
   }
@@ -517,7 +531,7 @@ InterstitialPage::InterstitialPageRVHViewDelegate::
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::CreateNewWindow(
-    int route_id, base::WaitableEvent* modal_dialog_event) {
+    int route_id) {
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
 
@@ -542,26 +556,32 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::ShowContextMenu(
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::StartDragging(
-    const WebDropData& drop_data) {
+    const WebDropData& drop_data,
+    WebDragOperationsMask allowed_operations) {
   NOTREACHED() << "InterstitialPage does not support dragging yet.";
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::UpdateDragCursor(
-    bool is_drop_target) {
+    WebDragOperation) {
   NOTREACHED() << "InterstitialPage does not support dragging yet.";
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::GotFocus() {
 }
 
-void InterstitialPage::InterstitialPageRVHViewDelegate::UpdatePreferredWidth(
-    int pref_width) {
+void InterstitialPage::InterstitialPageRVHViewDelegate::UpdatePreferredSize(
+    const gfx::Size& pref_size) {
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     bool reverse) {
   if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
     interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
+}
+
+bool InterstitialPage::InterstitialPageRVHViewDelegate::IsReservedAccelerator(
+    const NativeWebKeyboardEvent& event) {
+  return false;
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::HandleKeyboardEvent(
@@ -583,4 +603,8 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseLeave() {
 void InterstitialPage::InterstitialPageRVHViewDelegate::OnFindReply(
     int request_id, int number_of_matches, const gfx::Rect& selection_rect,
     int active_match_ordinal, bool final_update) {
+}
+
+int InterstitialPage::GetBrowserWindowID() const {
+  return tab_->GetBrowserWindowID();
 }

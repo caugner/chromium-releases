@@ -33,9 +33,11 @@
 // This file implements unit tests for class Element.
 
 #include <algorithm>
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
 #include "core/cross/element.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
+#include "core/cross/service_dependency.h"
 #include "core/cross/primitive.h"
 
 namespace o3d {
@@ -141,12 +143,12 @@ TEST_F(ElementTest, DrawElement) {
   ASSERT_TRUE(draw_element2 != NULL);
 
   // Check there are no draw elements.
-  EXPECT_EQ(element->GetDrawElementRefs().size(), 0);
+  EXPECT_EQ(element->GetDrawElementRefs().size(), 0U);
 
   element->AddDrawElement(draw_element1);
 
   // Check it's been added.
-  EXPECT_EQ(element->GetDrawElementRefs().size(), 1);
+  EXPECT_EQ(element->GetDrawElementRefs().size(), 1U);
   EXPECT_EQ(element->GetDrawElements()[0], draw_element1);
 
   // Check removing something else fails
@@ -156,7 +158,7 @@ TEST_F(ElementTest, DrawElement) {
   EXPECT_TRUE(element->RemoveDrawElement(draw_element1));
 
   // Check it's been removed.
-  EXPECT_EQ(element->GetDrawElementRefs().size(), 0);
+  EXPECT_EQ(element->GetDrawElementRefs().size(), 0U);
 
   // Check removing it twice fails.
   EXPECT_FALSE(element->RemoveDrawElement(draw_element1));
@@ -225,8 +227,8 @@ static void CreateCube(Pack* pack, Primitive** primitive_pointer) {
   primitive->set_number_vertices(8);
 
   EXPECT_EQ(primitive->primitive_type(), o3d::Primitive::TRIANGLELIST);
-  EXPECT_EQ(primitive->number_primitives(), 12);
-  EXPECT_EQ(primitive->number_vertices(), 8);
+  EXPECT_EQ(primitive->number_primitives(), 12U);
+  EXPECT_EQ(primitive->number_vertices(), 8U);
 
   *primitive_pointer = primitive;
 }

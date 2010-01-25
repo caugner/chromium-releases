@@ -312,6 +312,70 @@ TEST_F(FilePathTest, Append) {
   }
 }
 
+TEST_F(FilePathTest, StripTrailingSeparators) {
+  const struct UnaryTestData cases[] = {
+    { FPL(""),              FPL("") },
+    { FPL("/"),             FPL("/") },
+    { FPL("//"),            FPL("//") },
+    { FPL("///"),           FPL("/") },
+    { FPL("////"),          FPL("/") },
+    { FPL("a/"),            FPL("a") },
+    { FPL("a//"),           FPL("a") },
+    { FPL("a///"),          FPL("a") },
+    { FPL("a////"),         FPL("a") },
+    { FPL("/a"),            FPL("/a") },
+    { FPL("/a/"),           FPL("/a") },
+    { FPL("/a//"),          FPL("/a") },
+    { FPL("/a///"),         FPL("/a") },
+    { FPL("/a////"),        FPL("/a") },
+#if defined(FILE_PATH_USES_DRIVE_LETTERS)
+    { FPL("c:"),            FPL("c:") },
+    { FPL("c:/"),           FPL("c:/") },
+    { FPL("c://"),          FPL("c://") },
+    { FPL("c:///"),         FPL("c:/") },
+    { FPL("c:////"),        FPL("c:/") },
+    { FPL("c:/a"),          FPL("c:/a") },
+    { FPL("c:/a/"),         FPL("c:/a") },
+    { FPL("c:/a//"),        FPL("c:/a") },
+    { FPL("c:/a///"),       FPL("c:/a") },
+    { FPL("c:/a////"),      FPL("c:/a") },
+#endif  // FILE_PATH_USES_DRIVE_LETTERS
+#if defined(FILE_PATH_USES_WIN_SEPARATORS)
+    { FPL("\\"),            FPL("\\") },
+    { FPL("\\\\"),          FPL("\\\\") },
+    { FPL("\\\\\\"),        FPL("\\") },
+    { FPL("\\\\\\\\"),      FPL("\\") },
+    { FPL("a\\"),           FPL("a") },
+    { FPL("a\\\\"),         FPL("a") },
+    { FPL("a\\\\\\"),       FPL("a") },
+    { FPL("a\\\\\\\\"),     FPL("a") },
+    { FPL("\\a"),           FPL("\\a") },
+    { FPL("\\a\\"),         FPL("\\a") },
+    { FPL("\\a\\\\"),       FPL("\\a") },
+    { FPL("\\a\\\\\\"),     FPL("\\a") },
+    { FPL("\\a\\\\\\\\"),   FPL("\\a") },
+#if defined(FILE_PATH_USES_DRIVE_LETTERS)
+    { FPL("c:\\"),          FPL("c:\\") },
+    { FPL("c:\\\\"),        FPL("c:\\\\") },
+    { FPL("c:\\\\\\"),      FPL("c:\\") },
+    { FPL("c:\\\\\\\\"),    FPL("c:\\") },
+    { FPL("c:\\a"),         FPL("c:\\a") },
+    { FPL("c:\\a\\"),       FPL("c:\\a") },
+    { FPL("c:\\a\\\\"),     FPL("c:\\a") },
+    { FPL("c:\\a\\\\\\"),   FPL("c:\\a") },
+    { FPL("c:\\a\\\\\\\\"), FPL("c:\\a") },
+#endif  // FILE_PATH_USES_DRIVE_LETTERS
+#endif  // FILE_PATH_USES_WIN_SEPARATORS
+  };
+
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    FilePath input(cases[i].input);
+    FilePath observed = input.StripTrailingSeparators();
+    EXPECT_EQ(FilePath::StringType(cases[i].expected), observed.value()) <<
+              "i: " << i << ", input: " << input.value();
+  }
+}
+
 TEST_F(FilePathTest, IsAbsolute) {
   const struct UnaryBooleanTestData cases[] = {
     { FPL(""),       false },
@@ -482,6 +546,86 @@ TEST_F(FilePathTest, IsParentTest) {
     EXPECT_EQ(parent.IsParent(child), cases[i].expected) <<
       "i: " << i << ", parent: " << parent.value() << ", child: " <<
       child.value();
+  }
+}
+
+TEST_F(FilePathTest, AppendRelativePathTest) {
+  const struct BinaryTestData cases[] = {
+#if defined(FILE_PATH_USES_WIN_SEPARATORS)
+    { { FPL("/"),             FPL("/foo/bar/baz") },      FPL("foo\\bar\\baz")},
+#else  // FILE_PATH_USES_WIN_SEPARATORS
+    { { FPL("/"),             FPL("/foo/bar/baz") },      FPL("foo/bar/baz")},
+#endif  // FILE_PATH_USES_WIN_SEPARATORS
+    { { FPL("/foo/bar"),      FPL("/foo/bar/baz") },      FPL("baz")},
+    { { FPL("/foo/bar/"),     FPL("/foo/bar/baz") },      FPL("baz")},
+    { { FPL("//foo/bar/"),    FPL("//foo/bar/baz") },     FPL("baz")},
+    { { FPL("/foo/bar"),      FPL("/foo2/bar/baz") },     FPL("")},
+    { { FPL("/foo/bar.txt"),  FPL("/foo/bar/baz") },      FPL("")},
+    { { FPL("/foo/bar"),      FPL("/foo/bar2/baz") },     FPL("")},
+    { { FPL("/foo/bar"),      FPL("/foo/bar") },          FPL("")},
+    { { FPL("/foo/bar/baz"),  FPL("/foo/bar") },          FPL("")},
+    { { FPL("foo/bar"),       FPL("foo/bar/baz") },       FPL("baz")},
+    { { FPL("foo/bar"),       FPL("foo2/bar/baz") },      FPL("")},
+    { { FPL("foo/bar"),       FPL("foo/bar2/baz") },      FPL("")},
+    { { FPL(""),              FPL("foo") },               FPL("")},
+#if defined(FILE_PATH_USES_DRIVE_LETTERS)
+    { { FPL("c:/foo/bar"),    FPL("c:/foo/bar/baz") },    FPL("baz")},
+    { { FPL("E:/foo/bar"),    FPL("e:/foo/bar/baz") },    FPL("baz")},
+    { { FPL("f:/foo/bar"),    FPL("F:/foo/bar/baz") },    FPL("baz")},
+    { { FPL("E:/Foo/bar"),    FPL("e:/foo/bar/baz") },    FPL("")},
+    { { FPL("f:/foo/bar"),    FPL("F:/foo/Bar/baz") },    FPL("")},
+#if defined(FILE_PATH_USES_WIN_SEPARATORS)
+    { { FPL("c:/"),           FPL("c:/foo/bar/baz") },    FPL("foo\\bar\\baz")},
+    // TODO(akalin): Figure out how to handle the corner case in the
+    // commented-out test case below.  Appending to an empty path gives
+    // /foo\bar\baz but appending to a nonempty path "blah" gives
+    // blah\foo\bar\baz.
+    // { { FPL("c:"),            FPL("c:/foo/bar/baz") }, FPL("foo\\bar\\baz")},
+#endif  // FILE_PATH_USES_WIN_SEPARATORS
+    { { FPL("c:/foo/bar"),    FPL("d:/foo/bar/baz") },    FPL("")},
+    { { FPL("c:/foo/bar"),    FPL("D:/foo/bar/baz") },    FPL("")},
+    { { FPL("C:/foo/bar"),    FPL("d:/foo/bar/baz") },    FPL("")},
+    { { FPL("c:/foo/bar"),    FPL("c:/foo2/bar/baz") },   FPL("")},
+    { { FPL("e:/foo/bar"),    FPL("E:/foo2/bar/baz") },   FPL("")},
+    { { FPL("F:/foo/bar"),    FPL("f:/foo2/bar/baz") },   FPL("")},
+    { { FPL("c:/foo/bar"),    FPL("c:/foo/bar2/baz") },   FPL("")},
+#endif  // FILE_PATH_USES_DRIVE_LETTERS
+#if defined(FILE_PATH_USES_WIN_SEPARATORS)
+    { { FPL("\\foo\\bar"),    FPL("\\foo\\bar\\baz") },   FPL("baz")},
+    { { FPL("\\foo/bar"),     FPL("\\foo\\bar\\baz") },   FPL("baz")},
+    { { FPL("\\foo/bar"),     FPL("\\foo/bar/baz") },     FPL("baz")},
+    { { FPL("\\"),            FPL("\\foo\\bar\\baz") },   FPL("foo\\bar\\baz")},
+    { { FPL(""),              FPL("\\foo\\bar\\baz") },   FPL("")},
+    { { FPL("\\foo\\bar"),    FPL("\\foo2\\bar\\baz") },  FPL("")},
+    { { FPL("\\foo\\bar"),    FPL("\\foo\\bar2\\baz") },  FPL("")},
+#endif  // FILE_PATH_USES_WIN_SEPARATORS
+  };
+
+  const FilePath base(FPL("blah"));
+
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    FilePath parent(cases[i].inputs[0]);
+    FilePath child(cases[i].inputs[1]);
+    {
+      FilePath result;
+      bool success = parent.AppendRelativePath(child, &result);
+      EXPECT_EQ(cases[i].expected[0] != '\0', success) <<
+        "i: " << i << ", parent: " << parent.value() << ", child: " <<
+        child.value();
+      EXPECT_STREQ(cases[i].expected, result.value().c_str()) <<
+        "i: " << i << ", parent: " << parent.value() << ", child: " <<
+        child.value();
+    }
+    {
+      FilePath result(base);
+      bool success = parent.AppendRelativePath(child, &result);
+      EXPECT_EQ(cases[i].expected[0] != '\0', success) <<
+        "i: " << i << ", parent: " << parent.value() << ", child: " <<
+        child.value();
+      EXPECT_EQ(base.Append(cases[i].expected).value(), result.value()) <<
+        "i: " << i << ", parent: " << parent.value() << ", child: " <<
+        child.value();
+    }
   }
 }
 
@@ -764,4 +908,3 @@ TEST_F(FilePathTest, ReferencesParent) {
               "i: " << i << ", input: " << input.value();
   }
 }
-

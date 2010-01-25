@@ -88,15 +88,38 @@
 **
 **
 ***********************************************************************/
-#if defined(WIN32)
+#if 1
+
+/*
+** Local change: the portions of NSPR used by the base module are
+** implementation details.  NSPR symbols do not need to be exported beyond
+** the base module.  For all platforms, avoid decorating functions with
+** specific visibility and access keywords.
+*/
+
+#define PR_EXPORT(__type) extern __type
+#define PR_EXPORT_DATA(__type) extern __type
+#define PR_IMPORT(__type) extern __type
+#define PR_IMPORT_DATA(__type) extern __type
+
+#define PR_EXTERN(__type) extern __type
+#define PR_IMPLEMENT(__type) __type
+#define PR_EXTERN_DATA(__type) extern __type
+#define PR_IMPLEMENT_DATA(__type) __type
+
+#define PR_CALLBACK
+#define PR_CALLBACK_DECL
+#define PR_STATIC_CALLBACK(__x) static __x
+
+#elif defined(WIN32)
 
 #define PR_EXPORT(__type) extern __declspec(dllexport) __type
 #define PR_EXPORT_DATA(__type) extern __declspec(dllexport) __type
-#define PR_IMPORT(__type) extern __type
+#define PR_IMPORT(__type) __declspec(dllimport) __type
 #define PR_IMPORT_DATA(__type) __declspec(dllimport) __type
 
 #define PR_EXTERN(__type) extern __declspec(dllexport) __type
-#define PR_IMPLEMENT(__type) __type
+#define PR_IMPLEMENT(__type) __declspec(dllexport) __type
 #define PR_EXTERN_DATA(__type) extern __declspec(dllexport) __type
 #define PR_IMPLEMENT_DATA(__type) __declspec(dllexport) __type
 

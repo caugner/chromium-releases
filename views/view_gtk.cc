@@ -10,17 +10,15 @@
 
 namespace views {
 
-void View::DoDrag(const MouseEvent& e, int press_x, int press_y) {
-  NOTIMPLEMENTED();
+// static
+int View::GetDoubleClickTimeMS() {
+  GdkDisplay* display = gdk_display_get_default();
+  return display ? display->double_click_time : 500;
 }
 
 ViewAccessibilityWrapper* View::GetViewAccessibilityWrapper() {
   NOTIMPLEMENTED();
   return NULL;
-}
-
-void View::Focus() {
-  NOTIMPLEMENTED();
 }
 
 int View::GetHorizontalDragThreshold() {

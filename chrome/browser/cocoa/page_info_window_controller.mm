@@ -4,8 +4,20 @@
 
 #import "chrome/browser/cocoa/page_info_window_controller.h"
 
+#include "app/resource_bundle.h"
 #include "base/mac_util.h"
+#include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#import "chrome/browser/cocoa/nswindow_local_state.h"
 #include "chrome/browser/cocoa/page_info_window_mac.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/pref_service.h"
+#include "grit/theme_resources.h"
+
+@interface PageInfoWindowController (Private)
+// Saves the window preference to the local state.
+- (void)saveWindowPositionToLocalState;
+@end
 
 @implementation PageInfoWindowController
 @synthesize identityImg = identityImg_;
@@ -21,18 +33,21 @@
   NSString* nibpath = [bundle pathForResource:@"PageInfo" ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     // Load the image refs.
-    NSImage* img = [[NSImage alloc] initByReferencingFile:
-                    [bundle pathForResource:@"pageinfo_good" ofType:@"png"]];
-    goodImg_.reset(img);
-
-    img = [[NSImage alloc] initByReferencingFile:
-           [bundle pathForResource:@"pageinfo_bad" ofType:@"png"]];
-    badImg_.reset(img);
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    goodImg_.reset([rb.GetNSImageNamed(IDR_PAGEINFO_GOOD) retain]);
+    badImg_.reset([rb.GetNSImageNamed(IDR_PAGEINFO_BAD) retain]);
   }
   return self;
 }
 
 - (void)awakeFromNib {
+  if (g_browser_process && g_browser_process->local_state()) {
+    // Get the positioning information.
+    PrefService* prefs = g_browser_process->local_state();
+    [[self window] restoreWindowPositionFromPrefs:prefs
+                                   withPath:prefs::kPageInfoWindowPlacement];
+  }
+
   // By default, assume we have no history information.
   [self setShowHistoryBox:NO];
 }
@@ -72,7 +87,12 @@
   const NSSize kPageInfoWindowSize = NSMakeSize(460, 235);
   const NSSize kPageInfoWindowWithHistorySize = NSMakeSize(460, 310);
 
-  frame.size = (show ? kPageInfoWindowWithHistorySize : kPageInfoWindowSize);
+  NSSize size = (show ? kPageInfoWindowWithHistorySize : kPageInfoWindowSize);
+
+  // Just setting |size| will cause the window to grow upwards. Shift the
+  // origin up by grow amount, which causes the window to grow downwards.
+  frame.origin.y -= size.height - frame.size.height;
+  frame.size = size;
 
   [window setFrame:frame display:YES animate:YES];
 }
@@ -81,6 +101,14 @@
 // can clean ourselves up.
 - (void)windowWillClose:(NSNotification*)notif {
   [self autorelease];
+}
+
+// The last page info window that was moved will determine the location of the
+// next new one.
+- (void)windowDidMove:(NSNotification*)notif {
+  if (g_browser_process && g_browser_process->local_state())
+    [[self window] saveWindowPositionToPrefs:g_browser_process->local_state()
+                                    withPath:prefs::kPageInfoWindowPlacement];
 }
 
 @end

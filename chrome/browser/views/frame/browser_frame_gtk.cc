@@ -35,7 +35,7 @@ BrowserFrameGtk::~BrowserFrameGtk() {
 }
 
 void BrowserFrameGtk::Init() {
-  WindowGtk::Init(gfx::Rect());
+  WindowGtk::Init(NULL, gfx::Rect());
 }
 
 views::Window* BrowserFrameGtk::GetWindow() {
@@ -43,7 +43,6 @@ views::Window* BrowserFrameGtk::GetWindow() {
 }
 
 void BrowserFrameGtk::TabStripCreated(TabStripWrapper* tabstrip) {
-  root_view_->set_tabstrip(tabstrip);
 }
 
 int BrowserFrameGtk::GetMinimizeButtonOffset() const {
@@ -51,7 +50,8 @@ int BrowserFrameGtk::GetMinimizeButtonOffset() const {
   return 0;
 }
 
-gfx::Rect BrowserFrameGtk::GetBoundsForTabStrip(TabStripWrapper* tabstrip) const {
+gfx::Rect BrowserFrameGtk::GetBoundsForTabStrip(
+    TabStripWrapper* tabstrip) const {
   return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
 }
 
@@ -69,6 +69,10 @@ ThemeProvider* BrowserFrameGtk::GetThemeProviderForFrame() const {
   return GetThemeProvider();
 }
 
+bool BrowserFrameGtk::AlwaysUseNativeFrame() const {
+  return false;
+}
+
 ThemeProvider* BrowserFrameGtk::GetThemeProvider() const {
   return profile_->GetThemeProvider();
 }
@@ -78,6 +82,17 @@ ThemeProvider* BrowserFrameGtk::GetDefaultThemeProvider() const {
 }
 
 views::RootView* BrowserFrameGtk::CreateRootView() {
-  root_view_ = new BrowserRootView(this);
+  root_view_ = new BrowserRootView(browser_view_, this);
   return root_view_;
+}
+
+void BrowserFrameGtk::IsActiveChanged() {
+  GetRootView()->SchedulePaint();
+  browser_view_->ActivationChanged(IsActive());
+  views::WidgetGtk::IsActiveChanged();
+}
+
+bool BrowserFrameGtk::GetAccelerator(int cmd_id,
+                                     views::Accelerator* accelerator) {
+  return browser_view_->GetAccelerator(cmd_id, accelerator);
 }

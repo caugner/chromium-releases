@@ -11,15 +11,12 @@
 #include "chrome/browser/automation/extension_automation_constants.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 
 bool AutomationExtensionFunction::enabled_ = false;
 
-void AutomationExtensionFunction::SetName(const std::string& name) {
-  name_ = name;
-}
-
-void AutomationExtensionFunction::SetArgs(const std::string& args) {
-  args_ = args;
+void AutomationExtensionFunction::SetArgs(const Value* args) {
+  JSONWriter::Write(args, false, &args_);
 }
 
 const std::string AutomationExtensionFunction::GetResult() {

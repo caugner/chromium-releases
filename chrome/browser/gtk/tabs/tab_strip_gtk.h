@@ -12,11 +12,14 @@
 #include "base/gfx/rect.h"
 #include "base/task.h"
 #include "base/message_loop.h"
+#include "chrome/browser/gtk/tabstrip_origin_provider.h"
 #include "chrome/browser/gtk/tabs/tab_gtk.h"
+#include "chrome/browser/gtk/view_id_util.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/owned_widget_gtk.h"
 
+class BrowserWindowGtk;
 class CustomDrawButton;
 class DraggedTabControllerGtk;
 class GtkThemeProvider;
@@ -24,11 +27,13 @@ class GtkThemeProvider;
 class TabStripGtk : public TabStripModelObserver,
                     public TabGtk::TabDelegate,
                     public MessageLoopForUI::Observer,
-                    public NotificationObserver {
+                    public NotificationObserver,
+                    public TabstripOriginProvider,
+                    public ViewIDUtil::Delegate {
  public:
   class TabAnimation;
 
-  explicit TabStripGtk(TabStripModel* model);
+  TabStripGtk(TabStripModel* model, BrowserWindowGtk* window);
   virtual ~TabStripGtk();
 
   // Initialize and load the TabStrip into a container.
@@ -39,6 +44,8 @@ class TabStripGtk : public TabStripModelObserver,
   void Hide();
 
   TabStripModel* model() const { return model_; }
+
+  BrowserWindowGtk* window() const { return window_; }
 
   GtkWidget* widget() const { return tabstrip_.get(); }
 
@@ -77,14 +84,11 @@ class TabStripGtk : public TabStripModelObserver,
   // Retrieve the ideal bounds for the Tab at the specified index.
   gfx::Rect GetIdealBounds(int index);
 
-  // Return the origin of the tab strip in coordinates relative to where we
-  // start drawing the background theme image. This is the x coordinate of
-  // the origin of the GdkWindow of widget(), but the y coordinate of the origin
-  // of widget() itself.
-  // Used to help other widgets draw their background relative to the tabstrip.
-  // Should only be called after both the tabstrip and |widget| have been
-  // allocated.
-  gfx::Point GetTabStripOriginForWidget(GtkWidget* widget);
+  // TabstripOriginProvider implementation -------------------------------------
+  virtual gfx::Point GetTabStripOriginForWidget(GtkWidget* widget);
+
+  // ViewIDUtil::Delegate implementation ---------------------------------------
+  virtual GtkWidget* GetWidgetForViewID(ViewID id);
 
  protected:
   // TabStripModelObserver implementation:
@@ -106,6 +110,7 @@ class TabStripGtk : public TabStripModelObserver,
 
   // TabGtk::TabDelegate implementation:
   virtual bool IsTabSelected(const TabGtk* tab) const;
+  virtual bool IsTabDetached(const TabGtk* tab) const;
   virtual void SelectTab(TabGtk* tab);
   virtual void CloseTab(TabGtk* tab);
   virtual bool IsCommandEnabledForTab(
@@ -176,6 +181,12 @@ class TabStripGtk : public TabStripModelObserver,
     // screen.
     void SetContainerShapeMask();
 
+    // Creates the container widget.
+    void CreateContainer();
+
+    // Destroys the container widget.
+    void DestroyContainer();
+
     // Index of the tab to drop on. If drop_before is true, the drop should
     // occur between the tab at drop_index - 1 and drop_index.
     // WARNING: if drop_before is true it is possible this will == tab_count,
@@ -239,6 +250,17 @@ class TabStripGtk : public TabStripModelObserver,
   // Sets the bounds of the tab and moves the tab widget to those bounds.
   void SetTabBounds(TabGtk* tab, const gfx::Rect& bounds);
 
+  // Returns true if |rects| are all areas that match up with tab favicons.
+  // |rects| must be sorted from left to right.  |tabs_to_paint| are the tab
+  // positions that match the rects.
+  bool CanPaintOnlyFavIcons(const GdkRectangle* rects,
+                            int num_rects,
+                            std::vector<int>* tabs_to_paint);
+
+  // Paints the tab favicon areas for tabs in |tabs_to_paint|.
+  void PaintOnlyFavIcons(GdkEventExpose* event,
+                         const std::vector<int>& tabs_to_paint);
+
   // Initializes the new tab button.
   CustomDrawButton* MakeNewTabButton();
 
@@ -248,8 +270,18 @@ class TabStripGtk : public TabStripModelObserver,
   // Returns the number of pinned tabs.
   int GetPinnedTabCount() const;
 
-  // Retrieves the Tab at the specified index.
+  // Retrieves the Tab at the specified index. Take care in using this, you may
+  // need to use GetTabAtAdjustForAnimation.
   TabGtk* GetTabAt(int index) const;
+
+  // Returns the tab at the specified index. If a remove animation is on going
+  // and the index is >= the index of the tab being removed, the index is
+  // incremented. While a remove operation is on going the indices of the model
+  // do not line up with the indices of the view. This method adjusts the index
+  // accordingly.
+  //
+  // Use this instead of GetTabAt if the index comes from the model.
+  TabGtk* GetTabAtAdjustForAnimation(int index) const;
 
   // Returns the exact (unrounded) current width of each tab.
   void GetCurrentTabWidths(double* unselected_width,
@@ -311,11 +343,6 @@ class TabStripGtk : public TabStripModelObserver,
   // during animations, so we can't use current_unselected_width_.
   void LayoutNewTabButton(double last_tab_right, double unselected_width);
 
-#if defined(OS_CHROMEOS)
-  // Positions the tab overview button.
-  void LayoutTabOverviewButton();
-#endif
-
   // -- Link Drag & Drop ------------------------------------------------------
 
   // Returns the bounds to render the drop at, in screen coordinates. Sets
@@ -363,15 +390,6 @@ class TabStripGtk : public TabStripModelObserver,
   // Optionally a full Layout will be performed, specified by |layout|.
   void FinishAnimation(TabAnimation* animation, bool layout);
 
-#if defined(OS_CHROMEOS)
-  // Creates and returns the tab overview button.
-  CustomDrawButton* MakeTabOverviewButton();
-
-  // Invoked when the user clicks the tab overview button.
-  static void OnTabOverviewButtonClicked(GtkWidget* widget,
-                                         TabStripGtk* tabstrip);
-#endif
-
   NotificationRegistrar registrar_;
 
   // The Tabs we contain, and their last generated "good" bounds.
@@ -407,6 +425,9 @@ class TabStripGtk : public TabStripModelObserver,
   // Our model.
   TabStripModel* model_;
 
+  // The BrowserWindowGtk containing this tab strip.
+  BrowserWindowGtk* window_;
+
   // Theme resources.
   GtkThemeProvider* theme_provider_;
 
@@ -415,11 +436,6 @@ class TabStripGtk : public TabStripModelObserver,
 
   // The New Tab button.
   scoped_ptr<CustomDrawButton> newtab_button_;
-
-#if defined(OS_CHROMEOS)
-  // The tab overview button.
-  scoped_ptr<CustomDrawButton> tab_overview_button_;
-#endif
 
   // Valid for the lifetime of a drag over us.
   scoped_ptr<DropInfo> drop_info_;

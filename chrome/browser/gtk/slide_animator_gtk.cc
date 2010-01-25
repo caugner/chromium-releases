@@ -24,24 +24,26 @@ SlideAnimatorGtk::SlideAnimatorGtk(GtkWidget* child,
                                    Direction direction,
                                    int duration,
                                    bool linear,
+                                   bool control_child_size,
                                    Delegate* delegate)
     : child_(child),
       direction_(direction),
-      delegate_(delegate),
-      fixed_needs_resize_(false) {
+      delegate_(delegate) {
   widget_.Own(gtk_fixed_new());
   gtk_fixed_put(GTK_FIXED(widget_.get()), child, 0, 0);
   gtk_widget_set_size_request(widget_.get(), -1, 0);
-  // We have to manually set the size request for |child_| every time the
-  // GtkFixed changes sizes.
-  g_signal_connect(widget_.get(), "size-allocate",
-                   G_CALLBACK(OnFixedSizeAllocate), child_);
+  if (control_child_size) {
+    // If the child requests it, we will manually set the size request for
+    // |child_| every time the GtkFixed changes sizes. This is mainly useful
+    // for bars, where we want the child to expand to fill all available space.
+    g_signal_connect(widget_.get(), "size-allocate",
+                     G_CALLBACK(OnFixedSizeAllocate), child_);
+  }
 
-  // The size of the GtkFixed widget is set during animation. When we open
-  // without showing the animation, we have to call AnimationProgressed
-  // ourselves to properly set the size of the GtkFixed. We can't do this until
-  // after the child has been allocated, hence we connect to "size-allocate" on
-  // the child.
+  // We connect to this signal to set an initial position for our child widget.
+  // The reason we connect to this signal rather than setting the initial
+  // position here is that the widget is currently unallocated and may not
+  // even have a size request.
   g_signal_connect(child, "size-allocate",
                    G_CALLBACK(OnChildSizeAllocate), this);
 
@@ -67,20 +69,15 @@ void SlideAnimatorGtk::Open() {
 void SlideAnimatorGtk::OpenWithoutAnimation() {
   animation_->Reset(1.0);
   Open();
-
-  // This checks to see if |child_| has been allocated yet. If it has been
-  // allocated already, we can go ahead and reposition everything by calling
-  // AnimationProgressed(). If it has not been allocated, we have to delay
-  // this call until it has been allocated (see OnChildSizeAllocate).
-  if (child_->allocation.x != -1) {
-    AnimationProgressed(animation_.get());
-  } else {
-    fixed_needs_resize_ = true;
-  }
+  AnimationProgressed(animation_.get());
 }
 
 void SlideAnimatorGtk::Close() {
   animation_->Hide();
+}
+
+void SlideAnimatorGtk::End() {
+  animation_->End();
 }
 
 void SlideAnimatorGtk::CloseWithoutAnimation() {
@@ -98,12 +95,20 @@ bool SlideAnimatorGtk::IsClosing() {
   return animation_->IsClosing();
 }
 
+bool SlideAnimatorGtk::IsAnimating() {
+  return animation_->IsAnimating();
+}
+
 void SlideAnimatorGtk::AnimationProgressed(const Animation* animation) {
-  int showing_height = child_->allocation.height *
-                       animation_->GetCurrentValue();
+  GtkRequisition req;
+  gtk_widget_size_request(child_, &req);
+
+  int showing_height = static_cast<int>(req.height *
+                                        animation_->GetCurrentValue());
   if (direction_ == DOWN) {
     gtk_fixed_move(GTK_FIXED(widget_.get()), child_, 0,
-                   showing_height - child_->allocation.height);
+                   showing_height - req.height);
+    child_needs_move_ = false;
   }
   gtk_widget_set_size_request(widget_.get(), -1, showing_height);
 }
@@ -123,10 +128,5 @@ void SlideAnimatorGtk::OnChildSizeAllocate(GtkWidget* child,
   if (slider->child_needs_move_) {
     gtk_fixed_move(GTK_FIXED(slider->widget()), child, 0, -allocation->height);
     slider->child_needs_move_ = false;
-  }
-
-  if (slider->fixed_needs_resize_) {
-    slider->AnimationProgressed(slider->animation_.get());
-    slider->fixed_needs_resize_ = false;
   }
 }

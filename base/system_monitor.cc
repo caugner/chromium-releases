@@ -5,6 +5,7 @@
 #include "base/system_monitor.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/singleton.h"
 
 namespace base {
 
@@ -59,19 +60,27 @@ void SystemMonitor::RemoveObserver(PowerObserver* obs) {
 void SystemMonitor::NotifyPowerStateChange() {
   LOG(INFO) << L"PowerStateChange: "
            << (BatteryPower() ? L"On" : L"Off") << L" battery";
-  observer_list_->Notify(&PowerObserver::OnPowerStateChange, this);
+  observer_list_->Notify(&PowerObserver::OnPowerStateChange, BatteryPower());
 }
 
 void SystemMonitor::NotifySuspend() {
   LOG(INFO) << L"Power Suspending";
-  observer_list_->Notify(&PowerObserver::OnSuspend, this);
+  observer_list_->Notify(&PowerObserver::OnSuspend);
 }
 
 void SystemMonitor::NotifyResume() {
   LOG(INFO) << L"Power Resuming";
-  observer_list_->Notify(&PowerObserver::OnResume, this);
+  observer_list_->Notify(&PowerObserver::OnResume);
 }
 
+// static
+SystemMonitor* SystemMonitor::Get() {
+  // Uses the LeakySingletonTrait because cleanup is optional.
+  return
+      Singleton<SystemMonitor, LeakySingletonTraits<SystemMonitor> >::get();
+}
+
+// static
 void SystemMonitor::Start() {
 #if defined(ENABLE_BATTERY_MONITORING)
   DCHECK(MessageLoop::current());  // Can't call start too early.

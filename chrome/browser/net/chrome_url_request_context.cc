@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
+#include "chrome/browser/net/sqlite_persistent_cookie_store.h"
 #include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_constants.h"
@@ -29,7 +30,7 @@
 
 net::ProxyConfig* CreateProxyConfig(const CommandLine& command_line) {
   // Scan for all "enable" type proxy switches.
-  static const wchar_t* proxy_switches[] = {
+  static const char* proxy_switches[] = {
     switches::kProxyServer,
     switches::kProxyPacUrl,
     switches::kProxyAutoDetect,
@@ -102,28 +103,39 @@ static net::ProxyService* CreateProxyService(URLRequestContext* context,
       proxy_config.get(),
       use_v8,
       context,
-      g_browser_process->io_thread()->message_loop());
+      g_browser_process->io_thread()->message_loop(),
+      g_browser_process->file_thread()->message_loop());
 }
 
 // static
 ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginal(
     Profile* profile, const FilePath& cookie_store_path,
-    const FilePath& disk_cache_path, int cache_size) {
+    const FilePath& disk_cache_path, int cache_size,
+    ChromeAppCacheService* appcache_service) {
   DCHECK(!profile->IsOffTheRecord());
-  ChromeURLRequestContext* context = new ChromeURLRequestContext(profile);
+  ChromeURLRequestContext* context = new ChromeURLRequestContext(
+      profile, appcache_service);
+
+  // The appcache service uses the profile's original context for UpdateJobs.
+  DCHECK(!appcache_service->request_context());
+  appcache_service->set_request_context(context);
 
   // Global host resolver for the context.
   context->host_resolver_ = chrome_browser_net::GetGlobalHostResolver();
 
-  context->proxy_service_ = CreateProxyService(
-      context, *CommandLine::ForCurrentProcess());
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  context->proxy_service_ = CreateProxyService(context, command_line);
 
   net::HttpCache* cache =
       new net::HttpCache(context->host_resolver_,
                          context->proxy_service_,
-                         disk_cache_path.ToWStringHack(), cache_size);
+                         context->ssl_config_service_,
+                         disk_cache_path, cache_size);
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kDisableByteRangeSupport))
+    cache->set_enable_range_support(false);
+
   bool record_mode = chrome::kRecordModeEnabled &&
                      command_line.HasSwitch(switches::kRecordMode);
   bool playback_mode = command_line.HasSwitch(switches::kPlaybackMode);
@@ -136,10 +148,10 @@ ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginal(
   }
   context->http_transaction_factory_ = cache;
 
-  // The kNewFtp switch is Windows specific only because we have multiple FTP
+  // The kWininetFtp switch is Windows specific because we have two FTP
   // implementations on Windows.
 #if defined(OS_WIN)
-  if (command_line.HasSwitch(switches::kNewFtp))
+  if (!command_line.HasSwitch(switches::kWininetFtp))
     context->ftp_transaction_factory_ =
         new net::FtpNetworkLayer(context->host_resolver_);
 #else
@@ -150,10 +162,12 @@ ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginal(
   // setup cookie store
   if (!context->cookie_store_) {
     DCHECK(!cookie_store_path.empty());
-    context->cookie_db_.reset(new SQLitePersistentCookieStore(
-        cookie_store_path.ToWStringHack(),
-        g_browser_process->db_thread()->message_loop()));
-    context->cookie_store_ = new net::CookieMonster(context->cookie_db_.get());
+
+    scoped_refptr<SQLitePersistentCookieStore> cookie_db =
+        new SQLitePersistentCookieStore(
+            cookie_store_path,
+            g_browser_process->db_thread()->message_loop());
+    context->cookie_store_ = new net::CookieMonster(cookie_db.get());
   }
 
   return context;
@@ -161,49 +175,79 @@ ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginal(
 
 // static
 ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginalForMedia(
-    Profile* profile, const FilePath& disk_cache_path, int cache_size) {
+    Profile* profile, const FilePath& disk_cache_path, int cache_size,
+    ChromeAppCacheService* appcache_service) {
   DCHECK(!profile->IsOffTheRecord());
   return CreateRequestContextForMedia(profile, disk_cache_path, cache_size,
-                                      false);
+                                      false, appcache_service);
 }
 
 // static
 ChromeURLRequestContext* ChromeURLRequestContext::CreateOriginalForExtensions(
     Profile* profile, const FilePath& cookie_store_path) {
   DCHECK(!profile->IsOffTheRecord());
-  ChromeURLRequestContext* context = new ChromeURLRequestContext(profile);
+  ChromeURLRequestContext* context = new ChromeURLRequestContext(
+      profile, NULL);
 
   // All we care about for extensions is the cookie store.
   DCHECK(!cookie_store_path.empty());
-  context->cookie_db_.reset(new SQLitePersistentCookieStore(
-      cookie_store_path.ToWStringHack(),
-      g_browser_process->db_thread()->message_loop()));
-  context->cookie_store_ = new net::CookieMonster(context->cookie_db_.get());
+
+  scoped_refptr<SQLitePersistentCookieStore> cookie_db =
+      new SQLitePersistentCookieStore(
+          cookie_store_path,
+          g_browser_process->db_thread()->message_loop());
+  net::CookieMonster* cookie_monster = new net::CookieMonster(cookie_db.get());
 
   // Enable cookies for extension URLs only.
   const char* schemes[] = {chrome::kExtensionScheme};
-  context->cookie_store_->SetCookieableSchemes(schemes, 1);
+  cookie_monster->SetCookieableSchemes(schemes, 1);
+  context->cookie_store_ = cookie_monster;
 
   return context;
 }
 
 // static
 ChromeURLRequestContext* ChromeURLRequestContext::CreateOffTheRecord(
-    Profile* profile) {
+    Profile* profile, ChromeAppCacheService* appcache_service) {
   DCHECK(profile->IsOffTheRecord());
-  ChromeURLRequestContext* context = new ChromeURLRequestContext(profile);
+  ChromeURLRequestContext* context = new ChromeURLRequestContext(
+      profile, appcache_service);
+
+  // The appcache service uses the profile's original context for UpdateJobs.
+  DCHECK(!appcache_service->request_context());
+  appcache_service->set_request_context(context);
 
   // Share the same proxy service and host resolver as the original profile.
-  // This proxy service's lifespan is dependent on the lifespan of the original
-  // profile which we reference (see above).
+  // TODO(eroman): although ProxyService is reference counted, this sharing
+  // still has a subtle dependency on the lifespan of the original profile --
+  // ProxyService holds a (non referencing) pointer to the URLRequestContext
+  // it uses to download PAC scripts, which in this case is the original
+  // profile...
   context->host_resolver_ =
       profile->GetOriginalProfile()->GetRequestContext()->host_resolver();
   context->proxy_service_ =
       profile->GetOriginalProfile()->GetRequestContext()->proxy_service();
 
-  context->http_transaction_factory_ =
-      new net::HttpCache(context->host_resolver_, context->proxy_service_, 0);
+  net::HttpCache* cache =
+      new net::HttpCache(context->host_resolver_, context->proxy_service_,
+                         context->ssl_config_service_, 0);
   context->cookie_store_ = new net::CookieMonster;
+  context->http_transaction_factory_ = cache;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableByteRangeSupport))
+    cache->set_enable_range_support(false);
+
+  // The kWininetFtp switch is Windows specific because we have two FTP
+  // implementations on Windows.
+#if defined(OS_WIN)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kWininetFtp))
+    context->ftp_transaction_factory_ =
+        new net::FtpNetworkLayer(context->host_resolver_);
+#else
+  context->ftp_transaction_factory_ =
+      new net::FtpNetworkLayer(context->host_resolver_);
+#endif
 
   return context;
 }
@@ -212,12 +256,14 @@ ChromeURLRequestContext* ChromeURLRequestContext::CreateOffTheRecord(
 ChromeURLRequestContext*
 ChromeURLRequestContext::CreateOffTheRecordForExtensions(Profile* profile) {
   DCHECK(profile->IsOffTheRecord());
-  ChromeURLRequestContext* context = new ChromeURLRequestContext(profile);
-  context->cookie_store_ = new net::CookieMonster;
+  ChromeURLRequestContext* context =
+      new ChromeURLRequestContext(profile, NULL);
+  net::CookieMonster* cookie_monster = new net::CookieMonster;
 
   // Enable cookies for extension URLs only.
   const char* schemes[] = {chrome::kExtensionScheme};
-  context->cookie_store_->SetCookieableSchemes(schemes, 1);
+  cookie_monster->SetCookieableSchemes(schemes, 1);
+  context->cookie_store_ = cookie_monster;
 
   return context;
 }
@@ -225,10 +271,11 @@ ChromeURLRequestContext::CreateOffTheRecordForExtensions(Profile* profile) {
 // static
 ChromeURLRequestContext* ChromeURLRequestContext::CreateRequestContextForMedia(
     Profile* profile, const FilePath& disk_cache_path, int cache_size,
-    bool off_the_record) {
+    bool off_the_record, ChromeAppCacheService* appcache_service) {
   URLRequestContext* original_context =
       profile->GetOriginalProfile()->GetRequestContext();
-  ChromeURLRequestContext* context = new ChromeURLRequestContext(profile);
+  ChromeURLRequestContext* context =
+      new ChromeURLRequestContext(profile, appcache_service);
   context->is_media_ = true;
 
   // Share the same proxy service of the common profile.
@@ -250,22 +297,29 @@ ChromeURLRequestContext* ChromeURLRequestContext::CreateRequestContextForMedia(
     net::HttpNetworkLayer* original_network_layer =
         static_cast<net::HttpNetworkLayer*>(original_cache->network_layer());
     cache = new net::HttpCache(original_network_layer->GetSession(),
-                               disk_cache_path.ToWStringHack(), cache_size);
+                               disk_cache_path, cache_size);
   } else {
     // If original HttpCache doesn't exist, simply construct one with a whole
     // new set of network stack.
     cache = new net::HttpCache(original_context->host_resolver(),
                                original_context->proxy_service(),
-                               disk_cache_path.ToWStringHack(), cache_size);
+                               original_context->ssl_config_service(),
+                               disk_cache_path, cache_size);
   }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableByteRangeSupport))
+    cache->set_enable_range_support(false);
 
   cache->set_type(net::MEDIA_CACHE);
   context->http_transaction_factory_ = cache;
   return context;
 }
 
-ChromeURLRequestContext::ChromeURLRequestContext(Profile* profile)
-    : prefs_(profile->GetPrefs()),
+ChromeURLRequestContext::ChromeURLRequestContext(
+    Profile* profile, ChromeAppCacheService* appcache_service)
+    : appcache_service_(appcache_service),
+      prefs_(profile->GetPrefs()),
       is_media_(false),
       is_off_the_record_(profile->IsOffTheRecord()) {
   // Set up Accept-Language and Accept-Charset header values
@@ -290,12 +344,12 @@ ChromeURLRequestContext::ChromeURLRequestContext(Profile* profile)
   // net_util::GetSuggestedFilename is unlikely to be taken.
   referrer_charset_ = default_charset;
 
-  cookie_policy_.SetType(net::CookiePolicy::FromInt(
+  cookie_policy_.set_type(net::CookiePolicy::FromInt(
       prefs_->GetInteger(prefs::kCookieBehavior)));
 
   blacklist_ = profile->GetBlacklist();
 
-  force_tls_state_ = profile->GetForceTLSState();
+  strict_transport_security_state_ = profile->GetStrictTransportSecurityState();
 
   if (profile->GetExtensionsService()) {
     const ExtensionList* extensions =
@@ -313,12 +367,32 @@ ChromeURLRequestContext::ChromeURLRequestContext(Profile* profile)
   prefs_->AddPrefObserver(prefs::kCookieBehavior, this);
   prefs_->AddPrefObserver(prefs::kDefaultCharset, this);
 
-  if (!is_off_the_record_) {
-    registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
-                   NotificationService::AllSources());
-    registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
-                   NotificationService::AllSources());
-  }
+  ssl_config_service_ = profile->GetSSLConfigService();
+}
+
+ChromeURLRequestContext::ChromeURLRequestContext(
+    ChromeURLRequestContext* other) {
+  // Set URLRequestContext members
+  host_resolver_ = other->host_resolver_;
+  proxy_service_ = other->proxy_service_;
+  ssl_config_service_ = other->ssl_config_service_;
+  http_transaction_factory_ = other->http_transaction_factory_;
+  ftp_transaction_factory_ = other->ftp_transaction_factory_;
+  cookie_store_ = other->cookie_store_;
+  cookie_policy_.set_type(other->cookie_policy_.type());
+  strict_transport_security_state_ = other->strict_transport_security_state_;
+  accept_language_ = other->accept_language_;
+  accept_charset_ = other->accept_charset_;
+  referrer_charset_ = other->referrer_charset_;
+
+  // Set ChromeURLRequestContext members
+  appcache_service_ = other->appcache_service_;
+  extension_paths_ = other->extension_paths_;
+  user_script_dir_path_ = other->user_script_dir_path_;
+  prefs_ = other->prefs_;
+  blacklist_ = other->blacklist_;
+  is_media_ = other->is_media_;
+  is_off_the_record_ = other->is_off_the_record_;
 }
 
 // NotificationObserver implementation.
@@ -351,23 +425,6 @@ void ChromeURLRequestContext::Observe(NotificationType type,
                             &ChromeURLRequestContext::OnDefaultCharsetChange,
                             default_charset));
     }
-  } else if (NotificationType::EXTENSIONS_LOADED == type) {
-    ExtensionPaths* new_paths = new ExtensionPaths;
-    ExtensionList* extensions = Details<ExtensionList>(details).ptr();
-    DCHECK(extensions);
-    for (ExtensionList::const_iterator iter = extensions->begin();
-         iter != extensions->end(); ++iter) {
-      new_paths->insert(ExtensionPaths::value_type((*iter)->id(),
-                                                   (*iter)->path()));
-    }
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &ChromeURLRequestContext::OnNewExtensions,
-                          new_paths));
-  } else if (NotificationType::EXTENSION_UNLOADED == type) {
-    Extension* extension = Details<Extension>(details).ptr();
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &ChromeURLRequestContext::OnUnloadedExtension,
-                          extension->id()));
   } else {
     NOTREACHED();
   }
@@ -397,13 +454,18 @@ const std::string& ChromeURLRequestContext::GetUserAgent(
   return webkit_glue::GetUserAgent(url);
 }
 
-bool ChromeURLRequestContext::interceptCookie(const URLRequest* request,
+bool ChromeURLRequestContext::InterceptCookie(const URLRequest* request,
                                               std::string* cookie) {
   const URLRequest::UserData* d =
-      request->GetUserData((void*)&Blacklist::kRequestDataKey);
+      request->GetUserData(&Blacklist::kRequestDataKey);
   if (d) {
     const Blacklist::Match* match = static_cast<const Blacklist::Match*>(d);
     if (match->attributes() & Blacklist::kDontStoreCookies) {
+      NotificationService::current()->Notify(
+          NotificationType::BLACKLIST_BLOCKED_RESOURCE,
+          Source<const ChromeURLRequestContext>(this),
+          Details<const URLRequest>(request));
+
       cookie->clear();
       return false;
     }
@@ -414,14 +476,20 @@ bool ChromeURLRequestContext::interceptCookie(const URLRequest* request,
   return true;
 }
 
-bool ChromeURLRequestContext::allowSendingCookies(const URLRequest* request)
+bool ChromeURLRequestContext::AllowSendingCookies(const URLRequest* request)
     const {
   const URLRequest::UserData* d =
-      request->GetUserData((void*)&Blacklist::kRequestDataKey);
+      request->GetUserData(&Blacklist::kRequestDataKey);
   if (d) {
     const Blacklist::Match* match = static_cast<const Blacklist::Match*>(d);
-    if (match->attributes() & Blacklist::kDontSendCookies)
+    if (match->attributes() & Blacklist::kDontSendCookies) {
+      NotificationService::current()->Notify(
+          NotificationType::BLACKLIST_BLOCKED_RESOURCE,
+          Source<const ChromeURLRequestContext>(this),
+          Details<const URLRequest>(request));
+
       return false;
+    }
   }
   return true;
 }
@@ -438,7 +506,7 @@ void ChromeURLRequestContext::OnCookiePolicyChange(
     net::CookiePolicy::Type type) {
   DCHECK(MessageLoop::current() ==
          ChromeThread::GetMessageLoop(ChromeThread::IO));
-  cookie_policy_.SetType(type);
+  cookie_policy_.set_type(type);
 }
 
 void ChromeURLRequestContext::OnDefaultCharsetChange(
@@ -450,20 +518,25 @@ void ChromeURLRequestContext::OnDefaultCharsetChange(
       net::HttpUtil::GenerateAcceptCharsetHeader(default_charset);
 }
 
-void ChromeURLRequestContext::OnNewExtensions(ExtensionPaths* new_paths) {
-  extension_paths_.insert(new_paths->begin(), new_paths->end());
-  delete new_paths;
+void ChromeURLRequestContext::OnNewExtensions(const std::string& id,
+                                              const FilePath& path) {
+  if (!is_off_the_record_)
+    extension_paths_[id] = path;
 }
 
-void ChromeURLRequestContext::OnUnloadedExtension(
-    const std::string& extension_id) {
-  ExtensionPaths::iterator iter = extension_paths_.find(extension_id);
+void ChromeURLRequestContext::OnUnloadedExtension(const std::string& id) {
+  if (is_off_the_record_)
+    return;
+  ExtensionPaths::iterator iter = extension_paths_.find(id);
   DCHECK(iter != extension_paths_.end());
   extension_paths_.erase(iter);
 }
 
 ChromeURLRequestContext::~ChromeURLRequestContext() {
   DCHECK(NULL == prefs_);
+
+  if (appcache_service_.get() && appcache_service_->request_context() == this)
+    appcache_service_->set_request_context(NULL);
 
   NotificationService::current()->Notify(
       NotificationType::URL_REQUEST_CONTEXT_RELEASED,
@@ -472,14 +545,4 @@ ChromeURLRequestContext::~ChromeURLRequestContext() {
 
   delete ftp_transaction_factory_;
   delete http_transaction_factory_;
-
-  // Do not delete the cookie store in the case of the media context, as it is
-  // owned by the original context.
-  if (!is_media_)
-    delete cookie_store_;
-
-  // Do not delete the proxy service in the case of OTR or media contexts, as
-  // it is owned by the original URLRequestContext.
-  if (!is_off_the_record_ && !is_media_)
-    delete proxy_service_;
 }

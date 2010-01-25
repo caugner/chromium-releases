@@ -8,8 +8,8 @@
 #include <map>
 #include <string>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
@@ -20,11 +20,6 @@ class RenderViewHost;
 class RenderWidgetHost;
 class RenderWidgetHostView;
 class TabContents;
-class WebKeyboardEvent;
-
-namespace base {
-class WaitableEvent;
-}
 
 // The TabContentsView is an interface that is implemented by the platform-
 // dependent web contents views. The TabContents uses this interface to talk to
@@ -45,7 +40,7 @@ class TabContentsView : public RenderViewHostDelegate::View {
 
   TabContents* tab_contents() const { return tab_contents_; }
 
-  virtual void CreateView() = 0;
+  virtual void CreateView(const gfx::Size& initial_size) = 0;
 
   // Sets up the View that holds the rendered web page, receives messages for
   // it and contains page plugins. The host view should be sized to the current
@@ -65,6 +60,9 @@ class TabContentsView : public RenderViewHostDelegate::View {
   // dialog boxes.
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const = 0;
 
+  // Initialize the passed-in renderer preferences.
+  virtual void InitRendererPrefs(RendererPreferences* prefs) {}
+
   // Computes the rectangle for the native widget that contains the contents of
   // the tab relative to its parent.
   virtual void GetContainerBounds(gfx::Rect *out) const = 0;
@@ -76,14 +74,6 @@ class TabContentsView : public RenderViewHostDelegate::View {
     GetContainerBounds(&rc);
     return gfx::Size(rc.width(), rc.height());
   }
-
-  // Called when the TabContents is being destroyed. This should clean up child
-  // windows that are part of the view.
-  //
-  // TODO(brettw) It seems like this might be able to be done internally as the
-  // window is being torn down without input from the TabContents. Try to
-  // implement functions that way rather than adding stuff here.
-  virtual void OnContentsDestroy() = 0;
 
   // Sets the page title for the native widgets corresponding to the view. This
   // is not strictly necessary and isn't expected to be displayed anywhere, but
@@ -133,7 +123,7 @@ class TabContentsView : public RenderViewHostDelegate::View {
   virtual void HandleMouseLeave() {}
 
   // Set and return the content's intrinsic width.
-  virtual void UpdatePreferredWidth(int pref_width);
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
   int preferred_width() const {
     return preferred_width_;
   }
@@ -170,8 +160,7 @@ class TabContentsView : public RenderViewHostDelegate::View {
   // We implement these functions on RenderViewHostDelegate::View directly and
   // do some book-keeping associated with the request. The request is then
   // forwarded to *Internal which does platform-specific work.
-  virtual void CreateNewWindow(int route_id,
-                               base::WaitableEvent* modal_dialog_event);
+  virtual void CreateNewWindow(int route_id);
   virtual void CreateNewWidget(int route_id, bool activatable);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -179,6 +168,7 @@ class TabContentsView : public RenderViewHostDelegate::View {
                                  bool user_gesture,
                                  const GURL& creator_url);
   virtual void ShowCreatedWidget(int route_id, const gfx::Rect& initial_pos);
+  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
 
   // The TabContents whose contents we display.
   TabContents* tab_contents_;

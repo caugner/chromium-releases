@@ -18,7 +18,11 @@ function runtest() {
     if (window.layoutTestController) {
         layoutTestController.dumpAsText();
         layoutTestController.waitUntilDone();
-        plg.getURLNotify("http://www.apple.com", "_blank", "callback");
+        layoutTestController.setCanOpenWindows();
+        // The new window should close immediately after it opens and finishes
+        // loading.  The setTimeout allows NPP_URLNotify to run before the
+        // window is closed.
+        plg.getURLNotify("data:text/html,<body onload='setTimeout(function(){close()},0)'></body>", "_blank", "callback");
     } else {
         document.write("Cannot run interactively");
     }

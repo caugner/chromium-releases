@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "chrome/browser/history/history.h"
 
 #include "app/l10n_util.h"
-#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/ref_counted.h"
@@ -40,6 +39,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/history/visit_log.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
@@ -53,7 +53,35 @@
 using base::Time;
 using history::HistoryBackend;
 
+namespace {
+
+// The history thread is intentionally not a ChromeThread because the
+// sync integration unit tests depend on being able to create more than one
+// history thread.
 static const char* kHistoryThreadName = "Chrome_HistoryThread";
+
+class ChromeHistoryThread : public base::Thread {
+ public:
+  ChromeHistoryThread() : base::Thread(kHistoryThreadName) {}
+  virtual ~ChromeHistoryThread() {
+    // We cannot rely on our base class to call Stop() since we want our
+    // CleanUp function to run.
+    Stop();
+  }
+ protected:
+  virtual void CleanUp() {
+    history::ClearVisitLog();
+  }
+  virtual void Run(MessageLoop* message_loop) {
+    // Allocate VisitLog on local stack so it will be saved in crash dump.
+    history::VisitLog visit_log;
+    history::InitVisitLog(&visit_log);
+    message_loop->Run();
+    history::ClearVisitLog();
+  }
+};
+
+}  // namespace
 
 // Sends messages from the backend to us on the main thread. This must be a
 // separate class from the history service so that it can hold a reference to
@@ -100,7 +128,7 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
 const history::StarID HistoryService::kBookmarkBarID = 1;
 
 HistoryService::HistoryService()
-    : thread_(new base::Thread(kHistoryThreadName)),
+    : thread_(new ChromeHistoryThread()),
       profile_(NULL),
       backend_loaded_(false) {
   // Is NULL when running generate_profile.
@@ -111,7 +139,7 @@ HistoryService::HistoryService()
 }
 
 HistoryService::HistoryService(Profile* profile)
-    : thread_(new base::Thread(kHistoryThreadName)),
+    : thread_(new ChromeHistoryThread()),
       profile_(profile),
       backend_loaded_(false) {
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
@@ -125,29 +153,41 @@ HistoryService::~HistoryService() {
 
 bool HistoryService::Init(const FilePath& history_dir,
                           BookmarkService* bookmark_service) {
-  if (!thread_->Start())
+  if (!thread_->Start()) {
+    Cleanup();
     return false;
+  }
+
+  history_dir_ = history_dir;
+  bookmark_service_ = bookmark_service;
 
   // Create the history backend.
-  scoped_refptr<HistoryBackend> backend(
-      new HistoryBackend(history_dir,
-                         new BackendDelegate(this),
-                         bookmark_service));
-  history_backend_.swap(backend);
-
-  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init);
+  LoadBackendIfNecessary();
   return true;
 }
 
-void HistoryService::Cleanup() {
-  if (!thread_) {
-    // We've already cleaned up.
-    return;
-  }
+bool HistoryService::BackendLoaded() {
+  // NOTE: We start the backend loading even though it completes asynchronously
+  // and thus won't affect the return value of this function.  This is because
+  // callers of this assume that if the backend isn't yet loaded it will be
+  // soon, so they will either listen for notifications or just retry this call
+  // later.  If we've purged the backend, we haven't necessarily restarted it
+  // loading by now, so we need to trigger the load in order to maintain that
+  // expectation.
+  LoadBackendIfNecessary();
+  return backend_loaded_;
+}
 
-  // Shutdown is a little subtle. The backend's destructor must run on the
-  // history thread since it is not threadsafe. So this thread must not be the
-  // last thread holding a reference to the backend, or a crash could happen.
+void HistoryService::UnloadBackend() {
+  if (!history_backend_)
+    return;  // Already unloaded.
+
+  // Get rid of the in-memory backend.
+  in_memory_backend_.reset();
+
+  // The backend's destructor must run on the history thread since it is not
+  // threadsafe. So this thread must not be the last thread holding a reference
+  // to the backend, or a crash could happen.
   //
   // We have a reference to the history backend. There is also an extra
   // reference held by our delegate installed in the backend, which
@@ -166,6 +206,16 @@ void HistoryService::Cleanup() {
       NewRunnableMethod(history_backend_.get(), &HistoryBackend::Closing);
   history_backend_ = NULL;
   ScheduleTask(PRIORITY_NORMAL, closing_task);
+}
+
+void HistoryService::Cleanup() {
+  if (!thread_) {
+    // We've already cleaned up.
+    return;
+  }
+
+  // Unload the backend.
+  UnloadBackend();
 
   // Delete the thread, which joins with the background thread. We defensively
   // NULL the pointer before deleting it in case somebody tries to use it
@@ -180,7 +230,11 @@ void HistoryService::NotifyRenderProcessHostDestruction(const void* host) {
                     &HistoryBackend::NotifyRenderProcessHostDestruction, host);
 }
 
-history::URLDatabase* HistoryService::in_memory_database() const {
+history::URLDatabase* HistoryService::InMemoryDatabase() {
+  // NOTE: See comments in BackendLoaded() as to why we call
+  // LoadBackendIfNecessary() here even though it won't affect the return value
+  // for this call.
+  LoadBackendIfNecessary();
   if (in_memory_backend_.get())
     return in_memory_backend_->db();
   return NULL;
@@ -268,7 +322,7 @@ void HistoryService::AddPage(const GURL& url,
                              PageTransition::Type transition,
                              const history::RedirectList& redirects,
                              bool did_replace_entry) {
-  DCHECK(history_backend_) << "History service being called after cleanup";
+  DCHECK(thread_) << "History service being called after cleanup";
 
   // Filter out unwanted URLs. We don't add auto-subframe URLs. They are a
   // large part of history (think iframes for ads) and we never display them in
@@ -358,6 +412,7 @@ void HistoryService::SetPageContents(const GURL& url,
                                      const std::wstring& contents) {
   if (!CanAddURL(url))
     return;
+
   ScheduleAndForget(PRIORITY_LOW, &HistoryBackend::SetPageContents,
                     url, contents);
 }
@@ -380,37 +435,28 @@ HistoryService::Handle HistoryService::GetPageThumbnail(
                   new history::GetPageThumbnailRequest(callback), page_url);
 }
 
-HistoryService::Handle HistoryService::GetFavIcon(
-    const GURL& icon_url,
-    CancelableRequestConsumerBase* consumer,
-    FavIconDataCallback* callback) {
-  // We always do image requests at lower-than-UI priority even though they
-  // appear in the UI, since they can take a long time and the user can use the
-  // program without them.
-  return Schedule(PRIORITY_NORMAL, &HistoryBackend::GetFavIcon, consumer,
-                  new history::GetFavIconRequest(callback), icon_url);
+void HistoryService::GetFavicon(FaviconService::GetFaviconRequest* request,
+                                const GURL& icon_url) {
+  Schedule(PRIORITY_NORMAL, &HistoryBackend::GetFavIcon, NULL, request,
+           icon_url);
 }
 
-HistoryService::Handle HistoryService::UpdateFavIconMappingAndFetch(
+void HistoryService::UpdateFaviconMappingAndFetch(
+    FaviconService::GetFaviconRequest* request,
     const GURL& page_url,
-    const GURL& icon_url,
-    CancelableRequestConsumerBase* consumer,
-    FavIconDataCallback* callback) {
-  return Schedule(PRIORITY_NORMAL,
-                  &HistoryBackend::UpdateFavIconMappingAndFetch, consumer,
-                  new history::GetFavIconRequest(callback), page_url, icon_url);
+    const GURL& icon_url) {
+  Schedule(PRIORITY_NORMAL, &HistoryBackend::UpdateFavIconMappingAndFetch, NULL,
+           request, page_url, icon_url);
 }
 
-HistoryService::Handle HistoryService::GetFavIconForURL(
-    const GURL& page_url,
-    CancelableRequestConsumerBase* consumer,
-    FavIconDataCallback* callback) {
-  return Schedule(PRIORITY_UI, &HistoryBackend::GetFavIconForURL,
-                  consumer, new history::GetFavIconRequest(callback),
-                  page_url);
+void HistoryService::GetFaviconForURL(
+    FaviconService::GetFaviconRequest* request,
+    const GURL& page_url) {
+  Schedule(PRIORITY_NORMAL, &HistoryBackend::GetFavIconForURL, NULL, request,
+           page_url);
 }
 
-void HistoryService::SetFavIcon(const GURL& page_url,
+void HistoryService::SetFavicon(const GURL& page_url,
                                 const GURL& icon_url,
                                 const std::vector<unsigned char>& image_data) {
   if (!CanAddURL(page_url))
@@ -421,7 +467,7 @@ void HistoryService::SetFavIcon(const GURL& page_url,
       scoped_refptr<RefCountedBytes>(new RefCountedBytes(image_data)));
 }
 
-void HistoryService::SetFavIconOutOfDateForPage(const GURL& page_url) {
+void HistoryService::SetFaviconOutOfDateForPage(const GURL& page_url) {
   ScheduleAndForget(PRIORITY_NORMAL,
                     &HistoryBackend::SetFavIconOutOfDateForPage, page_url);
 }
@@ -590,6 +636,9 @@ bool HistoryService::CanAddURL(const GURL& url) const {
   if (!url.is_valid())
     return false;
 
+  // TODO: We should allow kChromeUIScheme URLs if they have been explicitly
+  // typed.  Right now, however, these are marked as typed even when triggered
+  // by a shortcut or menu action.
   if (url.SchemeIs(chrome::kJavaScriptScheme) ||
       url.SchemeIs(chrome::kChromeUIScheme) ||
       url.SchemeIs(chrome::kViewSourceScheme) ||
@@ -598,8 +647,7 @@ bool HistoryService::CanAddURL(const GURL& url) const {
     return false;
 
   if (url.SchemeIs(chrome::kAboutScheme)) {
-    std::string path = url.path();
-    if (path.empty() || LowerCaseEqualsASCII(path, "blank"))
+    if (LowerCaseEqualsASCII(url.path(), "blank"))
       return false;
     // We allow all other about URLs since the user may like to see things
     // like "about:memory" or "about:histograms" in their history and
@@ -619,23 +667,9 @@ void HistoryService::SetInMemoryBackend(
 }
 
 void HistoryService::NotifyTooNew() {
-#if defined(OS_WIN)
-  // Find the last browser window to display our message box from.
-  Browser* cur_browser = BrowserList::GetLastActive();
-  // TODO(brettw): Do this some other way or beng will kick you. e.g. move to
-  //               BrowserView.
-  HWND parent_hwnd =
-      reinterpret_cast<HWND>(cur_browser->window()->GetNativeHandle());
-  HWND cur_hwnd = cur_browser ? parent_hwnd : NULL;
-
-  std::wstring title = l10n_util::GetString(IDS_PRODUCT_NAME);
-  std::wstring message = l10n_util::GetString(IDS_PROFILE_TOO_NEW_ERROR);
-  MessageBox(cur_hwnd, message.c_str(), title.c_str(),
-             MB_OK | MB_ICONWARNING | MB_TOPMOST);
-#else
-  // TODO(port): factor this out into platform-specific code.
-  NOTIMPLEMENTED();
-#endif
+  Source<HistoryService> source(this);
+  NotificationService::current()->Notify(NotificationType::HISTORY_TOO_NEW,
+      source, NotificationService::NoDetails());
 }
 
 void HistoryService::DeleteURL(const GURL& url) {
@@ -676,6 +710,19 @@ void HistoryService::BroadcastNotifications(
   Details<history::HistoryDetails> det(details_deleted);
 
   NotificationService::current()->Notify(type, source, det);
+}
+
+void HistoryService::LoadBackendIfNecessary() {
+  if (!thread_ || history_backend_)
+    return;  // Failed to init, or already started loading.
+
+  scoped_refptr<HistoryBackend> backend(
+      new HistoryBackend(history_dir_,
+                         new BackendDelegate(this),
+                         bookmark_service_));
+  history_backend_.swap(backend);
+
+  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init);
 }
 
 void HistoryService::OnDBLoaded() {

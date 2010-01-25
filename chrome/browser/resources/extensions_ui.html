@@ -2,7 +2,197 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title i18n-content="title"></title>
+<title i18n-content="title">About extensions</title>
+<style>
+body {
+  font-size: 84%;
+  font-family: Arial, Helvetica, sans-serif;
+  padding: 0.75em;
+  margin: 0;
+  min-width: 45em;
+}
+
+a {
+  color: black;
+}
+
+div#header {
+  padding: 0.75em 1em;
+  padding-top: 0.6em;
+  padding-left: 0;
+  margin-bottom: 0.75em;
+  position: relative;
+  overflow: hidden;
+  background: #5296de;
+  -webkit-background-size: 100%;
+  border: 1px solid #3a75bd;
+  -webkit-border-radius: 6px;
+  color: white;
+}
+div#header h1 {
+  padding-left: 37px;
+  margin: 0;
+  display: inline;
+  background: url('gear.png') 12px 60% no-repeat;
+  color: white;
+}
+
+h1 {
+  font-size: 110%;
+  font-weight: bold;
+  color: #4a8ee6;
+  padding: 0;
+  margin: 0;
+}
+
+div#outside {
+  margin-left:2px;
+}
+
+div.content {
+  font-size:84%;
+}
+
+.sidebar-content {
+  font-size:84%;
+  white-space:nowrap;
+  margin-top:-5px;
+  margin-right:2px;
+}
+
+.sidebar-content button {
+  -webkit-box-sizing:border-box;
+  width:100%;
+}
+
+h2 {
+  font-size: 110%;
+  letter-spacing: -1px;
+  font-weight: normal;
+  color: #3a75bd;
+  margin-bottom:2em;
+}
+
+.extension-details {
+  margin:1em 25px 4em;
+  line-height:1.5em;
+}
+
+.extension-name-row {
+  border-top:1px solid #b5c7de;
+  background:#eff7ff;
+  padding:3px 25px;
+}
+
+.extension-name {
+  font-weight:bold;
+}
+
+.extension-version {
+  margin-left: 1ex;
+}
+
+.extension-description {
+  margin:0.5em 0;
+}
+
+.extension-views {
+  margin:0 0 0.75em;
+  margin-left:2ex;
+  padding:0;
+  list-style-type:none;
+}
+
+.extension-actions {
+  margin-top:0.5em;
+}
+
+button {
+  font-size:100%;
+}
+
+#dialogBackground, #dialogBackground div {
+  display: -webkit-box;
+  -webkit-box-align: center;
+}
+
+#dialog input[type="button"] {
+  font-size: 12px;
+  height: 25px;
+  width: 100px;
+}
+
+#dialog input[type="text"] {
+  width: 220px;
+  font-size: 12px;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+#dialogBackground {
+  background-color: rgba(0, 0, 0, .2);
+  display: none;
+  height: 100%;
+  left: 0;
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 1;
+  -webkit-box-orient: vertical;
+  -webkit-user-select:none;
+}
+
+#dialogHBackground {
+  height: 100%;
+  -webkit-box-orient: horizontal;
+}
+
+#dialog {
+  background-color: #5296DE;
+  border: 1px solid #3A75BD;
+  border-radius: 6px 6px;
+  font-size: 12px;
+  width: 500px;
+  -webkit-box-orient: vertical;
+}
+
+#dialogHeader {
+  background-color: rgba(0,0,0,0);
+  color: white;
+  margin: 4px;
+  width: 100%;
+}
+
+#dialogBody {
+  background-color: rgb(240, 240, 240);
+  border: 1px solid #3A75BD;
+  border-bottom-left-radius: 4px 4px;
+  border-bottom-right-radius: 4px 4px;
+  margin: 0px 2px 2px 2px;
+  -webkit-box-orient: vertical;
+}
+
+#dialogContentHeader {
+  margin: 16px;
+}
+
+.dialogBrowseRow {
+  margin-left: -24px;
+  width: 100%;
+  -webkit-box-orient: horizontal;
+  -webkit-box-pack: end;
+}
+
+.dialogBrowseRow>* {
+  margin: 2px
+}
+
+#dialogContentFooter {
+  margin-bottom: 6px;
+  margin-left: -12px;
+  margin-top: 20px;
+}
+
+</style>
 <script>
 /**
  * This variable structure is here to document the structure that the template
@@ -12,9 +202,11 @@ var extensionDataFormat = {
   "extensions": [
     {
       "id": "0000000000000000000000000000000000000000",
-      "name": "Extension Name",
+      "name": "Google Chrome",
       "description": "Extension long format description",
       "version": "1.0.231",
+      "enabled": "true",
+      "options_url": "options.html",
       "content_scripts": [
         {
           "js": ["script1_file1.js", "script1_file2.js"],
@@ -46,9 +238,10 @@ var extensionDataFormat = {
     },
     {
       "id": "0000000000000000000000000000000000000001",
-      "name": "Extension Name",
+      "name": "RSS Subscriber",
       "description": "Extension long format description",
       "version": "1.0.231",
+      "enabled": "true",
       "content_scripts": [
         {
           "js": ["script1_file1.js", "script1_file2.js"],
@@ -79,6 +272,13 @@ var extensionDataFormat = {
  * @param {Object} extensionsData Detailed info about installed extensions
  */
 function showExtensionsData(extensionsData) {
+  // Sort by extension name (case-insensitive)
+  extensionsData.extensions.sort(function(a, b) {
+    a = a.name.toLowerCase();
+    b = b.name.toLowerCase();
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+
   // This is the javascript code that processes the template:
   var input = new JsEvalContext(extensionsData);
   var output = document.getElementById('extensionTemplate');
@@ -121,189 +321,243 @@ function sendInspectMessage(viewData) {
 }
 
 /**
+ * Handles a 'reload' button getting clicked.
+ */
+function handleReloadExtension(node) {
+  // Tell the C++ ExtensionDOMHandler to reload the extension.
+  chrome.send('reload', [node.extensionId]);
+}
+
+/**
+ * Handles a 'enable' or 'disable' button getting clicked.
+ */
+function handleEnableExtension(node, enable) {
+  // Tell the C++ ExtensionDOMHandler to reload the extension.
+  chrome.send('enable', [node.extensionId, String(enable)]);
+  requestExtensionsData();
+}
+
+/**
  * Handles an 'uninstall' button getting clicked.
  */
 function handleUninstallExtension(node) {
   // Tell the C++ ExtensionDOMHandler to uninstall an extension.
   chrome.send('uninstall', [node.extensionId]);
-
-  // Find the div above us with class 'extension' and remove it.
-  while (node) {
-    if (node.className == 'extension') {
-      node.parentNode.removeChild(node);
-      return;
-    }
-    node = node.parentNode;
-  }
-
-  throw new Error("Couldn't find containing extension element.");
 }
+
+/**
+ * Handles an 'options' button getting clicked.
+ */
+function handleOptions(node) {
+  chrome.send('options', [node.extensionId]);
+}
+
+/**
+* Utility function which asks the C++ to show a platform-specific file select
+* dialog, and fire |callback| with the |filePath| that resulted. |selectType|
+* can be either 'file' or 'folder'. |operation| can be 'load', 'packRoot',
+* or 'pem' which are signals to the C++ to do some operation-specific
+* configuration.
+*/
+function showFileDialog(selectType, operation, callback) {
+  handleFilePathSelected = function(filePath) {
+    callback(filePath);
+    handleFilePathSelected = function() {};
+  };
+
+  chrome.send('selectFilePath', [selectType, operation]);
+}
+
+/**
+ * Handles the "Load extension..." button being pressed.
+ */
+function loadExtension() {
+  showFileDialog('folder', 'load', function(filePath) {
+    chrome.send('load', [String(filePath)]);
+  });
+}
+
+/**
+ * Handles the "Pack extension..." button being pressed.
+ */
+function packExtension() {
+  var extensionPath = document.getElementById('extensionPathText').value;
+  var privateKeyPath = document.getElementById('privateKeyPath').value;
+  chrome.send('pack', [extensionPath, privateKeyPath]);
+}
+
+/**
+ * Shows to modal HTML pack dialog.
+ */
+function showPackDialog() {
+  document.getElementById('dialogBackground').style.display="-webkit-box";
+}
+
+/**
+ * Hides the pack dialog.
+ */
+function hidePackDialog() {
+  document.getElementById('dialogBackground').style.display="none"
+}
+
+/**
+ * Pop up a select dialog to capture the extension path.
+ */
+function selectExtensionPath() {
+  showFileDialog('folder', 'packRoot', function(filePath) {
+    document.getElementById('extensionPathText').value = filePath;
+  });
+}
+
+/**
+ * Pop up a select dialog to capture the private key path.
+ */
+function selectPrivateKeyPath() {
+  showFileDialog('file', 'pem', function(filePath) {
+    document.getElementById('privateKeyPath').value = filePath;
+  });
+}
+
+/**
+ * Handles the "Update extensions now" button being pressed.
+ */
+function autoUpdate() {
+  chrome.send('autoupdate', []);
+}
+
 </script>
-<style>
-body {
-  background-color: Window;
-  color: WindowText;
-  font: message-box;
-}
-
-div#outside {
- margin-left: 5%;
- margin-right: 5%;
- text-align: justify;
- width: 90%;
-}
-
-div#installed-extensions {
-  font-size: xx-large;
-  font-weight: bold;
-  text-align: center;
-}
-
-div.extension-name {
-  font-size: large;
-  font-weight: bold;
-  margin-top: 2em;
-  text-align: left;
-}
-
-div.extension-uninstall {
-  margin-bottom: 1em;
-}
-
-dl {
-  margin: 0px 0px 3px 0px;
-}
-
-table {
-  background-color: Window;
-  border: 1px solid ThreeDShadow;
-  border-spacing: 0px;
-  color: WindowText;
-  font: message-box;
-  margin-bottom: 20px;
-  text-align: left;
-  width: 100%;
-}
-
-th {
-  background-color: Highlight;
-  color: HighlightText;
-  text-align: center;
-}
-
-th + th,
-td + td {
-  border-left: 1px dotted ThreeDShadow;
-}
-
-td {
-  border-top: 1px dotted ThreeDShadow;
-  text-align: left;
-}
-
-th, td {
-  padding: 3px;
-}
-
-th.type, th.suff {
-  width: 20%;
-}
-
-th.desc {
-  width: 50%;
-}
-
-#error-box {
-  background-color:#D8D8D8;
-  margin-top: 8px;
-  padding: 8px;
-  width: 100%;
-}
-#error-log {
-  color: #B00000;
-  font-weight: bold;
-}
-.error {
-  font-style:italic;
-}
-</style>
 </head>
 <body onload="requestExtensionsData();">
-  <div id="body-container" style="display:none;">
-    <div id="outside">
-      <div id="installed-extensions">Installed Extensions</div>
-      <div id="extensionTemplate">
-
-        <div class="extension-name" jsdisplay="extensions.length === 0">
-            No Extensions Installed</div>
-
-        <div jsdisplay="extensions.length > 0">
-          <div class="extension" jsselect="extensions">
-            <div class="extension-name" jscontent="name">Extension Name</div>
-            <div class="extension-uninstall">
-              <button
-                jsvalues=".extensionId:id"
-                onclick="handleUninstallExtension(this)"
-                >Uninstall</button>
+  <div id="dialogBackground">
+    <div id="dialogHBackground">
+      <div id="dialog">
+        <div id="dialogHeader">
+          Pack Extension
+        </div>
+        <div id="dialogBody">
+          <div id="dialogContentHeader" i18n-content="packDialogHeading">
+            HEADING
+          </div>
+          <div class="dialogBrowseRow">
+            <div i18n-content="rootDirectoryLabel">
+              ROOT_DIR
             </div>
-            <dl>
-              <dd>Id: <span jscontent="id">0000000000000000000000000000000000000000</span></dd>
-              <dd>
-                <span jscontent="description">Extension Description</span>
-              </dd>
-              <dd>Version: <span jscontent="version">x.x.x.x</span></dd>
-            </dl>
-
-            <table jsselect="content_scripts">
-              <thead>
-                <tr><th colspan="2">Content Script</th></tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>URL Match Patterns</td>
-                  <td>
-                    <span jsselect="matches"
-                        jscontent="(($index > 0) ? ', ' : '') + $this">
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>CSS Files</td>
-                  <td>
-                    <span jsselect="css"
-                        jscontent="(($index > 0) ? ', ' : '') + $this">
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>JavaScript Files</td>
-                  <td>
-                    <span jsselect="js"
-                        jscontent="(($index > 0) ? ', ' : '') + $this">
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <table>
-              <thead>
-                <tr><th colspan="2">Active Views</th></tr>
-              </thead>
-              <tbody>
-                <tr jsselect="views">
-                  <td width="100%"><span jscontent="path"></span></td>
-                  <td width="1" align="right"><button
-                    jsvalues=".extensionView:$this"
-                    onclick="sendInspectMessage(this.extensionView);"
-                  >Inspect</button></td>
-                  <!-- TODO(aa): Debug link -->
-                 </tr>
-               </tbody>
-            </table>
+            <div>
+              <input type="text" id="extensionPathText">
+            </div>
+            <div>
+              <input type="button" value="BROWSE"
+                     i18n-values="value:packDialogBrowse"
+                     onclick="selectExtensionPath();">
+            </div>
+          </div>
+          <div class="dialogBrowseRow">
+            <div i18n-content="privateKeyLabel">
+              PRIVATE_KEY
+            </div>
+            <div>
+              <input type="text" id="privateKeyPath">
+            </div>
+            <div>
+              <input type="button" value="BROWSE"
+                     i18n-values="value:packDialogBrowse"
+                     onclick="selectPrivateKeyPath();">
+            </div>
+          </div>
+          <div class="dialogBrowseRow" id="dialogContentFooter">
+            <div>
+              <input type="button" value="OK" onclick="packExtension();">
+            </div>
+            <div>
+              <input type="button" value="Cancel" onclick="hidePackDialog();">
+            </div>
           </div>
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="body-container" style="display:none;">
+
+    <div id="header"><h1>About extensions</h1></div>
+
+    <div id="outside">
+
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td width="100%" valign="top" align="left">
+
+            <h2>Installed extensions</h2>
+            <div class="content">
+
+              <div id="extensionTemplate">
+
+                <div class="extension-name" jsdisplay="extensions.length === 0">
+                    No extensions installed</div>
+
+                <div jsdisplay="extensions.length > 0">
+                  <div class="extension" jsselect="extensions">
+                    <div class="extension-name-row">
+                      <span class="extension-name" jscontent="name">Extension Name</span>
+                      <span class="extension-version" jscontent="version">x.x.x.x</span>
+                      <span jsdisplay="!enabled">(Disabled)</span>
+                    </div>
+                    <div class="extension-details">
+                      <div class="extension-id">ID: <span jscontent="id"></div>
+                      <div class="extension-description" jscontent="description"></div>
+                      Active views:
+                      <ul class="extension-views">
+                        <li jsselect="views"><span jscontent="path"></span> -
+                          <a jsvalues=".extensionView:$this" href="#"
+                            onclick="sendInspectMessage(this.extensionView); return false;"
+                              >Inspect</a>
+                      </ul>
+                      <div class="extension-actions">
+                        <button
+                          jsvalues=".extensionId:id"
+                          jsdisplay="enabled"
+                          onclick="handleEnableExtension(this, false)"
+                          >Disable</button>
+                        <button
+                          jsvalues=".extensionId:id"
+                          jsdisplay="!enabled"
+                          onclick="handleEnableExtension(this, true)"
+                          >Enable</button>
+                        <button
+                          jsvalues=".extensionId:id"
+                          jsdisplay="enabled"
+                          onclick="handleReloadExtension(this)"
+                          >Reload</button>
+                        <button
+                          jsvalues=".extensionId:id"
+                          onclick="handleUninstallExtension(this)"
+                          >Uninstall</button>
+                        <button
+                          jsdisplay="options_url"
+                          jsvalues=".extensionId:id"
+                          onclick="handleOptions(this)"
+                          >Options</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </td>
+          <td style="min-width:20px"></td>
+          <td valign="top">
+            <h2>Tools</h2>
+
+            <div class="sidebar-content">
+              <button onclick="loadExtension()">Load unpacked extension...</button><br />
+              <button onclick="showPackDialog()">Pack extension...</button><br />
+              <button onclick="autoUpdate()">Update extensions now</button>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+    </div> <!-- /outside -->
   </body>
 </html>

@@ -32,12 +32,11 @@
 
 // This file contains the command parser class.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H__
-#define O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H_
+#define O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H_
 
 #include "core/cross/types.h"
-#include "command_buffer/common/cross/rpc.h"
-#include "command_buffer/common/cross/buffer_sync_api.h"
+#include "command_buffer/common/cross/constants.h"
 #include "command_buffer/common/cross/cmd_buffer_format.h"
 
 namespace o3d {
@@ -73,10 +72,10 @@ class CommandParser {
 
   // Processes one command, updating the get pointer. This will return an error
   // if there are no commands in the buffer.
-  BufferSyncInterface::ParseError ProcessCommand();
+  parse_error::ParseError ProcessCommand();
 
   // Processes all commands until get == put.
-  BufferSyncInterface::ParseError ProcessAllCommands();
+  parse_error::ParseError ProcessAllCommands();
 
  private:
   CommandBufferOffset get_;
@@ -97,17 +96,17 @@ class AsyncAPIInterface {
   // Parameters:
   //    command: the command index.
   //    arg_count: the number of CommandBufferEntry arguments.
-  //    args: the arguments.
+  //    cmd_data: the command data.
   // Returns:
-  //   BufferSyncInterface::NO_ERROR if no error was found, one of
-  //   BufferSyncInterface::ParseError otherwise.
-  virtual BufferSyncInterface::ParseError DoCommand(
+  //   parse_error::NO_ERROR if no error was found, one of
+  //   parse_error::ParseError otherwise.
+  virtual parse_error::ParseError DoCommand(
       unsigned int command,
       unsigned int arg_count,
-      CommandBufferEntry *args) = 0;
+      const void* cmd_data) = 0;
 };
 
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_CMD_PARSER_H_

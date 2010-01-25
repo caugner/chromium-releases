@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/sandbox_init_wrapper.h"
 #include "chrome/renderer/mock_keyboard.h"
 #include "chrome/renderer/mock_render_process.h"
@@ -18,7 +19,7 @@
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebFrame.h"
 
 class RenderViewTest : public testing::Test {
  public:
@@ -30,7 +31,7 @@ class RenderViewTest : public testing::Test {
   void ProcessPendingMessages();
 
   // Returns a pointer to the main frame.
-  WebFrame* GetMainFrame();
+  WebKit::WebFrame* GetMainFrame();
 
   // Executes the given JavaScript in the context of the main frame. The input
   // is a NULL-terminated UTF-8 string.
@@ -44,6 +45,9 @@ class RenderViewTest : public testing::Test {
                    int key_code,
                    MockKeyboard::Modifiers key_modifiers,
                    std::wstring* output);
+
+  // Sends one native key event over IPC.
+  void SendNativeKeyEvent(const NativeWebKeyboardEvent& key_event);
 
   // testing::Test
   virtual void SetUp();

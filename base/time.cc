@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,11 @@ int64 TimeDelta::InMilliseconds() const {
   return delta_ / Time::kMicrosecondsPerMillisecond;
 }
 
+int64 TimeDelta::InMillisecondsRoundedUp() const {
+  return (delta_ + Time::kMicrosecondsPerMillisecond - 1) /
+      Time::kMicrosecondsPerMillisecond;
+}
+
 int64 TimeDelta::InMicroseconds() const {
   return delta_;
 }
@@ -51,7 +56,7 @@ int64 TimeDelta::InMicroseconds() const {
 Time Time::FromTimeT(time_t tt) {
   if (tt == 0)
     return Time();  // Preserve 0 so we can tell it doesn't exist.
-  return (tt * kMicrosecondsPerSecond) + kTimeTToMicrosecondsOffset;
+  return Time((tt * kMicrosecondsPerSecond) + kTimeTToMicrosecondsOffset);
 }
 
 time_t Time::ToTimeT() const {
@@ -62,8 +67,9 @@ time_t Time::ToTimeT() const {
 
 // static
 Time Time::FromDoubleT(double dt) {
-  return (dt * static_cast<double>(kMicrosecondsPerSecond)) +
-      kTimeTToMicrosecondsOffset;
+  return Time(static_cast<int64>((dt *
+                                  static_cast<double>(kMicrosecondsPerSecond)) +
+                                 kTimeTToMicrosecondsOffset));
 }
 
 double Time::ToDoubleT() const {

@@ -152,7 +152,7 @@ const IDNTestCase idn_cases[] = {
   {"xn--bcher-kva.de", L"b\x00fc" L"cher.de",
    {true,  false, false, false, false,
     false, false, false, false, true,
-    true,  true,  false, false, false,
+    true,  false,  false, false, false,
     true,  false, false, false, false,
     false}},
   // a with diaeresis
@@ -173,7 +173,7 @@ const IDNTestCase idn_cases[] = {
   {"xn--caf-dma.fr", L"caf\x00e9.fr",
    {true,  false, false, false, false,
     false, false, false, false, true,
-    false, true,  false, false, false,
+    false, true,  true,  false, false,
     false, false, false, false, false,
     false}},
   // c-cedillla and a with tilde (Portuguese)
@@ -342,6 +342,11 @@ const IDNTestCase idn_cases[] = {
      false, false, true,  false, false,
      true}},
 #endif
+};
+
+struct RFC1738Case {
+  const char* host;
+  bool expected_output;
 };
 
 struct SuggestedFilenameCase {
@@ -528,6 +533,71 @@ TEST(NetUtilTest, FileURLConversion) {
 
   // Test that if a file URL is malformed, we get a failure
   EXPECT_FALSE(net::FileURLToFilePath(GURL("filefoobar"), &output));
+}
+
+TEST(NetUtilTest, GetIdentityFromURL) {
+  struct {
+    const char* input_url;
+    const wchar_t* expected_username;
+    const wchar_t* expected_password;
+  } tests[] = {
+    {
+      "http://username:password@google.com",
+      L"username",
+      L"password",
+    },
+    { // Test for http://crbug.com/19200
+      "http://username:p@ssword@google.com",
+      L"username",
+      L"p@ssword",
+    },
+    { // Username contains %20.
+      "http://use rname:password@google.com",
+      L"use rname",
+      L"password",
+    },
+    { // Keep %00 as is.
+      "http://use%00rname:password@google.com",
+      L"use%00rname",
+      L"password",
+    },
+    { // Use a '+' in the username.
+      "http://use+rname:password@google.com",
+      L"use+rname",
+      L"password",
+    },
+    { // Use a '&' in the password.
+      "http://username:p&ssword@google.com",
+      L"username",
+      L"p&ssword",
+    },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    SCOPED_TRACE(StringPrintf("Test[%d]: %s", i, tests[i].input_url));
+    GURL url(tests[i].input_url);
+
+    std::wstring username, password;
+    net::GetIdentityFromURL(url, &username, &password);
+
+    EXPECT_EQ(tests[i].expected_username, username);
+    EXPECT_EQ(tests[i].expected_password, password);
+  }
+}
+
+// Try extracting a username which was encoded with UTF8.
+TEST(NetUtilTest, GetIdentityFromURL_UTF8) {
+  GURL url(WideToUTF16(L"http://foo:\x4f60\x597d@blah.com"));
+
+  EXPECT_EQ("foo", url.username());
+  EXPECT_EQ("%E4%BD%A0%E5%A5%BD", url.password());
+
+  // Extract the unescaped identity.
+  std::wstring username, password;
+  net::GetIdentityFromURL(url, &username, &password);
+
+  // Verify that it was decoded as UTF8.
+  EXPECT_EQ(L"foo", username);
+  EXPECT_EQ(L"\x4f60\x597d", password);
 }
 
 // Just a bunch of fake headers.
@@ -745,6 +815,32 @@ TEST(NetUtilTest, IDNToUnicodeSlow) {
   }
 }
 
+TEST(NetUtilTest, RFC1738) {
+  const RFC1738Case rfc1738_cases[] = {
+    {"", false},
+    {"a", true},
+    {"-", false},
+    {".", false},
+    {"a.", false},
+    {"a.a", true},
+    {"9.a", true},
+    {"a.9", false},
+    {"a.a9", true},
+    {"a.9a", false},
+    {"a+9a", false},
+    {"1-.a-b", false},
+    {"1-2.a-b", true},
+    {"a.b.c.d.e", true},
+    {"1.2.3.4.e", true},
+    {"a.b.c.d.5", false},
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(rfc1738_cases); ++i) {
+    EXPECT_EQ(rfc1738_cases[i].expected_output,
+              net::IsCanonicalizedHostRFC1738Compliant(rfc1738_cases[i].host));
+  }
+}
+
 TEST(NetUtilTest, StripWWW) {
   EXPECT_EQ(L"", net::StripWWW(L""));
   EXPECT_EQ(L"", net::StripWWW(L"www."));
@@ -802,7 +898,7 @@ TEST(NetUtilTest, GetSuggestedFilename) {
      "",
      L"",
      L"download"},
-    {"view-cache:",
+    {"non-standard-scheme:",
      "",
      "",
      L"",
@@ -1269,3 +1365,63 @@ TEST(NetUtilTest, FormatUrlParsed) {
   EXPECT_EQ(L"query", formatted.substr(parsed.query.begin, parsed.query.len));
   EXPECT_EQ(L"ref", formatted.substr(parsed.ref.begin, parsed.ref.len));
 }
+
+TEST(NetUtilTest, SimplifyUrlForRequest) {
+  struct {
+    const char* input_url;
+    const char* expected_simplified_url;
+  } tests[] = {
+    {
+      // Reference section should be stripped.
+      "http://www.google.com:78/foobar?query=1#hash",
+      "http://www.google.com:78/foobar?query=1",
+    },
+    {
+      // Reference section can itself contain #.
+      "http://192.168.0.1?query=1#hash#10#11#13#14",
+      "http://192.168.0.1?query=1",
+    },
+    { // Strip username/password.
+      "http://user:pass@google.com",
+      "http://google.com/",
+    },
+    { // Strip both the reference and the username/password.
+      "http://user:pass@google.com:80/sup?yo#X#X",
+      "http://google.com/sup?yo",
+    },
+    { // Try an HTTPS URL -- strip both the reference and the username/password.
+      "https://user:pass@google.com:80/sup?yo#X#X",
+      "https://google.com:80/sup?yo",
+    },
+    { // Try an FTP URL -- strip both the reference and the username/password.
+      "ftp://user:pass@google.com:80/sup?yo#X#X",
+      "ftp://google.com:80/sup?yo",
+    },
+    { // Try an standard URL with unknow scheme.
+      "foobar://user:pass@google.com:80/sup?yo#X#X",
+      "foobar://google.com:80/sup?yo",
+    },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    SCOPED_TRACE(StringPrintf("Test[%d]: %s", i, tests[i].input_url));
+    GURL input_url(GURL(tests[i].input_url));
+    GURL expected_url(GURL(tests[i].expected_simplified_url));
+    EXPECT_EQ(expected_url, net::SimplifyUrlForRequest(input_url));
+  }
+}
+
+TEST(NetUtilTest, SetExplicitlyAllowedPortsTest) {
+  std::wstring invalid[] = { L"1,2,a", L"'1','2'", L"1, 2, 3", L"1 0,11,12" };
+  std::wstring valid[] = { L"", L"1", L"1,2", L"1,2,3", L"10,11,12,13" };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(invalid); ++i) {
+    net::SetExplicitlyAllowedPorts(invalid[i]);
+    EXPECT_EQ(0, static_cast<int>(net::explicitly_allowed_ports.size()));
+  }
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(valid); ++i) {
+    net::SetExplicitlyAllowedPorts(valid[i]);
+    EXPECT_EQ(i, net::explicitly_allowed_ports.size());
+  }
+}
+

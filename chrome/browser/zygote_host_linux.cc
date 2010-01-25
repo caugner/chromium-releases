@@ -46,7 +46,7 @@ static void SaveSUIDUnsafeEnvironmentVariables() {
 }
 
 ZygoteHost::ZygoteHost() {
-  std::wstring chrome_path;
+  FilePath chrome_path;
   CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
   CommandLine cmd_line(chrome_path);
 
@@ -63,6 +63,23 @@ ZygoteHost::ZygoteHost() {
     const std::wstring prefix =
         browser_command_line.GetSwitchValue(switches::kZygoteCmdPrefix);
     cmd_line.PrependWrapper(prefix);
+  }
+  // Append any switches from the browser process that need to be forwarded on
+  // to the zygote/renderers.
+  // Should this list be obtained from browser_render_process_host.cc?
+  if (browser_command_line.HasSwitch(switches::kAllowSandboxDebugging)) {
+    cmd_line.AppendSwitch(switches::kAllowSandboxDebugging);
+  }
+  if (browser_command_line.HasSwitch(switches::kLoggingLevel)) {
+    cmd_line.AppendSwitchWithValue(switches::kLoggingLevel,
+                                   browser_command_line.GetSwitchValue(
+                                       switches::kLoggingLevel));
+  }
+  if (browser_command_line.HasSwitch(switches::kEnableLogging)) {
+    // Append with value to support --enable-logging=stderr.
+    cmd_line.AppendSwitchWithValue(switches::kEnableLogging,
+                                   browser_command_line.GetSwitchValue(
+                                       switches::kEnableLogging));
   }
 
   const char* sandbox_binary = NULL;
@@ -105,6 +122,7 @@ ZygoteHost::ZygoteHost() {
   base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
   CHECK(process != -1) << "Failed to launch zygote process";
 
+  pid_ = process;
   close(fds[1]);
   control_fd_ = fds[0];
 }

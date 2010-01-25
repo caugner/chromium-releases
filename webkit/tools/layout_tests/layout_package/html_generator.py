@@ -76,9 +76,10 @@ class HTMLGenerator(object):
                 <tr>
                   <td style="background-color: #CDECDE;
                     border-bottom: 1px solid black;">
-                    <span class="titlelink">%s</span></td></tr>
+                    <span class="titlelink">%s.&nbsp;&nbsp;%s</span></td></tr>
                 <tr><td>&nbsp;&nbsp;Last modified: <a href="%s">%s</a>
-              """ % (failure.test_path,
+              """ % (test_number,
+                     failure.test_path,
                      failure.GetTestHome(),
                      failure.test_age)
       html += "<div class='detail'>"
@@ -103,11 +104,11 @@ class HTMLGenerator(object):
                   </tr>
                 """
 
-        if failure.text_diff_mismatch or failure.simplified_text_diff_mismatch:
-            html += self._GenerateTextFailureHTML(failure)
+        if failure.text_diff_mismatch:
+          html += self._GenerateTextFailureHTML(failure)
 
         if failure.image_mismatch:
-            html += self._GenerateImageFailureHTML(failure)
+          html += self._GenerateImageFailureHTML(failure)
 
         html += "</table>"
       html += "</div></td></tr></table><br>"
@@ -160,6 +161,10 @@ class HTMLGenerator(object):
 
   def _GenerateTextFailureHTML(self, failure):
     html = ""
+    if not failure.GetTextBaselineLocation():
+      return """<tr><td colspan='5'>This test likely does not have any
+                TEXT baseline for this platform, or one could not
+                be found.</td></tr>"""
     html += """
               <tr>
                 <td>
@@ -187,6 +192,10 @@ class HTMLGenerator(object):
                                                                     anchor_text)
 
   def _GenerateImageFailureHTML(self, failure):
+    if not failure.GetImageBaselineLocation():
+      return """<tr><td colspan='5'>This test likely does not have any
+                IMAGE baseline for this platform, or one could not be found.
+                </td></tr>"""
     html = \
       """
       <tr>
@@ -198,12 +207,9 @@ class HTMLGenerator(object):
     html += self._GenerateImageFailureTD(failure.GetExpectedImageFilename())
     html += self._GenerateImageFailureTD(failure.GetActualImageFilename())
     html += self._GenerateImageFailureTD(failure.GetImageDiffFilename())
-    if failure.IsImageBaselineInChromium():
-      html += """
-                <td><a href="./%s"><img style="width: %s" src="./%s" /></a></td>
-              """ % (failure.image_baseline_upstream_local,
-                     self.image_size,
-                     failure.image_baseline_upstream_local)
+    if (failure.image_baseline_upstream_local and
+        failure.image_baseline_upstream_local != ""):
+      html += self._GenerateImageFailureTD(failure.GetImageUpstreamFilename())
     else:
       html += """
               <td>&nbsp;</td>

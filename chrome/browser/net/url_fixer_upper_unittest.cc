@@ -180,7 +180,7 @@ static bool MakeTempFile(const FilePath& dir,
                          const FilePath& file_name,
                          FilePath* full_path) {
   *full_path = dir.Append(file_name);
-  return file_util::WriteFile(full_path->ToWStringHack(), NULL, 0) == 0;
+  return file_util::WriteFile(*full_path, "", 0) == 0;
 }
 
 // Returns true if the given URL is a file: URL that matches the given file
@@ -231,7 +231,7 @@ struct fixup_case {
   // It would be better if this next case got treated as http, but I don't see
   // a clean way to guess this isn't the new-and-exciting "user" scheme.
   {"user:passwd@www.google.com:8080/", "", "user:passwd@www.google.com:8080/"},
-  //{"file:///c:/foo/bar%20baz.txt", "", "file:///C:/foo/bar%20baz.txt"},
+  // {"file:///c:/foo/bar%20baz.txt", "", "file:///C:/foo/bar%20baz.txt"},
   {"ftp.google.com", "", "ftp://ftp.google.com/"},
   {"    ftp.google.com", "", "ftp://ftp.google.com/"},
   {"FTP.GooGle.com", "", "ftp://FTP.GooGle.com/"},

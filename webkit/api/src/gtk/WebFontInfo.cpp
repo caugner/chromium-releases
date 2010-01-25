@@ -38,10 +38,10 @@
 
 namespace WebKit {
 
-WebString WebFontInfo::familyForChars(const WebUChar* characters, size_t numCharacters)
+WebCString WebFontInfo::familyForChars(const WebUChar* characters, size_t numCharacters)
 {
     FcCharSet* cset = FcCharSetCreate();
-    for (int i = 0; i < numCharacters; ++i) {
+    for (size_t i = 0; i < numCharacters; ++i) {
         if (U16_IS_SURROGATE(characters[i])
          && U16_IS_SURROGATE_LEAD(characters[i])
          && i != numCharacters - 1
@@ -71,7 +71,7 @@ WebString WebFontInfo::familyForChars(const WebUChar* characters, size_t numChar
     FcCharSetDestroy(cset);
 
     if (!fontSet)
-        return WebString();
+        return WebCString();
 
     // Older versions of fontconfig have a bug where they cannot select
     // only scalable fonts so we have to manually filter the results.
@@ -92,17 +92,17 @@ WebString WebFontInfo::familyForChars(const WebUChar* characters, size_t numChar
             continue;
 
         FcChar8* family;
-        WebString result;
+        WebCString result;
         if (FcPatternGetString(current, FC_FAMILY, 0, &family) == FcResultMatch) {
             const char* charFamily = reinterpret_cast<char*>(family);
-            result = WebString::fromUTF8(charFamily, strlen(charFamily));
+            result = WebCString(charFamily, strlen(charFamily));
         }
         FcFontSetDestroy(fontSet);
         return result;
     }
 
     FcFontSetDestroy(fontSet);
-    return WebString();
+    return WebCString();
 }
 
 } // namespace WebKit

@@ -4,6 +4,7 @@
 
 #include "base/perftimer.h"
 #include "net/base/mock_host_resolver.h"
+#include "net/proxy/proxy_resolver_js_bindings.h"
 #include "net/proxy/proxy_resolver_v8.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -92,11 +93,12 @@ class PacPerfSuiteRunner {
   void RunTest(const std::string& script_name,
                const PacQuery* queries,
                int queries_len) {
-    GURL pac_url;
-
-    if (resolver_->does_fetch()) {
+    if (!resolver_->expects_pac_bytes()) {
       InitHttpServer();
-      pac_url = server_->TestServerPage(std::string("files/") + script_name);
+      GURL pac_url =
+          server_->TestServerPage(std::string("files/") + script_name);
+      int rv = resolver_->SetPacScriptByUrl(pac_url, NULL);
+      EXPECT_EQ(net::OK, rv);
     } else {
       LoadPacScriptIntoResolver(script_name);
     }
@@ -107,7 +109,7 @@ class PacPerfSuiteRunner {
     {
       net::ProxyInfo proxy_info;
       int result = resolver_->GetProxyForURL(
-          GURL("http://www.warmup.com"), pac_url, &proxy_info);
+          GURL("http://www.warmup.com"), &proxy_info, NULL, NULL, NULL);
       ASSERT_EQ(net::OK, result);
     }
 
@@ -122,8 +124,7 @@ class PacPerfSuiteRunner {
       // Resolve.
       net::ProxyInfo proxy_info;
       int result = resolver_->GetProxyForURL(GURL(query.query_url),
-                                             pac_url,
-                                             &proxy_info);
+                                             &proxy_info, NULL, NULL, NULL);
 
       // Check that the result was correct. Note that ToPacString() and
       // ASSERT_EQ() are fast, so they won't skew the results.
@@ -137,7 +138,7 @@ class PacPerfSuiteRunner {
 
   // Lazily startup an HTTP server (to serve the PAC script).
   void InitHttpServer() {
-    DCHECK(resolver_->does_fetch());
+    DCHECK(!resolver_->expects_pac_bytes());
     if (!server_) {
       server_ = HTTPTestServer::CreateServer(
           L"net/data/proxy_resolver_perftest", NULL);
@@ -163,7 +164,8 @@ class PacPerfSuiteRunner {
     ASSERT_TRUE(ok);
 
     // Load the PAC script into the ProxyResolver.
-    resolver_->SetPacScript(file_contents);
+    int rv = resolver_->SetPacScriptByData(file_contents, NULL);
+    EXPECT_EQ(net::OK, rv);
   }
 
   net::ProxyResolver* resolver_;
@@ -186,8 +188,8 @@ TEST(ProxyResolverPerfTest, ProxyResolverMac) {
 #endif
 
 TEST(ProxyResolverPerfTest, ProxyResolverV8) {
-  net::ProxyResolverV8::JSBindings* js_bindings =
-      net::ProxyResolverV8::CreateDefaultBindings(
+  net::ProxyResolverJSBindings* js_bindings =
+      net::ProxyResolverJSBindings::CreateDefault(
           new net::MockHostResolver, NULL);
 
   net::ProxyResolverV8 resolver(js_bindings);

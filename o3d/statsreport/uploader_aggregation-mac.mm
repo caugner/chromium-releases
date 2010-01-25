@@ -94,6 +94,7 @@ static bool ReportMetrics(const char* extra_url_data,
         data.sum = [[item objectAtIndex:1] longLongValue];
         data.minimum = [[item objectAtIndex:2] longLongValue];
         data.maximum = [[item objectAtIndex:3] longLongValue];
+        data.align = 0;  // Pleases the compiler.
         current = new TimingMetric(short_name_c_str, data);
         }
         break;
@@ -112,15 +113,10 @@ static bool ReportMetrics(const char* extra_url_data,
   DLOG(INFO) << "formatter.output() = " << formatter.output();
   return stats_uploader->UploadMetrics(extra_url_data,
                                        user_agent,
-                                       formatter.output());
+                                       formatter.output().c_str());
 }
 
 void ResetPersistentMetrics() {
-  NSError *error = nil;
-  /*
-  [[NSFileManager defaultManager] removeItemAtPath:O3DStatsPath()
-                                             error:&error];
-                                             */
   [[NSFileManager defaultManager] removeFileAtPath:O3DStatsPath()
                                            handler:nil];
 }

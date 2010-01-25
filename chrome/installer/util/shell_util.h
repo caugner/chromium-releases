@@ -10,6 +10,7 @@
 #define CHROME_INSTALLER_UTIL_SHELL_UTIL_H_
 
 #include <windows.h>
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -70,15 +71,9 @@ class ShellUtil {
   // Registry value name that is needed for ChromeHTML ProgId
   static const wchar_t* kRegUrlProtocol;
 
-  // Name that we give to Chrome extension file association handler ProgId.
-  static const wchar_t* kChromeExtProgId;
-
-  // Description of Chrome file/URL association handler ProgId.
-  static const wchar_t* kChromeExtProgIdDesc;
-
   // Checks if we need Admin rights for registry cleanup by checking if any
   // entry exists in HKLM.
-  static bool AdminNeededForRegistryCleanup();
+  static bool AdminNeededForRegistryCleanup(const std::wstring& suffix);
 
   // Create Chrome shortcut on Desktop
   // If shell_change is CURRENT_USER, the shortcut is created in the
@@ -117,11 +112,6 @@ class ShellUtil {
   // chrome_exe: the full path to chrome.exe
   static std::wstring GetChromeShellOpenCmd(const std::wstring& chrome_exe);
 
-  // This method returns the command to open .crx files using chrome in order
-  // to install them as extensions. Similar to above method.
-  static std::wstring GetChromeInstallExtensionCmd(
-      const std::wstring& chrome_exe);
-
   // Returns the localized name of Chrome shortcut. If |alternate| is true
   // it returns a second localized text that is better suited for certain
   // scenarios.
@@ -139,11 +129,18 @@ class ShellUtil {
   // User's profile only affects any new user profiles (not existing ones).
   static bool GetQuickLaunchPath(bool system_level, std::wstring* path);
 
+  // Gets a mapping of all registered browser (on local machine) names and
+  // thier reinstall command (which usually sets browser as default).
+  static void GetRegisteredBrowsers(std::map<std::wstring,
+                                    std::wstring>* browsers);
+
   // This function gets a suffix (user's login name) that can be added
   // to Chromium default browser entry in the registry to create a unique name
   // if there are multiple users on the machine, each with their own copy of
   // Chromium that they want to set as default browser.
-  // This suffix value is assigned to |entry|.
+  // This suffix value is assigned to |entry|. The function also checks for
+  // existence of Default Browser registry key with this suffix and
+  // returns true if it exists. In all other cases it returns false.
   static bool GetUserSpecificDefaultBrowserSuffix(std::wstring* entry);
 
   // Make Chrome default browser.

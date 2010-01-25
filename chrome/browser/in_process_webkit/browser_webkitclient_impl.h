@@ -13,21 +13,28 @@ class BrowserWebKitClientImpl : public webkit_glue::WebKitClientImpl {
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
+  virtual bool sandboxEnabled();
   virtual unsigned long long visitedLinkHash(const char* canonicalURL,
                                              size_t length);
   virtual bool isLinkVisited(unsigned long long linkHash);
+  virtual WebKit::WebMessagePortChannel* createMessagePortChannel();
   virtual void setCookies(const WebKit::WebURL& url,
                           const WebKit::WebURL& policy_url,
                           const WebKit::WebString& value);
   virtual WebKit::WebString cookies(const WebKit::WebURL& url,
                                     const WebKit::WebURL& policy_url);
   virtual void prefetchHostName(const WebKit::WebString&);
-  virtual bool getFileSize(const WebKit::WebString& path, long long& result);
   virtual WebKit::WebString defaultLocale();
   virtual WebKit::WebThemeEngine* themeEngine();
   virtual WebKit::WebURLLoader* createURLLoader();
   virtual void getPluginList(bool refresh, WebKit::WebPluginListBuilder*);
   virtual WebKit::WebData loadResource(const char* name);
+  virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
+      const WebKit::WebString& path);
+  virtual WebKit::WebStorageNamespace* createSessionStorageNamespace();
+  virtual void dispatchStorageEvent(const WebKit::WebString& key,
+      const WebKit::WebString& oldValue, const WebKit::WebString& newValue,
+      const WebKit::WebString& origin, bool isLocalStorage);
 };
 
 #endif  // CHROME_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_CLIENT_IMPL_H_

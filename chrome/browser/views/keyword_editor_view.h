@@ -56,9 +56,10 @@ class KeywordEditorView : public views::View,
   // Overriden to invoke Layout.
   virtual gfx::Size GetPreferredSize();
 
-  // DialogDelegate methods:
+  // views::DialogDelegate methods:
   virtual bool CanResize() const;
   virtual std::wstring GetWindowTitle() const;
+  virtual std::wstring GetWindowName() const;
   virtual int GetDialogButtons() const;
   virtual bool Accept();
   virtual bool Cancel();
@@ -76,7 +77,7 @@ class KeywordEditorView : public views::View,
   virtual void OnDoubleClick();
 
   // Button::ButtonListener method.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // TemplateURLModelObserver notification.
   virtual void OnTemplateURLModelChanged();

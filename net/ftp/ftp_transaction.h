@@ -11,8 +11,9 @@
 
 namespace net {
 
-class FtpRequestInfo;
 class FtpResponseInfo;
+class FtpRequestInfo;
+class LoadLog;
 
 // Represents a single FTP transaction.
 class FtpTransaction {
@@ -34,8 +35,10 @@ class FtpTransaction {
   //
   // NOTE: The transaction is not responsible for deleting the callback object.
   //
+  // Profiling information for the request is saved to |load_log| if non-NULL.
   virtual int Start(const FtpRequestInfo* request_info,
-                    CompletionCallback* callback) = 0;
+                    CompletionCallback* callback,
+                    LoadLog* load_log) = 0;
 
   // Restarts the FTP transaction with authentication credentials.
   virtual int RestartWithAuth(const std::wstring& username,

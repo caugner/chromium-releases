@@ -24,7 +24,8 @@ BrowserBubble::BrowserBubble(views::View* view, views::Widget* frame,
 
 BrowserBubble::~BrowserBubble() {
   DCHECK(!attached_);
-  popup_->CloseNow();
+  popup_->Close();
+
   // Don't call DetachFromBrowser from here.  It needs to talk to the
   // BrowserView to deregister itself, and if BrowserBubble is owned
   // by a child of BrowserView, then it's possible that this stack frame
@@ -62,11 +63,13 @@ void BrowserBubble::BrowserWindowMoved() {
     delegate_->BubbleBrowserWindowMoved(this);
   else
     Hide();
+  if (visible_)
+    Reposition();
 }
 
-void BrowserBubble::BrowserWindowClosed() {
+void BrowserBubble::BrowserWindowClosing() {
   if (delegate_)
-    delegate_->BubbleBrowserWindowClosed(this);
+    delegate_->BubbleBrowserWindowClosing(this);
   else
     Hide();
 }

@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    'common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'All',
@@ -26,7 +23,7 @@
         '../third_party/bzip2/bzip2.gyp:*',
         '../third_party/codesighs/codesighs.gyp:*',
         '../third_party/ffmpeg/ffmpeg.gyp:*',
-        '../third_party/icu38/icu38.gyp:*',
+        '../third_party/icu/icu.gyp:*',
         '../third_party/libjpeg/libjpeg.gyp:*',
         '../third_party/libpng/libpng.gyp:*',
         '../third_party/libxml/libxml.gyp:*',
@@ -47,6 +44,16 @@
             '../v8/tools/gyp/v8.gyp:*',
           ],
         }],
+        ['chrome_frame_define==1', {
+          'dependencies': [
+            '../chrome_frame/chrome_frame.gyp:*',
+          ],
+        }],
+        ['OS=="mac"', {
+          'dependencies': [
+            '../third_party/ocmock/ocmock.gyp:*',
+          ],
+        }],
         ['OS=="linux"', {
           'dependencies': [
             '../breakpad/breakpad.gyp:*',
@@ -55,6 +62,13 @@
             '../tools/gtk_clipboard_dump/gtk_clipboard_dump.gyp:*',
             '../tools/xdisplaycheck/xdisplaycheck.gyp:*',
             '../courgette/courgette.gyp:*',
+          ],
+          'conditions': [
+            ['branding=="Chrome"', {
+              'dependencies': [
+                '../chrome/installer/installer.gyp:linux_packages',
+              ],
+            }],
           ],
         }],
         ['OS=="win"', {
@@ -70,8 +84,6 @@
             '../third_party/cld/cld.gyp:*',
             '../third_party/tcmalloc/tcmalloc.gyp:*',
             '../tools/memory_watcher/memory_watcher.gyp:*',
-            '../webkit/activex_shim/activex_shim.gyp:*',
-            '../webkit/activex_shim_dll/activex_shim_dll.gyp:*',
           ],
         }, {
           'dependencies': [
@@ -90,19 +102,8 @@
     ['OS=="mac"', {
       'targets': [
         {
-          # Target to build everything needed for layout tests to cut down
-          # on what the layout test bots have to build.
-          'target_name': 'build_for_layout_tests',
-          'type': 'none',
-          'dependencies': [
-            '../chrome/chrome.gyp:image_diff',
-            '../webkit/tools/test_shell/test_shell.gyp:test_shell',
-            '../webkit/tools/test_shell/test_shell.gyp:test_shell_tests',
-          ],
-        },
-        {
           # Target to build everything plus the dmg.  We don't put the dmg
-          # in the All target because developer really don't need it.
+          # in the All target because developers really don't need it.
           'target_name': 'all_and_dmg',
           'type': 'none',
           'dependencies': [
@@ -110,7 +111,128 @@
             '../chrome/chrome.gyp:build_app_dmg',
           ],
         },
-      ],
-    }],
-  ],
+        # These targets are here so the build bots can use them to build
+        # subsets of a full tree for faster cycle times.
+        {
+          'target_name': 'chromium_builder_dbg',
+          'type': 'none',
+          'dependencies': [
+            '../app/app.gyp:app_unittests',
+            '../ipc/ipc.gyp:ipc_tests',
+            '../media/media.gyp:media_unittests',
+            '../printing/printing.gyp:printing_unittests',
+            '../chrome/chrome.gyp:browser_tests',
+            '../chrome/chrome.gyp:ui_tests',
+            '../chrome/chrome.gyp:unit_tests',
+            'temp_gyp/googleurl.gyp:googleurl_unittests',
+          ],
+        },
+        {
+          'target_name': 'chromium_builder_rel',
+          'type': 'none',
+          'dependencies': [
+            '../app/app.gyp:app_unittests',
+            '../chrome/chrome.gyp:browser_tests',
+            '../chrome/chrome.gyp:memory_test',
+            '../chrome/chrome.gyp:page_cycler_tests',
+            '../chrome/chrome.gyp:startup_tests',
+            '../chrome/chrome.gyp:tab_switching_test',
+            '../chrome/chrome.gyp:ui_tests',
+            '../chrome/chrome.gyp:unit_tests',
+            '../chrome/chrome.gyp:url_fetch_test',
+            '../ipc/ipc.gyp:ipc_tests',
+            '../media/media.gyp:media_unittests',
+            '../printing/printing.gyp:printing_unittests',
+            'temp_gyp/googleurl.gyp:googleurl_unittests',
+          ],
+        },
+      ],  # targets
+    }], # OS="mac"
+    ['OS=="win"', {
+      'targets': [
+        # These targets are here so the build bots can use them to build
+        # subsets of a full tree for faster cycle times.
+        {
+          'target_name': 'chromium_builder',
+          'type': 'none',
+          'dependencies': [
+            '../app/app.gyp:app_unittests',
+            '../chrome/chrome.gyp:browser_tests',
+            '../chrome/chrome.gyp:interactive_ui_tests',
+            '../chrome/chrome.gyp:memory_test',
+            '../chrome/chrome.gyp:page_cycler_tests',
+            '../chrome/chrome.gyp:plugin_tests',
+            '../chrome/chrome.gyp:startup_tests',
+            '../chrome/chrome.gyp:sync_unit_tests',
+            '../chrome/chrome.gyp:tab_switching_test',
+            '../chrome/chrome.gyp:ui_tests',
+            '../chrome/chrome.gyp:unit_tests',
+            '../chrome/chrome.gyp:url_fetch_test',
+            '../chrome/installer/installer.gyp:installer_util_unittests',
+            '../chrome/installer/installer.gyp:mini_installer_test',
+            # mini_installer_tests depends on mini_installer. This should be
+            # defined in installer.gyp.
+            '../chrome/installer/mini_installer.gyp:mini_installer',
+            '../courgette/courgette.gyp:courgette_unittests',
+            '../ipc/ipc.gyp:ipc_tests',
+            '../media/media.gyp:media_unittests',
+            '../printing/printing.gyp:printing_unittests',
+            '../webkit/tools/test_shell/test_shell.gyp:npapi_layout_test_plugin',
+            # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
+            # This should:
+            # 1) not be the case. OR.
+            # 2) be expressed in the ui tests dependencies.
+            '../webkit/tools/test_shell/test_shell.gyp:test_shell_common',
+            'temp_gyp/googleurl.gyp:googleurl_unittests',
+          ],
+        },
+        {
+          'target_name': 'chrome_frame_builder',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/installer/installer.gyp:installer_util_unittests',
+            '../chrome/installer/installer.gyp:mini_installer_test',
+            # mini_installer_tests depends on mini_installer. This should be
+            # defined in installer.gyp.
+            '../chrome/installer/mini_installer.gyp:mini_installer',
+            '../courgette/courgette.gyp:courgette_unittests',
+            '../chrome/chrome.gyp:chrome',
+            '../chrome_frame/chrome_frame.gyp:npchrome_tab',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_perftests',
+          ],
+        },
+        {
+          'target_name': 'purify_builder_ui',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/chrome.gyp:ui_tests',
+          ],
+        },
+        {
+          'target_name': 'purify_builder_unit',
+          'type': 'none',
+          'dependencies': [
+            '../chrome/chrome.gyp:unit_tests',
+          ],
+        },
+        {
+          'target_name': 'purify_builder_webkit',
+          'type': 'none',
+          'dependencies': [
+            '../webkit/tools/test_shell/test_shell.gyp:test_shell_tests',
+            '../webkit/tools/test_shell/test_shell.gyp:test_shell',
+          ],
+        },
+      ],  # targets
+    }], # OS="win"
+  ], # conditions
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

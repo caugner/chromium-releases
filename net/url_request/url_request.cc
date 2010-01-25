@@ -4,12 +4,13 @@
 
 #include "net/url_request/url_request.h"
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "base/process_util.h"
 #include "base/singleton.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "net/base/load_flags.h"
+#include "net/base/load_log.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/upload_data.h"
@@ -18,10 +19,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_manager.h"
-
-#ifndef NDEBUG
-URLRequestMetrics url_request_metrics;
-#endif
 
 using base::Time;
 using net::UploadData;
@@ -36,10 +33,102 @@ static URLRequestJobManager* GetJobManager() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// URLRequest::InstanceTracker
+
+const size_t URLRequest::InstanceTracker::kMaxGraveyardSize = 25;
+const size_t URLRequest::InstanceTracker::kMaxGraveyardURLSize = 1000;
+
+URLRequest::InstanceTracker::~InstanceTracker() {
+  base::LeakTracker<URLRequest>::CheckForLeaks();
+
+  // Only check in Debug mode, because this is triggered too often.
+  // See http://crbug.com/21199, http://crbug.com/18372
+  DCHECK_EQ(0u, GetLiveRequests().size());
+}
+
+// static
+URLRequest::InstanceTracker* URLRequest::InstanceTracker::Get() {
+  return Singleton<InstanceTracker>::get();
+}
+
+std::vector<URLRequest*> URLRequest::InstanceTracker::GetLiveRequests() {
+  std::vector<URLRequest*> list;
+  for (base::LinkNode<InstanceTrackerNode>* node = live_instances_.head();
+       node != live_instances_.end();
+       node = node->next()) {
+    URLRequest* url_request = node->value()->url_request();
+    list.push_back(url_request);
+  }
+  return list;
+}
+
+void URLRequest::InstanceTracker::ClearRecentlyDeceased() {
+  next_graveyard_index_ = 0;
+  graveyard_.clear();
+}
+
+const URLRequest::InstanceTracker::RecentRequestInfoList
+URLRequest::InstanceTracker::GetRecentlyDeceased() {
+  RecentRequestInfoList list;
+
+  // Copy the items from |graveyard_| (our circular queue of recently
+  // deceased request infos) into a vector, ordered from oldest to
+  // newest.
+  for (size_t i = 0; i < graveyard_.size(); ++i) {
+    size_t index = (next_graveyard_index_ + i) % graveyard_.size();
+    list.push_back(graveyard_[index]);
+  }
+  return list;
+}
+
+URLRequest::InstanceTracker::InstanceTracker() : next_graveyard_index_(0) {}
+
+void URLRequest::InstanceTracker::Add(InstanceTrackerNode* node) {
+  live_instances_.Append(node);
+}
+
+void URLRequest::InstanceTracker::Remove(InstanceTrackerNode* node) {
+  // Remove from |live_instances_|.
+  node->RemoveFromList();
+
+  // Add into |graveyard_|.
+  InsertIntoGraveyard(ExtractInfo(node->url_request()));
+}
+
+// static
+const URLRequest::InstanceTracker::RecentRequestInfo
+URLRequest::InstanceTracker::ExtractInfo(URLRequest* url_request) {
+  RecentRequestInfo info;
+  info.original_url = url_request->original_url();
+  info.load_log = url_request->load_log();
+
+  // Paranoia check: truncate |info.original_url| if it is really big.
+  const std::string& spec = info.original_url.possibly_invalid_spec();
+  if (spec.size() > kMaxGraveyardURLSize)
+    info.original_url = GURL(spec.substr(0, kMaxGraveyardURLSize));
+  return info;
+}
+
+void URLRequest::InstanceTracker::InsertIntoGraveyard(
+    const RecentRequestInfo& info) {
+  if (graveyard_.size() < kMaxGraveyardSize) {
+    // Still growing to maximum capacity.
+    DCHECK_EQ(next_graveyard_index_, graveyard_.size());
+    graveyard_.push_back(info);
+  } else {
+    // At maximum capacity, overwrite the oldest entry.
+    graveyard_[next_graveyard_index_] = info;
+  }
+
+  next_graveyard_index_ = (next_graveyard_index_ + 1) % kMaxGraveyardSize;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // URLRequest
 
 URLRequest::URLRequest(const GURL& url, Delegate* delegate)
-    : url_(url),
+    : load_log_(new net::LoadLog),
+      url_(url),
       original_url_(url),
       method_("GET"),
       load_flags_(net::LOAD_NORMAL),
@@ -48,10 +137,9 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       enable_profiling_(false),
       redirect_limit_(kMaxRedirects),
       final_upload_progress_(0),
-      priority_(0) {
-  URLREQUEST_COUNT_CTOR();
+      priority_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(instance_tracker_node_(this)) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
-  origin_pid_ = base::GetCurrentProcId();
 
   // Sanity check out environment.
   DCHECK(MessageLoop::current()) <<
@@ -61,8 +149,6 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
 }
 
 URLRequest::~URLRequest() {
-  URLREQUEST_COUNT_DTOR();
-
   Cancel();
 
   if (job_)
@@ -238,13 +324,43 @@ void URLRequest::set_referrer(const std::string& referrer) {
   referrer_ = referrer;
 }
 
+GURL URLRequest::GetSanitizedReferrer() const {
+  GURL ret(referrer());
+
+  // Ensure that we do not send username and password fields in the referrer.
+  if (ret.has_username() || ret.has_password()) {
+    GURL::Replacements referrer_mods;
+    referrer_mods.ClearUsername();
+    referrer_mods.ClearPassword();
+    ret = ret.ReplaceComponents(referrer_mods);
+  }
+
+  return ret;
+}
+
 void URLRequest::Start() {
   StartJob(GetJobManager()->CreateJob(this));
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// URLRequest::InstanceTrackerNode
+
+URLRequest::InstanceTrackerNode::
+InstanceTrackerNode(URLRequest* url_request) : url_request_(url_request) {
+  InstanceTracker::Get()->Add(this);
+}
+
+URLRequest::InstanceTrackerNode::~InstanceTrackerNode() {
+  InstanceTracker::Get()->Remove(this);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 void URLRequest::StartJob(URLRequestJob* job) {
   DCHECK(!is_pending_);
   DCHECK(!job_);
+
+  net::LoadLog::BeginEvent(load_log_, net::LoadLog::TYPE_URL_REQUEST_START);
 
   job_ = job;
   job_->SetExtraRequestHeaders(extra_request_headers_);
@@ -345,6 +461,8 @@ void URLRequest::ReceivedRedirect(const GURL& location, bool* defer_redirect) {
 }
 
 void URLRequest::ResponseStarted() {
+  net::LoadLog::EndEvent(load_log_, net::LoadLog::TYPE_URL_REQUEST_START);
+
   URLRequestJob* job = GetJobManager()->MaybeInterceptResponse(this);
   if (job) {
     RestartWithJob(job);
@@ -355,6 +473,7 @@ void URLRequest::ResponseStarted() {
 
 void URLRequest::FollowDeferredRedirect() {
   DCHECK(job_);
+  DCHECK(status_.is_success());
 
   job_->FollowDeferredRedirect();
 }
@@ -479,22 +598,13 @@ int64 URLRequest::GetExpectedContentSize() const {
   return expected_content_size;
 }
 
-URLRequest::UserData* URLRequest::GetUserData(void* key) const {
+URLRequest::UserData* URLRequest::GetUserData(const void* key) const {
   UserDataMap::const_iterator found = user_data_.find(key);
   if (found != user_data_.end())
     return found->second.get();
   return NULL;
 }
 
-void URLRequest::SetUserData(void* key, UserData* data) {
+void URLRequest::SetUserData(const void* key, UserData* data) {
   user_data_[key] = linked_ptr<UserData>(data);
 }
-
-#ifndef NDEBUG
-
-URLRequestMetrics::~URLRequestMetrics() {
-  DLOG_IF(WARNING, object_count != 0) <<
-    "Leaking " << object_count << " URLRequest object(s)";
-}
-
-#endif

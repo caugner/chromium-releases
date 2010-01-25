@@ -1,13 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_NAVIGATION_CONTROLLER_H_
 #define CHROME_BROWSER_TAB_CONTENTS_NAVIGATION_CONTROLLER_H_
 
-#include <map>
-
 #include "build/build_config.h"
+
+#include <string>
+#include <vector>
 
 #include "base/linked_ptr.h"
 #include "base/string16.h"
@@ -55,10 +56,14 @@ class NavigationController {
     // navigation.
     LoadCommittedDetails()
         : entry(NULL),
+          type(NavigationType::UNKNOWN),
+          previous_entry_index(-1),
           is_auto(false),
           did_replace_entry(false),
           is_in_page(false),
-          is_main_frame(true) {
+          is_main_frame(true),
+          is_content_filtered(false),
+          http_status_code(0) {
     }
 
     // The committed entry. This will be the active entry in the controller.
@@ -136,6 +141,11 @@ class NavigationController {
   // Returns the profile for this controller. It can never be NULL.
   Profile* profile() const {
     return profile_;
+  }
+
+  // Sets the profile for this controller.
+  void set_profile(Profile* profile) {
+    profile_ = profile;
   }
 
   // Initializes this NavigationController with the given saved navigations,
@@ -248,11 +258,6 @@ class NavigationController {
   void LoadURL(const GURL& url, const GURL& referrer,
                PageTransition::Type type);
 
-  // Load the specified URL the next time it becomes active.
-  void LoadURLLazily(const GURL& url, const GURL& referrer,
-                     PageTransition::Type type, const std::wstring& title,
-                     SkBitmap* icon);
-
   // Loads the current page if this NavigationController was restored from
   // history and the current page has not loaded yet.
   void LoadIfNecessary();
@@ -314,7 +319,11 @@ class NavigationController {
   //
   // In the case that nothing has changed, the details structure is undefined
   // and it will return false.
+  //
+  // |extra_invalidate_flags| are an additional set of flags (InvalidateTypes)
+  // added to the flags sent to the delegate's NotifyNavigationStateChanged.
   bool RendererDidNavigate(const ViewHostMsg_FrameNavigate_Params& params,
+                           int extra_invalidate_flags,
                            LoadCommittedDetails* details);
 
   // Notifies us that we just became active. This is used by the TabContents
@@ -345,14 +354,6 @@ class NavigationController {
   void CopyStateFrom(const NavigationController& source);
 
   // Random data ---------------------------------------------------------------
-
-  // Returns true if this NavigationController is is configured to load a URL
-  // lazily. If true, use GetLazyTitle() and GetLazyFavIcon() to discover the
-  // titles and favicons. Since no request was made, this is the only info
-  // we have about this page. This feature is used by web application clusters.
-  bool LoadingURLLazily() const;
-  const string16& GetLazyTitle() const;
-  const SkBitmap& GetLazyFavIcon() const;
 
   // Returns the identifier used by session restore.
   const SessionID& session_id() const { return session_id_; }
@@ -425,7 +426,11 @@ class NavigationController {
 
   // Allows the derived class to issue notifications that a load has been
   // committed. This will fill in the active entry to the details structure.
-  void NotifyNavigationEntryCommitted(LoadCommittedDetails* details);
+  //
+  // |extra_invalidate_flags| are an additional set of flags (InvalidateTypes)
+  // added to the flags sent to the delegate's NotifyNavigationStateChanged.
+  void NotifyNavigationEntryCommitted(LoadCommittedDetails* details,
+                                      int extra_invalidate_flags);
 
   // Sets the max restored page ID this NavigationController has seen, if it
   // was restored from a previous session.
@@ -502,10 +507,6 @@ class NavigationController {
 
   // Whether we need to be reloaded when made active.
   bool needs_reload_;
-
-  // If true, the pending entry is lazy and should be loaded as soon as this
-  // controller becomes active.
-  bool load_pending_entry_when_active_;
 
   // Unique identifier of this controller for session restore. This id is only
   // unique within the current session, and is not guaranteed to be unique

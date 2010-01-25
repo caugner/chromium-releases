@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_BOOKMARK_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_VIEWS_BOOKMARK_BUBBLE_VIEW_H_
 
+#include "app/combobox_model.h"
 #include "base/gfx/rect.h"
 #include "chrome/browser/views/info_bubble.h"
 #include "googleurl/src/gurl.h"
@@ -33,12 +34,12 @@ class BookmarkBubbleView : public views::View,
                            public views::Combobox::Listener,
                            public InfoBubbleDelegate {
  public:
-   static void Show(views::Window* window,
-                    const gfx::Rect& bounds,
-                    InfoBubbleDelegate* delegate,
-                    Profile* profile,
-                    const GURL& url,
-                    bool newly_bookmarked);
+  static void Show(views::Window* window,
+                   const gfx::Rect& bounds,
+                   InfoBubbleDelegate* delegate,
+                   Profile* profile,
+                   const GURL& url,
+                   bool newly_bookmarked);
 
   static bool IsShowing();
 
@@ -56,17 +57,19 @@ class BookmarkBubbleView : public views::View,
   // Override to close on return.
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
 
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
+
  private:
   // Model for the combobox showing the list of folders to choose from. The
   // list always contains the bookmark bar, other node and parent. The list
   // also contains an extra item that shows the text 'Choose another folder...'.
-  class RecentlyUsedFoldersModel : public views::Combobox::Model {
+  class RecentlyUsedFoldersModel : public ComboboxModel {
    public:
     RecentlyUsedFoldersModel(BookmarkModel* bb_model, const BookmarkNode* node);
 
     // Combobox::Model methods. Call through to nodes_.
-    virtual int GetItemCount(views::Combobox* source);
-    virtual std::wstring GetItemAt(views::Combobox* source, int index);
+    virtual int GetItemCount();
+    virtual std::wstring GetItemAt(int index);
 
     // Returns the node at the specified index.
     const BookmarkNode* GetNodeAt(int index);
@@ -102,7 +105,7 @@ class BookmarkBubbleView : public views::View,
   virtual void LinkActivated(views::Link* source, int event_flags);
 
   // ButtonListener method, closes the bubble or opens the edit dialog.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Combobox::Listener method. Changes the parent of the bookmark.
   virtual void ItemChanged(views::Combobox* combobox,
@@ -118,6 +121,9 @@ class BookmarkBubbleView : public views::View,
 
   // Closes the bubble.
   void Close();
+
+  // Handle the message when the user presses a button.
+  void HandleButtonPressed(views::Button* sender);
 
   // Shows the BookmarkEditor.
   void ShowEditor();

@@ -2,18 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(OS_WIN)
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlmisc.h>
-#endif
-
 #include "chrome/browser/tab_contents/web_drag_source.h"
 
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
+
+using WebKit::WebDragOperationNone;
+using WebKit::WebDragOperationCopy;
 
 namespace {
 
@@ -53,8 +50,9 @@ void WebDragSource::OnDragSourceCancel() {
   gfx::Point client;
   gfx::Point screen;
   GetCursorPositions(source_wnd_, &client, &screen);
-  render_view_host_->DragSourceCancelledAt(client.x(), client.y(),
-                                           screen.x(), screen.y());
+  render_view_host_->DragSourceEndedAt(client.x(), client.y(),
+                                       screen.x(), screen.y(),
+                                       WebDragOperationNone);
 }
 
 void WebDragSource::OnDragSourceDrop() {
@@ -65,7 +63,9 @@ void WebDragSource::OnDragSourceDrop() {
   gfx::Point screen;
   GetCursorPositions(source_wnd_, &client, &screen);
   render_view_host_->DragSourceEndedAt(client.x(), client.y(),
-                                       screen.x(), screen.y());
+                                       screen.x(), screen.y(),
+                                       WebDragOperationCopy);
+  // TODO(jpa): This needs to be fixed to send the actual drag operation.
 }
 
 void WebDragSource::OnDragSourceMove() {

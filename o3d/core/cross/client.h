@@ -52,11 +52,8 @@
 #include "core/cross/object_manager.h"
 #include "core/cross/semantic_manager.h"
 #include "core/cross/transformation_context.h"
-#include "core/cross/pack.h"
-#include "core/cross/bitmap.h"
+#include "core/cross/render_node.h"
 #include "core/cross/callback.h"
-#include "core/cross/cursor.h"
-#include "core/cross/draw_list.h"
 #include "core/cross/event.h"
 #include "core/cross/event_callback.h"
 #include "core/cross/event_manager.h"
@@ -65,11 +62,13 @@
 #include "core/cross/tick_event.h"
 #include "core/cross/timer.h"
 #include "core/cross/timingtable.h"
+#include "core/cross/transform.h"
 
 namespace o3d {
 class MessageQueue;
 class Profiler;
 class State;
+class Pack;
 
 // The Client class is the main point of entry to O3D.  It defines methods
 // for creating and deleting packs and internal use only methods for creating
@@ -248,8 +247,16 @@ class Client {
   // This is the function anything hosting the client, like a plugin, should
   // call to render.
   // Parameters:
-  //   None
-  void RenderClient();
+  //   send_callback : whether to make the javascript render callback.
+  //       Generally you want to pass true, but if the render is happening
+  //       in non-windowed mode (eg on a Mac) and is in response to an update
+  //       event rather than a timer, it can be useful to pass false to prevent
+  //       the javascript code triggering another update and causing an infinite
+  //       calback loop. Case in point is the custom camera example, which
+  //       modifies some HTML form text fields on render callback, which on
+  //       Firefox causes a plugin invalidation and round and round we would
+  //       go.
+  void RenderClient(bool send_callback);
 
   // Sets the texture to use when a Texture or Sampler is missing while
   // rendering. If you set it to NULL you'll get an error if you try to render
@@ -388,11 +395,9 @@ class Client {
   // Dumps all profiler state to a string.
   String ProfileToString();
 
-  // Saves a png screenshot of the display buffer.
-  // Returns true on success and false on failure.
-  bool SaveScreen(const String& file_name);
+  // Reutrns a data: URL of the client area in png format.
+  String ToDataURL();
 
-#ifdef OS_WIN
   // This class is intended to be used on the stack, such that the variable gets
   // incremented on scope entry and decremented on scope exit.  It's currently
   // used in WindowProc to determine if we're reentrant or not, but may be
@@ -423,9 +428,13 @@ class Client {
     Client *client_;
     DISALLOW_COPY_AND_ASSIGN(ScopedIncrement);
   };
-#endif
 
  private:
+  // Renders the client.
+  void RenderClientInner(bool present, bool send_callback);
+
+  // Gets a screenshot.
+  String GetScreenshotAsDataURL();
 
   // MessageQueue that allows external code to communicate with the Client.
   scoped_ptr<MessageQueue> message_queue_;
@@ -440,9 +449,6 @@ class Client {
   ServiceDependency<Profiler> profiler_;
   ServiceDependency<Renderer> renderer_;
   ServiceDependency<EvaluationCounter> evaluation_counter_;
-
-  // Currently rendering.
-  bool rendering_;
 
   // RenderTree was called.
   bool render_tree_called_;
@@ -491,9 +497,7 @@ class Client {
   // The id of the client.
   Id id_;
 
-#ifdef OS_WIN
   int calls_;  // Used to check reentrancy along with ScopedIncrement.
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(Client);
 };  // Client

@@ -6,7 +6,6 @@
 // and I'm not really sure what to do about most of them.
 
 #include "config.h"
-#include "webkit/glue/editor_client_impl.h"
 
 #include "Document.h"
 #include "EditCommand.h"
@@ -22,19 +21,24 @@
 #include "PlatformKeyboardEvent.h"
 #include "PlatformString.h"
 #include "RenderObject.h"
-
 #undef LOG
-#include "base/message_loop.h"
-#include "base/string_util.h"
+
+#include "webkit/api/public/WebEditingAction.h"
 #include "webkit/api/public/WebKit.h"
+#include "webkit/api/public/WebNode.h"
+#include "webkit/api/public/WebRange.h"
+#include "webkit/api/public/WebTextAffinity.h"
+#include "webkit/api/public/WebViewClient.h"
+// Can include api/src since eventually editor_client_impl will be there too.
+#include "webkit/api/src/DOMUtilitiesPrivate.h"
 #include "webkit/glue/autofill_form.h"
-#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/editor_client_impl.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webview.h"
 #include "webkit/glue/webview_impl.h"
 
+using WebKit::WebEditingAction;
+using WebKit::WebString;
+using WebKit::WebTextAffinity;
 using webkit_glue::AutofillForm;
 
 // Arbitrary depth limit for the undo stack, to keep it from using
@@ -47,48 +51,20 @@ static const size_t kMaximumUndoStackDepth = 1000;
 // (so to avoid sending long strings through IPC).
 static const size_t kMaximumTextSizeForAutofill = 1000;
 
-namespace {
-
-// Record an editor command from the keyDownEntries[] below.  We ignore the
-// Move* and Insert* commands because they're not that interesting.
-void MaybeRecordCommand(WebViewDelegate* d, const char* command_name) {
-  if (!d)
-    return;
-
-  const char* move_prefix = "Move";
-  const char* insert_prefix = "Insert";
-  const char* delete_prefix = "Delete";
-  // Ignore all the Move*, Insert*, and Delete* commands.
-  if (0 == strncmp(command_name, move_prefix, sizeof(move_prefix)) ||
-      0 == strncmp(command_name, insert_prefix, sizeof(insert_prefix)) ||
-      0 == strncmp(command_name, delete_prefix, sizeof(delete_prefix))) {
-    return;
-  }
-  d->UserMetricsRecordComputedAction(UTF8ToWide(command_name));
-}
-
-}
-
-EditorClientImpl::EditorClientImpl(WebView* web_view)
-    : web_view_(static_cast<WebViewImpl*>(web_view)),
-      use_editor_delegate_(false),
+EditorClientImpl::EditorClientImpl(WebViewImpl* webview)
+    : webview_(webview),
       in_redo_(false),
       backspace_or_delete_pressed_(false),
       spell_check_this_field_status_(SPELLCHECK_AUTOMATIC),
-// Don't complain about using "this" in initializer list.
-MSVC_PUSH_DISABLE_WARNING(4355)
-      autofill_factory_(this) {
-MSVC_POP_WARNING()
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          autofill_timer_(this, &EditorClientImpl::DoAutofill)) {
 }
 
 EditorClientImpl::~EditorClientImpl() {
 }
 
 void EditorClientImpl::pageDestroyed() {
-  // Called by the Page (which owns the editor client) when the page is going
-  // away. This should cause us to delete ourselves, which is stupid. The page
-  // should just delete us when it's going away. Oh well.
-  delete this;
+  // Our lifetime is bound to the WebViewImpl.
 }
 
 bool EditorClientImpl::shouldShowDeleteInterface(WebCore::HTMLElement* elem) {
@@ -96,56 +72,62 @@ bool EditorClientImpl::shouldShowDeleteInterface(WebCore::HTMLElement* elem) {
   // it if in testing mode and the test specifically requests it by using this
   // magic class name.
   return WebKit::layoutTestMode() &&
-         elem->className() == "needsDeletionUI";
+      elem->getAttribute(WebCore::HTMLNames::classAttr) == "needsDeletionUI";
 }
 
 bool EditorClientImpl::smartInsertDeleteEnabled() {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      return d->SmartInsertDeleteEnabled();
-  }
+  if (webview_->client())
+    return webview_->client()->isSmartInsertDeleteEnabled();
   return true;
 }
 
 bool EditorClientImpl::isSelectTrailingWhitespaceEnabled() {
-  if (use_editor_delegate_) {
-  WebViewDelegate* d = web_view_->delegate();
-  if (d)
-    return d->IsSelectTrailingWhitespaceEnabled();
-  }
+  if (webview_->client())
+    return webview_->client()->isSelectTrailingWhitespaceEnabled();
+
+#if defined(OS_WIN)
   return true;
+#else
+  return false;
+#endif
 }
 
 bool EditorClientImpl::ShouldSpellcheckByDefault() {
   // Spellcheck should be enabled for all editable areas (such as textareas,
   // contentEditable regions, and designMode docs), except text inputs.
-  const WebCore::Frame* frame = web_view_->GetFocusedWebCoreFrame();
+  const WebCore::Frame* frame = webview_->GetFocusedWebCoreFrame();
   if (!frame)
     return false;
   const WebCore::Editor* editor = frame->editor();
   if (!editor)
     return false;
+  if (editor->spellCheckingEnabledInFocusedNode())
+    return true;
   const WebCore::Document* document = frame->document();
   if (!document)
     return false;
   const WebCore::Node* node = document->focusedNode();
+  // If |node| is NULL, we default to allowing spellchecking. This is done in
+  // order to mitigate the issue when the user clicks outside the textbox, as a
+  // result of which |node| becomes NULL, resulting in all the spell check
+  // markers being deleted. Also, the Frame will decide not to do spellchecking
+  // if the user can't edit - so returning true here will not cause any problems
+  // to the Frame's behavior.
   if (!node)
-    return false;
+    return true;
   const WebCore::RenderObject* renderer = node->renderer();
   if (!renderer)
     return false;
 
-  return (!renderer->isTextField() && editor->canEdit());
+  return !renderer->isTextField();
 }
 
 bool EditorClientImpl::isContinuousSpellCheckingEnabled() {
   if (spell_check_this_field_status_ == SPELLCHECK_FORCED_OFF)
     return false;
-  else if (spell_check_this_field_status_ == SPELLCHECK_FORCED_ON)
+  if (spell_check_this_field_status_ == SPELLCHECK_FORCED_ON)
     return true;
-  else
-    return ShouldSpellcheckByDefault();
+  return ShouldSpellcheckByDefault();
 }
 
 void EditorClientImpl::toggleContinuousSpellChecking() {
@@ -164,7 +146,7 @@ void EditorClientImpl::toggleGrammarChecking() {
 }
 
 int EditorClientImpl::spellCheckerDocumentTag() {
-  NOTIMPLEMENTED();
+  ASSERT_NOT_REACHED();
   return 0;
 }
 
@@ -173,19 +155,17 @@ bool EditorClientImpl::isEditable() {
 }
 
 bool EditorClientImpl::shouldBeginEditing(WebCore::Range* range) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      return d->ShouldBeginEditing(web_view_, Describe(range));
+  if (webview_->client()) {
+    return webview_->client()->shouldBeginEditing(
+        webkit_glue::RangeToWebRange(range));
   }
   return true;
 }
 
 bool EditorClientImpl::shouldEndEditing(WebCore::Range* range) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      return d->ShouldEndEditing(web_view_, Describe(range));
+  if (webview_->client()) {
+    return webview_->client()->shouldEndEditing(
+        webkit_glue::RangeToWebRange(range));
   }
   return true;
 }
@@ -193,14 +173,11 @@ bool EditorClientImpl::shouldEndEditing(WebCore::Range* range) {
 bool EditorClientImpl::shouldInsertNode(WebCore::Node* node,
                                         WebCore::Range* range,
                                         WebCore::EditorInsertAction action) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d) {
-      return d->ShouldInsertNode(web_view_,
-                                 Describe(node),
-                                 Describe(range),
-                                 Describe(action));
-    }
+  if (webview_->client()) {
+    return webview_->client()->shouldInsertNode(
+        webkit_glue::NodeToWebNode(node),
+        webkit_glue::RangeToWebRange(range),
+        static_cast<WebEditingAction>(action));
   }
   return true;
 }
@@ -208,25 +185,20 @@ bool EditorClientImpl::shouldInsertNode(WebCore::Node* node,
 bool EditorClientImpl::shouldInsertText(const WebCore::String& text,
                                         WebCore::Range* range,
                                         WebCore::EditorInsertAction action) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d) {
-      std::wstring wstr = webkit_glue::StringToStdWString(text);
-      return d->ShouldInsertText(web_view_,
-                                 wstr,
-                                 Describe(range),
-                                 Describe(action));
-    }
+  if (webview_->client()) {
+    return webview_->client()->shouldInsertText(
+        webkit_glue::StringToWebString(text),
+        webkit_glue::RangeToWebRange(range),
+        static_cast<WebEditingAction>(action));
   }
   return true;
 }
 
 
 bool EditorClientImpl::shouldDeleteRange(WebCore::Range* range) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      return d->ShouldDeleteRange(web_view_, Describe(range));
+  if (webview_->client()) {
+    return webview_->client()->shouldDeleteRange(
+        webkit_glue::RangeToWebRange(range));
   }
   return true;
 }
@@ -235,25 +207,23 @@ bool EditorClientImpl::shouldChangeSelectedRange(WebCore::Range* from_range,
                                                  WebCore::Range* to_range,
                                                  WebCore::EAffinity affinity,
                                                  bool still_selecting) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d) {
-      return d->ShouldChangeSelectedRange(web_view_,
-                                          Describe(from_range),
-                                          Describe(to_range),
-                                          Describe(affinity),
-                                          still_selecting);
-    }
+  if (webview_->client()) {
+    return webview_->client()->shouldChangeSelectedRange(
+        webkit_glue::RangeToWebRange(from_range),
+        webkit_glue::RangeToWebRange(to_range),
+        static_cast<WebTextAffinity>(affinity),
+        still_selecting);
   }
   return true;
 }
 
 bool EditorClientImpl::shouldApplyStyle(WebCore::CSSStyleDeclaration* style,
                                         WebCore::Range* range) {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      return d->ShouldApplyStyle(web_view_, Describe(style), Describe(range));
+  if (webview_->client()) {
+    // TODO(darin): Pass a reference to the CSSStyleDeclaration somehow.
+    return webview_->client()->shouldApplyStyle(
+        WebString(),
+        webkit_glue::RangeToWebRange(range));
   }
   return true;
 }
@@ -265,38 +235,26 @@ bool EditorClientImpl::shouldMoveRangeAfterDelete(
 }
 
 void EditorClientImpl::didBeginEditing() {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      d->DidBeginEditing();
-  }
+  if (webview_->client())
+    webview_->client()->didBeginEditing();
 }
 
 void EditorClientImpl::respondToChangedSelection() {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d) {
-      WebCore::Frame* frame = web_view_->GetFocusedWebCoreFrame();
-      if (frame)
-        d->DidChangeSelection(!frame->selection()->isRange());
-    }
+  if (webview_->client()) {
+    WebCore::Frame* frame = webview_->GetFocusedWebCoreFrame();
+    if (frame)
+      webview_->client()->didChangeSelection(!frame->selection()->isRange());
   }
 }
 
 void EditorClientImpl::respondToChangedContents() {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      d->DidChangeContents();
-  }
+  if (webview_->client())
+    webview_->client()->didChangeContents();
 }
 
 void EditorClientImpl::didEndEditing() {
-  if (use_editor_delegate_) {
-    WebViewDelegate* d = web_view_->delegate();
-    if (d)
-      d->DidEndEditing();
-  }
+  if (webview_->client())
+    webview_->client()->didEndEditing();
 }
 
 void EditorClientImpl::didWriteSelectionToPasteboard() {
@@ -308,15 +266,15 @@ void EditorClientImpl::didSetSelectionTypesForPasteboard() {
 void EditorClientImpl::registerCommandForUndo(
     PassRefPtr<WebCore::EditCommand> command) {
   if (undo_stack_.size() == kMaximumUndoStackDepth)
-    undo_stack_.pop_front();  // drop oldest item off the far end
+    undo_stack_.removeFirst();  // drop oldest item off the far end
   if (!in_redo_)
     redo_stack_.clear();
-  undo_stack_.push_back(command);
+  undo_stack_.append(command);
 }
 
 void EditorClientImpl::registerCommandForRedo(
     PassRefPtr<WebCore::EditCommand> command) {
-  redo_stack_.push_back(command);
+  redo_stack_.append(command);
 }
 
 void EditorClientImpl::clearUndoRedoOperations() {
@@ -325,17 +283,18 @@ void EditorClientImpl::clearUndoRedoOperations() {
 }
 
 bool EditorClientImpl::canUndo() const {
-  return !undo_stack_.empty();
+  return !undo_stack_.isEmpty();
 }
 
 bool EditorClientImpl::canRedo() const {
-  return !redo_stack_.empty();
+  return !redo_stack_.isEmpty();
 }
 
 void EditorClientImpl::undo() {
   if (canUndo()) {
-    RefPtr<WebCore::EditCommand> command(undo_stack_.back());
-    undo_stack_.pop_back();
+    EditCommandStack::iterator back = --undo_stack_.end();
+    RefPtr<WebCore::EditCommand> command(*back);
+    undo_stack_.remove(back);
     command->unapply();
     // unapply will call us back to push this command onto the redo stack.
   }
@@ -343,8 +302,9 @@ void EditorClientImpl::undo() {
 
 void EditorClientImpl::redo() {
   if (canRedo()) {
-    RefPtr<WebCore::EditCommand> command(redo_stack_.back());
-    redo_stack_.pop_back();
+    EditCommandStack::iterator back = --redo_stack_.end();
+    RefPtr<WebCore::EditCommand> command(*back);
+    redo_stack_.remove(back);
 
     ASSERT(!in_redo_);
     in_redo_ = true;
@@ -586,7 +546,7 @@ bool EditorClientImpl::handleEditingKeyboardEvent(
   if (!frame)
     return false;
 
-  const char* command_name = interpretKeyEvent(evt);
+  WebCore::String command_name = interpretKeyEvent(evt);
   WebCore::Editor::Command command = frame->editor()->command(command_name);
 
   if (keyEvent->type() == WebCore::PlatformKeyboardEvent::RawKeyDown) {
@@ -595,19 +555,23 @@ bool EditorClientImpl::handleEditingKeyboardEvent(
     // so we leave it upon WebCore to either handle them immediately
     // (e.g. Tab that changes focus) or let a keypress event be generated
     // (e.g. Tab that inserts a Tab character, or Enter).
-    if (command.isTextInsertion() || !command_name)
+    if (command.isTextInsertion() || command_name.isEmpty())
       return false;
     if (command.execute(evt)) {
-      WebViewDelegate* d = web_view_->delegate();
-      MaybeRecordCommand(d, command_name);
+      if (webview_->client()) {
+        webview_->client()->didExecuteCommand(
+            webkit_glue::StringToWebString(command_name));
+      }
       return true;
     }
     return false;
   }
 
   if (command.execute(evt)) {
-    WebViewDelegate* d = web_view_->delegate();
-    MaybeRecordCommand(d, command_name);
+    if (webview_->client()) {
+      webview_->client()->didExecuteCommand(
+          webkit_glue::StringToWebString(command_name));
+    }
     return true;
   }
 
@@ -666,7 +630,10 @@ void EditorClientImpl::handleKeyboardEvent(WebCore::KeyboardEvent* evt) {
     ShowFormAutofillForNode(evt->target()->toNode());
   }
 
-  if (handleEditingKeyboardEvent(evt))
+  // Give the embedder a chance to handle the keyboard event.
+  if ((webview_->client() &&
+       webview_->client()->handleCurrentKeyboardEvent()) ||
+      handleEditingKeyboardEvent(evt))
     evt->setDefaultHandled();
 }
 
@@ -681,30 +648,31 @@ void EditorClientImpl::textFieldDidEndEditing(WebCore::Element* element) {
   // Notification that focus was lost.  Be careful with this, it's also sent
   // when the page is being closed.
 
-  // Cancel any pending DoAutofill calls.
-  autofill_factory_.RevokeAll();
+  // Cancel any pending DoAutofill call.
+  autofill_args_.clear();
+  autofill_timer_.stop();
 
   // Hide any showing popup.
-  web_view_->HideAutoCompletePopup();
+  webview_->HideAutoCompletePopup();
+
+  if (!webview_->client())
+    return;  // The page is getting closed, don't fill the password.
 
   // Notify any password-listener of the focus change.
   WebCore::HTMLInputElement* input_element =
-      webkit_glue::ElementToHTMLInputElement(element);
+      WebKit::elementToHTMLInputElement(element);
   if (!input_element)
     return;
 
   WebFrameImpl* webframe =
       WebFrameImpl::FromFrame(input_element->document()->frame());
-  if (webframe->GetView() && !webframe->GetView()->GetDelegate())
-    return;  // The page is getting closed, don't fill the password.
-
   webkit_glue::PasswordAutocompleteListener* listener =
       webframe->GetPasswordListener(input_element);
   if (!listener)
     return;
 
-  std::wstring value =
-      webkit_glue::StringToStdWString(input_element->value());
+  string16 value =
+      webkit_glue::StringToString16(input_element->value());
   listener->OnBlur(input_element, value);
 }
 
@@ -718,18 +686,19 @@ void EditorClientImpl::textDidChangeInTextField(WebCore::Element* element) {
 
 bool EditorClientImpl::ShowFormAutofillForNode(WebCore::Node* node) {
   WebCore::HTMLInputElement* input_element =
-      webkit_glue::NodeToHTMLInputElement(node);
+      WebKit::nodeToHTMLInputElement(node);
   if (input_element)
     return Autofill(input_element, true, true, false);
   return false;
 }
 
 bool EditorClientImpl::Autofill(WebCore::HTMLInputElement* input_element,
-                                bool form_autofill_only,
+                                bool autofill_form_only,
                                 bool autofill_on_empty_value,
-                                bool requires_caret_at_end) {
-  // Cancel any pending DoAutofill calls.
-  autofill_factory_.RevokeAll();
+                                bool require_caret_at_end) {
+  // Cancel any pending DoAutofill call.
+  autofill_args_.clear();
+  autofill_timer_.stop();
 
   // Let's try to trigger autofill for that field, if applicable.
   if (!input_element->isEnabledFormControl() || !input_element->isTextField() ||
@@ -737,7 +706,7 @@ bool EditorClientImpl::Autofill(WebCore::HTMLInputElement* input_element,
     return false;
   }
 
-  std::wstring name = AutofillForm::GetNameForInputElement(input_element);
+  string16 name = AutofillForm::GetNameForInputElement(input_element);
   if (name.empty())  // If the field has no name, then we won't have values.
     return false;
 
@@ -745,42 +714,38 @@ bool EditorClientImpl::Autofill(WebCore::HTMLInputElement* input_element,
   if (input_element->value().length() > kMaximumTextSizeForAutofill)
     return false;
 
-  if (!requires_caret_at_end) {
-    DoAutofill(input_element, form_autofill_only, autofill_on_empty_value,
-               false, backspace_or_delete_pressed_);
+  autofill_args_ = new AutofillArgs();
+  autofill_args_->input_element = input_element;
+  autofill_args_->autofill_form_only = autofill_form_only;
+  autofill_args_->autofill_on_empty_value = autofill_on_empty_value;
+  autofill_args_->require_caret_at_end = require_caret_at_end;
+  autofill_args_->backspace_or_delete_pressed = backspace_or_delete_pressed_;
+
+  if (!require_caret_at_end) {
+    DoAutofill(NULL);
   } else {
     // We post a task for doing the autofill as the caret position is not set
-    // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
-    // we need it to determine whether or not to trigger autofill.
-    std::wstring value =
-        webkit_glue::StringToStdWString(input_element->value());
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        autofill_factory_.NewRunnableMethod(&EditorClientImpl::DoAutofill,
-                                            input_element,
-                                            form_autofill_only,
-                                            autofill_on_empty_value,
-                                            true,
-                                            backspace_or_delete_pressed_));
+    // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976)
+    // and we need it to determine whether or not to trigger autofill.
+    autofill_timer_.startOneShot(0.0);
   }
   return true;
 }
 
-void EditorClientImpl::DoAutofill(WebCore::HTMLInputElement* input_element,
-                                  bool form_autofill_only,
-                                  bool autofill_on_empty_value,
-                                  bool requires_caret_at_end,
-                                  bool backspace) {
-  std::wstring value = webkit_glue::StringToStdWString(input_element->value());
+void EditorClientImpl::DoAutofill(WebCore::Timer<EditorClientImpl>* timer) {
+  OwnPtr<AutofillArgs> args(autofill_args_.release());
+  WebCore::HTMLInputElement* input_element = args->input_element.get();
+
+  string16 value = webkit_glue::StringToString16(input_element->value());
 
   // Enforce autofill_on_empty_value and caret_at_end.
-  bool is_caret_at_end = requires_caret_at_end ?
-        input_element->selectionStart() == input_element->selectionEnd() &&
-        input_element->selectionEnd() == static_cast<int>(value.length()) :
-        true;  // When |requires_caret_at_end| is false, just pretend we are at
-               // the end.
-  if ((!autofill_on_empty_value && value.empty()) || !is_caret_at_end) {
-    web_view_->HideAutoCompletePopup();
+  bool is_caret_at_end = args->require_caret_at_end ?
+      input_element->selectionStart() == input_element->selectionEnd() &&
+      input_element->selectionEnd() == static_cast<int>(value.length()) :
+      true;  // When |require_caret_at_end| is false, just pretend we are at
+             // the end.
+  if ((!args->autofill_on_empty_value && value.empty()) || !is_caret_at_end) {
+    webview_->HideAutoCompletePopup();
     return;
   }
 
@@ -792,18 +757,27 @@ void EditorClientImpl::DoAutofill(WebCore::HTMLInputElement* input_element,
   webkit_glue::PasswordAutocompleteListener* listener =
       webframe->GetPasswordListener(input_element);
   if (listener) {
-    if (form_autofill_only)
+    if (args->autofill_form_only)
       return;
 
-    listener->OnInlineAutocompleteNeeded(input_element, value, backspace, true);
+    listener->OnInlineAutocompleteNeeded(
+        input_element, value, args->backspace_or_delete_pressed, true);
     return;
   }
 
   // Then trigger form autofill.
-  std::wstring name = AutofillForm::GetNameForInputElement(input_element);
-  DCHECK_GT(static_cast<int>(name.length()), 0);
-  web_view_->delegate()->QueryFormFieldAutofill(name, value,
-      reinterpret_cast<int64>(input_element));
+  string16 name = AutofillForm::GetNameForInputElement(input_element);
+  ASSERT(static_cast<int>(name.length()) > 0);
+
+  if (webview_->client()) {
+    webview_->client()->queryAutofillSuggestions(
+        webkit_glue::NodeToWebNode(input_element), name, value);
+  }
+}
+
+void EditorClientImpl::CancelPendingAutofill() {
+  autofill_args_.clear();
+  autofill_timer_.stop();
 }
 
 void EditorClientImpl::OnAutofillSuggestionAccepted(
@@ -812,7 +786,7 @@ void EditorClientImpl::OnAutofillSuggestionAccepted(
       WebFrameImpl::FromFrame(text_field->document()->frame());
   webkit_glue::PasswordAutocompleteListener* listener =
       webframe->GetPasswordListener(text_field);
-  std::wstring value = webkit_glue::StringToStdWString(text_field->value());
+  string16 value = webkit_glue::StringToString16(text_field->value());
   // Password listeners need to autocomplete other fields that depend on the
   // input element with autofill suggestions.
   if (listener)
@@ -849,20 +823,18 @@ void EditorClientImpl::learnWord(const WebCore::String&) {
   NOTIMPLEMENTED();
 }
 
-void EditorClientImpl::checkSpellingOfString(const UChar* str, int length,
+void EditorClientImpl::checkSpellingOfString(const UChar* text, int length,
                                              int* misspellingLocation,
                                              int* misspellingLength) {
   // SpellCheckWord will write (0, 0) into the output vars, which is what our
   // caller expects if the word is spelled correctly.
   int spell_location = -1;
   int spell_length = 0;
-  WebViewDelegate* d = web_view_->delegate();
 
-  // Check to see if the provided str is spelled correctly.
-  if (isContinuousSpellCheckingEnabled() && d) {
-    std::wstring word =
-        webkit_glue::StringToStdWString(WebCore::String(str, length));
-    d->SpellCheck(word, &spell_location, &spell_length);
+  // Check to see if the provided text is spelled correctly.
+  if (isContinuousSpellCheckingEnabled() && webview_->client()) {
+    webview_->client()->spellCheck(
+        WebString(text, length), spell_location, spell_length);
   } else {
     spell_location = 0;
     spell_length = 0;
@@ -878,21 +850,18 @@ void EditorClientImpl::checkSpellingOfString(const UChar* str, int length,
 
 WebCore::String EditorClientImpl::getAutoCorrectSuggestionForMisspelledWord(
     const WebCore::String& misspelledWord) {
-  WebViewDelegate* d = web_view_->delegate();
-  if (!(isContinuousSpellCheckingEnabled() && d))
+  if (!(isContinuousSpellCheckingEnabled() && webview_->client()))
     return WebCore::String();
-
-  std::wstring word = webkit_glue::StringToStdWString(misspelledWord);
 
   // Do not autocorrect words with capital letters in it except the
   // first letter. This will remove cases changing "IMB" to "IBM".
-  for (size_t i = 1; i < word.length(); i++) {
-    if (u_isupper(static_cast<UChar32>(word[i])))
+  for (size_t i = 1; i < misspelledWord.length(); i++) {
+    if (u_isupper(static_cast<UChar32>(misspelledWord[i])))
       return WebCore::String();
   }
 
-  std::wstring autocorrect_word = d->GetAutoCorrectWord(word);
-  return webkit_glue::StdWStringToString(autocorrect_word);
+  return webkit_glue::WebStringToString(webview_->client()->autoCorrectWord(
+      webkit_glue::StringToWebString(misspelledWord)));
 }
 
 void EditorClientImpl::checkGrammarOfString(const UChar*, int length,
@@ -911,15 +880,22 @@ void EditorClientImpl::updateSpellingUIWithGrammarString(const WebCore::String&,
   NOTIMPLEMENTED();
 }
 
-void EditorClientImpl::updateSpellingUIWithMisspelledWord(const WebCore::String&) {
-  NOTIMPLEMENTED();
+void EditorClientImpl::updateSpellingUIWithMisspelledWord(
+    const WebCore::String& misspelled_word) {
+  if (webview_->client()) {
+    webview_->client()->updateSpellingUIWithMisspelledWord(
+        webkit_glue::StringToWebString(misspelled_word));
+  }
 }
 
 void EditorClientImpl::showSpellingUI(bool show) {
-  NOTIMPLEMENTED();
+  if (webview_->client())
+    webview_->client()->showSpellingUI(show);
 }
 
 bool EditorClientImpl::spellingUIIsShowing() {
+  if (webview_->client())
+    return webview_->client()->isShowingSpellingUI();
   return false;
 }
 
@@ -929,91 +905,6 @@ void EditorClientImpl::getGuessesForWord(const WebCore::String&,
 }
 
 void EditorClientImpl::setInputMethodState(bool enabled) {
-  WebViewDelegate* d = web_view_->delegate();
-  if (d) {
-    d->SetInputMethodState(enabled);
-  }
-}
-
-
-std::wstring EditorClientImpl::DescribeOrError(int number,
-                                               WebCore::ExceptionCode ec) {
-  if (ec)
-    return L"ERROR";
-
-  return IntToWString(number);
-}
-
-std::wstring EditorClientImpl::DescribeOrError(WebCore::Node* node,
-                                               WebCore::ExceptionCode ec) {
-  if (ec)
-    return L"ERROR";
-
-  return Describe(node);
-}
-
-// These Describe() functions match the output expected by the layout tests.
-std::wstring EditorClientImpl::Describe(WebCore::Range* range) {
-  if (range) {
-    WebCore::ExceptionCode exception = 0;
-    std::wstring str = L"range from ";
-    int offset = range->startOffset(exception);
-    str.append(DescribeOrError(offset, exception));
-    str.append(L" of ");
-    WebCore::Node* container = range->startContainer(exception);
-    str.append(DescribeOrError(container, exception));
-    str.append(L" to ");
-    offset = range->endOffset(exception);
-    str.append(DescribeOrError(offset, exception));
-    str.append(L" of ");
-    container = range->endContainer(exception);
-    str.append(DescribeOrError(container, exception));
-    return str;
-  }
-  return L"(null)";
-}
-
-// See comment for Describe(), above.
-std::wstring EditorClientImpl::Describe(WebCore::Node* node) {
-  if (node) {
-    std::wstring str = webkit_glue::StringToStdWString(node->nodeName());
-    WebCore::Node* parent = node->parentNode();
-    if (parent) {
-      str.append(L" > ");
-      str.append(Describe(parent));
-    }
-    return str;
-  }
-  return L"(null)";
-}
-
-// See comment for Describe(), above.
-std::wstring EditorClientImpl::Describe(WebCore::EditorInsertAction action) {
-  switch (action) {
-    case WebCore::EditorInsertActionTyped:
-      return L"WebViewInsertActionTyped";
-    case WebCore::EditorInsertActionPasted:
-      return L"WebViewInsertActionPasted";
-    case WebCore::EditorInsertActionDropped:
-      return L"WebViewInsertActionDropped";
-  }
-  return L"(UNKNOWN ACTION)";
-}
-
-// See comment for Describe(), above.
-std::wstring EditorClientImpl::Describe(WebCore::EAffinity affinity) {
-  switch (affinity) {
-    case WebCore::UPSTREAM:
-      return L"NSSelectionAffinityUpstream";
-    case WebCore::DOWNSTREAM:
-      return L"NSSelectionAffinityDownstream";
-  }
-  return L"(UNKNOWN AFFINITY)";
-}
-
-std::wstring EditorClientImpl::Describe(WebCore::CSSStyleDeclaration* style) {
-  // TODO(pamg): Implement me.  It's not clear what WebKit produces for this
-  // (their [style description] method), and none of the layout tests provide
-  // an example.  But because none of them use it, it's not yet important.
-  return std::wstring();
+  if (webview_->client())
+    webview_->client()->setInputMethodEnabled(enabled);
 }

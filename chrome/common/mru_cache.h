@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,6 +137,15 @@ class MRUCacheBase {
       Erase(rbegin());
   }
 
+  // Deletes everything from the cache.
+  void Clear() {
+    for (typename PayloadList::iterator i(ordering_.begin());
+         i != ordering_.end(); ++i)
+      deletor_(i->second);
+    index_.clear();
+    ordering_.clear();
+  }
+
   // Returns the number of elements in the cache.
   size_type size() const {
     // We don't use ordering_.size() for the return value because
@@ -171,7 +180,7 @@ class MRUCacheBase {
 
   DeletorType deletor_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(MRUCacheBase);
+  DISALLOW_COPY_AND_ASSIGN(MRUCacheBase);
 };
 
 // MRUCache --------------------------------------------------------------------

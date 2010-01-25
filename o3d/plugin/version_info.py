@@ -20,7 +20,9 @@ import os.path
 import re
 import sys
 
-gflags_dir = os.path.join('..', '..', 'third_party', 'gflags', 'python')
+script_dir = os.path.join(os.path.dirname(sys.argv[0]))
+gflags_dir = os.path.normpath(
+  os.path.join(script_dir, '..', 'third_party', 'gflags', 'python'))
 sys.path.append(gflags_dir)
 
 import gflags
@@ -41,6 +43,8 @@ gflags.DEFINE_boolean('mimetype', False,
 gflags.DEFINE_boolean('version', False,
                       'Print out the plugin version and exit.')
 
+gflags.DEFINE_boolean('commaversion', False,
+                      'Print out the plugin version with commas and exit.')
 
 def GetDotVersion(version):
   return '%d.%d.%d.%d' % version
@@ -51,7 +55,7 @@ def GetCommaVersion(version):
 def DoReplace(in_filename, out_filename, replacements):
   '''Replace the version number in the given filename with the replacements.'''
   if not os.path.exists(in_filename):
-    raise Exception(r'''Input template file %s doesn't exist.''' % file)
+    raise Exception(r'''Input template file %s doesn't exist.''' % in_filename)
   input_file = open(in_filename, 'r')
   input = input_file.read()
   input_file.close()
@@ -76,9 +80,11 @@ def main(argv):
   # Get version string from o3d_version.py
   o3d_version_vars = {}
   if FLAGS.kill_switch:
-    execfile('../installer/win/o3d_kill_version.py', o3d_version_vars)
+    execfile(os.path.join(script_dir, '..', 'installer', 'win',
+                          'o3d_kill_version.py'), o3d_version_vars)
   else:
-    execfile('../installer/win/o3d_version.py', o3d_version_vars)
+    execfile(os.path.join(script_dir, '..', 'installer', 'win',
+                          'o3d_version.py'), o3d_version_vars)
 
   plugin_version = o3d_version_vars['plugin_version']
   sdk_version = o3d_version_vars['sdk_version']
@@ -110,6 +116,10 @@ def main(argv):
 
   if FLAGS.version:
     print '%s' % O3D_PLUGIN_VERSION
+    sys.exit(0)
+
+  if FLAGS.commaversion:
+    print '%s' % O3D_PLUGIN_VERSION_COMMAS
     sys.exit(0)
 
   plugin_replace_strings = [

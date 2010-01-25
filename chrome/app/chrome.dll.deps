@@ -15,6 +15,7 @@ dependents = [
   'OLEAUT32.dll',
   'OLEACC.dll',
   'secur32.dll',
+  't2embed.dll',
 ]
 
 delay_loaded = [
@@ -32,4 +33,6 @@ delay_loaded = [
   'avcodec-52.dll',
   'avformat-52.dll',
   'avutil-50.dll',
+  'pthreads.dll',
+  'IPHLPAPI.dll',
 ]

@@ -5,7 +5,7 @@
 #ifndef VIEWS_CONTROLS_COMBOBOX_NATIVE_COMBOBOX_WRAPPER_H_
 #define VIEWS_CONTROLS_COMBOBOX_NATIVE_COMBOBOX_WRAPPER_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 
 namespace gfx{
 class Size;
@@ -34,7 +34,7 @@ class NativeComboboxWrapper {
   virtual bool IsDropdownOpen() const = 0;
 
   // Returns the preferred size of the combobox.
-  virtual gfx::Size GetPreferredSize() const = 0;
+  virtual gfx::Size GetPreferredSize() = 0;
 
   // Retrieves the views::View that hosts the native control.
   virtual View* GetView() = 0;

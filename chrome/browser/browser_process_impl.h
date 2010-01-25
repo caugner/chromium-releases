@@ -19,6 +19,7 @@
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "ipc/ipc_message.h"
 
 #if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
@@ -32,7 +33,7 @@ class NotificationService;
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
  public:
-  BrowserProcessImpl(const CommandLine& command_line);
+  explicit BrowserProcessImpl(const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
   virtual void EndSession();
@@ -96,6 +97,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return local_state_.get();
   }
 
+#if defined(OS_WIN)
   virtual sandbox::BrokerServices* broker_services() {
     // TODO(abarth): DCHECK(CalledOnValidThread());
     //               See <http://b/1287166>.
@@ -103,6 +105,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
       return NULL;
     return broker_services_;
   }
+#endif  // defined(OS_WIN)
 
   virtual DebuggerWrapper* debugger_wrapper() {
     DCHECK(CalledOnValidThread());
@@ -169,13 +172,6 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return 0 == module_ref_count_;
   }
 
-  virtual views::AcceleratorHandler* accelerator_handler() {
-    DCHECK(CalledOnValidThread());
-    if (!accelerator_handler_.get())
-      CreateAcceleratorHandler();
-    return accelerator_handler_.get();
-  }
-
   virtual printing::PrintJobManager* print_job_manager();
 
   virtual GoogleURLTracker* google_url_tracker() {
@@ -187,20 +183,29 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   virtual const std::string& GetApplicationLocale();
 
-  virtual MemoryModel memory_model() {
-    DCHECK(CalledOnValidThread());
-    return memory_model_;
-  }
-
   virtual base::WaitableEvent* shutdown_event() {
     return shutdown_event_.get();
   }
+
+  virtual void CheckForInspectorFiles();
+
+  virtual bool have_inspector_files() const {
+    return have_inspector_files_;
+  }
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+  virtual void SetIPCLoggingEnabled(bool enable);
+#endif
 
  private:
   void CreateResourceDispatcherHost();
   void CreatePrefService();
   void CreateMetricsService();
+
   void CreateIOThread();
+  void ResetIOThread();
+  static void CleanupOnIOThread();
+
   void CreateFileThread();
   void CreateDBThread();
   void CreateTemplateURLModel();
@@ -211,10 +216,15 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void CreateIconManager();
   void CreateDebuggerWrapper(int port);
   void CreateDevToolsManager();
-  void CreateAcceleratorHandler();
   void CreateGoogleURLTracker();
 
+#if defined(OS_WIN)
   void InitBrokerServices(sandbox::BrokerServices* broker_services);
+#endif  // defined(OS_WIN)
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+  void SetIPCLoggingEnabledForChildProcesses(bool enabled);
+#endif
 
   bool created_resource_dispatcher_host_;
   scoped_ptr<ResourceDispatcherHost> resource_dispatcher_host_;
@@ -241,8 +251,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   bool created_local_state_;
   scoped_ptr<PrefService> local_state_;
 
+#if defined(OS_WIN)
   bool initialized_broker_services_;
   sandbox::BrokerServices* broker_services_;
+#endif  // defined(OS_WIN)
 
   bool created_icon_manager_;
   scoped_ptr<IconManager> icon_manager_;
@@ -257,8 +269,6 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   scoped_ptr<AutomationProviderList> automation_provider_list_;
 
-  scoped_ptr<views::AcceleratorHandler> accelerator_handler_;
-
   scoped_ptr<GoogleURLTracker> google_url_tracker_;
 
   scoped_ptr<NotificationService> main_notification_service_;
@@ -270,8 +280,6 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   std::string locale_;
 
-  MemoryModel memory_model_;
-
   bool checked_for_new_frames_;
   bool using_new_frames_;
 
@@ -281,6 +289,12 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   // An event that notifies when we are shutting-down.
   scoped_ptr<base::WaitableEvent> shutdown_event_;
+
+  // Runs on the file thread and stats the inspector's directory, filling in
+  // have_inspector_files_ with the result.
+  void DoInspectorFilesCheck();
+  // Our best estimate about the existence of the inspector directory.
+  bool have_inspector_files_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

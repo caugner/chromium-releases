@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,31 +11,32 @@ class SkBitmap;
 
 namespace color_utils {
 
-// Represents set of CIE XYZ tristimulus values.
-struct CIE_XYZ {
-  double X;
-  double Y; // luminance
-  double Z;
-};
-
-// Represents a L*a*b* color value
-struct LabColor {
-  int L;
-  int a;
-  int b;
+// Represents an HSL color.
+struct HSL {
+  double h;
+  double s;
+  double l;
 };
 
 // Note: these transformations assume sRGB as the source color space
+void SkColorToHSL(SkColor c, HSL* hsl);
+SkColor HSLToSkColor(const HSL& hsl, SkAlpha alpha);
 
-// Convert between different color spaces
-void SkColorToCIEXYZ(SkColor c, CIE_XYZ* xyz);
-void CIEXYZToLabColor(const CIE_XYZ& xyz, LabColor* lab);
-
-SkColor CIEXYZToSkColor(SkAlpha alpha, const CIE_XYZ& xyz);
-void LabColorToCIEXYZ(const LabColor& lab, CIE_XYZ* xyz);
-
-void SkColorToLabColor(SkColor c, LabColor* lab);
-SkColor LabColorToSkColor(const LabColor& lab, SkAlpha alpha);
+// HSL-Shift an SkColor. The shift values are in the range of 0-1, with the
+// option to specify -1 for 'no change'. The shift values are defined as:
+// hsl_shift[0] (hue): The absolute hue value - 0 and 1 map
+//    to 0 and 360 on the hue color wheel (red).
+// hsl_shift[1] (saturation): A saturation shift, with the
+//    following key values:
+//    0 = remove all color.
+//    0.5 = leave unchanged.
+//    1 = fully saturate the image.
+// hsl_shift[2] (lightness): A lightness shift, with the
+//    following key values:
+//    0 = remove all lightness (make all pixels black).
+//    0.5 = leave unchanged.
+//    1 = full lightness (make all pixels white).
+SkColor HSLShift(SkColor color, const HSL& shift);
 
 // Determine if a given alpha value is nearly completely transparent.
 bool IsColorCloseToTransparent(SkAlpha alpha);
@@ -56,15 +57,18 @@ void BuildLumaHistogram(SkBitmap* bitmap, int histogram[256]);
 // |alpha| == 0) to |foreground| (for |alpha| == 255).
 SkColor AlphaBlend(SkColor foreground, SkColor background, SkAlpha alpha);
 
-// Given two possible foreground colors, return the one that is more readable
-// over |background|.
-SkColor PickMoreReadableColor(SkColor foreground1,
-                              SkColor foreground2,
-                              SkColor background);
+// Given a foreground and background color, try to return a foreground color
+// that is "readable" over the background color by luma-inverting the foreground
+// color and then picking whichever foreground color has higher contrast against
+// the background color.
+//
+// NOTE: This won't do anything but waste time if the supplied foreground color
+// has a luma value close to the midpoint (0.5 in the HSL representation).
+SkColor GetReadableColor(SkColor foreground, SkColor background);
 
 // Gets a Windows system color as a SkColor
 SkColor GetSysSkColor(int which);
 
-} // namespace color_utils
+}  // namespace color_utils
 
-#endif  // #ifndef APP_GFX_COLOR_UTILS_H_
+#endif  // APP_GFX_COLOR_UTILS_H_

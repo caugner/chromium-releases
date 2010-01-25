@@ -43,10 +43,14 @@ typedef void (*MockTransactionHandler)(const net::HttpRequestInfo* request,
 struct MockTransaction {
   const char* url;
   const char* method;
+  // If |request_time| is unspecified, the current time will be used.
+  base::Time request_time;
   const char* request_headers;
   int load_flags;
   const char* status;
   const char* response_headers;
+  // If |response_time| is unspecified, the current time will be used.
+  base::Time response_time;
   const char* data;
   int test_mode;
   MockTransactionHandler handler;
@@ -100,17 +104,19 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
  public:
   explicit TestTransactionConsumer(net::HttpTransactionFactory* factory)
       : state_(IDLE),
-        trans_(factory->CreateTransaction()),
+        trans_(NULL),
         error_(net::OK) {
+    // Disregard the error code.
+    factory->CreateTransaction(&trans_);
     ++quit_counter_;
   }
 
   ~TestTransactionConsumer() {
   }
 
-  void Start(const net::HttpRequestInfo* request) {
+  void Start(const net::HttpRequestInfo* request, net::LoadLog* load_log) {
     state_ = STARTING;
-    int result = trans_->Start(request, this);
+    int result = trans_->Start(request, this, load_log);
     if (result != net::ERR_IO_PENDING)
       DidStart(result);
   }
@@ -200,7 +206,8 @@ class MockNetworkTransaction : public net::HttpTransaction {
   }
 
   virtual int Start(const net::HttpRequestInfo* request,
-                    net::CompletionCallback* callback) {
+                    net::CompletionCallback* callback,
+                    net::LoadLog* load_log) {
     const MockTransaction* t = FindMockTransaction(request->url);
     if (!t)
       return net::ERR_FAILED;
@@ -216,8 +223,15 @@ class MockNetworkTransaction : public net::HttpTransaction {
     std::replace(header_data.begin(), header_data.end(), '\n', '\0');
 
     response_.request_time = base::Time::Now();
+    if (!t->request_time.is_null())
+      response_.request_time = t->request_time;
+
     response_.was_cached = false;
+
     response_.response_time = base::Time::Now();
+    if (!t->response_time.is_null())
+      response_.response_time = t->response_time;
+
     response_.headers = new net::HttpResponseHeaders(header_data);
     response_.ssl_info.cert_status = t->cert_status;
     data_ = resp_data;
@@ -298,12 +312,17 @@ class MockNetworkLayer : public net::HttpTransactionFactory {
   MockNetworkLayer() : transaction_count_(0) {
   }
 
-  virtual net::HttpTransaction* CreateTransaction() {
+  virtual int CreateTransaction(scoped_ptr<net::HttpTransaction>* trans) {
     transaction_count_++;
-    return new MockNetworkTransaction();
+    trans->reset(new MockNetworkTransaction());
+    return net::OK;
   }
 
   virtual net::HttpCache* GetCache() {
+    return NULL;
+  }
+
+  virtual net::HttpNetworkSession* GetSession() {
     return NULL;
   }
 

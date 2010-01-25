@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_TEST_PERF_MEM_USAGE_H__
-#define CHROME_TEST_PERF_MEM_USAGE_H__
+#ifndef CHROME_TEST_PERF_MEM_USAGE_H_
+#define CHROME_TEST_PERF_MEM_USAGE_H_
+
+#include "base/basictypes.h"
 
 // Get memory information for the process with given process ID.
 //
@@ -29,10 +31,10 @@
 // and PeakPagefileUsage (returned by peak_virtual_size), Working Set and
 // Peak working Set.
 bool GetMemoryInfo(uint32 process_id,
-                   size_t *peak_virtual_size,
-                   size_t *current_virtual_size,
-                   size_t *peak_working_set_size,
-                   size_t *current_working_set_size);
+                   size_t* peak_virtual_size,
+                   size_t* current_virtual_size,
+                   size_t* peak_working_set_size,
+                   size_t* current_working_set_size);
 
 // Get the number of bytes currently committed by the system.
 // Returns -1 on failure.
@@ -40,4 +42,5 @@ size_t GetSystemCommitCharge();
 
 // Get and print memory usage information for running chrome processes.
 void PrintChromeMemoryUsageInfo();
-#endif  // CHROME_TEST_PERF_MEM_USAGE_H__
+
+#endif  // CHROME_TEST_PERF_MEM_USAGE_H_

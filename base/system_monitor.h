@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #endif  // !OS_WIN
 
 #include "base/observer_list_threadsafe.h"
-#include "base/singleton.h"
 #if defined(ENABLE_BATTERY_MONITORING)
 #include "base/timer.h"
 #endif  // defined(ENABLE_BATTERY_MONITORING)
@@ -28,12 +27,8 @@ namespace base {
 // TODO(mbelshe):  Add support beyond just power management.
 class SystemMonitor {
  public:
-  // Access to the Singleton
-  static SystemMonitor* Get() {
-    // Uses the LeakySingletonTrait because cleanup is optional.
-    return
-        Singleton<SystemMonitor, LeakySingletonTraits<SystemMonitor> >::get();
-  }
+  // Retrieves the Singleton.
+  static SystemMonitor* Get();
 
   // Start the System Monitor within a process.  This method
   // is provided so that the battery check can be deferred.
@@ -49,7 +44,7 @@ class SystemMonitor {
 
   // Is the computer currently on battery power.
   // Can be called on any thread.
-  bool BatteryPower() {
+  bool BatteryPower() const {
     // Using a lock here is not necessary for just a bool.
     return battery_in_use_;
   }
@@ -67,16 +62,16 @@ class SystemMonitor {
   // lengthy operations are needed, the observer should take care to invoke
   // the operation on an appropriate thread.
   class PowerObserver {
-  public:
+   public:
     // Notification of a change in power status of the computer, such
     // as from switching between battery and A/C power.
-    virtual void OnPowerStateChange(SystemMonitor*) = 0;
+    virtual void OnPowerStateChange(bool on_battery_power) {}
 
     // Notification that the system is suspending.
-    virtual void OnSuspend(SystemMonitor*) = 0;
+    virtual void OnSuspend() {}
 
     // Notification that the system is resuming.
-    virtual void OnResume(SystemMonitor*) = 0;
+    virtual void OnResume() {}
   };
 
   // Add a new observer.

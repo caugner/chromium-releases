@@ -37,7 +37,7 @@
 #define O3D_PLUGIN_NPAPI_HOST_CONTROL_WIN_NP_PLUGIN_PROXY_H_
 
 #include <vector>
-#include "third_party/npapi/files/include/npupp.h"
+#include "third_party/npapi/include/npupp.h"
 
 class NPBrowserProxy;
 struct INPObjectProxy;
@@ -68,6 +68,11 @@ class NPPluginProxy {
             const NPWindow& window,
             const std::vector<CStringA>& argument_names,
             const std::vector<CStringA>& argument_values);
+
+  // Sets the target window of the npapi plugin. This may be called
+  // repeatedly during its lifetime, in particular to set the plugin's
+  // size.
+  bool SetWindow(const NPWindow& window);
 
   // Frees all resources allocated in Init, and blocks on all pending stream
   // operations.

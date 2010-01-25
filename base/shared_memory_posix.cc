@@ -13,6 +13,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_thread.h"
+#include "base/safe_strerror_posix.h"
 #include "base/string_util.h"
 
 namespace base {
@@ -96,11 +97,10 @@ bool SharedMemory::Create(const std::wstring &name, bool read_only,
 // These files need to be deleted explicitly.
 // In practice this call is only needed for unit tests.
 bool SharedMemory::Delete(const std::wstring& name) {
-  std::wstring mem_filename;
-  if (FilenameForMemoryName(name, &mem_filename) == false)
+  FilePath path;
+  if (!FilePathForMemoryName(name, &path))
     return false;
 
-  FilePath path(WideToUTF8(mem_filename));
   if (file_util::PathExists(path)) {
     return file_util::Delete(path, false);
   }
@@ -121,10 +121,8 @@ bool SharedMemory::Open(const std::wstring &name, bool read_only) {
 // For the given shmem named |memname|, return a filename to mmap()
 // (and possibly create).  Modifies |filename|.  Return false on
 // error, or true of we are happy.
-bool SharedMemory::FilenameForMemoryName(const std::wstring &memname,
-                                         std::wstring *filename) {
-  std::wstring mem_filename;
-
+bool SharedMemory::FilePathForMemoryName(const std::wstring& memname,
+                                         FilePath* path) {
   // mem_name will be used for a filename; make sure it doesn't
   // contain anything which will confuse us.
   DCHECK(memname.find_first_of(L"/") == std::string::npos);
@@ -134,9 +132,8 @@ bool SharedMemory::FilenameForMemoryName(const std::wstring &memname,
   if (file_util::GetShmemTempDir(&temp_dir) == false)
     return false;
 
-  mem_filename = UTF8ToWide(temp_dir.value());
-  file_util::AppendToPath(&mem_filename, L"com.google.chrome.shmem." + memname);
-  *filename = mem_filename;
+  *path = temp_dir.AppendASCII("com.google.chrome.shmem." +
+                               WideToASCII(memname));
   return true;
 }
 
@@ -145,7 +142,7 @@ bool SharedMemory::FilenameForMemoryName(const std::wstring &memname,
 // TODO(jrg): there is no way to "clean up" all unused named shmem if
 // we restart from a crash.  (That isn't a new problem, but it is a problem.)
 // In case we want to delete it later, it may be useful to save the value
-// of mem_filename after FilenameForMemoryName().
+// of mem_filename after FilePathForMemoryName().
 bool SharedMemory::CreateOrOpen(const std::wstring &name,
                                 int posix_flags, size_t size) {
   DCHECK(mapped_file_ == -1);
@@ -153,11 +150,13 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
   file_util::ScopedFILE file_closer;
   FILE *fp;
 
+  FilePath path;
   if (name == L"") {
     // It doesn't make sense to have a read-only private piece of shmem
     DCHECK(posix_flags & (O_RDWR | O_WRONLY));
 
-    FilePath path;
+    // Q: Why not use the shm_open() etc. APIs?
+    // A: Because they're limited to 4mb on OS X.  FFFFFFFUUUUUUUUUUU
     fp = file_util::CreateAndOpenTemporaryShmemFile(&path);
 
     // Deleting the file prevents anyone else from mapping it in
@@ -165,8 +164,7 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
     // the last fd is closed, it is truly freed).
     file_util::Delete(path, false);
   } else {
-    std::wstring mem_filename;
-    if (FilenameForMemoryName(name, &mem_filename) == false)
+    if (!FilePathForMemoryName(name, &path))
       return false;
 
     std::string mode;
@@ -186,41 +184,29 @@ bool SharedMemory::CreateOrOpen(const std::wstring &name,
         break;
     }
 
-    fp = file_util::OpenFile(mem_filename, mode.c_str());
+    fp = file_util::OpenFile(path, mode.c_str());
   }
 
-  if (fp == NULL)
+  if (fp == NULL) {
+    if (posix_flags & O_CREAT)
+      PLOG(ERROR) << "Creating shared memory in " << path.value() << " failed";
     return false;
+  }
+
   file_closer.reset(fp);  // close when we go out of scope
 
   // Make sure the (new) file is the right size.
-  // According to the man page, "Use of truncate() to extend a file is
-  // not portable."
   if (size && (posix_flags & (O_RDWR | O_CREAT))) {
     // Get current size.
-    size_t current_size = 0;
     struct stat stat;
     if (fstat(fileno(fp), &stat) != 0)
       return false;
-    current_size = stat.st_size;
-    // Possibly grow.
-    if (current_size < size) {
-      if (fseeko(fp, current_size, SEEK_SET) != 0)
+    const size_t current_size = stat.st_size;
+    if (current_size != size) {
+      if (ftruncate(fileno(fp), size) != 0)
         return false;
-      size_t writesize = size - current_size;
-      scoped_array<char> buf(new char[writesize]);
-      memset(buf.get(), 0, writesize);
-      if (fwrite(buf.get(), 1, writesize, fp) != writesize) {
-          return false;
-      }
-      if (fflush(fp) != 0)
+      if (fseeko(fp, size, SEEK_SET) != 0)
         return false;
-    } else if (current_size > size) {
-      // possibly shrink.
-      if ((ftruncate(fileno(fp), size) != 0) ||
-          (fflush(fp) != 0)) {
-        return false;
-      }
     }
   }
 
@@ -305,7 +291,7 @@ void SharedMemory::LockOrUnlockCommon(int function) {
                    << " function:" << function
                    << " fd:" << mapped_file_
                    << " errno:" << errno
-                   << " msg:" << strerror(errno);
+                   << " msg:" << safe_strerror(errno);
     }
   }
 }

@@ -13,6 +13,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
+#include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 
@@ -24,8 +25,7 @@ ToolbarModel::~ToolbarModel() {
 
 // ToolbarModel Implementation.
 std::wstring ToolbarModel::GetText() {
-  static const GURL kAboutBlankURL("about:blank");
-  GURL url(kAboutBlankURL);
+  GURL url(chrome::kAboutBlankURL);
   std::wstring languages;  // Empty if we don't have a |navigation_controller|.
 
   NavigationController* navigation_controller = GetNavigationController();
@@ -38,7 +38,7 @@ std::wstring ToolbarModel::GetText() {
       // Explicitly hide the URL for this tab.
       url = GURL();
     } else if (entry) {
-      url = entry->display_url();
+      url = entry->virtual_url();
     }
   }
   return net::FormatUrl(url, languages, true, UnescapeRule::NORMAL, NULL, NULL);
@@ -154,6 +154,9 @@ ToolbarModel::InfoTextType ToolbarModel::GetInfoText(std::wstring* text,
   DCHECK(text && tooltip);
   text->clear();
   tooltip->clear();
+
+  if (input_in_progress_)
+    return INFO_NO_INFO;
 
   NavigationController* navigation_controller = GetNavigationController();
   if (!navigation_controller)  // We might not have a controller on init.

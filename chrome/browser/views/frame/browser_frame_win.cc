@@ -7,7 +7,10 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 
+#include <set>
+
 #include "app/resource_bundle.h"
+#include "app/theme_provider.h"
 #include "app/win_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/browser_list.h"
@@ -51,10 +54,6 @@ BrowserFrameWin::BrowserFrameWin(BrowserView* browser_view, Profile* profile)
   GetNonClientView()->SetFrameView(CreateFrameViewForWindow());
   // Don't focus anything on creation, selecting a tab will set the focus.
   set_focus_on_creation(false);
-  // Force popups and apps under Vista to have a nonthemed frame.
-  if (win_util::ShouldUseVistaFrame() &&
-      !browser_view_->IsBrowserTypeNormal())
-    GetNonClientView()->ForceAeroGlassFrame();
 }
 
 void BrowserFrameWin::Init() {
@@ -69,7 +68,6 @@ views::Window* BrowserFrameWin::GetWindow() {
 }
 
 void BrowserFrameWin::TabStripCreated(TabStripWrapper* tabstrip) {
-  root_view_->set_tabstrip(tabstrip);
 }
 
 int BrowserFrameWin::GetMinimizeButtonOffset() const {
@@ -84,7 +82,8 @@ int BrowserFrameWin::GetMinimizeButtonOffset() const {
   return minimize_button_corner.x;
 }
 
-gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(TabStripWrapper* tabstrip) const {
+gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(
+    TabStripWrapper* tabstrip) const {
   return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
 }
 
@@ -108,20 +107,19 @@ ThemeProvider* BrowserFrameWin::GetThemeProviderForFrame() const {
   return GetThemeProvider();
 }
 
-ThemeProvider* BrowserFrameWin::GetThemeProvider() const {
-  return profile_->GetThemeProvider();
-}
-
-ThemeProvider* BrowserFrameWin::GetDefaultThemeProvider() const {
-  return profile_->GetThemeProvider();
+bool BrowserFrameWin::AlwaysUseNativeFrame() const {
+  // We use the native frame when we're told we should by the theme provider
+  // (e.g. no custom theme is active), or when we're a popup or app window. We
+  // don't theme popup or app windows, so regardless of whether or not a theme
+  // is active for normal browser windows, we don't want to use the custom frame
+  // for popups/apps.
+  return GetThemeProvider()->ShouldUseNativeFrame() ||
+      (!browser_view_->IsBrowserTypeNormal() &&
+      win_util::ShouldUseVistaFrame());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrame, views::WidgetWin overrides:
-
-bool BrowserFrameWin::AcceleratorPressed(views::Accelerator* accelerator) {
-  return browser_view_->AcceleratorPressed(*accelerator);
-}
 
 bool BrowserFrameWin::GetAccelerator(int cmd_id,
                                      views::Accelerator* accelerator) {
@@ -143,7 +141,8 @@ void BrowserFrameWin::OnExitSizeMove() {
       detached_drag_mode_ = false;
       if (drop_tabstrip_) {
         gfx::Point screen_point = views::Screen::GetCursorScreenPoint();
-        BrowserTabStrip* tabstrip = browser_view_->tabstrip()->AsBrowserTabStrip();
+        BrowserTabStrip* tabstrip =
+            browser_view_->tabstrip()->AsBrowserTabStrip();
         gfx::Rect tsb = tabstrip->GetDraggedTabScreenBounds(screen_point);
         drop_tabstrip_->AttachTab(tabstrip->DetachTab(0), screen_point, tsb);
       } else {
@@ -170,7 +169,7 @@ void BrowserFrameWin::OnMove(const CPoint& point) {
   browser_view_->WindowMoved();
 }
 
-void BrowserFrameWin::OnMoving(UINT param, const RECT* new_bounds) {
+void BrowserFrameWin::OnMoving(UINT param, LPRECT new_bounds) {
   browser_view_->WindowMoved();
 }
 
@@ -294,6 +293,14 @@ void BrowserFrameWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
   WindowWin::OnWindowPosChanged(window_pos);
 }
 
+ThemeProvider* BrowserFrameWin::GetThemeProvider() const {
+  return profile_->GetThemeProvider();
+}
+
+ThemeProvider* BrowserFrameWin::GetDefaultThemeProvider() const {
+  return profile_->GetThemeProvider();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrame, views::CustomFrameWindow overrides:
 
@@ -302,9 +309,7 @@ int BrowserFrameWin::GetShowState() const {
 }
 
 views::NonClientFrameView* BrowserFrameWin::CreateFrameViewForWindow() {
-  if (GetThemeProvider()->ShouldUseNativeFrame() ||
-      (!browser_view_->IsBrowserTypeNormal() &&
-      win_util::ShouldUseVistaFrame()))
+  if (AlwaysUseNativeFrame())
     browser_frame_view_ = new GlassBrowserFrameView(this, browser_view_);
   else
     browser_frame_view_ = new OpaqueBrowserFrameView(this, browser_view_);
@@ -317,7 +322,7 @@ void BrowserFrameWin::UpdateFrameAfterFrameChange() {
 }
 
 views::RootView* BrowserFrameWin::CreateRootView() {
-  root_view_ = new BrowserRootView(this);
+  root_view_ = new BrowserRootView(browser_view_, this);
   return root_view_;
 }
 
@@ -325,31 +330,28 @@ views::RootView* BrowserFrameWin::CreateRootView() {
 // BrowserFrame, private:
 
 void BrowserFrameWin::UpdateDWMFrame() {
-  // Nothing to do yet.
-  if (!GetClientView() || !browser_view_->IsBrowserTypeNormal() ||
-      !win_util::ShouldUseVistaFrame())
+  // Nothing to do yet, or we're not showing a DWM frame.
+  if (!GetClientView() || !AlwaysUseNativeFrame())
     return;
 
-  // In fullscreen mode, we don't extend glass into the client area at all,
-  // because the GDI-drawn text in the web content composited over it will
-  // become semi-transparent over any glass area.
   MARGINS margins = { 0 };
-  if (!IsMaximized() && !IsFullscreen()) {
-    margins.cxLeftWidth = kClientEdgeThickness + 1;
-    margins.cxRightWidth = kClientEdgeThickness + 1;
-    margins.cyBottomHeight = kClientEdgeThickness + 1;
-  }
-  // In maximized mode, we only have a titlebar strip of glass, no side/bottom
-  // borders.
-  if (!browser_view_->IsFullscreen()) {
-    margins.cyTopHeight =
-        GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
-  }
-
-  // If DWM is supported, we may still not want to use the DWM frame if we're in
-  // opaque mode (e.g. showing a theme). In this case we want to reset the DWM
-  // frame extending.
-  if (!GetNonClientView()->UseNativeFrame()) {
+  if (browser_view_->IsBrowserTypeNormal()) {
+    // In fullscreen mode, we don't extend glass into the client area at all,
+    // because the GDI-drawn text in the web content composited over it will
+    // become semi-transparent over any glass area.
+    if (!IsMaximized() && !IsFullscreen()) {
+      margins.cxLeftWidth = kClientEdgeThickness + 1;
+      margins.cxRightWidth = kClientEdgeThickness + 1;
+      margins.cyBottomHeight = kClientEdgeThickness + 1;
+    }
+    // In maximized mode, we only have a titlebar strip of glass, no side/bottom
+    // borders.
+    if (!browser_view_->IsFullscreen()) {
+      margins.cyTopHeight =
+          GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
+    }
+  } else {
+    // For popup and app windows we want to use the default margins.
     margins.cxLeftWidth = margins.cxRightWidth = margins.cyTopHeight =
         margins.cyBottomHeight = 0;
   }

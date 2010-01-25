@@ -117,6 +117,9 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 #elif defined(OS_MACOSX)
   static const rlim_t kSystemDefaultMaxFds = 256;
   static const char fd_dir[] = "/dev/fd";
+#elif defined(OS_FREEBSD)
+  static const rlim_t kSystemDefaultMaxFds = 8192;
+  static const char fd_dir[] = "/dev/fd";
 #endif
   std::set<int> saved_fds;
 
@@ -193,7 +196,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 void SetAllFDsToCloseOnExec() {
 #if defined(OS_LINUX)
   const char fd_dir[] = "/proc/self/fd";
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_FREEBSD)
   const char fd_dir[] = "/dev/fd";
 #endif
   ScopedDIR dir_closer(opendir(fd_dir));
@@ -220,9 +223,92 @@ void SetAllFDsToCloseOnExec() {
   }
 }
 
+bool LaunchApp(const std::vector<std::string>& argv,
+               const environment_vector& environ,
+               const file_handle_mapping_vector& fds_to_remap,
+               bool wait, ProcessHandle* process_handle) {
+  pid_t pid = fork();
+  if (pid < 0)
+    return false;
+
+  if (pid == 0) {
+    // Child process
+#if defined(OS_MACOSX)
+    RestoreDefaultExceptionHandler();
+#endif
+
+    InjectiveMultimap fd_shuffle;
+    for (file_handle_mapping_vector::const_iterator
+        it = fds_to_remap.begin(); it != fds_to_remap.end(); ++it) {
+      fd_shuffle.push_back(InjectionArc(it->first, it->second, false));
+    }
+
+    for (environment_vector::const_iterator it = environ.begin();
+         it != environ.end(); ++it) {
+      if (it->first) {
+        if (it->second) {
+          setenv(it->first, it->second, 1);
+        } else {
+          unsetenv(it->first);
+        }
+      }
+    }
+
+    // Obscure fork() rule: in the child, if you don't end up doing exec*(),
+    // you call _exit() instead of exit(). This is because _exit() does not
+    // call any previously-registered (in the parent) exit handlers, which
+    // might do things like block waiting for threads that don't even exist
+    // in the child.
+    if (!ShuffleFileDescriptors(fd_shuffle))
+      _exit(127);
+
+    // If we are using the SUID sandbox, it sets a magic environment variable
+    // ("SBX_D"), so we remove that variable from the environment here on the
+    // off chance that it's already set.
+    unsetenv("SBX_D");
+
+    CloseSuperfluousFds(fd_shuffle);
+
+    scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
+    for (size_t i = 0; i < argv.size(); i++)
+      argv_cstr[i] = const_cast<char*>(argv[i].c_str());
+    argv_cstr[argv.size()] = NULL;
+    execvp(argv_cstr[0], argv_cstr.get());
+    PLOG(ERROR) << "LaunchApp: execvp(" << argv_cstr[0] << ") failed";
+    _exit(127);
+  } else {
+    // Parent process
+    if (wait)
+      HANDLE_EINTR(waitpid(pid, 0, 0));
+
+    if (process_handle)
+      *process_handle = pid;
+  }
+
+  return true;
+}
+
+bool LaunchApp(const std::vector<std::string>& argv,
+               const file_handle_mapping_vector& fds_to_remap,
+               bool wait, ProcessHandle* process_handle) {
+  base::environment_vector no_env;
+  return LaunchApp(argv, no_env, fds_to_remap, wait, process_handle);
+}
+
+bool LaunchApp(const CommandLine& cl,
+               bool wait, bool start_hidden,
+               ProcessHandle* process_handle) {
+  file_handle_mapping_vector no_files;
+  return LaunchApp(cl.argv(), no_files, wait, process_handle);
+}
+
 ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process),
                                                         last_time_(0),
-                                                        last_system_time_(0) {
+                                                        last_system_time_(0)
+#if defined(OS_LINUX)
+                                                      , last_cpu_(0)
+#endif
+{
   processor_count_ = base::SysInfo::NumberOfProcessors();
 }
 
@@ -246,7 +332,7 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   int status;
   const int result = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
   if (result == -1) {
-    LOG(ERROR) << "waitpid failed pid:" << handle << " errno:" << errno;
+    PLOG(ERROR) << "waitpid(" << handle << ")";
     if (child_exited)
       *child_exited = false;
     return false;
@@ -380,14 +466,13 @@ bool CrashAwareSleep(ProcessHandle handle, int64 wait_milliseconds) {
   }
 }
 
-namespace {
-
 int64 TimeValToMicroseconds(const struct timeval& tv) {
   return tv.tv_sec * kMicrosecondsPerSecond + tv.tv_usec;
 }
 
-}
-
+#if defined(OS_MACOSX)
+// TODO(port): this function only returns the *current* CPU's usage;
+// we want to return this->process_'s CPU usage.
 int ProcessMetrics::GetCPUUsage() {
   struct timeval now;
   struct rusage usage;
@@ -426,6 +511,7 @@ int ProcessMetrics::GetCPUUsage() {
 
   return cpu;
 }
+#endif
 
 bool GetAppOutput(const CommandLine& cl, std::string* output) {
   int pipe_fd[2];
@@ -441,9 +527,18 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
       return false;
     case 0:  // child
       {
+#if defined(OS_MACOSX)
+        RestoreDefaultExceptionHandler();
+#endif
+
+        // Obscure fork() rule: in the child, if you don't end up doing exec*(),
+        // you call _exit() instead of exit(). This is because _exit() does not
+        // call any previously-registered (in the parent) exit handlers, which
+        // might do things like block waiting for threads that don't even exist
+        // in the child.
         int dev_null = open("/dev/null", O_WRONLY);
         if (dev_null < 0)
-          exit(127);
+          _exit(127);
 
         InjectiveMultimap fd_shuffle;
         fd_shuffle.push_back(InjectionArc(pipe_fd[1], STDOUT_FILENO, true));
@@ -451,7 +546,7 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
         fd_shuffle.push_back(InjectionArc(dev_null, STDIN_FILENO, true));
 
         if (!ShuffleFileDescriptors(fd_shuffle))
-          exit(127);
+          _exit(127);
 
         CloseSuperfluousFds(fd_shuffle);
 
@@ -461,7 +556,7 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
           argv_cstr[i] = const_cast<char*>(argv[i].c_str());
         argv_cstr[argv.size()] = NULL;
         execvp(argv_cstr[0], argv_cstr.get());
-        exit(127);
+        _exit(127);
       }
     default:  // parent
       {

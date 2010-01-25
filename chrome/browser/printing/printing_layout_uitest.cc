@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/gdi_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/gfx/gdi_util.h"
 #include "base/simple_thread.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_paths.h"
@@ -21,16 +21,16 @@ namespace {
 
 using printing::Image;
 
-const wchar_t* const kGenerateSwitch = L"print-layout-generate";
+const char kGenerateSwitch[] = "print-layout-generate";
 const wchar_t kDocRoot[] = L"chrome/test/data";
 
 class PrintingLayoutTest : public PrintingTest<UITest> {
  public:
   PrintingLayoutTest() {
-    emf_path_ = browser_directory_.ToWStringHack();
-    file_util::AppendToPath(&emf_path_, L"metafile_dumps");
-    launch_arguments_.AppendSwitchWithValue(L"debug-print",
-                                            L'"' + emf_path_ + L'"');
+    emf_path_ = browser_directory_;
+    emf_path_ = emf_path_.AppendASCII("metafile_dumps");
+    launch_arguments_.AppendSwitchWithValue("debug-print",
+                                            L'"' + emf_path_.value() + L'"');
     show_window_ = true;
   }
 
@@ -60,8 +60,8 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
   // data pixels and returns the percentage of different pixels; 0 for success,
   // ]0, 100] for failure.
   double CompareWithResult(const std::wstring& verification_name) {
-    std::wstring test_result(ScanFiles(verification_name));
-    if (test_result.empty()) {
+    FilePath test_result(ScanFiles(verification_name));
+    if (test_result.value().empty()) {
       // 100% different, the print job buffer is not there.
       return 100.;
     }
@@ -69,27 +69,28 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
     std::wstring verification_file(test_data_directory_.ToWStringHack());
     file_util::AppendToPath(&verification_file, L"printing");
     file_util::AppendToPath(&verification_file, verification_name);
-    std::wstring emf(verification_file + L".emf");
-    std::wstring png(verification_file + L".png");
+    FilePath emf(verification_file + L".emf");
+    FilePath png(verification_file + L".png");
 
     // Looks for Cleartype override.
-    if (file_util::PathExists(verification_file + L"_cleartype.png") &&
+    if (file_util::PathExists(
+            FilePath::FromWStringHack(verification_file + L"_cleartype.png")) &&
         IsClearTypeEnabled()) {
-      png = verification_file + L"_cleartype.png";
+      png = FilePath(verification_file + L"_cleartype.png");
     }
 
     if (GenerateFiles()) {
       // Copy the .emf and generate an .png.
       file_util::CopyFile(test_result, emf);
-      Image emf_content(emf);
+      Image emf_content(emf.value());
       emf_content.SaveToPng(png);
       // Saving is always fine.
       return 0;
     } else {
       // File compare between test and result.
-      Image emf_content(emf);
-      Image test_content(test_result);
-      Image png_content(png);
+      Image emf_content(emf.value());
+      Image test_content(test_result.value());
+      Image png_content(png.value());
       double diff_emf = emf_content.PercentageDifferent(test_content);
 
       EXPECT_EQ(0., diff_emf) << verification_name <<
@@ -97,7 +98,8 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
           L" result size:" << test_content.size();
       if (diff_emf) {
         // Backup the result emf file.
-        file_util::CopyFile(test_result, verification_file + L"_failed.emf");
+        file_util::CopyFile(test_result, FilePath(
+              verification_file + L"_failed.emf"));
       }
 
       // This verification is only to know that the EMF rendering stays
@@ -108,7 +110,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
           L" result size:" << test_content.size();
       if (diff_png) {
         // Backup the rendered emf file to detect the rendering difference.
-        emf_content.SaveToPng(verification_file + L"_rendering.png");
+        emf_content.SaveToPng(FilePath(verification_file + L"_rendering.png"));
       }
       return std::max(diff_png, diff_emf);
     }
@@ -155,8 +157,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
     bool found_emf = false;
     bool found_prn = false;
     for (int i = 0; i < 100; ++i) {
-      file_util::FileEnumerator enumerator(
-          FilePath::FromWStringHack(emf_path()), false,
+      file_util::FileEnumerator enumerator(emf_path(), false,
           file_util::FileEnumerator::FILES);
       emf_file.clear();
       prn_file.clear();
@@ -197,11 +198,11 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
     return CommandLine::ForCurrentProcess()->HasSwitch(kGenerateSwitch);
   }
 
-  const std::wstring& emf_path() const { return emf_path_; }
+  const FilePath& emf_path() const { return emf_path_; }
 
-  std::wstring emf_path_;
+  FilePath emf_path_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PrintingLayoutTest);
+  DISALLOW_COPY_AND_ASSIGN(PrintingLayoutTest);
 };
 
 // Tests that don't need UI access.
@@ -262,7 +263,7 @@ bool CloseDialogWindow(HWND dialog_window) {
 // default button.
 class DismissTheWindow : public base::DelegateSimpleThread::Delegate {
  public:
-  DismissTheWindow(DWORD owner_process)
+  explicit DismissTheWindow(DWORD owner_process)
       : owner_process_(owner_process) {
   }
 

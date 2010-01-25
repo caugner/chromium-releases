@@ -13,10 +13,11 @@
 #include "base/string_util.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/ssl/ssl_cert_error_handler.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
-#include "chrome/browser/ssl/ssl_mixed_content_handler.h"
 #include "chrome/browser/ssl/ssl_request_info.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -34,35 +35,6 @@
 #include "webkit/glue/resource_type.h"
 
 using WebKit::WebConsoleMessage;
-
-class SSLPolicy::ShowMixedContentTask : public Task {
- public:
-  ShowMixedContentTask(SSLPolicy* policy, SSLMixedContentHandler* handler);
-  virtual ~ShowMixedContentTask();
-
-  virtual void Run();
-
- private:
-  SSLPolicy* policy_;
-  scoped_refptr<SSLMixedContentHandler> handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShowMixedContentTask);
-};
-
-SSLPolicy::ShowMixedContentTask::ShowMixedContentTask(SSLPolicy* policy,
-                                           SSLMixedContentHandler* handler)
-    : policy_(policy),
-      handler_(handler) {
-}
-
-SSLPolicy::ShowMixedContentTask::~ShowMixedContentTask() {
-}
-
-void SSLPolicy::ShowMixedContentTask::Run() {
-  policy_->AllowMixedContentForOrigin(handler_->frame_origin());
-  policy_->AllowMixedContentForOrigin(handler_->main_frame_origin());
-  policy_->backend()->Reload();
-}
 
 SSLPolicy::SSLPolicy(SSLPolicyBackend* backend)
     : backend_(backend) {
@@ -84,10 +56,11 @@ void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
   // For now we handle the DENIED as the UNKNOWN, which means a blocking
   // page is shown to the user every time he comes back to the page.
 
-  switch(handler->cert_error()) {
+  switch (handler->cert_error()) {
     case net::ERR_CERT_COMMON_NAME_INVALID:
     case net::ERR_CERT_DATE_INVALID:
     case net::ERR_CERT_AUTHORITY_INVALID:
+    case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
       OnOverridableCertError(handler);
       break;
     case net::ERR_CERT_NO_REVOCATION_MECHANISM:
@@ -112,39 +85,28 @@ void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
   }
 }
 
-void SSLPolicy::OnMixedContent(SSLMixedContentHandler* handler) {
-  FilterPolicy::Type filter_policy = FilterPolicy::DONT_FILTER;
+void SSLPolicy::DidDisplayInsecureContent(NavigationEntry* entry) {
+  // TODO(abarth): We don't actually need to break the whole origin here,
+  //               but we can handle that in a later patch.
+  DidRunInsecureContent(entry, entry->url().spec());
+}
 
-  // If the user has added an exception, doctor the |filter_policy|.
-  std::string host = GURL(handler->main_frame_origin()).host();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS) &&
-      backend_->IsForceTLSEnabledForHost(host)) {
-    // We're supposed to block all mixed content for this host.
-    filter_policy = FilterPolicy::FILTER_ALL;
-  } else if (backend_->DidAllowMixedContentForHost(host) ||
-             backend_->DidMarkHostAsBroken(host, handler->pid())) {
-    // Let the mixed content through.
-    filter_policy = FilterPolicy::DONT_FILTER;
-  } else if (filter_policy != FilterPolicy::DONT_FILTER) {
-    backend_->ShowMessageWithLink(
-        l10n_util::GetString(IDS_SSL_INFO_BAR_FILTERED_CONTENT),
-        l10n_util::GetString(IDS_SSL_INFO_BAR_SHOW_CONTENT),
-        new ShowMixedContentTask(this, handler));
-  }
+void SSLPolicy::DidRunInsecureContent(NavigationEntry* entry,
+                                      const std::string& security_origin) {
+  if (!entry)
+    return;
 
-  handler->StartRequest(filter_policy);
-  AddMixedContentWarningToConsole(handler);
+  SiteInstance* site_instance = entry->site_instance();
+  if (!site_instance)
+      return;
+
+  backend_->MarkHostAsBroken(GURL(security_origin).host(),
+                             site_instance->GetProcess()->id());
 }
 
 void SSLPolicy::OnRequestStarted(SSLRequestInfo* info) {
   if (net::IsCertStatusError(info->ssl_cert_status()))
     UpdateStateForUnsafeContent(info);
-
-  if (IsMixedContent(info->url(),
-                     info->resource_type(),
-                     info->filter_policy(),
-                     info->frame_origin()))
-    UpdateStateForMixedContent(info);
 }
 
 void SSLPolicy::UpdateEntry(NavigationEntry* entry) {
@@ -174,38 +136,8 @@ void SSLPolicy::UpdateEntry(NavigationEntry* entry) {
   // possibly have mixed content.  See bug http://crbug.com/12423.
   if (site_instance &&
       backend_->DidMarkHostAsBroken(entry->url().host(),
-                                    site_instance->GetProcess()->pid()))
+                                    site_instance->GetProcess()->id()))
     entry->ssl().set_has_mixed_content();
-}
-
-// static
-bool SSLPolicy::IsMixedContent(const GURL& url,
-                               ResourceType::Type resource_type,
-                               FilterPolicy::Type filter_policy,
-                               const std::string& frame_origin) {
-  ////////////////////////////////////////////////////////////////////////////
-  // WARNING: This function is called from both the IO and UI threads.  Do  //
-  //          not touch any non-thread-safe objects!  You have been warned. //
-  ////////////////////////////////////////////////////////////////////////////
-
-  // We can't possibly have mixed content when loading the main frame.
-  if (resource_type == ResourceType::MAIN_FRAME)
-    return false;
-
-  // If we've filtered the resource, then it's no longer dangerous.
-  if (filter_policy != FilterPolicy::DONT_FILTER)
-    return false;
-
-  // If the frame doing the loading is already insecure, then we must have
-  // already dealt with whatever mixed content might be going on.
-  if (!GURL(frame_origin).SchemeIsSecure())
-    return false;
-
-  // We aren't worried about mixed content if we're loading an HTTPS URL.
-  if (url.SchemeIsSecure())
-    return false;
-
-  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -289,7 +221,7 @@ void SSLPolicy::ShowErrorPage(SSLCertErrorHandler* handler) {
       (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
       L"rtl" : L"ltr");
 
-  static const StringPiece html(
+  static const base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SSL_ERROR_HTML));
 
@@ -298,7 +230,8 @@ void SSLPolicy::ShowErrorPage(SSLCertErrorHandler* handler) {
 
   TabContents* tab  = handler->GetTabContents();
   int cert_id = CertStore::GetSharedInstance()->StoreCert(
-      handler->ssl_info().cert, tab->render_view_host()->process()->pid());
+      handler->ssl_info().cert,
+      tab->render_view_host()->process()->id());
   std::string security_info =
       SSLManager::SerializeSecurityInfo(cert_id,
                                         handler->ssl_info().cert_status,
@@ -307,18 +240,12 @@ void SSLPolicy::ShowErrorPage(SSLCertErrorHandler* handler) {
                                                    true,
                                                    handler->request_url(),
                                                    security_info);
-  tab->controller().GetActiveEntry()->set_page_type(
-      NavigationEntry::ERROR_PAGE);
-}
 
-void SSLPolicy::AddMixedContentWarningToConsole(
-    SSLMixedContentHandler* handler) {
-  const std::wstring& text = l10n_util::GetStringF(
-      IDS_MIXED_CONTENT_LOG_MESSAGE,
-      UTF8ToWide(handler->frame_origin()),
-      UTF8ToWide(handler->request_url().spec()));
-  backend_->AddMessageToConsole(
-      WideToUTF16Hack(text), WebConsoleMessage::LevelWarning);
+  // TODO(jcampan): we may want to set the navigation entry type to
+  // PageType::ERROR_PAGE.  The navigation entry is not available at this point,
+  // it is created when the renderer receives a DidNavigate (triggered by the
+  // LoadAlternateHTMLString above). We'd probably need to pass the page type
+  // along with the security_info.
 }
 
 void SSLPolicy::InitializeEntryIfNeeded(NavigationEntry* entry) {
@@ -337,30 +264,25 @@ void SSLPolicy::MarkOriginAsBroken(const std::string& origin, int pid) {
   backend_->MarkHostAsBroken(parsed_origin.host(), pid);
 }
 
-void SSLPolicy::AllowMixedContentForOrigin(const std::string& origin) {
-  GURL parsed_origin(origin);
-  if (!parsed_origin.SchemeIsSecure())
-    return;
-
-  backend_->AllowMixedContentForHost(parsed_origin.host());
-}
-
 void SSLPolicy::UpdateStateForMixedContent(SSLRequestInfo* info) {
+  // TODO(abarth): This function isn't right because we need to remove
+  //               info->main_frame_origin().
+
   if (info->resource_type() != ResourceType::MAIN_FRAME ||
       info->resource_type() != ResourceType::SUB_FRAME) {
     // The frame's origin now contains mixed content and therefore is broken.
-    MarkOriginAsBroken(info->frame_origin(), info->pid());
+    MarkOriginAsBroken(info->frame_origin(), info->child_id());
   }
 
   if (info->resource_type() != ResourceType::MAIN_FRAME) {
     // The main frame now contains a frame with mixed content.  Therefore, we
     // mark the main frame's origin as broken too.
-    MarkOriginAsBroken(info->main_frame_origin(), info->pid());
+    MarkOriginAsBroken(info->main_frame_origin(), info->child_id());
   }
 }
 
 void SSLPolicy::UpdateStateForUnsafeContent(SSLRequestInfo* info) {
   // This request as a broken cert, which means its host is broken.
-  backend_->MarkHostAsBroken(info->url().host(), info->pid());
+  backend_->MarkHostAsBroken(info->url().host(), info->child_id());
   UpdateStateForMixedContent(info);
 }

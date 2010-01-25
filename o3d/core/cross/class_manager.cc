@@ -32,7 +32,6 @@
 
 // This file implements class ClassManager.
 
-#include "core/cross/precompile.h"
 #include "core/cross/bitmap.h"
 #include "core/cross/bounding_box.h"
 #include "core/cross/buffer.h"
@@ -192,6 +191,15 @@ void ClassManager::AddClass(const ObjectBase::Class* object_class,
       << "attempt to register duplicate class";
   object_creator_class_map_.insert(std::make_pair(object_class,
                                                   function));
+}
+
+void ClassManager::RemoveClass(const ObjectBase::Class* object_class) {
+  ObjectClassInfoNameMap::size_type ii = object_class_info_name_map_.erase(
+      object_class->name());
+  DLOG_ASSERT(ii == 1) << "attempt to unregister non-existant class name";
+  ObjectCreatorClassMap::size_type jj = object_creator_class_map_.erase(
+      object_class);
+  DLOG_ASSERT(jj == 1) << "attempt to unregister non-existant class";
 }
 
 const ObjectBase::Class* ClassManager::GetClassByClassName(

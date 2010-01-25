@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_CODEC_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_CODEC_H_
 
+#include <set>
 #include <string>
 
 #include "base/basictypes.h"
@@ -109,7 +110,8 @@ class BookmarkCodec {
 
   // Decodes the supplied node from the supplied value. Child nodes are
   // created appropriately by way of DecodeChildren. If node is NULL a new
-  // node is created and added to parent, otherwise node is used.
+  // node is created and added to parent (parent must then be non-NULL),
+  // otherwise node is used.
   bool DecodeNode(const DictionaryValue& value,
                   BookmarkNode* parent,
                   BookmarkNode* node);
@@ -136,8 +138,13 @@ class BookmarkCodec {
   // Whether or not IDs were reassigned by the codec.
   bool ids_reassigned_;
 
-  // Whether or not IDs were missing for some bookmark nodes during decoding.
-  bool ids_missing_;
+  // Whether or not IDs are valid. This is initially true, but set to false
+  // if an id is missing or not unique.
+  bool ids_valid_;
+
+  // Contains the id of each of the nodes found in the file. Used to determine
+  // if we have duplicates.
+  std::set<int64> ids_;
 
   // MD5 context used to compute MD5 hash of all bookmark data.
   MD5Context md5_context_;

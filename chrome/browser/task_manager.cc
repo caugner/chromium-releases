@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,34 +7,48 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/number_formatting.h"
 #include "base/process_util.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/task_manager_resource_providers.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
+#include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 
+namespace {
+
 // The delay between updates of the information (in ms).
-static const int kUpdateTimeMs = 1000;
+const int kUpdateTimeMs = 1000;
 
 template <class T>
-static int ValueCompare(T value1, T value2) {
+int ValueCompare(T value1, T value2) {
   if (value1 < value2)
     return -1;
   if (value1 == value2)
     return 0;
   return 1;
 }
+
+std::wstring FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
+  return l10n_util::GetStringF(IDS_TASK_MANAGER_CACHE_SIZE_CELL_TEXT,
+      FormatBytes(stat.size, DATA_UNITS_KILOBYTE, false),
+      FormatBytes(stat.liveSize, DATA_UNITS_KILOBYTE, false));
+}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // TaskManagerModel class
@@ -117,8 +131,7 @@ std::wstring TaskManagerModel::GetResourcePrivateMemory(int index) const {
       metrics_map_.find(resources_[index]->GetProcess());
   DCHECK(iter != metrics_map_.end());
   base::ProcessMetrics* process_metrics = iter->second;
-  std::wstring number = FormatNumber(GetPrivateMemory(process_metrics));
-  return GetMemCellText(&number);
+  return GetMemCellText(GetPrivateMemory(process_metrics));
 }
 
 std::wstring TaskManagerModel::GetResourceSharedMemory(int index) const {
@@ -127,8 +140,7 @@ std::wstring TaskManagerModel::GetResourceSharedMemory(int index) const {
       metrics_map_.find(resources_[index]->GetProcess());
   DCHECK(iter != metrics_map_.end());
   base::ProcessMetrics* process_metrics = iter->second;
-  std::wstring number = FormatNumber(GetSharedMemory(process_metrics));
-  return GetMemCellText(&number);
+  return GetMemCellText(GetSharedMemory(process_metrics));
 }
 
 std::wstring TaskManagerModel::GetResourcePhysicalMemory(int index) const {
@@ -137,8 +149,7 @@ std::wstring TaskManagerModel::GetResourcePhysicalMemory(int index) const {
       metrics_map_.find(resources_[index]->GetProcess());
   DCHECK(iter != metrics_map_.end());
   base::ProcessMetrics* process_metrics = iter->second;
-  std::wstring number = FormatNumber(GetPhysicalMemory(process_metrics));
-  return GetMemCellText(&number);
+  return GetMemCellText(GetPhysicalMemory(process_metrics));
 }
 
 std::wstring TaskManagerModel::GetResourceProcessId(int index) const {
@@ -154,8 +165,45 @@ std::wstring TaskManagerModel::GetResourceStatsValue(int index, int col_id)
 
 std::wstring TaskManagerModel::GetResourceGoatsTeleported(int index) const {
   DCHECK(index < ResourceCount());
-  goats_teleported_ += rand();
-  return FormatNumber(goats_teleported_);
+  goats_teleported_ += rand() & 4095;
+  return UTF16ToWide(base::FormatNumber(goats_teleported_));
+}
+
+std::wstring TaskManagerModel::GetResourceWebCoreImageCacheSize(
+    int index) const {
+  DCHECK(index < ResourceCount());
+  if (!resources_[index]->ReportsCacheStats())
+    return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
+  const WebKit::WebCache::ResourceTypeStats stats(
+      resources_[index]->GetWebCoreCacheStats());
+  return FormatStatsSize(stats.images);
+}
+
+std::wstring TaskManagerModel::GetResourceWebCoreScriptsCacheSize(
+    int index) const {
+  DCHECK(index < ResourceCount());
+  if (!resources_[index]->ReportsCacheStats())
+    return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
+  const WebKit::WebCache::ResourceTypeStats stats(
+      resources_[index]->GetWebCoreCacheStats());
+  return FormatStatsSize(stats.scripts);
+}
+
+std::wstring TaskManagerModel::GetResourceWebCoreCSSCacheSize(
+    int index) const {
+  DCHECK(index < ResourceCount());
+  if (!resources_[index]->ReportsCacheStats())
+    return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
+  const WebKit::WebCache::ResourceTypeStats stats(
+      resources_[index]->GetWebCoreCacheStats());
+  return FormatStatsSize(stats.cssStyleSheets);
+}
+
+std::wstring TaskManagerModel::GetResourceSqliteMemoryUsed(int index) const {
+  DCHECK(index < ResourceCount());
+  if (!resources_[index]->ReportsSqliteMemoryUsed())
+    return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
+  return GetMemCellText(resources_[index]->SqliteMemoryUsedBytes() / 1024);
 }
 
 bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
@@ -232,29 +280,19 @@ int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
       return ValueCompare<int>(GetCPUUsage(resources_[row1]),
                                GetCPUUsage(resources_[row2]));
 
-    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN: {
-      base::ProcessMetrics* pm1;
-      base::ProcessMetrics* pm2;
-      if (!GetProcessMetricsForRows(row1, row2, &pm1, &pm2))
-        return 0;
-      return ValueCompare<size_t>(GetPrivateMemory(pm1),
-                                  GetPrivateMemory(pm2));
-    }
-
-    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN: {
-      base::ProcessMetrics* pm1;
-      base::ProcessMetrics* pm2;
-      if (!GetProcessMetricsForRows(row1, row2, &pm1, &pm2))
-        return 0;
-      return ValueCompare<size_t>(GetSharedMemory(pm1),
-                                  GetSharedMemory(pm2));
-    }
-
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN: {
       base::ProcessMetrics* pm1;
       base::ProcessMetrics* pm2;
       if (!GetProcessMetricsForRows(row1, row2, &pm1, &pm2))
         return 0;
+      if (col_id == IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) {
+        return ValueCompare<size_t>(GetPrivateMemory(pm1),
+                                    GetPrivateMemory(pm2));
+      }
+      if (col_id == IDS_TASK_MANAGER_SHARED_MEM_COLUMN)
+        return ValueCompare<size_t>(GetSharedMemory(pm1), GetSharedMemory(pm2));
       return ValueCompare<size_t>(GetPhysicalMemory(pm1),
                                   GetPhysicalMemory(pm2));
     }
@@ -263,6 +301,23 @@ int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
       int proc1_id = base::GetProcId(resources_[row1]->GetProcess());
       int proc2_id = base::GetProcId(resources_[row2]->GetProcess());
       return ValueCompare<int>(proc1_id, proc2_id);
+    }
+
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN: {
+      WebKit::WebCache::ResourceTypeStats stats1 = { { 0 } };
+      WebKit::WebCache::ResourceTypeStats stats2 = { { 0 } };
+      if (resources_[row1]->ReportsCacheStats())
+        stats1 = resources_[row1]->GetWebCoreCacheStats();
+      if (resources_[row2]->ReportsCacheStats())
+        stats2 = resources_[row2]->GetWebCoreCacheStats();
+      if (col_id == IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN)
+        return ValueCompare<size_t>(stats1.images.size, stats2.images.size);
+      if (col_id == IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN)
+        return ValueCompare<size_t>(stats1.scripts.size, stats2.scripts.size);
+      return ValueCompare<size_t>(stats1.cssStyleSheets.size,
+                                  stats2.cssStyleSheets.size);
     }
 
     default:
@@ -336,11 +391,12 @@ int TaskManagerModel::GetStatsValue(const TaskManager::Resource* resource,
   return 0;
 }
 
-std::wstring TaskManagerModel::GetMemCellText(
-    std::wstring* number) const {
+std::wstring TaskManagerModel::GetMemCellText(int64 number) const {
+  std::wstring str = UTF16ToWide(base::FormatNumber(number));
+
   // Adjust number string if necessary.
-  l10n_util::AdjustStringForLocaleDirection(*number, number);
-  return l10n_util::GetStringF(IDS_TASK_MANAGER_MEM_CELL_TEXT, *number);
+  l10n_util::AdjustStringForLocaleDirection(str, &str);
+  return l10n_util::GetStringF(IDS_TASK_MANAGER_MEM_CELL_TEXT, str);
 }
 
 void TaskManagerModel::StartUpdating() {
@@ -532,6 +588,17 @@ void TaskManagerModel::Clear() {
   }
 }
 
+void TaskManagerModel::NotifyResourceTypeStats(
+    base::ProcessId renderer_id,
+    const WebKit::WebCache::ResourceTypeStats& stats) {
+  for (ResourceList::iterator it = resources_.begin();
+       it != resources_.end(); ++it) {
+    if (base::GetProcId((*it)->GetProcess()) == renderer_id) {
+      (*it)->NotifyResourceTypeStats(stats);
+    }
+  }
+}
+
 void TaskManagerModel::Refresh() {
   DCHECK_NE(IDLE, update_state_);
 
@@ -574,6 +641,13 @@ void TaskManagerModel::Refresh() {
     // Then we reset the current byte count.
     iter->second = 0;
   }
+
+  // Let resources update themselves if they need to.
+  for (ResourceList::iterator iter = resources_.begin();
+       iter != resources_.end(); ++iter) {
+     (*iter)->Refresh();
+  }
+
   if (!resources_.empty()) {
     FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_,
                       OnItemsChanged(0, ResourceCount()));
@@ -611,8 +685,8 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
   TaskManager::Resource* resource = NULL;
   for (ResourceProviderList::iterator iter = providers_.begin();
        iter != providers_.end(); ++iter) {
-    resource = (*iter)->GetResource(param.origin_pid,
-                                    param.render_process_host_id,
+    resource = (*iter)->GetResource(param.origin_child_id,
+                                    param.render_process_host_child_id,
                                     param.routing_id);
     if (resource)
       break;
@@ -658,18 +732,20 @@ void TaskManagerModel::OnJobRedirect(URLRequestJob* job,
 }
 
 void TaskManagerModel::OnBytesRead(URLRequestJob* job, int byte_count) {
-  int render_process_host_id = -1, routing_id = -1;
+  int render_process_host_child_id = -1, routing_id = -1;
   ResourceDispatcherHost::RenderViewForRequest(job->request(),
-                                               &render_process_host_id,
+                                               &render_process_host_child_id,
                                                &routing_id);
   // This happens in the IO thread, post it to the UI thread.
+  int origin_child_id =
+      chrome_browser_net::GetOriginProcessUniqueIDForRequest(job->request());
   ui_loop_->PostTask(FROM_HERE,
                      NewRunnableMethod(
-                        this,
-                        &TaskManagerModel::BytesRead,
-                        BytesReadParam(job->request()->origin_pid(),
-                                       render_process_host_id, routing_id,
-                                       byte_count)));
+                         this,
+                         &TaskManagerModel::BytesRead,
+                         BytesReadParam(origin_child_id,
+                                        render_process_host_child_id,
+                                        routing_id, byte_count)));
 }
 
 bool TaskManagerModel::GetProcessMetricsForRows(
@@ -758,4 +834,21 @@ void TaskManager::OnWindowClosed() {
 // static
 TaskManager* TaskManager::GetInstance() {
   return Singleton<TaskManager>::get();
+}
+
+void TaskManager::OpenAboutMemory() {
+  Browser* browser = BrowserList::GetLastActive();
+  DCHECK(browser);
+  browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_FOREGROUND_TAB,
+                   PageTransition::LINK);
+  // In case the browser window is minimzed, show it. If this is an application
+  // or popup, we can only have one tab, hence we need to process this in a
+  // tabbed browser window. Currently, |browser| is pointing to the application,
+  // popup window. Therefore, we have to retrieve the last active tab again,
+  // since a new window has been used.
+  if (browser->type() & Browser::TYPE_APP_POPUP) {
+    browser = BrowserList::GetLastActive();
+    DCHECK(browser);
+  }
+  browser->window()->Show();
 }

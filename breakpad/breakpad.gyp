@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../build/common.gypi',
-  ],
   'conditions': [
     [ 'OS=="mac"', {
       'target_defaults': {
@@ -112,7 +109,18 @@
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
             ],
-          }
+          },
+          'configurations': {
+            'Release': {
+              'xcode_settings': {
+                # dump_syms crashes when built at -O1, -O2, and -O3.  It does
+                # not crash at -Os.  To play it safe, dump_syms is always built
+                # at -O0 until this can be sorted out.
+                # http://code.google.com/p/google-breakpad/issues/detail?id=329
+                'GCC_OPTIMIZATION_LEVEL': '0',  # -O0
+               },
+             },
+          },
         },
         {
           'target_name': 'symupload',
@@ -177,6 +185,10 @@
               '-lurlmon.lib',
             ],
           },
+          'defines': [
+            # Avoid the TerminateThread Application Verifier Failure.
+            'BREAKPAD_NO_TERMINATE_THREAD',
+          ],
           'direct_dependent_settings': {
             'include_dirs': [
               'src',
@@ -211,8 +223,8 @@
     }],
     [ 'OS=="linux"', {
       'conditions': [
-        # Tools needed for archiving official build symbols.
-        ['branding=="Chrome"', {
+        # Tools needed for archiving build symbols.
+        ['branding=="Chrome" or linux_breakpad==1', {
           'targets': [
             {
               'target_name': 'symupload',
@@ -329,20 +341,13 @@
             '..',
           ],
         },
-        {
-          'target_name': 'minidump_2_core',
-          'type': 'executable',
-
-          'sources': [
-            'linux/minidump-2-core.cc',
-          ],
-
-          'include_dirs': [
-            'src',
-            '..',
-          ],
-        },
       ],
     }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

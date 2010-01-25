@@ -5,6 +5,7 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_HTTP_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_HTTP_JOB_H_
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -67,8 +68,8 @@ class URLRequestHttpJob : public URLRequestJob {
   std::string AssembleRequestCookies();
   void FetchResponseCookies();
 
-  // Process the X-Force-TLS header, if one exists.
-  void ProcessForceTLSHeader();
+  // Process the Strict-Transport-Security header, if one exists.
+  void ProcessStrictTransportSecurityHeader();
 
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);

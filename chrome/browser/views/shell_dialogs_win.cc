@@ -7,7 +7,6 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
-#include <atlbase.h>
 
 #include <algorithm>
 #include <set>
@@ -17,12 +16,11 @@
 #include "app/win_util.h"
 #include "base/file_util.h"
 #include "base/registry.h"
+#include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "grit/generated_resources.h"
-#include "views/focus/focus_manager.h"
-#include "views/focus/view_storage.h"
 
 // Helpers to show certain types of Windows shell dialogs in a way that doesn't
 // block the UI of the entire app.
@@ -118,11 +116,6 @@ class BaseShellDialogImpl {
   // This set only contains non-null HWNDs. NULL hwnds are not added to this
   // list.
   typedef std::set<HWND> Owners;
-
-  // Storage id used to store the last focused view so we can restore focus
-  // appropriately.
-  int view_storage_id_;
-
   static Owners owners_;
   static int instance_count_;
 
@@ -134,9 +127,7 @@ BaseShellDialogImpl::Owners BaseShellDialogImpl::owners_;
 int BaseShellDialogImpl::instance_count_ = 0;
 
 BaseShellDialogImpl::BaseShellDialogImpl()
-    : ui_loop_(MessageLoop::current()),
-      view_storage_id_(views::ViewStorage::GetSharedInstance()->
-          CreateStorageID()) {
+    : ui_loop_(MessageLoop::current()) {
   ++instance_count_;
 }
 
@@ -157,20 +148,6 @@ BaseShellDialogImpl::RunState BaseShellDialogImpl::BeginRun(HWND owner) {
   run_state.owner = owner;
   if (owner) {
     owners_.insert(owner);
-    // Disabling the owner causes the browser to be disabled when the dialog is
-    // closed and the browser gets the activation.  This messes up the normal
-    // focus restoration process.  To work-around this, we'll restore the focus
-    // ourselves after we have reenabled the owner.
-    views::FocusManager* focus_manager =
-        views::FocusManager::GetFocusManagerForNativeView(owner);
-    if (focus_manager) {
-      views::View* focused_view = focus_manager->GetFocusedView();
-      if (focused_view)
-        views::ViewStorage::GetSharedInstance()->StoreView(view_storage_id_,
-                                                           focused_view);
-    } else {
-      NOTREACHED();
-    }
     DisableOwner(owner);
   }
   return run_state;
@@ -182,24 +159,6 @@ void BaseShellDialogImpl::EndRun(RunState run_state) {
     EnableOwner(run_state.owner);
     DCHECK(owners_.find(run_state.owner) != owners_.end());
     owners_.erase(run_state.owner);
-    // Now that the owner is enabled, restore the focus if applicable.
-    views::View* view_to_focus =
-        views::ViewStorage::GetSharedInstance()->RetrieveView(view_storage_id_);
-    if (view_to_focus) {
-      views::ViewStorage::GetSharedInstance()->RemoveView(view_storage_id_);
-      views::FocusManager* focus_manager =
-          views::FocusManager::GetFocusManagerForNativeView(run_state.owner);
-      if (focus_manager) {
-        // We need to clear focus as when the focus is restored when the dialog
-        // is closed, only setting the native focus fails.  Meaning the focused
-        // manager still believes the right view has focus, and would ignore
-        // requesting focus to what it thinks is already focused.
-        focus_manager->ClearFocus();
-        view_to_focus->RequestFocus();
-      } else {
-        NOTREACHED();
-      }
-    }
   }
   DCHECK(run_state.dialog_thread);
   delete run_state.dialog_thread;
@@ -494,10 +453,10 @@ bool SelectFileDialogImpl::RunSelectFolderDialog(const std::wstring& title,
     STRRET out_dir_buffer;
     ZeroMemory(&out_dir_buffer, sizeof(out_dir_buffer));
     out_dir_buffer.uType = STRRET_WSTR;
-    CComPtr<IShellFolder> shell_folder = NULL;
-    if (SHGetDesktopFolder (&shell_folder) == NOERROR) {
+    ScopedComPtr<IShellFolder> shell_folder;
+    if (SHGetDesktopFolder(shell_folder.Receive()) == NOERROR) {
       HRESULT hr = shell_folder->GetDisplayNameOf(list, SHGDN_FORPARSING,
-                                                 &out_dir_buffer);
+                                                  &out_dir_buffer);
       if (SUCCEEDED(hr) && out_dir_buffer.uType == STRRET_WSTR) {
         *path = FilePath(out_dir_buffer.pOleStr);
         CoTaskMemFree(out_dir_buffer.pOleStr);

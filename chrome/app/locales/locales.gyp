@@ -8,9 +8,6 @@
     # TODO(sgk): eliminate this; see comment in build/common.gypi
     'msvs_debug_link_incremental': '1',
   },
-  'includes': [
-    '../../../build/common.gypi',
-  ],
   'target_defaults': {
     'type': 'loadable_module',
     'dependencies': [
@@ -38,6 +35,18 @@
   'conditions': [
     ['OS=="win"', {
       'targets': [
+        {
+          'target_name': 'am',
+          'msvs_guid': 'A59E9C5D-5140-4D8C-A1B5-58044D577AAF',
+          'sources': [
+            '<(chrome_grit_out_dir)/generated_resources_am.rc',
+            '<(chrome_grit_out_dir)/locale_settings_am.rc',
+            '<(chrome_grit_out_dir)/strings$(CHROMIUM_BUILD)_am.rc',
+            '<(webkit_grit_out_dir)/webkit_strings_am.rc',
+            '<(app_grit_out_dir)/app_strings_am.rc',
+            '<(app_grit_out_dir)/app_locale_settings_am.rc',
+          ],
+        },
         {
           'target_name': 'ar',
           'msvs_guid': '3AB90E6A-56FF-4C9D-B918-AB76DDBF8BE8',
@@ -543,6 +552,18 @@
           ],
         },
         {
+          'target_name': 'sw',
+          'msvs_guid': 'CBB54535-5590-464D-BB3A-631DAD11EBB5',
+          'sources': [
+            '<(chrome_grit_out_dir)/generated_resources_sw.rc',
+            '<(chrome_grit_out_dir)/locale_settings_sw.rc',
+            '<(chrome_grit_out_dir)/strings$(CHROMIUM_BUILD)_sw.rc',
+            '<(webkit_grit_out_dir)/webkit_strings_sw.rc',
+            '<(app_grit_out_dir)/app_strings_sw.rc',
+            '<(app_grit_out_dir)/app_locale_settings_sw.rc',
+          ],
+        },
+        {
           'target_name': 'ta',
           'msvs_guid': '7A0BA0C5-0D90-49AE-919A-4BE096F69E4F',
           'sources': [
@@ -643,3 +664,8 @@
   ],
 }
 
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

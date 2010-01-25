@@ -6,12 +6,12 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
-#include "base/time_format.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
@@ -29,6 +29,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
 
 // Maximum number of search results to return in a given search. We should
 // eventually remove this.
@@ -78,7 +79,7 @@ void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
 
   SetFontAndTextDirection(&localized_strings);
 
-  static const StringPiece history_html(
+  static const base::StringPiece history_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_HISTORY_HTML));
   const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
@@ -103,7 +104,7 @@ BrowsingHistoryHandler::BrowsingHistoryHandler()
 
 BrowsingHistoryHandler::~BrowsingHistoryHandler() {
   cancelable_consumer_.CancelAllRequests();
-  if (remover_.get())
+  if (remover_)
     remover_->RemoveObserver(this);
 }
 
@@ -203,9 +204,9 @@ void BrowsingHistoryHandler::HandleDeleteDay(const Value* value) {
   base::Time begin_time = time.LocalMidnight();
   base::Time end_time = begin_time + base::TimeDelta::FromDays(1);
 
-  remover_.reset(new BrowsingDataRemover(dom_ui_->GetProfile(),
-                                         begin_time,
-                                         end_time));
+  remover_ = new BrowsingDataRemover(dom_ui_->GetProfile(),
+                                     begin_time,
+                                     end_time);
   remover_->AddObserver(this);
   remover_->Remove(BrowsingDataRemover::REMOVE_HISTORY |
                    BrowsingDataRemover::REMOVE_COOKIES |
@@ -214,8 +215,9 @@ void BrowsingHistoryHandler::HandleDeleteDay(const Value* value) {
 
 void BrowsingHistoryHandler::OnBrowsingDataRemoverDone() {
   dom_ui_->CallJavascriptFunction(L"deleteComplete");
-  remover_->RemoveObserver(this);
-  remover_.release();
+  // No need to remove ourselves as an observer as BrowsingDataRemover deletes
+  // itself after we return.
+  remover_ = NULL;
 }
 
 void BrowsingHistoryHandler::QueryComplete(
@@ -376,4 +378,10 @@ HistoryUI::HistoryUI(TabContents* contents) : DOMUI(contents) {
 const GURL HistoryUI::GetHistoryURLWithSearchText(const std::wstring& text) {
   return GURL(std::string(chrome::kChromeUIHistoryURL) + "#q=" +
               EscapeQueryParamValue(WideToUTF8(text)));
+}
+
+// static
+RefCountedMemory* HistoryUI::GetFaviconResourceBytes() {
+  return ResourceBundle::GetSharedInstance().
+      LoadImageResourceBytes(IDR_HISTORY_FAVICON);
 }

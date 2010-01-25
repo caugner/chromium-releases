@@ -1,10 +1,10 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -31,31 +31,45 @@
 #ifndef WebViewClient_h
 #define WebViewClient_h
 
-#error "This header file is still a work in progress; do not include!"
-
+#include "WebDragOperation.h"
+#include "WebEditingAction.h"
+#include "WebFileChooserCompletion.h"
+#include "WebTextAffinity.h"
+#include "WebTextDirection.h"
 #include "WebWidgetClient.h"
 
 namespace WebKit {
+    class WebAccessibilityObject;
+    class WebDevToolsAgentClient;
+    class WebDragData;
     class WebFileChooserCompletion;
     class WebFrame;
-    class WebPopupMenu;
+    class WebNode;
+    class WebNotificationPresenter;
+    class WebRange;
     class WebString;
+    class WebURL;
     class WebView;
+    class WebWidget;
     struct WebConsoleMessage;
-    struct WebContextMenuInfo;
+    struct WebContextMenuData;
+    struct WebPoint;
     struct WebPopupMenuInfo;
 
-    class WebViewClient : public WebWidgetClient {
+    // Since a WebView is a WebWidget, a WebViewClient is a WebWidgetClient.
+    // Virtual inheritance allows an implementation of WebWidgetClient to be
+    // easily reused as part of an implementation of WebViewClient.
+    class WebViewClient : virtual public WebWidgetClient {
     public:
         // Factory methods -----------------------------------------------------
 
         // Create a new related WebView.
-        virtual WebView* createView(bool hasUserGesture) = 0;
+        virtual WebView* createView(WebFrame* creator) = 0;
 
         // Create a new WebPopupMenu.  In the second form, the client is
         // responsible for rendering the contents of the popup menu.
-        virtual WebPopupMenu* createPopupMenu(bool activatable) = 0;
-        virtual WebPopupMenu* createPopupMenu(bool activatable, const WebPopupMenuInfo&) = 0;
+        virtual WebWidget* createPopupMenu(bool activatable) = 0;
+        virtual WebWidget* createPopupMenu(const WebPopupMenuInfo&) = 0;
 
 
         // Misc ----------------------------------------------------------------
@@ -64,15 +78,14 @@ namespace WebKit {
         virtual void didAddMessageToConsole(
             const WebConsoleMessage&, const WebString& sourceName, unsigned sourceLine) = 0;
 
-        // If enabled, sudden termination implies that there are no registered
-        // unload event handlers that would need to run in order to close the
-        // WebView.  This information allows the embedder to determine if the
-        // process can be closed without closing the respective WebViews.
-        virtual void enableSuddenTermination() = 0;
-        virtual void disableSuddenTermination() = 0;
+        // Called when script in the page calls window.print().  If frame is
+        // non-null, then it selects a particular frame, including its
+        // children, to print.  Otherwise, the main frame and its children
+        // should be printed.
+        virtual void printPage(WebFrame*) = 0;
 
-        // Called when script in the page calls window.print().
-        virtual void printPage() = 0;
+        // Called to retrieve the provider of desktop notifications.
+        virtual WebNotificationPresenter* notificationPresenter() = 0;
 
 
         // Navigational --------------------------------------------------------
@@ -81,46 +94,107 @@ namespace WebKit {
         virtual void didStartLoading() = 0;
         virtual void didStopLoading() = 0;
 
-        // A frame (or subframe) was created.  The client may return a
-        // WebFrameClient to be associated with the newly created frame.
-        virtual WebFrameClient* didCreateFrame(WebFrame* frame) = 0;
-
 
         // Editing -------------------------------------------------------------
 
-        // May return null.  The WebEditingClient is passed additional events
-        // related to text editing in the page.
-        virtual WebEditingClient* editingClient() = 0;
+        // These methods allow the client to intercept and overrule editing
+        // operations.
+        virtual bool shouldBeginEditing(const WebRange&) = 0;
+        virtual bool shouldEndEditing(const WebRange&) = 0;
+        virtual bool shouldInsertNode(
+            const WebNode&, const WebRange&, WebEditingAction) = 0;
+        virtual bool shouldInsertText(
+            const WebString&, const WebRange&, WebEditingAction) = 0;
+        virtual bool shouldChangeSelectedRange(
+            const WebRange& from, const WebRange& to, WebTextAffinity,
+            bool stillSelecting) = 0;
+        virtual bool shouldDeleteRange(const WebRange&) = 0;
+        virtual bool shouldApplyStyle(const WebString& style, const WebRange&) = 0;
 
-        // The client should perform spell-checking on the given word
-        // synchronously.  Return a length of 0 if the word is not misspelled.
+        virtual bool isSmartInsertDeleteEnabled() = 0;
+        virtual bool isSelectTrailingWhitespaceEnabled() = 0;
+        virtual void setInputMethodEnabled(bool enabled) = 0;
+
+        virtual void didBeginEditing() = 0;
+        virtual void didChangeSelection(bool isSelectionEmpty) = 0;
+        virtual void didChangeContents() = 0;
+        virtual void didExecuteCommand(const WebString& commandName) = 0;
+        virtual void didEndEditing() = 0;
+
+        // This method is called in response to WebView's handleInputEvent()
+        // when the default action for the current keyboard event is not
+        // suppressed by the page, to give the embedder a chance to handle
+        // the keyboard event specially.
+        //
+        // Returns true if the keyboard event was handled by the embedder,
+        // indicating that the default action should be suppressed.
+        virtual bool handleCurrentKeyboardEvent() = 0;
+
+
+        // Spellchecker --------------------------------------------------------
+
+        // The client should perform spell-checking on the given text.  If the
+        // text contains a misspelled word, then upon return misspelledOffset
+        // will point to the start of the misspelled word, and misspelledLength
+        // will indicates its length.  Otherwise, if there was not a spelling
+        // error, then upon return misspelledLength is 0.
         virtual void spellCheck(
-            const WebString& word, int& misspelledOffset, int& misspelledLength) = 0;
+            const WebString& text, int& misspelledOffset, int& misspelledLength) = 0;
 
-        // Request the text on the selection clipboard be sent back to the
-        // WebView so it can be inserted into the current focus area.  This is
-        // only meaningful on platforms that have a selection clipboard (e.g.,
-        // X-Windows).
-        virtual void pasteFromSelectionClipboard() = 0;
+        // Computes an auto-corrected replacement for a misspelled word.  If no
+        // replacement is found, then an empty string is returned.
+        virtual WebString autoCorrectWord(const WebString& misspelledWord) = 0;
+
+        // Show or hide the spelling UI.
+        virtual void showSpellingUI(bool show) = 0;
+
+        // Returns true if the spelling UI is showing.
+        virtual bool isShowingSpellingUI() = 0;
+
+        // Update the spelling UI with the given word.
+        virtual void updateSpellingUIWithMisspelledWord(const WebString& word) = 0;
 
 
         // Dialogs -------------------------------------------------------------
 
-        // These methods should not return until the dialog has been closed.
-        virtual void runModalAlertDialog(const WebString& message) = 0;
-        virtual bool runModalConfirmDialog(const WebString& message) = 0;
-        virtual bool runModalPromptDialog(
-            const WebString& message, const WebString& defaultValue,
-            WebString* actualValue) = 0;
-        virtual bool runModalBeforeUnloadDialog(const WebString& message) = 0;
-
-        // This method returns immediately after showing the dialog.  When the
+        // This method returns immediately after showing the dialog. When the
         // dialog is closed, it should call the WebFileChooserCompletion to
-        // pass the results of the dialog.
-        virtual void runFileChooser(
+        // pass the results of the dialog. Returns false if
+        // WebFileChooseCompletion will never be called.
+        virtual bool runFileChooser(
             bool multiSelect, const WebString& title,
             const WebString& initialValue, WebFileChooserCompletion*) = 0;
 
+        // Displays a modal alert dialog containing the given message.  Returns
+        // once the user dismisses the dialog.
+        virtual void runModalAlertDialog(
+            WebFrame*, const WebString& message) = 0;
+
+        // Displays a modal confirmation dialog with the given message as
+        // description and OK/Cancel choices.  Returns true if the user selects
+        // 'OK' or false otherwise.
+        virtual bool runModalConfirmDialog(
+            WebFrame*, const WebString& message) = 0;
+
+        // Displays a modal input dialog with the given message as description
+        // and OK/Cancel choices.  The input field is pre-filled with
+        // defaultValue.  Returns true if the user selects 'OK' or false
+        // otherwise.  Upon returning true, actualValue contains the value of
+        // the input field.
+        virtual bool runModalPromptDialog(
+            WebFrame*, const WebString& message, const WebString& defaultValue,
+            WebString* actualValue) = 0;
+
+        // Displays a modal confirmation dialog containing the given message as
+        // description and OK/Cancel choices, where 'OK' means that it is okay
+        // to proceed with closing the view.  Returns true if the user selects
+        // 'OK' or false otherwise.
+        virtual bool runModalBeforeUnloadDialog(
+            WebFrame*, const WebString& message) = 0;
+
+        // Shows a context menu with commands relevant to a specific element on
+        // the a given frame. Additional context data is supplied.
+        virtual void showContextMenu(WebFrame*, const WebContextMenuData&) = 0;
 
         // UI ------------------------------------------------------------------
 
@@ -131,13 +205,19 @@ namespace WebKit {
         virtual void setMouseOverURL(const WebURL&) = 0;
 
         // Called when a tooltip should be shown at the current cursor position.
-        virtual void setToolTipText(const WebString&) = 0;
+        virtual void setToolTipText(const WebString&, WebTextDirection hint) = 0;
 
         // Called when a context menu should be shown at the current cursor position.
-        virtual void showContextMenu(const WebContextMenuInfo&) = 0;
+        // FIXME hook this up
+        //virtual void showContextMenu(const WebContextMenuInfo&) = 0;
 
         // Called when a drag-n-drop operation should begin.
-        virtual void startDragging(WebFrame*, const WebDragData&) = 0;
+        virtual void startDragging(
+            const WebPoint& from, const WebDragData&, WebDragOperationsMask) = 0;
+
+        // Called to determine if drag-n-drop operations may initiate a page
+        // navigation.
+        virtual bool acceptsLoadDrops() = 0;
 
         // Take focus away from the WebView by focusing an adjacent UI element
         // in the containing window.
@@ -145,10 +225,12 @@ namespace WebKit {
         virtual void focusPrevious() = 0;
 
 
-        // Session History -----------------------------------------------------
+        // Session history -----------------------------------------------------
 
-        // Returns the history item at the given index.
-        virtual WebHistoryItem historyItemAtIndex(int index) = 0;
+        // Tells the embedder to navigate back or forward in session history by
+        // the given offset (relative to the current position in session
+        // history).
+        virtual void navigateBackForwardSoon(int offset) = 0;
 
         // Returns the number of history items before/after the current
         // history item.
@@ -159,19 +241,38 @@ namespace WebKit {
         virtual void didAddHistoryItem() = 0;
 
 
-        // Developer Tools -----------------------------------------------------
+        // Accessibility -------------------------------------------------------
 
-        virtual void didOpenInspector(int numResources) = 0;
+        // Notifies embedder that the focus has changed to the given
+        // accessibility object.
+        virtual void focusAccessibilityObject(const WebAccessibilityObject&) = 0;
 
 
-        // FIXME need to something for:
-        // OnPasswordFormsSeen
-        // OnAutofillFormSubmitted
-        // QueryFormFieldAutofill
-        // RemoveStoredAutofillEntry
-        // ShowModalHTMLDialog <-- we should be able to kill this
-        // GetWebDevToolsAgentDelegate
-        // WasOpenedByUserGesture
+        // Developer tools -----------------------------------------------------
+
+        // Called to notify the client that the inspector's settings were
+        // changed and should be saved.  See WebView::inspectorSettings.
+        virtual void didUpdateInspectorSettings() = 0;
+
+        virtual WebDevToolsAgentClient* devToolsAgentClient() = 0;
+
+
+        // Autofill ------------------------------------------------------------
+
+        // Queries the browser for suggestions to be shown for the form text
+        // field named |name|.  |value| is the text entered by the user so
+        // far and the WebNode corresponds to the input field.
+        virtual void queryAutofillSuggestions(const WebNode&,
+                                              const WebString& name,
+                                              const WebString& value) = 0;
+
+        // Instructs the browser to remove the autofill entry specified from
+        // its DB.
+        virtual void removeAutofillSuggestions(const WebString& name,
+                                               const WebString& value) = 0;
+
+    protected:
+        ~WebViewClient() { }
     };
 
 } // namespace WebKit

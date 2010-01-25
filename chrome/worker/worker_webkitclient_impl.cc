@@ -5,6 +5,7 @@
 #include "chrome/worker/worker_webkitclient_impl.h"
 
 #include "base/logging.h"
+#include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/worker/worker_thread.h"
 #include "webkit/api/public/WebString.h"
 #include "webkit/api/public/WebURL.h"
@@ -24,6 +25,12 @@ WebKit::WebSandboxSupport* WorkerWebKitClientImpl::sandboxSupport() {
   return NULL;
 }
 
+bool WorkerWebKitClientImpl::sandboxEnabled() {
+  // Always return true because WebKit should always act as though the Sandbox
+  // is enabled for workers.  See the comment in WebKitClient for more info.
+  return true;
+}
+
 unsigned long long WorkerWebKitClientImpl::visitedLinkHash(
     const char* canonical_url,
     size_t length) {
@@ -34,6 +41,11 @@ unsigned long long WorkerWebKitClientImpl::visitedLinkHash(
 bool WorkerWebKitClientImpl::isLinkVisited(unsigned long long link_hash) {
   NOTREACHED();
   return false;
+}
+
+WebKit::WebMessagePortChannel*
+WorkerWebKitClientImpl::createMessagePortChannel() {
+  return new WebMessagePortChannelImpl();
 }
 
 void WorkerWebKitClientImpl::setCookies(const WebKit::WebURL& url,

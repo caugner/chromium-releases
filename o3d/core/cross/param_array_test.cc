@@ -32,12 +32,15 @@
 
 // Tests functionality of the ParamArray class
 
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
 #include "core/cross/id_manager.h"
 #include "core/cross/error.h"
+#include "core/cross/object_manager.h"
+#include "core/cross/pack.h"
 #include "core/cross/param_array.h"
+#include "core/cross/service_dependency.h"
 #include "core/cross/standard_param.h"
+#include "core/cross/transformation_context.h"
 
 namespace o3d {
 
@@ -81,7 +84,7 @@ TEST_F(ParamArrayTest, Basic) {
   EXPECT_TRUE(param_array->IsA(NamedObject::GetApparentClass()));
 
   // Check that it's size is zero.
-  EXPECT_EQ(param_array->size(), 0);
+  EXPECT_EQ(param_array->size(), 0U);
 }
 
 // Test ParamArray::CreateParam
@@ -95,14 +98,14 @@ TEST_F(ParamArrayTest, CreateParam) {
   ASSERT_TRUE(param_0 != NULL);
 
   // Check the length.
-  EXPECT_EQ(param_array->size(), 1);
+  EXPECT_EQ(param_array->size(), 1U);
 
   // Add some more.
   ParamFloat* param_5 = param_array->CreateParam<ParamFloat>(5);
   ASSERT_TRUE(param_5 != NULL);
 
   // Check that the params in between got created.
-  EXPECT_EQ(param_array->size(), 6);
+  EXPECT_EQ(param_array->size(), 6U);
   EXPECT_EQ(param_array->GetParam<ParamFloat>(0), param_0);
   EXPECT_TRUE(param_array->GetParam<ParamFloat>(1) != NULL);
   EXPECT_TRUE(param_array->GetParam<ParamFloat>(2) != NULL);
@@ -117,7 +120,7 @@ TEST_F(ParamArrayTest, CreateParam) {
   ParamFloat* new_param_5 = param_array->CreateParam<ParamFloat>(5);
   ASSERT_TRUE(new_param_5 != NULL);
 
-  EXPECT_EQ(param_array->size(), 6);
+  EXPECT_EQ(param_array->size(), 6U);
   EXPECT_EQ(param_array->GetParam<ParamFloat>(0), param_0);
   EXPECT_TRUE(param_array->GetParam<ParamFloat>(1) != NULL);
   EXPECT_TRUE(param_array->GetParam<ParamFloat>(2) != NULL);
@@ -141,7 +144,7 @@ TEST_F(ParamArrayTest, RemoveParam) {
   ASSERT_TRUE(param_0 != NULL);
 
   // Check the length.
-  EXPECT_EQ(param_array->size(), 7);
+  EXPECT_EQ(param_array->size(), 7U);
 
   // Get the last param so we can see that it moves.
   ParamFloat* param;
@@ -151,27 +154,27 @@ TEST_F(ParamArrayTest, RemoveParam) {
   // Remove a single param.
   param_array->RemoveParams(1, 1);
 
-  EXPECT_EQ(param_array->size(), 6);
+  EXPECT_EQ(param_array->size(), 6U);
   EXPECT_EQ(param_array->GetParam<ParamFloat>(5), param);
 
   // Remove a range
   param_array->RemoveParams(1, 3);
-  EXPECT_EQ(param_array->size(), 3);
+  EXPECT_EQ(param_array->size(), 3U);
   EXPECT_EQ(param_array->GetParam<ParamFloat>(2), param);
 
   // Remove the first param.
   param_array->RemoveParams(0, 1);
-  EXPECT_EQ(param_array->size(), 2);
+  EXPECT_EQ(param_array->size(), 2U);
   EXPECT_EQ(param_array->GetParam<ParamFloat>(1), param);
 
   // Remove the end param
   param_array->RemoveParams(1, 1);
-  EXPECT_EQ(param_array->size(), 1);
+  EXPECT_EQ(param_array->size(), 1U);
   EXPECT_NE(param_array->GetParam<ParamFloat>(0), param);
 
   // Remove the remaining param.
   param_array->RemoveParams(0, 1);
-  EXPECT_EQ(param_array->size(), 0);
+  EXPECT_EQ(param_array->size(), 0U);
   EXPECT_TRUE(param_array->GetParam<ParamFloat>(0) == NULL);
 }
 

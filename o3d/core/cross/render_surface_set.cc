@@ -30,7 +30,6 @@
  */
 
 
-#include "core/cross/precompile.h"
 #include "core/cross/render_surface_set.h"
 
 #include "core/cross/error.h"
@@ -93,10 +92,12 @@ void RenderSurfaceSet::Render(RenderContext* render_context) {
   }
   render_context->renderer()->GetRenderSurfaces(
       &old_render_surface_,
-      &old_depth_stencil_surface_);
+      &old_depth_stencil_surface_,
+      &old_is_back_buffer_);
   render_context->renderer()->SetRenderSurfaces(
       render_surface(),
-      render_depth_stencil_surface());
+      render_depth_stencil_surface(),
+      false);
 }
 
 void RenderSurfaceSet::PostRender(RenderContext* render_context) {
@@ -104,7 +105,8 @@ void RenderSurfaceSet::PostRender(RenderContext* render_context) {
     return;
   }
   render_context->renderer()->SetRenderSurfaces(old_render_surface_,
-                                                old_depth_stencil_surface_);
+                                                old_depth_stencil_surface_,
+                                                old_is_back_buffer_);
 }
 
 }  // namespace o3d

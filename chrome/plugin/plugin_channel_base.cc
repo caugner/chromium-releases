@@ -8,6 +8,10 @@
 #include "chrome/common/child_process.h"
 #include "ipc/ipc_sync_message.h"
 
+#if defined(OS_POSIX)
+#include "ipc/ipc_channel_posix.h"
+#endif
+
 typedef base::hash_map<std::string, scoped_refptr<PluginChannelBase> >
     PluginChannelMap;
 
@@ -40,6 +44,15 @@ PluginChannelBase* PluginChannelBase::GetChannel(
   }
 
   return channel;
+}
+
+void PluginChannelBase::Broadcast(IPC::Message* message) {
+  for (PluginChannelMap::iterator iter = g_plugin_channels_.begin();
+       iter != g_plugin_channels_.end();
+       ++iter) {
+    iter->second->Send(new IPC::Message(*message));
+  }
+  delete message;
 }
 
 PluginChannelBase::PluginChannelBase()
@@ -167,6 +180,11 @@ void PluginChannelBase::RemoveRoute(int route_id) {
     PluginChannelMap::iterator iter = g_plugin_channels_.begin();
     while (iter != g_plugin_channels_.end()) {
       if (iter->second == this) {
+#if defined(OS_POSIX)
+        if (channel_valid()) {
+          IPC::RemoveAndCloseChannelSocket(channel_name());
+        }
+#endif
         g_plugin_channels_.erase(iter);
         return;
       }
@@ -184,6 +202,11 @@ void PluginChannelBase::OnControlMessageReceived(const IPC::Message& msg) {
 }
 
 void PluginChannelBase::OnChannelError() {
+#if defined(OS_POSIX)
+  if (channel_valid()) {
+    IPC::RemoveAndCloseChannelSocket(channel_name());
+  }
+#endif
   channel_valid_ = false;
 }
 

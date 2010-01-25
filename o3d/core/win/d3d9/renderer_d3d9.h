@@ -74,31 +74,16 @@ class RendererD3D9 : public Renderer {
   // Released all hardware resources.
   virtual void Destroy();
 
-  // This method should be called before any draw calls take place in a
-  // frame. It clears the back buffer, stencil and depth buffers.
-  virtual bool BeginDraw();
-
-  // Finalizes the drawing of the frame.
-  virtual void EndDraw();
-
-  // Does any pre-rendering preparation
-  virtual bool StartRendering();
-
-  // Presents the results of the draw calls for this frame.
-  virtual void FinishRendering();
-
   // Attempts to reset the back buffer to its new dimensions.
   virtual void Resize(int width, int height);
 
-  // Turns fullscreen display on or off.
-  // Parameters:
-  //  fullscreen: true for fullscreen, false for in-plugin display
-  //  display: a platform-specific display identifier
-  //  mode_id: a mode returned by GetDisplayModes, for fullscreen use.  Ignored
-  //      in non-fullscreen mode.
-  // Returns true on success, false on failure.
-  virtual bool SetFullscreen(bool fullscreen, const DisplayWindow& display,
-                             int mode_id);
+  // Overridden from Renderer.
+  virtual bool GoFullscreen(const DisplayWindow& display,
+                            int mode_id);
+
+  // Overridden from Renderer.
+  virtual bool CancelFullscreen(const DisplayWindow& display,
+                                int width, int height);
 
   // Tells whether we're currently displayed fullscreen or not.
   virtual bool fullscreen() const {
@@ -112,21 +97,6 @@ class RendererD3D9 : public Renderer {
   // Get a single fullscreen display mode by id.
   // Returns true on success, false on error.
   virtual bool GetDisplayMode(int id, DisplayMode *mode);
-
-  // clears the current buffers
-  virtual void Clear(const Float4 &color,
-                     bool color_flag,
-                     float depth,
-                     bool depth_flag,
-                     int stencil,
-                     bool stencil_flag);
-
-  // Draws a Element.
-  virtual void RenderElement(Element* element,
-                             DrawElement* draw_element,
-                             Material* material,
-                             ParamObject* override,
-                             ParamCache* param_cache);
 
   // Creates a StreamBank, returning a platform specific implementation class.
   virtual StreamBank::Ref CreateStreamBank();
@@ -156,10 +126,6 @@ class RendererD3D9 : public Renderer {
       int width,
       int height);
 
-  // Saves a png screenshot 'file_name.png'.
-  // Returns true on success and false on failure.
-  virtual bool SaveScreen(const String& file_name);
-
   inline LPDIRECT3DDEVICE9 d3d_device() const { return d3d_device_; }
   inline LPDIRECT3D9 d3d() const { return d3d_; }
 
@@ -176,6 +142,29 @@ class RendererD3D9 : public Renderer {
   explicit RendererD3D9(ServiceLocator* service_locator);
 
   // Overridden from Renderer.
+  virtual bool PlatformSpecificBeginDraw();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificEndDraw();
+
+  // Overridden from Renderer.
+  virtual bool PlatformSpecificStartRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificFinishRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificPresent();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificClear(const Float4 &color,
+                                     bool color_flag,
+                                     float depth,
+                                     bool depth_flag,
+                                     int stencil,
+                                     bool stencil_flag);
+
+  // Overridden from Renderer.
   virtual ParamCache* CreatePlatformSpecificParamCache();
 
   // Overridden from Renderer.
@@ -183,8 +172,8 @@ class RendererD3D9 : public Renderer {
 
   // Overridden from Renderer.
   virtual void SetRenderSurfacesPlatformSpecific(
-      RenderSurface* surface,
-      RenderDepthStencilSurface* depth_surface);
+      const RenderSurface* surface,
+      const RenderDepthStencilSurface* depth_surface);
 
   // Sets the viewport. This is the platform specific version.
   void SetViewportInPixels(int left,
@@ -193,9 +182,6 @@ class RendererD3D9 : public Renderer {
                            int height,
                            float min_z,
                            float max_z);
-
-  // Overridden from Renderer.
-  virtual Texture::Ref CreatePlatformSpecificTextureFromBitmap(Bitmap* bitmap);
 
   // Overridden from Renderer.
   virtual Texture2D::Ref CreatePlatformSpecificTexture2D(
@@ -211,6 +197,9 @@ class RendererD3D9 : public Renderer {
       Texture::Format format,
       int levels,
       bool enable_render_surfaces);
+
+  // Overridden from Renderer.
+  virtual void ApplyDirtyStates();
 
  private:
   ServiceDependency<ObjectManager> object_manager_;
@@ -231,6 +220,12 @@ class RendererD3D9 : public Renderer {
 
   CComPtr<IDirect3DSurface9> back_buffer_surface_;
   CComPtr<IDirect3DSurface9> back_buffer_depth_surface_;
+
+  CComPtr<IDirect3DSurface9> current_d3d_surface_;
+  CComPtr<IDirect3DSurface9> current_d3d_depth_surface_;
+
+  // The display mode we are in.
+  D3DDISPLAYMODE d3d_display_mode_;
 
   // D3DPresent parameters (for initializing and resetting the device.)
   D3DPRESENT_PARAMETERS d3d_present_parameters_;

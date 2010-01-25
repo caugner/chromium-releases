@@ -8,19 +8,27 @@
 #include "app/resource_bundle.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/jstemplate_builder.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/net_util.h"
 
@@ -42,8 +50,16 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
   DictionaryValue localized_strings;
   localized_strings.SetString(L"title",
       l10n_util::GetString(IDS_EXTENSIONS_TITLE));
+  localized_strings.SetString(L"packDialogHeading",
+      l10n_util::GetString(IDS_EXTENSION_PACK_DIALOG_HEADING));
+  localized_strings.SetString(L"rootDirectoryLabel",
+      l10n_util::GetString(IDS_EXTENSION_PACK_DIALOG_ROOT_DIRECTORY_LABEL));
+  localized_strings.SetString(L"packDialogBrowse",
+      l10n_util::GetString(IDS_EXTENSION_PACK_DIALOG_BROWSE));
+  localized_strings.SetString(L"privateKeyLabel",
+      l10n_util::GetString(IDS_EXTENSION_PACK_DIALOG_PRIVATE_KEY_LABEL));
 
-  static const StringPiece extensions_html(
+  static const base::StringPiece extensions_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_EXTENSIONS_UI_HTML));
   std::string full_html(extensions_html.data(), extensions_html.size());
@@ -65,18 +81,31 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-ExtensionsDOMHandler::ExtensionsDOMHandler(
-    ExtensionsService* extension_service)
+ExtensionsDOMHandler::ExtensionsDOMHandler(ExtensionsService* extension_service)
     : extensions_service_(extension_service) {
- }
+}
 
 void ExtensionsDOMHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback("requestExtensionsData",
       NewCallback(this, &ExtensionsDOMHandler::HandleRequestExtensionsData));
   dom_ui_->RegisterMessageCallback("inspect",
       NewCallback(this, &ExtensionsDOMHandler::HandleInspectMessage));
+  dom_ui_->RegisterMessageCallback("reload",
+      NewCallback(this, &ExtensionsDOMHandler::HandleReloadMessage));
+  dom_ui_->RegisterMessageCallback("enable",
+      NewCallback(this, &ExtensionsDOMHandler::HandleEnableMessage));
   dom_ui_->RegisterMessageCallback("uninstall",
       NewCallback(this, &ExtensionsDOMHandler::HandleUninstallMessage));
+  dom_ui_->RegisterMessageCallback("options",
+    NewCallback(this, &ExtensionsDOMHandler::HandleOptionsMessage));
+  dom_ui_->RegisterMessageCallback("load",
+      NewCallback(this, &ExtensionsDOMHandler::HandleLoadMessage));
+  dom_ui_->RegisterMessageCallback("pack",
+      NewCallback(this, &ExtensionsDOMHandler::HandlePackMessage));
+  dom_ui_->RegisterMessageCallback("autoupdate",
+      NewCallback(this, &ExtensionsDOMHandler::HandleAutoUpdateMessage));
+  dom_ui_->RegisterMessageCallback("selectFilePath",
+      NewCallback(this, &ExtensionsDOMHandler::HandleSelectFilePathMessage));
 }
 
 void ExtensionsDOMHandler::HandleRequestExtensionsData(const Value* value) {
@@ -91,12 +120,31 @@ void ExtensionsDOMHandler::HandleRequestExtensionsData(const Value* value) {
     // themes.
     if (!(*extension)->IsTheme()) {
       extensions_list->Append(CreateExtensionDetailValue(
-          *extension, GetActivePagesForExtension((*extension)->id())));
+          *extension, GetActivePagesForExtension((*extension)->id()), true));
+    }
+  }
+  extensions = extensions_service_->disabled_extensions();
+  for (ExtensionList::const_iterator extension = extensions->begin();
+       extension != extensions->end(); ++extension) {
+    if (!(*extension)->IsTheme()) {
+      extensions_list->Append(CreateExtensionDetailValue(
+          *extension, GetActivePagesForExtension((*extension)->id()), false));
     }
   }
   results.Set(L"extensions", extensions_list);
 
   dom_ui_->CallJavascriptFunction(L"returnExtensionsData", results);
+
+  // Register for notifications that we need to reload the page.
+  registrar_.RemoveAll();
+  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
+      NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+      NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_UPDATE_DISABLED,
+      NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED_DISABLED,
+      NotificationService::AllSources());
 }
 
 void ExtensionsDOMHandler::HandleInspectMessage(const Value* value) {
@@ -121,6 +169,29 @@ void ExtensionsDOMHandler::HandleInspectMessage(const Value* value) {
   DevToolsManager::GetInstance()->OpenDevToolsWindow(host);
 }
 
+void ExtensionsDOMHandler::HandleReloadMessage(const Value* value) {
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 1);
+  std::string extension_id;
+  CHECK(list->GetString(0, &extension_id));
+  extensions_service_->ReloadExtension(extension_id);
+}
+
+void ExtensionsDOMHandler::HandleEnableMessage(const Value* value) {
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 2);
+  std::string extension_id, enable_str;
+  CHECK(list->GetString(0, &extension_id));
+  CHECK(list->GetString(1, &enable_str));
+  if (enable_str == "true") {
+    extensions_service_->EnableExtension(extension_id);
+  } else {
+    extensions_service_->DisableExtension(extension_id);
+  }
+}
+
 void ExtensionsDOMHandler::HandleUninstallMessage(const Value* value) {
   CHECK(value->IsType(Value::TYPE_LIST));
   const ListValue* list = static_cast<const ListValue*>(value);
@@ -128,6 +199,172 @@ void ExtensionsDOMHandler::HandleUninstallMessage(const Value* value) {
   std::string extension_id;
   CHECK(list->GetString(0, &extension_id));
   extensions_service_->UninstallExtension(extension_id, false);
+}
+
+void ExtensionsDOMHandler::HandleOptionsMessage(const Value* value) {
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 1);
+  std::string extension_id;
+  CHECK(list->GetString(0, &extension_id));
+  Extension *extension = extensions_service_->GetExtensionById(extension_id);
+  if (!extension || extension->options_url().is_empty()) {
+    return;
+  }
+  Browser* browser = Browser::GetOrCreateTabbedBrowser(dom_ui_->GetProfile());
+  CHECK(browser);
+  browser->OpenURL(extension->options_url(), GURL(), NEW_FOREGROUND_TAB,
+                   PageTransition::LINK);
+}
+
+void ExtensionsDOMHandler::HandleLoadMessage(const Value* value) {
+  std::string string_path;
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 1) << list->GetSize();
+  CHECK(list->GetString(0, &string_path));
+  FilePath file_path = FilePath::FromWStringHack(ASCIIToWide(string_path));
+  extensions_service_->LoadExtension(file_path);
+}
+
+void ExtensionsDOMHandler::ShowAlert(const std::string& message) {
+  ListValue arguments;
+  arguments.Append(Value::CreateStringValue(message));
+  dom_ui_->CallJavascriptFunction(L"alert", arguments);
+}
+
+void ExtensionsDOMHandler::HandlePackMessage(const Value* value) {
+  std::string extension_path;
+  std::string private_key_path;
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 2);
+  CHECK(list->GetString(0, &extension_path));
+  CHECK(list->GetString(1, &private_key_path));
+
+  FilePath root_directory = FilePath::FromWStringHack(ASCIIToWide(
+      extension_path));
+  FilePath key_file = FilePath::FromWStringHack(ASCIIToWide(private_key_path));
+
+  if (root_directory.empty()) {
+    if (extension_path.empty()) {
+      ShowAlert(l10n_util::GetStringUTF8(
+          IDS_EXTENSION_PACK_DIALOG_ERROR_ROOT_REQUIRED));
+    } else {
+      ShowAlert(l10n_util::GetStringUTF8(
+          IDS_EXTENSION_PACK_DIALOG_ERROR_ROOT_INVALID));
+    }
+
+    return;
+  }
+
+  if (!private_key_path.empty() && key_file.empty()) {
+    ShowAlert(l10n_util::GetStringUTF8(
+        IDS_EXTENSION_PACK_DIALOG_ERROR_KEY_INVALID));
+    return;
+  }
+
+  pack_job_ = new PackExtensionJob(this, root_directory, key_file,
+      ChromeThread::GetMessageLoop(ChromeThread::FILE));
+}
+
+void ExtensionsDOMHandler::OnPackSuccess(const FilePath& crx_file,
+                                         const FilePath& pem_file) {
+  std::string message;
+  if (!pem_file.empty()) {
+    message = WideToASCII(l10n_util::GetStringF(
+        IDS_EXTENSION_PACK_DIALOG_SUCCESS_BODY_NEW,
+        crx_file.ToWStringHack(),
+        pem_file.ToWStringHack()));
+  } else {
+    message = WideToASCII(l10n_util::GetStringF(
+        IDS_EXTENSION_PACK_DIALOG_SUCCESS_BODY_UPDATE,
+        crx_file.ToWStringHack()));
+  }
+  ShowAlert(message);
+
+  ListValue results;
+  dom_ui_->CallJavascriptFunction(L"hidePackDialog", results);
+}
+
+void ExtensionsDOMHandler::OnPackFailure(const std::wstring& error) {
+  ShowAlert(WideToASCII(error));
+}
+
+void ExtensionsDOMHandler::HandleAutoUpdateMessage(const Value* value) {
+  ExtensionUpdater* updater = extensions_service_->updater();
+  if (updater) {
+    updater->CheckNow();
+  }
+}
+
+void ExtensionsDOMHandler::HandleSelectFilePathMessage(const Value* value) {
+  std::string select_type;
+  std::string operation;
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 2);
+  CHECK(list->GetString(0, &select_type));
+  CHECK(list->GetString(1, &operation));
+
+  SelectFileDialog::Type type = SelectFileDialog::SELECT_FOLDER;
+  static SelectFileDialog::FileTypeInfo info;
+  int file_type_index = 0;
+  if (select_type == "file")
+    type = SelectFileDialog::SELECT_OPEN_FILE;
+
+  string16 select_title;
+  if (operation == "load")
+    select_title = l10n_util::GetStringUTF16(IDS_EXTENSION_LOAD_FROM_DIRECTORY);
+  else if (operation == "packRoot")
+    select_title = l10n_util::GetStringUTF16(
+        IDS_EXTENSION_PACK_DIALOG_SELECT_ROOT);
+  else if (operation == "pem") {
+    select_title = l10n_util::GetStringUTF16(
+        IDS_EXTENSION_PACK_DIALOG_SELECT_KEY);
+    info.extensions.push_back(std::vector<FilePath::StringType>());
+        info.extensions.front().push_back(FILE_PATH_LITERAL("pem"));
+        info.extension_description_overrides.push_back(WideToUTF16(
+            l10n_util::GetString(
+                IDS_EXTENSION_PACK_DIALOG_KEY_FILE_TYPE_DESCRIPTION)));
+        info.include_all_files = true;
+    file_type_index = 1;
+  } else {
+    NOTREACHED();
+    return;
+  }
+
+  load_extension_dialog_ = SelectFileDialog::Create(this);
+  load_extension_dialog_->SelectFile(type, select_title, FilePath(), &info,
+      file_type_index, FILE_PATH_LITERAL(""),
+      dom_ui_->tab_contents()->view()->GetTopLevelNativeWindow(), NULL);
+}
+
+
+void ExtensionsDOMHandler::FileSelected(const FilePath& path, int index,
+                                        void* params) {
+  // Add the extensions to the results structure.
+  ListValue results;
+  results.Append(Value::CreateStringValue(path.value()));
+  dom_ui_->CallJavascriptFunction(L"window.handleFilePathSelected", results);
+}
+
+void ExtensionsDOMHandler::Observe(NotificationType type,
+                                   const NotificationSource& source,
+                                   const NotificationDetails& details) {
+  switch (type.value) {
+    case NotificationType::EXTENSION_LOADED:
+    case NotificationType::EXTENSION_UNLOADED:
+    case NotificationType::EXTENSION_UPDATE_DISABLED:
+    case NotificationType::EXTENSION_UNLOADED_DISABLED:
+      if (dom_ui_->tab_contents())
+        dom_ui_->tab_contents()->controller().Reload(false);
+      registrar_.RemoveAll();
+      break;
+
+    default:
+      NOTREACHED();
+  }
 }
 
 static void CreateScriptFileDetailValue(
@@ -138,15 +375,11 @@ static void CreateScriptFileDetailValue(
 
   ListValue *list = new ListValue();
   for (size_t i = 0; i < scripts.size(); ++i) {
-    const UserScript::File &file = scripts[i];
-    // We are passing through GURLs to canonicalize the output to a valid
-    // URL path fragment.
-    GURL script_url = net::FilePathToFileURL(file.path());
-    GURL extension_url = net::FilePathToFileURL(extension_path);
-    std::string relative_path =
-        script_url.spec().substr(extension_url.spec().length() + 1);
-
-    list->Append(new StringValue(relative_path));
+    const UserScript::File& file = scripts[i];
+    // TODO(cira): this information is not used on extension page yet. We
+    // may want to display actual resource that got loaded, not default.
+    list->Append(
+        new StringValue(file.resource().relative_path().value()));
   }
   script_data->Set(key, list);
 }
@@ -176,27 +409,32 @@ DictionaryValue* ExtensionsDOMHandler::CreateContentScriptDetailValue(
 
 // Static
 DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
-    const Extension *extension, const std::vector<ExtensionPage>& pages) {
+    const Extension *extension, const std::vector<ExtensionPage>& pages,
+    bool enabled) {
   DictionaryValue* extension_data = new DictionaryValue();
 
   extension_data->SetString(L"id", extension->id());
   extension_data->SetString(L"name", extension->name());
   extension_data->SetString(L"description", extension->description());
   extension_data->SetString(L"version", extension->version()->GetString());
+  extension_data->SetBoolean(L"enabled", enabled);
+  if (!extension->options_url().is_empty()) {
+    extension_data->SetString(L"options_url", extension->options_url().spec());
+  }
 
   // Add list of content_script detail DictionaryValues
   ListValue *content_script_list = new ListValue();
   UserScriptList content_scripts = extension->content_scripts();
   for (UserScriptList::const_iterator script = content_scripts.begin();
     script != content_scripts.end(); ++script) {
-      content_script_list->Append(CreateContentScriptDetailValue(*script,
-          extension->path()));
+      content_script_list->Append(
+          CreateContentScriptDetailValue(*script, extension->path()));
   }
   extension_data->Set(L"content_scripts", content_script_list);
 
   // Add permissions
   ListValue *permission_list = new ListValue;
-  std::vector<URLPattern> permissions = extension->permissions();
+  std::vector<URLPattern> permissions = extension->host_permissions();
   for (std::vector<URLPattern>::iterator permission = permissions.begin();
        permission != permissions.end(); ++permission) {
     permission_list->Append(Value::CreateStringValue(
@@ -231,7 +469,7 @@ std::vector<ExtensionPage> ExtensionsDOMHandler::GetActivePagesForExtension(
     RenderViewHost* view = (*iter)->render_view_host();
     if ((*iter)->extension_id() == extension_id && view) {
       result.push_back(ExtensionPage((*iter)->url(),
-                                     view->process()->pid(),
+                                     view->process()->id(),
                                      view->routing_id()));
     }
   }
@@ -240,6 +478,8 @@ std::vector<ExtensionPage> ExtensionsDOMHandler::GetActivePagesForExtension(
 }
 
 ExtensionsDOMHandler::~ExtensionsDOMHandler() {
+  if (pack_job_.get())
+    pack_job_->ClearClient();
 }
 
 // ExtensionsDOMHandler, public: -----------------------------------------------

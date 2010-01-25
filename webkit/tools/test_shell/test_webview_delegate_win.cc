@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,21 +12,21 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 
-#include "base/gfx/gdi_util.h"
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/gdi_util.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/gfx/point.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/trace_event.h"
 #include "net/base/net_errors.h"
 #include "webkit/api/public/WebCursorInfo.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebRect.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webdropdata.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webview.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -37,65 +37,19 @@
 
 using WebKit::WebCursorInfo;
 using WebKit::WebNavigationPolicy;
+using WebKit::WebPopupMenuInfo;
 using WebKit::WebRect;
+using WebKit::WebWidget;
 
-// WebViewDelegate -----------------------------------------------------------
+// WebViewClient --------------------------------------------------------------
 
-TestWebViewDelegate::~TestWebViewDelegate() {
-  RevokeDragDrop(shell_->webViewWnd());
+WebWidget* TestWebViewDelegate::createPopupMenu(
+    const WebPopupMenuInfo& info) {
+  NOTREACHED();
+  return NULL;
 }
 
-WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
-    WebView* webview,
-    const GURL& url,
-    const std::string& mime_type,
-    const std::string& clsid,
-    std::string* actual_mime_type) {
-  HWND hwnd = shell_->webViewHost()->view_handle();
-  if (!hwnd)
-    return NULL;
-
-  bool allow_wildcard = true;
-  WebPluginInfo info;
-  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(url, mime_type, clsid,
-                                                     allow_wildcard, &info,
-                                                     actual_mime_type))
-    return NULL;
-
-  if (actual_mime_type && !actual_mime_type->empty())
-    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type, hwnd);
-  else
-    return WebPluginDelegateImpl::Create(info.path, mime_type, hwnd);
-}
-
-void TestWebViewDelegate::DidMovePlugin(const WebPluginGeometry& move) {
-  HRGN hrgn = ::CreateRectRgn(move.clip_rect.x(),
-                              move.clip_rect.y(),
-                              move.clip_rect.right(),
-                              move.clip_rect.bottom());
-  gfx::SubtractRectanglesFromRegion(hrgn, move.cutout_rects);
-
-  // Note: System will own the hrgn after we call SetWindowRgn,
-  // so we don't need to call DeleteObject(hrgn)
-  ::SetWindowRgn(move.window, hrgn, FALSE);
-  unsigned long flags = 0;
-  if (move.visible)
-    flags |= SWP_SHOWWINDOW;
-  else
-    flags |= SWP_HIDEWINDOW;
-
-  ::SetWindowPos(move.window,
-                 NULL,
-                 move.window_rect.x(),
-                 move.window_rect.y(),
-                 move.window_rect.width(),
-                 move.window_rect.height(),
-                 flags);
-}
-
-void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
-  MessageBox(NULL, message.c_str(), L"JavaScript Alert", MB_OK);
-}
+// WebWidgetClient ------------------------------------------------------------
 
 void TestWebViewDelegate::show(WebNavigationPolicy) {
   if (WebWidgetHost* host = GetWidgetHost()) {
@@ -132,7 +86,7 @@ WebRect TestWebViewDelegate::windowRect() {
 
 void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
   if (this == shell_->delegate()) {
-    // ignored
+    set_fake_window_rect(rect);
   } else if (this == shell_->popup_delegate()) {
     MoveWindow(shell_->popupWnd(),
                rect.x, rect.y, rect.width, rect.height, FALSE);
@@ -140,6 +94,9 @@ void TestWebViewDelegate::setWindowRect(const WebRect& rect) {
 }
 
 WebRect TestWebViewDelegate::rootWindowRect() {
+  if (using_fake_rect_) {
+    return fake_window_rect();
+  }
   if (WebWidgetHost* host = GetWidgetHost()) {
     RECT rect;
     HWND root_window = ::GetAncestor(host->view_handle(), GA_ROOT);
@@ -159,7 +116,7 @@ void TestWebViewDelegate::runModal() {
   if (!host)
     return;
 
-  show(WebNavigationPolicy() /*XXX NEW_WINDOW*/);
+  show(WebKit::WebNavigationPolicyNewWindow);
 
   WindowList* wl = TestShell::windowList();
   for (WindowList::const_iterator i = wl->begin(); i != wl->end(); ++i) {
@@ -174,11 +131,82 @@ void TestWebViewDelegate::runModal() {
     EnableWindow(*i, TRUE);
 }
 
+// WebPluginPageDelegate ------------------------------------------------------
+
+webkit_glue::WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
+    const GURL& url,
+    const std::string& mime_type,
+    std::string* actual_mime_type) {
+  HWND hwnd = shell_->webViewHost()->view_handle();
+  if (!hwnd)
+    return NULL;
+
+  bool allow_wildcard = true;
+  WebPluginInfo info;
+  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
+          url, mime_type, allow_wildcard, &info, actual_mime_type)) {
+    return NULL;
+  }
+
+  if (actual_mime_type && !actual_mime_type->empty())
+    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type, hwnd);
+  else
+    return WebPluginDelegateImpl::Create(info.path, mime_type, hwnd);
+}
+
+void TestWebViewDelegate::CreatedPluginWindow(
+    gfx::PluginWindowHandle handle) {
+  // ignored
+}
+
+void TestWebViewDelegate::WillDestroyPluginWindow(
+    gfx::PluginWindowHandle handle) {
+  // ignored
+}
+
+void TestWebViewDelegate::DidMovePlugin(
+    const webkit_glue::WebPluginGeometry& move) {
+  unsigned long flags = 0;
+
+  if (move.rects_valid) {
+    HRGN hrgn = ::CreateRectRgn(move.clip_rect.x(),
+                                move.clip_rect.y(),
+                                move.clip_rect.right(),
+                                move.clip_rect.bottom());
+    gfx::SubtractRectanglesFromRegion(hrgn, move.cutout_rects);
+
+    // Note: System will own the hrgn after we call SetWindowRgn,
+    // so we don't need to call DeleteObject(hrgn)
+    ::SetWindowRgn(move.window, hrgn, FALSE);
+  } else {
+    flags |= (SWP_NOSIZE | SWP_NOMOVE);
+  }
+
+  if (move.visible)
+    flags |= SWP_SHOWWINDOW;
+  else
+    flags |= SWP_HIDEWINDOW;
+
+  ::SetWindowPos(move.window,
+                 NULL,
+                 move.window_rect.x(),
+                 move.window_rect.y(),
+                 move.window_rect.width(),
+                 move.window_rect.height(),
+                 flags);
+}
+
+// Public methods -------------------------------------------------------------
+
 void TestWebViewDelegate::UpdateSelectionClipboard(bool is_empty_selection) {
   // No selection clipboard on windows, do nothing.
 }
 
-// Private methods -----------------------------------------------------------
+// Private methods ------------------------------------------------------------
+
+void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
+  MessageBox(NULL, message.c_str(), L"JavaScript Alert", MB_OK);
+}
 
 void TestWebViewDelegate::SetPageTitle(const std::wstring& title) {
   // The Windows test shell, pre-refactoring, ignored this.  *shrug*

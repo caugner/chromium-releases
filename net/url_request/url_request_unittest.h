@@ -24,6 +24,7 @@
 #include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/ssl_config_service_defaults.h"
 #include "net/http/http_network_layer.h"
 #include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request.h"
@@ -45,9 +46,10 @@ class TestURLRequestContext : public URLRequestContext {
   TestURLRequestContext() {
     host_resolver_ = net::CreateSystemHostResolver();
     proxy_service_ = net::ProxyService::CreateNull();
+    ssl_config_service_ = new net::SSLConfigServiceDefaults;
     http_transaction_factory_ =
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
-            proxy_service_);
+            proxy_service_, ssl_config_service_);
   }
 
   explicit TestURLRequestContext(const std::string& proxy) {
@@ -55,14 +57,14 @@ class TestURLRequestContext : public URLRequestContext {
     net::ProxyConfig proxy_config;
     proxy_config.proxy_rules.ParseFromString(proxy);
     proxy_service_ = net::ProxyService::CreateFixed(proxy_config);
+    ssl_config_service_ = new net::SSLConfigServiceDefaults;
     http_transaction_factory_ =
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
-            proxy_service_);
+            proxy_service_, ssl_config_service_);
   }
 
   virtual ~TestURLRequestContext() {
     delete http_transaction_factory_;
-    delete proxy_service_;
   }
 };
 
@@ -238,8 +240,15 @@ class TestDelegate : public URLRequest::Delegate {
 class BaseTestServer : public base::RefCounted<BaseTestServer> {
  protected:
   BaseTestServer() { }
+  BaseTestServer(int connection_attempts, int connection_timeout)
+      : launcher_(connection_attempts, connection_timeout) { }
 
  public:
+  virtual ~BaseTestServer() { }
+
+  void set_forking(bool forking) {
+    launcher_.set_forking(forking);
+  }
 
   // Used with e.g. HTTPTestServer::SendQuit()
   bool WaitToFinish(int milliseconds) {
@@ -256,17 +265,33 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
   }
 
   GURL TestServerPage(const std::string& path) {
-    return GURL(base_address_ + path);
+    // TODO(phajdan.jr): Check for problems with IPv6.
+    return GURL(scheme_ + "://" + host_name_ + ":" + port_str_ + "/" + path);
   }
 
+  GURL TestServerPage(const std::string& path,
+                      const std::string& user,
+                      const std::string& password) {
+    // TODO(phajdan.jr): Check for problems with IPv6.
+
+    if (password.empty())
+      return GURL(scheme_ + "://" + user + "@" +
+                  host_name_ + ":" + port_str_ + "/" + path);
+
+    return GURL(scheme_ + "://" + user + ":" + password +
+                "@" + host_name_ + ":" + port_str_ + "/" + path);
+  }
+
+  // Deprecated in favor of TestServerPage.
+  // TODO(phajdan.jr): Remove TestServerPageW.
   GURL TestServerPageW(const std::wstring& path) {
-    return GURL(base_address_ + WideToUTF8(path));
+    return TestServerPage(WideToUTF8(path));
   }
 
   virtual bool MakeGETRequest(const std::string& page_name) = 0;
 
-  std::wstring GetDataDirectory() {
-    return launcher_.GetDocumentRootPath().ToWStringHack();
+  FilePath GetDataDirectory() {
+    return launcher_.GetDocumentRootPath();
   }
 
  protected:
@@ -275,41 +300,19 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
              const FilePath& document_root,
              const FilePath& cert_path,
              const std::wstring& file_root_url) {
-    std::string blank;
-    return Start(protocol, host_name, port, document_root, cert_path,
-                 file_root_url, blank, blank);
-  }
-
-  bool Start(net::TestServerLauncher::Protocol protocol,
-             const std::string& host_name, int port,
-             const FilePath& document_root,
-             const FilePath& cert_path,
-             const std::wstring& file_root_url,
-             const std::string& url_user,
-             const std::string& url_password) {
     if (!launcher_.Start(protocol,
         host_name, port, document_root, cert_path, file_root_url))
       return false;
 
-    std::string scheme;
     if (protocol == net::TestServerLauncher::ProtoFTP)
-      scheme = "ftp";
+      scheme_ = "ftp";
     else
-      scheme = "http";
+      scheme_ = "http";
     if (!cert_path.empty())
-      scheme.push_back('s');
+      scheme_.push_back('s');
 
-    std::string port_str = IntToString(port);
-    if (url_user.empty()) {
-      base_address_ = scheme + "://" + host_name + ":" + port_str + "/";
-    } else {
-      if (url_password.empty())
-        base_address_ = scheme + "://" + url_user + "@" +
-            host_name + ":" + port_str + "/";
-      else
-        base_address_ = scheme + "://" + url_user + ":" + url_password +
-            "@" + host_name + ":" + port_str + "/";
-    }
+    host_name_ = host_name;
+    port_str_ = IntToString(port);
     return true;
   }
 
@@ -337,7 +340,9 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
   };
 
   net::TestServerLauncher launcher_;
-  std::string base_address_;
+  std::string scheme_;
+  std::string host_name_;
+  std::string port_str_;
 };
 
 
@@ -345,6 +350,10 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
 class HTTPTestServer : public BaseTestServer {
  protected:
   explicit HTTPTestServer() : loop_(NULL) {
+  }
+
+  explicit HTTPTestServer(int connection_attempts, int connection_timeout)
+      : BaseTestServer(connection_attempts, connection_timeout), loop_(NULL) {
   }
 
  public:
@@ -356,20 +365,59 @@ class HTTPTestServer : public BaseTestServer {
     return CreateServerWithFileRootURL(document_root, std::wstring(), loop);
   }
 
+  static scoped_refptr<HTTPTestServer> CreateServer(
+      const std::wstring& document_root,
+      MessageLoop* loop,
+      int connection_attempts,
+      int connection_timeout) {
+    return CreateServerWithFileRootURL(document_root, std::wstring(), loop,
+                                       connection_attempts,
+                                       connection_timeout);
+  }
+
   static scoped_refptr<HTTPTestServer> CreateServerWithFileRootURL(
       const std::wstring& document_root,
       const std::wstring& file_root_url,
       MessageLoop* loop) {
-    scoped_refptr<HTTPTestServer> test_server = new HTTPTestServer();
+    return CreateServerWithFileRootURL(document_root, file_root_url,
+                                       loop, 10, 1000);
+  }
+
+  static scoped_refptr<HTTPTestServer> CreateForkingServer(
+      const std::wstring& document_root) {
+    scoped_refptr<HTTPTestServer> test_server =
+        new HTTPTestServer(10, 1000);
+    test_server->set_forking(true);
+    FilePath no_cert;
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    if (!StartTestServer(test_server.get(), docroot, no_cert, std::wstring()))
+      return NULL;
+    return test_server;
+  }
+
+  static scoped_refptr<HTTPTestServer> CreateServerWithFileRootURL(
+      const std::wstring& document_root,
+      const std::wstring& file_root_url,
+      MessageLoop* loop,
+      int connection_attempts,
+      int connection_timeout) {
+    scoped_refptr<HTTPTestServer> test_server =
+        new HTTPTestServer(connection_attempts, connection_timeout);
     test_server->loop_ = loop;
     FilePath no_cert;
     FilePath docroot = FilePath::FromWStringHack(document_root);
-    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
-                            kDefaultHostName, kHTTPDefaultPort,
-                            docroot, no_cert, file_root_url)) {
+    if (!StartTestServer(test_server.get(), docroot, no_cert, file_root_url))
       return NULL;
-    }
     return test_server;
+  }
+
+  static bool StartTestServer(HTTPTestServer* server,
+                              const FilePath& document_root,
+                              const FilePath& cert_path,
+                              const std::wstring& file_root_url) {
+    return server->Start(net::TestServerLauncher::ProtoHTTP, kDefaultHostName,
+                         kHTTPDefaultPort, document_root, cert_path,
+                         file_root_url);
   }
 
   // A subclass may wish to send the request in a different manner
@@ -527,27 +575,18 @@ class FTPTestServer : public BaseTestServer {
 
   static scoped_refptr<FTPTestServer> CreateServer(
       const std::wstring& document_root) {
-    std::string blank;
-    return CreateServer(document_root, blank, blank);
-  }
-
-  static scoped_refptr<FTPTestServer> CreateServer(
-      const std::wstring& document_root,
-      const std::string& url_user,
-      const std::string& url_password) {
     scoped_refptr<FTPTestServer> test_server = new FTPTestServer();
     FilePath docroot = FilePath::FromWStringHack(document_root);
     FilePath no_cert;
     if (!test_server->Start(net::TestServerLauncher::ProtoFTP,
-        kDefaultHostName, kFTPDefaultPort, docroot, no_cert, std::wstring(),
-        url_user, url_password)) {
+        kDefaultHostName, kFTPDefaultPort, docroot, no_cert, std::wstring())) {
       return NULL;
     }
     return test_server;
   }
 
   virtual bool MakeGETRequest(const std::string& page_name) {
-    const GURL& url = TestServerPage(base_address_, page_name);
+    const GURL& url = TestServerPage(page_name);
     TestDelegate d;
     URLRequest request(url, &d);
     request.set_context(new TestURLRequestContext());

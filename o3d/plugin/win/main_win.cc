@@ -42,6 +42,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/ref_counted.h"
 #include "core/cross/display_mode.h"
 #include "core/cross/event.h"
 #include "plugin/cross/plugin_logging.h"
@@ -50,14 +51,32 @@
 #include "v8/include/v8.h"
 #include "breakpad/win/bluescreen_detector.h"
 
+#if defined(RENDERER_CB)
+#include "core/cross/command_buffer/renderer_cb.h"
+#include "core/cross/command_buffer/display_window_cb.h"
+#include "gpu_plugin/command_buffer.h"
+#endif
+
 using glue::_o3d::PluginObject;
 using glue::StreamManager;
 using o3d::DisplayWindowWindows;
 using o3d::Event;
 
+#if defined(RENDERER_CB)
+using o3d::gpu_plugin::CommandBuffer;
+using o3d::gpu_plugin::NPObjectPointer;
+#endif
+
 namespace {
 // The instance handle of the O3D DLL.
 HINSTANCE g_module_instance;
+
+// TODO(apatrick): We can have an NPBrowser in the other configurations when we
+//    move over to gyp. This is just to avoid having to write scons files for
+//    np_utils.
+#if defined(RENDERER_CB)
+o3d::gpu_plugin::NPBrowser* g_browser;
+#endif
 }  // namespace anonymous
 
 #if !defined(O3D_INTERNAL_PLUGIN)
@@ -87,12 +106,17 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
 #endif  // O3D_INTERNAL_PLUGIN
 
 namespace {
-const wchar_t* const kFullScreenWindowClassName = L"O3DFullScreenWindowClass";
+const wchar_t* const kO3DWindowClassName = L"O3DWindowClass";
+
+void CleanupAllWindows(PluginObject *obj);
 
 // We would normally make this a stack variable in main(), but in a
-// plugin, that's not possible, so we allocate it dynamically and
-// destroy it explicitly.
-scoped_ptr<base::AtExitManager> g_at_exit_manager;
+// plugin, that's not possible, so we make it a global. When the DLL is loaded
+// this it gets constructed and when it is unlooaded it is destructed. Note
+// that this cannot be done in NP_Initialize and NP_Shutdown because those
+// calls do not necessarily signify the DLL being loaded and unloaded. If the
+// DLL is not unloaded then the values of global variables are preserved.
+base::AtExitManager g_at_exit_manager;
 
 static int HandleKeyboardEvent(PluginObject *obj,
                                HWND hWnd,
@@ -349,79 +373,6 @@ void HandleMouseEvent(PluginObject *obj,
   }
 }
 
-// This returns 0 on success, 1 on failure, to match WindowProc.
-LRESULT ForwardEvent(PluginObject *obj,
-                     HWND hWnd,
-                     UINT Msg,
-                     WPARAM wParam,
-                     LPARAM lParam,
-                     bool translateCoords) {
-  DCHECK(obj);
-  DCHECK(obj->GetPluginHWnd());
-  HWND dest_hwnd = obj->GetParentHWnd();
-  DCHECK(hWnd);
-  DCHECK(dest_hwnd);
-  bool fullscreen = hWnd == obj->GetFullscreenHWnd();
-  if (fullscreen) {
-    dest_hwnd = obj->GetPluginHWnd();
-  } else if (obj->IsChrome()) {
-    // When trying to find the parent window of the Chrome plugin, new Chrome is
-    // different than old Chrome; it's got an extra wrapper window around the
-    // plugin that didn't used to be there.  The wrapper won't listen to events,
-    // so if we see it, we have to go one window up the tree from there in order
-    // to find someone who'll listen to us.  The new behavior is seen in nightly
-    // builds of Chromium as of 2.0.163.0 (9877) [but went in some time before
-    // that]; the old behavior is still exhibited by Chrome as of 1.0.154.48.
-    wchar_t chrome_class_name[] = L"WrapperNativeWindowClass";
-    wchar_t buffer[sizeof(chrome_class_name) / sizeof(chrome_class_name[0])];
-    if (!GetClassName(dest_hwnd, buffer, sizeof(buffer) / sizeof(buffer[0]))) {
-      return 1;
-    }
-    if (!wcscmp(chrome_class_name, buffer)) {
-      dest_hwnd = ::GetParent(dest_hwnd);
-    }
-  }
-  if (translateCoords) {
-    int x = GET_X_LPARAM(lParam);
-    int y = GET_Y_LPARAM(lParam);
-
-    RECT rect0, rect1;
-    if (!::GetWindowRect(hWnd, &rect0)) {
-      DCHECK(false);
-      return 1;
-    }
-    if (!::GetWindowRect(dest_hwnd, &rect1)) {
-      DCHECK(false);
-      return 1;
-    }
-    int width = rect0.right - rect0.left;
-    int width_1 = rect1.right - rect1.left;
-
-    int x_1;
-    int y_1;
-
-    if (!fullscreen) {  // Translate from plugin to browser offset coords.
-      x_1 = x - rect1.left + rect0.left;
-    } else {  // Translate from screen to plugin offset coords.
-      // The plugin and the fullscreen window each fill their respective entire
-      // window, so there aren't any offsets to add or subtract.
-      x_1 = x * width_1 / width;
-    }
-    int height = rect0.bottom - rect0.top;
-    int height_1 = rect1.bottom - rect1.top;
-    if (!fullscreen) {  // Translate from plugin to browser offset coords.
-      y_1 = y - rect1.top + rect0.top;
-    } else {  // Translate from screen to plugin offset coords.
-      // The plugin and the fullscreen window each fill their respective entire
-      // window, so there aren't any offsets to add or subtract.
-      y_1 = y * height_1 / height;
-    }
-
-    lParam = MAKELPARAM(x_1, y_1);
-  }
-  return !::PostMessage(dest_hwnd, Msg, wParam, lParam);
-}
-
 LRESULT HandleDragAndDrop(PluginObject *obj, WPARAM wParam) {
   HDROP hDrop = reinterpret_cast<HDROP>(wParam);
   UINT num_files = ::DragQueryFile(hDrop, 0xFFFFFFFF, NULL, 0);
@@ -494,13 +445,6 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
 
   switch (Msg) {
     case WM_PAINT: {
-      if (reentrance_count.get() > 1) {
-        // In Chrome, alert dialogs raised from JavaScript cause
-        // reentrant WM_PAINT messages to be dispatched and 100% CPU
-        // to be consumed unless we call this
-        ::ValidateRect(hWnd, NULL);
-        break;  // Ignore this message; we're reentrant.
-      }
       PAINTSTRUCT paint_struct;
       HDC hdc = ::BeginPaint(hWnd, &paint_struct);
       if (paint_struct.rcPaint.right - paint_struct.rcPaint.left != 0 ||
@@ -511,11 +455,10 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
           if (!obj->RecordPaint()) {
             ::SetPixelV(hdc, 0, 0, RGB(0, 0, 0));
           }
-
           obj->renderer()->set_need_to_render(true);
         } else {
-          // If there Client has no Renderer associated with it, paint the draw
-          // area gray.
+          // If the Client has no Renderer associated with it, paint the
+          // draw area gray.
           ::SelectObject(paint_struct.hdc, GetStockObject(DKGRAY_BRUSH));
           ::Rectangle(paint_struct.hdc,
                       paint_struct.rcPaint.left,
@@ -525,29 +468,17 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
         }
       }
       ::EndPaint(hWnd, &paint_struct);
-      break;
+      return 0;
     }
     case WM_SETCURSOR: {
       obj->set_cursor(obj->cursor());
       return 1;
     }
     case WM_ERASEBKGND: {
-      return 1;  // tell windows we don't need the background cleared
+      // Tell windows we don't need the background cleared.
+      return 1;
     }
-    case WM_SIZE: {
-      // Resize event called
-      if (reentrance_count.get() > 1) {
-        break;  // Ignore this message; we're reentrant.
-      }
 
-      // get new dimensions of window
-      int window_width = LOWORD(lParam);
-      int window_height = HIWORD(lParam);
-
-      // Tell the plugin that it has been resized
-      obj->Resize(window_width, window_height);
-      break;
-    }
     case WM_TIMER: {
       if (reentrance_count.get() > 1) {
         break;  // Ignore this message; we're reentrant.
@@ -564,7 +495,6 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
       // repaint the window.
       if (obj->client()->render_mode() == o3d::Client::RENDERMODE_CONTINUOUS) {
         InvalidateRect(obj->GetHWnd(), NULL, FALSE);
-        reentrance_count.decrement();
         UpdateWindow(obj->GetHWnd());
       }
 
@@ -624,20 +554,28 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
     case WM_SYSKEYUP:
       return HandleKeyboardEvent(obj, hWnd, Msg, wParam, lParam);
 
-#if(_WIN32_WINNT >= 0x0500)
-    case WM_APPCOMMAND:
-#endif /* _WIN32_WINNT >= 0x0500 */
-      return ForwardEvent(obj, hWnd, Msg, wParam, lParam, false);
-
     case WM_DROPFILES:
       return HandleDragAndDrop(obj, wParam);
+
+    case WM_ACTIVATE:
+      // We don't receive WM_KILLFOCUS when Alt-Tabbing away from a
+      // full-screen window. We do however get WM_ACTIVATE.
+      if (LOWORD(wParam) == WA_INACTIVE) {
+        if (obj->fullscreen()) {
+          obj->CancelFullscreenDisplay();
+        }
+      }
+      return 0;
 
     case WM_KILLFOCUS:
       // If we lose focus [which also happens on alt+f4 killing the fullscreen
       // window] fall back to plugin mode to avoid lost-device awkwardness.
       // TODO: We'll have problems with this when dealing with e.g.
       // Japanese text input IME windows.
-      if (hWnd == obj->GetFullscreenHWnd()) {
+      if (obj->fullscreen()) {
+        // TODO(kbr): consider doing this somehow more asynchronously;
+        // not supposed to cause window activation in the WM_KILLFOCUS
+        // handler
         obj->CancelFullscreenDisplay();
         return 0;
       }
@@ -650,34 +588,73 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
       // manually, its destructor will know not to.
       reentrance_count.decrement();
 
-      if (hWnd == obj->GetFullscreenHWnd()) {
-        return ::CallWindowProc(::DefWindowProc,
-                                hWnd,
-                                Msg,
-                                wParam,
-                                lParam);
-      } else {
-        return ::CallWindowProc(obj->GetDefaultPluginWindowProc(),
-                                hWnd,
-                                Msg,
-                                wParam,
-                                lParam);
-      }
+      return ::CallWindowProc(::DefWindowProc,
+                              hWnd,
+                              Msg,
+                              wParam,
+                              lParam);
   }
   return 0;
 }
 
-bool RegisterFullScreenWindowClass() {
-  WNDCLASSEX window_class = { sizeof(WNDCLASSEX) };
+static const wchar_t* kOrigWndProcName = L"o3dOrigWndProc";
+
+LRESULT CALLBACK PluginWindowInterposer(HWND hWnd,
+                                        UINT Msg,
+                                        WPARAM wParam,
+                                        LPARAM lParam) {
+  PluginObject *obj = PluginObject::GetPluginProperty(hWnd);
+
+  // Need to get the original window proc before potentially calling
+  // CleanupAllWindows which will clear it.
+  WNDPROC proc = static_cast<WNDPROC>(GetProp(hWnd, kOrigWndProcName));
+  DCHECK(proc != NULL);
+
+  switch (Msg) {
+    case WM_PAINT: {
+      // For nicer startup appearance, allow the browser to paint the
+      // plugin window until we start to draw 3D content. Forbid the
+      // browser from painting once we have started to draw to prevent
+      // a flash in Firefox upon our receiving focus the first time.
+      if (obj != NULL && obj->renderer() != NULL) {
+        if (obj->renderer()->presented_once()) {
+          // Tell Windows we painted the window region.
+          ::ValidateRect(hWnd, NULL);
+          return 0;
+        }
+      }
+      // Break out to call the original window procedure to paint the
+      // window.
+      break;
+    }
+
+    case WM_DESTROY:
+      if (obj != NULL) {
+        CleanupAllWindows(obj);
+      }
+      break;
+
+    default:
+      break;
+  }
+
+  return CallWindowProc(proc, hWnd, Msg, wParam, lParam);
+}
+
+bool RegisterO3DWindowClass() {
+  WNDCLASSEX window_class;
+  ZeroMemory(&window_class, sizeof(window_class));
+  window_class.cbSize = sizeof(window_class);
   window_class.hInstance = g_module_instance;
   window_class.lpfnWndProc = WindowProc;
-  window_class.lpszClassName = kFullScreenWindowClassName;
-  window_class.style = CS_DBLCLKS;
+  window_class.lpszClassName = kO3DWindowClassName;
+  // We use CS_OWNDC in case we are rendering OpenGL into this window.
+  window_class.style = CS_DBLCLKS | CS_OWNDC;
   return RegisterClassEx(&window_class) != 0;
 }
 
-void UnregisterFullScreenWindowClass() {
-  UnregisterClass(kFullScreenWindowClassName, g_module_instance);
+void UnregisterO3DWindowClass() {
+  UnregisterClass(kO3DWindowClassName, g_module_instance);
 }
 
 NPError InitializePlugin() {
@@ -691,10 +668,6 @@ NPError InitializePlugin() {
     g_exception_manager->StartMonitoring();
   }
 
-  // Initialize the AtExitManager so that base singletons can be
-  // destroyed properly.
-  g_at_exit_manager.reset(new base::AtExitManager());
-
   // Turn on the logging.
   CommandLine::Init(0, NULL);
   InitLogging(L"debug.log",
@@ -705,58 +678,54 @@ NPError InitializePlugin() {
 
   DLOG(INFO) << "NP_Initialize";
 
-  if (!RegisterFullScreenWindowClass())
+  if (!RegisterO3DWindowClass())
     return NPERR_MODULE_LOAD_FAILED_ERROR;
 
   return NPERR_NO_ERROR;
 }
 
-void CleanupFullscreenWindow(PluginObject *obj) {
-  DCHECK(obj->GetFullscreenHWnd());
-  obj->StorePluginProperty(obj->GetPluginHWnd(), obj);
-  ::DestroyWindow(obj->GetFullscreenHWnd());
-  obj->SetFullscreenHWnd(NULL);
-}
-
 void CleanupAllWindows(PluginObject *obj) {
-  DCHECK(obj->GetHWnd());
-  DCHECK(obj->GetPluginHWnd());
-  ::KillTimer(obj->GetHWnd(), 0);
-  if (obj->GetFullscreenHWnd()) {
-    CleanupFullscreenWindow(obj);
+  if (obj->GetContentHWnd()) {
+    ::KillTimer(obj->GetContentHWnd(), 0);
+    PluginObject::ClearPluginProperty(obj->GetContentHWnd());
+    ::DestroyWindow(obj->GetContentHWnd());
+    obj->SetContentHWnd(NULL);
   }
-  PluginObject::ClearPluginProperty(obj->GetHWnd());
-  ::SetWindowLongPtr(obj->GetPluginHWnd(),
-                     GWL_WNDPROC,
-                     reinterpret_cast<LONG_PTR>(
-                         obj->GetDefaultPluginWindowProc()));
-  obj->SetPluginHWnd(NULL);
+
+  if (obj->GetPluginHWnd()) {
+    // Restore the original WNDPROC on the plugin window so that we
+    // don't attempt to call into the O3D DLL after it's been unloaded.
+    LONG_PTR origWndProc = reinterpret_cast<LONG_PTR>(
+        GetProp(obj->GetPluginHWnd(),
+                kOrigWndProcName));
+    DCHECK(origWndProc != NULL);
+    RemoveProp(obj->GetPluginHWnd(), kOrigWndProcName);
+    SetWindowLongPtr(obj->GetPluginHWnd(), GWLP_WNDPROC, origWndProc);
+
+    PluginObject::ClearPluginProperty(obj->GetPluginHWnd());
+    obj->SetPluginHWnd(NULL);
+  }
+
   obj->SetHWnd(NULL);
 }
 
-HWND CreateFullscreenWindow(PluginObject *obj,
-                            int mode_id) {
-  o3d::DisplayMode mode;
-  if (!obj->renderer()->GetDisplayMode(mode_id, &mode)) {
-    return NULL;
-  }
-  CHECK(mode.width() > 0 && mode.height() > 0);
-
-  HWND hWnd = CreateWindowEx(NULL,
-                             kFullScreenWindowClassName,
-                             L"O3D Test Fullscreen Window",
-                             WS_POPUP,
-                             0, 0,
-                             mode.width(),
-                             mode.height(),
-                             NULL,
-                             NULL,
-                             g_module_instance,
-                             NULL);
-
-  ShowWindow(hWnd, SW_SHOW);
-  return hWnd;
+// Re-parents the content_hwnd into the containing_hwnd, resizing the
+// content_hwnd to the given width and height in the process.
+void ReplaceContentWindow(HWND content_hwnd,
+                          HWND containing_hwnd,
+                          int width, int height) {
+  ::ShowWindow(content_hwnd, SW_HIDE);
+  LONG_PTR style = ::GetWindowLongPtr(content_hwnd, GWL_STYLE);
+  style |= WS_CHILD;
+  ::SetWindowLongPtr(content_hwnd, GWL_STYLE, style);
+  ::SetParent(content_hwnd, containing_hwnd);
+  BOOL res = ::SetWindowPos(content_hwnd, containing_hwnd,
+                            0, 0, width, height,
+                            SWP_NOZORDER | SWP_ASYNCWINDOWPOS);
+  DCHECK(res);
+  ::ShowWindow(content_hwnd, SW_SHOW);
 }
+
 }  // namespace anonymous
 
 #if defined(O3D_INTERNAL_PLUGIN)
@@ -767,6 +736,11 @@ extern "C" {
 
 NPError OSCALL NP_Initialize(NPNetscapeFuncs *browserFuncs) {
   HANDLE_CRASHES;
+
+#if defined(RENDERER_CB)
+  g_browser = new o3d::gpu_plugin::NPBrowser(browserFuncs);
+#endif
+
   NPError retval = InitializeNPNApi(browserFuncs);
   if (retval != NPERR_NO_ERROR) return retval;
   return InitializePlugin();
@@ -776,7 +750,7 @@ NPError OSCALL NP_Shutdown(void) {
   HANDLE_CRASHES;
   DLOG(INFO) << "NP_Shutdown";
 
-  UnregisterFullScreenWindowClass();
+  UnregisterO3DWindowClass();
 
 #if !defined(O3D_INTERNAL_PLUGIN)
 
@@ -789,10 +763,7 @@ NPError OSCALL NP_Shutdown(void) {
     stats_report::g_global_metrics.Uninitialize();
   }
 
-  CommandLine::Terminate();
-
-  // Force all base singletons to be destroyed.
-  g_at_exit_manager.reset(NULL);
+  CommandLine::Reset();
 
   // TODO : This is commented out until we can determine if
   // it's safe to shutdown breakpad at this stage (Gears, for
@@ -807,6 +778,11 @@ NPError OSCALL NP_Shutdown(void) {
     delete g_bluescreen_detector;
     g_bluescreen_detector = NULL;
   }
+
+#if defined(RENDERER_CB)
+  delete g_browser;
+  g_browser = NULL;
+#endif
 
 #endif  // O3D_INTERNAL_PLUGIN
 
@@ -882,37 +858,84 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window) {
     }
     return NPERR_NO_ERROR;
   }
-  if (obj->GetHWnd() == hWnd) {
+
+  if (obj->GetPluginHWnd() == hWnd) {
+    // May need to resize the content window.
+    DCHECK(obj->GetContentHWnd());
+    // Avoid spurious resize requests.
+    if (window->width != obj->width() ||
+        window->height != obj->height()) {
+      if (!obj->fullscreen() && window->width > 0 && window->height > 0) {
+        ::SetWindowPos(obj->GetContentHWnd(), obj->GetPluginHWnd(), 0, 0,
+                       window->width, window->height,
+                       SWP_NOZORDER | SWP_NOREPOSITION);
+      }
+      // Even if we are in full-screen mode, store off the new width
+      // and height to restore to them later.
+      obj->Resize(window->width, window->height);
+      // Only propagate this resize event to the client if it isn't in
+      // full-screen mode.
+      if (!obj->fullscreen()) {
+        obj->client()->SendResizeEvent(obj->width(), obj->height(), false);
+      }
+    }
     return NPERR_NO_ERROR;
   }
-  if (obj->fullscreen()) {
-    // We can get here if the user alt+tabs away from the fullscreen plugin
-    // window or JavaScript resizes the plugin window.
-    DCHECK(obj->GetPluginHWnd());
-    DCHECK(obj->GetFullscreenHWnd());
-    DCHECK(obj->GetPluginHWnd() == hWnd);
-    
-    // Exit full screen if the plugin window is being modified.
-    obj->CancelFullscreenDisplay();
-    
-    return NPERR_NO_ERROR;
-  }
+
   DCHECK(!obj->GetPluginHWnd());
   obj->SetPluginHWnd(hWnd);
-  obj->SetParentHWnd(::GetParent(hWnd));
-  PluginObject::StorePluginProperty(hWnd, obj);
-  obj->SetDefaultPluginWindowProc(
-      reinterpret_cast<WNDPROC>(
-          ::SetWindowLongPtr(hWnd,
-                             GWL_WNDPROC,
-                             reinterpret_cast<LONG_PTR>(WindowProc))));
+
+  // Subclass the plugin window's window procedure to avoid processing
+  // WM_PAINT. This seems to only be necessary for Firefox, which
+  // overdraws our plugin the first time it gains focus.
+  SetProp(hWnd, kOrigWndProcName,
+          reinterpret_cast<HANDLE>(GetWindowLongPtr(hWnd, GWLP_WNDPROC)));
+  PluginObject::StorePluginPropertyUnsafe(hWnd, obj);
+  SetWindowLongPtr(hWnd, GWLP_WNDPROC,
+                   reinterpret_cast<LONG_PTR>(PluginWindowInterposer));
+
+  // Create the content window, into which O3D always renders, rather
+  // than alternating rendering between the browser's window and a
+  // separate full-screen window. The O3D window is removed from the
+  // browser's hierarchy and made top-level in order to go to
+  // full-screen mode via Direct3D. This solves fundamental focus
+  // fighting problems seen on Windows Vista.
+  HWND content_window =
+    CreateWindow(kO3DWindowClassName,
+                 L"O3D Window",
+                 WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                 0, 0,
+                 window->width, window->height,
+                 hWnd,
+                 NULL,
+                 g_module_instance,
+                 NULL);
+  obj->Resize(window->width, window->height);
+  obj->SetContentHWnd(content_window);
+  PluginObject::StorePluginProperty(content_window, obj);
+  ::ShowWindow(content_window, SW_SHOW);
 
   // create and assign the graphics context
-  DisplayWindowWindows default_display;
-  default_display.set_hwnd(obj->GetHWnd());
+#if defined(RENDERER_CB)
+  const unsigned int kDefaultCommandBufferSize = 256 << 10;
+  NPObjectPointer<CommandBuffer> command_buffer =
+      RendererCBLocal::CreateCommandBuffer(instance,
+                                           obj->GetHWnd(),
+                                           kDefaultCommandBufferSize);
+
+  DisplayWindowCB default_display;
+  default_display.set_npp(instance);
+  default_display.set_command_buffer(command_buffer);
 
   obj->CreateRenderer(default_display);
+  obj->renderer()->Resize(window->width, window->height);
   obj->client()->Init();
+#else
+  DisplayWindowWindows default_display;
+  default_display.set_hwnd(obj->GetHWnd());
+  obj->CreateRenderer(default_display);
+  obj->client()->Init();
+#endif
 
   // we set the timer to 10ms or 100fps. At the time of this comment
   // the renderer does a vsync the max fps it will run will be the refresh
@@ -949,32 +972,43 @@ bool PluginObject::GetDisplayMode(int mode_id, o3d::DisplayMode *mode) {
 bool PluginObject::RequestFullscreenDisplay() {
   bool success = false;
   DCHECK(GetPluginHWnd());
+  DCHECK(GetContentHWnd());
   if (!fullscreen_ && renderer_ && fullscreen_region_valid_) {
     DCHECK(renderer_->fullscreen() == fullscreen_);
-    DCHECK(!GetFullscreenHWnd());
-    HWND drawing_hwnd =
-      CreateFullscreenWindow(this, fullscreen_region_mode_id_);
-    if (drawing_hwnd) {
-      ::KillTimer(GetHWnd(), 0);
-      SetFullscreenHWnd(drawing_hwnd);
-      StorePluginPropertyUnsafe(drawing_hwnd, this);
-
+    // The focus window we pass into IDirect3D9::CreateDevice must not
+    // fight with the full-screen window for the focus. The best way
+    // to achieve this is to re-use the content window for full-screen
+    // mode.
+    ::ShowWindow(GetContentHWnd(), SW_HIDE);
+    ::SetParent(GetContentHWnd(), NULL);
+    // Remove WS_CHILD from the window style
+    LONG_PTR style = ::GetWindowLongPtr(GetContentHWnd(), GWL_STYLE);
+    style &= ~WS_CHILD;
+    ::SetWindowLongPtr(GetContentHWnd(), GWL_STYLE, style);
+    ::ShowWindow(GetContentHWnd(), SW_SHOW);
+    // We need to resize the full-screen window to the desired size of
+    // the display mode early, before calling
+    // Renderer::GoFullscreen().
+    o3d::DisplayMode mode;
+    if (GetDisplayMode(fullscreen_region_mode_id_, &mode)) {
+      ::SetWindowPos(GetContentHWnd(), HWND_TOP, 0, 0,
+                     mode.width(), mode.height(),
+                     SWP_NOZORDER | SWP_NOREPOSITION | SWP_ASYNCWINDOWPOS);
       DisplayWindowWindows display;
-      display.set_hwnd(GetHWnd());
-      if (renderer_->SetFullscreen(true, display,
-            fullscreen_region_mode_id_)) {
+      display.set_hwnd(GetContentHWnd());
+      if (renderer_->GoFullscreen(display,
+                                  fullscreen_region_mode_id_)) {
         fullscreen_ = true;
         client()->SendResizeEvent(renderer_->width(), renderer_->height(),
-            true);
+                                  true);
         success = true;
-      } else {
-        CleanupFullscreenWindow(this);
       }
-      prev_width_ = renderer_->width();
-      prev_height_ = renderer_->height();
-      ::SetTimer(GetHWnd(), 0, 10, NULL);
-    } else {
-      LOG(ERROR) << "Failed to create fullscreen window.";
+    }
+
+    if (!success) {
+      ReplaceContentWindow(GetContentHWnd(), GetPluginHWnd(),
+                           prev_width_, prev_height_);
+      LOG(ERROR) << "Failed to switch to fullscreen mode.";
     }
   }
   return success;
@@ -985,18 +1019,15 @@ void PluginObject::CancelFullscreenDisplay() {
   if (fullscreen_) {
     DCHECK(renderer());
     DCHECK(renderer()->fullscreen());
-    ::KillTimer(GetHWnd(), 0);
+    fullscreen_ = false;
     DisplayWindowWindows display;
-    display.set_hwnd(GetPluginHWnd());
-    if (!renderer_->SetFullscreen(false, display, 0)) {
+    display.set_hwnd(GetContentHWnd());
+    if (!renderer_->CancelFullscreen(display, prev_width_, prev_height_)) {
       LOG(FATAL) << "Failed to get the renderer out of fullscreen mode!";
     }
-    CleanupFullscreenWindow(this);
-    prev_width_ = renderer_->width();
-    prev_height_ = renderer_->height();
+    ReplaceContentWindow(GetContentHWnd(), GetPluginHWnd(),
+                         prev_width_, prev_height_);
     client()->SendResizeEvent(prev_width_, prev_height_, false);
-    ::SetTimer(GetHWnd(), 0, 10, NULL);
-    fullscreen_ = false;
   }
 }
 }  // namespace _o3d

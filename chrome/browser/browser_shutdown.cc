@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/histogram.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/thread.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
@@ -21,13 +22,15 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "net/dns_global.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/rlz/rlz.h"
+#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -49,44 +52,41 @@ void RegisterPrefs(PrefService* local_state) {
   local_state->RegisterIntegerPref(prefs::kShutdownNumProcessesSlow, 0);
 }
 
-void OnShutdownStarting(ShutdownType type) {
-  // TODO(erikkay): http://b/753080 when onbeforeunload is supported at
-  // shutdown, fix this to allow these variables to be reset.
-  if (shutdown_type_ == NOT_VALID) {
-    shutdown_type_ = type;
-    // For now, we're only counting the number of renderer processes
-    // since we can't safely count the number of plugin processes from this
-    // thread, and we'd really like to avoid anything which might add further
-    // delays to shutdown time.
-    shutdown_num_processes_ = static_cast<int>(RenderProcessHost::size());
-    shutdown_started_ = Time::Now();
+ShutdownType GetShutdownType() {
+  return shutdown_type_;
+}
 
-    // Call FastShutdown on all of the RenderProcessHosts.  This will be
-    // a no-op in some cases, so we still need to go through the normal
-    // shutdown path for the ones that didn't exit here.
-    shutdown_num_processes_slow_ = 0;
-    size_t start_rph_size = RenderProcessHost::size();
-    for (RenderProcessHost::iterator hosts = RenderProcessHost::begin();
-         hosts != RenderProcessHost::end();
-         ++hosts) {
-      RenderProcessHost* rph = hosts->second;
-      if (!rph->FastShutdownIfPossible())
-        // TODO(ojan): I think now that we deal with beforeunload/unload
-        // higher up, it's not possible to get here. Confirm this and change
-        // FastShutdownIfPossible to just be FastShutdown.
-        shutdown_num_processes_slow_++;
-      // The number of RPHs should not have changed as the result of invoking
-      // FastShutdownIfPossible.
-      CHECK(start_rph_size == RenderProcessHost::size());
-    }
+void OnShutdownStarting(ShutdownType type) {
+  if (shutdown_type_ != NOT_VALID)
+    return;
+
+  shutdown_type_ = type;
+  // For now, we're only counting the number of renderer processes
+  // since we can't safely count the number of plugin processes from this
+  // thread, and we'd really like to avoid anything which might add further
+  // delays to shutdown time.
+  shutdown_started_ = Time::Now();
+
+  // Call FastShutdown on all of the RenderProcessHosts.  This will be
+  // a no-op in some cases, so we still need to go through the normal
+  // shutdown path for the ones that didn't exit here.
+  shutdown_num_processes_ = 0;
+  shutdown_num_processes_slow_ = 0;
+  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+       !i.IsAtEnd(); i.Advance()) {
+    ++shutdown_num_processes_;
+    if (!i.GetCurrentValue()->FastShutdownIfPossible())
+      ++shutdown_num_processes_slow_;
   }
 }
 
+#if defined(OS_WIN)
 FilePath GetShutdownMsPath() {
   FilePath shutdown_ms_file;
   PathService::Get(base::DIR_TEMP, &shutdown_ms_file);
   return shutdown_ms_file.AppendASCII(kShutdownMsFile);
 }
+#endif
 
 void Shutdown() {
   // Unload plugins. This needs to happen on the IO thread.
@@ -130,9 +130,11 @@ void Shutdown() {
 
   prefs->SavePersistentPrefs();
 
+#if defined(OS_WIN)
   // Cleanup any statics created by RLZ. Must be done before NotificationService
   // is destroyed.
   RLZTracker::CleanupRlz();
+#endif
 
   // The jank'o'meter requires that the browser process has been destroyed
   // before calling UninstallJankometer().
@@ -145,6 +147,7 @@ void Shutdown() {
   if (delete_resources_on_shutdown)
     ResourceBundle::CleanupSharedInstance();
 
+#if defined(OS_WIN)
   if (!Upgrade::IsBrowserAlreadyRunning()) {
     Upgrade::SwapNewChromeExeIfPresent();
   }
@@ -159,10 +162,12 @@ void Shutdown() {
     FilePath shutdown_ms_file = GetShutdownMsPath();
     file_util::WriteFile(shutdown_ms_file, shutdown_ms.c_str(), len);
   }
+#endif
 
   UnregisterURLRequestChromeJob();
 }
 
+#if defined(OS_WIN)
 void ReadLastShutdownInfo() {
   FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
@@ -209,5 +214,6 @@ void ReadLastShutdownInfo() {
     }
   }
 }
+#endif
 
 }  // namespace browser_shutdown

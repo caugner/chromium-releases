@@ -199,6 +199,13 @@ class TabStripModelDelegate {
 
   // Returns whether some contents can be closed.
   virtual bool CanCloseContentsAt(int index) = 0;
+
+  // Returns true if we should allow "bookmark all tabs" in this window; this is
+  // true when there is more than one bookmarkable tab open.
+  virtual bool CanBookmarkAllTabs() const = 0;
+
+  // Creates a bookmark folder containing a bookmark for all open tabs.
+  virtual void BookmarkAllTabs() = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -296,9 +303,7 @@ class TabStripModel : public NotificationObserver {
   // Returns true if the TabContents was closed immediately, false if it was not
   // closed (we may be waiting for a response from an onunload handler, or
   // waiting for the user to confirm closure).
-  bool CloseTabContentsAt(int index) {
-    return InternalCloseTabContentsAt(index, true);
-  }
+  bool CloseTabContentsAt(int index);
 
   // Replaces the entire state of a the tab at index by switching in a
   // different NavigationController. This is used through the recently
@@ -438,6 +443,10 @@ class TabStripModel : public NotificationObserver {
   // Selects the last tab in the tab strip.
   void SelectLastTab();
 
+  // Swap adjacent tabs.
+  void MoveTabNext();
+  void MoveTabPrevious();
+
   // View API //////////////////////////////////////////////////////////////////
 
   // The specified contents should be opened in a new tabstrip. Returns the
@@ -462,6 +471,7 @@ class TabStripModel : public NotificationObserver {
     CommandCloseTabsOpenedBy,
     CommandRestoreTab,
     CommandTogglePinned,
+    CommandBookmarkAllTabs,
     CommandLast
   };
 
@@ -494,19 +504,20 @@ class TabStripModel : public NotificationObserver {
   // something related to their current activity.
   bool IsNewTabAtEndOfTabStrip(TabContents* contents) const;
 
-  // Closes the TabContents at the specified index. This causes the TabContents
-  // to be destroyed, but it may not happen immediately (e.g. if it's a
-  // TabContents). If the page in question has an unload event the TabContents
-  // will not be destroyed until after the event has completed, which will then
-  // call back into this method.
+  // Closes the TabContents at the specified indices. This causes the
+  // TabContents to be destroyed, but it may not happen immediately.
+  // If the page in question has an unload event the
+  // TabContents will not be destroyed until after the event has completed,
+  // which will then call back into this method.
   //
   // The boolean parameter create_historical_tab controls whether to
-  // record this tab and its history for reopening recently closed
+  // record these tabs and their history for reopening recently closed
   // tabs.
   //
-  // Returns true if the TabContents was closed immediately, false if we are
+  // Returns true if the TabContents were closed immediately, false if we are
   // waiting for the result of an onunload handler.
-  bool InternalCloseTabContentsAt(int index, bool create_historical_tab);
+  bool InternalCloseTabs(std::vector<int> indices,
+                         bool create_historical_tabs);
 
   void MoveTabContentsAtImpl(int index, int to_position,
                              bool select_after_move,

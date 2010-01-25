@@ -33,9 +33,12 @@
 // This file implements unit tests for class Curve.
 
 #include <algorithm>
-#include "core/cross/client.h"
 #include "tests/common/win/testing_common.h"
 #include "core/cross/curve.h"
+#include "core/cross/pack.h"
+#include "core/cross/service_dependency.h"
+#include "core/cross/error_status.h"
+#include "core/cross/object_manager.h"
 #include "import/cross/memory_buffer.h"
 #include "import/cross/memory_stream.h"
 #include "serializer/cross/serializer_binary.h"
@@ -145,24 +148,24 @@ TEST_F(CurveTest, CreateKeyRemoveKey) {
   ASSERT_TRUE(bezier_key != NULL);
 
   const CurveKeyRefArray& keys = curve->keys();
-  EXPECT_EQ(keys.size(), 3);
+  EXPECT_EQ(keys.size(), 3U);
   EXPECT_TRUE(KeyInKeys(step_key, keys));
   EXPECT_TRUE(KeyInKeys(linear_key, keys));
   EXPECT_TRUE(KeyInKeys(bezier_key, keys));
 
   step_key->Destroy();
-  EXPECT_EQ(keys.size(), 2);
+  EXPECT_EQ(keys.size(), 2U);
   EXPECT_FALSE(KeyInKeys(step_key, keys));
   EXPECT_TRUE(KeyInKeys(linear_key, keys));
   EXPECT_TRUE(KeyInKeys(bezier_key, keys));
 
   bezier_key->Destroy();
-  EXPECT_EQ(keys.size(), 1);
+  EXPECT_EQ(keys.size(), 1U);
   EXPECT_TRUE(KeyInKeys(linear_key, keys));
   EXPECT_FALSE(KeyInKeys(bezier_key, keys));
 
   linear_key->Destroy();
-  EXPECT_EQ(keys.size(), 0);
+  EXPECT_EQ(keys.size(), 0U);
 }
 
 // Tests ResortKeys and IsDiscontinuous
@@ -185,7 +188,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   ASSERT_TRUE(key4 != NULL);
 
   const CurveKeyRefArray& keys = curve->keys();
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
 
   key1->SetInput(1.0f);
   key2->SetInput(2.0f);
@@ -193,7 +196,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   key4->SetInput(4.0f);
   EXPECT_FALSE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
 
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key2);
   EXPECT_EQ(keys[2], key3);
@@ -202,7 +205,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   key4->SetInput(0.0f);
   EXPECT_FALSE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
 
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key4);
   EXPECT_EQ(keys[1], key1);
   EXPECT_EQ(keys[2], key2);
@@ -211,7 +214,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   key4->SetInput(2.5f);
   EXPECT_FALSE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
 
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key2);
   EXPECT_EQ(keys[2], key4);
@@ -222,7 +225,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
 
   key4->SetInput(2.0f);
   EXPECT_TRUE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key2);
   EXPECT_EQ(keys[2], key4);
@@ -230,7 +233,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
 
   key4->SetInput(1.5f);  // should move it before key2
   EXPECT_FALSE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key4);
   EXPECT_EQ(keys[2], key2);
@@ -238,7 +241,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
 
   key4->SetInput(2.0f);  // should still be before key2.
   EXPECT_TRUE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  EXPECT_EQ(keys.size(), 4);
+  EXPECT_EQ(keys.size(), 4U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key4);
   EXPECT_EQ(keys[2], key2);
@@ -247,7 +250,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   CurveKey* key5 = curve->Create<LinearCurveKey>();
   CurveKey* key6 = curve->Create<LinearCurveKey>();
   EXPECT_TRUE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  EXPECT_EQ(keys.size(), 6);
+  EXPECT_EQ(keys.size(), 6U);
   EXPECT_EQ(keys[0], key5);
   EXPECT_EQ(keys[1], key6);
   EXPECT_EQ(keys[2], key1);
@@ -260,7 +263,7 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   key5->SetInput(5.0f);
   key6->SetInput(5.0f);
   EXPECT_TRUE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  EXPECT_EQ(keys.size(), 6);
+  EXPECT_EQ(keys.size(), 6U);
   EXPECT_EQ(keys[0], key1);
   EXPECT_EQ(keys[1], key4);
   EXPECT_EQ(keys[2], key2);
@@ -274,11 +277,11 @@ TEST_F(CurveTest, ResortKeysDiscontinuous) {
   key3->SetInput(3.0f);
   key4->SetInput(4.0f);
   EXPECT_FALSE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
-  CurveKey* stepkey1 = curve->Create<StepCurveKey>();
+  curve->Create<StepCurveKey>();
   EXPECT_TRUE(curve->IsDiscontinuous());  // causes keys to be re-sorted.
 
   // Try all step keys.
-  CurveKey* stepkey2 = curve->Create<StepCurveKey>();
+  curve->Create<StepCurveKey>();
   key1->Destroy();
   key2->Destroy();
   key3->Destroy();

@@ -1,10 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gears_integration.h"
 
-#include "base/gfx/png_encoder.h"
+#include "app/gfx/codec/png_codec.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -116,7 +116,7 @@ static GURL ConvertSkBitmapToDataURL(const SkBitmap& icon) {
 
   // Get the FavIcon data.
   std::vector<unsigned char> icon_data;
-  PNGEncoder::EncodeBGRASkBitmap(icon, false, &icon_data);
+  gfx::PNGCodec::EncodeBGRASkBitmap(icon, false, &icon_data);
 
   // Base64-encode it (to make it a data URL).
   std::string icon_data_str(reinterpret_cast<char*>(&icon_data[0]),
@@ -225,14 +225,11 @@ class CreateShortcutCommand : public CPCommandInterface {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
-template<>
-void RunnableMethodTraits<CreateShortcutCommand>::RetainCallee(
-    CreateShortcutCommand* remover) {
-}
-template<>
-void RunnableMethodTraits<CreateShortcutCommand>::ReleaseCallee(
-    CreateShortcutCommand* remover) {
-}
+template <>
+struct RunnableMethodTraits<CreateShortcutCommand> {
+  void RetainCallee(CreateShortcutCommand* command) {}
+  void ReleaseCallee(CreateShortcutCommand* command) {}
+};
 
 void GearsCreateShortcut(
     const webkit_glue::WebApplicationInfo& app_info,
@@ -299,14 +296,11 @@ class QueryShortcutsCommand : public CPCommandInterface {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
-template<>
-void RunnableMethodTraits<QueryShortcutsCommand>::RetainCallee(
-    QueryShortcutsCommand* remover) {
-}
-template<>
-void RunnableMethodTraits<QueryShortcutsCommand>::ReleaseCallee(
-    QueryShortcutsCommand* remover) {
-}
+template <>
+struct RunnableMethodTraits<QueryShortcutsCommand> {
+  void RetainCallee(QueryShortcutsCommand* command) {}
+  void ReleaseCallee(QueryShortcutsCommand* command) {}
+};
 
 void GearsQueryShortcuts(GearsQueryShortcutsCallback* callback) {
   CPHandleCommand(GEARSPLUGINCOMMAND_GET_SHORTCUT_LIST,

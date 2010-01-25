@@ -2,20 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import "chrome/browser/cocoa/hung_renderer_controller.h"
+
 #import <Cocoa/Cocoa.h>
 
-#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
 #include "base/process_util.h"
 #include "base/sys_string_conversions.h"
-#include "grit/generated_resources.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/hung_renderer_dialog.h"
-#import "chrome/browser/cocoa/hung_renderer_controller.h"
+#import "chrome/browser/cocoa/multi_key_equivalent_button.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/result_codes.h"
 #include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
+#include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 
 namespace {
 // We only support showing one of these at a time per app.  The
@@ -41,10 +47,32 @@ HungRendererController* g_instance = NULL;
 }
 
 - (void)awakeFromNib {
-  // This is easier than creating a localizer, since we only have one
-  // string to modify.
-  std::wstring productString = l10n_util::GetString(IDS_PRODUCT_NAME);
-  [[self window] setTitle:base::SysWideToNSString(productString)];
+  // Load in the image
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  NSImage* backgroundImage = rb.GetNSImageNamed(IDR_FROZEN_TAB_ICON);
+  DCHECK(backgroundImage);
+  [imageView_ setImage:backgroundImage];
+
+  // Make the message fit.
+  CGFloat messageShift =
+    [GTMUILocalizerAndLayoutTweaker sizeToFitFixedWidthTextField:messageView_];
+
+  // Move the graphic up to be top even with the message.
+  NSRect graphicFrame = [imageView_ frame];
+  graphicFrame.origin.y += messageShift;
+  [imageView_ setFrame:graphicFrame];
+
+  // Make the window taller to fit everything.
+  NSSize windowDelta = NSMakeSize(0, messageShift);
+  [GTMUILocalizerAndLayoutTweaker
+      resizeWindowWithoutAutoResizingSubViews:[self window]
+                                        delta:windowDelta];
+
+  // Make the "wait" button respond to additional keys.  By setting this to
+  // @"\e", it will respond to both Esc and Command-. (period).
+  KeyEquivalentAndModifierMask key;
+  key.charCode = @"\e";
+  [waitButton_ addKeyEquivalent:key];
 }
 
 - (IBAction)kill:(id)sender {
@@ -72,9 +100,9 @@ HungRendererController* g_instance = NULL;
   // TODO(rohitrao): Add favicons.
   TabContents* contents = hungRenderers_[rowIndex];
   string16 title = contents->GetTitle();
-  if (title.empty())
-    title = l10n_util::GetStringUTF16(IDS_TAB_UNTITLED_TITLE);
-  return base::SysUTF16ToNSString(title);
+  if (!title.empty())
+    return base::SysUTF16ToNSString(title);
+  return l10n_util::GetNSStringWithFixup(IDS_TAB_UNTITLED_TITLE);
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
@@ -117,7 +145,7 @@ HungRendererController* g_instance = NULL;
   return killButton_;
 }
 
-- (NSButton*)waitButton {
+- (MultiKeyEquivalentButton*)waitButton {
   return waitButton_;
 }
 @end

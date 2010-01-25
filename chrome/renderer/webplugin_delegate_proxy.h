@@ -1,23 +1,25 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H__
-#define CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H__
+#ifndef CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H_
+#define CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H_
 
 #include <string>
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
 #include "base/gfx/rect.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
+#include "base/weak_ptr.h"
 #include "chrome/common/transport_dib.h"
 #include "chrome/renderer/plugin_channel_host.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message.h"
 #include "skia/ext/platform_canvas.h"
 #include "webkit/glue/webplugin.h"
+#include "webkit/glue/webplugininfo.h"
 #include "webkit/glue/webplugin_delegate.h"
 
 struct NPObject;
@@ -34,31 +36,29 @@ class WaitableEvent;
 
 // An implementation of WebPluginDelegate that proxies all calls to
 // the plugin process.
-class WebPluginDelegateProxy : public WebPluginDelegate,
-                               public IPC::Channel::Listener,
-                               public IPC::Message::Sender  {
+class WebPluginDelegateProxy :
+    public webkit_glue::WebPluginDelegate,
+    public IPC::Channel::Listener,
+    public IPC::Message::Sender,
+    public base::SupportsWeakPtr<WebPluginDelegateProxy> {
  public:
-  static WebPluginDelegateProxy* Create(const GURL& url,
-                                        const std::string& mime_type,
-                                        const std::string& clsid,
-                                        RenderView* render_view);
-
-  // Called to drop our back-pointer to the containing RenderView.
-  void DropRenderView() { render_view_ = NULL; }
-
-  // Called to drop our pointer to the window script object.
-  void DropWindowScriptObject() { window_script_object_ = NULL; }
+  WebPluginDelegateProxy(const std::string& mime_type,
+                         const base::WeakPtr<RenderView>& render_view);
 
   // WebPluginDelegate implementation:
   virtual void PluginDestroyed();
-  virtual bool Initialize(const GURL& url, char** argn, char** argv, int argc,
-                          WebPlugin* plugin, bool load_manually);
+  virtual bool Initialize(const GURL& url,
+                          const std::vector<std::string>& arg_names,
+                          const std::vector<std::string>& arg_values,
+                          webkit_glue::WebPlugin* plugin,
+                          bool load_manually);
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect);
   virtual void Paint(gfx::NativeDrawingContext context, const gfx::Rect& rect);
   virtual void Print(gfx::NativeDrawingContext context);
   virtual NPObject* GetPluginScriptableObject();
-  virtual void DidFinishLoadWithReason(NPReason reason);
+  virtual void DidFinishLoadWithReason(const GURL& url, NPReason reason,
+                                       intptr_t notify_data);
   virtual void SetFocus();
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor);
@@ -71,12 +71,12 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg);
 
-  virtual void SendJavaScriptStream(const std::string& url,
-                                    const std::wstring& result,
+  virtual void SendJavaScriptStream(const GURL& url,
+                                    const std::string& result,
                                     bool success, bool notify_needed,
                                     intptr_t notify_data);
 
-  virtual void DidReceiveManualResponse(const std::string& url,
+  virtual void DidReceiveManualResponse(const GURL& url,
                                         const std::string& mime_type,
                                         const std::string& headers,
                                         uint32 expected_length,
@@ -84,34 +84,22 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   virtual void DidReceiveManualData(const char* buffer, int length);
   virtual void DidFinishManualLoading();
   virtual void DidManualLoadFail();
-  virtual FilePath GetPluginPath();
   virtual void InstallMissingPlugin();
-  virtual WebPluginResourceClient* CreateResourceClient(int resource_id,
-                                                        const std::string &url,
-                                                        bool notify_needed,
-                                                        intptr_t notify_data,
-                                                        intptr_t existing_stream);
-
-  // Notifies the delegate about a Get/Post URL request getting routed
-  virtual void URLRequestRouted(const std::string&url, bool notify_needed,
-                                intptr_t notify_data);
+  virtual webkit_glue::WebPluginResourceClient* CreateResourceClient(
+      int resource_id,
+      const GURL& url,
+      bool notify_needed,
+      intptr_t notify_data,
+      intptr_t existing_stream);
 
  protected:
   template<class WebPluginDelegateProxy> friend class DeleteTask;
   ~WebPluginDelegateProxy();
 
  private:
-  WebPluginDelegateProxy(const std::string& mime_type,
-                         const std::string& clsid,
-                         RenderView* render_view);
-
   // Message handlers for messages that proxy WebPlugin methods, which
   // we translate into calls to the real WebPlugin.
   void OnSetWindow(gfx::PluginWindowHandle window);
-#if defined(OS_LINUX)
-  void OnCreatePluginContainer(gfx::PluginWindowHandle* container);
-  void OnDestroyPluginContainer(gfx::PluginWindowHandle container);
-#endif
 #if defined(OS_WIN)
   void OnSetWindowlessPumpEvent(HANDLE modal_loop_pump_messages_event);
 #endif
@@ -143,6 +131,7 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
                                   intptr_t existing_stream,
                                   bool notify_needed,
                                   intptr_t notify_data);
+  void OnDeferResourceLoading(int resource_id, bool defer);
 
   // Draw a graphic indicating a crashed plugin.
   void PaintSadPlugin(gfx::NativeDrawingContext context, const gfx::Rect& rect);
@@ -162,19 +151,24 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   bool CreateBitmap(scoped_ptr<TransportDIB>* memory,
                     scoped_ptr<skia::PlatformCanvas>* canvas);
 
-  RenderView* render_view_;
-  WebPlugin* plugin_;
+  // Called for cleanup during plugin destruction. Normally right before the
+  // plugin window gets destroyed, or when the plugin has crashed (at which
+  // point the window has already been destroyed).
+  void WillDestroyWindow();
+
+  base::WeakPtr<RenderView> render_view_;
+  webkit_glue::WebPlugin* plugin_;
   bool windowless_;
+  gfx::PluginWindowHandle window_;
   scoped_refptr<PluginChannelHost> channel_host_;
   std::string mime_type_;
-  std::string clsid_;
   int instance_id_;
-  FilePath plugin_path_;
+  WebPluginInfo info_;
 
   gfx::Rect plugin_rect_;
 
   NPObject* npobject_;
-  NPObjectStub* window_script_object_;
+  base::WeakPtr<NPObjectStub> window_script_object_;
 
   // Event passed in by the plugin process and is used to decide if
   // messages need to be pumped in the NPP_HandleEvent sync call.
@@ -204,7 +198,7 @@ class WebPluginDelegateProxy : public WebPluginDelegate,
   // The url of the main frame hosting the plugin.
   GURL page_url_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegateProxy);
+  DISALLOW_COPY_AND_ASSIGN(WebPluginDelegateProxy);
 };
 
 #endif  // CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_prefs.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
@@ -52,8 +53,13 @@ class TestingProfile : public Profile {
   // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
   void CreateTemplateURLModel();
 
-  // Creates a ThemeProvider. If not invoked the ThemeProvider is NULL.
-  void CreateThemeProvider();
+  // Uses a specific theme provider for this profile. TestingProfile takes
+  // ownership of |theme_provider|.
+  void UseThemeProvider(BrowserThemeProvider* theme_provider);
+
+  virtual ProfileId GetRuntimeId() {
+    return reinterpret_cast<ProfileId>(this);
+  }
 
   virtual FilePath GetPath() {
     return path_;
@@ -62,40 +68,32 @@ class TestingProfile : public Profile {
   void set_off_the_record(bool off_the_record) {
     off_the_record_ = off_the_record;
   }
-  virtual bool IsOffTheRecord() {
-    return off_the_record_;
-  }
-  virtual Profile* GetOffTheRecordProfile() {
-    return NULL;
-  }
+  virtual bool IsOffTheRecord() { return off_the_record_; }
+  virtual Profile* GetOffTheRecordProfile() { return NULL; }
 
   virtual void DestroyOffTheRecordProfile() {}
 
-  virtual Profile* GetOriginalProfile() {
-    return this;
-  }
-  virtual VisitedLinkMaster* GetVisitedLinkMaster() {
+  virtual Profile* GetOriginalProfile() { return this; }
+  virtual ChromeAppCacheService* GetAppCacheService() { return NULL; }
+  virtual VisitedLinkMaster* GetVisitedLinkMaster() { return NULL; }
+  virtual ExtensionsService* GetExtensionsService() { return NULL; }
+  virtual UserScriptMaster* GetUserScriptMaster() { return NULL; }
+  virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() {
     return NULL;
   }
-  virtual ExtensionsService* GetExtensionsService() {
+  virtual ExtensionProcessManager* GetExtensionProcessManager() { return NULL; }
+  virtual ExtensionMessageService* GetExtensionMessageService() { return NULL; }
+  virtual SSLHostState* GetSSLHostState() { return NULL; }
+  virtual net::StrictTransportSecurityState* GetStrictTransportSecurityState() {
     return NULL;
   }
-  virtual UserScriptMaster* GetUserScriptMaster() {
-    return NULL;
-  }
-  virtual ExtensionProcessManager* GetExtensionProcessManager() {
-    return NULL;
-  }
-  virtual ExtensionMessageService* GetExtensionMessageService() {
-    return NULL;
-  }
-  virtual SSLHostState* GetSSLHostState() {
-    return NULL;
-  }
-  virtual net::ForceTLSState* GetForceTLSState() {
+  virtual FaviconService* GetFaviconService(ServiceAccessType access) {
     return NULL;
   }
   virtual HistoryService* GetHistoryService(ServiceAccessType access) {
+    return history_service_.get();
+  }
+  virtual HistoryService* GetHistoryServiceWithoutCreating() {
     return history_service_.get();
   }
   void set_has_history_service(bool has_history_service) {
@@ -120,64 +118,36 @@ class TestingProfile : public Profile {
   virtual TemplateURLModel* GetTemplateURLModel() {
     return template_url_model_.get();
   }
-  virtual TemplateURLFetcher* GetTemplateURLFetcher() {
-    return NULL;
-  }
-
-  virtual ThumbnailStore* GetThumbnailStore() {
-    return NULL;
-  }
-
-  virtual DownloadManager* GetDownloadManager() {
-    return NULL;
-  }
-  virtual bool HasCreatedDownloadManager() const {
-    return false;
-  }
-  virtual void InitThemes() { }
-  virtual void SetTheme(Extension* extension) { }
-  virtual void SetNativeTheme() { }
-  virtual void ClearTheme() { }
-  virtual Extension* GetTheme() {
-    return NULL;
-  }
+  virtual TemplateURLFetcher* GetTemplateURLFetcher() { return NULL; }
+  virtual ThumbnailStore* GetThumbnailStore() { return NULL; }
+  virtual DownloadManager* GetDownloadManager() { return NULL; }
+  virtual bool HasCreatedDownloadManager() const { return false; }
+  virtual void InitThemes();
+  virtual void SetTheme(Extension* extension) {}
+  virtual void SetNativeTheme() {}
+  virtual void ClearTheme() {}
+  virtual Extension* GetTheme() { return NULL; }
   virtual ThemeProvider* GetThemeProvider() {
+    InitThemes();
     return theme_provider_.get();
   }
-  virtual URLRequestContext* GetRequestContext() {
-    return NULL;
-  }
-  virtual URLRequestContext* GetRequestContextForMedia() {
-    return NULL;
-  }
-  virtual URLRequestContext* GetRequestContextForExtensions() {
-    return NULL;
-  }
-  virtual Blacklist* GetBlacklist() {
-    return NULL;
-  }
+  virtual URLRequestContext* GetRequestContext() { return NULL; }
+  virtual URLRequestContext* GetRequestContextForMedia() { return NULL; }
+  virtual URLRequestContext* GetRequestContextForExtensions() { return NULL; }
+  virtual net::SSLConfigService* GetSSLConfigService() { return NULL; }
+  virtual Blacklist* GetBlacklist() { return NULL; }
   void set_session_service(SessionService* session_service) {
     session_service_ = session_service;
   }
-  virtual SessionService* GetSessionService() {
-    return session_service_.get();
-  }
-  virtual void ShutdownSessionService() {
-  }
+  virtual SessionService* GetSessionService() { return session_service_.get(); }
+  virtual void ShutdownSessionService() {}
   virtual bool HasSessionService() const {
     return (session_service_.get() != NULL);
   }
-  virtual std::wstring GetName() {
-    return std::wstring();
-  }
-  virtual void SetName(const std::wstring& name) {
-  }
-  virtual std::wstring GetID() {
-    return id_;
-  }
-  virtual void SetID(const std::wstring& id) {
-    id_ = id;
-  }
+  virtual std::wstring GetName() { return std::wstring(); }
+  virtual void SetName(const std::wstring& name) {}
+  virtual std::wstring GetID() { return id_; }
+  virtual void SetID(const std::wstring& id) { id_ = id; }
   void set_last_session_exited_cleanly(bool value) {
     last_session_exited_cleanly_ = value;
   }
@@ -185,42 +155,26 @@ class TestingProfile : public Profile {
     return last_session_exited_cleanly_;
   }
   virtual void MergeResourceString(int message_id,
-                                   std::wstring* output_string) {
-  }
-  virtual void MergeResourceInteger(int message_id, int* output_value) {
-  }
-  virtual void MergeResourceBoolean(int message_id, bool* output_value) {
-  }
+                                   std::wstring* output_string) {}
+  virtual void MergeResourceInteger(int message_id, int* output_value) {}
+  virtual void MergeResourceBoolean(int message_id, bool* output_value) {}
   virtual BookmarkModel* GetBookmarkModel() {
     return bookmark_bar_model_.get();
   }
-  virtual bool IsSameProfile(Profile *p) {
-    return this == p;
-  }
-  virtual base::Time GetStartTime() const {
-    return start_time_;
-  }
-  virtual TabRestoreService* GetTabRestoreService() {
+  virtual bool IsSameProfile(Profile *p) { return this == p; }
+  virtual base::Time GetStartTime() const { return start_time_; }
+  virtual TabRestoreService* GetTabRestoreService() { return NULL; }
+  virtual void ResetTabRestoreService() {}
+  virtual void ReinitializeSpellChecker() {}
+  virtual SpellChecker* GetSpellChecker() { return NULL; }
+  virtual void DeleteSpellChecker() {}
+  virtual WebKitContext* GetWebKitContext() { return NULL; }
+  virtual WebKitContext* GetOffTheRecordWebKitContext() { return NULL; }
+  virtual void MarkAsCleanShutdown() {}
+  virtual void InitExtensions() {}
+  virtual void InitWebResources() {}
+  virtual DesktopNotificationService* GetDesktopNotificationService() {
     return NULL;
-  }
-  virtual void ResetTabRestoreService() {
-  }
-  virtual void ReinitializeSpellChecker() {
-  }
-  virtual SpellChecker* GetSpellChecker() {
-    return NULL;
-  }
-  virtual WebKitContext* GetWebKitContext() {
-    return NULL;
-  }
-  virtual WebKitContext* GetOffTheRecordWebKitContext() {
-    return NULL;
-  }
-  virtual void MarkAsCleanShutdown() {
-  }
-  virtual void InitExtensions() {
-  }
-  virtual void InitWebResources() {
   }
 
   // Schedules a task on the history backend and runs a nested loop until the
@@ -228,11 +182,9 @@ class TestingProfile : public Profile {
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
-#ifdef CHROME_PERSONALIZATION
-  virtual ProfilePersonalization* GetProfilePersonalization() {
-    return NULL;
-  }
-#endif
+  // Creates and initializes a profile sync service if the tests require one.
+  void CreateProfileSyncService();
+  virtual ProfileSyncService* GetProfileSyncService();
 
  protected:
   // The path of the profile; the various database and other files are relative
@@ -252,14 +204,20 @@ class TestingProfile : public Profile {
   // The BookmarkModel. Only created if CreateBookmarkModel is invoked.
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
 
+  // The ProfileSyncService.  Created by CreateProfileSyncService.
+#if defined(BROWSER_SYNC)
+  scoped_ptr<ProfileSyncService> profile_sync_service_;
+#endif
+
   // The TemplateURLFetcher. Only created if CreateTemplateURLModel is invoked.
   scoped_ptr<TemplateURLModel> template_url_model_;
 
   // The SessionService. Defaults to NULL, but can be set using the setter.
   scoped_refptr<SessionService> session_service_;
 
-  // The theme provider. Only created if CreateThemeProvider is invoked.
-  scoped_refptr<BrowserThemeProvider> theme_provider_;
+  // The theme provider. Created lazily by GetThemeProvider()/InitThemes().
+  scoped_ptr<BrowserThemeProvider> theme_provider_;
+  bool created_theme_provider_;
 
   // Do we have a history service? This defaults to the value of
   // history_service, but can be explicitly set.
@@ -271,6 +229,22 @@ class TestingProfile : public Profile {
 
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;
+};
+
+// A profile that derives from another profile.  This does not actually
+// override anything except the GetRuntimeId() in order to test sharing of
+// site information.
+class DerivedTestingProfile : public TestingProfile {
+ public:
+   DerivedTestingProfile(Profile* profile) : original_profile_(profile) {
+   }
+
+  virtual ProfileId GetRuntimeId() {
+    return original_profile_->GetRuntimeId();
+  }
+
+ protected:
+  Profile* original_profile_;
 };
 
 #endif  // CHROME_TEST_TESTING_PROFILE_H_

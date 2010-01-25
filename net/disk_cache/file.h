@@ -12,6 +12,8 @@
 #include "base/platform_file.h"
 #include "base/ref_counted.h"
 
+class FilePath;
+
 namespace disk_cache {
 
 // This interface is used to support asynchronous ReadData and WriteData calls.
@@ -39,7 +41,7 @@ class File : public base::RefCounted<File> {
 
   // Initializes the object to point to a given file. The file must aready exist
   // on disk, and allow shared read and write.
-  bool Init(const std::wstring& name);
+  bool Init(const FilePath& name);
 
   // Returns the handle or file descriptor.
   base::PlatformFile platform_file() const;
@@ -66,6 +68,9 @@ class File : public base::RefCounted<File> {
   // the new length.
   bool SetLength(size_t length);
   size_t GetLength();
+
+  // Blocks until |num_pending_io| IO operations complete.
+  static void WaitForPendingIO(int* num_pending_io);
 
  protected:
   virtual ~File();

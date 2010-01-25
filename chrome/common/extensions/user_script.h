@@ -10,6 +10,7 @@
 
 #include "base/file_path.h"
 #include "base/string_piece.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "googleurl/src/gurl.h"
 
@@ -19,6 +20,8 @@ class Pickle;
 // extension.
 class UserScript {
  public:
+  typedef std::vector<URLPattern> PatternList;
+
   // Locations that user scripts can be run inside the document.
   enum RunLocation {
     DOCUMENT_START,  // After the documentElemnet is created, but before
@@ -32,48 +35,50 @@ class UserScript {
   // Holds actual script file info.
   class File {
    public:
-    File(const FilePath& path, const GURL& url):
-         path_(path),
+    File(const ExtensionResource& resource, const GURL& url):
+         resource_(resource),
          url_(url) {
     }
     File() {}
 
-    const FilePath& path() const { return path_; }
-    void set_path(const FilePath& path) { path_ = path; }
+    const ExtensionResource& resource() const { return resource_; }
+    void set_resource(const ExtensionResource& resource) {
+      resource_ = resource;
+    }
 
     const GURL& url() const { return url_; }
     void set_url(const GURL& url) { url_ = url; }
 
     // If external_content_ is set returns it as content otherwise it returns
     // content_
-    const StringPiece GetContent() const {
+    const base::StringPiece GetContent() const {
       if (external_content_.data())
         return external_content_;
       else
         return content_;
     }
-    void set_external_content(const StringPiece& content) {
+    void set_external_content(const base::StringPiece& content) {
       external_content_ = content;
     }
-    const void set_content(const StringPiece& content) {
+    const void set_content(const base::StringPiece& content) {
       content_.assign(content.begin(), content.end());
     }
 
-    // Serialization support. The content and path_ member will not be
+    // Serialization support. The content and resource_ member will not be
     // serialized!
     void Pickle(::Pickle* pickle) const;
     void Unpickle(const ::Pickle& pickle, void** iter);
 
    private:
-    // Where is the script file lives on the disk.
-    FilePath path_;
+    // Where the script file lives on the disk.
+    ExtensionResource resource_;
 
     // The url to this scipt file.
     GURL url_;
 
     // The script content. It can be set to either loaded_content_ or
     // externally allocated string.
-    StringPiece external_content_;
+    base::StringPiece external_content_;
 
     // Set when the content is loaded by LoadContent
     std::string content_;
@@ -97,7 +102,7 @@ class UserScript {
 
   // The URLPatterns, if any, that determine which pages this script runs
   // against.
-  const std::vector<URLPattern>& url_patterns() const { return url_patterns_; }
+  const PatternList& url_patterns() const { return url_patterns_; }
   void add_url_pattern(const URLPattern& pattern) {
     url_patterns_.push_back(pattern);
   }
@@ -139,7 +144,7 @@ class UserScript {
 
   // URLPatterns that determine pages to inject the script into. These are
   // only used with scripts that are part of extensions.
-  std::vector<URLPattern> url_patterns_;
+  PatternList url_patterns_;
 
   // List of js scripts defined in content_scripts
   FileList js_scripts_;

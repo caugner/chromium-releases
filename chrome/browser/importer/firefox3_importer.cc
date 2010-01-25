@@ -14,6 +14,8 @@
 #include "base/string_util.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
+#include "chrome/browser/importer/importer_bridge.h"
+#include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/sqlite_utils.h"
@@ -23,67 +25,56 @@
 using base::Time;
 using webkit_glue::PasswordForm;
 
-// Wraps the function sqlite3_close() in a class that is
-// used in scoped_ptr_malloc.
-
-namespace {
-
-class DBClose {
- public:
-  inline void operator()(sqlite3* x) const {
-    sqlite3_close(x);
-  }
-};
-
-}  // namespace
-
 void Firefox3Importer::StartImport(ProfileInfo profile_info,
-                                   uint16 items, ProfileWriter* writer,
-                                   MessageLoop* delagate_loop,
-                                   ImporterHost* host) {
-  writer_ = writer;
+                                   uint16 items,
+                                   ImporterBridge* bridge) {
+  bridge_ = bridge;
   source_path_ = profile_info.source_path;
   app_path_ = profile_info.app_path;
-  importer_host_ = host;
 
 
   // The order here is important!
-  NotifyStarted();
+  bridge_->NotifyStarted();
   if ((items & HOME_PAGE) && !cancelled())
     ImportHomepage();  // Doesn't have a UI item.
+
+  // Note history should be imported before bookmarks because bookmark import
+  // will also import favicons and we store favicon for a URL only if the URL
+  // exist in history or bookmarks.
+  if ((items & HISTORY) && !cancelled()) {
+    bridge_->NotifyItemStarted(HISTORY);
+    ImportHistory();
+    bridge_->NotifyItemEnded(HISTORY);
+  }
+
   if ((items & FAVORITES) && !cancelled()) {
-    NotifyItemStarted(FAVORITES);
+    bridge_->NotifyItemStarted(FAVORITES);
     ImportBookmarks();
-    NotifyItemEnded(FAVORITES);
+    bridge_->NotifyItemEnded(FAVORITES);
   }
   if ((items & SEARCH_ENGINES) && !cancelled()) {
-    NotifyItemStarted(SEARCH_ENGINES);
+    bridge_->NotifyItemStarted(SEARCH_ENGINES);
     ImportSearchEngines();
-    NotifyItemEnded(SEARCH_ENGINES);
+    bridge_->NotifyItemEnded(SEARCH_ENGINES);
   }
   if ((items & PASSWORDS) && !cancelled()) {
-    NotifyItemStarted(PASSWORDS);
+    bridge_->NotifyItemStarted(PASSWORDS);
     ImportPasswords();
-    NotifyItemEnded(PASSWORDS);
+    bridge_->NotifyItemEnded(PASSWORDS);
   }
-  if ((items & HISTORY) && !cancelled()) {
-    NotifyItemStarted(HISTORY);
-    ImportHistory();
-    NotifyItemEnded(HISTORY);
-  }
-  NotifyEnded();
+  bridge_->NotifyEnded();
 }
 
 void Firefox3Importer::ImportHistory() {
   std::wstring file = source_path_;
   file_util::AppendToPath(&file, L"places.sqlite");
-  if (!file_util::PathExists(file))
+  if (!file_util::PathExists(FilePath::FromWStringHack(file)))
     return;
 
   sqlite3* sqlite;
   if (sqlite3_open(WideToUTF8(file).c_str(), &sqlite) != SQLITE_OK)
     return;
-  scoped_ptr_malloc<sqlite3, DBClose> db(sqlite);
+  sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   SQLStatement s;
   // |visit_type| represent the transition type of URLs (typed, click,
@@ -118,21 +109,20 @@ void Firefox3Importer::ImportHistory() {
     rows.push_back(row);
   }
   if (!rows.empty() && !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddHistoryPage, rows));
+    bridge_->SetHistoryItems(rows);
   }
 }
 
 void Firefox3Importer::ImportBookmarks() {
   std::wstring file = source_path_;
   file_util::AppendToPath(&file, L"places.sqlite");
-  if (!file_util::PathExists(file))
+  if (!file_util::PathExists(FilePath::FromWStringHack(file)))
     return;
 
   sqlite3* sqlite;
   if (sqlite3_open(WideToUTF8(file).c_str(), &sqlite) != SQLITE_OK)
     return;
-  scoped_ptr_malloc<sqlite3, DBClose> db(sqlite);
+  sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   // Get the bookmark folders that we are interested in.
   int toolbar_folder_id = -1;
@@ -252,22 +242,22 @@ void Firefox3Importer::ImportBookmarks() {
 
   // Write into profile.
   if (!bookmarks.empty() && !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddBookmarkEntry, bookmarks,
-        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_FIREFOX),
-        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
+    const std::wstring& first_folder_name =
+        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_FIREFOX);
+    int options = 0;
+    if (import_to_bookmark_bar())
+      options = ProfileWriter::IMPORT_TO_BOOKMARK_BAR;
+    bridge_->AddBookmarkEntries(bookmarks, first_folder_name, options);
   }
   if (!template_urls.empty() && !cancelled()) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddKeywords, template_urls, -1, false));
+    bridge_->SetKeywords(template_urls, -1, false);
   } else {
     STLDeleteContainerPointers(template_urls.begin(), template_urls.end());
   }
   if (!favicon_map.empty() && !cancelled()) {
     std::vector<history::ImportedFavIconUsage> favicons;
     LoadFavicons(db.get(), favicon_map, &favicons);
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddFavicons, favicons));
+    bridge_->SetFavIcons(favicons);
   }
 }
 
@@ -278,23 +268,26 @@ void Firefox3Importer::ImportPasswords() {
       !decryptor.Init(app_path_, source_path_))
     return;
 
-  // Firefox 3 uses signons3.txt to store the passwords.
-  std::wstring file = source_path_;
-  file_util::AppendToPath(&file, L"signons3.txt");
-  if (!file_util::PathExists(file)) {
-    file = source_path_;
-    file_util::AppendToPath(&file, L"signons2.txt");
-  }
-
-  std::string content;
-  file_util::ReadFileToString(file, &content);
   std::vector<PasswordForm> forms;
-  decryptor.ParseSignons(content, &forms);
+  FilePath source_path = FilePath::FromWStringHack(source_path_);
+  FilePath file = source_path.AppendASCII("signons.sqlite");
+  if (file_util::PathExists(file)) {
+    // Since Firefox 3.1, passwords are in signons.sqlite db.
+    decryptor.ReadAndParseSignons(file, &forms);
+  } else {
+    // Firefox 3.0 uses signons3.txt to store the passwords.
+    file = source_path.AppendASCII("signons3.txt");
+    if (!file_util::PathExists(file))
+      file = source_path.AppendASCII("signons2.txt");
+
+    std::string content;
+    file_util::ReadFileToString(file, &content);
+    decryptor.ParseSignons(content, &forms);
+  }
 
   if (!cancelled()) {
     for (size_t i = 0; i < forms.size(); ++i) {
-      main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-          &ProfileWriter::AddPasswordForm, forms[i]));
+      bridge_->SetPasswordForm(forms[i]);
     }
   }
 }
@@ -305,16 +298,15 @@ void Firefox3Importer::ImportSearchEngines() {
 
   std::vector<TemplateURL*> search_engines;
   ParseSearchEnginesFromXMLFiles(files, &search_engines);
-  main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-      &ProfileWriter::AddKeywords, search_engines,
-      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_), true));
+  int default_index =
+      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_);
+  bridge_->SetKeywords(search_engines, default_index, true);
 }
 
 void Firefox3Importer::ImportHomepage() {
-  GURL homepage = GetHomepage(source_path_);
-  if (homepage.is_valid() && !IsDefaultHomepage(homepage, app_path_)) {
-    main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
-        &ProfileWriter::AddHomepage, homepage));
+  GURL home_page = GetHomepage(source_path_);
+  if (home_page.is_valid() && !IsDefaultHomepage(home_page, app_path_)) {
+    bridge_->AddHomePage(home_page);
   }
 }
 
@@ -322,13 +314,13 @@ void Firefox3Importer::GetSearchEnginesXMLFiles(
     std::vector<std::wstring>* files) {
   std::wstring file = source_path_;
   file_util::AppendToPath(&file, L"search.sqlite");
-  if (!file_util::PathExists(file))
+  if (!file_util::PathExists(FilePath::FromWStringHack(file)))
     return;
 
   sqlite3* sqlite;
   if (sqlite3_open(WideToUTF8(file).c_str(), &sqlite) != SQLITE_OK)
     return;
-  scoped_ptr_malloc<sqlite3, DBClose> db(sqlite);
+  sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   SQLStatement s;
   const char* stmt = "SELECT engineid FROM engine_data "

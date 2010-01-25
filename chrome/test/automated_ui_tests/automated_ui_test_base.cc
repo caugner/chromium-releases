@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/gfx/point.h"
+#include "base/gfx/rect.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/test/automated_ui_tests/automated_ui_test_base.h"
@@ -9,18 +11,20 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "views/view.h"
+#include "views/event.h"
 
 AutomatedUITestBase::AutomatedUITestBase() {}
 
 AutomatedUITestBase::~AutomatedUITestBase() {}
 
-void AutomatedUITestBase::LogErrorMessage(const std::string& error) {}
+void AutomatedUITestBase::LogErrorMessage(const std::string& error) {
+}
 
 void AutomatedUITestBase::LogWarningMessage(const std::string& warning) {
 }
 
-void AutomatedUITestBase::LogInfoMessage(const std::string& info) {}
+void AutomatedUITestBase::LogInfoMessage(const std::string& info) {
+}
 
 void AutomatedUITestBase::SetUp() {
   UITest::SetUp();
@@ -81,7 +85,6 @@ bool AutomatedUITestBase::DuplicateTab() {
   return RunCommand(IDC_DUPLICATE_TAB);
 }
 
-#if defined(OS_WIN)
 bool AutomatedUITestBase::DragTabOut() {
   BrowserProxy* browser = active_browser();
   if (browser == NULL) {
@@ -138,13 +141,13 @@ bool AutomatedUITestBase::DragTabOut() {
     return false;
   }
 
-  // Click on the center of the tab, and drag it downwads.
-  POINT start;
-  POINT end;
-  start.x = dragged_tab_bounds.x() + dragged_tab_bounds.width()/2;
-  start.y = dragged_tab_bounds.y() + dragged_tab_bounds.height()/2;
-  end.x = start.x;
-  end.y = start.y + 3*urlbar_bounds.height();
+  // Click on the center of the tab, and drag it downwards.
+  gfx::Point start;
+  gfx::Point end;
+  start.set_x(dragged_tab_bounds.x() + dragged_tab_bounds.width() / 2);
+  start.set_y(dragged_tab_bounds.y() + dragged_tab_bounds.height() / 2);
+  end.set_x(start.x());
+  end.set_y(start.y() + 3 * urlbar_bounds.height());
 
   if (!browser->SimulateDragWithTimeout(start, end,
                                         views::Event::EF_LEFT_BUTTON_DOWN,
@@ -200,8 +203,8 @@ bool AutomatedUITestBase::DragActiveTab(bool drag_right) {
   }
 
   // Click on the center of the tab, and drag it to the left or the right.
-  POINT dragged_tab_point(dragged_tab_bounds.CenterPoint().ToPOINT());
-  POINT destination_point(dragged_tab_point);
+  gfx::Point dragged_tab_point = dragged_tab_bounds.CenterPoint();
+  gfx::Point destination_point = dragged_tab_point;
 
   int new_tab_index;
   if (drag_right) {
@@ -210,14 +213,14 @@ bool AutomatedUITestBase::DragActiveTab(bool drag_right) {
       return false;
     }
     new_tab_index = tab_index + 1;
-    destination_point.x += 2 * dragged_tab_bounds.width() / 3;
+    destination_point.Offset(2 * dragged_tab_bounds.width() / 3, 0);
   } else {
     if (tab_index <= 0) {
       LogInfoMessage("cant_drag_to_left");
       return false;
     }
     new_tab_index = tab_index - 1;
-    destination_point.x -= 2 * dragged_tab_bounds.width() / 3;
+    destination_point.Offset(-2 * dragged_tab_bounds.width() / 3, 0);
   }
 
   if (!browser->SimulateDragWithTimeout(dragged_tab_point,
@@ -236,7 +239,13 @@ bool AutomatedUITestBase::DragActiveTab(bool drag_right) {
 
   return true;
 }
-#endif
+
+bool AutomatedUITestBase::FindInPage() {
+  if (!RunCommandAsync(IDC_FIND))
+    return false;
+
+  return WaitForFindWindowVisibilityChange(active_browser(), true);
+}
 
 bool AutomatedUITestBase::ForwardButton() {
   return RunCommand(IDC_FORWARD);
@@ -244,6 +253,10 @@ bool AutomatedUITestBase::ForwardButton() {
 
 bool AutomatedUITestBase::GoOffTheRecord() {
   return RunCommand(IDC_NEW_INCOGNITO_WINDOW);
+}
+
+bool AutomatedUITestBase::Home() {
+  return RunCommand(IDC_HOME);
 }
 
 bool AutomatedUITestBase::OpenAndActivateNewBrowserWindow(
@@ -289,6 +302,7 @@ bool AutomatedUITestBase::Navigate(const GURL& url) {
   }
   bool did_timeout = false;
   tab->NavigateToURLWithTimeout(url,
+                                1,
                                 command_execution_timeout_ms(),
                                 &did_timeout);
 
@@ -311,6 +325,41 @@ bool AutomatedUITestBase::ReloadPage() {
 
 bool AutomatedUITestBase::RestoreTab() {
   return RunCommand(IDC_RESTORE_TAB);
+}
+
+bool AutomatedUITestBase::SelectNextTab() {
+  return RunCommand(IDC_SELECT_NEXT_TAB);
+}
+
+bool AutomatedUITestBase::SelectPreviousTab() {
+  return RunCommand(IDC_SELECT_PREVIOUS_TAB);
+}
+
+bool AutomatedUITestBase::ShowBookmarkBar() {
+  bool is_visible;
+  bool is_animating;
+  if (!active_browser()->GetBookmarkBarVisibility(&is_visible,
+                                                  &is_animating)) {
+    return false;
+  }
+
+  if (is_visible) {
+    // If the bar is visible, then issuing the command again will toggle it.
+    return true;
+  }
+
+  if (!RunCommandAsync(IDC_SHOW_BOOKMARK_BAR))
+    return false;
+
+  return WaitForBookmarkBarVisibilityChange(active_browser(), true);
+}
+
+bool AutomatedUITestBase::ShowDownloads() {
+  return RunCommand(IDC_SHOW_DOWNLOADS);
+}
+
+bool AutomatedUITestBase::ShowHistory() {
+  return RunCommand(IDC_SHOW_HISTORY);
 }
 
 bool AutomatedUITestBase::RunCommandAsync(int browser_command) {

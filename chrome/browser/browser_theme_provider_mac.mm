@@ -6,19 +6,34 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "app/gfx/color_utils.h"
 #include "base/logging.h"
 #include "skia/ext/skia_utils_mac.h"
 
-NSImage* BrowserThemeProvider::GetNSImageNamed(int id) {
+namespace {
+
+void HSLToHSB(const color_utils::HSL& hsl, CGFloat* h, CGFloat* s, CGFloat* b) {
+  SkColor color = color_utils::HSLToSkColor(hsl, 255);  // alpha doesn't matter
+  SkScalar hsv[3];
+  SkColorToHSV(color, hsv);
+
+  *h = SkScalarToDouble(hsv[0]) / 360.0;
+  *s = SkScalarToDouble(hsv[1]);
+  *b = SkScalarToDouble(hsv[2]);
+}
+
+}
+
+NSImage* BrowserThemeProvider::GetNSImageNamed(int id) const {
   DCHECK(CalledOnValidThread());
 
   if (!HasCustomImage(id))
     return nil;
 
   // Check to see if we already have the image in the cache.
-  NSImageMap::const_iterator found = nsimage_cache_.find(id);
-  if (found != nsimage_cache_.end())
-    return found->second;
+  NSImageMap::const_iterator nsimage_iter = nsimage_cache_.find(id);
+  if (nsimage_iter != nsimage_cache_.end())
+    return nsimage_iter->second;
 
   // Why don't we load the file directly into the image instead of the whole
   // SkBitmap > native conversion?
@@ -52,22 +67,22 @@ NSImage* BrowserThemeProvider::GetNSImageNamed(int id) {
   return empty_image;
 }
 
-NSColor* BrowserThemeProvider::GetNSColor(int id) {
+NSColor* BrowserThemeProvider::GetNSColor(int id) const {
   DCHECK(CalledOnValidThread());
 
   // Check to see if we already have the color in the cache.
-  NSColorMap::const_iterator found = nscolor_cache_.find(id);
-  if (found != nscolor_cache_.end())
-    return found->second;
+  NSColorMap::const_iterator nscolor_iter = nscolor_cache_.find(id);
+  if (nscolor_iter != nscolor_cache_.end())
+    return nscolor_iter->second;
 
-  ColorMap::iterator color_iter = colors_.find(GetColorKey(id));
+  ColorMap::const_iterator color_iter = colors_.find(GetColorKey(id));
   if (color_iter != colors_.end()) {
     const SkColor& sk_color = color_iter->second;
-
-    NSColor* color = [NSColor colorWithCalibratedRed:SkColorGetR(sk_color)
-                                               green:SkColorGetG(sk_color)
-                                                blue:SkColorGetB(sk_color)
-                                               alpha:SkColorGetA(sk_color)];
+    NSColor* color = [NSColor
+        colorWithCalibratedRed:SkColorGetR(sk_color)/255.0
+                         green:SkColorGetG(sk_color)/255.0
+                          blue:SkColorGetB(sk_color)/255.0
+                         alpha:SkColorGetA(sk_color)/255.0];
 
     // We loaded successfully.  Cache the color.
     if (color) {
@@ -79,24 +94,23 @@ NSColor* BrowserThemeProvider::GetNSColor(int id) {
   return nil;
 }
 
-NSColor* BrowserThemeProvider::GetNSColorTint(int id) {
+NSColor* BrowserThemeProvider::GetNSColorTint(int id) const {
   DCHECK(CalledOnValidThread());
 
   // Check to see if we already have the color in the cache.
-  NSColorMap::const_iterator found = nscolor_cache_.find(id);
-  if (found != nscolor_cache_.end())
-    return found->second;
+  NSColorMap::const_iterator nscolor_iter = nscolor_cache_.find(id);
+  if (nscolor_iter != nscolor_cache_.end())
+    return nscolor_iter->second;
 
-  TintMap::iterator tint_iter = tints_.find(GetTintKey(id));
+  TintMap::const_iterator tint_iter = tints_.find(GetTintKey(id));
   if (tint_iter != tints_.end()) {
-    skia::HSL tint = tint_iter->second;
+    color_utils::HSL tint = tint_iter->second;
+    CGFloat hue, saturation, brightness;
+    HSLToHSB(tint, &hue, &saturation, &brightness);
 
-    // The tint is HSL, not HSB, but we're cheating for now. TODO(avi,alcor):
-    // determine how much this matters and fix it if necessary.
-    // http://crbug.com/15760
-    NSColor* tint_color = [NSColor colorWithCalibratedHue:tint.h
-                                               saturation:tint.s
-                                               brightness:tint.l
+    NSColor* tint_color = [NSColor colorWithCalibratedHue:hue
+                                               saturation:saturation
+                                               brightness:brightness
                                                     alpha:1.0];
 
     // We loaded successfully.  Cache the color.

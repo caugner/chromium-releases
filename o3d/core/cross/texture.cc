@@ -32,9 +32,10 @@
 
 // This file contains the definition of the Texture2D and TextureCUBE classes.
 
-#include "core/cross/precompile.h"
+#include <cmath>
 #include "core/cross/texture.h"
 #include "core/cross/bitmap.h"
+#include "core/cross/canvas.h"
 #include "core/cross/renderer.h"
 #include "core/cross/client_info.h"
 #include "core/cross/error.h"
@@ -56,135 +57,348 @@ Texture2D::Texture2D(ServiceLocator* service_locator,
                      int height,
                      Format format,
                      int levels,
-                     bool alpha_is_one,
-                     bool resize_to_pot,
                      bool enable_render_surfaces)
-    : Texture(service_locator, format, levels, alpha_is_one,
-              resize_to_pot, enable_render_surfaces),
-      locked_levels_(0) {
+    : Texture(service_locator, format, levels, enable_render_surfaces),
+      surface_map_(levels) {
   RegisterReadOnlyParamRef(kWidthParamName, &width_param_);
   RegisterReadOnlyParamRef(kHeightParamName, &height_param_);
   width_param_->set_read_only_value(width);
   height_param_->set_read_only_value(height);
 
+  for (int ii = 0; ii < kMaxLevels; ++ii) {
+    locked_levels_[ii] = kNone;
+  }
+
   ClientInfoManager* client_info_manager =
       service_locator->GetService<ClientInfoManager>();
   client_info_manager->AdjustTextureMemoryUsed(
-    static_cast<int>(Bitmap::GetMipChainSize(width, height, format, levels)));
+    static_cast<int>(image::ComputeMipChainSize(
+        width, height, format, levels)));
 }
 
 Texture2D::~Texture2D() {
-  if (locked_levels_ != 0) {
-    O3D_ERROR(service_locator())
-        << "Texture2D \"" << name()
-        << "\" was never unlocked before being destroyed.";
+  bool reported = false;
+  for (int ii = 0; ii < levels(); ++ii) {
+    if (IsLocked(ii)) {
+      if (!reported) {
+        reported = true;
+        O3D_ERROR(service_locator())
+            << "Texture2D \"" << name()
+            << "\" was never unlocked before being destroyed.";
+      }
+      Unlock(ii);
+    }
   }
 
   ClientInfoManager* client_info_manager =
       service_locator()->GetService<ClientInfoManager>();
   client_info_manager->AdjustTextureMemoryUsed(
-    -static_cast<int>(Bitmap::GetMipChainSize(width(),
-                                              height(),
-                                              format(),
-                                              levels())));
+    -static_cast<int>(image::ComputeMipChainSize(width(),
+                                                 height(),
+                                                 format(),
+                                                 levels())));
 }
 
-void Texture2D::DrawImage(Bitmap* src_img,
+void Texture2D::DrawImage(const Bitmap& src_img,
+                          int src_mip,
                           int src_x, int src_y,
                           int src_width, int src_height,
+                          int dst_mip,
                           int dst_x, int dst_y,
-                          int dst_width, int dst_height, int dest_mip) {
-  DCHECK(src_img->image_data());
+                          int dst_width, int dst_height) {
+  DCHECK(src_img.image_data());
 
-  int mip_width = std::max(1, width() >> dest_mip);
-  int mip_height = std::max(1, height() >> dest_mip);
+  if (dst_mip < 0 || dst_mip >= levels()) {
+    O3D_ERROR(service_locator()) << "Mip out of range";
+  }
+
+  if (src_mip < 0 || src_mip >= static_cast<int>(src_img.num_mipmaps())) {
+    O3D_ERROR(service_locator()) << "Source Mip out of range";
+  }
 
   // Clip source and destination rectangles to
   // source and destination bitmaps.
   // if src or dest rectangle is out of boundary,
   // do nothing and return.
-  if (!Bitmap::AdjustDrawImageBoundary(&src_x, &src_y,
-                                       &src_width, &src_height,
-                                       src_img->width(), src_img->height(),
-                                       &dst_x, &dst_y,
-                                       &dst_width, &dst_height,
-                                       mip_width, mip_height))
-    return;
-
-  unsigned int components = 0;
-  // check formats of source and dest images.
-  // format of source and dest should be the same.
-  if (src_img->format() != format()) {
-    O3D_ERROR(service_locator()) << "DrawImage does not support "
-                                 << "different formats.";
+  if (!image::AdjustDrawImageBoundary(&src_x, &src_y,
+                                      &src_width, &src_height,
+                                      src_mip,
+                                      src_img.width(), src_img.height(),
+                                      &dst_x, &dst_y,
+                                      &dst_width, &dst_height,
+                                      dst_mip,
+                                      width(), height())) {
     return;
   }
+
+  // check formats of source and dest images.
+  // format of source and dest should be the same.
+  if (src_img.format() != format()) {
+    O3D_ERROR(service_locator()) << "formats must be the same.";
+    return;
+  }
+
+  unsigned int mip_width = image::ComputeMipDimension(dst_mip, width());
+  unsigned int mip_height = image::ComputeMipDimension(dst_mip, height());
+
   // if src and dest are in the same size and drawImage is copying
   // the entire bitmap on dest image, just perform memcpy.
   if (src_x == 0 && src_y == 0 && dst_x == 0 && dst_y == 0 &&
-      src_img->width() == mip_width && src_img->height() == mip_height &&
-      src_width == src_img->width() && src_height == src_img->height() &&
-      dst_width == mip_width && dst_height == mip_height) {
-    void* data = NULL;
-    if (!Lock(dest_mip, &data))
-      return;
-
-    uint8* mip_data = static_cast<uint8*>(data);
-    unsigned int size = Bitmap::GetMipChainSize(mip_width, mip_height,
-                                                format(), 1);
-    memcpy(mip_data, src_img->image_data(), size);
-    this->Unlock(dest_mip);
-
+      src_img.width() == mip_width && src_img.height() == mip_height &&
+      static_cast<unsigned int>(src_width) == src_img.width() &&
+      static_cast<unsigned int>(src_height) == src_img.height() &&
+      static_cast<unsigned int>(dst_width) == mip_width &&
+      static_cast<unsigned int>(dst_height) == mip_height) {
+    SetRect(dst_mip, 0, 0, mip_width, mip_height,
+            src_img.GetMipData(src_mip),
+            src_img.GetMipPitch(src_mip));
     return;
   }
-  if (src_img->format() == Texture::XRGB8 ||
-      src_img->format() == Texture::ARGB8) {
-    components = 4;
-  } else {
+
+  unsigned int components = image::GetNumComponentsForFormat(format());
+  if (components == 0) {
     O3D_ERROR(service_locator()) << "DrawImage does not support format: "
-                                 << src_img->format() << " unless src and "
+                                 << src_img.format() << " unless src and "
                                  << "dest images are in the same size and "
                                  << "copying the entire bitmap";
     return;
   }
 
-  void* data = NULL;
-  if (!Lock(dest_mip, &data))
+  int src_pitch = src_img.GetMipPitch(src_mip);
+  if (image::AdjustForSetRect(&src_y, src_width, src_height, &src_pitch,
+                              &dst_y, dst_width, &dst_height)) {
+    SetRect(dst_mip, dst_x, dst_y, dst_width, dst_height,
+            src_img.GetPixelData(src_mip, src_x, src_y),
+            src_pitch);
     return;
+  }
 
-  uint8* src_img_data = src_img->image_data();
-  uint8* mip_data = static_cast<uint8*>(data);
+  LockHelper helper(this, dst_mip, kReadWrite);
+  uint8* mip_data = helper.GetDataAs<uint8>();
+  if (!mip_data) {
+    return;
+  }
 
-  Bitmap::BilinearInterpolateScale(src_img_data, src_x, src_y,
-                                   src_width, src_height,
-                                   src_img->width(), src_img->height(),
-                                   mip_data, dst_x, dst_y,
-                                   dst_width, dst_height,
-                                   mip_width, mip_height, components);
+  image::LanczosScale(src_img.format(),
+                      src_img.GetMipData(src_mip),
+                      src_img.GetMipPitch(src_mip),
+                      src_x, src_y,
+                      src_width, src_height,
+                      mip_data, helper.pitch(),
+                      dst_x, dst_y,
+                      dst_width, dst_height,
+                      components);
+}
 
-  this->Unlock(dest_mip);
+void Texture2D::DrawImage(const Canvas& src_img,
+                          int src_x, int src_y,
+                          int src_width, int src_height,
+                          int dst_mip,
+                          int dst_x, int dst_y,
+                          int dst_width, int dst_height) {
+  if (dst_mip < 0 || dst_mip >= levels()) {
+    O3D_ERROR(service_locator()) << "Mip out of range";
+  }
+
+  // Clip source and destination rectangles to
+  // source and destination bitmaps.
+  // if src or dest rectangle is out of boundary,
+  // do nothing and return.
+  if (!image::AdjustDrawImageBoundary(&src_x, &src_y,
+                                      &src_width, &src_height,
+                                      0,
+                                      src_img.width(), src_img.height(),
+                                      &dst_x, &dst_y,
+                                      &dst_width, &dst_height,
+                                      dst_mip,
+                                      width(), height())) {
+    return;
+  }
+
+  // check formats of source and dest images.
+  // format of source and dest should be the same.
+  if (format() != Texture::ARGB8 && format() != Texture::XRGB8) {
+    O3D_ERROR(service_locator()) << "format must be ARGB8 or XRGB8.";
+    return;
+  }
+
+  unsigned int mip_width = image::ComputeMipDimension(dst_mip, width());
+  DCHECK(mip_width > 0);
+
+  unsigned int mip_height = image::ComputeMipDimension(dst_mip, height());
+  DCHECK(mip_height > 0);
+
+  unsigned int components = image::GetNumComponentsForFormat(format());
+  DCHECK(components > 0);
+
+  int src_pitch = src_img.GetPitch();
+  if (image::AdjustForSetRect(&src_y, src_width, src_height, &src_pitch,
+                              &dst_y, dst_width, &dst_height)) {
+    SetRect(dst_mip, dst_x, dst_y, dst_width, dst_height,
+            src_img.GetPixelData(src_x, src_y),
+            src_pitch);
+    return;
+  }
+
+  LockHelper helper(this, dst_mip, kReadWrite);
+  uint8* mip_data = helper.GetDataAs<uint8>();
+  if (!mip_data) {
+    return;
+  }
+
+  image::LanczosScale(format(),
+                      src_img.GetPixelData(0, 0),
+                      src_img.GetPitch(),
+                      src_x, src_y,
+                      src_width, src_height,
+                      mip_data, helper.pitch(),
+                      dst_x, dst_y,
+                      dst_width, dst_height,
+                      components);
+}
+
+void Texture2D::SetFromBitmap(const Bitmap& bitmap) {
+  DCHECK(bitmap.image_data());
+  if (bitmap.width() != static_cast<unsigned>(width()) ||
+      bitmap.height() != static_cast<unsigned>(height()) ||
+      bitmap.format() != format()) {
+    O3D_ERROR(service_locator())
+        << "bitmap must be the same format and dimensions as texture";
+    return;
+  }
+
+  int last_level = std::min<int>(bitmap.num_mipmaps(), levels());
+  for (int level = 0; level < last_level; ++level) {
+    SetRect(level, 0, 0,
+            image::ComputeMipDimension(level, width()),
+            image::ComputeMipDimension(level, height()),
+            bitmap.GetMipData(level),
+            bitmap.GetMipPitch(level));
+  }
+}
+
+void Texture2D::GenerateMips(int source_level, int num_levels) {
+  if (source_level < 0 || source_level >= levels()) {
+    O3D_ERROR(service_locator()) << "source level out of range";
+    return;
+  }
+  if (source_level + num_levels >= levels()) {
+    O3D_ERROR(service_locator()) << "num levels out of range";
+    return;
+  }
+
+  for (int ii = 0; ii < num_levels; ++ii) {
+    int level = source_level + ii;
+    Texture2D::LockHelper src_helper(this, level, kReadOnly);
+    Texture2D::LockHelper dst_helper(this, level + 1, kWriteOnly);
+    const uint8* src_data = src_helper.GetDataAs<const uint8>();
+    if (!src_data) {
+      O3D_ERROR(service_locator())
+          << "could not lock source texture.";
+      return;
+    }
+    uint8* dst_data = dst_helper.GetDataAs<uint8>();
+    if (!dst_data) {
+      O3D_ERROR(service_locator())
+          << "could not lock destination texture.";
+      return;
+    }
+
+    unsigned int src_width = image::ComputeMipDimension(level, width());
+    unsigned int src_height = image::ComputeMipDimension(level, height());
+    image::GenerateMipmap(src_width, src_height, format(),
+                          src_data, src_helper.pitch(),
+                          dst_data, dst_helper.pitch());
+  }
+}
+
+bool Texture2D::Lock(
+    int level, void** texture_data, int* pitch, AccessMode mode) {
+  DCHECK(texture_data);
+  DCHECK(pitch);
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to lock inexistent level " << level << " on Texture \""
+        << name() << "\"";
+    return false;
+  }
+  if (IsLocked(level)) {
+    O3D_ERROR(service_locator())
+        << "Level " << level << " of texture \"" << name()
+        << "\" is already locked.";
+    return false;
+  }
+  if (render_surfaces_enabled()) {
+    O3D_ERROR(service_locator())
+        << "Attempting to lock a render-target texture: " << name();
+    return false;
+  }
+  bool success = PlatformSpecificLock(level, texture_data, pitch, mode);
+  if (success) {
+    locked_levels_[level] = mode;
+  } else {
+    O3D_ERROR(service_locator()) << "Failed to Lock Texture2D";
+  }
+  return success;
+}
+
+// Unlocks the given mipmap level of this texture.
+bool Texture2D::Unlock(int level) {
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to unlock inexistent level " << level << " on Texture \""
+        << name() << "\"";
+    return false;
+  }
+  if (!IsLocked(level)) {
+    O3D_ERROR(service_locator())
+        << "Level " << level << " of texture \"" << name()
+        << "\" is not locked.";
+    return false;
+  }
+  bool result = PlatformSpecificUnlock(level);
+  if (result) {
+    locked_levels_[level] = kNone;
+  } else {
+    O3D_ERROR(service_locator()) << "Failed to Unlock Texture2D";
+  }
+  return result;
 }
 
 ObjectBase::Ref Texture2D::Create(ServiceLocator* service_locator) {
   return ObjectBase::Ref();
 }
 
-Texture2DLockHelper::Texture2DLockHelper(Texture2D* texture, int level)
-    : texture_(texture),
+RenderSurface::Ref Texture2D::GetRenderSurface(int mip_level) {
+  if (mip_level < 0 || mip_level >= levels()) {
+    O3D_ERROR(service_locator()) << "mip level out of range";
+    return RenderSurface::Ref(NULL);
+  }
+  if (surface_map_[mip_level].IsNull()) {
+    surface_map_[mip_level] = RenderSurface::Ref(
+        PlatformSpecificGetRenderSurface(mip_level));
+  }
+  return surface_map_[mip_level];
+}
+
+Texture2D::LockHelper::LockHelper(
+    Texture2D* texture, int level, Texture::AccessMode mode)
+    : mode_(mode),
+      texture_(texture),
       level_(level),
       data_(NULL),
       locked_(false) {
 }
 
-Texture2DLockHelper::~Texture2DLockHelper() {
+Texture2D::LockHelper::~LockHelper() {
   if (locked_) {
     texture_->Unlock(level_);
   }
 }
 
-void* Texture2DLockHelper::GetData() {
+void* Texture2D::LockHelper::GetData() {
   if (!locked_) {
-    locked_ = texture_->Lock(level_, &data_);
+    locked_ = texture_->Lock(level_, &data_, &pitch_, mode_);
     if (!locked_) {
       O3D_ERROR(texture_->service_locator())
           << "Unable to lock buffer '" << texture_->name() << "'";
@@ -197,13 +411,13 @@ TextureCUBE::TextureCUBE(ServiceLocator* service_locator,
                          int edge_length,
                          Format format,
                          int levels,
-                         bool alpha_is_one,
-                         bool resize_to_pot,
                          bool enable_render_surfaces)
-    : Texture(service_locator, format, levels, alpha_is_one,
-              resize_to_pot, enable_render_surfaces) {
-  for (unsigned int i = 0; i < 6; ++i) {
-    locked_levels_[i] = 0;
+    : Texture(service_locator, format, levels, enable_render_surfaces) {
+  for (int f = 0; f < static_cast<int>(NUMBER_OF_FACES); ++f) {
+    for (int ii = 0; ii < kMaxLevels; ++ii) {
+      locked_levels_[f][ii] = kNone;
+    }
+    surface_maps_[f].resize(levels);
   }
   RegisterReadOnlyParamRef(kEdgeLengthParamName, &edge_length_param_);
   edge_length_param_->set_read_only_value(edge_length);
@@ -211,111 +425,364 @@ TextureCUBE::TextureCUBE(ServiceLocator* service_locator,
   ClientInfoManager* client_info_manager =
       service_locator->GetService<ClientInfoManager>();
   client_info_manager->AdjustTextureMemoryUsed(
-    static_cast<int>(Bitmap::GetMipChainSize(edge_length,
-                                             edge_length,
-                                             format,
-                                             levels)) * 6);
+    static_cast<int>(image::ComputeMipChainSize(
+        edge_length,
+        edge_length,
+        format,
+        levels)) * static_cast<int>(NUMBER_OF_FACES));
 }
 
 TextureCUBE::~TextureCUBE() {
-  for (unsigned int i = 0; i < 6; ++i) {
-    if (locked_levels_[i] != 0) {
-      O3D_ERROR(service_locator())
-          << "TextureCUBE \"" << name() << "\" was never unlocked before"
-          << "being destroyed.";
-      break;  // No need to report it more than once.
+  bool reported = false;
+  for (int f = 0; f < static_cast<int>(NUMBER_OF_FACES); ++f) {
+    for (int i = 0; i < levels(); ++i) {
+      if (IsLocked(static_cast<CubeFace>(f), i)) {
+        if (!reported) {
+          // No need to report it more than once.
+          reported = true;
+          O3D_ERROR(service_locator())
+              << "TextureCUBE \"" << name() << "\" was never unlocked before"
+              << "being destroyed.";
+        }
+        Unlock(static_cast<CubeFace>(f), i);
+      }
     }
   }
 
   ClientInfoManager* client_info_manager =
       service_locator()->GetService<ClientInfoManager>();
   client_info_manager->AdjustTextureMemoryUsed(
-    -static_cast<int>(Bitmap::GetMipChainSize(edge_length(),
-                                              edge_length(),
-                                              format(),
-                                              levels()) * 6));
+    -static_cast<int>(image::ComputeMipChainSize(edge_length(),
+                                                 edge_length(),
+                                                 format(),
+                                                 levels()) * 6));
 }
 
 ObjectBase::Ref TextureCUBE::Create(ServiceLocator* service_locator) {
   return ObjectBase::Ref();
 }
 
-void TextureCUBE::DrawImage(Bitmap* src_img,
+RenderSurface::Ref TextureCUBE::GetRenderSurface(CubeFace face, int mip_level) {
+  if (mip_level < 0 || mip_level >= levels()) {
+    O3D_ERROR(service_locator()) << "mip level out of range";
+    return RenderSurface::Ref(NULL);
+  }
+  if (surface_maps_[face][mip_level].IsNull()) {
+    surface_maps_[face][mip_level] = RenderSurface::Ref(
+        PlatformSpecificGetRenderSurface(face, mip_level));
+  }
+  return surface_maps_[face][mip_level];
+}
+
+void TextureCUBE::DrawImage(const Bitmap& src_img, int src_mip,
                             int src_x, int src_y,
                             int src_width, int src_height,
+                            CubeFace dest_face, int dest_mip,
                             int dst_x, int dst_y,
-                            int dst_width, int dst_height,
-                            CubeFace dest_face, int dest_mip) {
-  DCHECK(src_img->image_data());
+                            int dst_width, int dst_height) {
+  DCHECK(src_img.image_data());
 
-  int mip_length = std::max(1, edge_length() >> dest_mip);
+  if (dest_face >= NUMBER_OF_FACES) {
+    O3D_ERROR(service_locator()) << "Invalid face specification";
+    return;
+  }
+
+  if (dest_mip < 0 || dest_mip >= levels()) {
+    O3D_ERROR(service_locator()) << "Destination Mip out of range";
+  }
+
+  if (src_mip < 0 || src_mip >= static_cast<int>(src_img.num_mipmaps())) {
+    O3D_ERROR(service_locator()) << "Source Mip out of range";
+  }
 
   // Clip source and destination rectangles to
   // source and destination bitmaps.
   // if src or dest rectangle is out of boundary,
   // do nothing and return true.
-  if (!Bitmap::AdjustDrawImageBoundary(&src_x, &src_y,
-                                       &src_width, &src_height,
-                                       src_img->width(), src_img->height(),
-                                       &dst_x, &dst_y,
-                                       &dst_width, &dst_height,
-                                       mip_length, mip_length))
+  if (!image::AdjustDrawImageBoundary(&src_x, &src_y,
+                                      &src_width, &src_height,
+                                      src_mip,
+                                      src_img.width(), src_img.height(),
+                                      &dst_x, &dst_y,
+                                      &dst_width, &dst_height,
+                                      dest_mip,
+                                      edge_length(), edge_length())) {
     return;
+  }
 
-  unsigned int components = 0;
   // check formats of source and dest images.
   // format of source and dest should be the same.
-  if (src_img->format() != format()) {
+  if (src_img.format() != format()) {
     O3D_ERROR(service_locator()) << "DrawImage does not support "
                                  << "different formats.";
     return;
   }
+
+  unsigned int mip_length = image::ComputeMipDimension(dest_mip, edge_length());
+
   // if src and dest are in the same size and drawImage is copying
   // the entire bitmap on dest image, just perform memcpy.
   if (src_x == 0 && src_y == 0 && dst_x == 0 && dst_y == 0 &&
-      src_img->width() == mip_length && src_img->height() == mip_length &&
-      src_width == src_img->width() && src_height == src_img->height() &&
-      dst_width == mip_length && dst_height == mip_length) {
-    // get mip data by lock method.
-    void* data = NULL;
-    if (!Lock(dest_face, dest_mip, &data))
-      return;
-
-    uint8* mip_data = static_cast<uint8*>(data);
-    unsigned int size = Bitmap::GetMipChainSize(mip_length, mip_length,
-                                                format(), 1);
-    memcpy(mip_data, src_img->image_data(), size);
-    this->Unlock(dest_face, dest_mip);
-
+      src_img.width() == mip_length && src_img.height() == mip_length &&
+      static_cast<unsigned int>(src_width) == src_img.width() &&
+      static_cast<unsigned int>(src_height) == src_img.height() &&
+      static_cast<unsigned int>(dst_width) == mip_length &&
+      static_cast<unsigned int>(dst_height) == mip_length) {
+    SetRect(dest_face, dest_mip, 0, 0, mip_length, mip_length,
+            src_img.image_data(),
+            src_img.GetMipPitch(src_mip));
     return;
   }
-  if (src_img->format() == Texture::XRGB8 ||
-      src_img->format() == Texture::ARGB8) {
-    components = 4;
-  } else {
+
+  unsigned int components = image::GetNumComponentsForFormat(format());
+  if (components == 0) {
     O3D_ERROR(service_locator()) << "DrawImage does not support format: "
-                                 << src_img->format() << " unless src and "
+                                 << src_img.format() << " unless src and "
                                  << "dest images are in the same size and "
                                  << "copying the entire bitmap";
     return;
   }
 
-  void* data = NULL;
-  if (!Lock(dest_face, dest_mip, &data)) {
+  int src_pitch = src_img.GetMipPitch(src_mip);
+  if (image::AdjustForSetRect(&src_y, src_width, src_height, &src_pitch,
+                              &dst_y, dst_width, &dst_height)) {
+    SetRect(dest_face, dest_mip, dst_x, dst_y, dst_width, dst_height,
+            src_img.GetPixelData(src_mip, src_x, src_y),
+            src_pitch);
+  }
+
+  LockHelper helper(this, dest_face, dest_mip, kReadWrite);
+  uint8* mip_data = helper.GetDataAs<uint8>();
+  if (!mip_data) {
     return;
   }
 
-  uint8* src_img_data = src_img->image_data();
-  uint8* mip_data = static_cast<uint8*>(data);
+  image::LanczosScale(src_img.format(), src_img.GetMipData(src_mip),
+                      src_img.GetMipPitch(src_mip),
+                      src_x, src_y,
+                      src_width, src_height,
+                      mip_data, helper.pitch(),
+                      dst_x, dst_y,
+                      dst_width, dst_height,
+                      components);
+}
 
-  Bitmap::BilinearInterpolateScale(src_img_data, src_x, src_y,
-                                   src_width, src_height,
-                                   src_img->width(), src_img->height(),
-                                   mip_data, dst_x, dst_y,
-                                   dst_width, dst_height,
-                                   mip_length, mip_length, components);
+void TextureCUBE::DrawImage(const Canvas& src_img,
+                            int src_x, int src_y,
+                            int src_width, int src_height,
+                            CubeFace dest_face, int dest_mip,
+                            int dst_x, int dst_y,
+                            int dst_width, int dst_height) {
+  if (dest_face >= NUMBER_OF_FACES) {
+    O3D_ERROR(service_locator()) << "Invalid face specification";
+    return;
+  }
 
-  this->Unlock(dest_face, dest_mip);
+  if (dest_mip < 0 || dest_mip >= levels()) {
+    O3D_ERROR(service_locator()) << "Destination Mip out of range";
+  }
+
+  // Clip source and destination rectangles to
+  // source and destination bitmaps.
+  // if src or dest rectangle is out of boundary,
+  // do nothing and return true.
+  if (!image::AdjustDrawImageBoundary(&src_x, &src_y,
+                                      &src_width, &src_height,
+                                      0,
+                                      src_img.width(), src_img.height(),
+                                      &dst_x, &dst_y,
+                                      &dst_width, &dst_height,
+                                      dest_mip,
+                                      edge_length(), edge_length())) {
+    return;
+  }
+
+  // check formats of source and dest images.
+  // format of source and dest should be the same.
+  if (format() != Texture::ARGB8 && format() != Texture::XRGB8) {
+    O3D_ERROR(service_locator()) << "format must be ARGB8 or XRGB8.";
+    return;
+  }
+
+  unsigned int mip_length = image::ComputeMipDimension(dest_mip, edge_length());
+  DCHECK(mip_length > 0u);
+
+  unsigned int components = image::GetNumComponentsForFormat(format());
+  DCHECK(components > 0);
+
+  int src_pitch = src_img.GetPitch();
+  if (image::AdjustForSetRect(&src_y, src_width, src_height, &src_pitch,
+                              &dst_y, dst_width, &dst_height)) {
+    SetRect(dest_face, dest_mip, dst_x, dst_y, dst_width, dst_height,
+            src_img.GetPixelData(src_x, src_y),
+            src_pitch);
+    return;
+  }
+
+  LockHelper helper(this, dest_face, dest_mip, kReadWrite);
+  uint8* mip_data = helper.GetDataAs<uint8>();
+  if (!mip_data) {
+    return;
+  }
+
+  image::LanczosScale(format(),
+                      src_img.GetPixelData(0, 0),
+                      src_img.GetPitch(),
+                      src_x, src_y,
+                      src_width, src_height,
+                      mip_data, helper.pitch(),
+                      dst_x, dst_y,
+                      dst_width, dst_height,
+                      components);
+}
+
+void TextureCUBE::SetFromBitmap(CubeFace face, const Bitmap& bitmap) {
+  DCHECK(bitmap.image_data());
+  if (bitmap.width() != static_cast<unsigned>(edge_length()) ||
+      bitmap.height() != static_cast<unsigned>(edge_length()) ||
+      bitmap.format() != format()) {
+    O3D_ERROR(service_locator())
+        << "bitmap must be the same format and dimensions as texture";
+    return;
+  }
+
+  int last_level = std::min<int>(bitmap.num_mipmaps(), levels());
+  for (int level = 0; level < last_level; ++level) {
+    SetRect(face, level, 0, 0,
+            image::ComputeMipDimension(level, edge_length()),
+            image::ComputeMipDimension(level, edge_length()),
+            bitmap.GetMipData(level),
+            bitmap.GetMipPitch(level));
+  }
+}
+
+void TextureCUBE::GenerateMips(int source_level, int num_levels) {
+  if (source_level < 0 || source_level >= levels()) {
+    O3D_ERROR(service_locator()) << "source level out of range";
+    return;
+  }
+  if (source_level + num_levels >= levels()) {
+    O3D_ERROR(service_locator()) << "num levels out of range";
+    return;
+  }
+
+  for (int face = FACE_POSITIVE_X; face < NUMBER_OF_FACES; ++face) {
+    for (int ii = 0; ii < num_levels; ++ii) {
+      int level = source_level + ii;
+      TextureCUBE::LockHelper src_helper(
+          this, static_cast<TextureCUBE::CubeFace>(face), level, kReadOnly);
+      TextureCUBE::LockHelper dst_helper(
+          this, static_cast<TextureCUBE::CubeFace>(face), level + 1,
+          kWriteOnly);
+      const uint8* src_data = src_helper.GetDataAs<const uint8>();
+      if (!src_data) {
+        O3D_ERROR(service_locator())
+            << "could not lock source texture.";
+        return;
+      }
+      uint8* dst_data = dst_helper.GetDataAs<uint8>();
+      if (!dst_data) {
+        O3D_ERROR(service_locator())
+            << "could not lock destination texture.";
+        return;
+      }
+
+      unsigned int src_edge_length =
+        std::max<unsigned int>(1U, edge_length() >> level);
+
+      image::GenerateMipmap(
+          src_edge_length, src_edge_length, format(),
+          src_data, src_helper.pitch(),
+          dst_data, dst_helper.pitch());
+    }
+  }
+}
+
+// Locks the given face and mipmap level of this texture for loading from
+// main memory, and returns a pointer to the buffer.
+bool TextureCUBE::Lock(
+    CubeFace face, int level, void** texture_data, int* pitch,
+    AccessMode mode) {
+  DCHECK(texture_data);
+  DCHECK(pitch);
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to lock inexistent level " << level << " on Texture \""
+        << name();
+    return false;
+  }
+  if (IsLocked(face, level)) {
+    O3D_ERROR(service_locator())
+        << "Level " << level << " Face " << face << " of texture \"" << name()
+        << "\" is already locked.";
+    return false;
+  }
+  if (render_surfaces_enabled()) {
+    O3D_ERROR(service_locator())
+        << "Attempting to lock a render-target texture: " << name();
+    return false;
+  }
+
+  bool success = PlatformSpecificLock(face, level, texture_data, pitch, mode);
+  if (success) {
+    locked_levels_[face][level] = mode;
+  } else {
+    O3D_ERROR(service_locator()) << "Failed to Lock TextureCUBE";
+  }
+  return success;
+}
+
+// Unlocks the given face and mipmap level of this texture.
+bool TextureCUBE::Unlock(CubeFace face, int level) {
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to unlock inexistent level " << level << " on Texture \""
+        << name();
+    return false;
+  }
+  if (!IsLocked(face, level)) {
+    O3D_ERROR(service_locator())
+        << "Level " << level << " of texture \"" << name()
+        << "\" is not locked.";
+    return false;
+  }
+  bool result = PlatformSpecificUnlock(face, level);
+  if (result) {
+    locked_levels_[face][level] = kNone;
+  } else {
+    O3D_ERROR(service_locator()) << "Failed to Unlock TextureCUBE";
+  }
+  return result;
+}
+
+TextureCUBE::LockHelper::LockHelper(
+    TextureCUBE* texture,
+    CubeFace face,
+    int level,
+    Texture::AccessMode mode)
+    : mode_(mode),
+      texture_(texture),
+      face_(face),
+      level_(level),
+      data_(NULL),
+      locked_(false) {
+}
+
+TextureCUBE::LockHelper::~LockHelper() {
+  if (locked_) {
+    texture_->Unlock(face_, level_);
+  }
+}
+
+void* TextureCUBE::LockHelper::GetData() {
+  if (!locked_) {
+    locked_ = texture_->Lock(face_, level_, &data_, &pitch_, mode_);
+    if (!locked_) {
+      O3D_ERROR(texture_->service_locator())
+          << "Unable to lock buffer '" << texture_->name() << "'";
+    }
+  }
+  return data_;
 }
 
 }  // namespace o3d

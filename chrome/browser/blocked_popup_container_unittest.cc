@@ -13,7 +13,7 @@
 #include "app/app_paths.h"
 #include "base/path_service.h"
 #include "chrome/browser/blocked_popup_container.h"
-#include "chrome/browser/tab_contents/test_web_contents.h"
+#include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/test/testing_profile.h"
 #include "net/base/net_util.h"
@@ -90,13 +90,12 @@ TEST_F(BlockedPopupContainerTest, BasicCase) {
 
   // Create another TabContents representing the blocked popup case.
   TabContents* popup = BuildTabContents();
-  popup->controller().LoadURLLazily(GetTestCase("error"), GURL(),
-                                    PageTransition::LINK,
-                                    L"", NULL);
+  popup->controller().LoadURL(GetTestCase("error"), GURL(),
+                              PageTransition::LINK);
   container_->AddTabContents(popup, gfx::Rect(), host1);
 
   EXPECT_EQ(container_->GetBlockedPopupCount(), static_cast<size_t>(1));
   EXPECT_EQ(container_->GetTabContentsAt(0), popup);
+  ASSERT_THAT(container_->GetHosts(), testing::Contains(host1));
   EXPECT_FALSE(container_->IsHostWhitelisted(0));
-  EXPECT_THAT(container_->GetHosts(), testing::Contains(host1));
 }

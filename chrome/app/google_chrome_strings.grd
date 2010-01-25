@@ -11,6 +11,7 @@ Chrome supports. -->
     </output>
     <!-- We use different filenames here so we can include the file easily in
          vcproj files using the $(CHROMIUM_BUILD). -->
+    <output filename="strings_google_chrome_am.rc" type="rc_all" lang="am" />
     <output filename="strings_google_chrome_ar.rc" type="rc_all" lang="ar" />
     <output filename="strings_google_chrome_bg.rc" type="rc_all" lang="bg" />
     <output filename="strings_google_chrome_bn.rc" type="rc_all" lang="bn" />
@@ -54,6 +55,7 @@ Chrome supports. -->
     <output filename="strings_google_chrome_sl.rc" type="rc_all" lang="sl" />
     <output filename="strings_google_chrome_sr.rc" type="rc_all" lang="sr" />
     <output filename="strings_google_chrome_sv.rc" type="rc_all" lang="sv" />
+    <output filename="strings_google_chrome_sw.rc" type="rc_all" lang="sw" />
     <output filename="strings_google_chrome_ta.rc" type="rc_all" lang="ta" />
     <output filename="strings_google_chrome_te.rc" type="rc_all" lang="te" />
     <output filename="strings_google_chrome_th.rc" type="rc_all" lang="th" />
@@ -63,6 +65,7 @@ Chrome supports. -->
     <output filename="strings_google_chrome_zh-CN.rc" type="rc_all" lang="zh-CN" />
     <output filename="strings_google_chrome_zh-TW.rc" type="rc_all" lang="zh-TW" />
 
+    <output filename="google_chrome_strings_am.pak" type="data_package" lang="am" />
     <output filename="google_chrome_strings_ar.pak" type="data_package" lang="ar" />
     <output filename="google_chrome_strings_bg.pak" type="data_package" lang="bg" />
     <output filename="google_chrome_strings_bn.pak" type="data_package" lang="bn" />
@@ -106,6 +109,7 @@ Chrome supports. -->
     <output filename="google_chrome_strings_sl.pak" type="data_package" lang="sl" />
     <output filename="google_chrome_strings_sr.pak" type="data_package" lang="sr" />
     <output filename="google_chrome_strings_sv.pak" type="data_package" lang="sv" />
+    <output filename="google_chrome_strings_sw.pak" type="data_package" lang="sw" />
     <output filename="google_chrome_strings_ta.pak" type="data_package" lang="ta" />
     <output filename="google_chrome_strings_te.pak" type="data_package" lang="te" />
     <output filename="google_chrome_strings_th.pak" type="data_package" lang="th" />
@@ -116,6 +120,7 @@ Chrome supports. -->
     <output filename="google_chrome_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
   </outputs>
   <translations>
+    <file path="resources/google_chrome_strings_am.xtb" lang="am" />
     <file path="resources/google_chrome_strings_ar.xtb" lang="ar" />
     <file path="resources/google_chrome_strings_bg.xtb" lang="bg" />
     <file path="resources/google_chrome_strings_bn.xtb" lang="bn" />
@@ -157,6 +162,7 @@ Chrome supports. -->
     <file path="resources/google_chrome_strings_sl.xtb" lang="sl" />
     <file path="resources/google_chrome_strings_sr.xtb" lang="sr" />
     <file path="resources/google_chrome_strings_sv.xtb" lang="sv" />
+    <file path="resources/google_chrome_strings_sw.xtb" lang="sw" />
     <file path="resources/google_chrome_strings_ta.xtb" lang="ta" />
     <file path="resources/google_chrome_strings_te.xtb" lang="te" />
     <file path="resources/google_chrome_strings_th.xtb" lang="th" />
@@ -171,6 +177,11 @@ Chrome supports. -->
       <message name="IDS_PRODUCT_NAME" desc="The Chrome application name">
         Google Chrome
       </message>
+      <if expr="pp_ifdef('chromeos') or pp_ifdef('toolkit_views')">
+        <message name="IDS_PRODUCT_OS_NAME" desc="The Chrome OS application name">
+          Google Chrome OS
+        </message>
+      </if>
       <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2" desc="2nd paragraph of extra information for an unsafe common name in an X509 certificate">
         In this case, the address listed in the certificate does not match the address of the website your browser tried to go to. One possible reason for this is that your communications are being intercepted by an attacker who is presenting a certificate for a different website, which would cause a mismatch. Another possible reason is that the server is set up to return the same certificate for multiple websites, including the one you are attempting to visit, even though that certificate is not valid for all of those websites. Google Chrome can say for sure that you reached &lt;strong&gt;<ph name="DOMAIN2">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but cannot verify that that is the same site as &lt;strong&gt;<ph name="DOMAIN">$2<ex>www.paypal.com</ex></ph>&lt;/strong&gt; which you intended to reach. If you proceed, Chrome will not check for any further name mismatches. In general, it is best not to proceed past this point.
       </message>
@@ -271,6 +282,10 @@ Chrome supports. -->
                desc="Displayed to explain the Most Visited concept when there aren't enough most visited items.">
         The "Most visited" area shows the websites that you use most often. After using Google Chrome for a while, you will see your most visited sites whenever you open a new tab. You can learn more about this and other features on the <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Getting Started page<ph name="END_LINK">&lt;/a&gt;</ph>.
       </message>
+      <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
+               desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
+        Welcome to Google Chrome
+      </message>
       <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
         Google Chrome needs to launch an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
       </message>
@@ -288,7 +303,7 @@ Chrome supports. -->
         Google Chrome language:
       </message>
       <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
-        Please close all Chrome windows and restart Chrome for this change to take effect.
+        Please close all Google Chrome windows and restart it for this change to take effect.
       </message>
       <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
         When you reset Google Chrome options any changes you've made will be reverted to the default settings. Do you want to reset Chrome options?
@@ -310,13 +325,13 @@ Chrome supports. -->
         Whoa! Google Chrome has crashed. Restart now?
       </message>
       <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
-        Do you want Chrome to save your password?
+        Do you want Google Chrome to save your password?
       </message>
       <message name="IDS_IMPORT_PROGRESS_STATUS_CANCEL_CONFIRM" desc="Import cancellation confirmation">
-        If you cancel now, not all items will be imported. You can import again later from the Chrome menu.
+        If you cancel now, not all items will be imported. You can import again later from the Google Chrome menu.
       </message>
       <message name="IDS_FR_BUBBLE_QUESTION" desc="Main text for the bubble">
-        Chrome uses your default search engine, which is currently set to <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>. Do you want to keep your default search engine?
+        Google Chrome uses your default search engine, which is currently set to <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>. Do you want to keep your default search engine?
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_EXIT_BUTTON" desc="Text on button of dialog that closes Chrome if we can't create a directory for this user.">
         Exit Chrome
@@ -385,35 +400,59 @@ Chrome supports. -->
       <message name="IDS_UNINSTALL_DELETE_PROFILE" desc="Text to show user to ask whether to delete all the profile data also during uninstallation.">
         Also delete your browsing data?
       </message>
+      <message name="IDS_UNINSTALL_SET_DEFAULT_BROWSER" desc="Text to ask whether to set another browser as default when Chromium is uninstalled.">
+        Change default browser to:
+      </message>
+      <message name="IDS_UNINSTALL_BUTTON_TEXT" desc="Label for uninstall button on Uninstall confirmation dialog.">
+        Uninstall
+      </message>
       <message name="IDS_DEFAULT_BROWSER_INFOBAR_TEXT" desc="Text to show in the default browser query infobar.">
         Hooray, you're back! But Google Chrome isn't your default browser.
       </message>
       <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
         Google Chrome isn't your default browser.
       </message>
-      <!-- Try Chrome Toast Dialog -->
-      <message name="IDS_TRY_TOAST_HEADING" desc="Top line of the try-chrome-again dialog">
-        There is a new version of Google Chrome available.
-      </message>
-      <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
-        Try it out (already installed)
-      </message>
-      <message name="IDS_TRY_TOAST_CANCEL" desc="Try chrome again dialog Cancel button">
-        Don't bug me
-      </message>
-      <message name="IDS_TRY_TOAST_WHY" desc="Text of the url link that explains why this dialog is being shown">
-        Why am I seeing this?
-      </message>
-
       <if expr="os == 'darwin'">
-        <message name="IDS_EXIT_MAC" desc="The menu item to quit the browser in the app menu.">
-          Quit Google Chrome
+        <message name="IDS_SHORT_PRODUCT_NAME" desc="The application's short name, used for the Mac's application menu, activity monitor, etc. This should be less than 16 characters. Example: Chrome, not Google Chrome.">
+          Chrome
         </message>
-        <message name="IDS_HIDE_MAC" desc="The menu item to hide all browser windows in the app menu.">
-          Hide Google Chrome
+        <message name="IDS_HELPER_NAME" desc="The helper application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Helper.">
+          Google Chrome Helper
         </message>
-        <message name="IDS_HELP_MAC" desc="The menu item to show help in the Help menu.">
-          Google Chrome Help
+        <message name="IDS_SHORT_HELPER_NAME" desc="The helper application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Helper, not Google Chrome Helper.">
+          Chrome Helper
+        </message>
+
+        <!-- TODO(mark): All helper tasks are currently handled by the helper process.  The following strings exist in support of possibly changing things so that there's a distinct .app bundle for each of the various tasks.  This ensures that if and when a split is made, translated names will be available.  If the helper process is not split into multiple .app bundles, these strings can be removed. -->
+        <message name="IDS_RENDERER_APP_NAME" desc="The renderer application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Renderer.">
+          Google Chrome Renderer
+        </message>
+        <message name="IDS_SHORT_RENDERER_APP_NAME" desc="The renderer application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Renderer, not Google Chrome Renderer.">
+          Chrome Renderer
+        </message>
+        <message name="IDS_PLUGIN_APP_NAME" desc="The plug-in host application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Plug-In Host.">
+          Google Chrome Plug-In Host
+        </message>
+        <message name="IDS_SHORT_PLUGIN_APP_NAME" desc="The plug-in host application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Plug-In Host, not Google Chrome Plug-In Host.">
+          Chrome Plug-In Host
+        </message>
+        <message name="IDS_WORKER_APP_NAME" desc="The worker application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Worker.">
+          Google Chrome Worker
+        </message>
+        <message name="IDS_SHORT_WORKER_APP_NAME" desc="The worker application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Worker, not Google Chrome Worker.">
+          Chrome Worker
+        </message>
+        <message name="IDS_UTILITY_APP_NAME" desc="The utility application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Utility.">
+          Google Chrome Utility
+        </message>
+        <message name="IDS_SHORT_UTILITY_APP_NAME" desc="The utility application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Utility, not Google Chrome Utility.">
+          Chrome Utility
+        </message>
+        <message name="IDS_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Profile Importer.">
+          Google Chrome Profile Importer
+        </message>
+        <message name="IDS_SHORT_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Profile Importer, not Google Chrome Profile Importer.">
+          Chrome Profile Importer
         </message>
       </if>
     </messages>

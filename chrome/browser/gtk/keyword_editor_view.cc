@@ -4,8 +4,8 @@
 
 #include "chrome/browser/gtk/keyword_editor_view.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
-#include "base/gfx/gtk_util.h"
 #include "chrome/browser/gtk/edit_search_engine_dialog.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/metrics/user_metrics.h"
@@ -13,35 +13,21 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_table_model.h"
+#include "chrome/common/gtk_tree.h"
 #include "chrome/common/gtk_util.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 
 namespace {
-
-// Initial size for dialog.
-const int kDialogDefaultWidth = 450;
-const int kDialogDefaultHeight = 450;
 
 // How many rows should be added to an index into the |table_model_| to get the
 // corresponding row in |list_store_|
 const int kFirstGroupRowOffset = 2;
 const int kSecondGroupRowOffset = 5;
 
-// Column ids for |list_store_|.
-enum {
-  COL_FAVICON,
-  COL_TITLE,
-  COL_KEYWORD,
-  COL_IS_HEADER,
-  COL_IS_SEPARATOR,
-  COL_WEIGHT,
-  COL_WEIGHT_SET,
-  COL_COUNT,
-};
-
 KeywordEditorView* instance_ = NULL;
 
-}
+}  // namespace
 
 // static
 void KeywordEditorView::Show(Profile* profile) {
@@ -54,6 +40,7 @@ void KeywordEditorView::Show(Profile* profile) {
     gtk_window_present(GTK_WINDOW(instance_->dialog_));
   } else {
     instance_ = new KeywordEditorView(profile);
+    gtk_widget_show_all(instance_->dialog_);
   }
 }
 
@@ -92,8 +79,6 @@ void KeywordEditorView::Init() {
       GTK_RESPONSE_CLOSE,
       NULL);
 
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), kDialogDefaultWidth,
-                              kDialogDefaultHeight);
   gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
                       gtk_util::kContentAreaSpacing);
 
@@ -117,6 +102,7 @@ void KeywordEditorView::Init() {
                                    G_TYPE_INT,
                                    G_TYPE_BOOLEAN);
   tree_ = gtk_tree_view_new_with_model(GTK_TREE_MODEL(list_store_));
+  g_object_unref(list_store_);
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree_), TRUE);
   gtk_tree_view_set_row_separator_func(GTK_TREE_VIEW(tree_),
                                        OnCheckRowIsSeparator,
@@ -194,7 +180,15 @@ void KeywordEditorView::Init() {
 
   EnableControls();
 
-  gtk_widget_show_all(dialog_);
+  // Set the size of the dialog.
+  gtk_widget_realize(dialog_);
+  int width = 1, height = 1;
+  gtk_util::GetWidgetSizeFromResources(
+      dialog_,
+      IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
+      IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES,
+      &width, &height);
+  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
 
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
@@ -269,16 +263,7 @@ int KeywordEditorView::GetSelectedModelRow() const {
 
 void KeywordEditorView::SelectModelRow(int model_row) {
   int row = GetListStoreRowForModelRow(model_row);
-  GtkTreeIter iter;
-  if (!gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(list_store_),
-                                     &iter, NULL, row)) {
-    NOTREACHED();
-    return;
-  }
-  GtkTreePath* path = gtk_tree_model_get_path(GTK_TREE_MODEL(list_store_),
-                                              &iter);
-  gtk_tree_view_set_cursor(GTK_TREE_VIEW(tree_), path, NULL, FALSE);
-  gtk_tree_path_free(path);
+  gtk_tree::SelectAndFocusRowNum(row, GTK_TREE_VIEW(tree_));
 }
 
 void KeywordEditorView::AddNodeToList(int model_row) {
@@ -418,7 +403,7 @@ gboolean KeywordEditorView::OnCheckRowIsSeparator(GtkTreeModel* model,
   return is_separator;
 }
 
-//static
+// static
 gboolean KeywordEditorView::OnSelectionFilter(GtkTreeSelection *selection,
                                               GtkTreeModel *model,
                                               GtkTreePath *path,
@@ -462,10 +447,9 @@ void KeywordEditorView::OnAddButtonClicked(GtkButton* button,
 void KeywordEditorView::OnEditButtonClicked(GtkButton* button,
                                             KeywordEditorView* editor) {
   int model_row = editor->GetSelectedModelRow();
-  if (model_row == -1) {
-    NOTREACHED();
+  if (model_row == -1)
     return;
-  }
+
   new EditSearchEngineDialog(
       GTK_WINDOW(gtk_widget_get_toplevel(editor->dialog_)),
       editor->controller_->GetTemplateURL(model_row),

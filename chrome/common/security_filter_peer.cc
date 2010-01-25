@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/security_filter_peer.h"
 
+#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/png_encoder.h"
 #include "base/gfx/size.h"
 #include "base/string_util.h"
 #include "grit/generated_resources.h"
@@ -75,6 +75,7 @@ SecurityFilterPeer*
     case net::ERR_CERT_UNABLE_TO_CHECK_REVOCATION:
     case net::ERR_CERT_REVOKED:
     case net::ERR_CERT_INVALID:
+    case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
     case net::ERR_INSECURE_RESPONSE:
       if (ResourceType::IsFrame(resource_type))
         return CreateSecurityFilterPeerForFrame(peer, os_error);
@@ -191,7 +192,7 @@ void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status,
   if (status.status() != URLRequestStatus::SUCCESS || !DataReady()) {
     // Pretend we failed to load the resource.
     original_peer_->OnReceivedResponse(response_info_, true);
-    URLRequestStatus status(URLRequestStatus::CANCELED, 0);
+    URLRequestStatus status(URLRequestStatus::CANCELED, net::ERR_ABORTED);
     original_peer_->OnCompletedRequest(status, security_info);
     return;
   }
@@ -309,8 +310,8 @@ bool ImageFilterPeer::DataReady() {
 
   // Now encode it to a PNG.
   std::vector<unsigned char> output;
-  if (!PNGEncoder::EncodeBGRASkBitmap(canvas.getDevice()->accessBitmap(false),
-                                      false, &output)) {
+  if (!gfx::PNGCodec::EncodeBGRASkBitmap(
+          canvas.getDevice()->accessBitmap(false), false, &output)) {
     return false;
   }
 

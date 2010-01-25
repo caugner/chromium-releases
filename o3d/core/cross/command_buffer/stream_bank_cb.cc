@@ -46,7 +46,7 @@
 
 namespace o3d {
 
-using command_buffer::ResourceID;
+using command_buffer::ResourceId;
 using command_buffer::CommandBufferHelper;
 using command_buffer::CommandBufferEntry;
 using command_buffer::GAPIInterface;
@@ -77,31 +77,31 @@ static bool GetCBSemantic(
   switch (semantic) {
     case Stream::POSITION:
       if (semantic_index != 0) return false;
-      *out_semantic = vertex_struct::POSITION;
+      *out_semantic = vertex_struct::kPosition;
       *out_semantic_index = 0;
       return true;
     case Stream::NORMAL:
       if (semantic_index != 0) return false;
-      *out_semantic = vertex_struct::NORMAL;
+      *out_semantic = vertex_struct::kNormal;
       *out_semantic_index = 0;
       return true;
     case Stream::TANGENT:
       if (semantic_index != 0) return false;
-      *out_semantic = vertex_struct::TEX_COORD;
+      *out_semantic = vertex_struct::kTexCoord;
       *out_semantic_index = 6;
       return true;
     case Stream::BINORMAL:
       if (semantic_index != 0) return false;
-      *out_semantic = vertex_struct::TEX_COORD;
+      *out_semantic = vertex_struct::kTexCoord;
       *out_semantic_index = 7;
       return true;
     case Stream::COLOR:
       if (semantic_index > 1) return false;
-      *out_semantic = vertex_struct::COLOR;
+      *out_semantic = vertex_struct::kColor;
       *out_semantic_index = semantic_index;
       return true;
     case Stream::TEXCOORD:
-      *out_semantic = vertex_struct::TEX_COORD;
+      *out_semantic = vertex_struct::kTexCoord;
       *out_semantic_index = semantic_index;
       return true;
     default:
@@ -114,22 +114,22 @@ static vertex_struct::Type GetCBType(const Field& field) {
   if (field.IsA(FloatField::GetApparentClass())) {
     switch (field.num_components()) {
       case 1:
-        return vertex_struct::FLOAT1;
+        return vertex_struct::kFloat1;
       case 2:
-        return vertex_struct::FLOAT2;
+        return vertex_struct::kFloat3;
       case 3:
-        return vertex_struct::FLOAT3;
+        return vertex_struct::kFloat3;
       case 4:
-        return vertex_struct::FLOAT4;
+        return vertex_struct::kFloat4;
     }
   } else if (field.IsA(UByteNField::GetApparentClass())) {
     switch (field.num_components()) {
       case 4:
-        return vertex_struct::UCHAR4N;
+        return vertex_struct::kUChar4N;
     }
   }
   DLOG(ERROR) << "Unknown Stream DataType";
-  return vertex_struct::NUM_TYPES;
+  return vertex_struct::kNumTypes;
 }
 
 // This function is overridden so that we can invalidate the vertex struct any
@@ -147,10 +147,7 @@ void StreamBankCB::CreateVertexStruct() {
   DCHECK_EQ(kInvalidResource, vertex_struct_id_);
   vertex_struct_id_ = renderer_->vertex_structs_ids().AllocateID();
   CommandBufferHelper *helper = renderer_->helper();
-  CommandBufferEntry args[5];
-  args[0].value_uint32 = vertex_struct_id_;
-  args[1].value_uint32 = vertex_stream_params_.size();
-  helper->AddCommand(command_buffer::CREATE_VERTEX_STRUCT, 2, args);
+  helper->CreateVertexStruct(vertex_struct_id_, vertex_stream_params_.size());
   for (unsigned int i = 0; i < vertex_stream_params_.size(); ++i) {
     const Stream &stream = vertex_stream_params_[i]->stream();
     vertex_struct::Semantic cb_semantic;
@@ -162,25 +159,22 @@ void StreamBankCB::CreateVertexStruct() {
       continue;
     }
     vertex_struct::Type cb_type = GetCBType(stream.field());
-    if (cb_type == vertex_struct::NUM_TYPES) {
+    if (cb_type == vertex_struct::kNumTypes) {
       DLOG(INFO) << "Invalid type (" << stream.field().num_components()
                  << ") - ignoring stream.";
       continue;
     }
 
-    namespace cmd = command_buffer::set_vertex_input_cmd;
     VertexBufferCB *vertex_buffer =
         static_cast<VertexBufferCB *>(stream.field().buffer());
-    args[0].value_uint32 = vertex_struct_id_;
-    args[1].value_uint32 = i;
-    args[2].value_uint32 = vertex_buffer->resource_id();
-    args[3].value_uint32 = stream.field().offset();
-    args[4].value_uint32 =
-        cmd::SemanticIndex::MakeValue(cb_semantic_index) |
-        cmd::Semantic::MakeValue(cb_semantic) |
-        cmd::Type::MakeValue(cb_type) |
-        cmd::Stride::MakeValue(vertex_buffer->stride());
-    helper->AddCommand(command_buffer::SET_VERTEX_INPUT, 5, args);
+    helper->SetVertexInput(
+        vertex_struct_id_, i,
+        vertex_buffer->resource_id(),
+        stream.field().offset(),
+        cb_semantic,
+        cb_semantic_index,
+        cb_type,
+        vertex_buffer->stride());
   }
 }
 
@@ -188,9 +182,7 @@ void StreamBankCB::CreateVertexStruct() {
 void StreamBankCB::DestroyVertexStruct() {
   if (vertex_struct_id_ != kInvalidResource) {
     CommandBufferHelper *helper = renderer_->helper();
-    CommandBufferEntry args[1];
-    args[0].value_uint32 = vertex_struct_id_;
-    helper->AddCommand(command_buffer::DESTROY_VERTEX_STRUCT, 1, args);
+    helper->DestroyVertexStruct(vertex_struct_id_);
     renderer_->vertex_structs_ids().FreeID(vertex_struct_id_);
     vertex_struct_id_ = kInvalidResource;
   }
@@ -200,10 +192,7 @@ void StreamBankCB::BindStreamsForRendering() {
   if (vertex_struct_id_ == kInvalidResource)
     CreateVertexStruct();
   CommandBufferHelper *helper = renderer_->helper();
-  CommandBufferEntry args[6];
-  // Sets current vertex struct.
-  args[0].value_uint32 = vertex_struct_id_;
-  helper->AddCommand(command_buffer::SET_VERTEX_STRUCT, 1, args);
+  helper->SetVertexStruct(vertex_struct_id_);
 }
 
 }  // namespace o3d

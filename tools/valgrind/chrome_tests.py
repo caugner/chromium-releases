@@ -28,7 +28,7 @@ import google.path_utils
 # TODO(erg): Copy/Move the relevant functions from the layout_package version
 # of platform_utils back up to google.platform_utils
 # package. http://crbug.com/6164
-import layout_package.platform_utils
+import layout_package.path_utils
 
 import common
 import valgrind_test
@@ -78,6 +78,7 @@ class ChromeTests:
     # Recognise the original abbreviations as well as full executable names.
     self._test_list = {
       "base": self.TestBase,            "base_unittests": self.TestBase,
+      "browser": self.TestBrowser,      "browser_tests": self.TestBrowser,
       "googleurl": self.TestGURL,       "googleurl_unittests": self.TestGURL,
       "ipc": self.TestIpc,              "ipc_tests": self.TestIpc,
       "layout": self.TestLayout,        "layout_tests": self.TestLayout,
@@ -99,14 +100,14 @@ class ChromeTests:
     self._test = test
 
     script_dir = google.path_utils.ScriptDir()
-    utility = layout_package.platform_utils.PlatformUtility(script_dir)
     # Compute the top of the tree (the "source dir") from the script dir (where
     # this script lives).  We assume that the script dir is in tools/valgrind/
     # relative to the top of the tree.
     self._source_dir = os.path.dirname(os.path.dirname(script_dir))
     # since this path is used for string matching, make sure it's always
     # an absolute Windows-style path
-    self._source_dir = utility.GetAbsolutePath(self._source_dir)
+    self._source_dir = layout_package.path_utils.GetAbsolutePath(
+        self._source_dir)
     valgrind_test_script = os.path.join(script_dir, "valgrind_test.py")
     self._command_preamble = [valgrind_test_script,
                               "--source_dir=%s" % (self._source_dir)]
@@ -167,6 +168,8 @@ class ChromeTests:
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
       cmd.append("--gtest_print_time")
+    if self._options.gtest_repeat:
+      cmd.append("--gtest_repeat=%s" % self._options.gtest_repeat)
     return cmd
 
   def Run(self):
@@ -216,10 +219,17 @@ class ChromeTests:
     if cmd_args:
       cmd.extend(["--"])
       cmd.extend(cmd_args)
+
+    # Sets LD_LIBRARY_PATH to the build folder so external libraries can be
+    # loaded.
+    os.putenv("LD_LIBRARY_PATH", self._options.build_dir)
     return valgrind_test.RunTool(cmd)
 
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
+
+  def TestBrowser(self):
+    return self.SimpleTest("chrome", "browser_tests")
 
   def TestGURL(self):
     return self.SimpleTest("chrome", "googleurl_unittests")
@@ -231,7 +241,7 @@ class ChromeTests:
     return self.SimpleTest("chrome", "printing_unittests")
 
   def TestIpc(self):
-    return self.SimpleTest("chrome", "ipc_tests",
+    return self.SimpleTest("ipc", "ipc_tests",
                            valgrind_test_args=["--trace_children"])
 
   def TestNet(self):
@@ -379,6 +389,8 @@ def _main(_):
                     help="generate baseline data instead of validating")
   parser.add_option("", "--gtest_filter",
                     help="additional arguments to --gtest_filter")
+  parser.add_option("", "--gtest_repeat",
+                    help="argument for --gtest_repeat")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
   parser.add_option("", "--tool", dest="valgrind_tool", default="memcheck",

@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/gfx/rect.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/common/chrome_paths.h"
@@ -102,12 +103,9 @@ TEST_F(TabDraggingTest, DISABLED_Tab1Tab2) {
   //            |    Tab_1     |
   //             ---- ---- ----
 
-  POINT start;
-  POINT end;
-  start.x = bounds1.x() + bounds1.width()/2;
-  start.y = bounds1.y() + bounds1.height()/2;
-  end.x = start.x + 2*bounds1.width()/3;
-  end.y = start.y;
+  gfx::Point start(bounds1.x() + bounds1.width() / 2,
+                   bounds1.y() + bounds1.height() / 2);
+  gfx::Point end(start.x() + 2 * bounds1.width() / 3, start.y());
   ASSERT_TRUE(browser->SimulateDrag(start, end,
                                     views::Event::EF_LEFT_BUTTON_DOWN,
                                     false));
@@ -203,12 +201,11 @@ TEST_F(TabDraggingTest, DISABLED_Tab1Tab3) {
   //                                |    Tab_1     |
   //                                 ---- ---- ----
 
-  POINT start;
-  POINT end;
-  start.x = bounds1.x() + bounds1.width()/2;
-  start.y = bounds1.y() + bounds1.height()/2;
-  end.x = start.x + bounds1.width()/2 + bounds2.width() + bounds3.width()/2;
-  end.y = start.y;
+  gfx::Point start(bounds1.x() + bounds1.width() / 2,
+                   bounds1.y() + bounds1.height() / 2);
+  gfx::Point end(start.x() + bounds1.width() / 2 + bounds2.width() +
+                     bounds3.width() / 2,
+                 start.y());
   ASSERT_TRUE(browser->SimulateDrag(start, end,
                                     views::Event::EF_LEFT_BUTTON_DOWN,
                                     false));
@@ -236,7 +233,8 @@ TEST_F(TabDraggingTest, DISABLED_Tab1Tab3) {
 
 // Drag Tab_1 into the position of Tab_3, and press ESCAPE before releasing the
 // left mouse button.
-TEST_F(TabDraggingTest, Tab1Tab3Escape) {
+// Flaky, see http://crbug.com/21092.
+TEST_F(TabDraggingTest, FLAKY_Tab1Tab3Escape) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_refptr<WindowProxy> window(browser->GetWindow());
@@ -310,12 +308,11 @@ TEST_F(TabDraggingTest, Tab1Tab3Escape) {
   //                                |    Tab_1     |
   //                                 ---- ---- ----
 
-  POINT start;
-  POINT end;
-  start.x = bounds1.x() + bounds1.width()/2;
-  start.y = bounds1.y() + bounds1.height()/2;
-  end.x = start.x + bounds1.width()/2 + bounds2.width() + bounds3.width()/2;
-  end.y = start.y;
+  gfx::Point start(bounds1.x() + bounds1.width() / 2,
+                   bounds1.y() + bounds1.height() / 2);
+  gfx::Point end(start.x() + bounds1.width() / 2 + bounds2.width() +
+                     bounds3.width() / 2,
+                 start.y());
 
   // Simulate drag with 'true' as the last parameter. This will interrupt
   // in-flight with Escape.
@@ -433,12 +430,10 @@ TEST_F(TabDraggingTest, Tab2OutOfTabStrip) {
   //                |    Tab_2     |   (New Window)
   //                ---- ---- ---- ---- ---- ---- ----
 
-  POINT start;
-  POINT end;
-  start.x = bounds2.x() + bounds2.width()/2;
-  start.y = bounds2.y() + bounds2.height()/2;
-  end.x = start.x;
-  end.y = start.y + 3*urlbar_bounds.height();
+  gfx::Point start(bounds2.x() + bounds2.width() / 2,
+                   bounds2.y() + bounds2.height() / 2);
+  gfx::Point end(start.x(),
+                 start.y() + 3 * urlbar_bounds.height());
 
   // Simulate tab drag.
   ASSERT_TRUE(browser->SimulateDrag(start, end,

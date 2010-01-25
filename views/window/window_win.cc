@@ -1280,10 +1280,21 @@ void WindowWin::ResetWindowRegion(bool force) {
   CRect window_rect;
   GetWindowRect(&window_rect);
   HRGN new_region;
-  gfx::Path window_mask;
-  non_client_view_->GetWindowMask(
-      gfx::Size(window_rect.Width(), window_rect.Height()), &window_mask);
-  new_region = window_mask.CreateHRGN();
+  if (IsMaximized()) {
+    HMONITOR monitor =
+        MonitorFromWindow(GetNativeView(), MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi;
+    mi.cbSize = sizeof mi;
+    GetMonitorInfo(monitor, &mi);
+    CRect work_rect = mi.rcWork;
+    work_rect.OffsetRect(-window_rect.left, -window_rect.top);
+    new_region = CreateRectRgnIndirect(&work_rect);
+  } else {
+    gfx::Path window_mask;
+    non_client_view_->GetWindowMask(
+        gfx::Size(window_rect.Width(), window_rect.Height()), &window_mask);
+    new_region = window_mask.CreateHRGN();
+  }
 
   if (current_rgn_result == ERROR || !EqualRgn(current_rgn, new_region)) {
     // SetWindowRgn takes ownership of the HRGN created by CreateHRGN.
@@ -1359,21 +1370,7 @@ static BOOL CALLBACK WindowCallbackProc(HWND hwnd, LPARAM lParam) {
   if (!root_view)
     return TRUE;
 
-  Widget* widget = root_view->GetWidget();
-  if (!widget)
-    return TRUE;
-
-  // If the toplevel HWND is a Window, close it if it's identified as a
-  // secondary window.
-  Window* window = widget->GetWindow();
-  if (window) {
-    if (!window->IsAppWindow())
-      window->Close();
-  } else {
-    // If it's not a Window, then close it anyway since it probably is
-    // secondary.
-    widget->Close();
-  }
+  Window::CloseSecondaryWidget(root_view->GetWidget());
   return TRUE;
 }
 }  // namespace

@@ -21,9 +21,8 @@ class FileStreamTest : public PlatformTest {
   virtual void SetUp() {
     PlatformTest::SetUp();
 
-    file_util::CreateTemporaryFileName(&temp_file_path_);
-    file_util::WriteFile(temp_file_path_.ToWStringHack(),
-                         kTestData, kTestDataSize);
+    file_util::CreateTemporaryFile(&temp_file_path_);
+    file_util::WriteFile(temp_file_path_, kTestData, kTestDataSize);
   }
   virtual void TearDown() {
     file_util::Delete(temp_file_path_, false);
@@ -885,7 +884,7 @@ TEST_F(FileStreamTest, Truncate) {
 
   // Read in the contents and make sure we get back what we expected.
   std::string read_contents;
-  file_util::ReadFileToString(temp_file_path(), &read_contents);
+  EXPECT_TRUE(file_util::ReadFileToString(temp_file_path(), &read_contents));
 
   EXPECT_EQ("01230123", read_contents);
 }

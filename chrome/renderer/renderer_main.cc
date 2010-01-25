@@ -20,13 +20,22 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/net/net_resource_provider.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/render_process.h"
+#include "chrome/renderer/render_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "net/base/net_module.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_LINUX_BREAKPAD)
 #include "chrome/app/breakpad_linux.h"
+#endif
+
+#if defined(OS_POSIX)
+#include <signal.h>
+
+static void SigUSR1Handler(int signal) { }
 #endif
 
 // This function provides some ways to test crash and assertion handling
@@ -51,15 +60,21 @@ static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
     title += L" renderer";  // makes attaching to process easier
     ::MessageBox(NULL, message.c_str(), title.c_str(),
                  MB_OK | MB_SETFOREGROUND);
-#elif defined(OS_MACOSX)
+#elif defined(OS_POSIX)
     // TODO(playmobil): In the long term, overriding this flag doesn't seem
     // right, either use our own flag or open a dialog we can use.
     // This is just to ease debugging in the interim.
     LOG(WARNING) << "Renderer ("
                  << getpid()
                  << ") paused waiting for debugger to attach @ pid";
+    // Install a signal handler so that pause can be woken.
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SigUSR1Handler;
+    sigaction(SIGUSR1, &sa, NULL);
+
     pause();
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_POSIX)
   }
 }
 
@@ -68,10 +83,13 @@ int RendererMain(const MainFunctionParams& parameters) {
   const CommandLine& parsed_command_line = parameters.command_line_;
   base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
 
-#if defined(OS_LINUX)
+#if defined(USE_LINUX_BREAKPAD)
   // Needs to be called after we have chrome::DIR_USER_DATA.
   InitCrashReporter();
 #endif
+
+  // Configure the network module so it has access to resources.
+  net::NetModule::SetResourceProvider(chrome_common_net::NetResourceProvider);
 
   // This function allows pausing execution using the --renderer-startup-dialog
   // flag allowing us to attach a debugger.
@@ -84,8 +102,17 @@ int RendererMain(const MainFunctionParams& parameters) {
   StatsScope<StatsCounterTimer>
       startup_timer(chrome::Counters::renderer_main());
 
-  // The main thread of the renderer services IO.
-  MessageLoopForIO main_message_loop;
+#if defined(OS_MACOSX)
+  // As long as we use Cocoa in the renderer (for the forseeable future as of
+  // now; see http://crbug.com/13890 for info) we need to have a UI loop.
+  MessageLoop main_message_loop(MessageLoop::TYPE_UI);
+#else
+  // The main message loop of the renderer services doesn't have IO or UI tasks,
+  // unless in-process-plugins is used.
+  MessageLoop main_message_loop(RenderProcess::InProcessPlugins() ?
+              MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT);
+#endif
+
   std::wstring app_name = chrome::kBrowserAppName;
   PlatformThread::SetName(WideToASCII(app_name + L"_RendererMain").c_str());
 
@@ -115,20 +142,28 @@ int RendererMain(const MainFunctionParams& parameters) {
   }
 
   {
+#if !defined(OS_LINUX)
+    // TODO(markus): Check if it is OK to unconditionally move this
+    // instruction down.
     RenderProcess render_process;
+    render_process.set_main_thread(new RenderThread());
+#endif
     bool run_loop = true;
     if (!no_sandbox) {
       run_loop = platform.EnableSandbox();
     }
+#if defined(OS_LINUX)
+    RenderProcess render_process;
+    render_process.set_main_thread(new RenderThread());
+#endif
 
     platform.RunSandboxTests();
 
     startup_timer.Stop();  // End of Startup Time Measurement.
 
     if (run_loop) {
-      // Load the accelerator table from the browser executable and tell the
-      // message loop to use it when translating messages.
-      if (pool) pool->Recycle();
+      if (pool)
+        pool->Recycle();
       MessageLoop::current()->Run();
     }
   }

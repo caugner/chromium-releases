@@ -45,7 +45,7 @@ TransportDIB* TransportDIB::Create(size_t size, uint32 sequence_num) {
   if (shmkey == -1) {
     DLOG(ERROR) << "Failed to create SysV shared memory region"
                 << " errno:" << errno;
-    return false;
+    return NULL;
   }
 
   void* address = shmat(shmkey, NULL /* desired address */, 0 /* flags */);
@@ -54,7 +54,7 @@ TransportDIB* TransportDIB::Create(size_t size, uint32 sequence_num) {
   // that the kernel will automatically clean it up for us.
   shmctl(shmkey, IPC_RMID, 0);
   if (address == kInvalidAddress)
-    return false;
+    return NULL;
 
   TransportDIB* dib = new TransportDIB;
 
@@ -69,7 +69,7 @@ TransportDIB* TransportDIB::Map(Handle shmkey) {
   if (shmctl(shmkey, IPC_STAT, &shmst) == -1)
     return NULL;
 
-  void* address = shmat(shmkey, NULL /* desired address */, SHM_RDONLY);
+  void* address = shmat(shmkey, NULL /* desired address */, 0 /* flags */);
   if (address == kInvalidAddress)
     return NULL;
 
@@ -79,6 +79,10 @@ TransportDIB* TransportDIB::Map(Handle shmkey) {
   dib->size_ = shmst.shm_segsz;
   dib->key_ = shmkey;
   return dib;
+}
+
+bool TransportDIB::is_valid(Handle dib) {
+  return dib >= 0;
 }
 
 skia::PlatformCanvas* TransportDIB::GetPlatformCanvas(int w, int h) {

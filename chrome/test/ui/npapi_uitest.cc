@@ -6,7 +6,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <atlbase.h>
 #include <comutil.h>
 
 // runtime headers
@@ -17,6 +16,8 @@
 #include <ostream>
 
 #include "base/file_util.h"
+#include "base/keyboard_codes.h"
+#include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
@@ -94,6 +95,16 @@ TEST_F(NPAPITester, GetJavaScriptURL) {
                 kTestCompleteSuccess, kShortWaitTimeout);
 }
 
+// Test that calling GetURL with a javascript URL and target=_self
+// works properly when the plugin is embedded in a subframe.
+TEST_F(NPAPITester, GetJavaScriptURL2) {
+  std::wstring test_case = L"get_javascript_url2.html";
+  GURL url = GetTestUrl(L"npapi", test_case);
+  NavigateToURL(url);
+  WaitForFinish("getjavascripturl2", "1", url, kTestCompleteCookie,
+                kTestCompleteSuccess, kShortWaitTimeout);
+}
+
 // Tests that if an NPObject is proxies back to its original process, the
 // original pointer is returned and not a proxy.  If this fails the plugin
 // will crash.
@@ -138,7 +149,7 @@ TEST_F(NPAPITester, DISABLED_SelfDeletePluginInvokeAlert) {
   automation()->WaitForAppModalDialog(5000);
   scoped_refptr<WindowProxy> window(automation()->GetActiveWindow());
   ASSERT_TRUE(window.get());
-  ASSERT_TRUE(window->SimulateOSKeyPress(VK_ESCAPE, 0));
+  ASSERT_TRUE(window->SimulateOSKeyPress(base::VKEY_ESCAPE, 0));
 
   WaitForFinish("self_delete_plugin_invoke_alert", "1", url,
                 kTestCompleteCookie, kTestCompleteSuccess,
@@ -147,28 +158,31 @@ TEST_F(NPAPITester, DISABLED_SelfDeletePluginInvokeAlert) {
 
 // Tests if a plugin executing a self deleting script in the context of
 // a synchronous paint event works correctly
-TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInvokeInSynchronousPaint) {
-  if (!UITest::in_process_renderer()) {
-    show_window_ = true;
-    std::wstring test_case = L"execute_script_delete_in_paint.html";
-    GURL url = GetTestUrl(L"npapi", test_case);
-    NavigateToURL(url);
-    WaitForFinish("execute_script_delete_in_paint", "1", url,
-                  kTestCompleteCookie, kTestCompleteSuccess,
-                  kShortWaitTimeout);
-  }
+TEST_F(NPAPIVisiblePluginTester,
+       DISABLED_SelfDeletePluginInvokeInSynchronousPaint) {
+  if (UITest::in_process_renderer())
+    return;
+
+  show_window_ = true;
+  std::wstring test_case = L"execute_script_delete_in_paint.html";
+  GURL url = GetTestUrl(L"npapi", test_case);
+  NavigateToURL(url);
+  WaitForFinish("execute_script_delete_in_paint", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                kShortWaitTimeout);
 }
 
 TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInNewStream) {
-  if (!UITest::in_process_renderer()) {
-    show_window_ = true;
-    std::wstring test_case = L"self_delete_plugin_stream.html";
-    GURL url = GetTestUrl(L"npapi", test_case);
-    NavigateToURL(url);
-    WaitForFinish("self_delete_plugin_stream", "1", url,
-                  kTestCompleteCookie, kTestCompleteSuccess,
-                  kShortWaitTimeout);
-  }
+  if (UITest::in_process_renderer())
+    return;
+
+  show_window_ = true;
+  std::wstring test_case = L"self_delete_plugin_stream.html";
+  GURL url = GetTestUrl(L"npapi", test_case);
+  NavigateToURL(url);
+  WaitForFinish("self_delete_plugin_stream", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                kShortWaitTimeout);
 }
 
 // Tests if a plugin has a non zero window rect.
@@ -207,7 +221,7 @@ TEST_F(NPAPIVisiblePluginTester, AlertInWindowMessage) {
   ASSERT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
       &available_buttons));
   ASSERT_TRUE(modal_dialog_showing);
-  ASSERT_TRUE((MessageBoxFlags::DIALOGBUTTON_OK & available_buttons) != 0);
+  ASSERT_NE((MessageBoxFlags::DIALOGBUTTON_OK & available_buttons), 0);
   ASSERT_TRUE(automation()->ClickAppModalDialogButton(
       MessageBoxFlags::DIALOGBUTTON_OK));
 
@@ -216,7 +230,7 @@ TEST_F(NPAPIVisiblePluginTester, AlertInWindowMessage) {
   ASSERT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
       &available_buttons));
   ASSERT_TRUE(modal_dialog_showing);
-  ASSERT_TRUE((MessageBoxFlags::DIALOGBUTTON_OK & available_buttons) != 0);
+  ASSERT_NE((MessageBoxFlags::DIALOGBUTTON_OK & available_buttons), 0);
   ASSERT_TRUE(automation()->ClickAppModalDialogButton(
       MessageBoxFlags::DIALOGBUTTON_OK));
 }
@@ -224,15 +238,16 @@ TEST_F(NPAPIVisiblePluginTester, AlertInWindowMessage) {
 #endif
 
 TEST_F(NPAPIVisiblePluginTester, VerifyNPObjectLifetimeTest) {
-  if (!UITest::in_process_renderer()) {
-    show_window_ = true;
-    std::wstring test_case = L"npobject_lifetime_test.html";
-    GURL url = GetTestUrl(L"npapi", test_case);
-    NavigateToURL(url);
-    WaitForFinish("npobject_lifetime_test", "1", url,
-                  kTestCompleteCookie, kTestCompleteSuccess,
-                  kShortWaitTimeout);
-  }
+  if (UITest::in_process_renderer())
+    return;
+
+  show_window_ = true;
+  std::wstring test_case = L"npobject_lifetime_test.html";
+  GURL url = GetTestUrl(L"npapi", test_case);
+  NavigateToURL(url);
+  WaitForFinish("npobject_lifetime_test", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                kShortWaitTimeout);
 }
 
 // Tests that we don't crash or assert if NPP_New fails
@@ -244,17 +259,19 @@ TEST_F(NPAPIVisiblePluginTester, NewFails) {
 }
 
 TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInNPNEvaluate) {
- if (!UITest::in_process_renderer()) {
-    GURL url = GetTestUrl(L"npapi",
-                          L"execute_script_delete_in_npn_evaluate.html");
-    NavigateToURL(url);
-    WaitForFinish("npobject_delete_plugin_in_evaluate", "1", url,
-                  kTestCompleteCookie, kTestCompleteSuccess,
-                  kShortWaitTimeout);
- }
+  if (UITest::in_process_renderer())
+    return;
+
+  GURL url = GetTestUrl(L"npapi",
+                        L"execute_script_delete_in_npn_evaluate.html");
+  NavigateToURL(url);
+  WaitForFinish("npobject_delete_plugin_in_evaluate", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                kShortWaitTimeout);
 }
 
-TEST_F(NPAPIVisiblePluginTester, OpenPopupWindowWithPlugin) {
+// Flaky. See http://crbug.com/17645
+TEST_F(NPAPIVisiblePluginTester, DISABLED_OpenPopupWindowWithPlugin) {
   GURL url = GetTestUrl(L"npapi",
                         L"get_javascript_open_popup_with_plugin.html");
   NavigateToURL(url);
@@ -297,3 +314,27 @@ TEST_F(NPAPIVisiblePluginTester, MultipleInstancesSyncCalls) {
                 kTestCompleteSuccess, kShortWaitTimeout);
 }
 
+TEST_F(NPAPIVisiblePluginTester, GetURLRequestFailWrite) {
+  if (UITest::in_process_renderer())
+    return;
+
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(
+               FilePath(FILE_PATH_LITERAL(
+                            "npapi/plugin_url_request_fail_write.html"))));
+
+  NavigateToURL(url);
+
+  WaitForFinish("geturl_fail_write", "1", url, kTestCompleteCookie,
+                kTestCompleteSuccess, kShortWaitTimeout);
+}
+
+TEST_F(NPAPITester, EnsureScriptingWorksInDestroy) {
+  if (UITest::in_process_renderer())
+    return;
+
+  GURL url = GetTestUrl(L"npapi", L"ensure_scripting_works_in_destroy.html");
+  NavigateToURL(url);
+  WaitForFinish("ensure_scripting_works_in_destroy", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                kShortWaitTimeout);
+}

@@ -4,12 +4,14 @@
 
 #include "app/l10n_util.h"
 
+#include <cstdlib>
 #include "app/app_paths.h"
 #include "app/app_switches.h"
 #include "app/gfx/canvas.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/i18n/file_util_icu.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
@@ -38,6 +40,144 @@ static const FilePath::CharType kLocaleFileExtension[] = ".pak";
 
 // Added to the end of strings that are too big in TrucateString.
 static const wchar_t* const kElideString = L"\x2026";
+
+static const char* const kAcceptLanguageList[] = {
+  "af",     // Afrikaans
+  "am",     // Amharic
+  "ar",     // Arabic
+  "az",     // Azerbaijani
+  "be",     // Belarusian
+  "bg",     // Bulgarian
+  "bh",     // Bihari
+  "bn",     // Bengali
+  "br",     // Breton
+  "bs",     // Bosnian
+  "ca",     // Catalan
+  "co",     // Corsican
+  "cs",     // Czech
+  "cy",     // Welsh
+  "da",     // Danish
+  "de",     // German
+  "de-AT",  // German (Austria)
+  "de-CH",  // German (Switzerland)
+  "de-DE",  // German (Germany)
+  "el",     // Greek
+  "en",     // English
+  "en-AU",  // English (Austrailia)
+  "en-CA",  // English (Canada)
+  "en-GB",  // English (UK)
+  "en-NZ",  // English (New Zealand)
+  "en-US",  // English (US)
+  "en-ZA",  // English (South Africa)
+  "eo",     // Esperanto
+  // TODO(jungshik) : Do we want to list all es-Foo for Latin-American
+  // Spanish speaking countries?
+  "es",     // Spanish
+  "et",     // Estonian
+  "eu",     // Basque
+  "fa",     // Persian
+  "fi",     // Finnish
+  "fil",    // Filipino
+  "fo",     // Faroese
+  "fr",     // French
+  "fr-CA",  // French (Canada)
+  "fr-CH",  // French (Switzerland)
+  "fr-FR",  // French (France)
+  "fy",     // Frisian
+  "ga",     // Irish
+  "gd",     // Scots Gaelic
+  "gl",     // Galician
+  "gn",     // Guarani
+  "gu",     // Gujarati
+  "ha",     // Hausa
+  "haw",    // Hawaiian
+  "he",     // Hebrew
+  "hi",     // Hindi
+  "hr",     // Croatian
+  "hu",     // Hungarian
+  "hy",     // Armenian
+  "ia",     // Interlingua
+  "id",     // Indonesian
+  "is",     // Icelandic
+  "it",     // Italian
+  "it-CH",  // Italian (Switzerland)
+  "it-IT",  // Italian (Italy)
+  "ja",     // Japanese
+  "jw",     // Javanese
+  "ka",     // Georgian
+  "kk",     // Kazakh
+  "km",     // Cambodian
+  "kn",     // Kannada
+  "ko",     // Korean
+  "ku",     // Kurdish
+  "ky",     // Kyrgyz
+  "la",     // Latin
+  "ln",     // Lingala
+  "lo",     // Laothian
+  "lt",     // Lithuanian
+  "lv",     // Latvian
+  "mk",     // Macedonian
+  "ml",     // Malayalam
+  "mn",     // Mongolian
+  "mo",     // Moldavian
+  "mr",     // Marathi
+  "ms",     // Malay
+  "mt",     // Maltese
+  "nb",     // Norwegian (Bokmal)
+  "ne",     // Nepali
+  "nl",     // Dutch
+  "nn",     // Norwegian (Nynorsk)
+  "no",     // Norwegian
+  "oc",     // Occitan
+  "om",     // Oromo
+  "or",     // Oriya
+  "pa",     // Punjabi
+  "pl",     // Polish
+  "ps",     // Pashto
+  "pt",     // Portuguese
+  "pt-BR",  // Portuguese (Brazil)
+  "pt-PT",  // Portuguese (Portugal)
+  "qu",     // Quechua
+  "rm",     // Romansh
+  "ro",     // Romanian
+  "ru",     // Russian
+  "sd",     // Sindhi
+  "sh",     // Serbo-Croatian
+  "si",     // Sinhalese
+  "sk",     // Slovak
+  "sl",     // Slovenian
+  "sn",     // Shona
+  "so",     // Somali
+  "sq",     // Albanian
+  "sr",     // Serbian
+  "st",     // Sesotho
+  "su",     // Sundanese
+  "sv",     // Swedish
+  "sw",     // Swahili
+  "ta",     // Tamil
+  "te",     // Telugu
+  "tg",     // Tajik
+  "th",     // Thai
+  "ti",     // Tigrinya
+  "tk",     // Turkmen
+  "to",     // Tonga
+  "tr",     // Turkish
+  "tt",     // Tatar
+  "tw",     // Twi
+  "ug",     // Uighur
+  "uk",     // Ukrainian
+  "ur",     // Urdu
+  "uz",     // Uzbek
+  "vi",     // Vietnamese
+  "xh",     // Xhosa
+  "yi",     // Yiddish
+  "yo",     // Yoruba
+  "zh",     // Chinese
+  "zh-CN",  // Chinese (Simplified)
+  "zh-TW",  // Chinese (Traditional)
+  "zu",     // Zulu
+};
+
 
 // Get language and region from the OS.
 void GetLanguageAndRegionFromOS(std::string* lang, std::string* region) {
@@ -238,6 +378,43 @@ std::string GetSystemLocale() {
   return ret;
 }
 
+#if defined(OS_LINUX)
+// Split and normalize the language list specified by LANGUAGE environment.
+// LANGUAGE environment specifies a priority list of user prefered locales for
+// application UI messages. Locales are separated by ':' character. The format
+// of a locale is: language[_territory[.codeset]][@modifier]
+//
+// This function splits the language list and normalizes each locale into
+// language[-territory] format, eg. fr, zh-CN, etc.
+void SplitAndNormalizeLanguageList(const std::string& env_language,
+                                   std::vector<std::string>* result) {
+  std::vector<std::string> langs;
+  SplitString(env_language, ':', &langs);
+  std::vector<std::string>::iterator i = langs.begin();
+  for (; i != langs.end(); ++i) {
+    size_t end_pos = i->find_first_of(".@");
+    // Erase encoding and modifier part.
+    if (end_pos != std::string::npos)
+      i->erase(end_pos);
+
+    if (!i->empty()) {
+      std::string locale;
+      size_t sep = i->find_first_of("_-");
+      if (sep != std::string::npos) {
+        // language part is always in lower case.
+        locale = StringToLowerASCII(i->substr(0, sep));
+        locale.append("-");
+        // territory part is always in upper case.
+        locale.append(StringToUpperASCII(i->substr(sep + 1)));
+      } else {
+        locale = StringToLowerASCII(*i);
+      }
+      result->push_back(locale);
+    }
+  }
+}
+#endif
+
 }  // namespace
 
 namespace l10n_util {
@@ -245,39 +422,56 @@ namespace l10n_util {
 // Represents the locale-specific text direction.
 static TextDirection g_text_direction = UNKNOWN_DIRECTION;
 
+// On the Mac, we don't want to test preferences or ICU for the language,
+// we want to use whatever Cocoa is using when it loaded the main nib file.
+// It handles all the mapping and fallbacks for us, we just need to ask.
+// See l10n_util_mac for that implementation.
+#if !defined(OS_MACOSX)
 std::string GetApplicationLocale(const std::wstring& pref_locale) {
-#if defined(OS_MACOSX)
-  // On the mac, we don't want to test preferences or ICU for the language,
-  // we want to use whatever Cocoa is using when it loaded the main nib file.
-  // It handles all the mapping and fallbacks for us, we just need to ask
-  // Cocoa.
-  // TODO(pinkerton): break this out into a .mm and ask Cocoa.
-  return "en";
-#else
   FilePath locale_path;
   PathService::Get(app::DIR_LOCALES, &locale_path);
   std::string resolved_locale;
+  std::vector<std::string> candidates;
+  const std::string system_locale = GetSystemLocale();
 
+  // We only use --lang and the app pref on Windows.  On Linux/Mac, we only
+  // look at the LC_*/LANG environment variables.  We do, however, pass --lang
+  // to renderer and plugin processes so they know what language the parent
+  // process decided to use.
+#if defined(OS_WIN)
   // First, check to see if there's a --lang flag.
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::string& lang_arg = WideToASCII(
       parsed_command_line.GetSwitchValue(switches::kLang));
-  if (!lang_arg.empty()) {
-    if (CheckAndResolveLocale(lang_arg, locale_path, &resolved_locale))
-      return resolved_locale;
-  }
+  if (!lang_arg.empty())
+    candidates.push_back(lang_arg);
 
   // Second, try user prefs.
-  if (!pref_locale.empty()) {
-    if (CheckAndResolveLocale(WideToASCII(pref_locale),
-                              locale_path, &resolved_locale))
-      return resolved_locale;
-  }
+  if (!pref_locale.empty())
+    candidates.push_back(WideToASCII(pref_locale));
 
   // Next, try the system locale.
-  const std::string system_locale = GetSystemLocale();
-  if (CheckAndResolveLocale(system_locale, locale_path, &resolved_locale))
-    return resolved_locale;
+  candidates.push_back(system_locale);
+#elif defined(OS_LINUX)
+  // On Linux, we also check LANGUAGE environment variable, which is supported
+  // by gettext to specify a priority list of prefered languages.
+  const char* env_language = ::getenv("LANGUAGE");
+  if (env_language)
+    SplitAndNormalizeLanguageList(env_language, &candidates);
+
+  // Only fallback to the system locale if LANGUAGE is not specified.
+  // We emulate gettext's behavior here, which ignores LANG/LC_MESSAGES/LC_ALL
+  // when LANGUAGE is specified. If no language specified in LANGUAGE is valid,
+  // then just fallback to the default language, which is en-US for us.
+  if (candidates.empty())
+    candidates.push_back(system_locale);
+#endif
+
+  std::vector<std::string>::const_iterator i = candidates.begin();
+  for (; i != candidates.end(); ++i) {
+    if (CheckAndResolveLocale(*i, locale_path, &resolved_locale))
+      return resolved_locale;
+  }
 
   // Fallback on en-US.
   const std::string fallback_locale("en-US");
@@ -288,8 +482,8 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
   NOTREACHED();
 
   return std::string();
-#endif
 }
+#endif  // !defined(OS_MACOSX)
 
 string16 GetDisplayNameForLocale(const std::string& locale_code,
                                  const std::string& display_locale,
@@ -534,6 +728,15 @@ string16 ToLower(const string16& string) {
   return result;
 }
 
+string16 ToUpper(const string16& string) {
+  icu::UnicodeString upper_u_str(
+      icu::UnicodeString(string.c_str()).toUpper(icu::Locale::getDefault()));
+  string16 result;
+  upper_u_str.extract(0, upper_u_str.length(),
+                      WriteInto(&result, upper_u_str.length() + 1));
+  return result;
+}
+
 // Returns the text direction for the default ICU locale. It is assumed
 // that SetICUDefaultLocale has been called to set the default locale to
 // the UI locale of Chrome.
@@ -680,6 +883,12 @@ void WrapPathWithLTRFormatting(const FilePath& path,
   rtl_safe_path->push_back(kPopDirectionalFormatting);
 }
 
+std::wstring GetDisplayStringInLTRDirectionality(std::wstring* text) {
+  if (GetTextDirection() == RIGHT_TO_LEFT)
+    WrapStringWithLTRFormatting(text);
+  return *text;
+}
+
 int DefaultCanvasTextAlignment() {
   if (GetTextDirection() == LEFT_TO_RIGHT) {
     return gfx::Canvas::TEXT_ALIGN_LEFT;
@@ -766,6 +975,17 @@ const std::vector<std::string>& GetAvailableLocales() {
     locales.push_back("es-419");
   }
   return locales;
+}
+
+void GetAcceptLanguagesForLocale(const std::string& display_locale,
+                                 std::vector<std::string>* locale_codes) {
+  for (size_t i = 0; i < arraysize(kAcceptLanguageList); ++i) {
+    if (!IsLocaleNameTranslated(kAcceptLanguageList[i], display_locale))
+      // TODO(jungshik) : Put them at the of the list with language codes
+      // enclosed by brackets instead of skipping.
+        continue;
+    locale_codes->push_back(kAcceptLanguageList[i]);
+  }
 }
 
 BiDiLineIterator::~BiDiLineIterator() {

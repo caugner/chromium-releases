@@ -7,11 +7,8 @@
 
 #include <windows.h>
 
+#include "base/keyboard_codes.h"
 #include "views/view.h"
-
-namespace WTL {
-class CPoint;
-}
 
 namespace views {
 
@@ -57,7 +54,7 @@ class NativeControl : public View {
   virtual LRESULT OnCommand(UINT code, int id, HWND source) { return 0; }
 
   // Invoked when the appropriate gesture for a context menu is issued.
-  virtual void OnContextMenu(const WTL::CPoint& location);
+  virtual void OnContextMenu(const POINT& location);
 
   // Overridden so to set the native focus to the native control.
   virtual void Focus();
@@ -83,7 +80,7 @@ class NativeControl : public View {
 
   // Invoked when a key is pressed on the control.
   // Should return true if the key message was processed, false otherwise.
-  virtual bool OnKeyDown(int virtual_key_code) { return false; }
+  virtual bool OnKeyDown(base::KeyboardCode virtual_key_code) { return false; }
 
   // Returns additional extended style flags. When subclasses call
   // CreateWindowEx in order to create the underlying control, they must OR the

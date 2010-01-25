@@ -1,5 +1,9 @@
 #!/bin/bash -e
 
+# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
 # Script to install everything needed to build chromium (well, ideally, anyway)
 # See http://code.google.com/p/chromium/wiki/LinuxBuildInstructions
 # and http://code.google.com/p/chromium/wiki/LinuxBuild64Bit
@@ -27,6 +31,7 @@ install_gold() {
     echo Bad sha1sum for $BINUTILS.tar.bz2
     exit 1
   fi
+
   cat > binutils-fix.patch <<__EOF__
 --- binutils-2.19.1/gold/reduced_debug_output.h.orig	2009-05-10 14:44:52.000000000 -0700
 +++ binutils-2.19.1/gold/reduced_debug_output.h	2009-05-10 14:46:51.000000000 -0700
@@ -48,6 +53,63 @@ install_gold() {
      this->failed_ = true;
    }
  
+diff -u -r1.3 -r1.4
+--- binutils-2.19.1/gold/descriptors.h	2009/01/15 01:29:25	1.3
++++ binutils-2.19.1/gold/descriptors.h	2009/02/28 03:05:08	1.4
+@@ -69,6 +69,8 @@
+     bool inuse;
+     // Whether this is a write descriptor.
+     bool is_write;
++    // Whether the descriptor is on the stack.
++    bool is_on_stack;
+   };
+ 
+   bool
+--- binutils-2.19.1/gold/descriptors.cc	2009/01/15 01:29:25	1.3
++++ binutils-2.19.1/gold/descriptors.cc	2009/02/28 03:05:08	1.4
+@@ -75,6 +75,12 @@
+ 	{
+ 	  gold_assert(!pod->inuse);
+ 	  pod->inuse = true;
++	  if (descriptor == this->stack_top_)
++	    {
++	      this->stack_top_ = pod->stack_next;
++	      pod->stack_next = -1;
++	      pod->is_on_stack = false;
++	    }
+ 	  return descriptor;
+ 	}
+     }
+@@ -114,6 +120,7 @@
+ 	  pod->stack_next = -1;
+ 	  pod->inuse = true;
+ 	  pod->is_write = (flags & O_ACCMODE) != O_RDONLY;
++	  pod->is_on_stack = false;
+ 
+ 	  ++this->current_;
+ 	  if (this->current_ >= this->limit_)
+@@ -158,10 +165,11 @@
+   else
+     {
+       pod->inuse = false;
+-      if (!pod->is_write)
++      if (!pod->is_write && !pod->is_on_stack)
+ 	{
+ 	  pod->stack_next = this->stack_top_;
+ 	  this->stack_top_ = descriptor;
++	  pod->is_on_stack = true;
+ 	}
+     }
+ }
+@@ -193,6 +201,8 @@
+ 	    this->stack_top_ = pod->stack_next;
+ 	  else
+ 	    this->open_descriptors_[last].stack_next = pod->stack_next;
++	  pod->stack_next = -1;
++	  pod->is_on_stack = false;
+ 	  return true;
+ 	}
+       last = i;
 __EOF__
 
   tar -xjvf $BINUTILS.tar.bz2
@@ -63,6 +125,7 @@ __EOF__
     echo "Installing gold as /usr/bin/ld."
     echo "To uninstall, do 'cd /usr/bin; sudo rm ld; sudo mv ld.orig ld'"
     test -f /usr/bin/ld && sudo mv /usr/bin/ld /usr/bin/ld.orig
+    sudo strip /usr/local/gold/bin/ld
     sudo ln -fs /usr/local/gold/bin/ld /usr/bin/ld.gold
     sudo ln -fs /usr/bin/ld.gold /usr/bin/ld
   else
@@ -89,8 +152,8 @@ fi
 # Packages need for development
 dev_list="bison fakeroot flex g++ g++-multilib gperf libasound2-dev
           libcairo2-dev libgconf2-dev libglib2.0-dev libgtk2.0-dev libnspr4-dev
-          libnss3-dev libsqlite3-dev lighttpd msttcorefonts perl php5-cgi
-          pkg-config python subversion wdiff"
+          libnss3-dev libsqlite3-dev lighttpd msttcorefonts patch perl php5-cgi
+          pkg-config python rpm subversion wdiff"
 
 # Full list of required run-time libraries
 lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libexpat1 libfontconfig1
@@ -168,15 +231,46 @@ sudo apt-get update
 # without accidentally promoting any packages from "auto" to "manual".
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
-new_list="$(yes n |
-            LANG=C sudo apt-get install --reinstall \
-                         ${dev_list} ${lib_list} ${dbg_list} \
-                         $([ "$(uname -m)" = x86_64 ] && echo ${cmp_list}) \
-                         |
-            sed -e '1,/The following NEW packages will be installed:/d;s/^  //;t;d')"
+packages="${dev_list} ${lib_list} ${dbg_list}"
+if [ "$(uname -m)" = "x86_64" ]; then
+  packages+=" ${cmp_list}"
+fi
+# Intentially leaving $packages unquoted so it's more readable.
+echo "Packages required: " $packages
+echo
+new_list_cmd="sudo apt-get install --reinstall $(echo $packages)"
+if new_list="$(yes n | LANG=C $new_list_cmd)"
+then
+  # We probably never hit this following line.
+  echo "No missing packages, and the packages are up-to-date."
+elif [ $? -eq 1 ]
+then
+  # We expect apt-get to have exit status of 1.
+  # This indicates that we canceled the install with "yes n|".
+  new_list=$(echo "$new_list" |
+    sed -e '1,/The following NEW packages will be installed:/d;s/^  //;t;d')
+  new_list=$(echo "$new_list" | sed 's/ *$//')
+  if [ -z "$new_list" ] ; then
+    echo "No missing packages, and the packages are up-to-date."
+  else
+    echo "Installing missing packages: $new_list."
+    sudo apt-get install ${new_list}
+  fi
+  echo
+else
+  # An apt-get exit status of 100 indicates that a real error has occurred.
 
-echo "Installing missing packages..."
-sudo apt-get install ${new_list}
+  # I am intentionally leaving out the '"'s around new_list_cmd,
+  # as this makes it easier to cut and paste the output
+  echo "The following command failed: " ${new_list_cmd}
+  echo
+  echo "It produces the following output:"
+  yes n | $new_list_cmd || true
+  echo
+  echo "You will have to install the above packages yourself."
+  echo
+  exit 100
+fi
 
 # Some operating systems already ship gold
 # (on Debian, you can probably do "apt-get install binutils-gold" to get it),
@@ -199,7 +293,7 @@ case `ld --version` in
 esac
 
 # Install 32bit backwards compatibility support for 64bit systems
-if [ "$(uname -m)" = x86_64 ]; then
+if [ "$(uname -m)" = "x86_64" ]; then
   echo "Installing 32bit libraries that are not already provided by the system"
   echo
   echo "While we only need to install a relatively small number of library"
@@ -221,13 +315,13 @@ if [ "$(uname -m)" = x86_64 ]; then
   touch "${tmp}/status"
 
   [ -r /etc/apt/apt.conf ] && cp /etc/apt/apt.conf "${tmp}/apt/"
-  cat >>"${tmp}/apt/apt.conf" <<-EOF
-	Apt::Architecture "i386";
-	Dir::Cache "${tmp}/cache";
-	Dir::Cache::Archives "${tmp}/";
-	Dir::State::Lists "${tmp}/apt/lists/";
-	Dir::State::status "${tmp}/status";
-	EOF
+  cat >>"${tmp}/apt/apt.conf" <<EOF
+        Apt::Architecture "i386";
+        Dir::Cache "${tmp}/cache";
+        Dir::Cache::Archives "${tmp}/";
+        Dir::State::Lists "${tmp}/apt/lists/";
+        Dir::State::status "${tmp}/status";
+EOF
 
   # Download 32bit packages
   echo "Computing list of available 32bit packages..."

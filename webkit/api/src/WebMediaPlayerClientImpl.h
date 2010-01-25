@@ -36,7 +36,6 @@
 #include "WebMediaPlayerClient.h"
 
 #include "MediaPlayerPrivate.h"
-#include "WebCanvas.h"
 #include <wtf/OwnPtr.h>
 
 namespace WebKit {
@@ -83,7 +82,7 @@ namespace WebKit {
         virtual WebCore::MediaPlayer::NetworkState networkState() const;
         virtual WebCore::MediaPlayer::ReadyState readyState() const;
         virtual float maxTimeSeekable() const;
-        virtual float maxTimeBuffered() const;
+        virtual WTF::PassRefPtr<WebCore::TimeRanges> buffered() const;
         virtual int dataRate() const;
         virtual void setAutobuffer(bool);
         virtual bool totalBytesKnown() const;
@@ -104,7 +103,6 @@ namespace WebKit {
 
         WebCore::MediaPlayer* m_mediaPlayer;
         OwnPtr<WebMediaPlayer> m_webMediaPlayer;
-        OwnPtr<WebKit::WebCanvas> m_webCanvas;
     };
 
 } // namespace WebKit

@@ -32,17 +32,16 @@
 
 // This file contains the implementation for the CanvasPaint class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/canvas_paint.h"
 #include "core/cross/canvas_utils.h"
 #include "core/cross/client.h"
 
-#include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkDrawLooper.h"
-#include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/core/SkTypeface.h"
-#include "third_party/skia/include/effects/SkBlurDrawLooper.h"
+#include "SkCanvas.h"
+#include "SkColor.h"
+#include "SkDrawLooper.h"
+#include "SkPaint.h"
+#include "SkTypeface.h"
+#include "SkBlurDrawLooper.h"
 
 namespace o3d {
 
@@ -95,7 +94,7 @@ class StrokeDrawLooper : public SkDrawLooper {
 };
 
 StrokeDrawLooper::StrokeDrawLooper(SkScalar radius, SkColor color)
-    : fColor(color), fRadius(radius) {
+    : fRadius(radius), fColor(color) {
 }
 
 void StrokeDrawLooper::init(SkCanvas* canvas, SkPaint* paint) {
@@ -158,6 +157,7 @@ StrokeDrawLooper::StrokeDrawLooper(SkFlattenableReadBuffer& buffer) {
 
 O3D_DEFN_CLASS(CanvasPaint, ParamObject);
 
+#ifndef OS_LINUX
 static SkPaint::Align ToSKAlign(CanvasPaint::TextAlign align) {
   switch (align) {
     case CanvasPaint::LEFT:
@@ -170,22 +170,23 @@ static SkPaint::Align ToSKAlign(CanvasPaint::TextAlign align) {
       return SkPaint::kLeft_Align;
   }
 }
+#endif  // OS_LINUX
 
 CanvasPaint::CanvasPaint(ServiceLocator* service_locator)
     : ParamObject(service_locator),
       shader_(NULL),
       needs_update_(true),
-      color_(Float4(0, 0, 0, 1)),
       text_align_(LEFT),
+      color_(Float4(0, 0, 0, 1)),
       text_size_(10),
-      shadow_radius_(0),
-      shadow_color_(Float4(0, 0, 0, 1)),
-      shadow_offset_x_(0),
-      shadow_offset_y_(0),
+      text_typeface_(""),
+      text_style_(NORMAL),
       outline_radius_(0),
       outline_color_(Float4(0, 0, 0, 1)),
-      text_style_(NORMAL),
-      text_typeface_("") {
+      shadow_radius_(0),
+      shadow_offset_x_(0),
+      shadow_offset_y_(0),
+      shadow_color_(Float4(0, 0, 0, 1)) {
   sk_paint_.setAntiAlias(true);
 }
 

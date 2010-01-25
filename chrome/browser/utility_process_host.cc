@@ -51,16 +51,26 @@ bool UtilityProcessHost::StartWebResourceUnpacker(const std::string& data) {
   return true;
 }
 
-std::wstring UtilityProcessHost::GetUtilityProcessCmd() {
-  std::wstring exe_path = CommandLine::ForCurrentProcess()->GetSwitchValue(
-      switches::kBrowserSubprocessPath);
-  if (exe_path.empty()) {
-    PathService::Get(base::FILE_EXE, &exe_path);
-  }
-  return exe_path;
+bool UtilityProcessHost::StartUpdateManifestParse(const std::string& xml) {
+  if (!StartProcess(FilePath()))
+    return false;
+
+  Send(new UtilityMsg_ParseUpdateManifest(xml));
+  return true;
+}
+
+FilePath UtilityProcessHost::GetUtilityProcessCmd() {
+  return GetChildPath();
 }
 
 bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
+#if defined(OS_POSIX)
+  // TODO(port): We should not reach here on linux (crbug.com/22703) or
+  // MacOS (crbug.com/8102) until problems related to autoupdate are fixed.
+  NOTREACHED();
+  return false;
+#endif
+
   // Name must be set or metrics_service will crash in any test which
   // launches a UtilityProcessHost.
   set_name(L"utility process");
@@ -68,7 +78,7 @@ bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
   if (!CreateChannel())
     return false;
 
-  std::wstring exe_path = GetUtilityProcessCmd();
+  FilePath exe_path = GetUtilityProcessCmd();
   if (exe_path.empty()) {
     NOTREACHED() << "Unable to get utility process binary name.";
     return false;
@@ -79,6 +89,7 @@ bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
                                  switches::kUtilityProcess);
   cmd_line.AppendSwitchWithValue(switches::kProcessChannelID,
                                  ASCIIToWide(channel_id()));
+  SetCrashReporterCommandLine(&cmd_line);
 
   base::ProcessHandle process;
 #if defined(OS_WIN)
@@ -146,5 +157,9 @@ void UtilityProcessHost::Client::OnMessageReceived(
                         Client::OnUnpackWebResourceSucceeded)
     IPC_MESSAGE_HANDLER(UtilityHostMsg_UnpackWebResource_Failed,
                         Client::OnUnpackWebResourceFailed)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Succeeded,
+                        Client::OnParseUpdateManifestSucceeded)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Failed,
+                        Client::OnParseUpdateManifestFailed)
   IPC_END_MESSAGE_MAP_EX()
 }

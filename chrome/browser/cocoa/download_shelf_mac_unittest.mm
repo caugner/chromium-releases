@@ -6,7 +6,7 @@
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/cocoa/download_shelf_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
+#include "testing/platform_test.h"
 
 // A fake implementation of DownloadShelfController. It implements only the
 // methods that DownloadShelfMac call during the tests in this file. We get this
@@ -45,7 +45,7 @@
 
 namespace {
 
-class DownloadShelfMacTest : public testing::Test {
+class DownloadShelfMacTest : public PlatformTest {
 
   virtual void SetUp() {
     shelf_controller_.reset([[FakeDownloadShelfController alloc] init]);
@@ -57,19 +57,19 @@ class DownloadShelfMacTest : public testing::Test {
   BrowserTestHelper browser_helper_;
 };
 
-TEST_F(DownloadShelfMacTest, CreationCallsShow) {
+TEST_F(DownloadShelfMacTest, CreationDoesNotCallShow) {
   // Also make sure the DownloadShelfMacTest constructor doesn't crash.
   DownloadShelfMac shelf(browser_helper_.browser(),
       (DownloadShelfController*)shelf_controller_.get());
-  EXPECT_EQ(1, shelf_controller_.get()->callCountShow);
+  EXPECT_EQ(0, shelf_controller_.get()->callCountShow);
 }
 
 TEST_F(DownloadShelfMacTest, ForwardsShow) {
   DownloadShelfMac shelf(browser_helper_.browser(),
       (DownloadShelfController*)shelf_controller_.get());
-  EXPECT_EQ(1, shelf_controller_.get()->callCountShow);
+  EXPECT_EQ(0, shelf_controller_.get()->callCountShow);
   shelf.Show();
-  EXPECT_EQ(2, shelf_controller_.get()->callCountShow);
+  EXPECT_EQ(1, shelf_controller_.get()->callCountShow);
 }
 
 TEST_F(DownloadShelfMacTest, ForwardsHide) {

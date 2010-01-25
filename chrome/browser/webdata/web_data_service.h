@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__
 
 #include <map>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/lock.h"
@@ -56,7 +57,7 @@ typedef enum {
   PASSWORD_IE7_RESULT,   // WDResult<IE7PasswordInfo>
 #endif
   WEB_APP_IMAGES,        // WDResult<WDAppImagesResult>
-  AUTOFILL_VALUE_RESULT, // WDResult<std::vector<std::wstring>>
+  AUTOFILL_VALUE_RESULT, // WDResult<std::vector<string16>>
 } WDResultType;
 
 // Result from GetWebAppImages.
@@ -381,16 +382,16 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   // form input fields named |name|.  The method OnWebDataServiceRequestDone of
   // |consumer| gets called back when the request is finished, with the vector
   // included in the argument |result|.
-  Handle GetFormValuesForElementName(const std::wstring& name,
-                                     const std::wstring& prefix,
+  Handle GetFormValuesForElementName(const string16& name,
+                                     const string16& prefix,
                                      int limit,
                                      WebDataServiceConsumer* consumer);
 
   // Removes form elements recorded for autofill from the database.
   void RemoveFormElementsAddedBetween(const base::Time& delete_begin,
                                       const base::Time& delete_end);
-  void RemoveFormValueForElementName(const std::wstring& name,
-                                     const std::wstring& value);
+  void RemoveFormValueForElementName(const string16& name,
+                                     const string16& value);
 
  protected:
   friend class TemplateURLModelTest;
@@ -464,13 +465,14 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //
   //////////////////////////////////////////////////////////////////////////////
   void AddAutofillFormElementsImpl(
-      GenericRequest<std::vector<webkit_glue::AutofillForm::Element> >* request);
+      GenericRequest<std::vector<webkit_glue::AutofillForm::Element> >*
+          request);
   void GetFormValuesForElementNameImpl(WebDataRequest* request,
-      const std::wstring& name, const std::wstring& prefix, int limit);
+      const string16& name, const string16& prefix, int limit);
   void RemoveFormElementsAddedBetweenImpl(
       GenericRequest2<base::Time, base::Time>* request);
   void RemoveFormValueForElementNameImpl(
-      GenericRequest2<std::wstring, std::wstring>* request);
+      GenericRequest2<string16, string16>* request);
 
   //////////////////////////////////////////////////////////////////////////////
   //

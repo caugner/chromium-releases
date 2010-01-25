@@ -6,6 +6,8 @@
 
 #include <gdk/gdk.h>
 
+#include "base/keyboard_code_conversion_gtk.h"
+
 namespace views {
 
 KeyEvent::KeyEvent(GdkEventKey* event)
@@ -13,11 +15,12 @@ KeyEvent::KeyEvent(GdkEventKey* event)
             Event::ET_KEY_PRESSED : Event::ET_KEY_RELEASED,
             GetFlagsFromGdkState(event->state)),
       // TODO(erg): All these values are iffy.
-      character_(event->keyval),
+      key_code_(base::WindowsKeyCodeForGdkKeyCode(event->keyval)),
       repeat_count_(0),
       message_flags_(0) {
 }
 
+// static
 int Event::GetFlagsFromGdkState(int state) {
   int flags = 0;
   if (state & GDK_CONTROL_MASK)

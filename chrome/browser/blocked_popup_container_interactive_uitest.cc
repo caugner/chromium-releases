@@ -6,6 +6,8 @@
 
 #include "app/l10n_util.h"
 #include "base/file_path.h"
+#include "base/gfx/rect.h"
+#include "base/keyboard_codes.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/automation/automation_constants.h"
@@ -36,10 +38,10 @@ class BlockedPopupContainerInteractiveTest : public UITest {
     ASSERT_TRUE(tab_.get());
   }
 
-  void NavigateMainTabTo(const std::wstring& file_name) {
+  void NavigateMainTabTo(const std::string& file_name) {
     FilePath filename(test_data_directory_);
     filename = filename.AppendASCII("constrained_files");
-    filename = filename.Append(FilePath::FromWStringHack(file_name));
+    filename = filename.AppendASCII(file_name);
     ASSERT_TRUE(tab_->NavigateToURL(net::FilePathToFileURL(filename)));
   }
 
@@ -51,8 +53,7 @@ class BlockedPopupContainerInteractiveTest : public UITest {
     // Simulate a click of the actual link to force user_gesture to be
     // true; if we don't, the resulting popup will be constrained, which
     // isn't what we want to test.
-    POINT link_point(tab_view_bounds.CenterPoint().ToPOINT());
-    ASSERT_TRUE(window->SimulateOSClick(link_point,
+    ASSERT_TRUE(window->SimulateOSClick(tab_view_bounds.CenterPoint(),
                                         views::Event::EF_LEFT_BUTTON_DOWN));
   }
 
@@ -62,7 +63,7 @@ class BlockedPopupContainerInteractiveTest : public UITest {
 };
 
 TEST_F(BlockedPopupContainerInteractiveTest, TestOpenAndResizeTo) {
-  NavigateMainTabTo(L"constrained_window_onload_resizeto.html");
+  NavigateMainTabTo("constrained_window_onload_resizeto.html");
   SimulateClickInCenterOf(window_);
 
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, 1000));
@@ -78,8 +79,14 @@ TEST_F(BlockedPopupContainerInteractiveTest, TestOpenAndResizeTo) {
   ASSERT_TRUE(popup_window->GetViewBoundsWithTimeout(
                   VIEW_ID_TAB_CONTAINER, &rect, false, 1000, &is_timeout));
   ASSERT_FALSE(is_timeout);
-  ASSERT_EQ(300, rect.width());
-  ASSERT_EQ(320, rect.height());
+  EXPECT_EQ(300, rect.width());
+  EXPECT_EQ(320, rect.height());
+
+#if defined(OS_LINUX)
+  // It seems we have to wait a little bit for the widgets to spin up before
+  // we can start clicking on them.
+  PlatformThread::Sleep(500);
+#endif
 
   SimulateClickInCenterOf(popup_window);
 
@@ -92,10 +99,17 @@ TEST_F(BlockedPopupContainerInteractiveTest, TestOpenAndResizeTo) {
   // inner{Width,Height}.
   is_timeout = false;
   ASSERT_TRUE(popup_window->GetViewBoundsWithTimeout(
-                  VIEW_ID_TAB_CONTAINER, &rect, false, 1000, &is_timeout));
+                 VIEW_ID_TAB_CONTAINER, &rect, false, 1000, &is_timeout));
   ASSERT_FALSE(is_timeout);
-  ASSERT_LT(rect.width(), 200);
-  ASSERT_LT(rect.height(), 200);
+  EXPECT_LT(rect.height(), 200);
+#if defined(OS_LINUX)
+  // On Linux we may run in an environment where there is no window frame. In
+  // this case our width might be exactly 200. The height will still be less
+  // because we have to show the location bar.
+  EXPECT_LE(rect.width(), 200);
+#else
+  EXPECT_LT(rect.width(), 200);
+#endif
 }
 
 // Helper function used to get the number of blocked popups out of the window
@@ -115,13 +129,13 @@ bool ParseCountOutOfTitle(const std::wstring& title, int* output) {
     offset++;
   }
 
-  return StringToInt(number, output);
+  return StringToInt(WideToUTF16(number), output);
 }
 
 // Tests that in the window.open() equivalent of a fork bomb, we stop building
 // windows.
 TEST_F(BlockedPopupContainerInteractiveTest, DontSpawnEndlessPopups) {
-  NavigateMainTabTo(L"infinite_popups.html");
+  NavigateMainTabTo("infinite_popups.html");
   SimulateClickInCenterOf(window_);
 
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, 1000));
@@ -164,7 +178,7 @@ TEST_F(BlockedPopupContainerInteractiveTest, DontSpawnEndlessPopups) {
 // Make sure that we refuse to close windows when a constrained popup is
 // displayed.
 TEST_F(BlockedPopupContainerInteractiveTest, WindowOpenWindowClosePopup) {
-  NavigateMainTabTo(L"openclose_main.html");
+  NavigateMainTabTo("openclose_main.html");
   SimulateClickInCenterOf(window_);
 
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, 5000));
@@ -183,7 +197,7 @@ TEST_F(BlockedPopupContainerInteractiveTest, WindowOpenWindowClosePopup) {
 }
 
 TEST_F(BlockedPopupContainerInteractiveTest, BlockAlertFromBlockedPopup) {
-  NavigateMainTabTo(L"block_alert.html");
+  NavigateMainTabTo("block_alert.html");
 
   // Wait for there to be an app modal dialog (and fail if it's shown).
   ASSERT_FALSE(automation()->WaitForAppModalDialog(4000));
@@ -200,7 +214,7 @@ TEST_F(BlockedPopupContainerInteractiveTest, BlockAlertFromBlockedPopup) {
 }
 
 TEST_F(BlockedPopupContainerInteractiveTest, ShowAlertFromNormalPopup) {
-  NavigateMainTabTo(L"show_alert.html");
+  NavigateMainTabTo("show_alert.html");
   SimulateClickInCenterOf(window_);
 
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, 5000));
@@ -212,6 +226,12 @@ TEST_F(BlockedPopupContainerInteractiveTest, ShowAlertFromNormalPopup) {
   scoped_refptr<TabProxy> popup_tab(popup_browser->GetTab(0));
   ASSERT_TRUE(popup_tab.get());
 
+#if defined(OS_LINUX)
+  // It seems we have to wait a little bit for the widgets to spin up before
+  // we can start clicking on them.
+  PlatformThread::Sleep(500);
+#endif
+
   SimulateClickInCenterOf(popup_window);
 
   // Wait for there to be an app modal dialog.
@@ -221,7 +241,7 @@ TEST_F(BlockedPopupContainerInteractiveTest, ShowAlertFromNormalPopup) {
 // Make sure that window focus works while creating a popup window so that we
 // don't
 TEST_F(BlockedPopupContainerInteractiveTest, DontBreakOnBlur) {
-  NavigateMainTabTo(L"window_blur_test.html");
+  NavigateMainTabTo("window_blur_test.html");
   SimulateClickInCenterOf(window_);
 
   // Wait for the popup window to open.
@@ -230,3 +250,39 @@ TEST_F(BlockedPopupContainerInteractiveTest, DontBreakOnBlur) {
   // We popup shouldn't be closed by the onblur handler.
   ASSERT_FALSE(automation()->WaitForWindowCountToBecome(1, 1500));
 }
+
+#if !defined(OS_MACOSX)  // see BrowserWindowCocoa::GetCommandId
+// Tests that tab related keyboard accelerators are reserved by the app.
+
+class BrowserInteractiveTest : public UITest {
+};
+
+TEST_F(BrowserInteractiveTest, ReserveKeyboardAccelerators) {
+  const std::string kBadPage =
+      "<html><script>"
+      "document.onkeydown = function() {"
+      "  event.preventDefault();"
+      "  return false;"
+      "}"
+      "</script></html>";
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  browser->AppendTab(GURL("data:text/html," + kBadPage));
+  int tab_count = 0;
+  ASSERT_TRUE(browser->GetTabCount(&tab_count));
+  ASSERT_EQ(tab_count, 2);
+
+  int active_tab = 0;
+  ASSERT_TRUE(browser->GetActiveTabIndex(&active_tab));
+  ASSERT_EQ(active_tab, 1);
+
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  ASSERT_TRUE(window->SimulateOSKeyPress(
+      base::VKEY_TAB, views::Event::EF_CONTROL_DOWN));
+  ASSERT_TRUE(browser->WaitForTabToBecomeActive(0, action_max_timeout_ms()));
+
+  ASSERT_TRUE(browser->ActivateTab(1));
+  ASSERT_TRUE(window->SimulateOSKeyPress(
+      base::VKEY_W, views::Event::EF_CONTROL_DOWN));
+  ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_max_timeout_ms()));
+}
+#endif

@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_DOM_UI_HISTORY_UI_H_
 #define CHROME_BROWSER_DOM_UI_HISTORY_UI_H_
 
-#include "base/scoped_ptr.h"
+#include <string>
+#include <vector>
+
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/dom_ui.h"
@@ -78,7 +80,7 @@ class BrowsingHistoryHandler : public DOMMessageHandler,
   std::wstring search_text_;
 
   // Browsing history remover
-  scoped_ptr<BrowsingDataRemover> remover_;
+  BrowsingDataRemover* remover_;
 
   // Our consumer for the history service.
   CancelableRequestConsumerT<int, 0> cancelable_consumer_;
@@ -92,6 +94,8 @@ class HistoryUI : public DOMUI {
 
   // Return the URL for a given search term.
   static const GURL GetHistoryURLWithSearchText(const std::wstring& text);
+
+  static RefCountedMemory* GetFaviconResourceBytes();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HistoryUI);

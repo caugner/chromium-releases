@@ -14,6 +14,7 @@
       '..',
       '../..',
       '../../<(cgdir)/include',
+      '../../<(glewdir)/include',
       '../../<(gtestdir)',
     ],
   },
@@ -28,7 +29,8 @@
         '../../<(jpegdir)/libjpeg.gyp:libjpeg',
         '../../<(pngdir)/libpng.gyp:libpng',
         '../../<(zlibdir)/zlib.gyp:zlib',
-        '../compiler/technique/technique.gyp:technique',
+        '../build/libs.gyp:cg_libs',
+        '../compiler/technique/technique.gyp:o3dTechnique',
       ],
       'sources': [
         'cross/collada_conditioner.cc',
@@ -37,8 +39,6 @@
         'cross/collada.h',
         'cross/collada_zip_archive.cc',
         'cross/collada_zip_archive.h',
-        'cross/destination_buffer.cc',
-        'cross/destination_buffer.h',
         'cross/file_output_stream_processor.cc',
         'cross/file_output_stream_processor.h',
         'cross/precompile.h',
@@ -49,16 +49,13 @@
         'cross/zip_archive.cc',
         'cross/zip_archive.h',
       ],
+
       'conditions' : [
-        ['renderer == "d3d9" and OS == "win"',
+        ['OS == "win"',
           {
             'include_dirs': [
               '$(DXSDK_DIR)/Include',
             ],
-          }
-        ],
-        ['OS == "win"',
-          {
             'sources': [
               'win/collada_conditioner_win.cc',
             ],
@@ -68,6 +65,9 @@
           {
             'sources': [
               'mac/collada_conditioner_mac.mm',
+            ],
+            'include_dirs': [
+              '../../third_party/glew/files/include',
             ],
             'link_settings': {
               'libraries': [
@@ -81,22 +81,58 @@
             'sources': [
               'linux/collada_conditioner_linux.cc',
             ],
+            'include_dirs': [
+              '../../third_party/glew/files/include',
+              '/usr/include/cairo',
+              '/usr/include/glib-2.0',
+              '/usr/include/gtk-2.0',
+              '/usr/include/pango-1.0',
+              '/usr/lib/glib-2.0/include',
+              '/usr/lib/gtk-2.0/include',
+              '/usr/include/atk-1.0',
+            ],
           },
         ],
       ],
     },
     {
+      'target_name': 'o3dSerializationObjects',
+      'type': 'static_library',
+      'sources': [
+        'cross/camera_info.cc',
+        'cross/camera_info.h',
+        'cross/destination_buffer.cc',
+        'cross/destination_buffer.h',
+        'cross/json_object.cc',
+        'cross/json_object.h',
+      ],
+    },
+    {
       'target_name': 'o3dImportTest',
       'type': 'none',
-      'dependencies': [
-        'o3dImport',
-      ],
       'direct_dependent_settings': {
         'sources': [
           'cross/tar_generator_test.cc',
           'cross/targz_generator_test.cc',
         ],
       },
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)/unittest_data',
+          'files': [
+            'test_data/crate.dae',
+            'test_data/crate.jpg',
+            'test_data/rock01.tga',
+            'test_data/rock02.tga',
+          ],
+        },
+      ],
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

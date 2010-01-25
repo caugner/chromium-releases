@@ -13,14 +13,16 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/toolbar_model.h"
+#include "chrome/browser/cocoa/autocomplete_text_field.h"
 #include "chrome/common/page_transition_types.h"
+#include "grit/generated_resources.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditController;
-@class AutocompleteEditHelper;
 class AutocompleteEditModel;
+@class AutocompleteFieldDelegate;
 class AutocompletePopupViewMac;
-@class AutocompleteTextField;
+class BubblePositioner;
 class Clipboard;
 class CommandUpdater;
 class Profile;
@@ -29,9 +31,11 @@ class ToolbarModel;
 
 // Implements AutocompleteEditView on an AutocompleteTextField.
 
-class AutocompleteEditViewMac : public AutocompleteEditView {
+class AutocompleteEditViewMac : public AutocompleteEditView,
+                                public AutocompleteTextFieldObserver {
  public:
   AutocompleteEditViewMac(AutocompleteEditController* controller,
+                          const BubblePositioner* bubble_positioner,
                           ToolbarModel* toolbar_model,
                           Profile* profile,
                           CommandUpdater* command_updater,
@@ -76,6 +80,7 @@ class AutocompleteEditViewMac : public AutocompleteEditView {
   virtual void RevertAll();
   virtual void UpdatePopup();
   virtual void ClosePopup();
+  virtual void SetFocus();
   virtual void OnTemporaryTextMaybeChanged(const std::wstring& display_text,
                                            bool save_original_selection);
   virtual bool OnInlineAutocompleteTextMaybeChanged(
@@ -83,11 +88,26 @@ class AutocompleteEditViewMac : public AutocompleteEditView {
   virtual void OnRevertTemporaryText();
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
+  virtual gfx::NativeView GetNativeView() const;
+
+  // Implement the AutocompleteTextFieldObserver interface.
+  virtual void OnControlKeyChanged(bool pressed);
+  virtual void OnPaste();
+  virtual bool CanPasteAndGo();
+  virtual int GetPasteActionStringId();
+  virtual void OnPasteAndGo();
+  virtual void OnSecurityIconClicked();
+  virtual void OnFrameChanged();
 
   // Helper functions for use from AutocompleteEditHelper Objective-C
   // class.
-  void OnUpOrDownKeyPressed(bool up, bool by_page);
+
+  // Returns true if |popup_view_| is open.
+  bool IsPopupOpen() const;
+
+  // Trivial wrappers forwarding to |model_| methods.
   void OnEscapeKeyPressed();
+  void OnUpOrDownKeyPressed(bool up, bool by_page);
 
   // Called when editing begins in the field, and before the results
   // of any editing are communicated to |model_|.
@@ -100,8 +120,19 @@ class AutocompleteEditViewMac : public AutocompleteEditView {
   // visual state (such as closing the popup).
   void OnDidResignKey();
 
-  // Called when the user attempts to paste into |field_|.
-  void OnPaste();
+  // Checks if a keyword search is possible and forwards to |model_|
+  // if so.  Returns true if the tab should be eaten.
+  bool OnTabPressed();
+
+  // Called when the user hits backspace in |field_|.  Checks whether
+  // keyword search is being terminated.  Returns true if the
+  // backspace should be intercepted (not forwarded on to the standard
+  // machinery).
+  bool OnBackspacePressed();
+
+  // Forward to same method in |popup_view_| model.  Used when
+  // Shift-Delete is pressed, to delete items from the popup.
+  void TryDeletingCurrentItem();
 
   void AcceptInput(WindowOpenDisposition disposition, bool for_drop);
 
@@ -152,12 +183,11 @@ class AutocompleteEditViewMac : public AutocompleteEditView {
   AutocompleteTextField* field_;  // owned by tab controller
 
   // Objective-C object to bridge field_ delegate calls to C++.
-  scoped_nsobject<AutocompleteEditHelper> edit_helper_;
+  scoped_nsobject<AutocompleteFieldDelegate> edit_helper_;
 
-  // Text and selection at the point where the user started using the
+  // Selection at the point where the user started using the
   // arrows to move around in the popup.
   NSRange saved_temporary_selection_;
-  std::wstring saved_temporary_text_;
 
   // Tracking state before and after a possible change for reporting
   // to model_.

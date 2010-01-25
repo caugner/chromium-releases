@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,10 @@
 #include <pk11pub.h>
 #undef Lock
 #include "base/nss_init.h"
+#elif defined(OS_MACOSX)
+#include <Security/Security.h>
+#include "base/scoped_cftyperef.h"
+#include "net/base/x509_certificate.h"
 #endif
 
 #include "base/file_util.h"
@@ -81,9 +85,47 @@ static CERTCertificate* LoadTemporaryCert(const FilePath& filename) {
 }
 #endif
 
+#if defined(OS_MACOSX)
+static net::X509Certificate* LoadTemporaryCert(const FilePath& filename) {
+  std::string rawcert;
+  if (!file_util::ReadFileToString(filename.ToWStringHack(), &rawcert)) {
+    LOG(ERROR) << "Can't load certificate " << filename.ToWStringHack();
+    return NULL;
+  }
+
+  CFDataRef pem = CFDataCreate(kCFAllocatorDefault,
+                               reinterpret_cast<const UInt8*>(rawcert.data()),
+                               static_cast<CFIndex>(rawcert.size()));
+  if (!pem)
+    return NULL;
+  scoped_cftyperef<CFDataRef> scoped_pem(pem);
+
+  SecExternalFormat input_format = kSecFormatUnknown;
+  SecExternalItemType item_type = kSecItemTypeUnknown;
+  CFArrayRef cert_array = NULL;
+  if (SecKeychainItemImport(pem, NULL, &input_format, &item_type, 0, NULL, NULL,
+                            &cert_array))
+    return NULL;
+  scoped_cftyperef<CFArrayRef> scoped_cert_array(cert_array);
+
+  if (!CFArrayGetCount(cert_array))
+    return NULL;
+
+  SecCertificateRef cert_ref = static_cast<SecCertificateRef>(
+      const_cast<void*>(CFArrayGetValueAtIndex(cert_array, 0)));
+  CFRetain(cert_ref);
+  return net::X509Certificate::CreateFromHandle(cert_ref,
+      net::X509Certificate::SOURCE_FROM_NETWORK);
+}
+#endif
+
 }  // namespace
 
 namespace net {
+
+#if defined(OS_MACOSX)
+void SetMacTestCertificate(X509Certificate* cert);
+#endif
 
 // static
 const char TestServerLauncher::kHostName[] = "127.0.0.1";
@@ -94,11 +136,32 @@ const int TestServerLauncher::kBadHTTPSPort = 9666;
 // The issuer name of the cert that should be trusted for the test to work.
 const wchar_t TestServerLauncher::kCertIssuerName[] = L"Test CA";
 
-TestServerLauncher::TestServerLauncher() : process_handle_(NULL)
+TestServerLauncher::TestServerLauncher() : process_handle_(
+                                               base::kNullProcessHandle),
+                                           forking_(false),
+                                           connection_attempts_(10),
+                                           connection_timeout_(1000)
 #if defined(OS_LINUX)
 , cert_(NULL)
 #endif
 {
+  InitCertPath();
+}
+
+TestServerLauncher::TestServerLauncher(int connection_attempts,
+                                       int connection_timeout)
+                        : process_handle_(base::kNullProcessHandle),
+                          forking_(false),
+                          connection_attempts_(connection_attempts),
+                          connection_timeout_(connection_timeout)
+#if defined(OS_LINUX)
+, cert_(NULL)
+#endif
+{
+  InitCertPath();
+}
+
+void TestServerLauncher::InitCertPath() {
   PathService::Get(base::DIR_SOURCE_ROOT, &cert_dir_);
   cert_dir_ = cert_dir_.Append(FILE_PATH_LITERAL("net"))
                        .Append(FILE_PATH_LITERAL("data"))
@@ -115,7 +178,7 @@ void AppendToPythonPath(const FilePath& dir) {
   const wchar_t kPythonPath[] = L"PYTHONPATH";
   // FIXME(dkegel): handle longer PYTHONPATH variables
   wchar_t oldpath[4096];
-  if (GetEnvironmentVariable(kPythonPath, oldpath, sizeof(oldpath)) == 0) {
+  if (GetEnvironmentVariable(kPythonPath, oldpath, arraysize(oldpath)) == 0) {
     SetEnvironmentVariableW(kPythonPath, dir.value().c_str());
   } else if (!wcsstr(oldpath, dir.value().c_str())) {
     std::wstring newpath(oldpath);
@@ -142,7 +205,7 @@ void AppendToPythonPath(const FilePath& dir) {
 
 void TestServerLauncher::SetPythonPath() {
   FilePath third_party_dir;
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &third_party_dir));
+  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &third_party_dir));
   third_party_dir = third_party_dir.Append(FILE_PATH_LITERAL("third_party"));
 
   AppendToPythonPath(third_party_dir.Append(FILE_PATH_LITERAL("tlslite")));
@@ -204,6 +267,8 @@ bool TestServerLauncher::Start(Protocol protocol,
     command_line.append(file_root_url);
     command_line.append(L"\"");
   }
+  // Deliberately do not pass the --forking flag. It breaks the tests
+  // on Windows.
 
   if (!base::LaunchApp(command_line, false, true, &process_handle_)) {
     LOG(ERROR) << "Failed to launch " << command_line;
@@ -220,6 +285,8 @@ bool TestServerLauncher::Start(Protocol protocol,
     command_line.push_back("-f");
   if (!cert_path.value().empty())
     command_line.push_back("--https=" + WideToUTF8(cert_path.ToWStringHack()));
+  if (forking_)
+    command_line.push_back("--forking");
 
   base::file_handle_mapping_vector no_mappings;
   LOG(INFO) << "Trying to launch " << command_line[0] << " ...";
@@ -248,12 +315,13 @@ bool TestServerLauncher::WaitToStart(const std::string& host_name, int port) {
   net::AddressList addr;
   scoped_refptr<net::HostResolver> resolver(net::CreateSystemHostResolver());
   net::HostResolver::RequestInfo info(host_name, port);
-  int rv = resolver->Resolve(info, &addr, NULL, NULL);
+  int rv = resolver->Resolve(info, &addr, NULL, NULL, NULL);
   if (rv != net::OK)
     return false;
 
   net::TCPPinger pinger(addr);
-  rv = pinger.Ping();
+  rv = pinger.Ping(base::TimeDelta::FromMilliseconds(connection_timeout_),
+                   connection_attempts_);
   return rv == net::OK;
 }
 
@@ -264,7 +332,7 @@ bool TestServerLauncher::WaitToFinish(int timeout_ms) {
   bool ret = base::WaitForSingleProcess(process_handle_, timeout_ms);
   if (ret) {
     base::CloseProcessHandle(process_handle_);
-    process_handle_ = NULL;
+    process_handle_ = base::kNullProcessHandle;
     LOG(INFO) << "Finished.";
   } else {
     LOG(INFO) << "Timed out.";
@@ -279,7 +347,7 @@ bool TestServerLauncher::Stop() {
   bool ret = base::KillProcess(process_handle_, 1, true);
   if (ret) {
     base::CloseProcessHandle(process_handle_);
-    process_handle_ = NULL;
+    process_handle_ = base::kNullProcessHandle;
     LOG(INFO) << "Stopped.";
   } else {
     LOG(INFO) << "Kill failed?";
@@ -292,6 +360,8 @@ TestServerLauncher::~TestServerLauncher() {
 #if defined(OS_LINUX)
   if (cert_)
     CERT_DestroyCertificate(reinterpret_cast<CERTCertificate*>(cert_));
+#elif defined(OS_MACOSX)
+  SetMacTestCertificate(NULL);
 #endif
   Stop();
 }
@@ -328,6 +398,12 @@ bool TestServerLauncher::LoadTestRootCert() {
           LoadTemporaryCert(GetRootCertPath()));
   DCHECK(cert_);
   return (cert_ != NULL);
+#elif defined(OS_MACOSX)
+  X509Certificate* cert = LoadTemporaryCert(GetRootCertPath());
+  if (!cert)
+    return false;
+  SetMacTestCertificate(cert);
+  return true;
 #else
   return true;
 #endif

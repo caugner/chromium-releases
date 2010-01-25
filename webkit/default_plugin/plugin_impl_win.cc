@@ -12,9 +12,6 @@
 #include "googleurl/src/gurl.h"
 #include "grit/webkit_strings.h"
 #include "unicode/locid.h"
-#include "webkit/default_plugin/activex_installer.h"
-#include "webkit/activex_shim/activex_shared.h"
-#include "webkit/activex_shim/npn_scripting.h"
 #include "webkit/default_plugin/default_plugin_shared.h"
 #include "webkit/default_plugin/plugin_main.h"
 #include "webkit/glue/webkit_glue.h"
@@ -23,17 +20,16 @@ static const int TOOLTIP_MAX_WIDTH = 500;
 
 PluginInstallerImpl::PluginInstallerImpl(int16 mode)
     : instance_(NULL),
-      is_activex_(false),
       mode_(mode),
       plugin_install_stream_(NULL),
       plugin_installer_state_(PluginInstallerStateUndefined),
+      install_dialog_(NULL),
       enable_click_(false),
       icon_(NULL),
       bold_font_(NULL),
       regular_font_(NULL),
       underline_font_(NULL),
       tooltip_(NULL),
-      activex_installer_(NULL),
       installation_job_monitor_thread_(
           new PluginInstallationJobMonitorThread()),
       plugin_database_handler_(*this),
@@ -44,18 +40,13 @@ PluginInstallerImpl::~PluginInstallerImpl() {
   installation_job_monitor_thread_->Stop();
 
   if (bold_font_)
-    ::DeleteObject(bold_font_);
+    DeleteObject(bold_font_);
 
   if (underline_font_)
-    ::DeleteObject(underline_font_);
-
-  if (activex_installer_) {
-    activex_installer_->Cleanup();
-    activex_installer_->Release();
-  }
+    DeleteObject(underline_font_);
 
   if (tooltip_)
-    ::DestroyWindow(tooltip_);
+    DestroyWindow(tooltip_);
 }
 
 bool PluginInstallerImpl::Initialize(HINSTANCE module_handle, NPP instance,
@@ -65,19 +56,18 @@ bool PluginInstallerImpl::Initialize(HINSTANCE module_handle, NPP instance,
   DCHECK(instance != NULL);
   DCHECK(module_handle != NULL);
 
+  if (mime_type == NULL || strlen(mime_type) == 0) {
+    DLOG(WARNING) << __FUNCTION__ << " Invalid parameters passed in";
+    NOTREACHED();
+    return false;
+  }
+
   instance_ = instance;
   mime_type_ = mime_type;
 
-  // The clsid without the {} parentheses.
-  std::string raw_activex_clsid;
-  if (!ParseInstantiationArguments(mime_type, instance, argc, argn, argv,
-                                   &raw_activex_clsid, &is_activex_,
-                                   &activex_clsid_,
-                                   &activex_codebase_,
-                                   &plugin_download_url_,
-                                   &plugin_finder_url_)) {
-    DLOG(ERROR) << "Incorrect arguments passed to plugin";
+  if (!webkit_glue::GetPluginFinderURL(&plugin_finder_url_)) {
     NOTREACHED();
+    DLOG(WARNING) << __FUNCTION__ << " Failed to get the plugin finder URL";
     return false;
   }
 
@@ -89,37 +79,20 @@ bool PluginInstallerImpl::Initialize(HINSTANCE module_handle, NPP instance,
 
   InitializeResources(module_handle);
 
-  if (is_activex_) {
-    // If the codebase is not from a whitelisted website, we do not allow
-    // download.
-    if (!activex_shim::IsCodebaseAllowed(raw_activex_clsid,
-                                         activex_codebase_)) {
-      activex_codebase_.clear();
-      plugin_download_url_.clear();
-    }
-
-    if (!plugin_download_url_.empty()) {
-      set_plugin_installer_state(PluginListDownloaded);
-      DisplayAvailablePluginStatus();
-      NotifyPluginStatus(default_plugin::MISSING_PLUGIN_AVAILABLE);
-    } else {
-      set_plugin_installer_state(PluginListDownloadFailed);
-      DisplayStatus(IDS_DEFAULT_PLUGIN_NO_PLUGIN_AVAILABLE_MSG);
-    }
-  } else {
-    DisplayStatus(IDS_DEFAULT_PLUGIN_GET_PLUGIN_MSG_NO_PLUGIN_NAME);
-    plugin_database_handler_.DownloadPluginsFileIfNeeded(plugin_finder_url_);
-  }
+  DisplayStatus(IDS_DEFAULT_PLUGIN_GET_PLUGIN_MSG_NO_PLUGIN_NAME);
+  plugin_database_handler_.DownloadPluginsFileIfNeeded(plugin_finder_url_);
 
   return true;
 }
 
 void PluginInstallerImpl::Shutdown() {
-  if (install_dialog_.IsWindow()) {
-    install_dialog_.DestroyWindow();
+  if (install_dialog_) {
+    install_dialog_->RemoveInstaller(this);
+    install_dialog_ = NULL;
   }
-  if (IsWindow()) {
-    DestroyWindow();
+
+  if (IsWindow(hwnd())) {
+    DestroyWindow(hwnd());
   }
 }
 
@@ -168,12 +141,12 @@ void PluginInstallerImpl::ClearDisplay() {
 }
 
 void PluginInstallerImpl::RefreshDisplay() {
-  if (!IsWindow())
+  if (!IsWindow(hwnd()))
     return;
   UpdateToolTip();
 
-  InvalidateRect(NULL, TRUE);
-  UpdateWindow();
+  InvalidateRect(hwnd(), NULL, TRUE);
+  UpdateWindow(hwnd());
 }
 
 bool PluginInstallerImpl::CreateToolTip() {
@@ -182,16 +155,16 @@ bool PluginInstallerImpl::CreateToolTip() {
                             WS_POPUP | TTS_ALWAYSTIP,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             CW_USEDEFAULT, CW_USEDEFAULT,
-                            m_hWnd, NULL, NULL, NULL);
+                            hwnd(), NULL, NULL, NULL);
  if (!tooltip_)
    return false;
 
   // Associate the ToolTip with the tool.
   TOOLINFO tool_info = {0};
   tool_info.cbSize = sizeof(tool_info);
-  tool_info.hwnd = m_hWnd;
+  tool_info.hwnd = hwnd();
   tool_info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-  tool_info.uId = reinterpret_cast<UINT_PTR>(m_hWnd);
+  tool_info.uId = reinterpret_cast<UINT_PTR>(hwnd());
   tool_info.lpszText = NULL;
   SendMessage(tooltip_, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&tool_info));
   SendMessage(tooltip_, TTM_SETMAXTIPWIDTH, 0, TOOLTIP_MAX_WIDTH);
@@ -207,9 +180,9 @@ void PluginInstallerImpl::UpdateToolTip() {
 
   TOOLINFO tool_info = {0};
   tool_info.cbSize = sizeof(tool_info);
-  tool_info.hwnd = m_hWnd;
+  tool_info.hwnd = hwnd();
   tool_info.uFlags = TTF_IDISHWND;
-  tool_info.uId = reinterpret_cast<UINT_PTR>(m_hWnd);
+  tool_info.uId = reinterpret_cast<UINT_PTR>(hwnd());
   tool_info.lpszText = const_cast<LPWSTR>(tip.c_str());
   SendMessage(tooltip_, TTM_UPDATETIPTEXT, 0, (LPARAM)&tool_info);
 }
@@ -253,13 +226,14 @@ void PluginInstallerImpl::URLNotify(const char* url, NPReason reason) {
     bool plugin_available = false;
     if (reason == NPRES_DONE) {
       DLOG(INFO) << "Received Done notification for plugin list download";
-      set_plugin_installer_state(PluginListDownloaded);
       plugin_database_handler_.ParsePluginList();
       if (plugin_database_handler_.GetPluginDetailsForMimeType(
               mime_type_.c_str(), desired_language_.c_str(),
               &plugin_download_url_, &plugin_name_,
               &plugin_download_url_for_display_)) {
         plugin_available = true;
+        install_dialog_ = PluginInstallDialog::AddInstaller(this, plugin_name_);
+        set_plugin_installer_state(PluginListDownloaded);
       } else {
         set_plugin_installer_state(PluginListDownloadedPluginNotFound);
       }
@@ -284,8 +258,6 @@ void PluginInstallerImpl::URLNotify(const char* url, NPReason reason) {
 }
 
 int16 PluginInstallerImpl::NPP_HandleEvent(void* event) {
-  // This is a hack. The renderer will send a direct custom message to ask for
-  // installation.
   NPEvent* npp_event = static_cast<NPEvent*>(event);
   if (npp_event->event == kInstallMissingPluginMessage) {
     // We could get this message because InfoBar may not be in sync with our
@@ -316,9 +288,9 @@ std::wstring PluginInstallerImpl::ReplaceStringForPossibleEmptyReplacement(
 }
 
 bool PluginInstallerImpl::SetWindow(HWND parent_window) {
-  if (!::IsWindow(parent_window)) {
+  if (!IsWindow(parent_window)) {
     // No window created yet. Ignore this call.
-    if (!IsWindow())
+    if (!IsWindow(hwnd()))
       return true;
     // Parent window has been destroyed.
     Shutdown();
@@ -327,22 +299,25 @@ bool PluginInstallerImpl::SetWindow(HWND parent_window) {
 
   RECT parent_rect = {0};
 
-  if (IsWindow()) {
-    ::GetClientRect(parent_window, &parent_rect);
-    SetWindowPos(NULL, &parent_rect, SWP_SHOWWINDOW);
+  if (IsWindow(hwnd())) {
+    GetClientRect(parent_window, &parent_rect);
+    SetWindowPos(hwnd(), NULL, parent_rect.left, parent_rect.top,
+                 parent_rect.right - parent_rect.left,
+                 parent_rect.bottom - parent_rect.top, SWP_SHOWWINDOW);
     return true;
   }
   // First time in -- no window created by plugin yet.
-  ::GetClientRect(parent_window, &parent_rect);
-  Create(parent_window, parent_rect, NULL, WS_CHILD | WS_BORDER);
-  DCHECK(IsWindow());
-  installation_job_monitor_thread_->set_plugin_window(m_hWnd);
+  GetClientRect(parent_window, &parent_rect);
+  set_window_style(WS_CHILD | WS_BORDER);
+  Init(parent_window, gfx::Rect(parent_rect));
+  DCHECK(IsWindow(hwnd()));
+  installation_job_monitor_thread_->set_plugin_window(hwnd());
 
   CreateToolTip();
   UpdateToolTip();
 
-  UpdateWindow();
-  ShowWindow(SW_SHOW);
+  UpdateWindow(hwnd());
+  ShowWindow(hwnd(), SW_SHOW);
 
   return true;
 }
@@ -355,25 +330,16 @@ void PluginInstallerImpl::DownloadPlugin() {
 
   DisplayStatus(IDS_DEFAULT_PLUGIN_DOWNLOADING_PLUGIN_MSG);
 
-  if (is_activex_) {
-    if (activex_installer_ == NULL) {
-      CComObject<ActiveXInstaller>::CreateInstance(&activex_installer_);
-      activex_installer_->AddRef();
-    }
-    activex_installer_->StartDownload(activex_clsid_, activex_codebase_, m_hWnd,
-                                      kActivexInstallResult);
+  if (!plugin_download_url_for_display_) {
+    webkit_glue::DownloadUrl(plugin_download_url_, hwnd());
   } else {
-    if (!plugin_download_url_for_display_) {
-      webkit_glue::DownloadUrl(plugin_download_url_, m_hWnd);
-    } else {
-      default_plugin::g_browser->geturl(instance(),
-                                        plugin_download_url_.c_str(),
-                                        "_blank");
-      set_plugin_installer_state(PluginInstallerLaunchSuccess);
-      DisplayStatus(IDS_DEFAULT_PLUGIN_REFRESH_PLUGIN_MSG);
-      enable_click_ = true;
-      RefreshDisplay();
-    }
+    default_plugin::g_browser->geturl(instance(),
+                                      plugin_download_url_.c_str(),
+                                      "_blank");
+    set_plugin_installer_state(PluginInstallerLaunchSuccess);
+    DisplayStatus(IDS_DEFAULT_PLUGIN_REFRESH_PLUGIN_MSG);
+    enable_click_ = true;
+    RefreshDisplay();
   }
 }
 
@@ -385,11 +351,11 @@ LRESULT PluginInstallerImpl::OnEraseBackGround(UINT message, WPARAM wparam,
                                                LPARAM lparam, BOOL& handled) {
   HDC paint_device_context = reinterpret_cast<HDC>(wparam);
   RECT erase_rect = {0};
-  ::GetClipBox(paint_device_context, &erase_rect);
+  GetClipBox(paint_device_context, &erase_rect);
   HBRUSH brush = ::CreateSolidBrush(RGB(252, 235, 162));
   DCHECK(brush);
-  ::FillRect(paint_device_context, &erase_rect, brush);
-  ::DeleteObject(brush);
+  FillRect(paint_device_context, &erase_rect, brush);
+  DeleteObject(brush);
   return 1;
 }
 
@@ -400,7 +366,7 @@ LRESULT PluginInstallerImpl::OnEraseBackGround(UINT message, WPARAM wparam,
 // currently use this code since code in WebKit should not depend on code in
 // Chrome. We can fix this by pulling (at least part of) the l10n_util
 // functionality up into the Base module.
-bool PluginInstallerImpl::IsRTLLayout() const {
+bool PluginInstallerImpl::IsRTLLayout() {
   const icu::Locale& locale = icu::Locale::getDefault();
   const char* lang = locale.getLanguage();
 
@@ -414,7 +380,7 @@ bool PluginInstallerImpl::IsRTLLayout() const {
 LRESULT PluginInstallerImpl::OnPaint(UINT message, WPARAM wparam, LPARAM lparam,
                                      BOOL& handled) {
   PAINTSTRUCT paint_struct = {0};
-  BeginPaint(&paint_struct);
+  BeginPaint(hwnd(), &paint_struct);
 
   int save_dc_context = SaveDC(paint_struct.hdc);
   // The drawing order is as below:-
@@ -441,7 +407,7 @@ LRESULT PluginInstallerImpl::OnPaint(UINT message, WPARAM wparam, LPARAM lparam,
   text_rect.bottom = text_rect.top + device_point.y;
 
   RECT client_rect = {0};
-  GetClientRect(&client_rect);
+  GetClientRect(hwnd(), &client_rect);
 
   int icon_width = GetSystemMetrics(SM_CXICON);
   int icon_height = GetSystemMetrics(SM_CYICON);
@@ -491,7 +457,7 @@ LRESULT PluginInstallerImpl::OnPaint(UINT message, WPARAM wparam, LPARAM lparam,
   }
 
   RestoreDC(paint_struct.hdc, save_dc_context);
-  EndPaint(&paint_struct);
+  EndPaint(hwnd(), &paint_struct);
   return 0;
 }
 
@@ -550,9 +516,7 @@ void PluginInstallerImpl::PaintUserActionInformation(HDC paint_dc,
 
 void PluginInstallerImpl::ShowInstallDialog() {
   enable_click_ = false;
-  install_dialog_.Initialize(this, plugin_name_);
-  install_dialog_.Create(m_hWnd, NULL);
-  install_dialog_.ShowWindow(SW_SHOW);
+  install_dialog_->ShowInstallDialog(hwnd());
 }
 
 LRESULT PluginInstallerImpl::OnLButtonDown(UINT message, WPARAM wparam,
@@ -581,7 +545,7 @@ LRESULT PluginInstallerImpl::OnLButtonDown(UINT message, WPARAM wparam,
 LRESULT PluginInstallerImpl::OnSetCursor(UINT message, WPARAM wparam,
                                          LPARAM lparam, BOOL& handled) {
   if (enable_click_) {
-    ::SetCursor(LoadCursor(NULL, MAKEINTRESOURCE(IDC_HAND)));
+    SetCursor(LoadCursor(NULL, MAKEINTRESOURCE(IDC_HAND)));
     return 1;
   }
   handled = FALSE;
@@ -648,43 +612,6 @@ LRESULT PluginInstallerImpl::OnCopyData(UINT message, WPARAM wparam,
   return 0;
 }
 
-LRESULT PluginInstallerImpl::OnActiveXInstallResult(UINT message,
-                                                    WPARAM wparam,
-                                                    LPARAM lparam,
-                                                    BOOL& handled) {
-  handled = TRUE;
-
-  if (SUCCEEDED(wparam)) {
-    set_plugin_installer_state(PluginInstallerLaunchSuccess);
-    DisplayStatus(IDS_DEFAULT_PLUGIN_REFRESH_PLUGIN_MSG);
-    PostMessage(kRefreshPluginsMessage, 0, 0);
-  } else if ((wparam == INET_E_UNKNOWN_PROTOCOL) ||
-             (wparam == HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND))) {
-    set_plugin_installer_state(PluginDownloadFailed);
-    DisplayPluginDownloadFailedStatus();
-  } else {
-    set_plugin_installer_state(PluginInstallerLaunchFailure);
-    DisplayStatus(IDS_DEFAULT_PLUGIN_INSTALLATION_FAILED_MSG);
-  }
-  return 0;
-}
-
-std::string PluginInstallerImpl::ResolveURL(NPP instance,
-                                            const std::string& relative_url) {
-  // The NPAPI functions may not be available if this function is called
-  // as a result of a unit test.
-  if (default_plugin::g_browser) {
-    NPObject* object = NULL;
-    default_plugin::g_browser->getvalue(instance, NPNVWindowNPObject, &object);
-    activex_shim::NPNScriptableObject window(instance, object);
-    std::wstring url =
-        window.GetObjectProperty("document").GetStringProperty("URL");
-    GURL base(url);
-    return base.Resolve(relative_url).spec();
-  }
-  return relative_url;
-}
-
 bool PluginInstallerImpl::InitializeResources(HINSTANCE module_handle) {
   DCHECK(icon_ == NULL);
   DCHECK(regular_font_ == NULL);
@@ -707,68 +634,6 @@ bool PluginInstallerImpl::InitializeResources(HINSTANCE module_handle) {
   font_info.lfUnderline = TRUE;
   underline_font_ = CreateFontIndirect(&font_info);
   DCHECK(underline_font_ != NULL);
-  return true;
-}
-
-bool PluginInstallerImpl::ParseInstantiationArguments(
-    NPMIMEType mime_type,
-    NPP instance,
-    int16 argc,
-    char* argn[],
-    char* argv[],
-    std::string* raw_activex_clsid,
-    bool* is_activex,
-    std::string* activex_clsid,
-    std::string* activex_codebase,
-    std::string* plugin_download_url,
-    std::string* plugin_finder_url) {
-
-  if (!raw_activex_clsid || !is_activex || !activex_clsid ||
-      !plugin_download_url || !plugin_finder_url || !activex_codebase) {
-    NOTREACHED();
-    return false;
-  }
-
-  *is_activex = false;
-
-  bool valid_mime_type = (mime_type != NULL ? strlen(mime_type) > 0 : false);
-
-  for (int i = 0; i < argc; ++i) {
-    // We should only look for activex installation if the mime type passed in
-    // is not valid. In any case this code will be taken out when we remove
-    // the activex shim.
-    if (!valid_mime_type && LowerCaseEqualsASCII(argn[i], "classid") &&
-        activex_shim::GetClsidFromClassidAttribute(argv[i],
-                                                   raw_activex_clsid)) {
-      *is_activex = true;
-      *activex_clsid = std::string("{") + *raw_activex_clsid + "}";
-    }
-    if (LowerCaseEqualsASCII(argn[i], "codebase")) {
-      *activex_codebase = ResolveURL(instance, argv[i]);
-      size_t pos = activex_codebase->find('#');
-      if (pos != std::string::npos)
-        *plugin_download_url = activex_codebase->substr(0, pos);
-      else
-        *plugin_download_url = *activex_codebase;
-    }
-  }
-
-  if (!*is_activex) {
-    if (!valid_mime_type || !instance) {
-      DLOG(WARNING) << __FUNCTION__ << " Invalid parameters passed in";
-      NOTREACHED();
-      return false;
-    }
-
-    if (!webkit_glue::GetPluginFinderURL(plugin_finder_url)) {
-      NOTREACHED();
-      DLOG(WARNING) << __FUNCTION__ << " Failed to get the plugin finder URL";
-      return false;
-    }
-
-    DLOG(INFO) << "Plugin finder URL is " << plugin_finder_url->c_str();
-  }
-
   return true;
 }
 

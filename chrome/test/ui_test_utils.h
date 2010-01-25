@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_type.h"
 
 class AppModalDialog;
 class Browser;
@@ -31,6 +32,15 @@ void RunMessageLoop();
 // Puts the current tab title in |title|. Returns true on success.
 bool GetCurrentTabTitle(const Browser* browser, string16* title);
 
+// Waits for the current tab to complete the navigation. Returns true on
+// success.
+bool WaitForNavigationInCurrentTab(Browser* browser);
+
+// Waits for the current tab to complete the specified number of navigations.
+// Returns true on success.
+bool WaitForNavigationsInCurrentTab(Browser* browser,
+                                    int number_of_navigations);
+
 // Waits for |controller| to complete a navigation. This blocks until
 // the navigation finishes.
 void WaitForNavigation(NavigationController* controller);
@@ -40,13 +50,15 @@ void WaitForNavigation(NavigationController* controller);
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations);
 
+// Waits for a new tab to be added to |browser|.
+void WaitForNewTab(Browser* browser);
+
+// Waits for a load stop for the specified |controller|.
+void WaitForLoadStop(NavigationController* controller);
+
 // Navigates the selected tab of |browser| to |url|, blocking until the
 // navigation finishes.
 void NavigateToURL(Browser* browser, const GURL& url);
-
-// Reloads current tab contents and waits for navigation to finish.
-// Returns true on success.
-bool ReloadCurrentTab(Browser* browser);
 
 // Navigates the selected tab of |browser| to |url|, blocking until the
 // number of navigations specified complete.
@@ -93,6 +105,29 @@ AppModalDialog* WaitForAppModalDialog();
 
 // Causes the specified tab to crash. Blocks until it is crashed.
 void CrashTab(TabContents* tab);
-}
+
+// Waits for the focus to change in the specified RenderViewHost.
+void WaitForFocusChange(RenderViewHost* rvh);
+
+// Waits for the renderer to return focus to the browser (happens through tab
+// traversal).
+void WaitForFocusInBrowser(Browser* browser);
+
+// Performs a find in the page of the specified tab. Returns the number of
+// matches found.  |ordinal| is an optional parameter which is set to the index
+// of the current match.
+int FindInPage(TabContents* tab,
+               const string16& search_string,
+               bool forward,
+               bool case_sensitive,
+               int* ordinal);
+
+// Register |observer| for the given |type| and run the message loop until
+// either the observer posts a quit task or we timeout.
+void RegisterAndWait(NotificationType::Type type,
+                     NotificationObserver* observer,
+                     int64 timeout_ms);
+
+}  // namespace ui_test_utils
 
 #endif  // CHROME_TEST_UI_TEST_UTILS_H_

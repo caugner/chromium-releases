@@ -7,11 +7,33 @@
 #include <limits>
 
 #include "app/l10n_util.h"
+#include "base/atomicops.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "grit/generated_resources.h"
+
+ChildProcessInfo::ChildProcessInfo(const ChildProcessInfo& original)
+    : type_(original.type_),
+      name_(original.name_),
+      id_(original.id_),
+      process_(original.process_) {
+}
+
+ChildProcessInfo::~ChildProcessInfo() {
+}
+
+ChildProcessInfo& ChildProcessInfo::operator=(
+    const ChildProcessInfo& original) {
+  if (&original != this) {
+    type_ = original.type_;
+    name_ = original.name_;
+    id_ = original.id_;
+    process_ = original.process_;
+  }
+  return *this;
+}
 
 std::wstring ChildProcessInfo::GetTypeNameInEnglish(
     ChildProcessInfo::ProcessType type) {
@@ -26,6 +48,14 @@ std::wstring ChildProcessInfo::GetTypeNameInEnglish(
       return L"Web Worker";
     case UTILITY_PROCESS:
       return L"Utility";
+    case PROFILE_IMPORT_PROCESS:
+      return L"Profile Import helper";
+    case ZYGOTE_PROCESS:
+      return L"Zygote";
+    case SANDBOX_HELPER_PROCESS:
+      return L"Sandbox helper";
+    case NACL_PROCESS:
+      return L"Native Client module";
     case UNKNOWN_PROCESS:
       default:
       DCHECK(false) << "Unknown child process type!";
@@ -43,6 +73,12 @@ std::wstring ChildProcessInfo::GetLocalizedTitle() const {
     message_id = IDS_TASK_MANAGER_PLUGIN_PREFIX;
   } else if (type_ == ChildProcessInfo::WORKER_PROCESS) {
     message_id = IDS_TASK_MANAGER_WORKER_PREFIX;
+  } else if (type_ == ChildProcessInfo::UTILITY_PROCESS) {
+    message_id = IDS_TASK_MANAGER_UTILITY_PREFIX;
+  } else if (type_ == ChildProcessInfo::PROFILE_IMPORT_PROCESS) {
+    message_id = IDS_TASK_MANAGER_PROFILE_IMPORT_PREFIX;
+  } else if (type_ == ChildProcessInfo::NACL_PROCESS) {
+    message_id = IDS_TASK_MANAGER_NACL_PREFIX;
   } else {
     DCHECK(false) << "Need localized name for child process type.";
     return title;
@@ -56,17 +92,11 @@ std::wstring ChildProcessInfo::GetLocalizedTitle() const {
   return l10n_util::GetStringF(message_id, title);
 }
 
-ChildProcessInfo::ChildProcessInfo(ProcessType type) {
-  // This constructor is only used by objects which derive from this class,
-  // which means *this* is a real object that refers to a child process, and not
-  // just a simple object that contains information about it.  So add it to our
-  // list of running processes.
-  type_ = type;
-  pid_ = -1;
-}
-
-
-ChildProcessInfo::~ChildProcessInfo() {
+ChildProcessInfo::ChildProcessInfo(ProcessType type, int id) : type_(type) {
+  if (id == -1)
+    id_ = GenerateChildProcessUniqueId();
+  else
+    id_ = id;
 }
 
 std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {
@@ -79,4 +109,11 @@ std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {
   return StringPrintf("%d.%x.%d",
                       base::GetCurrentProcId(), instance,
                       base::RandInt(0, std::numeric_limits<int>::max()));
+}
+
+// static
+int ChildProcessInfo::GenerateChildProcessUniqueId() {
+  // This function must be threadsafe.
+  static base::subtle::Atomic32 last_unique_child_id = 0;
+  return base::subtle::NoBarrier_AtomicIncrement(&last_unique_child_id, 1);
 }

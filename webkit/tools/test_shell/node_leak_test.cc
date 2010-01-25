@@ -18,7 +18,7 @@
 
 namespace {
 
-const wchar_t kTestUrlSwitch[] = L"test-url";
+const char kTestUrlSwitch[] = "test-url";
 
 // A test to help determine if any nodes have been leaked as a result of
 // visiting a given URL.  If enabled in WebCore, the number of leaked nodes
@@ -31,11 +31,6 @@ class NodeLeakTest : public TestShellTest {
  public:
   virtual void SetUp() {
     const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-
-    std::wstring js_flags =
-        parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
-    js_flags += L" --expose-gc";
-    webkit_glue::SetJavaScriptFlags(js_flags);
 
     FilePath cache_path = FilePath::FromWStringHack(
         parsed_command_line.GetSwitchValue(test_shell::kCacheDir));
@@ -58,7 +53,7 @@ class NodeLeakTest : public TestShellTest {
         parsed_command_line.HasSwitch(test_shell::kPlaybackMode) ?
         net::HttpCache::PLAYBACK : net::HttpCache::NORMAL;
     SimpleResourceLoaderBridge::Init(
-        new TestShellRequestContext(cache_path.ToWStringHack(), mode, false));
+        new TestShellRequestContext(cache_path, mode, false));
 
     TestShellTest::SetUp();
   }
@@ -70,7 +65,7 @@ class NodeLeakTest : public TestShellTest {
   }
 
   void NavigateToURL(const std::wstring& test_url) {
-    test_shell_->LoadURL(test_url.c_str());
+    test_shell_->LoadURL(GURL(WideToUTF8(test_url)));
     test_shell_->WaitTestFinished();
 
     // Depends on TestShellTests::TearDown to load blank page and

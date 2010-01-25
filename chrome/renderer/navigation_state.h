@@ -9,6 +9,7 @@
 #include "base/time.h"
 #include "chrome/common/page_transition_types.h"
 #include "webkit/api/public/WebDataSource.h"
+#include "webkit/glue/alt_error_page_resource_fetcher.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/searchable_form_data.h"
 
@@ -35,9 +36,6 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
 
   // Contains the page_id for this navigation or -1 if there is none yet.
   int32 pending_page_id() const { return pending_page_id_; }
-
-  // Is this a new navigation?
-  bool is_new_navigation() const { return pending_page_id_ == -1; }
 
   // Contains the transition type that the browser specified when it
   // initiated the load.
@@ -132,11 +130,35 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     password_form_data_.reset(data);
   }
 
+  webkit_glue::AltErrorPageResourceFetcher* alt_error_page_fetcher() const {
+    return alt_error_page_fetcher_.get();
+  }
+  void set_alt_error_page_fetcher(webkit_glue::AltErrorPageResourceFetcher* f) {
+    alt_error_page_fetcher_.reset(f);
+  }
+
   const std::string& security_info() const {
     return security_info_;
   }
   void set_security_info(const std::string& security_info) {
     security_info_ = security_info;
+  }
+
+  bool postpone_loading_data() const {
+    return postpone_loading_data_;
+  }
+  void set_postpone_loading_data(bool postpone_loading_data) {
+    postpone_loading_data_ = postpone_loading_data;
+  }
+
+  void clear_postponed_data() {
+    postponed_data_.clear();
+  }
+  void append_postponed_data(const char* data, size_t data_len) {
+    postponed_data_.append(data, data_len);
+  }
+  const std::string& postponed_data() const {
+    return postponed_data_;
   }
 
  private:
@@ -149,7 +171,8 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
         load_histograms_recorded_(false),
         request_committed_(false),
         is_content_initiated_(is_content_initiated),
-        pending_page_id_(pending_page_id) {
+        pending_page_id_(pending_page_id),
+        postpone_loading_data_(false) {
   }
 
   PageTransition::Type transition_type_;
@@ -166,7 +189,10 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   int32 pending_page_id_;
   scoped_ptr<webkit_glue::SearchableFormData> searchable_form_data_;
   scoped_ptr<webkit_glue::PasswordForm> password_form_data_;
+  scoped_ptr<webkit_glue::AltErrorPageResourceFetcher> alt_error_page_fetcher_;
   std::string security_info_;
+  bool postpone_loading_data_;
+  std::string postponed_data_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationState);
 };

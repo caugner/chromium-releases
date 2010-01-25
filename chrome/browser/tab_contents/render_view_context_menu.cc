@@ -1,24 +1,26 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 
+#include "app/clipboard/clipboard.h"
+#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/l10n_util.h"
-#include "base/clipboard.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/scoped_clipboard_writer.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/fonts_languages_window.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/spellchecker.h"
+#include "chrome/browser/spellchecker_platform_engine.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
@@ -27,8 +29,30 @@
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
-#include "net/base/net_util.h"
-#include "webkit/glue/media_player_action.h"
+#include "webkit/api/public/WebMediaPlayerAction.h"
+#include "webkit/api/public/WebContextMenuData.h"
+
+using WebKit::WebContextMenuData;
+using WebKit::WebMediaPlayerAction;
+
+namespace {
+
+string16 EscapeAmpersands(const string16& text) {
+  string16 ret;
+  ret.reserve(text.length() * 2);
+  for (string16::const_iterator i = text.begin();
+       i != text.end(); ++i) {
+    // The escape for an ampersand is two ampersands.
+    if ('&' == *i)
+      ret.push_back(*i);
+
+    ret.push_back(*i);
+  }
+
+  return ret;
+}
+
+}  // namespace
 
 RenderViewContextMenu::RenderViewContextMenu(
     TabContents* tab_contents,
@@ -44,51 +68,65 @@ RenderViewContextMenu::~RenderViewContextMenu() {
 // Menu construction functions -------------------------------------------------
 
 void RenderViewContextMenu::Init() {
-  InitMenu(params_.node_type, params_.media_params);
+  InitMenu();
   DoInit();
 }
 
-void RenderViewContextMenu::InitMenu(ContextNodeType node_type,
-                                     ContextMenuMediaParams media_params) {
-  if (node_type.type & ContextNodeType::PAGE)
-    AppendPageItems();
-  if (node_type.type & ContextNodeType::FRAME)
-    AppendFrameItems();
-  if (node_type.type & ContextNodeType::LINK)
+void RenderViewContextMenu::InitMenu() {
+
+  bool has_link = !params_.link_url.is_empty();
+  bool has_selection = !params_.selection_text.empty();
+
+  // When no special node or text is selected and selection has no link,
+  // show page items.
+  if (params_.media_type == WebContextMenuData::MediaTypeNone &&
+      !has_link &&
+      !params_.is_editable &&
+      !has_selection) {
+    // If context is in subframe, show subframe options instead.
+    if (!params_.frame_url.is_empty()) {
+      AppendFrameItems();
+    } else if (!params_.page_url.is_empty()) {
+      AppendPageItems();
+    }
+  }
+
+  if (has_link) {
     AppendLinkItems();
-
-  if (node_type.type & ContextNodeType::IMAGE) {
-    if (node_type.type & ContextNodeType::LINK)
+    if (params_.media_type != WebContextMenuData::MediaTypeNone)
       AppendSeparator();
-    AppendImageItems();
   }
 
-  if (node_type.type & ContextNodeType::VIDEO) {
-    if (node_type.type & ContextNodeType::LINK)
-      AppendSeparator();
-    AppendVideoItems(media_params);
+  switch (params_.media_type) {
+    case WebContextMenuData::MediaTypeNone:
+      break;
+    case WebContextMenuData::MediaTypeImage:
+      AppendImageItems();
+      break;
+    case WebContextMenuData::MediaTypeVideo:
+      AppendVideoItems();
+      break;
+    case WebContextMenuData::MediaTypeAudio:
+      AppendAudioItems();
+      break;
   }
 
-  if (node_type.type & ContextNodeType::AUDIO) {
-    if (node_type.type & ContextNodeType::LINK)
-      AppendSeparator();
-    AppendAudioItems(media_params);
-  }
-
-  if (node_type.type & ContextNodeType::EDITABLE)
+  if (params_.is_editable)
     AppendEditableItems();
-  else if (node_type.type & ContextNodeType::SELECTION ||
-           node_type.type & ContextNodeType::LINK)
+  else if (has_selection || has_link)
     AppendCopyItem();
 
-  if (node_type.type & ContextNodeType::SELECTION)
+  if (has_selection)
     AppendSearchProvider();
-  AppendSeparator();
+
   AppendDeveloperItems();
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
-  AppendMenuItem(IDS_CONTENT_CONTEXT_INSPECTELEMENT);
+  if (g_browser_process->have_inspector_files()) {
+    AppendSeparator();
+    AppendMenuItem(IDS_CONTENT_CONTEXT_INSPECTELEMENT);
+  }
 }
 
 void RenderViewContextMenu::AppendLinkItems() {
@@ -113,33 +151,31 @@ void RenderViewContextMenu::AppendImageItems() {
   AppendMenuItem(IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
 }
 
-void RenderViewContextMenu::AppendAudioItems(
-    ContextMenuMediaParams media_params) {
-  AppendMediaItems(media_params);
+void RenderViewContextMenu::AppendAudioItems() {
+  AppendMediaItems();
   AppendSeparator();
   AppendMenuItem(IDS_CONTENT_CONTEXT_SAVEAUDIOAS);
   AppendMenuItem(IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION);
   AppendMenuItem(IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB);
 }
 
-void RenderViewContextMenu::AppendVideoItems(
-    ContextMenuMediaParams media_params) {
-  AppendMediaItems(media_params);
+void RenderViewContextMenu::AppendVideoItems() {
+  AppendMediaItems();
   AppendSeparator();
   AppendMenuItem(IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
   AppendMenuItem(IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION);
   AppendMenuItem(IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB);
 }
 
-void RenderViewContextMenu::AppendMediaItems(
-    ContextMenuMediaParams media_params) {
-  if (media_params.player_state & ContextMenuMediaParams::PAUSED) {
+void RenderViewContextMenu::AppendMediaItems() {
+  int media_flags = params_.media_flags;
+  if (media_flags & WebContextMenuData::MediaPaused) {
     AppendMenuItem(IDS_CONTENT_CONTEXT_PLAY);
   } else {
     AppendMenuItem(IDS_CONTENT_CONTEXT_PAUSE);
   }
 
-  if (media_params.player_state & ContextMenuMediaParams::MUTED) {
+  if (media_flags & WebContextMenuData::MediaMuted) {
     AppendMenuItem(IDS_CONTENT_CONTEXT_UNMUTE);
   } else {
     AppendMenuItem(IDS_CONTENT_CONTEXT_MUTE);
@@ -170,8 +206,8 @@ void RenderViewContextMenu::AppendFrameItems() {
   AppendSeparator();
   // These two menu items have yet to be implemented.
   // http://code.google.com/p/chromium/issues/detail?id=11827
-  //AppendMenuItem(IDS_CONTENT_CONTEXT_SAVEFRAMEAS);
-  //AppendMenuItem(IDS_CONTENT_CONTEXT_PRINTFRAME);
+  // AppendMenuItem(IDS_CONTENT_CONTEXT_SAVEFRAMEAS);
+  // AppendMenuItem(IDS_CONTENT_CONTEXT_PRINTFRAME);
   AppendMenuItem(IDS_CONTENT_CONTEXT_VIEWFRAMESOURCE);
   AppendMenuItem(IDS_CONTENT_CONTEXT_VIEWFRAMEINFO);
 }
@@ -185,13 +221,13 @@ void RenderViewContextMenu::AppendSearchProvider() {
   const TemplateURL* const default_provider =
       profile_->GetTemplateURLModel()->GetDefaultSearchProvider();
   if (default_provider != NULL) {
-    std::wstring selection_text =
-        l10n_util::TruncateString(params_.selection_text, 50);
+    string16 selection_text = EscapeAmpersands(WideToUTF16(
+        l10n_util::TruncateString(params_.selection_text, 50)));
     if (!selection_text.empty()) {
-      string16 label(WideToUTF16(
-          l10n_util::GetStringF(IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
-                                default_provider->short_name(),
-                                selection_text)));
+      string16 label(l10n_util::GetStringFUTF16(
+          IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
+          WideToUTF16(default_provider->short_name()),
+          selection_text));
       AppendMenuItem(IDS_CONTENT_CONTEXT_SEARCHWEBFOR, label);
     }
   }
@@ -203,7 +239,7 @@ void RenderViewContextMenu::AppendEditableItems() {
        IDC_SPELLCHECK_SUGGESTION_0 + i <= IDC_SPELLCHECK_SUGGESTION_LAST;
        ++i) {
     AppendMenuItem(IDC_SPELLCHECK_SUGGESTION_0 + static_cast<int>(i),
-                   WideToUTF16(params_.dictionary_suggestions[i]));
+                   params_.dictionary_suggestions[i]);
   }
   if (params_.dictionary_suggestions.size() > 0)
     AppendSeparator();
@@ -255,6 +291,15 @@ void RenderViewContextMenu::AppendEditableItems() {
       l10n_util::GetStringUTF16(
           IDS_CONTENT_CONTEXT_CHECK_SPELLING_OF_THIS_FIELD));
 
+  // Add option for showing the spelling panel if the platfrom spellchecker
+  // supports it.
+  if (SpellCheckerPlatform::SpellCheckerAvailable() &&
+      SpellCheckerPlatform::SpellCheckerProvidesPanel()) {
+    AppendCheckboxMenuItem(IDC_SPELLPANEL_TOGGLE,  l10n_util::GetStringUTF16(
+              SpellCheckerPlatform::SpellingPanelVisible() ?
+              IDS_CONTENT_CONTEXT_HIDE_SPELLING_PANEL :
+              IDS_CONTENT_CONTEXT_SHOW_SPELLING_PANEL));
+  }
   FinishSubMenu();
 
   AppendSeparator();
@@ -304,13 +349,13 @@ bool RenderViewContextMenu::IsItemCommandEnabled(int id) const {
       // The images shown in the most visited thumbnails do not currently open
       // in a new tab as they should. Disabling this context menu option for
       // now, as a quick hack, before we resolve this issue (Issue = 2608).
-      // TODO (sidchat): Enable this option once this issue is resolved.
+      // TODO(sidchat): Enable this option once this issue is resolved.
       if (params_.src_url.scheme() == chrome::kChromeUIScheme)
         return false;
       return true;
 
     case IDS_CONTENT_CONTEXT_FULLSCREEN:
-      // TODO(ajwong): Enable fullsceren after we actually implement this.
+      // TODO(ajwong): Enable fullscreen after we actually implement this.
       return false;
 
     // Media control commands should all be disabled if the player is in an
@@ -318,15 +363,16 @@ bool RenderViewContextMenu::IsItemCommandEnabled(int id) const {
     case IDS_CONTENT_CONTEXT_PLAY:
     case IDS_CONTENT_CONTEXT_PAUSE:
     case IDS_CONTENT_CONTEXT_LOOP:
-      return (params_.media_params.player_state &
-              ContextMenuMediaParams::IN_ERROR) == 0;
+      return (params_.media_flags &
+              WebContextMenuData::MediaInError) == 0;
 
     // Mute and unmute should also be disabled if the player has no audio.
     case IDS_CONTENT_CONTEXT_MUTE:
     case IDS_CONTENT_CONTEXT_UNMUTE:
-      return params_.media_params.has_audio &&
-             (params_.media_params.player_state &
-              ContextMenuMediaParams::IN_ERROR) == 0;
+      return (params_.media_flags &
+              WebContextMenuData::MediaHasAudio) != 0 &&
+             (params_.media_flags &
+              WebContextMenuData::MediaInError) == 0;
 
     case IDS_CONTENT_CONTEXT_SAVESCREENSHOTAS:
       // TODO(ajwong): Enable save screenshot after we actually implement
@@ -340,8 +386,8 @@ bool RenderViewContextMenu::IsItemCommandEnabled(int id) const {
 
     case IDS_CONTENT_CONTEXT_SAVEAUDIOAS:
     case IDS_CONTENT_CONTEXT_SAVEVIDEOAS:
-      return (params_.media_params.player_state &
-              ContextMenuMediaParams::CAN_SAVE) &&
+      return (params_.media_flags &
+              WebContextMenuData::MediaCanSave) &&
              params_.src_url.is_valid() &&
              URLRequest::IsHandledURL(params_.src_url);
 
@@ -349,33 +395,42 @@ bool RenderViewContextMenu::IsItemCommandEnabled(int id) const {
     case IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB:
       return true;
 
-    case IDS_CONTENT_CONTEXT_SAVEPAGEAS:
-      return SavePackage::IsSavableURL(source_tab_contents_->GetURL());
+    case IDS_CONTENT_CONTEXT_SAVEPAGEAS: {
+      // Instead of using GetURL here, we use url() (which is the "real" url of
+      // the page) from the NavigationEntry because its reflects their origin
+      // rather than the display one (returned by GetURL) which may be
+      // different (like having "view-source:" on the front).
+      NavigationEntry* active_entry =
+          source_tab_contents_->controller().GetActiveEntry();
+      GURL savable_url = (active_entry) ? active_entry->url() :
+                                          GURL::EmptyGURL();
+      return SavePackage::IsSavableURL(savable_url);
+    }
 
     case IDS_CONTENT_CONTEXT_OPENFRAMENEWTAB:
     case IDS_CONTENT_CONTEXT_OPENFRAMENEWWINDOW:
       return params_.frame_url.is_valid();
 
     case IDS_CONTENT_CONTEXT_UNDO:
-      return !!(params_.edit_flags & ContextNodeType::CAN_UNDO);
+      return !!(params_.edit_flags & WebContextMenuData::CanUndo);
 
     case IDS_CONTENT_CONTEXT_REDO:
-      return !!(params_.edit_flags & ContextNodeType::CAN_REDO);
+      return !!(params_.edit_flags & WebContextMenuData::CanRedo);
 
     case IDS_CONTENT_CONTEXT_CUT:
-      return !!(params_.edit_flags & ContextNodeType::CAN_CUT);
+      return !!(params_.edit_flags & WebContextMenuData::CanCut);
 
     case IDS_CONTENT_CONTEXT_COPY:
-      return !!(params_.edit_flags & ContextNodeType::CAN_COPY);
+      return !!(params_.edit_flags & WebContextMenuData::CanCopy);
 
     case IDS_CONTENT_CONTEXT_PASTE:
-      return !!(params_.edit_flags & ContextNodeType::CAN_PASTE);
+      return !!(params_.edit_flags & WebContextMenuData::CanPaste);
 
     case IDS_CONTENT_CONTEXT_DELETE:
-      return !!(params_.edit_flags & ContextNodeType::CAN_DELETE);
+      return !!(params_.edit_flags & WebContextMenuData::CanDelete);
 
     case IDS_CONTENT_CONTEXT_SELECTALL:
-      return !!(params_.edit_flags & ContextNodeType::CAN_SELECT_ALL);
+      return !!(params_.edit_flags & WebContextMenuData::CanSelectAll);
 
     case IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
       return !profile_->IsOffTheRecord() && params_.link_url.is_valid();
@@ -414,8 +469,8 @@ bool RenderViewContextMenu::IsItemCommandEnabled(int id) const {
 bool RenderViewContextMenu::ItemIsChecked(int id) const {
   // See if the video is set to looping.
   if (id == IDS_CONTENT_CONTEXT_LOOP) {
-    return (params_.media_params.player_state &
-            ContextMenuMediaParams::LOOP) != 0;
+    return (params_.media_flags &
+            WebContextMenuData::MediaLoop) != 0;
   }
 
   // Check box for 'Check the Spelling of this field'.
@@ -502,43 +557,38 @@ void RenderViewContextMenu::ExecuteItemCommand(int id) {
 
     case IDS_CONTENT_CONTEXT_PLAY:
       UserMetrics::RecordAction(L"MediaContextMenu_Play", profile_);
-      MediaPlayerActionAt(params_.x,
-                          params_.y,
-                          MediaPlayerAction(MediaPlayerAction::PLAY));
+      MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                          WebMediaPlayerAction(
+                              WebMediaPlayerAction::Play, true));
       break;
 
     case IDS_CONTENT_CONTEXT_PAUSE:
       UserMetrics::RecordAction(L"MediaContextMenu_Pause", profile_);
-      MediaPlayerActionAt(params_.x,
-                          params_.y,
-                          MediaPlayerAction(MediaPlayerAction::PAUSE));
+      MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                          WebMediaPlayerAction(
+                              WebMediaPlayerAction::Play, false));
       break;
 
     case IDS_CONTENT_CONTEXT_MUTE:
       UserMetrics::RecordAction(L"MediaContextMenu_Mute", profile_);
-      MediaPlayerActionAt(params_.x,
-                        params_.y,
-                        MediaPlayerAction(MediaPlayerAction::MUTE));
+      MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                          WebMediaPlayerAction(
+                              WebMediaPlayerAction::Mute, true));
       break;
 
     case IDS_CONTENT_CONTEXT_UNMUTE:
       UserMetrics::RecordAction(L"MediaContextMenu_Unmute", profile_);
-      MediaPlayerActionAt(params_.x,
-                          params_.y,
-                          MediaPlayerAction(MediaPlayerAction::UNMUTE));
+      MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                          WebMediaPlayerAction(
+                              WebMediaPlayerAction::Mute, false));
       break;
 
     case IDS_CONTENT_CONTEXT_LOOP:
       UserMetrics::RecordAction(L"MediaContextMenu_Loop", profile_);
-      if (ItemIsChecked(IDS_CONTENT_CONTEXT_LOOP)) {
-        MediaPlayerActionAt(params_.x,
-                            params_.y,
-                            MediaPlayerAction(MediaPlayerAction::NO_LOOP));
-      } else {
-        MediaPlayerActionAt(params_.x,
-                            params_.y,
-                            MediaPlayerAction(MediaPlayerAction::LOOP));
-      }
+      MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                          WebMediaPlayerAction(
+                              WebMediaPlayerAction::Loop,
+                              !ItemIsChecked(IDS_CONTENT_CONTEXT_LOOP)));
       break;
 
     case IDS_CONTENT_CONTEXT_BACK:
@@ -688,6 +738,10 @@ void RenderViewContextMenu::ExecuteItemCommand(int id) {
           LANGUAGES_PAGE, profile_);
       break;
 
+    case IDC_SPELLPANEL_TOGGLE:
+      source_tab_contents_->render_view_host()->ToggleSpellPanel(
+          SpellCheckerPlatform::SpellingPanelVisible());
+      break;
     case IDS_CONTENT_CONTEXT_ADDSEARCHENGINE:  // Not implemented.
     default:
       break;
@@ -724,8 +778,8 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
   // Don't inspect about:network, about:memory, etc.
   // However, we do want to inspect about:blank, which is often
   // used by ordinary web pages.
-  if (active_entry->display_url().SchemeIs(chrome::kAboutScheme) &&
-      !LowerCaseEqualsASCII(active_entry->display_url().path(), "blank"))
+  if (active_entry->virtual_url().SchemeIs(chrome::kAboutScheme) &&
+      !LowerCaseEqualsASCII(active_entry->virtual_url().path(), "blank"))
     return false;
 
   // Don't enable the web inspector if JavaScript is disabled
@@ -756,33 +810,16 @@ void RenderViewContextMenu::Inspect(int x, int y) {
       source_tab_contents_->render_view_host(), x, y);
 }
 
-void RenderViewContextMenu::WriteTextToClipboard(const string16& text) {
-  Clipboard* clipboard = g_browser_process->clipboard();
-
-  if (!clipboard)
-    return;
-
-  ScopedClipboardWriter scw(clipboard);
-  scw.WriteText(text);
-}
-
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
-  std::string utf8_text = url.SchemeIs(chrome::kMailToScheme) ? url.path() :
-      // Unescaping path and query is not a good idea because other
-      // applications may not enocode non-ASCII characters in UTF-8.
-      // So the 4th parameter of net::FormatUrl() should be false.
-      // See crbug.com/2820.
-      WideToUTF8(net::FormatUrl(
-                 url, profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
-                 false, UnescapeRule::NONE, NULL, NULL));
-
-  WriteTextToClipboard(UTF8ToUTF16(utf8_text));
-  DidWriteURLToClipboard(utf8_text);
+  chrome_browser_net::WriteURLToClipboard(
+      url,
+      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
+      g_browser_process->clipboard());
 }
 
 void RenderViewContextMenu::MediaPlayerActionAt(
-    int x,
-    int y,
-    const MediaPlayerAction& action) {
-  source_tab_contents_->render_view_host()->MediaPlayerActionAt(x, y, action);
+    const gfx::Point& location,
+    const WebMediaPlayerAction& action) {
+  source_tab_contents_->render_view_host()->MediaPlayerActionAt(
+      location, action);
 }

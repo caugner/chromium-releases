@@ -10,8 +10,9 @@
 #include <gtk/gtk.h>
 #endif
 
-#include "app/resource_bundle.h"
 #include "app/os_exchange_data.h"
+#include "app/resource_bundle.h"
+#include "app/theme_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser.h"
@@ -19,7 +20,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/view_ids.h"
 #include "grit/theme_resources.h"
-#include "views/widget/widget.h"
+#include "views/window/window.h"
 
 BookmarkMenuButton::BookmarkMenuButton(Browser* browser)
     : views::MenuButton(NULL, std::wstring(), NULL, false),
@@ -29,15 +30,31 @@ BookmarkMenuButton::BookmarkMenuButton(Browser* browser)
   set_menu_delegate(this);
   SetID(VIEW_ID_BOOKMARK_MENU);
 
-  ResourceBundle &rb = ResourceBundle::GetSharedInstance();
-  // TODO (sky): if we keep this code, we need real icons, a11y support, and a
+  ThemeProvider* tp = browser_->profile()->GetThemeProvider();
+  // TODO(sky): if we keep this code, we need real icons, a11y support, and a
   // tooltip.
-  SetIcon(*rb.GetBitmapNamed(IDR_MENU_BOOKMARK));
+  SetIcon(*tp->GetBitmapNamed(IDR_MENU_BOOKMARK));
 }
 
 BookmarkMenuButton::~BookmarkMenuButton() {
   if (bookmark_drop_menu_)
     bookmark_drop_menu_->set_observer(NULL);
+}
+
+bool BookmarkMenuButton::GetDropFormats(
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats) {
+  BookmarkModel* bookmark_model = GetBookmarkModel();
+  if (!bookmark_model || !bookmark_model->IsLoaded())
+    return false;
+
+  *formats = OSExchangeData::URL;
+  custom_formats->insert(BookmarkDragData::GetBookmarkCustomFormat());
+  return true;
+}
+
+bool BookmarkMenuButton::AreDropTypesRequired() {
+  return true;
 }
 
 bool BookmarkMenuButton::CanDrop(const OSExchangeData& data) {
@@ -100,14 +117,13 @@ void BookmarkMenuButton::BookmarkMenuDeleted(
 }
 
 void BookmarkMenuButton::RunMenu(views::View* source,
-                                 const gfx::Point& pt,
-                                 gfx::NativeView hwnd) {
-  RunMenu(source, pt, hwnd, false);
+                                 const gfx::Point& pt) {
+  RunMenu(source, pt, GetWindow()->GetNativeWindow(), false);
 }
 
 void BookmarkMenuButton::RunMenu(views::View* source,
                                  const gfx::Point& pt,
-                                 gfx::NativeView hwnd,
+                                 gfx::NativeWindow hwnd,
                                  bool for_drop) {
   Profile* profile = browser_->profile();
   BookmarkMenuController* menu = new BookmarkMenuController(
@@ -152,5 +168,5 @@ void BookmarkMenuButton::StopShowFolderDropMenuTimer() {
 }
 
 void BookmarkMenuButton::ShowDropMenu() {
-  RunMenu(NULL, gfx::Point(), GetWidget()->GetNativeView(), true);
+  RunMenu(NULL, gfx::Point(), GetWindow()->GetNativeWindow(), true);
 }

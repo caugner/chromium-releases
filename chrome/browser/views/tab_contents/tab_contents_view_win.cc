@@ -8,7 +8,10 @@
 
 #include "app/gfx/canvas_paint.h"
 #include "app/os_exchange_data.h"
+#include "app/os_exchange_data_provider_win.h"
+#include "base/keyboard_codes.h"
 #include "base/time.h"
+#include "base/win_util.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/browser.h"  // TODO(beng): this dependency is awful.
 #include "chrome/browser/browser_process.h"
@@ -28,24 +31,12 @@
 #include "net/base/net_util.h"
 #include "views/focus/view_storage.h"
 #include "views/widget/root_view.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/webdropdata.h"
 
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationNone;
+using WebKit::WebDragOperationsMask;
 using WebKit::WebInputEvent;
-
-namespace {
-
-// Windows callback for OnDestroy to detach the plugin windows.
-BOOL CALLBACK DetachPluginWindowsCallback(HWND window, LPARAM param) {
-  if (WebPluginDelegateImpl::IsPluginDelegateWindow(window) &&
-      !IsHungAppWindow(window)) {
-    ::ShowWindow(window, SW_HIDE);
-    SetParent(window, NULL);
-  }
-  return TRUE;
-}
-
-}  // namespace
 
 // static
 TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
@@ -82,7 +73,7 @@ void TabContentsViewWin::Unparent() {
   ::SetParent(GetNativeView(), NULL);
 }
 
-void TabContentsViewWin::CreateView() {
+void TabContentsViewWin::CreateView(const gfx::Size& initial_size) {
   set_delete_on_destroy(false);
   // Since we create these windows parented to the desktop window initially, we
   // don't want to create them initially visible.
@@ -131,8 +122,9 @@ void TabContentsViewWin::GetContainerBounds(gfx::Rect* out) const {
   GetBounds(out, false);
 }
 
-void TabContentsViewWin::StartDragging(const WebDropData& drop_data) {
-  scoped_refptr<OSExchangeData> data(new OSExchangeData);
+void TabContentsViewWin::StartDragging(const WebDropData& drop_data,
+                                       WebDragOperationsMask ops) {
+  OSExchangeData data;
 
   // TODO(tc): Generate an appropriate drag image.
 
@@ -146,14 +138,16 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data) {
     file_name = file_name.BaseName().RemoveExtension();
     if (file_name.value().empty()) {
       // Retrieve the name from the URL.
-      file_name = FilePath::FromWStringHack(
-          net::GetSuggestedFilename(drop_data.url, "", "", L""));
+      std::wstring fn = net::GetSuggestedFilename(drop_data.url, "", "", L"");
+      if ((fn.size() + drop_data.file_extension.size() + 1) > MAX_PATH)
+        fn = fn.substr(0, MAX_PATH - drop_data.file_extension.size() - 2);
+      file_name = FilePath::FromWStringHack(fn);
     }
     file_name = file_name.ReplaceExtension(drop_data.file_extension);
-    data->SetFileContents(file_name.value(), drop_data.file_contents);
+    data.SetFileContents(file_name.value(), drop_data.file_contents);
   }
   if (!drop_data.text_html.empty())
-    data->SetHtml(drop_data.text_html, drop_data.html_base_url);
+    data.SetHtml(drop_data.text_html, drop_data.html_base_url);
   if (drop_data.url.is_valid()) {
     if (drop_data.url.SchemeIs(chrome::kJavaScriptScheme)) {
       // We don't want to allow javascript URLs to be dragged to the desktop,
@@ -170,13 +164,13 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data) {
 
       // Pass in NULL as the profile so that the bookmark always adds the url
       // rather than trying to move an existing url.
-      bm_drag_data.Write(NULL, data);
+      bm_drag_data.Write(NULL, &data);
     } else {
-      data->SetURL(drop_data.url, drop_data.url_title);
+      data.SetURL(drop_data.url, drop_data.url_title);
     }
   }
   if (!drop_data.plain_text.empty())
-    data->SetString(drop_data.plain_text);
+    data.SetString(drop_data.plain_text);
 
   drag_source_ = new WebDragSource(GetNativeView(), tab_contents());
 
@@ -186,7 +180,9 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data) {
   // updates while in the system DoDragDrop loop.
   bool old_state = MessageLoop::current()->NestableTasksAllowed();
   MessageLoop::current()->SetNestableTasksAllowed(true);
-  DoDragDrop(data, drag_source_, DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
+  DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source_,
+             DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
+  // TODO(snej): Use 'ops' param instead of hardcoding dropeffects
   MessageLoop::current()->SetNestableTasksAllowed(old_state);
 
   drag_source_ = NULL;
@@ -197,28 +193,6 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data) {
 
   if (tab_contents()->render_view_host())
     tab_contents()->render_view_host()->DragSourceSystemDragEnded();
-}
-
-void TabContentsViewWin::OnContentsDestroy() {
-  // TODO(brettw) this seems like maybe it can be moved into OnDestroy and this
-  // function can be deleted? If you're adding more here, consider whether it
-  // can be moved into OnDestroy which is a Windows message handler as the
-  // window is being torn down.
-
-  // When a tab is closed all its child plugin windows are destroyed
-  // automatically. This happens before plugins get any notification that its
-  // instances are tearing down.
-  //
-  // Plugins like Quicktime assume that their windows will remain valid as long
-  // as they have plugin instances active. Quicktime crashes in this case
-  // because its windowing code cleans up an internal data structure that the
-  // handler for NPP_DestroyStream relies on.
-  //
-  // The fix is to detach plugin windows from web contents when it is going
-  // away. This will prevent the plugin windows from getting destroyed
-  // automatically. The detached plugin windows will get cleaned up in proper
-  // sequence as part of the usual cleanup when the plugin instance goes away.
-  EnumChildWindows(GetNativeView(), DetachPluginWindowsCallback, NULL);
 }
 
 void TabContentsViewWin::OnDestroy() {
@@ -356,8 +330,8 @@ void TabContentsViewWin::CancelDragAndCloseTab() {
   close_tab_after_drag_ends_ = true;
 }
 
-void TabContentsViewWin::UpdateDragCursor(bool is_drop_target) {
-  drop_target_->set_is_drop_target(is_drop_target);
+void TabContentsViewWin::UpdateDragCursor(WebDragOperation operation) {
+  drop_target_->set_is_drop_target(operation != WebDragOperationNone);
 }
 
 void TabContentsViewWin::GotFocus() {
@@ -396,7 +370,8 @@ void TabContentsViewWin::HandleKeyboardEvent(
     // We may not have a focus_manager at this point (if the tab has been
     // switched by the time this message returned).
     if (focus_manager) {
-      views::Accelerator accelerator(event.windowsKeyCode,
+      views::Accelerator accelerator(
+          win_util::WinToKeyboardCode(event.windowsKeyCode),
           (event.modifiers & WebInputEvent::ShiftKey) ==
               WebInputEvent::ShiftKey,
           (event.modifiers & WebInputEvent::ControlKey) ==

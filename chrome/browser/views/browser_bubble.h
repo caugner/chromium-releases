@@ -20,7 +20,16 @@ class BrowserBubble {
    public:
     // Called when the Browser Window that this bubble is attached to moves.
     virtual void BubbleBrowserWindowMoved(BrowserBubble* bubble) = 0;
-    virtual void BubbleBrowserWindowClosed(BrowserBubble* bubble) = 0;
+
+    // Called with the Browser Window that this bubble is attached to is
+    // about to close.
+    virtual void BubbleBrowserWindowClosing(BrowserBubble* bubble) = 0;
+
+    // Called when the bubble became active / got focus.
+    virtual void BubbleGotFocus(BrowserBubble* bubble) {}
+
+    // Called when the bubble became inactive / lost focus.
+    virtual void BubbleLostFocus(BrowserBubble* bubble) {}
   };
 
   // Note that the bubble will size itself to the preferred size of |view|.
@@ -48,11 +57,11 @@ class BrowserBubble {
   // Notifications from BrowserView.
   // With no delegate, both of these default to Hiding the bubble.
   virtual void BrowserWindowMoved();
-  virtual void BrowserWindowClosed();
+  virtual void BrowserWindowClosing();
 
   // Show or hide the bubble.
-  void Show();
-  void Hide();
+  virtual void Show(bool activate);
+  virtual void Hide();
   bool visible() const { return visible_; }
 
   // The contained view.
@@ -63,6 +72,7 @@ class BrowserBubble {
   void MoveTo(int x, int y);
   int width() { return bounds_.width(); }
   int height() { return bounds_.height(); }
+  const gfx::Rect& bounds() const { return bounds_; }
 
   // Reposition the bubble - as we are using a WS_POPUP for the bubble,
   // we have to manually position it when the browser window moves.
@@ -78,16 +88,16 @@ class BrowserBubble {
   // Move the popup to an absolute position.
   void MovePopup(int x, int y, int w, int h);
 
- private:
+  // The widget that this bubble is in.
+  views::Widget* popup_;
+
   // The frame that this bubble is attached to.
   views::Widget* frame_;
   gfx::NativeView frame_native_view_;
 
+ private:
   // The view that is displayed in this bubble.
   views::View* view_;
-
-  // The widget that this bubble is in.
-  scoped_ptr<views::Widget> popup_;
 
   // The bounds relative to the frame.
   gfx::Rect bounds_;

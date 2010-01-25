@@ -295,7 +295,7 @@ char  *ZipArchive::GetFileData(const string &filename, size_t *size) {
 
   result = unzOpenCurrentFilePassword(uf, NULL);
 
-  char *buffer;
+  char *buffer = NULL;
 
   if (result == UNZ_OK) {
     const int kBufferChunkSize = 32768;
@@ -863,7 +863,7 @@ bool ZipArchive::GetTempFileFromFile(const string &filename,
 
 #else
     // get just the final path component
-    int pos = filename.rfind('/');
+    string::size_type pos = filename.rfind('/');
     if (pos != string::npos) {
       // TODO : need to get "proper" temp dir for user
       // TODO : need to append GUID to filename

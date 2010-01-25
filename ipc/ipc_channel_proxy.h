@@ -14,6 +14,8 @@ class MessageLoop;
 
 namespace IPC {
 
+class SendTask;
+
 //-----------------------------------------------------------------------------
 // IPC::ChannelProxy
 //
@@ -91,7 +93,7 @@ class ChannelProxy : public Message::Sender {
                Channel::Listener* listener, MessageFilter* filter,
                MessageLoop* ipc_thread_loop);
 
-  ~ChannelProxy() {
+  virtual ~ChannelProxy() {
     Close();
   }
 
@@ -117,6 +119,9 @@ class ChannelProxy : public Message::Sender {
   void AddFilter(MessageFilter* filter);
   void RemoveFilter(MessageFilter* filter);
 
+  // Called to clear the pointer to the IPC message loop when it's going away.
+  void ClearIPCMessageLoop();
+
 #if defined(OS_POSIX)
   // Calls through to the underlying channel's methods.
   // TODO(playmobil): For now this is only implemented in the case of
@@ -140,6 +145,7 @@ class ChannelProxy : public Message::Sender {
     Context(Channel::Listener* listener, MessageFilter* filter,
             MessageLoop* ipc_thread);
     virtual ~Context() { }
+    void ClearIPCMessageLoop() { ipc_message_loop_ = NULL; }
     MessageLoop* ipc_message_loop() const { return ipc_message_loop_; }
     const std::string& channel_id() const { return channel_id_; }
 
@@ -170,6 +176,7 @@ class ChannelProxy : public Message::Sender {
 
    private:
     friend class ChannelProxy;
+    friend class SendTask;
     // Create the Channel
     void CreateChannel(const std::string& id, const Channel::Mode& mode);
 
@@ -195,6 +202,8 @@ class ChannelProxy : public Message::Sender {
   Context* context() { return context_; }
 
  private:
+  friend class SendTask;
+
   void Init(const std::string& channel_id, Channel::Mode mode,
             MessageLoop* ipc_thread_loop, bool create_pipe_now);
 

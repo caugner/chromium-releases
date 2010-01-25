@@ -71,30 +71,61 @@ int TabProxy::FindInPage(const std::wstring& search_string,
 
 AutomationMsg_NavigationResponseValues TabProxy::NavigateToURL(
     const GURL& url) {
-  return NavigateToURLWithTimeout(url, base::kNoTimeout, NULL);
+  return NavigateToURLBlockUntilNavigationsComplete(url, 1);
+}
+
+AutomationMsg_NavigationResponseValues
+    TabProxy::NavigateToURLBlockUntilNavigationsComplete(
+        const GURL& url, int number_of_navigations) {
+  return NavigateToURLWithTimeout(url, number_of_navigations, base::kNoTimeout,
+                                  NULL);
 }
 
 AutomationMsg_NavigationResponseValues TabProxy::NavigateToURLWithTimeout(
-    const GURL& url, uint32 timeout_ms, bool* is_timeout) {
+    const GURL& url, int number_of_navigations, uint32 timeout_ms,
+    bool* is_timeout) {
   if (!is_valid())
     return AUTOMATION_MSG_NAVIGATION_ERROR;
 
   AutomationMsg_NavigationResponseValues navigate_response =
       AUTOMATION_MSG_NAVIGATION_ERROR;
 
-  sender_->SendWithTimeout(new AutomationMsg_NavigateToURL(
-      0, handle_, url, &navigate_response), timeout_ms, is_timeout);
+  if (number_of_navigations == 1) {
+    // TODO(phajdan.jr): Remove when the reference build gets updated.
+    // This is only for backwards compatibility.
+    sender_->SendWithTimeout(
+        new AutomationMsg_NavigateToURL(
+            0, handle_, url, &navigate_response),
+            timeout_ms, is_timeout);
+  } else {
+    sender_->SendWithTimeout(
+        new AutomationMsg_NavigateToURLBlockUntilNavigationsComplete(
+            0, handle_, url, number_of_navigations, &navigate_response),
+            timeout_ms, is_timeout);
+  }
 
   return navigate_response;
 }
 
 AutomationMsg_NavigationResponseValues TabProxy::NavigateInExternalTab(
-    const GURL& url) {
+    const GURL& url, const GURL& referrer) {
   if (!is_valid())
     return AUTOMATION_MSG_NAVIGATION_ERROR;
 
   AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_NavigateInExternalTab(0, handle_, url, &rv));
+  sender_->Send(new AutomationMsg_NavigateInExternalTab(0, handle_, url,
+                                                        referrer, &rv));
+  return rv;
+}
+
+AutomationMsg_NavigationResponseValues TabProxy::NavigateExternalTabAtIndex(
+    int index) {
+  if (!is_valid())
+    return AUTOMATION_MSG_NAVIGATION_ERROR;
+
+  AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
+  sender_->Send(new AutomationMsg_NavigateExternalTabAtIndex(0, handle_, index,
+                                                             &rv));
   return rv;
 }
 
@@ -103,19 +134,21 @@ bool TabProxy::SetAuth(const std::wstring& username,
   if (!is_valid())
     return false;
 
-  int navigate_response = -1;
+  AutomationMsg_NavigationResponseValues navigate_response =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_SetAuth(0, handle_, username, password,
                                           &navigate_response));
-  return navigate_response >= 0;
+  return navigate_response == AUTOMATION_MSG_NAVIGATION_SUCCESS;
 }
 
 bool TabProxy::CancelAuth() {
   if (!is_valid())
     return false;
 
-  int navigate_response = -1;
+  AutomationMsg_NavigationResponseValues navigate_response =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_CancelAuth(0, handle_, &navigate_response));
-  return navigate_response >= 0;
+  return navigate_response == AUTOMATION_MSG_NAVIGATION_SUCCESS;
 }
 
 bool TabProxy::NeedsAuth() const {
@@ -128,22 +161,35 @@ bool TabProxy::NeedsAuth() const {
 }
 
 AutomationMsg_NavigationResponseValues TabProxy::GoBack() {
+  return GoBackBlockUntilNavigationsComplete(1);
+}
+
+AutomationMsg_NavigationResponseValues
+    TabProxy::GoBackBlockUntilNavigationsComplete(int number_of_navigations) {
   if (!is_valid())
     return AUTOMATION_MSG_NAVIGATION_ERROR;
 
   AutomationMsg_NavigationResponseValues navigate_response =
       AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_GoBack(0, handle_, &navigate_response));
+  sender_->Send(new AutomationMsg_GoBackBlockUntilNavigationsComplete(
+      0, handle_, number_of_navigations, &navigate_response));
   return navigate_response;
 }
 
 AutomationMsg_NavigationResponseValues TabProxy::GoForward() {
+  return GoForwardBlockUntilNavigationsComplete(1);
+}
+
+AutomationMsg_NavigationResponseValues
+    TabProxy::GoForwardBlockUntilNavigationsComplete(
+        int number_of_navigations) {
   if (!is_valid())
     return AUTOMATION_MSG_NAVIGATION_ERROR;
 
   AutomationMsg_NavigationResponseValues navigate_response =
       AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_GoForward(0, handle_, &navigate_response));
+  sender_->Send(new AutomationMsg_GoForwardBlockUntilNavigationsComplete(
+      0, handle_, number_of_navigations, &navigate_response));
   return navigate_response;
 }
 
@@ -406,7 +452,7 @@ int TabProxy::InspectElement(int x, int y) {
   return ret;
 }
 
-bool TabProxy::GetDownloadDirectory(std::wstring* directory) {
+bool TabProxy::GetDownloadDirectory(FilePath* directory) {
   DCHECK(directory);
   if (!is_valid())
     return false;
@@ -420,10 +466,11 @@ bool TabProxy::ShowInterstitialPage(const std::string& html_text,
   if (!is_valid())
     return false;
 
-  bool succeeded = false;
+  AutomationMsg_NavigationResponseValues result =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->SendWithTimeout(new AutomationMsg_ShowInterstitialPage(
-      0, handle_, html_text, &succeeded), timeout_ms, NULL);
-  return succeeded;
+      0, handle_, html_text, &result), timeout_ms, NULL);
+  return result == AUTOMATION_MSG_NAVIGATION_SUCCESS;
 }
 
 bool TabProxy::HideInterstitialPage() {
@@ -506,10 +553,12 @@ bool TabProxy::TakeActionOnSSLBlockingPage(bool proceed) {
   if (!is_valid())
     return false;
 
-  bool success = false;
+  AutomationMsg_NavigationResponseValues result =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_ActionOnSSLBlockingPage(0, handle_, proceed,
-                                                          &success));
-  return success;
+                                                          &result));
+  return result == AUTOMATION_MSG_NAVIGATION_SUCCESS ||
+      result == AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED;
 }
 
 bool TabProxy::PrintNow() {
@@ -528,8 +577,8 @@ bool TabProxy::PrintAsync() {
   return sender_->Send(new AutomationMsg_PrintAsync(0, handle_));
 }
 
-bool TabProxy::SavePage(const std::wstring& file_name,
-                        const std::wstring& dir_path,
+bool TabProxy::SavePage(const FilePath& file_name,
+                        const FilePath& dir_path,
                         SavePackage::SavePackageType type) {
   if (!is_valid())
     return false;
@@ -566,10 +615,12 @@ bool TabProxy::ClickSSLInfoBarLink(int info_bar_index,
   if (!is_valid())
     return false;
 
-  bool success = false;
+  AutomationMsg_NavigationResponseValues result =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_ClickSSLInfoBarLink(
-      0, handle_, info_bar_index, wait_for_navigation, &success));
-  return success;
+      0, handle_, info_bar_index, wait_for_navigation, &result));
+  return result == AUTOMATION_MSG_NAVIGATION_SUCCESS ||
+      result == AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED;
 }
 
 bool TabProxy::GetLastNavigationTime(int64* nav_time) {
@@ -586,14 +637,16 @@ bool TabProxy::WaitForNavigation(int64 last_navigation_time) {
   if (!is_valid())
     return false;
 
-  bool success = false;
+  AutomationMsg_NavigationResponseValues result =
+      AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_WaitForNavigation(0, handle_,
                                                     last_navigation_time,
-                                                    &success));
-  return success;
+                                                    &result));
+  return result == AUTOMATION_MSG_NAVIGATION_SUCCESS ||
+      result == AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED;
 }
 
-bool TabProxy::GetPageCurrentEncoding(std::wstring* encoding) {
+bool TabProxy::GetPageCurrentEncoding(std::string* encoding) {
   if (!is_valid())
     return false;
 
@@ -602,7 +655,7 @@ bool TabProxy::GetPageCurrentEncoding(std::wstring* encoding) {
   return succeeded;
 }
 
-bool TabProxy::OverrideEncoding(const std::wstring& encoding) {
+bool TabProxy::OverrideEncoding(const std::string& encoding) {
   if (!is_valid())
     return false;
 
@@ -634,8 +687,31 @@ void TabProxy::SendContextMenuCommand(int selected_command) {
   sender_->Send(new AutomationMsg_ForwardContextMenuCommandToChrome(
       0, handle_, selected_command));
 }
-
 #endif  // defined(OS_WIN)
+
+void TabProxy::SelectAll() {
+  sender_->Send(new AutomationMsg_SelectAll(0, handle_));
+}
+
+void TabProxy::Cut() {
+  sender_->Send(new AutomationMsg_Cut(0, handle_));
+}
+
+void TabProxy::Copy() {
+  sender_->Send(new AutomationMsg_Copy(0, handle_));
+}
+
+void TabProxy::Paste() {
+  sender_->Send(new AutomationMsg_Paste(0, handle_));
+}
+
+void TabProxy::ReloadAsync() {
+  sender_->Send(new AutomationMsg_ReloadAsync(0, handle_));
+}
+
+void TabProxy::StopAsync() {
+  sender_->Send(new AutomationMsg_StopAsync(0, handle_));
+}
 
 void TabProxy::AddObserver(TabProxyDelegate* observer) {
   AutoLock lock(list_lock_);
