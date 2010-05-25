@@ -9,13 +9,13 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
+#include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/ssl/ssl_manager.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/filter_policy.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/resource_type.h"
 
-class MessageLoop;
+class ResourceDispatcherHost;
 class SSLCertErrorHandler;
 class TabContents;
 class URLRequest;
@@ -36,8 +36,6 @@ class URLRequest;
 //
 class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
  public:
-  virtual ~SSLErrorHandler() { }
-
   virtual SSLCertErrorHandler* AsSSLCertErrorHandler() { return NULL; }
 
   // Find the appropriate SSLManager for the URLRequest and begin handling
@@ -94,13 +92,16 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
   void TakeNoAction();
 
  protected:
+  friend class base::RefCountedThreadSafe<SSLErrorHandler>;
+
   // Construct on the IO thread.
   SSLErrorHandler(ResourceDispatcherHost* resource_dispatcher_host,
                   URLRequest* request,
                   ResourceType::Type resource_type,
                   const std::string& frame_origin,
-                  const std::string& main_frame_origin,
-                  MessageLoop* ui_loop);
+                  const std::string& main_frame_origin);
+
+  virtual ~SSLErrorHandler() { }
 
   // The following 2 methods are the methods subclasses should implement.
   virtual void OnDispatchFailed() { TakeNoAction(); }
@@ -108,17 +109,12 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
   // Can use the manager_ member.
   virtual void OnDispatched() { TakeNoAction(); }
 
-  // We cache the message loops to be able to proxy events across the thread
-  // boundaries.
-  MessageLoop* ui_loop_;
-  MessageLoop* io_loop_;
-
   // Should only be accessed on the UI thread.
   SSLManager* manager_;  // Our manager.
 
   // The id of the URLRequest associated with this object.
   // Should only be accessed from the IO thread.
-  ResourceDispatcherHost::GlobalRequestID request_id_;
+  GlobalRequestID request_id_;
 
   // The ResourceDispatcherHost we are associated with.
   ResourceDispatcherHost* resource_dispatcher_host_;

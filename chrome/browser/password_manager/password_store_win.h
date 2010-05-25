@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN
-#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN
+#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN_H_
+#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN_H_
 
 #include <map>
 #include <vector>
@@ -21,7 +21,6 @@ class PasswordStoreWin : public PasswordStoreDefault {
  public:
   // FilePath specifies path to WebDatabase.
   explicit PasswordStoreWin(WebDataService* web_data_service);
-  virtual ~PasswordStoreWin() {}
 
   // Overridden so that we can save the form for later use.
   virtual int GetLogins(const webkit_glue::PasswordForm& form,
@@ -29,6 +28,8 @@ class PasswordStoreWin : public PasswordStoreDefault {
   virtual void CancelLoginsQuery(int handle);
 
  private:
+  virtual ~PasswordStoreWin() {}
+
   // See PasswordStoreDefault.
   void OnWebDataServiceRequestDone(WebDataService::Handle h,
                                    const WDTypedResult* result);
@@ -54,4 +55,4 @@ class PasswordStoreWin : public PasswordStoreDefault {
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreWin);
 };
 
-#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN
+#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_WIN_H_

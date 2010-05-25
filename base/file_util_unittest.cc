@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -145,6 +145,8 @@ const struct append_case {
 #endif
 };
 
+#if defined(OS_WIN)
+// This function is deprecated, but still used on Windows.
 TEST_F(FileUtilTest, AppendToPath) {
   for (unsigned int i = 0; i < arraysize(append_cases); ++i) {
     const append_case& value = append_cases[i];
@@ -157,6 +159,8 @@ TEST_F(FileUtilTest, AppendToPath) {
   file_util::AppendToPath(NULL, L"path");  // asserts in debug mode
 #endif
 }
+#endif  // defined(OS_WIN)
+
 
 static const struct InsertBeforeExtensionCase {
   const FilePath::CharType* path;
@@ -311,6 +315,8 @@ static const struct dir_case {
 #endif
 };
 
+#if defined(OS_WIN)
+// This function is deprecated, and only exists on Windows anymore.
 TEST_F(FileUtilTest, GetDirectoryFromPath) {
   for (unsigned int i = 0; i < arraysize(dir_cases); ++i) {
     const dir_case& dir = dir_cases[i];
@@ -319,6 +325,7 @@ TEST_F(FileUtilTest, GetDirectoryFromPath) {
     EXPECT_EQ(dir.directory, parent);
   }
 }
+#endif
 
 TEST_F(FileUtilTest, CountFilesCreatedAfter) {
   // Create old file (that we don't want to count)
@@ -348,6 +355,34 @@ TEST_F(FileUtilTest, CountFilesCreatedAfter) {
   // Delete new file, we should see no files after cutoff now
   EXPECT_TRUE(file_util::Delete(new_file_name, false));
   EXPECT_EQ(0, file_util::CountFilesCreatedAfter(test_dir_, now));
+}
+
+TEST_F(FileUtilTest, FileAndDirectorySize) {
+  // Create three files of 20, 30 and 3 chars (utf8). ComputeDirectorySize
+  // should return 53 bytes.
+  FilePath file_01 = test_dir_.Append(FPL("The file 01.txt"));
+  CreateTextFile(file_01, L"12345678901234567890");
+  int64 size_f1 = 0;
+  ASSERT_TRUE(file_util::GetFileSize(file_01, &size_f1));
+  EXPECT_EQ(20ll, size_f1);
+
+  FilePath subdir_path = test_dir_.Append(FPL("Level2"));
+  file_util::CreateDirectory(subdir_path);
+
+  FilePath file_02 = subdir_path.Append(FPL("The file 02.txt"));
+  CreateTextFile(file_02, L"123456789012345678901234567890");
+  int64 size_f2 = 0;
+  ASSERT_TRUE(file_util::GetFileSize(file_02, &size_f2));
+  EXPECT_EQ(30ll, size_f2);
+
+  FilePath subsubdir_path = subdir_path.Append(FPL("Level3"));
+  file_util::CreateDirectory(subsubdir_path);
+
+  FilePath file_03 = subsubdir_path.Append(FPL("The file 03.txt"));
+  CreateTextFile(file_03, L"123");
+
+  int64 computed_size = file_util::ComputeDirectorySize(test_dir_);
+  EXPECT_EQ(size_f1 + size_f2 + 3, computed_size);
 }
 
 // Tests that the Delete function works as expected, especially
@@ -874,7 +909,9 @@ TEST_F(ReadOnlyFileUtilTest, ContentsEqual) {
   EXPECT_TRUE(file_util::ContentsEqual(original_file, same_file));
   EXPECT_FALSE(file_util::ContentsEqual(original_file, same_length_file));
   EXPECT_FALSE(file_util::ContentsEqual(original_file, different_file));
-  EXPECT_FALSE(file_util::ContentsEqual(L"bogusname", L"bogusname"));
+  EXPECT_FALSE(file_util::ContentsEqual(
+      FilePath(FILE_PATH_LITERAL("bogusname")),
+      FilePath(FILE_PATH_LITERAL("bogusname"))));
   EXPECT_FALSE(file_util::ContentsEqual(original_file, different_first_file));
   EXPECT_FALSE(file_util::ContentsEqual(original_file, different_last_file));
   EXPECT_TRUE(file_util::ContentsEqual(empty1_file, empty2_file));
@@ -989,7 +1026,7 @@ TEST_F(FileUtilTest, CreateShortcutTest) {
   CoInitialize(NULL);
   EXPECT_TRUE(file_util::CreateShortcutLink(target_file.value().c_str(),
                                             link_file.value().c_str(),
-                                            NULL, NULL, NULL, NULL, 0));
+                                            NULL, NULL, NULL, NULL, 0, NULL));
   FilePath resolved_name = link_file;
   EXPECT_TRUE(file_util::ResolveShortcut(&resolved_name));
   std::wstring read_contents = ReadTextFile(resolved_name);
@@ -1137,6 +1174,32 @@ TEST_F(FileUtilTest, CreateDirectoryTest) {
   EXPECT_TRUE(file_util::Delete(test_root, true));
   EXPECT_FALSE(file_util::PathExists(test_root));
   EXPECT_FALSE(file_util::PathExists(test_path));
+
+  // Verify assumptions made by the Windows implementation:
+  // 1. The current directory always exists.
+  // 2. The root directory always exists.
+  ASSERT_TRUE(file_util::DirectoryExists(
+      FilePath(FilePath::kCurrentDirectory)));
+  FilePath top_level = test_root;
+  while (top_level != top_level.DirName()) {
+    top_level = top_level.DirName();
+  }
+  ASSERT_TRUE(file_util::DirectoryExists(top_level));
+
+  // Given these assumptions hold, it should be safe to
+  // test that "creating" these directories succeeds.
+  EXPECT_TRUE(file_util::CreateDirectory(
+      FilePath(FilePath::kCurrentDirectory)));
+  EXPECT_TRUE(file_util::CreateDirectory(top_level));
+
+#if defined(OS_WIN)
+  FilePath invalid_drive(FILE_PATH_LITERAL("o:\\"));
+  FilePath invalid_path =
+      invalid_drive.Append(FILE_PATH_LITERAL("some\\inaccessible\\dir"));
+  if (!file_util::PathExists(invalid_drive)) {
+    EXPECT_FALSE(file_util::CreateDirectory(invalid_path));
+  }
+#endif
 }
 
 TEST_F(FileUtilTest, DetectDirectoryTest) {
@@ -1345,20 +1408,44 @@ TEST_F(FileUtilTest, Contains) {
   EXPECT_FALSE(file_util::ContainsPath(foo, foobar));
   EXPECT_FALSE(file_util::ContainsPath(foo, foo));
 
-// Platform-specific concerns
+  // Platform-specific concerns.
   FilePath foo_caps(data_dir.Append(FILE_PATH_LITERAL("FOO")));
 #if defined(OS_WIN)
   EXPECT_TRUE(file_util::ContainsPath(foo,
       foo_caps.Append(FILE_PATH_LITERAL("bar.txt"))));
   EXPECT_TRUE(file_util::ContainsPath(foo,
       FilePath(foo.value() + FILE_PATH_LITERAL("/bar.txt"))));
-#elif defined(OS_LINUX)
+#elif defined(OS_MACOSX)
+  // We can't really do this test on OS X since the case-sensitivity of the
+  // filesystem is configurable.
+#elif defined(OS_POSIX)
   EXPECT_FALSE(file_util::ContainsPath(foo,
       foo_caps.Append(FILE_PATH_LITERAL("bar.txt"))));
-#else
-  // We can't really do this test on osx since the case-sensitivity of the
-  // filesystem is configurable.
 #endif
+}
+
+TEST_F(FileUtilTest, LastModified) {
+  FilePath data_dir = test_dir_.Append(FILE_PATH_LITERAL("FilePathTest"));
+
+  // Create a fresh, empty copy of this directory.
+  if (file_util::PathExists(data_dir)) {
+    ASSERT_TRUE(file_util::Delete(data_dir, true));
+  }
+  ASSERT_TRUE(file_util::CreateDirectory(data_dir));
+
+  FilePath foobar(data_dir.Append(FILE_PATH_LITERAL("foobar.txt")));
+  std::string data("hello");
+  ASSERT_TRUE(file_util::WriteFile(foobar, data.c_str(), data.length()));
+
+  base::Time modification_time;
+  // Note that this timestamp is divisible by two (seconds) - FAT stores
+  // modification times with 2s resolution.
+  ASSERT_TRUE(base::Time::FromString(L"Tue, 15 Nov 1994, 12:45:26 GMT",
+              &modification_time));
+  ASSERT_TRUE(file_util::SetLastModifiedTime(foobar, modification_time));
+  file_util::FileInfo file_info;
+  ASSERT_TRUE(file_util::GetFileInfo(foobar, &file_info));
+  ASSERT_TRUE(file_info.last_modified == modification_time);
 }
 
 }  // namespace

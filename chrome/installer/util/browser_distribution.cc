@@ -9,20 +9,43 @@
 
 #include "chrome/installer/util/browser_distribution.h"
 
+#include "base/command_line.h"
+#include "base/lock.h"
 #include "base/registry.h"
-#include "chrome/installer/util/google_chrome_distribution.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
+#include "chrome/installer/util/google_chrome_distribution.h"
+#include "chrome/installer/util/google_chrome_sxs_distribution.h"
+#include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/l10n_string_util.h"
+
+#include "installer_util_strings.h"
 
 BrowserDistribution* BrowserDistribution::GetDistribution() {
+  return GetDistribution(InstallUtil::IsChromeFrameProcess());
+}
+
+BrowserDistribution* BrowserDistribution::GetDistribution(bool chrome_frame) {
   static BrowserDistribution* dist = NULL;
+  static Lock dist_lock;
+  AutoLock lock(dist_lock);
   if (dist == NULL) {
-#if defined(CHROME_FRAME_BUILD)
-    dist = new ChromeFrameDistribution();
-#elif defined(GOOGLE_CHROME_BUILD)
-    dist = new GoogleChromeDistribution();
+    if (chrome_frame) {
+      // TODO(robertshield): Make one of these for Google Chrome vs
+      // non Google Chrome builds?
+      dist = new ChromeFrameDistribution();
+    } else {
+#if defined(GOOGLE_CHROME_BUILD)
+      if (InstallUtil::IsChromeSxSProcess()) {
+        dist = new GoogleChromeSxSDistribution();
+      } else {
+        dist = new GoogleChromeDistribution();
+      }
 #else
-    dist = new BrowserDistribution();
+      dist = new BrowserDistribution();
 #endif
+    }
   }
   return dist;
 }
@@ -32,8 +55,16 @@ void BrowserDistribution::DoPostUninstallOperations(
     const std::wstring& distribution_data) {
 }
 
+std::wstring BrowserDistribution::GetAppGuid() {
+  return L"";
+}
+
 std::wstring BrowserDistribution::GetApplicationName() {
   return L"Chromium";
+}
+
+std::wstring BrowserDistribution::GetAppShortCutName() {
+  return GetApplicationName();
 }
 
 std::wstring BrowserDistribution::GetAlternateApplicationName() {
@@ -52,9 +83,27 @@ std::wstring BrowserDistribution::GetAppDescription() {
   return L"Browse the web";
 }
 
+std::wstring BrowserDistribution::GetLongAppDescription() {
+  const std::wstring& app_description =
+      installer_util::GetLocalizedString(IDS_PRODUCT_DESCRIPTION_BASE);
+  return app_description;
+}
+
 int BrowserDistribution::GetInstallReturnCode(
-    installer_util::InstallStatus install_status) {
-  return install_status;
+    installer_util::InstallStatus status) {
+  switch (status) {
+    case installer_util::FIRST_INSTALL_SUCCESS:
+    case installer_util::INSTALL_REPAIRED:
+    case installer_util::NEW_VERSION_UPDATED:
+    case installer_util::IN_USE_UPDATED:
+      return 0;
+    default:
+      return status;
+  }
+}
+
+std::string BrowserDistribution::GetSafeBrowsingName() {
+  return "chromium";
 }
 
 std::wstring BrowserDistribution::GetStateKey() {
@@ -85,6 +134,10 @@ std::wstring BrowserDistribution::GetVersionKey() {
   return L"Software\\Chromium";
 }
 
+bool BrowserDistribution::CanSetAsDefault() {
+  return true;
+}
+
 void BrowserDistribution::UpdateDiffInstallStatus(bool system_install,
     bool incremental_install, installer_util::InstallStatus install_status) {
 }
@@ -95,5 +148,6 @@ void BrowserDistribution::LaunchUserExperiment(
 }
 
 
-void BrowserDistribution::InactiveUserToastExperiment(int flavor) {
+void BrowserDistribution::InactiveUserToastExperiment(int flavor,
+                                                      bool system_install) {
 }

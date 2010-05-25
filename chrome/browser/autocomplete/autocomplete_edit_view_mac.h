@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,26 +7,15 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/basictypes.h"
-#include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
-#include "chrome/browser/toolbar_model.h"
 #include "chrome/browser/cocoa/autocomplete_text_field.h"
-#include "chrome/common/page_transition_types.h"
-#include "grit/generated_resources.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditController;
-class AutocompleteEditModel;
-@class AutocompleteFieldDelegate;
 class AutocompletePopupViewMac;
 class BubblePositioner;
 class Clipboard;
-class CommandUpdater;
 class Profile;
-class TabContents;
 class ToolbarModel;
 
 // Implements AutocompleteEditView on an AutocompleteTextField.
@@ -69,12 +58,9 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   virtual void SetWindowTextAndCaretPos(const std::wstring& text,
                                         size_t caret_pos);
 
-  virtual void SetForcedQuery() { NOTIMPLEMENTED(); }
+  virtual void SetForcedQuery();
 
-  virtual bool IsSelectAll() {
-    NOTIMPLEMENTED();
-    return false;
-  }
+  virtual bool IsSelectAll();
 
   virtual void SelectAll(bool reversed);
   virtual void RevertAll();
@@ -89,61 +75,36 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
   virtual gfx::NativeView GetNativeView() const;
+  virtual CommandUpdater* GetCommandUpdater();
 
   // Implement the AutocompleteTextFieldObserver interface.
   virtual void OnControlKeyChanged(bool pressed);
+  virtual void OnCopy();
   virtual void OnPaste();
   virtual bool CanPasteAndGo();
   virtual int GetPasteActionStringId();
   virtual void OnPasteAndGo();
-  virtual void OnSecurityIconClicked();
   virtual void OnFrameChanged();
+  virtual void OnDidResignKey();  // Closes the popup.
+  virtual void OnDidBeginEditing();
+  virtual void OnDidChange();
+  virtual void OnDidEndEditing();
+  virtual bool OnDoCommandBySelector(SEL cmd);
 
-  // Helper functions for use from AutocompleteEditHelper Objective-C
-  // class.
-
-  // Returns true if |popup_view_| is open.
-  bool IsPopupOpen() const;
-
-  // Trivial wrappers forwarding to |model_| methods.
-  void OnEscapeKeyPressed();
-  void OnUpOrDownKeyPressed(bool up, bool by_page);
-
-  // Called when editing begins in the field, and before the results
-  // of any editing are communicated to |model_|.
-  void OnWillBeginEditing();
-
-  // Called when editing ends in the field.
-  void OnDidEndEditing();
-
-  // Called when the window |field_| is in loses key to clean up
-  // visual state (such as closing the popup).
-  void OnDidResignKey();
-
-  // Checks if a keyword search is possible and forwards to |model_|
-  // if so.  Returns true if the tab should be eaten.
-  bool OnTabPressed();
-
-  // Called when the user hits backspace in |field_|.  Checks whether
-  // keyword search is being terminated.  Returns true if the
-  // backspace should be intercepted (not forwarded on to the standard
-  // machinery).
-  bool OnBackspacePressed();
-
-  // Forward to same method in |popup_view_| model.  Used when
-  // Shift-Delete is pressed, to delete items from the popup.
-  void TryDeletingCurrentItem();
-
-  void AcceptInput(WindowOpenDisposition disposition, bool for_drop);
-
-  // Helper for LocationBarViewMac.  Selects all in |field_|.
-  void FocusLocation();
+  // Helper for LocationBarViewMac.  Optionally selects all in |field_|.
+  void FocusLocation(bool select_all);
 
   // Helper to get appropriate contents from |clipboard|.  Returns
   // empty string if no appropriate data is found on |clipboard|.
   static std::wstring GetClipboardText(Clipboard* clipboard);
 
  private:
+  // Called when the user hits backspace in |field_|.  Checks whether
+  // keyword search is being terminated.  Returns true if the
+  // backspace should be intercepted (not forwarded on to the standard
+  // machinery).
+  bool OnBackspacePressed();
+
   // Returns the field's currently selected range.  Only valid if the
   // field has focus.
   NSRange GetSelectedRange() const;
@@ -170,6 +131,11 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   // though here we cannot really do the in-place operation they do.
   void EmphasizeURLComponents();
 
+  // Calculates text attributes according to |display_text| and applies them
+  // to the given |as| object.
+  void ApplyTextAttributes(const std::wstring& display_text,
+                           NSMutableAttributedString* as);
+
   scoped_ptr<AutocompleteEditModel> model_;
   scoped_ptr<AutocompletePopupViewMac> popup_view_;
 
@@ -182,9 +148,6 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
 
   AutocompleteTextField* field_;  // owned by tab controller
 
-  // Objective-C object to bridge field_ delegate calls to C++.
-  scoped_nsobject<AutocompleteFieldDelegate> edit_helper_;
-
   // Selection at the point where the user started using the
   // arrows to move around in the popup.
   NSRange saved_temporary_selection_;
@@ -193,6 +156,9 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   // to model_.
   NSRange selection_before_change_;
   std::wstring text_before_change_;
+
+  // The maximum/standard line height for the displayed text.
+  CGFloat line_height_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditViewMac);
 };

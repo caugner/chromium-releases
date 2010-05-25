@@ -16,7 +16,6 @@ class FilePath;
 class URLRequestMockHTTPJob : public URLRequestFileJob {
  public:
   URLRequestMockHTTPJob(URLRequest* request, const FilePath& file_path);
-  virtual ~URLRequestMockHTTPJob() { }
 
   virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetCharset(std::string* charset);
@@ -31,7 +30,13 @@ class URLRequestMockHTTPJob : public URLRequestFileJob {
   // Given the path to a file relative to base_path_, construct a mock URL.
   static GURL GetMockUrl(const FilePath& path);
 
+  // Given the path to a file relative to base_path_,
+  // construct a mock URL for view source.
+  static GURL GetMockViewSourceUrl(const FilePath& path);
+
  protected:
+  virtual ~URLRequestMockHTTPJob() { }
+
   static FilePath GetOnDiskPath(const FilePath& base_path,
                                 URLRequest* request,
                                 const std::string& scheme);
@@ -44,4 +49,4 @@ class URLRequestMockHTTPJob : public URLRequestFileJob {
   static FilePath base_path_;
 };
 
-# endif  // CHROME_BROWSER_NET_URL_REQUEST_MOCK_HTTP_JOB_H_
+#endif  // CHROME_BROWSER_NET_URL_REQUEST_MOCK_HTTP_JOB_H_

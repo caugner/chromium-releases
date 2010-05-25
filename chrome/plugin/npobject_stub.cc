@@ -11,7 +11,7 @@
 #include "chrome/plugin/plugin_thread.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
-#include "webkit/api/public/WebBindings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 
 using WebKit::WebBindings;
@@ -27,7 +27,7 @@ NPObjectStub::NPObjectStub(
       route_id_(route_id),
       containing_window_(containing_window),
       page_url_(page_url) {
-  channel_->AddRoute(route_id, this, true);
+  channel_->AddRoute(route_id, this, this);
 
   // We retain the object just as PluginHost does if everything was in-process.
   WebBindings::retainObject(npobject_);
@@ -55,7 +55,7 @@ void NPObjectStub::OnPluginDestroyed() {
 }
 
 void NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
-  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+  child_process_logging::SetActiveURL(page_url_);
 
   if (!npobject_) {
     if (msg.is_sync()) {
@@ -81,7 +81,6 @@ void NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(NPObjectMsg_Enumeration, OnEnumeration);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(NPObjectMsg_Construct, OnConstruct);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(NPObjectMsg_Evaluate, OnEvaluate);
-    IPC_MESSAGE_HANDLER(NPObjectMsg_SetException, OnSetException);
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 }
@@ -125,13 +124,19 @@ void NPObjectStub::OnInvoke(bool is_default,
   NPVariant result_var;
 
   VOID_TO_NPVARIANT(result_var);
+  result_param.type = NPVARIANT_PARAM_VOID;
 
   int arg_count = static_cast<int>(args.size());
   NPVariant* args_var = new NPVariant[arg_count];
   for (int i = 0; i < arg_count; ++i) {
-    CreateNPVariant(
-        args[i], local_channel, &(args_var[i]), containing_window_,
-        page_url_);
+    if (!CreateNPVariant(
+            args[i], local_channel, &(args_var[i]), containing_window_,
+            page_url_)) {
+      NPObjectMsg_Invoke::WriteReplyParams(reply_msg, result_param,
+                                           return_value);
+      local_channel->Send(reply_msg);
+      return;
+    }
   }
 
   if (is_default) {
@@ -211,13 +216,17 @@ void NPObjectStub::OnGetProperty(const NPIdentifier_Param& name,
 void NPObjectStub::OnSetProperty(const NPIdentifier_Param& name,
                                  const NPVariant_Param& property,
                                  IPC::Message* reply_msg) {
-  bool result;
+  bool result = false;
   NPVariant result_var;
   VOID_TO_NPVARIANT(result_var);
   NPIdentifier id = CreateNPIdentifier(name);
   NPVariant property_var;
-  CreateNPVariant(
-      property, channel_, &property_var, containing_window_, page_url_);
+  if (!CreateNPVariant(
+          property, channel_, &property_var, containing_window_, page_url_)) {
+    NPObjectMsg_SetProperty::WriteReplyParams(reply_msg, result);
+    channel_->Send(reply_msg);
+    return;
+  }
 
   if (IsPluginProcess()) {
     if (npobject_->_class->setProperty) {
@@ -283,7 +292,8 @@ void NPObjectStub::OnEnumeration(std::vector<NPIdentifier_Param>* value,
   if (!IsPluginProcess()) {
     *result = WebBindings::enumerate(0, npobject_, &value_np, &count);
   } else {
-    if (!npobject_->_class->enumerate) {
+    if (npobject_->_class->structVersion < NP_CLASS_STRUCT_VERSION_ENUM ||
+        !npobject_->_class->enumerate) {
       *result = false;
       return;
     }
@@ -315,12 +325,19 @@ void NPObjectStub::OnConstruct(const std::vector<NPVariant_Param>& args,
   int arg_count = static_cast<int>(args.size());
   NPVariant* args_var = new NPVariant[arg_count];
   for (int i = 0; i < arg_count; ++i) {
-    CreateNPVariant(
-        args[i], local_channel, &(args_var[i]), containing_window_, page_url_);
+    if (!CreateNPVariant(
+           args[i], local_channel, &(args_var[i]), containing_window_,
+           page_url_)) {
+      NPObjectMsg_Invoke::WriteReplyParams(reply_msg, result_param,
+                                           return_value);
+      local_channel->Send(reply_msg);
+      return;
+    }
   }
 
   if (IsPluginProcess()) {
-    if (npobject_->_class->construct) {
+    if (npobject_->_class->structVersion >= NP_CLASS_STRUCT_VERSION_CTOR &&
+        npobject_->_class->construct) {
       return_value = npobject_->_class->construct(
           npobject_, args_var, arg_count, &result_var);
     } else {
@@ -371,13 +388,4 @@ void NPObjectStub::OnEvaluate(const std::string& script,
       page_url_);
   NPObjectMsg_Evaluate::WriteReplyParams(reply_msg, result_param, return_value);
   local_channel->Send(reply_msg);
-}
-
-void NPObjectStub::OnSetException(const std::string& message) {
-  if (IsPluginProcess()) {
-    NOTREACHED() << "Should only be called on NPObjects in the renderer";
-    return;
-  }
-
-  WebBindings::setException(npobject_, message.c_str());
 }

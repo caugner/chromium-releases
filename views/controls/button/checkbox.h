@@ -1,9 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_BUTTON_CHECKBOX_H_
 #define VIEWS_CONTROLS_BUTTON_CHECKBOX_H_
+
+#include <string>
 
 #include "views/controls/button/native_button.h"
 
@@ -18,7 +20,7 @@ class Checkbox : public NativeButton {
   static const char kViewClassName[];
 
   Checkbox();
-  Checkbox(const std::wstring& label);
+  explicit Checkbox(const std::wstring& label);
   virtual ~Checkbox();
 
   // Sets a listener for this checkbox. Checkboxes aren't required to have them
@@ -41,6 +43,7 @@ class Checkbox : public NativeButton {
   // Overridden from View:
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
+  virtual void SetEnabled(bool enabled);
   virtual void PaintFocusBorder(gfx::Canvas* canvas);
   virtual View* GetViewForPoint(const gfx::Point& point);
   virtual View* GetViewForPoint(const gfx::Point& point,
@@ -53,6 +56,10 @@ class Checkbox : public NativeButton {
   virtual bool OnMouseDragged(const MouseEvent& e);
   virtual void WillGainFocus();
   virtual void WillLoseFocus();
+
+  // Accessibility accessors, overridden from View.
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleState(AccessibilityTypes::State* state);
 
   // Overridden from NativeButton:
   virtual void SetLabel(const std::wstring& label);
@@ -84,4 +91,4 @@ class Checkbox : public NativeButton {
 
 }  // namespace views
 
-#endif  // #ifndef VIEWS_CONTROLS_BUTTON_CHECKBOX_H_
+#endif  // VIEWS_CONTROLS_BUTTON_CHECKBOX_H_

@@ -8,19 +8,19 @@
 #include "app/l10n_util.h"
 #include "base/file_version_info.h"
 #include "base/string_util.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/child_process_host.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 
 // Known browsers which we collect details for.
 enum {
   CHROME_BROWSER = 0,
+  CHROME_NACL_PROCESS,
   IE_BROWSER,
   FIREFOX_BROWSER,
   OPERA_BROWSER,
@@ -34,12 +34,12 @@ enum {
 // These entries must match the ordering for MemoryDetails::BrowserProcess.
 static ProcessData g_process_template[MAX_BROWSERS];
 
-MemoryDetails::MemoryDetails()
-  : ui_loop_(NULL) {
+MemoryDetails::MemoryDetails() {
   static const std::wstring google_browser_name =
       l10n_util::GetString(IDS_PRODUCT_NAME);
   ProcessData g_process_template[MAX_BROWSERS] = {
     { google_browser_name.c_str(), L"chrome.exe", },
+    { google_browser_name.c_str(), L"nacl64.exe", },
     { L"IE", L"iexplore.exe", },
     { L"Firefox", L"firefox.exe", },
     { L"Opera", L"opera.exe", },
@@ -62,8 +62,7 @@ ProcessData* MemoryDetails::ChromeBrowser() {
 
 void MemoryDetails::CollectProcessData(
     std::vector<ProcessMemoryInformation> child_info) {
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::FILE));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
   // Clear old data.
   for (int index = 0; index < arraysize(g_process_template); index++)
@@ -85,7 +84,7 @@ void MemoryDetails::CollectProcessData(
     return;
   }
   do {
-    int pid = process_entry.th32ProcessID;
+    base::ProcessId pid = process_entry.th32ProcessID;
     ScopedHandle handle(::OpenProcess(
         PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid));
     if (!handle.Get())
@@ -120,7 +119,7 @@ void MemoryDetails::CollectProcessData(
 
       // Get Version Information.
       TCHAR name[MAX_PATH];
-      if (index2 == CHROME_BROWSER) {
+      if (index2 == CHROME_BROWSER || index2 == CHROME_NACL_PROCESS) {
         scoped_ptr<FileVersionInfo> version_info(
             FileVersionInfo::CreateFileVersionInfoForCurrentModule());
         if (version_info != NULL)
@@ -145,12 +144,18 @@ void MemoryDetails::CollectProcessData(
       }
 
       // Add the process info to our list.
-      process_data_[index2].processes.push_back(info);
+      if (index2 == CHROME_NACL_PROCESS) {
+        // Add NaCl processes to Chrome's list
+        process_data_[CHROME_BROWSER].processes.push_back(info);
+      } else {
+        process_data_[index2].processes.push_back(info);
+      }
       break;
     }
   } while (::Process32Next(snapshot, &process_entry));
 
   // Finally return to the browser thread.
-  ui_loop_->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnUIThread));
 }

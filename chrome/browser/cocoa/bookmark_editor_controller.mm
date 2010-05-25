@@ -2,38 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
-#include "base/mac_util.h"
-#include "base/sys_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/profile.h"
 #import "chrome/browser/cocoa/bookmark_editor_controller.h"
+#include "app/l10n_util.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 
-// static; implemented for each platform.
-void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
-                          Profile* profile,
-                          const BookmarkNode* parent,
-                          const EditDetails& details,
-                          Configuration configuration,
-                          Handler* handler) {
-  if (details.type == EditDetails::NEW_FOLDER) {
-    // TODO(sky): implement this.
-    NOTIMPLEMENTED();
-    return;
-  }
-  BookmarkEditorController* controller = [[BookmarkEditorController alloc]
-      initWithParentWindow:parent_hwnd
-                   profile:profile
-                    parent:parent
-                      node:details.existing_node
-             configuration:configuration
-                   handler:handler];
-  [controller runAsModalSheet];
-}
+@interface BookmarkEditorController (Private)
 
+// Grab the url from the text field and convert.
+- (GURL)GURLFromUrlField;
+
+@end
 
 @implementation BookmarkEditorController
+
+@synthesize displayURL = displayURL_;
+
++ (NSSet*)keyPathsForValuesAffectingOkEnabled {
+  return [NSSet setWithObject:@"displayURL"];
+}
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    profile:(Profile*)profile
@@ -41,92 +28,51 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
                       node:(const BookmarkNode*)node
              configuration:(BookmarkEditor::Configuration)configuration
                    handler:(BookmarkEditor::Handler*)handler {
-  NSString* nibpath = [mac_util::MainAppBundle()
-                        pathForResource:@"BookmarkEditor"
-                        ofType:@"nib"];
-  if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
-    parentWindow_ = parentWindow;
-    profile_ = profile;
-    parentNode_ = parent;
+  if ((self = [super initWithParentWindow:parentWindow
+                                  nibName:@"BookmarkEditor"
+                                  profile:profile
+                                   parent:parent
+                            configuration:configuration
+                                  handler:handler])) {
     // "Add Page..." has no "node" so this may be NULL.
     node_ = node;
-    configuration_ = configuration;
-    handler_.reset(handler);
   }
   return self;
+}
+
+- (void)dealloc {
+  [displayURL_ release];
+  [super dealloc];
 }
 
 - (void)awakeFromNib {
   // Set text fields to match our bookmark.  If the node is NULL we
   // arrived here from an "Add Page..." item in a context menu.
   if (node_) {
-    initialName_.reset([base::SysWideToNSString(node_->GetTitle()) retain]);
+    [self setInitialName:base::SysWideToNSString(node_->GetTitle())];
     std::string url_string = node_->GetURL().possibly_invalid_spec();
     initialUrl_.reset([[NSString stringWithUTF8String:url_string.c_str()]
                         retain]);
   } else {
-    initialName_.reset([@"" retain]);
     initialUrl_.reset([@"" retain]);
   }
-  [nameField_ setStringValue:initialName_];
-  [urlField_ setStringValue:initialUrl_];
-
-  // Get a ping when the URL or name text fields change;
-  // trigger an initial ping to set things up.
-  [nameField_ setDelegate:self];
-  [urlField_ setDelegate:self];
-  [self controlTextDidChange:nil];
-
-  if (configuration_ == BookmarkEditor::SHOW_TREE) {
-    // build the tree et al
-    NOTIMPLEMENTED();
-  } else {
-    // Remember the NSBrowser's height; we will shrink our frame by that
-    // much.
-    NSRect frame = [[self window] frame];
-    CGFloat browserHeight = [browser_ frame].size.height;
-    frame.size.height -= browserHeight;
-    frame.origin.y += browserHeight;
-    // Remove the NSBrowser and "new folder" button.
-    [browser_ removeFromSuperview];
-    [newFolderButton_ removeFromSuperview];
-    // Finally, commit the size change.
-    [[self window] setFrame:frame display:YES];
-  }
+  [self setDisplayURL:initialUrl_];
+  [super awakeFromNib];
 }
 
-/* TODO(jrg):
-// Implementing this informal protocol allows us to open the sheet
-// somewhere other than at the top of the window.  NOTE: this means
-// that I, the controller, am also the window's delegate.
-- (NSRect)window:(NSWindow*)window willPositionSheet:(NSWindow*)sheet
-        usingRect:(NSRect)rect {
-  // adjust rect.origin.y to be the bottom of the toolbar
-  return rect;
-}
-*/
-
-// TODO(jrg): consider NSModalSession.
-- (void)runAsModalSheet {
-  [NSApp beginSheet:[self window]
-     modalForWindow:parentWindow_
-      modalDelegate:self
-     didEndSelector:@selector(didEndSheet:returnCode:contextInfo:)
-        contextInfo:nil];
+- (void)nodeRemoved:(const BookmarkNode*)node
+         fromParent:(const BookmarkNode*)parent
+{
+  // Be conservative; it is needed (e.g. "Add Page...")
+  node_ = NULL;
+  [self cancel:self];
 }
 
-// TODO(jrg)
-- (IBAction)newFolder:(id)sender {
-  NOTIMPLEMENTED();
-}
-
-- (IBAction)cancel:(id)sender {
-  [NSApp endSheet:[self window]];
-}
+#pragma mark Bookmark Editing
 
 // If possible, return a valid GURL from the URL text field.
 - (GURL)GURLFromUrlField {
-  NSString *url = [urlField_ stringValue];
+  NSString* url = [self displayURL];
   GURL newURL = GURL([url UTF8String]);
   if (!newURL.is_valid()) {
     // Mimic observed friendliness from Windows
@@ -135,99 +81,63 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
   return newURL;
 }
 
-// When the URL changes we may enable or disable the OK button.
-// We set ourselves as the delegate of urlField_ so this gets called.
-// (Yes, setting ourself as a delegate automatically registers us for
-// the notification.)
-- (void)controlTextDidChange:(NSNotification *)aNotification {
-  GURL newURL = [self GURLFromUrlField];
-  NSString* name = [nameField_ stringValue];
-
-  // if empty or only whitespace, name is not valid.
-  bool name_valid = true;
-  if (([name length] == 0) ||
-      ([[name stringByTrimmingCharactersInSet:[NSCharacterSet
-              whitespaceAndNewlineCharacterSet]] length] == 0)) {
-    name_valid = false;
-  }
-
-  if (node_ && (node_->is_folder() || newURL.is_valid()) && name_valid) {
-    [okButton_ setEnabled:YES];
-  } else {
-    [okButton_ setEnabled:NO];
-  }
-}
-
-// TODO(jrg): Once the tree is available edits may be more extensive
-// than just name/url.
-- (IBAction)ok:(id)sender {
-  NSString *name = [nameField_ stringValue];
-  NSString *url = [urlField_ stringValue];
-
-  if ((![name isEqual:initialName_]) ||
-      (![url isEqual:initialUrl_])) {
-    std::wstring newTitle = base::SysNSStringToWide(name);
+// Enable the OK button if there is a valid URL.
+- (BOOL)okEnabled {
+  BOOL okEnabled = NO;
+  if ([[self displayURL] length]) {
     GURL newURL = [self GURLFromUrlField];
-    if (!newURL.is_valid()) {
-      // Shouldn't be reached -- OK button disabled if not valid!
-      NOTREACHED();
-      return;
-    }
-    int index = 0;
-    BookmarkModel* model = profile_->GetBookmarkModel();
-    if (node_) {
-      index = parentNode_->IndexOfChild(node_);
-      model->Remove(parentNode_, index);
-    } else {
-      index = parentNode_->GetChildCount();
-    }
-    const BookmarkNode* node = model->AddURL(parentNode_, index,
-                                             newTitle, newURL);
-    // Honor handler semantics: callback on node creation
-    if (handler_.get())
-      handler_->NodeCreated(node);
+    okEnabled = (newURL.is_valid()) ? YES : NO;
+  }
+  if (okEnabled)
+    [urlField_ setBackgroundColor:[NSColor whiteColor]];
+  else
+    [urlField_ setBackgroundColor:[NSColor colorWithCalibratedRed:1.0
+                                                            green:0.67
+                                                             blue:0.67
+                                                            alpha:1.0]];
+  return okEnabled;
+}
+
+// The the bookmark's URL is assumed to be valid (otherwise the OK button
+// should not be enabled).  If the bookmark previously existed then it is
+// removed from its old folder.  The bookmark is then added to its new
+// folder.  If the folder has not changed then the bookmark stays in its
+// original position (index) otherwise it is added to the end of the new
+// folder.  Called by -[BookmarkEditorBaseController ok:].
+- (NSNumber*)didCommit {
+  NSString* name = [[self displayName] stringByTrimmingCharactersInSet:
+                    [NSCharacterSet newlineCharacterSet]];
+  std::wstring newTitle = base::SysNSStringToWide(name);
+  const BookmarkNode* newParentNode = [self selectedNode];
+  BookmarkModel* model = [self bookmarkModel];
+  int newIndex = newParentNode->GetChildCount();
+  GURL newURL = [self GURLFromUrlField];
+  if (!newURL.is_valid()) {
+    // Shouldn't be reached -- OK button should be disabled if not valid!
+    NOTREACHED();
+    return [NSNumber numberWithBool:NO];
   }
 
-  [NSApp endSheet:[self window]];
+  // Determine where the new/replacement bookmark is to go.
+  const BookmarkNode* parentNode = [self parentNode];
+  if (node_ && parentNode) {
+    // Replace the old bookmark with the updated bookmark.
+    int oldIndex = parentNode->IndexOfChild(node_);
+    if (oldIndex >= 0)
+      model->Remove(parentNode, oldIndex);
+    if (parentNode == newParentNode)
+      newIndex = oldIndex;
+  }
+  // Add bookmark as new node at the end of the newly selected folder.
+  const BookmarkNode* node = model->AddURL(newParentNode, newIndex,
+                                           newTitle, newURL);
+  // Honor handler semantics: callback on node creation.
+  [self notifyHandlerCreatedNode:node];
+  return [NSNumber numberWithBool:YES];
 }
 
-- (void)didEndSheet:(NSWindow*)sheet
-         returnCode:(int)returnCode
-        contextInfo:(void*)contextInfo {
-  // This is probably unnecessary but it feels cleaner since the
-  // delegate of a text field can be automatically registered for
-  // notifications.
-  [nameField_ setDelegate:nil];
-  [urlField_ setDelegate:nil];
-
-  [[self window] orderOut:self];
-
-  // BookmarkEditor::Show() will create us then run away.  Unusually
-  // for a controller, we are responsible for deallocating ourself.
-  [self autorelease];
-}
-
-
-- (NSString*)displayName {
-  return [nameField_ stringValue];
-}
-
-- (NSString*)displayURL {
-  return [urlField_ stringValue];
-}
-
-- (void)setDisplayName:(NSString*)name {
-  [nameField_ setStringValue:name];
-  [self controlTextDidChange:nil];
-}
-
-- (void)setDisplayURL:(NSString*)name {
-  [urlField_ setStringValue:name];
-  [self controlTextDidChange:nil];
-}
-
-- (BOOL)okButtonEnabled {
-  return [okButton_ isEnabled];
+- (NSColor *)urlFieldColor {
+  return [urlField_ backgroundColor];
 }
 
 @end  // BookmarkEditorController

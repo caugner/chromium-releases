@@ -1,26 +1,37 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/worker/worker_webkitclient_impl.h"
 
 #include "base/logging.h"
+#include "chrome/common/database_util.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/worker/worker_thread.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 
-WebKit::WebClipboard* WorkerWebKitClientImpl::clipboard() {
+using WebKit::WebClipboard;
+using WebKit::WebKitClient;
+using WebKit::WebMessagePortChannel;
+using WebKit::WebMimeRegistry;
+using WebKit::WebSandboxSupport;
+using WebKit::WebSharedWorkerRepository;
+using WebKit::WebStorageNamespace;
+using WebKit::WebString;
+using WebKit::WebURL;
+
+WebClipboard* WorkerWebKitClientImpl::clipboard() {
   NOTREACHED();
   return NULL;
 }
 
-WebKit::WebMimeRegistry* WorkerWebKitClientImpl::mimeRegistry() {
-  NOTREACHED();
-  return NULL;
+WebMimeRegistry* WorkerWebKitClientImpl::mimeRegistry() {
+  return this;
 }
 
-WebKit::WebSandboxSupport* WorkerWebKitClientImpl::sandboxSupport() {
+WebSandboxSupport* WorkerWebKitClientImpl::sandboxSupport() {
   NOTREACHED();
   return NULL;
 }
@@ -43,34 +54,118 @@ bool WorkerWebKitClientImpl::isLinkVisited(unsigned long long link_hash) {
   return false;
 }
 
-WebKit::WebMessagePortChannel*
+WebMessagePortChannel*
 WorkerWebKitClientImpl::createMessagePortChannel() {
   return new WebMessagePortChannelImpl();
 }
 
-void WorkerWebKitClientImpl::setCookies(const WebKit::WebURL& url,
-                                        const WebKit::WebURL& policy_url,
-                                        const WebKit::WebString& value) {
+void WorkerWebKitClientImpl::setCookies(const WebURL& url,
+                                        const WebURL& first_party_for_cookies,
+                                        const WebString& value) {
   NOTREACHED();
 }
 
-WebKit::WebString WorkerWebKitClientImpl::cookies(
-    const WebKit::WebURL& url, const WebKit::WebURL& policy_url) {
-  NOTREACHED();
-  return WebKit::WebString();
+WebString WorkerWebKitClientImpl::cookies(
+    const WebURL& url, const WebURL& first_party_for_cookies) {
+  // WebSocketHandshake may access cookies in worker process.
+  return WebString();
 }
 
-void WorkerWebKitClientImpl::prefetchHostName(const WebKit::WebString&) {
+void WorkerWebKitClientImpl::prefetchHostName(const WebString&) {
   NOTREACHED();
 }
 
-bool WorkerWebKitClientImpl::getFileSize(const WebKit::WebString& path,
+bool WorkerWebKitClientImpl::getFileSize(const WebString& path,
                                          long long& result) {
   NOTREACHED();
   return false;
 }
 
-WebKit::WebString WorkerWebKitClientImpl::defaultLocale() {
+WebString WorkerWebKitClientImpl::defaultLocale() {
   NOTREACHED();
-  return WebKit::WebString();
+  return WebString();
+}
+
+WebStorageNamespace* WorkerWebKitClientImpl::createLocalStorageNamespace(
+    const WebString& path, unsigned quota) {
+  NOTREACHED();
+  return 0;
+}
+
+void WorkerWebKitClientImpl::dispatchStorageEvent(
+    const WebString& key, const WebString& old_value,
+    const WebString& new_value, const WebString& origin,
+    const WebKit::WebURL& url, bool is_local_storage) {
+  NOTREACHED();
+}
+
+WebSharedWorkerRepository* WorkerWebKitClientImpl::sharedWorkerRepository() {
+    return 0;
+}
+
+WebKitClient::FileHandle WorkerWebKitClientImpl::databaseOpenFile(
+    const WebString& vfs_file_name, int desired_flags,
+    WebKitClient::FileHandle* dir_handle) {
+  return DatabaseUtil::databaseOpenFile(vfs_file_name, desired_flags,
+      dir_handle);
+}
+
+int WorkerWebKitClientImpl::databaseDeleteFile(
+    const WebString& vfs_file_name, bool sync_dir) {
+  return DatabaseUtil::databaseDeleteFile(vfs_file_name, sync_dir);
+}
+
+long WorkerWebKitClientImpl::databaseGetFileAttributes(
+    const WebString& vfs_file_name) {
+  return DatabaseUtil::databaseGetFileAttributes(vfs_file_name);
+}
+
+long long WorkerWebKitClientImpl::databaseGetFileSize(
+    const WebString& vfs_file_name) {
+  return DatabaseUtil::databaseGetFileSize(vfs_file_name);
+}
+
+WebMimeRegistry::SupportsType WorkerWebKitClientImpl::supportsMIMEType(
+    const WebString&) {
+  return WebMimeRegistry::IsSupported;
+}
+
+WebMimeRegistry::SupportsType WorkerWebKitClientImpl::supportsImageMIMEType(
+    const WebString&) {
+  NOTREACHED();
+  return WebMimeRegistry::IsSupported;
+}
+
+WebMimeRegistry::SupportsType WorkerWebKitClientImpl::supportsJavaScriptMIMEType(
+    const WebString&) {
+  NOTREACHED();
+  return WebMimeRegistry::IsSupported;
+}
+
+WebMimeRegistry::SupportsType WorkerWebKitClientImpl::supportsMediaMIMEType(
+    const WebString&, const WebString&) {
+  NOTREACHED();
+  return WebMimeRegistry::IsSupported;
+}
+
+WebMimeRegistry::SupportsType WorkerWebKitClientImpl::supportsNonImageMIMEType(
+    const WebString&) {
+  NOTREACHED();
+  return WebMimeRegistry::IsSupported;
+}
+
+WebString WorkerWebKitClientImpl::mimeTypeForExtension(const WebString&) {
+  NOTREACHED();
+  return WebString();
+}
+
+WebString WorkerWebKitClientImpl::mimeTypeFromFile(const WebString&) {
+  NOTREACHED();
+  return WebString();
+}
+
+WebString WorkerWebKitClientImpl::preferredExtensionForMIMEType(
+    const WebString&) {
+  NOTREACHED();
+  return WebString();
 }

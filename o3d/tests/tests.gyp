@@ -102,14 +102,11 @@
             ],
           },
         ],
-        ['renderer == "cb"',
+        ['renderer == "gles2"',
           {
             'dependencies': [
-              '../command_buffer/command_buffer.gyp:command_buffer_client_test',
-              '../command_buffer/command_buffer.gyp:command_buffer_common_test',
-              '../command_buffer/command_buffer.gyp:command_buffer_service_test',
-              '../gpu_plugin/gpu_plugin.gyp:np_utils',
-            ]
+              '../build/libs.gyp:gles2_libs',
+            ],
           },
         ],
         ['OS == "mac"',
@@ -201,24 +198,30 @@
             'sources': [
               'common/win/dxcapture.cc',
             ],
-            'link_settings': {
-              'libraries': [
-                '"$(DXSDK_DIR)/Lib/x86/d3dx9.lib"',
-                'd3d9.lib',
-              ],
-            },
-          },
-        ],
-        ['OS == "win" and (renderer == "d3d9" or cb_service == "d3d9")',
-          {
-            'include_dirs': [
+            'msvs_system_include_dirs': [
               '"$(DXSDK_DIR)/Include"',
             ],
             'link_settings': {
               'libraries': [
+                '"$(DXSDK_DIR)/Lib/x86/d3dx9.lib"',
+                'd3d9.lib',
                 '"$(DXSDK_DIR)/Lib/x86/DxErr.lib"',
               ],
             },
+          },
+        ],
+        ['OS == "win" and renderer == "gl"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:gl_libs',
+            ],
+          },
+        ],
+        ['OS == "win" and renderer == "gles2"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:gles2_libs',
+            ],
           },
         ],
         ['OS == "linux"',

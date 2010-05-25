@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,9 @@
 
 class AlertInfoBarDelegate;
 class ConfirmInfoBarDelegate;
+class CrashedExtensionInfoBarDelegate;
+class ExtensionInfoBarDelegate;
+class TranslateInfoBarDelegate;
 class InfoBar;
 class LinkInfoBarDelegate;
 class SkBitmap;
@@ -42,12 +45,13 @@ class ThemeInstalledInfoBarDelegate;
 // AddInfoBar!
 class InfoBarDelegate {
  public:
-  // The type of the infobar. It controls its appearence, such as its background
+  // The type of the infobar. It controls its appearance, such as its background
   // color.
   enum Type {
     INFO_TYPE,
     WARNING_TYPE,
-    ERROR_TYPE
+    ERROR_TYPE,
+    PAGE_ACTION_TYPE
   };
 
   // Returns true if the supplied |delegate| is equal to this one. Equality is
@@ -99,6 +103,24 @@ class InfoBarDelegate {
   // Returns a pointer to the ThemeInstalledInfoBarDelegate interface, if
   // implemented.
   virtual ThemeInstalledInfoBarDelegate* AsThemePreviewInfobarDelegate() {
+    return NULL;
+  }
+
+  // Returns a pointer to the TranslateInfoBarDelegate interface, if
+  // implemented.
+  virtual TranslateInfoBarDelegate* AsTranslateInfoBarDelegate() {
+    return NULL;
+  }
+
+  // Returns a pointer to the ExtensionInfoBarDelegate interface, if
+  // implemented.
+  virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate() {
+    return NULL;
+  }
+
+  // Returns a pointer to the CrashedExtensionInfoBarDelegate interface, if
+  // implemented.
+  virtual CrashedExtensionInfoBarDelegate* AsCrashedExtensionInfoBarDelegate() {
     return NULL;
   }
 
@@ -211,6 +233,9 @@ class ConfirmInfoBarDelegate : public AlertInfoBarDelegate {
   // returns "OK" for the OK button and "Cancel" for the Cancel button.
   virtual std::wstring GetButtonLabel(InfoBarButton button) const;
 
+  // Return whether or not the specified button needs elevation.
+  virtual bool NeedElevation(InfoBarButton button) const { return false; }
+
   // Called when the OK button is pressed. If the function returns true, the
   // InfoBarDelegate should be removed from the associated TabContents.
   virtual bool Accept() { return true; }
@@ -218,6 +243,22 @@ class ConfirmInfoBarDelegate : public AlertInfoBarDelegate {
   // Called when the Cancel button is pressed.  If the function returns true,
   // the InfoBarDelegate should be removed from the associated TabContents.
   virtual bool Cancel() { return true; }
+
+  // Returns the text of the link to be displayed, if any. Otherwise returns
+  // and empty string.
+  virtual std::wstring GetLinkText() {
+    return std::wstring();
+  }
+
+  // Called when the Link is clicked. The |disposition| specifies how the
+  // resulting document should be loaded (based on the event flags present when
+  // the link was clicked). This function returns true if the InfoBar should be
+  // closed now or false if it should remain until the user explicitly closes
+  // it.
+  // Will only be called if GetLinkText() returns non-empty string.
+  virtual bool LinkClicked(WindowOpenDisposition disposition) {
+    return true;
+  }
 
   // Overridden from InfoBarDelegate:
   virtual InfoBar* CreateInfoBar();
@@ -235,11 +276,15 @@ class ConfirmInfoBarDelegate : public AlertInfoBarDelegate {
 
 class SimpleAlertInfoBarDelegate : public AlertInfoBarDelegate {
  public:
+  // |icon| may be |NULL|.
   SimpleAlertInfoBarDelegate(TabContents* contents,
                              const std::wstring& message,
-                             SkBitmap* icon);
+                             SkBitmap* icon,
+                             bool auto_expire);
 
   // Overridden from AlertInfoBarDelegate:
+  virtual bool ShouldExpire(
+      const NavigationController::LoadCommittedDetails& details) const;
   virtual std::wstring GetMessageText() const;
   virtual SkBitmap* GetIcon() const;
   virtual void InfoBarClosed();
@@ -247,6 +292,7 @@ class SimpleAlertInfoBarDelegate : public AlertInfoBarDelegate {
  private:
   std::wstring message_;
   SkBitmap* icon_;
+  bool auto_expire_;  // Should it expire automatically on navigation?
 
   DISALLOW_COPY_AND_ASSIGN(SimpleAlertInfoBarDelegate);
 };

@@ -5,9 +5,15 @@
 #ifndef CHROME_FRAME_CHROME_FRAME_PLUGIN_H_
 #define CHROME_FRAME_CHROME_FRAME_PLUGIN_H_
 
+#include "base/ref_counted.h"
 #include "base/win_util.h"
 #include "chrome_frame/chrome_frame_automation.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
+#include "chrome_frame/simple_resource_loader.h"
 #include "chrome_frame/utils.h"
+
+#include "grit/chromium_strings.h"
 
 #define IDC_ABOUT_CHROME_FRAME 40018
 
@@ -24,15 +30,16 @@ class ChromeFramePlugin : public ChromeFrameDelegateImpl {
     Uninitialize();
   }
 
-BEGIN_MSG_MAP(ChromeFrameActivex)
+BEGIN_MSG_MAP(T)
   MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
   MESSAGE_HANDLER(WM_SIZE, OnSize)
   MESSAGE_HANDLER(WM_PARENTNOTIFY, OnParentNotify)
 END_MSG_MAP()
 
   bool Initialize() {
+    DLOG(INFO) << __FUNCTION__;
     DCHECK(!automation_client_.get());
-    automation_client_.reset(CreateAutomationClient());
+    automation_client_ = CreateAutomationClient();
     if (!automation_client_.get()) {
       NOTREACHED() << "new ChromeFrameAutomationClient";
       return false;
@@ -42,21 +49,34 @@ END_MSG_MAP()
   }
 
   void Uninitialize() {
-    if (automation_client_.get()) {
+    DLOG(INFO) << __FUNCTION__;
+    if (IsValid()) {
       automation_client_->Uninitialize();
-      automation_client_.reset();
+      automation_client_ = NULL;
     }
   }
 
   bool InitializeAutomation(const std::wstring& profile_name,
                             const std::wstring& extra_chrome_arguments,
-                            bool incognito) {
+                            bool incognito, bool is_widget_mode) {
+    DCHECK(IsValid());
     // We don't want to do incognito when privileged, since we're
     // running in browser chrome or some other privileged context.
     bool incognito_mode = !is_privileged_ && incognito;
-    return automation_client_->Initialize(this, kCommandExecutionTimeout, true,
-                                          profile_name, extra_chrome_arguments,
-                                          incognito_mode);
+    FilePath profile_path;
+    GetProfilePath(profile_name, &profile_path);
+    ChromeFrameLaunchParams chrome_launch_params = {
+      kCommandExecutionTimeout,
+      GURL(),
+      GURL(),
+      profile_path,
+      profile_name,
+      extra_chrome_arguments,
+      true,
+      incognito_mode,
+      is_widget_mode
+    };
+    return automation_client_->Initialize(this, chrome_launch_params);
   }
 
   // ChromeFrameDelegate implementation
@@ -77,12 +97,17 @@ END_MSG_MAP()
   virtual void OnAutomationServerReady() {
     // Issue the extension automation request if we're privileged to
     // allow this control to handle extension requests from Chrome.
-    if (is_privileged_)
-      automation_client_->SetEnableExtensionAutomation(true);
+    if (is_privileged_ && IsValid())
+      automation_client_->SetEnableExtensionAutomation(functions_enabled_);
   }
 
   virtual bool IsValid() const {
     return automation_client_.get() != NULL;
+  }
+
+  virtual void OnHostMoved() {
+    if (IsValid())
+      automation_client_->OnChromeFrameHostMoved();
   }
 
  protected:
@@ -92,7 +117,8 @@ END_MSG_MAP()
   }
 
   virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
-                                   int x_pos, int y_pos, int align_flags) {
+                                   int align_flags,
+                                   const IPC::ContextMenuParams& params) {
     if (!menu_handle || !automation_client_.get()) {
       NOTREACHED();
       return;
@@ -105,12 +131,20 @@ END_MSG_MAP()
     if (!copy)
       return;
 
-    T* pThis = static_cast<T*>(this);
-    if (pThis->PreProcessContextMenu(copy)) {
+    T* self = static_cast<T*>(this);
+    if (self->PreProcessContextMenu(copy)) {
+      // In order for the context menu to handle keyboard input, give the
+      // ActiveX window focus.
+      ignore_setfocus_ = true;
+      SetFocus(GetWindow());
+      ignore_setfocus_ = false;
       UINT flags = align_flags | TPM_LEFTBUTTON | TPM_RETURNCMD | TPM_RECURSE;
-      UINT selected = TrackPopupMenuEx(copy, flags, x_pos, y_pos, GetWindow(),
-                                       NULL);
-      if (selected != 0 && !pThis->HandleContextMenuCommand(selected)) {
+      UINT selected = TrackPopupMenuEx(copy, flags, params.screen_x,
+                                       params.screen_y, GetWindow(), NULL);
+      // Menu is over now give focus back to chrome
+      GiveFocusToChrome(false);
+      if (IsValid() && selected != 0 &&
+          !self->HandleContextMenuCommand(selected, params)) {
         automation_client_->SendContextMenuCommandToChromeFrame(selected);
       }
     }
@@ -120,15 +154,9 @@ END_MSG_MAP()
 
   LRESULT OnSetFocus(UINT message, WPARAM wparam, LPARAM lparam,
                      BOOL& handled) {  // NO_LINT
-    if (!ignore_setfocus_ && automation_client_ != NULL) {
-      TabProxy* tab = automation_client_->tab();
-      HWND chrome_window = automation_client_->tab_window();
-      if (tab && ::IsWindow(chrome_window)) {
-        DLOG(INFO) << "Setting initial focus";
-        tab->SetInitialFocus(win_util::IsShiftPressed());
-      }
+    if (!ignore_setfocus_ && IsValid()) {
+      GiveFocusToChrome(true);
     }
-
     return 0;
   }
 
@@ -136,7 +164,7 @@ END_MSG_MAP()
                  BOOL& handled) {  // NO_LINT
     handled = FALSE;
     // When we get resized, we need to resize the external tab window too.
-    if (automation_client_.get())
+    if (IsValid())
       automation_client_->Resize(LOWORD(lparam), HIWORD(lparam),
                                  SWP_NOACTIVATE | SWP_NOZORDER);
     return 0;
@@ -170,17 +198,15 @@ END_MSG_MAP()
   // modified as well (enable/disable commands, add/remove items).
   // Override in most-derived class if needed.
   bool PreProcessContextMenu(HMENU menu) {
-    // Add an "About" item. 
-    // TODO: The string should be localized and menu should
-    // be modified in ExternalTabContainer:: once we go public.
+    // Add an "About" item.
     AppendMenu(menu, MF_STRING, IDC_ABOUT_CHROME_FRAME,
-        L"About Chrome Frame...");
+               SimpleResourceLoader::Get(IDS_CHROME_FRAME_MENU_ABOUT).c_str());
     return true;
   }
 
   // Return true if menu command is processed, otherwise the command will be
   // passed to Chrome for execution. Override in most-derived class if needed.
-  bool HandleContextMenuCommand(UINT cmd) {
+  bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params) {
     return false;
   }
 
@@ -189,9 +215,28 @@ END_MSG_MAP()
     return new ChromeFrameAutomationClient;
   }
 
+  void GiveFocusToChrome(bool restore_focus_to_view) {
+    if (IsValid()) {
+      TabProxy* tab = automation_client_->tab();
+      HWND chrome_window = automation_client_->tab_window();
+      if (tab && ::IsWindow(chrome_window)) {
+        DLOG(INFO) << "Setting initial focus";
+        tab->SetInitialFocus(win_util::IsShiftPressed(),
+                             restore_focus_to_view);
+      }
+    }
+  }
+
+  virtual void GetProfilePath(const std::wstring& profile_name,
+                              FilePath* profile_path) {
+    chrome::GetChromeFrameUserDataDirectory(profile_path);
+    *profile_path = profile_path->Append(profile_name);
+    DLOG(INFO) << __FUNCTION__ << ": " << profile_path->value();
+  }
+
  protected:
   // Our gateway to chrome land
-  scoped_ptr<ChromeFrameAutomationClient> automation_client_;
+  scoped_refptr<ChromeFrameAutomationClient> automation_client_;
 
   // Url of the containing document.
   std::string document_url_;
@@ -208,6 +253,12 @@ END_MSG_MAP()
   //
   // When privileged, additional interfaces are made available to the user.
   bool is_privileged_;
+
+  // List of functions to enable for automation, or a single entry "*" to
+  // enable all functions for automation.  Ignored unless is_privileged_ is
+  // true.  Defaults to the empty list, meaning automation will not be
+  // turned on.
+  std::vector<std::string> functions_enabled_;
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_PLUGIN_H_

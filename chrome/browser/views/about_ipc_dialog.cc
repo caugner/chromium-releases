@@ -88,7 +88,7 @@ struct Settings {
 
 } settings_views = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
-void CreateColumn(uint16 start, uint16 end, HWND hwnd,
+void CreateColumn(uint32 start, uint32 end, HWND hwnd,
                   CListViewCtrl** control) {
   DCHECK(*control == NULL);
   *control = new CListViewCtrl(hwnd);
@@ -98,7 +98,7 @@ void CreateColumn(uint16 start, uint16 end, HWND hwnd,
   control_ptr->ModifyStyle(0, LVS_SORTASCENDING | LVS_NOCOLUMNHEADER);
   control_ptr->InsertColumn(0, L"id", LVCFMT_LEFT, 230);
 
-  for (uint16 i = start; i < end; i++) {
+  for (uint32 i = start; i < end; i++) {
     std::wstring name;
     IPC::Logging::GetMessageText(i, &name, NULL, NULL);
 
@@ -187,7 +187,7 @@ void CloseDialog() {
   if (!current_profile)
     return;
   PrefService* prefs = current_profile->GetPrefs();
-  if (!prefs->IsPrefRegistered(prefs::kIpcDisabledMessages))
+  if (!prefs->FindPreference(prefs::kIpcDisabledMessages))
     return;
   ListValue* list = prefs->GetMutableList(prefs::kIpcDisabledMessages);
   list->Clear();
@@ -200,7 +200,7 @@ void CloseDialog() {
 }
 
 void OnButtonClick(int id) {
-  switch(id) {
+  switch (id) {
     case IDC_ViewAll:
       CheckButtons(settings_views.view, true);
       break;

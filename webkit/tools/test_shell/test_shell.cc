@@ -6,13 +6,11 @@
 
 #include "webkit/tools/test_shell/test_shell.h"
 
-#include "app/gfx/codec/png_codec.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/debug_on_start.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/gfx/size.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
@@ -20,8 +18,10 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/stats_table.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/size.h"
 #include "googleurl/src/url_util.h"
 #include "grit/webkit_strings.h"
 #include "net/base/mime_util.h"
@@ -31,29 +31,33 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/api/public/WebAccessibilityObject.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebKit.h"
-#include "webkit/api/public/WebScriptController.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebSize.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebURLRequest.h"
-#include "webkit/api/public/WebURLResponse.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/tools/test_shell/accessibility_controller.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
+#include "webkit/tools/test_shell/test_shell_devtools_agent.h"
+#include "webkit/tools/test_shell/test_shell_devtools_client.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
+#include "webkit/tools/test_shell/test_webview_delegate.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebFrame;
 using WebKit::WebNavigationPolicy;
 using WebKit::WebRect;
+using WebKit::WebScriptController;
 using WebKit::WebSize;
 using WebKit::WebURLRequest;
 using WebKit::WebView;
@@ -75,8 +79,6 @@ const int kSVGTestWindowHeight = 360;
 // URLRequestTestShellFileJob is used to serve the inspector
 class URLRequestTestShellFileJob : public URLRequestFileJob {
  public:
-  virtual ~URLRequestTestShellFileJob() { }
-
   static URLRequestJob* InspectorFactory(URLRequest* request,
                                          const std::string& scheme) {
     FilePath path;
@@ -91,6 +93,7 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
   URLRequestTestShellFileJob(URLRequest* request, const FilePath& path)
       : URLRequestFileJob(request, path) {
   }
+  virtual ~URLRequestTestShellFileJob() { }
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestTestShellFileJob);
 };
@@ -100,6 +103,8 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
 // Initialize static member variable
 WindowList* TestShell::window_list_;
 WebPreferences* TestShell::web_prefs_ = NULL;
+bool TestShell::developer_extras_enabled_ = false;
+bool TestShell::inspector_test_mode_ = false;
 bool TestShell::layout_test_mode_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
 bool TestShell::test_is_preparing_ = false;
@@ -116,12 +121,17 @@ TestShell::TestShell()
 #endif
       test_params_(NULL),
       is_modal_(false),
+      is_loading_(false),
+      allow_images_(true),
+      allow_plugins_(true),
+      allow_scripts_(true),
       dump_stats_table_on_exit_(false) {
     accessibility_controller_.reset(new AccessibilityController(this));
     delegate_.reset(new TestWebViewDelegate(this));
     popup_delegate_.reset(new TestWebViewDelegate(this));
     layout_test_controller_.reset(new LayoutTestController(this));
     event_sending_controller_.reset(new EventSendingController(this));
+    plain_text_controller_.reset(new PlainTextController(this));
     text_input_controller_.reset(new TextInputController(this));
     navigation_controller_.reset(new TestNavigationController(this));
 
@@ -134,9 +144,13 @@ TestShell::TestShell()
 TestShell::~TestShell() {
   delegate_->RevokeDragDrop();
 
-  // Navigate to an empty page to fire all the destruction logic for the
-  // current page.
-  LoadURL(GURL("about:blank"));
+  // DevTools frontend page is supposed to be navigated only once and
+  // loading another URL in that Page is an error.
+  if (!dev_tools_client_.get()) {
+    // Navigate to an empty page to fire all the destruction logic for the
+    // current page.
+    LoadURL(GURL("about:blank"));
+  }
 
   // Call GC twice to clean up garbage.
   CallJSGC();
@@ -144,6 +158,8 @@ TestShell::~TestShell() {
 
   // Destroy the WebView before the TestWebViewDelegate.
   m_webViewHost.reset();
+
+  CloseDevTools();
 
   PlatformCleanUp();
 
@@ -153,7 +169,7 @@ TestShell::~TestShell() {
     printf("<stats>\n");
     if (table != NULL) {
       int counter_max = table->GetMaxCounters();
-      for (int index=0; index < counter_max; index++) {
+      for (int index = 0; index < counter_max; index++) {
         std::string name(table->GetRowName(index));
         if (name.length() > 0) {
           int value = table->GetRowValue(index);
@@ -163,6 +179,15 @@ TestShell::~TestShell() {
     }
     printf("</stats>\n");
   }
+}
+
+void TestShell::UpdateNavigationControls() {
+  int current_index = navigation_controller()->GetCurrentEntryIndex();
+  int max_index = navigation_controller()->GetEntryCount() - 1;
+
+  EnableUIControl(BACK_BUTTON, current_index > 0);
+  EnableUIControl(FORWARD_BUTTON, current_index < max_index);
+  EnableUIControl(STOP_BUTTON, is_loading_);
 }
 
 bool TestShell::CreateNewWindow(const GURL& starting_url,
@@ -195,9 +220,7 @@ void TestShell::Dump(TestShell* shell) {
   if ((shell == NULL) || ((params = shell->test_params()) == NULL))
     return;
 
-  WebKit::flushConsoleMessages();
-  // Echo the url in the output so we know we're not getting out of sync.
-  printf("#URL:%s\n", params->test_url.c_str());
+  WebScriptController::flushConsoleMessages();
 
   // Dump the requested representation.
   WebFrame* frame = shell->webView()->mainFrame();
@@ -248,7 +271,44 @@ void TestShell::Dump(TestShell* shell) {
       dumped_anything = true;
       WebViewHost* view_host = shell->webViewHost();
       view_host->webview()->layout();
-      view_host->Paint();
+      if (shell->layout_test_controller()->test_repaint()) {
+        WebSize view_size = view_host->webview()->size();
+        int width = view_size.width;
+        int height = view_size.height;
+        if (shell->layout_test_controller()->sweep_horizontally()) {
+          for (gfx::Rect column(0, 0, 1, height); column.x() < width;
+              column.Offset(1, 0)) {
+            view_host->PaintRect(column);
+          }
+        } else {
+          for (gfx::Rect line(0, 0, width, 1); line.y() < height;
+              line.Offset(0, 1)) {
+            view_host->PaintRect(line);
+          }
+        }
+      } else {
+        view_host->Paint();
+      }
+
+      // See if we need to draw the selection bounds rect. Selection bounds
+      // rect is the rect enclosing the (possibly transformed) selection.
+      // The rect should be drawn after everything is laid out and painted.
+      if (shell->layout_test_controller_->ShouldDumpSelectionRect()) {
+        // If there is a selection rect - draw a red 1px border enclosing rect
+        WebRect wr = frame->selectionBoundsRect();
+        if (!wr.isEmpty()) {
+          // Render a red rectangle bounding selection rect
+          SkPaint paint;
+          paint.setColor(0xFFFF0000);  // Fully opaque red
+          paint.setStyle(SkPaint::kStroke_Style);
+          paint.setFlags(SkPaint::kAntiAlias_Flag);
+          paint.setStrokeWidth(1.0f);
+          SkIRect rect;  // Bounding rect
+          rect.set(wr.x, wr.y, wr.x + wr.width, wr.y + wr.height);
+          view_host->canvas()->drawIRect(rect, paint);
+        }
+      }
+
       std::string md5sum = DumpImage(view_host->canvas(),
           params->pixel_file_name, params->pixel_hash);
       printf("#MD5:%s\n", md5sum.c_str());
@@ -279,10 +339,10 @@ std::string TestShell::DumpImage(skia::PlatformCanvas* canvas,
 #if defined(OS_WIN)
   bool discard_transparency = true;
   device.makeOpaque(0, 0, src_bmp.width(), src_bmp.height());
-#elif defined(OS_LINUX)
-  bool discard_transparency = true;
 #elif defined(OS_MACOSX)
   bool discard_transparency = false;
+#elif defined(OS_POSIX)
+  bool discard_transparency = true;
 #endif
 
   // Compute MD5 sum.  We should have done this before calling
@@ -414,20 +474,22 @@ void TestShell::ResetWebPreferences() {
         web_prefs_->minimum_logical_font_size = 9;
         web_prefs_->javascript_can_open_windows_automatically = true;
         web_prefs_->dom_paste_enabled = true;
-        web_prefs_->developer_extras_enabled = !layout_test_mode_;
+        web_prefs_->developer_extras_enabled = !layout_test_mode_ ||
+            developer_extras_enabled_;
+        web_prefs_->site_specific_quirks_enabled = true;
         web_prefs_->shrinks_standalone_images_to_fit = false;
         web_prefs_->uses_universal_detector = false;
         web_prefs_->text_areas_are_resizable = false;
-        web_prefs_->java_enabled = true;
+        web_prefs_->java_enabled = false;
         web_prefs_->allow_scripts_to_close_windows = false;
         web_prefs_->xss_auditor_enabled = false;
         // It's off by default for Chrome, but we don't want to
         // lose the coverage of dynamic font tests in webkit test.
         web_prefs_->remote_fonts_enabled = true;
         web_prefs_->local_storage_enabled = true;
-        web_prefs_->session_storage_enabled = true;
         web_prefs_->application_cache_enabled = true;
         web_prefs_->databases_enabled = true;
+        web_prefs_->allow_file_access_from_file_urls = true;
         // LayoutTests were written with Safari Mac in mind which does not allow
         // tabbing to links by default.
         web_prefs_->tabs_to_links = false;
@@ -453,6 +515,11 @@ bool TestShell::RemoveWindowFromList(gfx::NativeWindow window) {
   return false;
 }
 
+void TestShell::TestTimedOut() {
+  puts("#TEST_TIMED_OUT\n");
+  TestFinished();
+}
+
 void TestShell::Show(WebNavigationPolicy policy) {
   delegate_->show(policy);
 }
@@ -464,6 +531,7 @@ void TestShell::BindJSObjectsToWindow(WebFrame* frame) {
         frame, L"accessibilityController");
     layout_test_controller_->BindToJavascript(frame, L"layoutTestController");
     event_sending_controller_->BindToJavascript(frame, L"eventSender");
+    plain_text_controller_->BindToJavascript(frame, L"plainText");
     text_input_controller_->BindToJavascript(frame, L"textInputController");
   }
 }
@@ -508,6 +576,37 @@ WebView* TestShell::CreateWebView() {
   return new_win->webView();
 }
 
+void TestShell::InitializeDevToolsAgent(WebView* webView) {
+  DCHECK(!dev_tools_agent_.get());
+  dev_tools_agent_.reset(new TestShellDevToolsAgent(webView));
+}
+
+void TestShell::ShowDevTools() {
+  if (!devtools_shell_) {
+    FilePath dir_exe;
+    PathService::Get(base::DIR_EXE, &dir_exe);
+    FilePath devtools_path =
+        dir_exe.AppendASCII("resources/inspector/devtools.html");
+    TestShell* devtools_shell;
+    TestShell::CreateNewWindow(GURL(devtools_path.value()),
+                               &devtools_shell);
+    devtools_shell_ = devtools_shell->AsWeakPtr();
+    devtools_shell_->CreateDevToolsClient(dev_tools_agent_.get());
+  }
+  DCHECK(devtools_shell_);
+  devtools_shell_->Show(WebKit::WebNavigationPolicyNewWindow);
+}
+
+void TestShell::CloseDevTools() {
+  if (devtools_shell_)
+    devtools_shell_->DestroyWindow(devtools_shell_->mainWnd());
+}
+
+void TestShell::CreateDevToolsClient(TestShellDevToolsAgent *agent) {
+  dev_tools_client_.reset(new TestShellDevToolsClient(agent,
+                                                      webView()));
+}
+
 bool TestShell::IsSVGTestURL(const GURL& url) {
   return url.is_valid() && url.spec().find("W3C-SVG-1.1") != std::string::npos;
 }
@@ -532,6 +631,11 @@ void TestShell::LoadFile(const FilePath& file) {
 }
 
 void TestShell::LoadURL(const GURL& url) {
+  // Used as a sentinal for run_webkit_tests.py to know when to start reading
+  // test output for this test and so we know we're not getting out of sync.
+  if (layout_test_mode_ && test_params())
+    printf("#URL:%s\n", test_params()->test_url.c_str());
+
   LoadURLForFrame(url, std::wstring());
 }
 
@@ -556,13 +660,13 @@ bool TestShell::Navigate(const TestNavigationEntry& entry, bool reload) {
   // If we are reloading, then WebKit will use the state of the current page.
   // Otherwise, we give it the state to navigate to.
   if (reload) {
-    frame->reload();
+    frame->reload(false);
   } else if (!entry.GetContentState().empty()) {
-    DCHECK(entry.GetPageID() != -1);
+    DCHECK_NE(entry.GetPageID(), -1);
     frame->loadHistoryItem(
         webkit_glue::HistoryItemFromString(entry.GetContentState()));
   } else {
-    DCHECK(entry.GetPageID() == -1);
+    DCHECK_EQ(entry.GetPageID(), -1);
     frame->loadRequest(WebURLRequest(entry.GetURL()));
   }
 
@@ -616,16 +720,20 @@ void TestShell::SetFocus(WebWidgetHost* host, bool enable) {
   if (!layout_test_mode_) {
     InteractiveSetFocus(host, enable);
   } else {
+    // Simulate the effects of InteractiveSetFocus(), which includes calling
+    // both setFocus() and setIsActive().
     if (enable) {
       if (m_focusedWidgetHost != host) {
         if (m_focusedWidgetHost)
-            m_focusedWidgetHost->webwidget()->setFocus(false);
+          m_focusedWidgetHost->webwidget()->setFocus(false);
+        webView()->setIsActive(enable);
         host->webwidget()->setFocus(enable);
         m_focusedWidgetHost = host;
       }
     } else {
       if (m_focusedWidgetHost == host) {
         host->webwidget()->setFocus(enable);
+        webView()->setIsActive(enable);
         m_focusedWidgetHost = NULL;
       }
     }
@@ -644,14 +752,6 @@ void AppendToLog(const char* file, int line, const char* msg) {
 
 bool GetApplicationDirectory(FilePath* path) {
   return PathService::Get(base::DIR_EXE, path);
-}
-
-GURL GetInspectorURL() {
-  return GURL("test-shell-resource://inspector/inspector.html");
-}
-
-std::string GetUIResourceProtocol() {
-  return "test-shell-resource";
 }
 
 bool GetExeDirectory(FilePath* path) {
@@ -681,7 +781,10 @@ bool IsDefaultPluginEnabled() {
 }
 
 bool IsProtocolSupportedForMedia(const GURL& url) {
-  if (url.SchemeIsFile() || url.SchemeIs("http") || url.SchemeIs("https"))
+  if (url.SchemeIsFile() ||
+      url.SchemeIs("http") ||
+      url.SchemeIs("https") ||
+      url.SchemeIs("data"))
     return true;
   return false;
 }
@@ -690,7 +793,7 @@ std::wstring GetWebKitLocale() {
   return L"en-US";
 }
 
-void CloseIdleConnections() {
+void CloseCurrentConnections() {
   // Used in benchmarking,  Ignored for test_shell.
 }
 

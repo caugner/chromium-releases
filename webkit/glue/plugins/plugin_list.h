@@ -1,19 +1,20 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
-#define WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
+#ifndef WEBKIT_GLUE_PLUGINS_PLUGIN_LIST_H_
+#define WEBKIT_GLUE_PLUGINS_PLUGIN_LIST_H_
 
 #include <set>
 #include <string>
 #include <vector>
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/lock.h"
-#include "webkit/glue/webplugininfo.h"
-#include "webkit/glue/plugins/nphostapi.h"
+#include "third_party/npapi/bindings/nphostapi.h"
+#include "webkit/glue/plugins/webplugininfo.h"
 
 class GURL;
 
@@ -24,8 +25,7 @@ struct DefaultLazyInstanceTraits;
 
 }  // namespace base
 
-namespace NPAPI
-{
+namespace NPAPI {
 
 #define kDefaultPluginLibraryName FILE_PATH_LITERAL("default_plugin")
 #define kGearsPluginLibraryName FILE_PATH_LITERAL("gears")
@@ -33,9 +33,9 @@ namespace NPAPI
 class PluginInstance;
 
 // This struct holds entry points into a plugin.  The entry points are
-// slightly different between Linux and other platforms.
+// slightly different between Win/Mac and Unixes.
 struct PluginEntryPoints {
-#if !defined(OS_LINUX) && !defined(OS_FREEBSD)
+#if !defined(OS_POSIX) || defined(OS_MACOSX)
   NP_GetEntryPointsFunc np_getentrypoints;
 #endif
   NP_InitializeFunc np_initialize;
@@ -76,9 +76,9 @@ class PluginList {
   // Returns true iff the plugin list has been loaded already.
   bool PluginsLoaded();
 
-  // Clear the plugins_loaded_ bit to force a refresh next time we retrieve
-  // plugins.
-  void ResetPluginsLoaded();
+  // Cause the plugin list to refresh next time they are accessed, regardless
+  // of whether they are already loaded.
+  void RefreshPlugins();
 
   // Add/Remove an extra plugin to load when we actually do the loading.  Must
   // be called before the plugins have been loaded.
@@ -92,6 +92,12 @@ class PluginList {
   // function pointers.  An internal plugin must be registered before it can
   // be loaded using PluginList::LoadPlugin().
   void RegisterInternalPlugin(const PluginVersionInfo& info);
+
+  // Removes a specified internal plugin from the list. The search will match
+  // on the path from the version info previously registered.
+  //
+  // This is generally only necessary for tests.
+  void UnregisterInternalPlugin(const FilePath& path);
 
   // Creates a WebPluginInfo structure given a plugin's path.  On success
   // returns true, with the information being put into "info".  If it's an
@@ -109,8 +115,11 @@ class PluginList {
   // Shutdown all plugins.  Should be called at process teardown.
   void Shutdown();
 
-  // Get all the plugins
+  // Get all the plugins.
   void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
+
+  // Get all the enabled plugins.
+  void GetEnabledPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
 
   // Returns true if a plugin is found for the given url and mime type.
   // The mime type which corresponds to the URL is optionally returned
@@ -123,14 +132,27 @@ class PluginList {
                      WebPluginInfo* info,
                      std::string* actual_mime_type);
 
-  // Get plugin info by plugin path. Returns true if the plugin is found and
-  // WebPluginInfo has been filled in |info|.
+  // Get plugin info by plugin path (including disabled plugins). Returns true
+  // if the plugin is found and WebPluginInfo has been filled in |info|.
   bool GetPluginInfoByPath(const FilePath& plugin_path,
                            WebPluginInfo* info);
 
   // Load a specific plugin with full path.
   void LoadPlugin(const FilePath& filename,
                   std::vector<WebPluginInfo>* plugins);
+
+  // Enable a specific plugin, specified by path. Returns |true| iff a plugin
+  // currently in the plugin list was actually enabled as a result; regardless
+  // of return value, if a plugin is found in the future with the given name, it
+  // will be enabled. Note that plugins are enabled by default as far as
+  // |PluginList| is concerned.
+  bool EnablePlugin(const FilePath& filename);
+
+  // Disable a specific plugin, specified by path. Returns |true| iff a plugin
+  // currently in the plugin list was actually disabled as a result; regardless
+  // of return value, if a plugin is found in the future with the given name, it
+  // will be disabled.
+  bool DisablePlugin(const FilePath& filename);
 
  private:
   // Constructors are private for singletons
@@ -139,9 +161,13 @@ class PluginList {
   // Load all plugins from the default plugins directory
   void LoadPlugins(bool refresh);
 
-  // Load all plugins from a specific directory
+  // Load all plugins from a specific directory.
+  // |plugins| is updated with loaded plugin information.
+  // |visited_plugins| is updated with paths to all plugins that were considered
+  //   (including those we didn't load)
   void LoadPluginsFromDir(const FilePath& path,
-                          std::vector<WebPluginInfo>* plugins);
+                          std::vector<WebPluginInfo>* plugins,
+                          std::set<FilePath>* visited_plugins);
 
   // Returns true if we should load the given plugin, or false otherwise.
   // plugins is the list of plugins we have crawled in the current plugin
@@ -149,14 +175,20 @@ class PluginList {
   bool ShouldLoadPlugin(const WebPluginInfo& info,
                         std::vector<WebPluginInfo>* plugins);
 
-  // Find a plugin by mime type.
+  // Find a plugin by mime type; only searches enabled plugins.
   // The allow_wildcard parameter controls whether this function returns
   // plugins which support wildcard mime types (* as the mime type)
   bool FindPlugin(const std::string &mime_type,
                   bool allow_wildcard,
                   WebPluginInfo* info);
 
-  // Find a plugin by extension. Returns the corresponding mime type.
+  // Just like |FindPlugin| but it only looks at the disabled plug-ins.
+  bool FindDisabledPlugin(const std::string &mime_type,
+                          bool allow_wildcard,
+                          WebPluginInfo* info);
+
+  // Find a plugin by extension; only searches enabled plugins. Returns the
+  // corresponding mime type.
   bool FindPlugin(const GURL &url,
                   std::string* actual_mime_type,
                   WebPluginInfo* info);
@@ -193,6 +225,11 @@ class PluginList {
 #if defined(OS_WIN)
   // true if we shouldn't load the new WMP plugin.
   bool dont_load_new_wmp_;
+
+  // Loads plugins registered under HKCU\Software\MozillaPlugins and
+  // HKLM\Software\MozillaPlugins.
+  void LoadPluginsFromRegistry(std::vector<WebPluginInfo>* plugins,
+                               std::set<FilePath>* visited_plugins);
 #endif
 
   //
@@ -200,6 +237,9 @@ class PluginList {
   //
 
   bool plugins_loaded_;
+
+  // If true, we reload plugins even if they've been loaded already.
+  bool plugins_need_refresh_;
 
   // Contains information about the available plugins.
   std::vector<WebPluginInfo> plugins_;
@@ -213,6 +253,9 @@ class PluginList {
   // Holds information about internal plugins.
   std::vector<PluginVersionInfo> internal_plugins_;
 
+  // Path names of plugins to disable (the default is to enable them all).
+  std::set<FilePath> disabled_plugins_;
+
   // Need synchronization for the above members since this object can be
   // accessed on multiple threads.
   Lock lock_;
@@ -222,6 +265,6 @@ class PluginList {
   DISALLOW_COPY_AND_ASSIGN(PluginList);
 };
 
-} // namespace NPAPI
+}  // namespace NPAPI
 
-#endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
+#endif  // WEBKIT_GLUE_PLUGINS_PLUGIN_LIST_H_

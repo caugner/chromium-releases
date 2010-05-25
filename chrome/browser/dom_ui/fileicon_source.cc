@@ -4,10 +4,11 @@
 
 #include "chrome/browser/dom_ui/fileicon_source.h"
 
-#include "app/gfx/codec/png_codec.h"
-#include "base/string_util.h"
+#include "base/callback.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/time_format.h"
+#include "gfx/codec/png_codec.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 
@@ -22,6 +23,7 @@ FileIconSource::~FileIconSource() {
 }
 
 void FileIconSource::StartDataRequest(const std::string& path,
+                                      bool is_off_the_record,
                                       int request_id) {
   IconManager* im = g_browser_process->icon_manager();
 

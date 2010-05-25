@@ -1,17 +1,17 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/drag_utils.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "views/controls/button/text_button.h"
@@ -50,9 +50,8 @@ void SetURLAndDragImage(const GURL& url,
   // Render the image.
   gfx::Canvas canvas(prefsize.width(), prefsize.height(), false);
   button.Paint(&canvas, true);
-  SetDragImageOnDataObject(canvas, prefsize.width(), prefsize.height(),
-                           prefsize.width() / 2, prefsize.height() / 2,
-                           data);
+  SetDragImageOnDataObject(canvas, prefsize,
+      gfx::Point(prefsize.width() / 2, prefsize.height() / 2), data);
 }
 
 void CreateDragImageForFile(const FilePath::StringType& file_name,
@@ -88,8 +87,9 @@ void CreateDragImageForFile(const FilePath::StringType& file_name,
                        width, font.height(), gfx::Canvas::TEXT_ALIGN_CENTER);
 #endif
 
-  SetDragImageOnDataObject(canvas, width, height, width / 2,
-                           kLinkDragImageVPadding, data_object);
+  SetDragImageOnDataObject(canvas, gfx::Size(width, height),
+                           gfx::Point(width / 2, kLinkDragImageVPadding),
+                           data_object);
 }
 
 } // namespace drag_utils

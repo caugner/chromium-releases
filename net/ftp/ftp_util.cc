@@ -9,6 +9,8 @@
 #include "base/logging.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 
 // For examples of Unix<->VMS path conversions, see the unit test file. On VMS
 // a path looks differently depending on whether it's a file or directory.
@@ -98,9 +100,111 @@ std::string FtpUtil::VMSPathToUnix(const std::string& vms_path) {
   std::replace(result.begin(), result.end(), ']', '/');
 
   // Make sure the result doesn't end with a slash.
-  if (result[result.length() - 1] == '/')
+  if (result.length() && result[result.length() - 1] == '/')
     result = result.substr(0, result.length() - 1);
 
+  return result;
+}
+
+// static
+bool FtpUtil::ThreeLetterMonthToNumber(const string16& text, int* number) {
+  const static char* months[] = { "jan", "feb", "mar", "apr", "may", "jun",
+                                  "jul", "aug", "sep", "oct", "nov", "dec" };
+
+  for (size_t i = 0; i < arraysize(months); i++) {
+    if (LowerCaseEqualsASCII(text, months[i])) {
+      *number = i + 1;
+      return true;
+    }
+  }
+
+  // Special cases for directory listings in German (other three-letter month
+  // abbreviations are the same as in English). Note that we don't need to do
+  // a case-insensitive compare here. Only "ls -l" style listings may use
+  // localized month names, and they will always start capitalized. Also,
+  // converting non-ASCII characters to lowercase would be more complicated.
+  if (text == UTF8ToUTF16("M\xc3\xa4r")) {
+    // The full month name is M-(a-umlaut)-rz (March), which is M-(a-umlaut)r
+    // when abbreviated.
+    *number = 3;
+    return true;
+  }
+  if (text == ASCIIToUTF16("Mai")) {
+    *number = 5;
+    return true;
+  }
+  if (text == ASCIIToUTF16("Okt")) {
+    *number = 10;
+    return true;
+  }
+  if (text == ASCIIToUTF16("Dez")) {
+    *number = 12;
+    return true;
+  }
+
+  return false;
+}
+
+// static
+bool FtpUtil::LsDateListingToTime(const string16& month, const string16& day,
+                                  const string16& rest,
+                                  const base::Time& current_time,
+                                  base::Time* result) {
+  base::Time::Exploded time_exploded = { 0 };
+
+  if (!ThreeLetterMonthToNumber(month, &time_exploded.month))
+    return false;
+
+  if (!StringToInt(day, &time_exploded.day_of_month))
+    return false;
+
+  if (!StringToInt(rest, &time_exploded.year)) {
+    // Maybe it's time. Does it look like time (MM:HH)?
+    if (rest.length() != 5 || rest[2] != ':')
+      return false;
+
+    if (!StringToInt(rest.substr(0, 2), &time_exploded.hour))
+      return false;
+
+    if (!StringToInt(rest.substr(3, 2), &time_exploded.minute))
+      return false;
+
+    // Guess the year.
+    base::Time::Exploded current_exploded;
+    current_time.LocalExplode(&current_exploded);
+
+    // If it's not possible for the parsed date to be in the current year,
+    // use the previous year.
+    if (time_exploded.month > current_exploded.month ||
+        (time_exploded.month == current_exploded.month &&
+         time_exploded.day_of_month > current_exploded.day_of_month)) {
+      time_exploded.year = current_exploded.year - 1;
+    } else {
+      time_exploded.year = current_exploded.year;
+    }
+  }
+
+  // We don't know the time zone of the listing, so just use local time.
+  *result = base::Time::FromLocalExploded(time_exploded);
+  return true;
+}
+
+// static
+string16 FtpUtil::GetStringPartAfterColumns(const string16& text, int columns) {
+  size_t pos = 0;
+
+  for (int i = 0; i < columns; i++) {
+    // Skip the leading whitespace.
+    while (pos < text.length() && isspace(text[pos]))
+      pos++;
+
+    // Skip the actual text of i-th column.
+    while (pos < text.length() && !isspace(text[pos]))
+      pos++;
+  }
+
+  string16 result(text.substr(pos));
+  TrimWhitespace(result, TRIM_ALL, &result);
   return result;
 }
 

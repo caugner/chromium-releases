@@ -20,24 +20,8 @@ for localizable strings
     <output filename="chrome_frame_resources.pak" type="data_package" />
   </outputs>
   <release seq="1">
-    <messages>
-      <!-- TODO(slightlyoff): should these be in chrome_frame_strings.grd
-             instead?  -->
-      <message name="IDS_PROJNAME">
-        ChromeTab
-      </message>
-      <message name="IDS_VERSIONMISMATCH_HEADER">
-        ChromeFrame Update.
-      </message>
-      <message name="IDS_VERSIONMISMATCH">
-        ChromeFrame has been updated. Please restart your browser. Chrome version: <ph name="TODO_0001">%ls<ex>TODO</ex></ph>, Chrome Frame version: <ph name="TODO_0002">%ls<ex>TODO</ex></ph>
-      </message>
-      <message name="IDS_VERSIONUNKNOWN">
-        Very old
-      </message>
-    </messages>
-    <structures first_id="50000">
-      <structure name="IDD_FIND_DIALOG" file="structured_resources.rc" type="dialog" >
+    <structures first_id="50005">
+      <structure name="IDR_CHROME_FRAME_IE_FULL_TAB" file="structured_resources.rc" type="accelerators" >
       </structure>
     </structures>
     <includes>

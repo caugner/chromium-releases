@@ -1,3 +1,6 @@
+Name: SQLite
+URL: http://sqlite.org/
+
 Instructions for importing a new release of SQLite from sqlite.org.
 
 Note: our current base version is 3.6.18.
@@ -54,6 +57,8 @@ preload-cache.patch
 safe-tolower.patch
 sqlite-poison.patch
 fts2.patch
+icu-regexp.patch
+attach-integer.patch
 
 So, e.g. you could do this to apply all our patches to vanilla SQLite:
 
@@ -63,6 +68,8 @@ patch -p0 < ../sqlite/preload-cache.patch
 patch -p0 < ../sqlite/safe-tolower.patch
 patch -p0 < ../sqlite/sqlite-poison.patch
 patch -p0 < ../sqlite/fts2.patch
+patch -p0 < ../sqlite/icu-regexp.patch
+patch -p0 < ../sqlite/attach-integer.patch
 
 This will only be the case if all changes we make also update the corresponding
 patch files. Therefore please remember to do that whenever you make a change!
@@ -95,13 +102,16 @@ Chris Evans <cevans@google.com>, Oct 1, 2009
 
 --------------------------------------------
 
-As of Oct 1, 2009, these are our changes from sqlite_vendor:
+As of Dec 16, 2009, these are our changes from sqlite_vendor:
 
+ - A fix for a crash passing an integer expression to ATTACH / DETACH. See
+ attach-integer.patch
+ - A fix for a crash mis-calling the REGEXP() function of the ICU extension.
+ See icu-regexp.patch
  - A large number of fts2 robustness fixes against corrupt data in its metadata
    tables.
  - fts2.c disables fts2_tokenizer().
  - sqlite3Poison() in src/btree.c.
- - BEGIN defaults to BEGIN IMMEDIATE in parse.y.
  - Tweak to SQLITE_EXTENSION_INIT* in sqlite3ext.h.
    - That implied a change in src/test_autoext.c for testing.
  - Added fts.test and fts1.test in tests, modified quick.test.
@@ -141,6 +151,18 @@ Changes from Chrome:
  - Added a new function chromium_sqlite3_initialize_win_sqlite3_file()
    at the end of os_win.c. It allows the Windows-specific Chromium VFS
    to reuse most of the win32 SQLite VFS.
- - Added a new function initUnixFile() and made fillInUnixFile()
-   non-static in os_unix.c. It allows the Linux-specific Chromium VFS
-   to reuse most of the unix SQLite VFS.
+ - Added a new function
+   chromium_sqlite3_initialize_unix_sqlite3_file() and made
+   fillInUnixFile() non-static in os_unix.c. It allows the
+   Linux-specific Chromium VFS to reuse most of the unix SQLite VFS.
+ - Exposed three functions that deal with unused file descriptors in
+   os_unix.c, to allow Chromium's Posix VFS implementation in
+   WebKit/WebCore/platform/sql/chromium/SQLiteFileSystemChromiumPosix.cpp
+   to correctly implement the "unused file descriptors" logic in the
+   xDlOpen() method. The new functions are
+   chromium_sqlite3_get_reusable_file_handle(),
+   chromium_sqlite3_update_reusable_file_handle() and
+   chromium_sqlite3_destroy_reusable_file_handle(). Also, added the
+   chromium_sqlite3_fill_in_unix_sqlite3_file() function that calls
+   fillInUnixFile(), which will be made static again as soon as a
+   WebKit patch using the new function lands.

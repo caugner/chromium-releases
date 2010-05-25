@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,16 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
+
 #include "app/l10n_util.h"
 #include "app/message_box_flags.h"
 #include "app/win_util.h"
 #include "base/command_line.h"
+#include "base/i18n/rtl.h"
 #include "base/path_service.h"
 #include "base/win_util.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/views/uninstall_view.h"
@@ -28,33 +32,29 @@
 #include "views/focus/accelerator_handler.h"
 #include "views/window/window.h"
 
-namespace Platform {
-
 void WillInitializeMainMessageLoop(const MainFunctionParams& parameters) {
+  OleInitialize(NULL);
 }
 
 void DidEndMainMessageLoop() {
+  OleUninitialize();
 }
 
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
-  DWORD len = ::GetEnvironmentVariableW(env_vars::kNoOOBreakpad, NULL, 0);
+  DWORD len = ::GetEnvironmentVariableW(
+      ASCIIToWide(env_vars::kNoOOBreakpad).c_str() , NULL, 0);
   metrics->RecordBreakpadRegistration((len == 0));
   metrics->RecordBreakpadHasDebugger(TRUE == ::IsDebuggerPresent());
 }
 
-}  // namespace Platform
-
-// Displays a warning message if the user is running chrome on windows 2000.
-// Returns true if the OS is win2000, false otherwise.
-bool CheckForWin2000() {
+void WarnAboutMinimumSystemRequirements() {
   if (win_util::GetWinVersion() == win_util::WINVERSION_2000) {
+    // Display a warning message if the user is running chrome on Windows 2000.
     const std::wstring text = l10n_util::GetString(IDS_UNSUPPORTED_OS_WIN2000);
     const std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
     win_util::MessageBox(NULL, text, caption,
                          MB_OK | MB_ICONWARNING | MB_TOPMOST);
-    return true;
   }
-  return false;
 }
 
 int AskForUninstallConfirmation() {
@@ -109,11 +109,13 @@ int DoUninstallTasks(bool chrome_still_running) {
 // chrome executable's lifetime.
 void PrepareRestartOnCrashEnviroment(const CommandLine &parsed_command_line) {
   // Clear this var so child processes don't show the dialog by default.
-  ::SetEnvironmentVariableW(env_vars::kShowRestart, NULL);
+  ::SetEnvironmentVariableW(ASCIIToWide(env_vars::kShowRestart).c_str(), NULL);
 
   // For non-interactive tests we don't restart on crash.
-  if (::GetEnvironmentVariableW(env_vars::kHeadless, NULL, 0))
+  if (::GetEnvironmentVariableW(ASCIIToWide(env_vars::kHeadless).c_str(),
+                                NULL, 0)) {
     return;
+  }
 
   // If the known command-line test options are used we don't create the
   // environment block which means we don't get the restart dialog.
@@ -130,12 +132,13 @@ void PrepareRestartOnCrashEnviroment(const CommandLine &parsed_command_line) {
   dlg_strings.append(L"|");
   dlg_strings.append(l10n_util::GetString(IDS_CRASH_RECOVERY_CONTENT));
   dlg_strings.append(L"|");
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    dlg_strings.append(env_vars::kRtlLocale);
+  if (base::i18n::IsRTL())
+    dlg_strings.append(ASCIIToWide(env_vars::kRtlLocale));
   else
-    dlg_strings.append(env_vars::kLtrLocale);
+    dlg_strings.append(ASCIIToWide(env_vars::kLtrLocale));
 
-  ::SetEnvironmentVariableW(env_vars::kRestartInfo, dlg_strings.c_str());
+  ::SetEnvironmentVariableW(ASCIIToWide(env_vars::kRestartInfo).c_str(),
+                            dlg_strings.c_str());
 }
 
 // This method handles the --hide-icons and --show-icons command line options
@@ -197,15 +200,4 @@ bool CheckMachineLevelInstall() {
     }
   }
   return false;
-}
-
-bool DoUpgradeTasks(const CommandLine& command_line) {
-  if (!Upgrade::SwapNewChromeExeIfPresent())
-    return false;
-  // At this point the chrome.exe has been swapped with the new one.
-  if (!Upgrade::RelaunchChromeBrowser(command_line)) {
-    // The re-launch fails. Feel free to panic now.
-    NOTREACHED();
-  }
-  return true;
 }

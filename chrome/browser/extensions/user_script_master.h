@@ -5,36 +5,29 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_MASTER_H_
 #define CHROME_BROWSER_EXTENSIONS_USER_SCRIPT_MASTER_H_
 
-#include <vector>
-
-#include "base/directory_watcher.h"
 #include "base/file_path.h"
 #include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/notification_registrar.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
-class MessageLoop;
 namespace base {
 class StringPiece;
 }
 
+class Extension;
+class Profile;
+
 // Manages a segment of shared memory that contains the user scripts the user
 // has installed.  Lives on the UI thread.
 class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
-                         public DirectoryWatcher::Delegate,
                          public NotificationObserver {
  public:
-  // For testability, the constructor takes the MessageLoop to run the
-  // script-reloading worker on as well as the path the scripts live in.
-  // These are normally the file thread and a directory inside the profile.
-  UserScriptMaster(MessageLoop* worker, const FilePath& script_dir);
-  virtual ~UserScriptMaster();
-
-  // Add a watched directory. All scripts will be reloaded when any file in
-  // this directory changes.
-  void AddWatchedPath(const FilePath& path);
+  // For testability, the constructor takes the path the scripts live in.
+  // This is normally a directory inside the profile.
+  explicit UserScriptMaster(const FilePath& script_dir, Profile* profile);
 
   // Kicks off a process on the file thread to reload scripts from disk
   // into a new chunk of shared memory and notify renderers.
@@ -54,6 +47,11 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   // Returns the path to the directory user scripts are stored in.
   FilePath user_script_dir() const { return user_script_dir_; }
 
+ protected:
+  friend class base::RefCountedThreadSafe<UserScriptMaster>;
+
+  virtual ~UserScriptMaster();
+
  private:
   FRIEND_TEST(UserScriptMasterTest, Parse1);
   FRIEND_TEST(UserScriptMasterTest, Parse2);
@@ -62,6 +60,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   FRIEND_TEST(UserScriptMasterTest, Parse5);
   FRIEND_TEST(UserScriptMasterTest, Parse6);
 
+ public:
   // We reload user scripts on the file thread to prevent blocking the UI.
   // ScriptReloader lives on the file thread and does the reload
   // work, and then sends a message back to its master with a new SharedMemory*.
@@ -82,7 +81,7 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
 
     // Start a scan for scripts.
     // Will always send a message to the master upon completion.
-    void StartScan(MessageLoop* work_loop, const FilePath& script_dir,
+    void StartScan(const FilePath& script_dir,
                    const UserScriptList& external_scripts);
 
     // The master is going away; don't call it back.
@@ -91,6 +90,10 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
     }
 
    private:
+    friend class base::RefCountedThreadSafe<UserScriptMaster::ScriptReloader>;
+
+    ~ScriptReloader() {}
+
     // Where functions are run:
     //    master          file
     //   StartScan   ->  RunScan
@@ -114,14 +117,12 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
 
     // The message loop to call our master back on.
     // Expected to always outlive us.
-    MessageLoop* master_message_loop_;
+    ChromeThread::ID master_thread_id_;
 
     DISALLOW_COPY_AND_ASSIGN(ScriptReloader);
   };
 
-  // DirectoryWatcher::Delegate implementation.
-  virtual void OnDirectoryChanged(const FilePath& path);
-
+ private:
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -133,14 +134,6 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   // The directories containing user scripts.
   FilePath user_script_dir_;
 
-  // The watcher watches the profile's user scripts directory for new scripts.
-  std::vector<DirectoryWatcher*> dir_watchers_;
-
-  // The MessageLoop that the scanner worker runs on.
-  // Typically the file thread; configurable for testing.
-  MessageLoop* worker_loop_;
-
-  // ScriptReloader (in another thread) reloads script off disk.
   // We hang on to our pointer to know if we've already got one running.
   scoped_refptr<ScriptReloader> script_reloader_;
 
@@ -158,6 +151,9 @@ class UserScriptMaster : public base::RefCountedThreadSafe<UserScriptMaster>,
   // that we're currently mid-scan and then start over again once the scan
   // finishes.  This boolean tracks whether another scan is pending.
   bool pending_scan_;
+
+  // The profile for which the scripts managed here are installed.
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptMaster);
 };

@@ -15,15 +15,19 @@
 // A generic interface to memory. This object is reference counted because one
 // of its two subclasses own the data they carry, and we need to have
 // heterogeneous containers of these two types of memory.
-class RefCountedMemory : public base::RefCountedThreadSafe< RefCountedMemory > {
+class RefCountedMemory : public base::RefCountedThreadSafe<RefCountedMemory> {
  public:
-  virtual ~RefCountedMemory() {}
-
-  // Retrieves a pointer to the beginning of the data we point to.
+  // Retrieves a pointer to the beginning of the data we point to. If the data
+  // is empty, this will return NULL.
   virtual const unsigned char* front() const = 0;
 
   // Size of the memory pointed to.
   virtual size_t size() const = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<RefCountedMemory>;
+
+  virtual ~RefCountedMemory() {}
 };
 
 // An implementation of RefCountedMemory, where the ref counting does not
@@ -64,7 +68,11 @@ class RefCountedBytes : public RefCountedMemory {
   RefCountedBytes(const std::vector<unsigned char>& initializer)
       : data(initializer) {}
 
-  virtual const unsigned char* front() const { return &data.front(); }
+  virtual const unsigned char* front() const {
+    // STL will assert if we do front() on an empty vector, but calling code
+    // expects a NULL.
+    return size() ? &data.front() : NULL;
+  }
   virtual size_t size() const { return data.size(); }
 
   std::vector<unsigned char> data;

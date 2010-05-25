@@ -7,6 +7,7 @@
 #include "chrome/test/sync/engine/mock_server_connection.h"
 
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/util/character_set_converters.h"
 #include "chrome/test/sync/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,11 +26,14 @@ using sync_pb::CommitResponse_EntryResponse;
 using sync_pb::GetUpdatesMessage;
 using sync_pb::SyncEntity;
 using syncable::DirectoryManager;
+using syncable::FIRST_REAL_MODEL_TYPE;
+using syncable::MODEL_TYPE_COUNT;
+using syncable::ModelType;
 using syncable::ScopedDirLookup;
 using syncable::WriteTransaction;
 
 MockConnectionManager::MockConnectionManager(DirectoryManager* dirmgr,
-                                             PathString name)
+                                             const string& name)
     : ServerConnectionManager("unused", 0, false, "version", "id"),
       conflict_all_commits_(false),
       conflict_n_commits_(0),
@@ -41,27 +45,30 @@ MockConnectionManager::MockConnectionManager(DirectoryManager* dirmgr,
       fail_next_postbuffer_(false),
       directory_manager_(dirmgr),
       directory_name_(name),
-      mid_commit_callback_function_(NULL),
+      mid_commit_callback_(NULL),
       mid_commit_observer_(NULL),
       throttling_(false),
+      fail_with_auth_invalid_(false),
       fail_non_periodic_get_updates_(false),
       client_command_(NULL),
-      next_position_in_parent_(2) {
+      next_position_in_parent_(2),
+      use_legacy_bookmarks_protocol_(false),
+      num_get_updates_requests_(0) {
     server_reachable_ = true;
 };
 
 MockConnectionManager::~MockConnectionManager() {
   for (size_t i = 0; i < commit_messages_.size(); i++)
     delete commit_messages_[i];
+  delete mid_commit_callback_;
 }
 
 void MockConnectionManager::SetCommitTimeRename(string prepend) {
   commit_time_rename_prepended_string_ = prepend;
 }
 
-void MockConnectionManager::SetMidCommitCallbackFunction(
-    MockConnectionManager::TestCallbackFunction callback) {
-  mid_commit_callback_function_ = callback;
+void MockConnectionManager::SetMidCommitCallback(Closure* callback) {
+  mid_commit_callback_ = callback;
 }
 
 void MockConnectionManager::SetMidCommitObserver(
@@ -70,10 +77,12 @@ void MockConnectionManager::SetMidCommitObserver(
 }
 
 bool MockConnectionManager::PostBufferToPath(const PostBufferParams* params,
-                                             const string& path,
-                                             const string& auth_token) {
+    const string& path,
+    const string& auth_token,
+    browser_sync::ScopedServerStatusWatcher* watcher) {
   ClientToServerMessage post;
   CHECK(post.ParseFromString(params->buffer_in));
+  last_request_.CopyFrom(post);
   client_stuck_ = post.sync_problem_detected();
   ClientToServerResponse response;
   response.Clear();
@@ -123,17 +132,19 @@ bool MockConnectionManager::PostBufferToPath(const PostBufferParams* params,
   }
 
   {
-    AutoLock throttle_lock(throttle_lock_);
+    AutoLock lock(response_code_override_lock_);
     if (throttling_) {
-        response.set_error_code(ClientToServerResponse::THROTTLED);
-        throttling_ = false;
+      response.set_error_code(ClientToServerResponse::THROTTLED);
+      throttling_ = false;
     }
+
+    if (fail_with_auth_invalid_)
+      response.set_error_code(ClientToServerResponse::AUTH_INVALID);
   }
 
   response.SerializeToString(params->buffer_out);
-  if (mid_commit_callback_function_) {
-    if (mid_commit_callback_function_(directory))
-      mid_commit_callback_function_ = 0;
+  if (mid_commit_callback_) {
+    mid_commit_callback_->Run();
   }
   if (mid_commit_observer_) {
     mid_commit_observer_->Observe();
@@ -154,18 +165,24 @@ void MockConnectionManager::ResetUpdates() {
   updates_.Clear();
 }
 
-namespace {
+void MockConnectionManager::AddDefaultBookmarkData(sync_pb::SyncEntity* entity,
+                                                   bool is_folder) {
+  if (use_legacy_bookmarks_protocol_) {
+    sync_pb::SyncEntity_BookmarkData* data = entity->mutable_bookmarkdata();
+    data->set_bookmark_folder(is_folder);
 
-void AddDefaultBookmarkData(SyncEntity* entity, bool is_folder) {
-  sync_pb::SyncEntity_BookmarkData* data = entity->mutable_bookmarkdata();
-  data->set_bookmark_folder(is_folder);
-
-  if (!is_folder) {
-    data->set_bookmark_url("http://google.com");
+    if (!is_folder) {
+      data->set_bookmark_url("http://google.com");
+    }
+  } else {
+    entity->set_folder(is_folder);
+    entity->mutable_specifics()->MutableExtension(sync_pb::bookmark);
+    if (!is_folder) {
+      entity->mutable_specifics()->MutableExtension(sync_pb::bookmark)->
+          set_url("http://google.com");
+    }
   }
 }
-
-}  // namespace
 
 SyncEntity* MockConnectionManager::AddUpdateDirectory(int id,
                                                       int parent_id,
@@ -201,6 +218,7 @@ SyncEntity* MockConnectionManager::AddUpdateFull(string id, string parent_id,
   SyncEntity* ent = updates_.add_entries();
   ent->set_id_string(id);
   ent->set_parent_id_string(parent_id);
+  ent->set_non_unique_name(name);
   ent->set_name(name);
   ent->set_version(version);
   ent->set_sync_timestamp(sync_ts);
@@ -208,8 +226,7 @@ SyncEntity* MockConnectionManager::AddUpdateFull(string id, string parent_id,
   ent->set_ctime(1);
   ent->set_position_in_parent(GeneratePositionInParent());
   AddDefaultBookmarkData(ent, is_dir);
-  if (sync_ts > updates_.newest_timestamp())
-    updates_.set_newest_timestamp(sync_ts);
+
   return ent;
 }
 
@@ -239,8 +256,12 @@ void MockConnectionManager::SetLastUpdateOriginatorFields(
   GetMutableLastUpdate()->set_originator_client_item_id(entry_id);
 }
 
-void MockConnectionManager::SetLastUpdateSingletonTag(const string& tag) {
-  GetMutableLastUpdate()->set_singleton_tag(tag);
+void MockConnectionManager::SetLastUpdateServerTag(const string& tag) {
+  GetMutableLastUpdate()->set_server_defined_unique_tag(tag);
+}
+
+void MockConnectionManager::SetLastUpdateClientTag(const string& tag) {
+  GetMutableLastUpdate()->set_client_defined_unique_tag(tag);
 }
 
 void MockConnectionManager::SetLastUpdatePosition(int64 server_position) {
@@ -251,8 +272,8 @@ void MockConnectionManager::SetNewTimestamp(int64 ts) {
   updates_.set_new_timestamp(ts);
 }
 
-void MockConnectionManager::SetNewestTimestamp(int64 ts) {
-  updates_.set_newest_timestamp(ts);
+void MockConnectionManager::SetChangesRemaining(int64 timestamp) {
+  updates_.set_changes_remaining(timestamp);
 }
 
 void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
@@ -260,10 +281,34 @@ void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
   CHECK(csm->has_get_updates());
   ASSERT_EQ(csm->message_contents(), ClientToServerMessage::GET_UPDATES);
   const GetUpdatesMessage& gu = csm->get_updates();
+  num_get_updates_requests_++;
   EXPECT_TRUE(gu.has_from_timestamp());
   if (fail_non_periodic_get_updates_) {
     EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::PERIODIC,
               gu.caller_info().source());
+  }
+
+  // Verify that the GetUpdates filter sent by the Syncer matches the test
+  // expectation.
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    ModelType model_type = syncable::ModelTypeFromInt(i);
+    EXPECT_EQ(expected_filter_[i],
+        IsModelTypePresentInSpecifics(gu.requested_types(), model_type))
+        << "Syncer requested_types differs from test expectation.";
+  }
+
+  // Verify that the items we're about to send back to the client are of
+  // the types requested by the client.  If this fails, it probably indicates
+  // a test bug.
+  EXPECT_TRUE(gu.fetch_folders());
+  EXPECT_TRUE(gu.has_requested_types());
+  for (int i = 0; i < updates_.entries_size(); ++i) {
+    if (!updates_.entries(i).deleted()) {
+      ModelType entry_type = syncable::GetModelType(updates_.entries(i));
+      EXPECT_TRUE(
+          IsModelTypePresentInSpecifics(gu.requested_types(), entry_type))
+          << "Syncer did not request updates being provided by the test.";
+    }
   }
 
   // TODO(sync): filter results dependant on timestamp? or check limits?
@@ -271,8 +316,10 @@ void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
   ResetUpdates();
 }
 
-void MockConnectionManager::ProcessAuthenticate(ClientToServerMessage* csm,
-    ClientToServerResponse* response, const std::string& auth_token){
+void MockConnectionManager::ProcessAuthenticate(
+    ClientToServerMessage* csm,
+    ClientToServerResponse* response,
+    const std::string& auth_token) {
   ASSERT_EQ(csm->message_contents(), ClientToServerMessage::AUTHENTICATE);
   EXPECT_FALSE(auth_token.empty());
 
@@ -376,14 +423,13 @@ SyncEntity* MockConnectionManager::AddUpdateBookmark(
 }
 
 void MockConnectionManager::AddUpdateExtendedAttributes(SyncEntity* ent,
-    PathString* xattr_key, syncable::Blob* xattr_value, int xattr_count) {
+    string* xattr_key, syncable::Blob* xattr_value, int xattr_count) {
   sync_pb::ExtendedAttributes* mutable_extended_attributes =
       ent->mutable_extended_attributes();
   for (int i = 0; i < xattr_count; i++) {
     sync_pb::ExtendedAttributes_ExtendedAttribute* extended_attribute =
         mutable_extended_attributes->add_extendedattribute();
-    extended_attribute->set_key(static_cast<const string&>
-        (browser_sync::ToUTF8(xattr_key[i])));
+    extended_attribute->set_key(xattr_key[i]);
     SyncerProtoUtil::CopyBlobIntoProtoBytes(xattr_value[i],
         extended_attribute->mutable_value());
   }
@@ -400,10 +446,36 @@ const CommitMessage& MockConnectionManager::last_sent_commit() const {
 }
 
 void MockConnectionManager::ThrottleNextRequest(
-    ThrottleRequestVisitor* visitor) {
-  AutoLock lock(throttle_lock_);
+    ResponseCodeOverrideRequestor* visitor) {
+  AutoLock lock(response_code_override_lock_);
   throttling_ = true;
   if (visitor)
-    visitor->VisitAtomically();
+    visitor->OnOverrideComplete();
 }
 
+void MockConnectionManager::FailWithAuthInvalid(
+    ResponseCodeOverrideRequestor* visitor) {
+  AutoLock lock(response_code_override_lock_);
+  fail_with_auth_invalid_ = true;
+  if (visitor)
+    visitor->OnOverrideComplete();
+}
+
+void MockConnectionManager::StopFailingWithAuthInvalid(
+    ResponseCodeOverrideRequestor* visitor) {
+  AutoLock lock(response_code_override_lock_);
+  fail_with_auth_invalid_ = false;
+  if (visitor)
+    visitor->OnOverrideComplete();
+}
+
+bool MockConnectionManager::IsModelTypePresentInSpecifics(
+    const sync_pb::EntitySpecifics& filter, syncable::ModelType value) {
+  // This implementation is a little contorted; it's done this way
+  // to avoid having to switch on the ModelType.  We're basically doing
+  // the protobuf equivalent of ((value & filter) == filter).
+  sync_pb::EntitySpecifics value_filter;
+  syncable::AddDefaultExtensionValue(value, &value_filter);
+  value_filter.MergeFrom(filter);
+  return value_filter.SerializeAsString() == filter.SerializeAsString();
+}

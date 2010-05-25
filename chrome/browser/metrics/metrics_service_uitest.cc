@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,11 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
-#include "base/process_util.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -24,10 +23,10 @@
 
 class MetricsServiceTest : public UITest {
  public:
-   MetricsServiceTest() : UITest() {
-     // We need to show the window so web content type tabs load.
-     show_window_ = true;
-   }
+  MetricsServiceTest() : UITest() {
+    // We need to show the window so web content type tabs load.
+    show_window_ = true;
+  }
 
   // Open a few tabs of random content
   void OpenTabs() {
@@ -52,8 +51,7 @@ class MetricsServiceTest : public UITest {
     FilePath local_state_path = user_data_dir()
         .Append(chrome::kLocalStateFilename);
 
-    PrefService* local_state(new PrefService(local_state_path, NULL));
-    return local_state;
+    return new PrefService(local_state_path);
   }
 };
 
@@ -72,6 +70,10 @@ TEST_F(MetricsServiceTest, CloseRenderersNormally) {
   EXPECT_EQ(0, local_state->GetInteger(prefs::kStabilityRendererCrashCount));
 }
 
+#if defined(OS_WIN)
+// http://crbug.com/32048
+#define CrashRenderers FLAKY_CrashRenders
+#endif
 TEST_F(MetricsServiceTest, CrashRenderers) {
   // This doesn't make sense to test in single process mode.
   if (in_process_renderer_)
@@ -90,15 +92,16 @@ TEST_F(MetricsServiceTest, CrashRenderers) {
     scoped_refptr<TabProxy> tab(window->GetTab(1));
     ASSERT_TRUE(tab.get());
 
-// Only windows implements the crash service for now.
-#if defined(OS_WIN)
+// We should get a crash dump on Windows.
+// Also on Linux with Breakpad enabled.
+#if defined(OS_WIN) || defined(USE_LINUX_BREAKPAD)
     expected_crashes_ = 1;
 #endif
-    tab->NavigateToURLAsync(GURL("about:crash"));
+    ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutCrashURL)));
   }
 
   // Give the browser a chance to notice the crashed tab.
-  PlatformThread::Sleep(1000);
+  PlatformThread::Sleep(sleep_timeout_ms());
 
   QuitBrowser();
 

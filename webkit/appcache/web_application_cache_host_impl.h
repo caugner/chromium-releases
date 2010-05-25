@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,13 @@
 #define WEBKIT_APPCACHE_WEB_APPLICATION_CACHE_HOST_IMPL_H_
 
 #include "googleurl/src/gurl.h"
-#include "webkit/api/public/WebApplicationCacheHostClient.h"
-#include "webkit/api/public/WebURLResponse.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebApplicationCacheHostClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/appcache/appcache_interfaces.h"
+
+namespace WebKit {
+class WebFrame;
+}
 
 namespace appcache {
 
@@ -16,6 +20,9 @@ class WebApplicationCacheHostImpl : public WebKit::WebApplicationCacheHost {
  public:
   // Returns the host having given id or NULL if there is no such host.
   static WebApplicationCacheHostImpl* FromId(int id);
+
+  // Returns the host associated with the current document in frame.
+  static WebApplicationCacheHostImpl* FromFrame(WebKit::WebFrame* frame);
 
   WebApplicationCacheHostImpl(WebKit::WebApplicationCacheHostClient* client,
                               AppCacheBackend* backend);
@@ -26,6 +33,7 @@ class WebApplicationCacheHostImpl : public WebKit::WebApplicationCacheHost {
   void OnCacheSelected(int64 selected_cache_id, appcache::Status status);
   void OnStatusChanged(appcache::Status);
   void OnEventRaised(appcache::EventID);
+  virtual void OnContentBlocked() {}
 
   // WebApplicationCacheHost methods
   virtual void willStartMainResourceRequest(WebKit::WebURLRequest&);

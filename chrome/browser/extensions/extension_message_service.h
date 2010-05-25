@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <set>
 #include <string>
 
-#include "base/linked_ptr.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "chrome/common/notification_registrar.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "ipc/ipc_message.h"
 
@@ -45,7 +45,8 @@ class URLRequestContext;
 // case that the port is a tab).  The Sender is usually either a
 // RenderProcessHost or a RenderViewHost.
 class ExtensionMessageService
-    : public base::RefCountedThreadSafe<ExtensionMessageService>,
+    : public base::RefCountedThreadSafe<
+          ExtensionMessageService, ChromeThread::DeleteOnUIThread>,
       public NotificationObserver {
  public:
   // Javascript function name constants.
@@ -63,7 +64,6 @@ class ExtensionMessageService
   // --- UI thread only:
 
   explicit ExtensionMessageService(Profile* profile);
-  ~ExtensionMessageService();
 
   // Notification that our owning profile is going away.
   void ProfileDestroyed();
@@ -81,8 +81,9 @@ class ExtensionMessageService
   void PostMessageFromRenderer(int port_id, const std::string& message);
 
   // Send an event to every registered extension renderer.
-  void DispatchEventToRenderers(
-      const std::string& event_name, const std::string& event_args);
+  virtual void DispatchEventToRenderers(
+      const std::string& event_name, const std::string& event_args,
+      bool has_incognito_data);
 
   // Given an extension ID, opens a channel between the given
   // automation "port" or DevTools service and that extension. the
@@ -93,7 +94,7 @@ class ExtensionMessageService
   // processes, or -1 if the extension doesn't exist.
   int OpenSpecialChannelToExtension(
       const std::string& extension_id, const std::string& channel_name,
-      IPC::Message::Sender* source);
+      const std::string& tab_json, IPC::Message::Sender* source);
 
   // Given an extension ID, opens a channel between the given DevTools
   // service and the content script for that extension running in the
@@ -129,8 +130,14 @@ class ExtensionMessageService
                        ResourceMessageFilter* source);
 
  private:
+  friend class ChromeThread;
+  friend class DeleteTask<ExtensionMessageService>;
+  friend class MockExtensionMessageService;
+
   // A map of channel ID to its channel object.
-  typedef std::map<int, linked_ptr<MessageChannel> > MessageChannelMap;
+  typedef std::map<int, MessageChannel*> MessageChannelMap;
+
+  virtual ~ExtensionMessageService();
 
   // Allocates a pair of port ids.
   // NOTE: this can be called from any thread.
@@ -138,9 +145,6 @@ class ExtensionMessageService
 
   void CloseChannelImpl(MessageChannelMap::iterator channel_iter, int port_id,
                         bool notify_other_port);
-
-  // The UI message loop, used for posting tasks.
-  MessageLoop* ui_loop_;
 
   // --- UI thread only:
 
@@ -159,7 +163,8 @@ class ExtensionMessageService
 
   // Common between OpenChannelOnUIThread and OpenSpecialChannelToExtension.
   bool OpenChannelOnUIThreadImpl(
-      IPC::Message::Sender* source, TabContents* source_contents,
+      IPC::Message::Sender* source,
+      const std::string& tab_json,
       const MessagePort& receiver, int receiver_port_id,
       const std::string& source_extension_id,
       const std::string& target_extension_id,

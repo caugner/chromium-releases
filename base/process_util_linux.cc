@@ -6,6 +6,7 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/time.h>
@@ -13,8 +14,6 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-
-#include <string>
 
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -253,8 +252,10 @@ size_t ProcessMetrics::GetPrivateBytes() const {
   return ws_usage.priv << 10;
 }
 
-// Private and Shared working set sizes are obtained from /proc/<pid>/smaps,
-// as in http://www.pixelbeat.org/scripts/ps_mem.py
+// Private and Shared working set sizes are obtained from /proc/<pid>/smaps.
+// When that's not available, use the values from /proc<pid>/statm as a
+// close approximation.
+// See http://www.pixelbeat.org/scripts/ps_mem.py
 bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
   FilePath stat_file =
     FilePath("/proc").Append(IntToString(process_)).Append("smaps");
@@ -262,32 +263,50 @@ bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
   int private_kb = 0;
   int pss_kb = 0;
   bool have_pss = false;
-  if (!file_util::ReadFileToString(stat_file, &smaps))
-    return false;
-
-  StringTokenizer tokenizer(smaps, ":\n");
-  ParsingState state = KEY_NAME;
-  std::string last_key_name;
-  while (tokenizer.GetNext()) {
-    switch (state) {
-      case KEY_NAME:
-        last_key_name = tokenizer.token();
-        state = KEY_VALUE;
-        break;
-      case KEY_VALUE:
-        if (last_key_name.empty()) {
-          NOTREACHED();
-          return false;
-        }
-        if (StartsWithASCII(last_key_name, "Private_", 1)) {
-          private_kb += StringToInt(tokenizer.token());
-        } else if (StartsWithASCII(last_key_name, "Pss", 1)) {
-          have_pss = true;
-          pss_kb += StringToInt(tokenizer.token());
-        }
-        state = KEY_NAME;
-        break;
+  if (file_util::ReadFileToString(stat_file, &smaps) && smaps.length() > 0) {
+    StringTokenizer tokenizer(smaps, ":\n");
+    ParsingState state = KEY_NAME;
+    std::string last_key_name;
+    while (tokenizer.GetNext()) {
+      switch (state) {
+        case KEY_NAME:
+          last_key_name = tokenizer.token();
+          state = KEY_VALUE;
+          break;
+        case KEY_VALUE:
+          if (last_key_name.empty()) {
+            NOTREACHED();
+            return false;
+          }
+          if (StartsWithASCII(last_key_name, "Private_", 1)) {
+            private_kb += StringToInt(tokenizer.token());
+          } else if (StartsWithASCII(last_key_name, "Pss", 1)) {
+            have_pss = true;
+            pss_kb += StringToInt(tokenizer.token());
+          }
+          state = KEY_NAME;
+          break;
+      }
     }
+  } else {
+    // Try statm if smaps is empty because of the SUID sandbox.
+    // First we need to get the page size though.
+    int page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024;
+    if (page_size_kb <= 0)
+      return false;
+
+    stat_file =
+        FilePath("/proc").Append(IntToString(process_)).Append("statm");
+    std::string statm;
+    if (!file_util::ReadFileToString(stat_file, &statm) || statm.length() == 0)
+      return false;
+
+    std::vector<std::string> statm_vec;
+    SplitString(statm, ' ', &statm_vec);
+    if (statm_vec.size() != 7)
+      return false;  // Not the format we expect.
+    private_kb = StringToInt(statm_vec[1]) - StringToInt(statm_vec[2]);
+    private_kb *= page_size_kb;
   }
   ws_usage->priv = private_kb;
   // Sharable is not calculated, as it does not provide interesting data.
@@ -389,7 +408,7 @@ static int GetProcessCPU(pid_t pid) {
   return total_cpu;
 }
 
-int ProcessMetrics::GetCPUUsage() {
+double ProcessMetrics::GetCPUUsage() {
   // This queries the /proc-specific scaling factor which is
   // conceptually the system hertz.  To dump this value on another
   // system, try
@@ -414,7 +433,7 @@ int ProcessMetrics::GetCPUUsage() {
   }
 
   int64 time_delta = time - last_time_;
-  DCHECK(time_delta != 0);
+  DCHECK_NE(time_delta, 0);
   if (time_delta == 0)
     return 0;
 
@@ -430,6 +449,170 @@ int ProcessMetrics::GetCPUUsage() {
   last_cpu_ = cpu;
 
   return percentage;
+}
+
+namespace {
+
+// The format of /proc/meminfo is:
+//
+// MemTotal:      8235324 kB
+// MemFree:       1628304 kB
+// Buffers:        429596 kB
+// Cached:        4728232 kB
+// ...
+const size_t kMemTotalIndex = 1;
+const size_t kMemFreeIndex = 4;
+const size_t kMemBuffersIndex = 7;
+const size_t kMemCacheIndex = 10;
+
+}  // namespace
+
+size_t GetSystemCommitCharge() {
+  // Used memory is: total - free - buffers - caches
+  FilePath meminfo_file("/proc/meminfo");
+  std::string meminfo_data;
+  if (!file_util::ReadFileToString(meminfo_file, &meminfo_data)) {
+    LOG(WARNING) << "Failed to open /proc/meminfo.";
+    return 0;
+  }
+  std::vector<std::string> meminfo_fields;
+  SplitStringAlongWhitespace(meminfo_data, &meminfo_fields);
+
+  if (meminfo_fields.size() < kMemCacheIndex) {
+    LOG(WARNING) << "Failed to parse /proc/meminfo.  Only found " <<
+      meminfo_fields.size() << " fields.";
+    return 0;
+  }
+
+  DCHECK_EQ(meminfo_fields[kMemTotalIndex-1], "MemTotal:");
+  DCHECK_EQ(meminfo_fields[kMemFreeIndex-1], "MemFree:");
+  DCHECK_EQ(meminfo_fields[kMemBuffersIndex-1], "Buffers:");
+  DCHECK_EQ(meminfo_fields[kMemCacheIndex-1], "Cached:");
+
+  size_t result_in_kb;
+  result_in_kb = StringToInt(meminfo_fields[kMemTotalIndex]);
+  result_in_kb -= StringToInt(meminfo_fields[kMemFreeIndex]);
+  result_in_kb -= StringToInt(meminfo_fields[kMemBuffersIndex]);
+  result_in_kb -= StringToInt(meminfo_fields[kMemCacheIndex]);
+
+  return result_in_kb;
+}
+
+namespace {
+
+void OnNoMemorySize(size_t size) {
+  if (size != 0)
+    CHECK(false) << "Out of memory, size = " << size;
+  CHECK(false) << "Out of memory.";
+}
+
+void OnNoMemory() {
+  OnNoMemorySize(0);
+}
+
+}  // namespace
+
+extern "C" {
+#if !defined(USE_TCMALLOC)
+
+extern "C" {
+void* __libc_malloc(size_t size);
+void* __libc_realloc(void* ptr, size_t size);
+void* __libc_calloc(size_t nmemb, size_t size);
+void* __libc_valloc(size_t size);
+void* __libc_pvalloc(size_t size);
+void* __libc_memalign(size_t alignment, size_t size);
+}  // extern "C"
+
+// Overriding the system memory allocation functions:
+//
+// For security reasons, we want malloc failures to be fatal. Too much code
+// doesn't check for a NULL return value from malloc and unconditionally uses
+// the resulting pointer. If the first offset that they try to access is
+// attacker controlled, then the attacker can direct the code to access any
+// part of memory.
+//
+// Thus, we define all the standard malloc functions here and mark them as
+// visibility 'default'. This means that they replace the malloc functions for
+// all Chromium code and also for all code in shared libraries. There are tests
+// for this in process_util_unittest.cc.
+//
+// If we are using tcmalloc, then the problem is moot since tcmalloc handles
+// this for us. Thus this code is in a !defined(USE_TCMALLOC) block.
+//
+// We call the real libc functions in this code by using __libc_malloc etc.
+// Previously we tried using dlsym(RTLD_NEXT, ...) but that failed depending on
+// the link order. Since ld.so needs calloc during symbol resolution, it
+// defines its own versions of several of these functions in dl-minimal.c.
+// Depending on the runtime library order, dlsym ended up giving us those
+// functions and bad things happened. See crbug.com/31809
+//
+// This means that any code which calls __libc_* gets the raw libc versions of
+// these functions.
+
+#define DIE_ON_OOM_1(function_name) \
+  void* function_name(size_t) __attribute__ ((visibility("default"))); \
+  \
+  void* function_name(size_t size) { \
+    void* ret = __libc_##function_name(size); \
+    if (ret == NULL && size != 0) \
+      OnNoMemorySize(size); \
+    return ret; \
+  }
+
+#define DIE_ON_OOM_2(function_name, arg1_type) \
+  void* function_name(arg1_type, size_t) \
+      __attribute__ ((visibility("default"))); \
+  \
+  void* function_name(arg1_type arg1, size_t size) { \
+    void* ret = __libc_##function_name(arg1, size); \
+    if (ret == NULL && size != 0) \
+      OnNoMemorySize(size); \
+    return ret; \
+  }
+
+DIE_ON_OOM_1(malloc)
+DIE_ON_OOM_1(valloc)
+DIE_ON_OOM_1(pvalloc)
+
+DIE_ON_OOM_2(calloc, size_t)
+DIE_ON_OOM_2(realloc, void*)
+DIE_ON_OOM_2(memalign, size_t)
+
+// posix_memalign has a unique signature and doesn't have a __libc_ variant.
+int posix_memalign(void** ptr, size_t alignment, size_t size)
+    __attribute__ ((visibility("default")));
+
+int posix_memalign(void** ptr, size_t alignment, size_t size) {
+  // This will use the safe version of memalign, above.
+  *ptr = memalign(alignment, size);
+  return 0;
+}
+
+#endif  // !defined(USE_TCMALLOC)
+}  // extern C
+
+void EnableTerminationOnOutOfMemory() {
+  // Set the new-out of memory handler.
+  std::set_new_handler(&OnNoMemory);
+  // If we're using glibc's allocator, the above functions will override
+  // malloc and friends and make them die on out of memory.
+}
+
+bool AdjustOOMScore(ProcessId process, int score) {
+  if (score < 0 || score > 15)
+    return false;
+
+  FilePath oom_adj("/proc");
+  oom_adj = oom_adj.Append(Int64ToString(process));
+  oom_adj = oom_adj.AppendASCII("oom_adj");
+
+  if (!file_util::PathExists(oom_adj))
+    return false;
+
+  std::string score_str = IntToString(score);
+  return (static_cast<int>(score_str.length()) ==
+          file_util::WriteFile(oom_adj, score_str.c_str(), score_str.length()));
 }
 
 }  // namespace base

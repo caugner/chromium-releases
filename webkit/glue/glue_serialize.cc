@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,23 @@
 #include <string>
 
 #include "base/pickle.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebHistoryItem.h"
-#include "webkit/api/public/WebHTTPBody.h"
-#include "webkit/api/public/WebPoint.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebVector.h"
-#include "webkit/glue/glue_util.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebHistoryItem.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebHTTPBody.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebData;
+using WebKit::WebFileInfo;
 using WebKit::WebHistoryItem;
 using WebKit::WebHTTPBody;
 using WebKit::WebPoint;
+using WebKit::WebSerializedScriptValue;
 using WebKit::WebString;
 using WebKit::WebUChar;
 using WebKit::WebVector;
@@ -50,8 +52,15 @@ struct SerializeObject {
 //    This version checks and reads v1 and v2 correctly.
 // 4: Adds support for storing FormData::identifier().
 // 5: Adds support for empty FormData
+// 6: Adds support for documentSequenceNumbers
+// 7: Adds support for stateObject
+// 8: Adds support for file range and modification time
 // Should be const, but unit tests may modify it.
-int kVersion = 5;
+//
+// NOTE: If the version is -1, then the pickle contains only a URL string.
+// See CreateHistoryStateForURL.
+//
+int kVersion = 8;
 
 // A bunch of convenience functions to read/write to SerializeObjects.
 // The serializers assume the input data is in the correct format and so does
@@ -118,6 +127,16 @@ inline bool ReadBoolean(const SerializeObject* obj) {
   bool tmp = false;
   obj->pickle.ReadBool(&obj->iter, &tmp);
   return tmp;
+}
+
+inline void WriteGURL(const GURL& url, SerializeObject* obj) {
+  obj->pickle.WriteString(url.possibly_invalid_spec());
+}
+
+inline GURL ReadGURL(const SerializeObject* obj) {
+  std::string spec;
+  obj->pickle.ReadString(&obj->iter, &spec);
+  return GURL(spec);
 }
 
 // Read/WriteString pickle the WebString as <int length><WebUChar* data>.
@@ -213,6 +232,9 @@ static void WriteFormData(const WebHTTPBody& http_body, SerializeObject* obj) {
                 obj);
     } else {
       WriteString(element.filePath, obj);
+      WriteInteger64(element.fileStart, obj);
+      WriteInteger64(element.fileLength, obj);
+      WriteReal(element.fileInfo.modificationTime, obj);
     }
   }
   WriteInteger64(http_body.identifier(), obj);
@@ -240,7 +262,16 @@ static WebHTTPBody ReadFormData(const SerializeObject* obj) {
       if (length >= 0)
         http_body.appendData(WebData(static_cast<const char*>(data), length));
     } else {
-      http_body.appendFile(ReadString(obj));
+      WebString file_path = ReadString(obj);
+      long long file_start = 0;
+      long long file_length = -1;
+      WebFileInfo file_info;
+      if (obj->version >= 8) {
+        file_start = ReadInteger64(obj);
+        file_length = ReadInteger64(obj);
+        file_info.modificationTime = ReadReal(obj);
+      }
+      http_body.appendFileRange(file_path, file_start, file_length, file_info);
     }
   }
   if (obj->version >= 4)
@@ -274,6 +305,15 @@ static void WriteHistoryItem(
 
   WriteStringVector(item.documentState(), obj);
 
+  if (kVersion >= 6)
+    WriteInteger64(item.documentSequenceNumber(), obj);
+  if (kVersion >= 7) {
+    bool has_state_object = !item.stateObject().isNull();
+    WriteBoolean(has_state_object, obj);
+    if (has_state_object)
+      WriteString(item.stateObject().toString(), obj);
+  }
+
   // Yes, the referrer is written twice.  This is for backwards
   // compatibility with the format.
   WriteFormData(item.httpBody(), obj);
@@ -293,6 +333,14 @@ static WebHistoryItem ReadHistoryItem(
     const SerializeObject* obj, bool include_form_data) {
   // See note in WriteHistoryItem. on this.
   obj->version = ReadInteger(obj);
+
+  if (obj->version == -1) {
+    GURL url = ReadGURL(obj);
+    WebHistoryItem item;
+    item.initialize();
+    item.setURLString(WebString::fromUTF8(url.possibly_invalid_spec()));
+    return item;
+  }
 
   if (obj->version > kVersion || obj->version < 1)
     return WebHistoryItem();
@@ -315,6 +363,16 @@ static WebHistoryItem ReadHistoryItem(
   item.setReferrer(ReadString(obj));
 
   item.setDocumentState(ReadStringVector(obj));
+
+  if (obj->version >= 6)
+    item.setDocumentSequenceNumber(ReadInteger64(obj));
+  if (obj->version >= 7) {
+    bool has_state_object = ReadBoolean(obj);
+    if (has_state_object) {
+      item.setStateObject(
+          WebSerializedScriptValue::fromString(ReadString(obj)));
+    }
+  }
 
   // The extra referrer string is read for backwards compat.
   const WebHTTPBody& http_body = ReadFormData(obj);
@@ -383,14 +441,20 @@ void HistoryItemToVersionedString(const WebHistoryItem& item, int version,
 }
 
 std::string CreateHistoryStateForURL(const GURL& url) {
-  WebHistoryItem item;
-  item.initialize();
-  item.setURLString(UTF8ToUTF16(url.spec()));
-
-  return HistoryItemToString(item);
+  // We avoid using the WebKit API here, so that we do not need to have WebKit
+  // initialized before calling this method.  Instead, we write a simple
+  // serialization of the given URL with a dummy version number of -1.  This
+  // will be interpreted by ReadHistoryItem as a request to create a default
+  // WebHistoryItem.
+  SerializeObject obj;
+  WriteInteger(-1, &obj);
+  WriteGURL(url, &obj);
+  return obj.GetAsString();
 }
 
 std::string RemoveFormDataFromHistoryState(const std::string& content_state) {
+  // TODO(darin): We should avoid using the WebKit API here, so that we do not
+  // need to have WebKit initialized before calling this method.
   const WebHistoryItem& item = HistoryItemFromString(content_state, false);
   if (item.isNull()) {
     // Couldn't parse the string, return an empty string.

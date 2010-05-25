@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,15 +20,15 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   virtual ~GlassBrowserFrameView();
 
   // Overridden from BrowserNonClientFrameView:
-  virtual gfx::Rect GetBoundsForTabStrip(TabStripWrapper* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
   virtual void UpdateThrobber(bool running);
+  virtual void PaintTabStripShadow(gfx::Canvas* canvas);
 
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const;
   virtual bool AlwaysUseNativeFrame() const;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const;
-  virtual gfx::Point GetSystemMenuPoint() const;
   virtual int NonClientHitTest(const gfx::Point& point);
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) { }
   virtual void EnableClose(bool enable) { }
@@ -53,13 +53,11 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   int NonClientTopBorderHeight() const;
 
   // Paint various sub-components of this view.
-  void PaintDistributorLogo(gfx::Canvas* canvas);
   void PaintToolbarBackground(gfx::Canvas* canvas);
   void PaintOTRAvatar(gfx::Canvas* canvas);
   void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
-  void LayoutDistributorLogo();
   void LayoutOTRAvatar();
   void LayoutClientView();
 
@@ -94,9 +92,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   // The index of the current frame of the throbber animation.
   int throbber_frame_;
 
-  static void InitClass();
-  static SkBitmap* distributor_logo_;
-
   static const int kThrobberIconCount = 24;
   static HICON throbber_icons_[kThrobberIconCount];
   static void InitThrobberIcons();
@@ -104,4 +99,4 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   DISALLOW_EVIL_CONSTRUCTORS(GlassBrowserFrameView);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_
+#endif  // CHROME_BROWSER_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_

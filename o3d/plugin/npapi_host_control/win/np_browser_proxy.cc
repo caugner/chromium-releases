@@ -159,8 +159,13 @@ CComPtr<IDispatchEx> NPBrowserProxy::GetDispatchObject(NPObject* np_object) {
     }
 
     // Create a new NPObject proxy, register it for future use and return it.
+    CComObject<NPObjectProxy>* proxy_instance;
+    HRESULT hr = CComObject<NPObjectProxy>::CreateInstance(&proxy_instance);
+    if (FAILED(hr))
+      return NULL;
+
     CComPtr<INPObjectProxy> proxy_wrapper;
-    HRESULT hr = NPObjectProxy::CreateInstance(&proxy_wrapper);
+    hr = proxy_instance->QueryInterface(&proxy_wrapper);
     if (SUCCEEDED(hr)) {
       proxy_wrapper->SetBrowserProxy(this);
       proxy_wrapper->SetHostedObject(np_object);
@@ -589,7 +594,7 @@ void NPBrowserProxy::NPN_ReleaseVariantValue(NPVariant *variant) {
       break;
     case NPVariantType_String:
       NPN_MemFree(
-          const_cast<NPUTF8*>(variant->value.stringValue.utf8characters));
+          const_cast<NPUTF8*>(variant->value.stringValue.UTF8Characters));
       break;
     case NPVariantType_Object:
       NPN_ReleaseObject(variant->value.objectValue);
@@ -765,7 +770,7 @@ bool NPBrowserProxy::NPN_Evaluate(NPP npp,
   if (ConstructObject(npp, window_object, "Object", NULL, 0, &result_object)) {
     CStringA function_code;
     function_code.Format("result_object.result = (%s);",
-                         script->utf8characters);
+                         script->UTF8Characters);
 
     NPVariant args[2];
     STRINGZ_TO_NPVARIANT("result_object", args[0]);

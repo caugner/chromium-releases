@@ -7,11 +7,12 @@
 
 #include <vector>
 
-#include "app/gfx/text_elider.h"
 #include "app/table_model.h"
+#include "app/text_elider.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/views/confirm_message_box_dialog.h"
 #include "chrome/browser/views/options/options_page_view.h"
 #include "views/controls/button/native_button.h"
@@ -21,8 +22,6 @@
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
 #include "webkit/glue/password_form.h"
-
-class Profile;
 
 ///////////////////////////////////////////////////////////////////////////////
 // PasswordTableModelObserver
@@ -150,6 +149,7 @@ class PasswordsPageView : public OptionsPageView,
                           public ConfirmMessageBoxObserver {
  public:
   explicit PasswordsPageView(Profile* profile);
+  virtual ~PasswordsPageView();
 
   // views::TableViewObserverImplementation.
   virtual void OnSelectionChanged();

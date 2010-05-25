@@ -7,18 +7,33 @@
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <locale.h>
+#endif
+
+#if defined(OS_WIN)
+#define JPEG_EXT L".jpg"
+#define HTML_EXT L".htm"
+#define TXT_EXT L".txt"
+#define TAR_EXT L".tar"
+#elif defined(OS_MACOSX)
+#define JPEG_EXT L".jpeg"
+#define HTML_EXT L".html"
+#define TXT_EXT L".txt"
+#define TAR_EXT L".tar"
+#else
+#define JPEG_EXT L""
+#define HTML_EXT L""
+#define TXT_EXT L""
+#define TAR_EXT L""
 #endif
 
 class DownloadManagerTest : public testing::Test {
  public:
   DownloadManagerTest() {
     download_manager_ = new DownloadManager();
-    download_util::InitializeExeTypes(&download_manager_->exe_types_);
   }
 
   void GetGeneratedFilename(const std::string& content_disposition,
@@ -32,7 +47,7 @@ class DownloadManagerTest : public testing::Test {
     info.mime_type = mime_type;
     info.referrer_charset = referrer_charset;
     FilePath generated_name;
-    download_manager_->GenerateFilename(&info, &generated_name);
+    DownloadManager::GenerateFileNameFromInfo(&info, &generated_name);
     *generated_name_string = generated_name.ToWStringHack();
   }
 
@@ -71,11 +86,7 @@ const struct {
 
   // No useful information in disposition or URL, use default
   {"", "http://www.truncated.com/path/", "text/plain",
-#if defined(OS_LINUX)
-   L"download"
-#else
-   L"download.txt"
-#endif
+   L"download" TXT_EXT
   },
 
   // A normal avi should get .avi and not .avi.avi
@@ -90,11 +101,12 @@ const struct {
   // This block tests whether we append extensions based on MIME types;
   // we don't do this on Linux, so we skip the tests rather than #ifdef
   // them up.
-#if !defined(OS_LINUX)
+#if !defined(OS_POSIX) || defined(OS_MACOSX)
   {"filename=my-cat",
    "http://www.example.com/my-cat",
    "image/jpeg",
-   L"my-cat.jpg"},
+   L"my-cat" JPEG_EXT
+  },
 
   {"filename=my-cat",
    "http://www.example.com/my-cat",
@@ -104,13 +116,14 @@ const struct {
   {"filename=my-cat",
    "http://www.example.com/my-cat",
    "text/html",
-   L"my-cat.htm"},
+   L"my-cat" HTML_EXT
+  },
 
   {"filename=my-cat",
    "http://www.example.com/my-cat",
    "dance/party",
    L"my-cat"},
-#endif  // defined(OS_LINUX)
+#endif  // !defined(OS_POSIX) || defined(OS_MACOSX)
 
   {"filename=my-cat.jpg",
    "http://www.example.com/my-cat.jpg",
@@ -148,6 +161,33 @@ const struct {
    "http://www.goodguy.com/evil.exe",
    "application/rss+xml",
    L"evil.download"},
+
+  // Test truncation of trailing dots and spaces
+  {"filename=evil.exe ",
+   "http://www.goodguy.com/evil.exe ",
+   "binary/octet-stream",
+   L"evil.exe"},
+
+  {"filename=evil.exe.",
+   "http://www.goodguy.com/evil.exe.",
+   "binary/octet-stream",
+   L"evil.exe"},
+
+  {"filename=evil.exe.  .  .",
+   "http://www.goodguy.com/evil.exe.  .  .",
+   "binary/octet-stream",
+   L"evil.exe"},
+
+  {"filename=evil.",
+   "http://www.goodguy.com/evil.",
+   "binary/octet-stream",
+   L"evil"},
+
+  {"filename=. . . . .",
+   "http://www.goodguy.com/. . . . .",
+   "binary/octet-stream",
+   L"download"},
+
 #endif  // OS_WIN
 
   {"filename=utils.js",
@@ -203,11 +243,7 @@ const struct {
   {"filename=.hidden",
    "http://www.evil.com/.hidden",
    "text/plain",
-#if defined(OS_LINUX)
-   L"hidden"
-#else
-   L"hidden.txt"
-#endif
+   L"hidden" TXT_EXT
   },
 
   {"filename=trailing.",
@@ -219,11 +255,7 @@ const struct {
   {"filename=trailing.",
    "http://www.evil.com/trailing.",
    "text/plain",
-#if defined(OS_LINUX)
-   L"trailing"
-#else
-   L"trailing.txt"
-#endif
+   L"trailing" TXT_EXT
   },
 
   {"filename=.",
@@ -245,21 +277,13 @@ const struct {
   {"a_file_name.txt",
    "http://www.evil.com/",
    "image/jpeg",
-#if defined(OS_LINUX)
-   L"download"
-#else
-   L"download.jpg"
-#endif
+   L"download" JPEG_EXT
   },
 
   {"filename=",
    "http://www.evil.com/",
    "image/jpeg",
-#if defined(OS_LINUX)
-   L"download"
-#else
-   L"download.jpg"
-#endif
+   L"download" JPEG_EXT
   },
 
   {"filename=simple",
@@ -365,17 +389,20 @@ const struct {
   {"filename=source.srf",
    "http://www.hotmail.com",
    "image/jpeg",
-#if defined(OS_WIN)
-   L"source.srf.jpg"
-#else
-   L"source.srf"
-#endif
-},
+   L"source.srf" JPEG_EXT
+  },
 
   {"filename=source.jpg",
    "http://www.hotmail.com",
    "application/x-javascript",
-   L"source.jpg"},
+#if defined(OS_WIN)
+   L"source.jpg"
+#elif defined(OS_MACOSX)
+   L"source.jpg.js"
+#else
+   L"source.jpg"
+#endif
+  },
 
   // NetUtilTest.{GetSuggestedFilename, GetFileNameFromCD} test these
   // more thoroughly. Tested below are a small set of samples.
@@ -399,11 +426,7 @@ const struct {
   {"attachment; filename==?iiso88591?Q?caf=EG?=",
    "http://www.example.com/test%20123",
    "image/jpeg",
-#if defined(OS_LINUX)
-   L"test 123"
-#else
-   L"test 123.jpg"
-#endif
+   L"test 123" JPEG_EXT
   },
 
   {"malformed_disposition",
@@ -415,11 +438,7 @@ const struct {
   {"attachment; filename==?iso88591?Q?caf=E3?",
    "http://www.google.com/path1/path2/",
    "image/jpeg",
-#if defined(OS_LINUX)
-   L"download"
-#else
-   L"download.jpg"
-#endif
+   L"download" JPEG_EXT
   },
 
   // Issue=5772.
@@ -442,11 +461,7 @@ const struct {
   {"",
    "http://www.example.com/bar.bogus",
    "application/x-tar",
-#if defined(OS_LINUX)
-   L"bar.bogus"
-#else
-   L"bar.bogus.tar"
-#endif
+   L"bar.bogus" TAR_EXT
   },
 
   // http://code.google.com/p/chromium/issues/detail?id=20337
@@ -461,7 +476,7 @@ const struct {
 // Tests to ensure that the file names we generate from hints from the server
 // (content-disposition, URL name, etc) don't cause security holes.
 TEST_F(DownloadManagerTest, TestDownloadFilename) {
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // This test doesn't run when the locale is not UTF-8 becuase some of the
   // string conversions fail. This is OK (we have the default value) but they
   // don't match our expectations.
@@ -509,6 +524,7 @@ const struct {
   const char* mime_type;
   const FilePath::CharType* expected_path;
 } kSafeFilenameCases[] = {
+#if defined(OS_WIN)
   { FILE_PATH_LITERAL("C:\\foo\\bar.htm"),
     "text/html",
     FILE_PATH_LITERAL("C:\\foo\\bar.htm") },
@@ -543,18 +559,54 @@ const struct {
   { FILE_PATH_LITERAL("C:\\foo\\con"),
     "text/html",
     FILE_PATH_LITERAL("C:\\foo\\_con.htm") },
+#else
+  { FILE_PATH_LITERAL("/foo/bar.htm"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/bar.htm") },
+  { FILE_PATH_LITERAL("/foo/bar.html"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/bar.html") },
+  { FILE_PATH_LITERAL("/foo/bar"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/bar.html") },
+
+  { FILE_PATH_LITERAL("/bar.html"),
+    "image/png",
+    FILE_PATH_LITERAL("/bar.html.png") },
+  { FILE_PATH_LITERAL("/bar"),
+    "image/png",
+    FILE_PATH_LITERAL("/bar.png") },
+
+  { FILE_PATH_LITERAL("/foo/bar.exe"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/bar.exe.html") },
+  { FILE_PATH_LITERAL("/foo/bar.exe"),
+    "image/gif",
+    FILE_PATH_LITERAL("/foo/bar.exe.gif") },
+
+  { FILE_PATH_LITERAL("/foo/google.com"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/google.com.html") },
+
+  { FILE_PATH_LITERAL("/foo/con.htm"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/con.htm") },
+  { FILE_PATH_LITERAL("/foo/con"),
+    "text/html",
+    FILE_PATH_LITERAL("/foo/con.html") },
+#endif  // OS_WIN
 };
 
 }  // namespace
 
-#if defined(OS_WIN)
-// TODO(port): port to non-Windows.
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// TODO(port): port to Linux/BSD.
 TEST_F(DownloadManagerTest, GetSafeFilename) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSafeFilenameCases); ++i) {
     FilePath path(kSafeFilenameCases[i].path);
-    download_manager_->GenerateSafeFilename(kSafeFilenameCases[i].mime_type,
+    download_manager_->GenerateSafeFileName(kSafeFilenameCases[i].mime_type,
         &path);
     EXPECT_EQ(kSafeFilenameCases[i].expected_path, path.value());
   }
 }
-#endif  // OS_WIN
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,6 @@ namespace prefs {
 // Profile prefs
 extern const wchar_t kHomePageIsNewTabPage[];
 extern const wchar_t kHomePage[];
-extern const wchar_t kProfileName[];
-extern const wchar_t kProfileNickname[];
-extern const wchar_t kProfileID[];
 extern const wchar_t kSessionExitedCleanly[];
 extern const wchar_t kRestoreOnStartup[];
 extern const wchar_t kURLsToRestoreOnStartup[];
@@ -48,21 +45,23 @@ extern const wchar_t kWebKitUsesUniversalDetector[];
 extern const wchar_t kWebKitTextAreasAreResizable[];
 extern const wchar_t kWebKitJavaEnabled[];
 extern const wchar_t kPasswordManagerEnabled[];
-extern const wchar_t kFormAutofillEnabled[];
+extern const wchar_t kFormAutofillEnabled[];  // OBSOLETE
 extern const wchar_t kSafeBrowsingEnabled[];
 extern const wchar_t kSearchSuggestEnabled[];
-extern const wchar_t kCookieBehavior[];
+extern const wchar_t kCookieBehavior[];  // OBSOLETE
 extern const wchar_t kMixedContentFiltering[];
 extern const wchar_t kDefaultSearchProviderSearchURL[];
 extern const wchar_t kDefaultSearchProviderSuggestURL[];
 extern const wchar_t kDefaultSearchProviderName[];
 extern const wchar_t kDefaultSearchProviderID[];
+extern const wchar_t kDefaultSearchProviderPrepopulateID[];
 extern const wchar_t kPromptForDownload[];
 extern const wchar_t kAlternateErrorPagesEnabled[];
 extern const wchar_t kDnsPrefetchingEnabled[];
 extern const wchar_t kDnsStartupPrefetchList[];
 extern const wchar_t kDnsHostReferralList[];
-#if defined(OS_LINUX)
+extern const wchar_t kCookiePromptExpanded[];
+#if defined(USE_NSS)
 extern const wchar_t kCertRevocationCheckingEnabled[];
 extern const wchar_t kSSL2Enabled[];
 extern const wchar_t kSSL3Enabled[];
@@ -74,6 +73,11 @@ extern const wchar_t kTapToClickEnabled[];
 extern const wchar_t kVertEdgeScrollEnabled[];
 extern const wchar_t kTouchpadSpeedFactor[];
 extern const wchar_t kTouchpadSensitivity[];
+extern const wchar_t kLanguageUseGlobalEngine[];
+extern const wchar_t kLanguageHotkeyNextEngine[];
+extern const wchar_t kLanguageHotkeyTrigger[];
+extern const wchar_t kLanguagePreloadEngines[];
+extern const wchar_t kLanguageHangulKeyboard[];
 #endif
 extern const wchar_t kIpcDisabledMessages[];
 extern const wchar_t kShowHomeButton[];
@@ -101,20 +105,49 @@ extern const wchar_t kPrintingPageHeaderRight[];
 extern const wchar_t kPrintingPageFooterLeft[];
 extern const wchar_t kPrintingPageFooterCenter[];
 extern const wchar_t kPrintingPageFooterRight[];
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 extern const wchar_t kUsesSystemTheme[];
 #endif
+extern const wchar_t kCurrentThemePackFilename[];
 extern const wchar_t kCurrentThemeID[];
 extern const wchar_t kCurrentThemeImages[];
 extern const wchar_t kCurrentThemeColors[];
 extern const wchar_t kCurrentThemeTints[];
 extern const wchar_t kCurrentThemeDisplayProperties[];
+extern const wchar_t kExtensionsUIDeveloperMode[];
+extern const wchar_t kExtensionToolbarSize[];
+extern const wchar_t kPluginsLastInternalDirectory[];
+extern const wchar_t kPluginsPluginsList[];
 extern const wchar_t kCheckDefaultBrowser[];
+#if defined(OS_MACOSX)
+extern const wchar_t kShowUpdatePromotionInfoBar[];
+#endif
 extern const wchar_t kUseCustomChromeFrame[];
 extern const wchar_t kShowOmniboxSearchHint[];
-extern const wchar_t kNTPThemePromoRemaining[];
+extern const wchar_t kNTPPromoLineRemaining[];
+extern const wchar_t kNTPPromoImageRemaining[];
 extern const wchar_t kDesktopNotificationAllowedOrigins[];
 extern const wchar_t kDesktopNotificationDeniedOrigins[];
+extern const wchar_t kDefaultContentSettings[];
+extern const wchar_t kPerHostContentSettings[];  // OBSOLETE
+extern const wchar_t kContentSettingsVersion[];
+extern const wchar_t kContentSettingsPatterns[];
+extern const wchar_t kBlockThirdPartyCookies[];
+extern const wchar_t kClearSiteDataOnExit[];
+extern const wchar_t kPerHostZoomLevels[];
+extern const wchar_t kAutoFillInfoBarShown[];
+extern const wchar_t kAutoFillEnabled[];
+extern const wchar_t kAutoFillAuxiliaryProfilesEnabled[];
+extern const wchar_t kAutoFillDialogPlacement[];
+extern const wchar_t kAutoFillDefaultProfile[];
+extern const wchar_t kAutoFillDefaultCreditCard[];
+extern const wchar_t kAutoFillPositiveUploadRate[];
+extern const wchar_t kAutoFillNegativeUploadRate[];
+
+extern const wchar_t kPrivacyFilterRules[];
+extern const wchar_t kUseVerticalTabs[];
+extern const wchar_t kEnableTranslate[];
+extern const wchar_t kPinnedTabs[];
 
 // Local state
 extern const wchar_t kMetricsClientID[];
@@ -129,24 +162,23 @@ extern const wchar_t kProfilePrefix[];
 
 extern const wchar_t kStabilityExitedCleanly[];
 extern const wchar_t kStabilityStatsVersion[];
+extern const wchar_t kStabilityStatsBuildTime[];
 extern const wchar_t kStabilitySessionEndCompleted[];
 extern const wchar_t kStabilityLaunchCount[];
 extern const wchar_t kStabilityCrashCount[];
 extern const wchar_t kStabilityIncompleteSessionEndCount[];
 extern const wchar_t kStabilityPageLoadCount[];
 extern const wchar_t kStabilityRendererCrashCount[];
+extern const wchar_t kStabilityExtensionRendererCrashCount[];
 extern const wchar_t kStabilityLaunchTimeSec[];
 extern const wchar_t kStabilityLastTimestampSec[];
-extern const wchar_t kStabilityUptimeSec[];
 extern const wchar_t kStabilityRendererHangCount[];
+extern const wchar_t kStabilityChildProcessCrashCount[];
 
 extern const wchar_t kStabilityBreakpadRegistrationSuccess[];
 extern const wchar_t kStabilityBreakpadRegistrationFail[];
 extern const wchar_t kStabilityDebuggerPresent[];
 extern const wchar_t kStabilityDebuggerNotPresent[];
-
-extern const wchar_t kSecurityRendererOnSboxDesktop[];
-extern const wchar_t kSecurityRendererOnDefaultDesktop[];
 
 extern const wchar_t kStabilityPluginStats[];
 extern const wchar_t kStabilityPluginName[];
@@ -185,11 +217,14 @@ extern const wchar_t kSafeBrowsingClientKey[];
 extern const wchar_t kSafeBrowsingWrappedKey[];
 
 extern const wchar_t kOptionsWindowLastTabIndex[];
+extern const wchar_t kContentSettingsWindowLastTabIndex[];
 extern const wchar_t kShouldShowFirstRunBubble[];
 extern const wchar_t kShouldUseOEMFirstRunBubble[];
+extern const wchar_t kShouldUseMinimalFirstRunBubble[];
 extern const wchar_t kShouldShowWelcomePage[];
 
 extern const wchar_t kLastKnownGoogleURL[];
+extern const wchar_t kLastKnownIntranetRedirectOrigin[];
 
 extern const wchar_t kCountryIDAtInstall[];
 extern const wchar_t kGeoIDAtInstall[];  // OBSOLETE
@@ -206,8 +241,8 @@ extern const wchar_t kNumFoldersInOtherBookmarkFolder[];
 extern const wchar_t kNumKeywords[];
 
 extern const wchar_t kDisableExtensions[];
-extern const wchar_t kEnableUserScripts[];
 extern const wchar_t kShowExtensionShelf[];
+extern const wchar_t kBrowserActionContainerWidth[];
 
 extern const wchar_t kLastExtensionsUpdateCheck[];
 extern const wchar_t kNextExtensionsUpdateCheck[];
@@ -220,12 +255,28 @@ extern const wchar_t kNTPTipsCache[];
 extern const wchar_t kNTPTipsCacheUpdate[];
 extern const wchar_t kNTPTipsServer[];
 extern const wchar_t kNTPShownSections[];
+extern const wchar_t kNTPPrefVersion[];
 
 extern const wchar_t kDevToolsOpenDocked[];
 extern const wchar_t kDevToolsSplitLocation[];
 
 extern const wchar_t kSyncLastSyncedTime[];
 extern const wchar_t kSyncHasSetupCompleted[];
-}
+extern const wchar_t kSyncBookmarks[];
+extern const wchar_t kSyncPreferences[];
+extern const wchar_t kSyncAutofill[];
+extern const wchar_t kSyncThemes[];
+extern const wchar_t kSyncTypedUrls[];
+extern const wchar_t kSyncBootstrappedAuth[];
+
+extern const wchar_t kWebAppCreateOnDesktop[];
+extern const wchar_t kWebAppCreateInAppsMenu[];
+extern const wchar_t kWebAppCreateInQuickLaunchBar[];
+
+extern const wchar_t kGeolocationAccessToken[];
+extern const wchar_t kGeolocationDefaultContentSetting[];
+extern const wchar_t kGeolocationContentSettings[];
+
+}  // namespace prefs
 
 #endif  // CHROME_COMMON_PREF_NAMES_H_

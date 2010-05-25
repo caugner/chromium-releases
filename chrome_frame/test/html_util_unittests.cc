@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <atlsecurity.h>
 #include <shellapi.h>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
@@ -17,11 +19,11 @@
 #include "base/win_util.h"
 #include "net/base/net_util.h"
 
-#include "chrome_frame/test/chrome_frame_unittests.h"
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/html_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "chrome/browser/automation/url_request_automation_job.h"
 
 const char kChromeFrameUserAgent[] = "chromeframe";
 
@@ -225,51 +227,51 @@ TEST_F(HtmlUtilUnittest, AddChromeFrameToUserAgentValue) {
       "", ""
     }, {
       "Mozilla/4.7 [en] (WinNT; U)",
-      "Mozilla/4.7 [en] (WinNT; U) chromeframe/0.0"
+      "Mozilla/4.7 [en] (WinNT; U) chromeframe/0.0.0.0"
     }, {
       "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT)",
-      "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT) chromeframe/0.0"
+      "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT) chromeframe/0.0.0.0"
     }, {
       "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0; T312461; "
         ".NET CLR 1.1.4322)",
       "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0; T312461; "
-        ".NET CLR 1.1.4322) chromeframe/0.0"
+        ".NET CLR 1.1.4322) chromeframe/0.0.0.0"
     }, {
       "Mozilla/4.0 (compatible; MSIE 5.0; Windows NT 4.0) Opera 5.11 [en]",
       "Mozilla/4.0 (compatible; MSIE 5.0; Windows NT 4.0) "
-          "Opera 5.11 [en] chromeframe/0.0"
+          "Opera 5.11 [en] chromeframe/0.0.0.0"
     }, {
       "Mozilla/5.0 (Windows; U; Windows NT 5.0; en-US; rv:1.0.2) "
           "Gecko/20030208 Netscape/7.02",
       "Mozilla/5.0 (Windows; U; Windows NT 5.0; en-US; rv:1.0.2) "
-          "Gecko/20030208 Netscape/7.02 chromeframe/0.0"
+          "Gecko/20030208 Netscape/7.02 chromeframe/0.0.0.0"
     }, {
       "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.6) Gecko/20040612 "
           "Firefox/0.8",
       "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.6) Gecko/20040612 "
-          "Firefox/0.8 chromeframe/0.0"
+          "Firefox/0.8 chromeframe/0.0.0.0"
     }, {
       "Mozilla/5.0 (compatible; Konqueror/3.2; Linux) (KHTML, like Gecko)",
       "Mozilla/5.0 (compatible; Konqueror/3.2; Linux) "
-          "(KHTML, like Gecko) chromeframe/0.0"
+          "(KHTML, like Gecko) chromeframe/0.0.0.0"
     }, {
       "Lynx/2.8.4rel.1 libwww-FM/2.14 SSL-MM/1.4.1 OpenSSL/0.9.6h",
       "Lynx/2.8.4rel.1 libwww-FM/2.14 SSL-MM/1.4.1 "
-          "OpenSSL/0.9.6h chromeframe/0.0",
+          "OpenSSL/0.9.6h chromeframe/0.0.0.0",
     }, {
       "Mozilla/5.0 (X11; U; Linux i686 (x86_64); en-US; rv:1.7.10) "
           "Gecko/20050716 Firefox/1.0.6",
       "Mozilla/5.0 (X11; U; Linux i686 (x86_64); en-US; rv:1.7.10) "
-          "Gecko/20050716 Firefox/1.0.6 chromeframe/0.0"
+          "Gecko/20050716 Firefox/1.0.6 chromeframe/0.0.0.0"
     }, {
       "Invalid/1.1 ((((((",
-      "Invalid/1.1 (((((( chromeframe/0.0",
+      "Invalid/1.1 (((((( chromeframe/0.0.0.0",
     }, {
       "Invalid/1.1 ()))))",
-      "Invalid/1.1 ())))) chromeframe/0.0",
+      "Invalid/1.1 ())))) chromeframe/0.0.0.0",
     }, {
       "Strange/1.1 ()",
-      "Strange/1.1 () chromeframe/0.0",
+      "Strange/1.1 () chromeframe/0.0.0.0",
     }
   };
 
@@ -307,5 +309,63 @@ TEST_F(HtmlUtilUnittest, GetChromeFrameUserAgent) {
   // Expect static buffer since caller does no cleanup.
   EXPECT_EQ(call1, call2);
   std::string ua(call1);
-  EXPECT_EQ("chromeframe/0.0", ua);
+  EXPECT_EQ("chromeframe/0.0.0.0", ua);
 }
+
+TEST(HttpUtils, HasFrameBustingHeader) {
+  // Simple negative cases.
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader(""));
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader("Content-Type: text/plain"));
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader("X-Frame-Optionss: ALLOWALL"));
+  // Explicit negative cases, test that we ignore case.
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader("X-Frame-Options: ALLOWALL"));
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader("X-Frame-Options: allowall"));
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader("X-Frame-Options: ALLowalL"));
+  // Added space, ensure stripped out
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: ALLOWALL "));
+  // Added space with linefeed, ensure still stripped out
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: ALLOWALL \r\n"));
+  // Multiple identical headers, all of them allowing framing.
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: ALLOWALL\r\n"
+    "X-Frame-Options: ALLOWALL\r\n"
+    "X-Frame-Options: ALLOWALL"));
+  // Interleave with other headers.
+  EXPECT_FALSE(http_utils::HasFrameBustingHeader(
+    "Content-Type: text/plain\r\n"
+    "X-Frame-Options: ALLOWALL\r\n"
+    "Content-Length: 42"));
+
+  // Simple positive cases.
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader("X-Frame-Options: deny"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: SAMEorigin"));
+
+  // Verify that we pick up case changes in the header name too:
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader("X-FRAME-OPTIONS: deny"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader("x-frame-options: deny"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader("X-frame-optionS: deny"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader("X-Frame-optionS: deny"));
+
+  // Allowall entries do not override the denying entries, are
+  // order-independent, and the deny entries can interleave with
+  // other headers.
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader(
+    "Content-Length: 42\r\n"
+    "X-Frame-Options: ALLOWall\r\n"
+    "X-Frame-Options: deny\r\n"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: ALLOWall\r\n"
+    "Content-Length: 42\r\n"
+    "X-Frame-Options: SAMEORIGIN\r\n"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: deny\r\n"
+    "X-Frame-Options: ALLOWall\r\n"
+    "Content-Length: 42\r\n"));
+  EXPECT_TRUE(http_utils::HasFrameBustingHeader(
+    "X-Frame-Options: SAMEORIGIN\r\n"
+    "X-Frame-Options: ALLOWall\r\n"));
+}
+

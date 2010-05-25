@@ -5,12 +5,10 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 
 #include "chrome/browser/browser.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/test/ui_test_utils.h"
-
-namespace {
-static const int kTimeoutMs = 60 * 1000;  // 1 minute
-};
 
 ExtensionApiTest::ResultCatcher::ResultCatcher() {
   registrar_.Add(this, NotificationType::EXTENSION_TEST_PASSED,
@@ -24,19 +22,18 @@ bool ExtensionApiTest::ResultCatcher::GetNextResult() {
   // to RunMessageLoop(), so we maintain a queue of results and just pull them
   // off as the test calls this, going to the run loop only when the queue is
   // empty.
-  if (!results_.size()) {
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, new MessageLoop::QuitTask, kTimeoutMs);
+  if (results_.empty())
     ui_test_utils::RunMessageLoop();
-  }
-  if (results_.size()) {
+
+  if (!results_.empty()) {
     bool ret = results_.front();
     results_.pop_front();
     message_ = messages_.front();
     messages_.pop_front();
     return ret;
   }
-  message_ = "No response from message loop.";
+
+  NOTREACHED();
   return false;
 }
 
@@ -79,6 +76,35 @@ bool ExtensionApiTest::RunExtensionTest(const char* extension_name) {
   } else {
     return true;
   }
+}
+
+// Test that exactly one extension loaded.
+Extension* ExtensionApiTest::GetSingleLoadedExtension() {
+  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+
+  int found_extension_index = -1;
+  for (size_t i = 0; i < service->extensions()->size(); ++i) {
+    // Ignore any component extensions. They are automatically loaded into all
+    // profiles and aren't the extension we're looking for here.
+    if (service->extensions()->at(i)->location() == Extension::COMPONENT)
+      continue;
+
+    if (found_extension_index != -1) {
+      message_ = StringPrintf(
+          "Expected only one extension to be present.  Found %u.",
+          static_cast<unsigned>(service->extensions()->size()));
+      return NULL;
+    }
+
+    found_extension_index = static_cast<int>(i);
+  }
+
+  Extension* extension = service->extensions()->at(found_extension_index);
+  if (!extension) {
+    message_ = "extension pointer is NULL.";
+    return NULL;
+  }
+  return extension;
 }
 
 void ExtensionApiTest::SetUpCommandLine(CommandLine* command_line) {

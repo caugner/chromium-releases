@@ -18,8 +18,6 @@ class SyncEntity;
 
 namespace browser_sync {
 
-class SyncerSession;
-
 // A syncer command for processing updates.
 //
 // Preconditions - updates in the SyncerSesssion have been downloaded
@@ -27,16 +25,20 @@ class SyncerSession;
 //
 // Postconditions - All of the verified SyncEntity data will be copied to
 //                  the server fields of the corresponding syncable entries.
+// TODO(tim): This should not be ModelChanging (bug 36592).
 class ProcessUpdatesCommand : public ModelChangingSyncerCommand {
  public:
   ProcessUpdatesCommand();
   virtual ~ProcessUpdatesCommand();
 
-  virtual void ModelChangingExecuteImpl(SyncerSession* session);
+  // ModelChangingSyncerCommand implementation.
+  virtual bool ModelNeutralExecuteImpl(sessions::SyncSession* session);
+  virtual void ModelChangingExecuteImpl(sessions::SyncSession* session);
+
+ private:
   ServerUpdateProcessingResult ProcessUpdate(
       const syncable::ScopedDirLookup& dir,
       const sync_pb::SyncEntity& pb_entry);
- private:
   DISALLOW_COPY_AND_ASSIGN(ProcessUpdatesCommand);
 };
 

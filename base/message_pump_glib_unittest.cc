@@ -296,7 +296,7 @@ namespace {
 // while making sure there is always work to do and events in the queue.
 class ConcurrentHelper : public base::RefCounted<ConcurrentHelper>  {
  public:
-  ConcurrentHelper(EventInjector* injector)
+  explicit ConcurrentHelper(EventInjector* injector)
       : injector_(injector),
         event_count_(kStartingEventCount),
         task_count_(kStartingTaskCount) {
@@ -330,6 +330,10 @@ class ConcurrentHelper : public base::RefCounted<ConcurrentHelper>  {
   int task_count() const { return task_count_; }
 
  private:
+  friend class base::RefCounted<ConcurrentHelper>;
+
+  ~ConcurrentHelper() {}
+
   static const int kStartingEventCount = 20;
   static const int kStartingTaskCount = 20;
 
@@ -455,6 +459,10 @@ class GLibLoopRunner : public base::RefCounted<GLibLoopRunner> {
   }
 
  private:
+  friend class base::RefCounted<GLibLoopRunner>;
+
+  ~GLibLoopRunner() {}
+
   bool quit_;
 };
 

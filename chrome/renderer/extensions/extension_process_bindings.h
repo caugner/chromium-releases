@@ -7,7 +7,7 @@
 #ifndef CHROME_RENDERER_EXTENSIONS_EXTENSION_PROCESS_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_EXTENSION_PROCESS_BINDINGS_H_
 
-#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -26,6 +26,9 @@ class ExtensionProcessBindings {
   static void SetFunctionNames(const std::vector<std::string>& names);
   static v8::Extension* Get();
 
+  // Gets the set of extensions running in this process.
+  static void GetActiveExtensions(std::set<std::string>* extension_ids);
+
   // Handles a response to an API request.
   static void HandleResponse(int request_id, bool success,
                              const std::string& response,
@@ -43,10 +46,12 @@ class ExtensionProcessBindings {
   static void SetHostPermissions(const GURL& extension_url,
                                  const std::vector<URLPattern>& permissions);
 
-  // Set l10n messages for a particular extension.
-  static void SetL10nMessages(
-      const std::string& extension_id,
-      const std::map<std::string, std::string>& l10n_messages);
+  // Sets whether incognito is enabled for a particular extension.
+  static void SetIncognitoEnabled(const std::string& extension_id,
+                                  bool enabled);
+
+  // Checks whether incognito is enabled for a particular extension.
+  static bool HasIncognitoEnabled(const std::string& extension_id);
 
   // Check if the extension in the currently running context has permission to
   // access the given extension function. Must be called with a valid V8

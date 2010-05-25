@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H
-#define CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H
+#ifndef CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H_
+#define CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H_
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
@@ -12,21 +12,17 @@
 namespace net {
 class X509Certificate;
 }
-class MessageLoop;
 class URLRequest;
 
 // This class handles the approval and selection of a certificate for SSL client
 // authentication by the user.
 // It is self-owned and deletes itself when the UI reports the user selection or
 // when the URLRequest is cancelled.
-class SSLClientAuthHandler :
-    public base::RefCountedThreadSafe<SSLClientAuthHandler> {
+class SSLClientAuthHandler
+    : public base::RefCountedThreadSafe<SSLClientAuthHandler> {
  public:
   SSLClientAuthHandler(URLRequest* request,
-                       net::SSLCertRequestInfo* cert_request_info,
-                       MessageLoop* io_loop,
-                       MessageLoop* ui_loop);
-  ~SSLClientAuthHandler();
+                       net::SSLCertRequestInfo* cert_request_info);
 
   // Asks the user to select a certificate and resumes the URL request with that
   // certificate.
@@ -37,14 +33,23 @@ class SSLClientAuthHandler :
   // Should only be called on the IO thread.
   void OnRequestCancelled();
 
+  // Calls DoCertificateSelected on the I/O thread.
+  // Called on the UI thread after the user has made a selection (which may
+  // be long after DoSelectCertificate returns, if the UI is modeless/async.)
+  void CertificateSelected(net::X509Certificate* cert);
+
  private:
+  friend class base::RefCountedThreadSafe<SSLClientAuthHandler>;
+
+  ~SSLClientAuthHandler();
+
   // Asks the user for a cert.
   // Called on the UI thread.
   void DoSelectCertificate();
 
   // Notifies that the user has selected a cert.
   // Called on the IO thread.
-  void CertificateSelected(net::X509Certificate* cert);
+  void DoCertificateSelected(net::X509Certificate* cert);
 
   // The URLRequest that triggered this client auth.
   URLRequest* request_;
@@ -52,10 +57,7 @@ class SSLClientAuthHandler :
   // The certs to choose from.
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
 
-  MessageLoop* io_loop_;
-  MessageLoop* ui_loop_;
-
   DISALLOW_COPY_AND_ASSIGN(SSLClientAuthHandler);
 };
 
-#endif  // CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H
+#endif  // CHROME_BROWSER_SSL_SSL_CLIENT_AUTH_HANDLER_H_

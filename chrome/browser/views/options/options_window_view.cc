@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,17 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/options/advanced_page_view.h"
 #include "chrome/browser/views/options/content_page_view.h"
 #include "chrome/browser/views/options/general_page_view.h"
+#include "chrome/browser/window_sizer.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -99,13 +102,25 @@ OptionsWindowView::~OptionsWindowView() {
 
 void OptionsWindowView::ShowOptionsPage(OptionsPage page,
                                         OptionsGroup highlight_group) {
-  // If the window is not yet visible, we need to show it (it will become
-  // active), otherwise just bring it to the front.
-  if (!window()->IsVisible()) {
-    window()->Show();
-  } else {
-    window()->Activate();
+  if (Browser* b = BrowserList::GetLastActive()) {
+    // Move dialog to user expected position.
+    gfx::Rect frame_bounds = b->window()->GetRestoredBounds();
+    if (b->window()->IsMaximized()) {
+      // For maximized window get monitor size as a bounding box.
+      WindowSizer::MonitorInfoProvider* provider =
+          WindowSizer::CreateDefaultMonitorInfoProvider();
+      frame_bounds = provider->GetMonitorWorkAreaMatching(frame_bounds);
+      delete provider;
+    }
+    gfx::Point origin = frame_bounds.origin();
+    origin.Offset(
+        (frame_bounds.width() - window()->GetBounds().width()) / 2,
+        (frame_bounds.height() - window()->GetBounds().height()) / 2);
+    window()->SetBounds(gfx::Rect(origin, window()->GetBounds().size()), NULL);
   }
+
+  // This will show invisible windows and bring visible windows to the front.
+  window()->Show();
 
   if (page == OPTIONS_PAGE_DEFAULT) {
     // Remember the last visited page from local state.
@@ -221,7 +236,6 @@ void ShowOptionsWindow(OptionsPage page,
   if (!instance_) {
     instance_ = new OptionsWindowView(profile);
     views::Window::CreateChromeWindow(NULL, gfx::Rect(), instance_);
-    // The window is alive by itself now...
   }
   instance_->ShowOptionsPage(page, highlight_group);
 }

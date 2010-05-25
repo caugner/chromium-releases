@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/scoped_handle.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 namespace {
 
@@ -35,7 +36,7 @@ bool GetUrlFromHDrop(IDataObject* data_object, std::wstring* url,
     if (0 == _wcsicmp(PathFindExtensionW(filename), L".url") &&
         GetPrivateProfileStringW(L"InternetShortcut", L"url", 0, url_buffer,
                                  arraysize(url_buffer), filename)) {
-      *url = url_buffer;
+      url->assign(url_buffer);
       PathRemoveExtension(filename);
       title->assign(PathFindFileName(filename));
       success = true;
@@ -49,21 +50,18 @@ bool GetUrlFromHDrop(IDataObject* data_object, std::wstring* url,
   return success;
 }
 
-bool SplitUrlAndTitle(const std::wstring& str, std::wstring* url,
-    std::wstring* title) {
+void SplitUrlAndTitle(const std::wstring& str,
+                      std::wstring* url,
+                      std::wstring* title) {
   DCHECK(url && title);
   size_t newline_pos = str.find('\n');
-  bool success = false;
-  if (newline_pos != std::string::npos) {
-    *url = str.substr(0, newline_pos);
-    title->assign(str.substr(newline_pos + 1));
-    success = true;
+  if (newline_pos != std::wstring::npos) {
+    url->assign(str, 0, newline_pos);
+    title->assign(str, newline_pos + 1, std::wstring::npos);
   } else {
-    *url = str;
+    url->assign(str);
     title->assign(str);
-    success = true;
   }
-  return success;
 }
 
 }  // namespace
@@ -146,7 +144,7 @@ FORMATETC* ClipboardUtil::GetFileContentFormatZero() {
 
 FORMATETC* ClipboardUtil::GetWebKitSmartPasteFormat() {
   static UINT cf = RegisterClipboardFormat(L"WebKit Smart Paste Format");
-  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, 0, TYMED_HGLOBAL};
+  static FORMATETC format = {cf, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
   return &format;
 }
 
@@ -191,42 +189,45 @@ bool ClipboardUtil::GetUrl(IDataObject* data_object,
 
   // Try to extract a URL from |data_object| in a variety of formats.
   STGMEDIUM store;
-  if (GetUrlFromHDrop(data_object, url, title)) {
+  if (GetUrlFromHDrop(data_object, url, title))
     return true;
-  }
 
   if (SUCCEEDED(data_object->GetData(GetMozUrlFormat(), &store)) ||
       SUCCEEDED(data_object->GetData(GetUrlWFormat(), &store))) {
-    // Mozilla URL format or unicode URL
-    ScopedHGlobal<wchar_t> data(store.hGlobal);
-    bool success = SplitUrlAndTitle(data.get(), url, title);
+    {
+      // Mozilla URL format or unicode URL
+      ScopedHGlobal<wchar_t> data(store.hGlobal);
+      SplitUrlAndTitle(data.get(), url, title);
+    }
     ReleaseStgMedium(&store);
-    if (success)
-      return true;
+    return true;
   }
 
   if (SUCCEEDED(data_object->GetData(GetUrlFormat(), &store))) {
-    // URL using ascii
-    ScopedHGlobal<char> data(store.hGlobal);
-    bool success = SplitUrlAndTitle(UTF8ToWide(data.get()), url, title);
+    {
+      // URL using ascii
+      ScopedHGlobal<char> data(store.hGlobal);
+      SplitUrlAndTitle(UTF8ToWide(data.get()), url, title);
+    }
     ReleaseStgMedium(&store);
-    if (success)
-      return true;
+    return true;
   }
 
   if (SUCCEEDED(data_object->GetData(GetFilenameWFormat(), &store))) {
-    // filename using unicode
-    ScopedHGlobal<wchar_t> data(store.hGlobal);
     bool success = false;
-    if (data.get() && data.get()[0] && (PathFileExists(data.get()) ||
-                                        PathIsUNC(data.get()))) {
-      wchar_t file_url[INTERNET_MAX_URL_LENGTH];
-      DWORD file_url_len = sizeof(file_url) / sizeof(file_url[0]);
-      if (SUCCEEDED(::UrlCreateFromPathW(data.get(), file_url, &file_url_len,
-                                         0))) {
-        *url = file_url;
-        title->assign(file_url);
-        success = true;
+    {
+      // filename using unicode
+      ScopedHGlobal<wchar_t> data(store.hGlobal);
+      if (data.get() && data.get()[0] &&
+          (PathFileExists(data.get()) || PathIsUNC(data.get()))) {
+        wchar_t file_url[INTERNET_MAX_URL_LENGTH];
+        DWORD file_url_len = arraysize(file_url);
+        if (SUCCEEDED(::UrlCreateFromPathW(data.get(), file_url, &file_url_len,
+                                           0))) {
+          url->assign(file_url);
+          title->assign(file_url);
+          success = true;
+        }
       }
     }
     ReleaseStgMedium(&store);
@@ -235,20 +236,20 @@ bool ClipboardUtil::GetUrl(IDataObject* data_object,
   }
 
   if (SUCCEEDED(data_object->GetData(GetFilenameFormat(), &store))) {
-    // filename using ascii
-    ScopedHGlobal<char> data(store.hGlobal);
     bool success = false;
-    if (data.get() && data.get()[0] && (PathFileExistsA(data.get()) ||
-                                        PathIsUNCA(data.get()))) {
-      char file_url[INTERNET_MAX_URL_LENGTH];
-      DWORD file_url_len = sizeof(file_url) / sizeof(file_url[0]);
-      if (SUCCEEDED(::UrlCreateFromPathA(data.get(),
-                                         file_url,
-                                         &file_url_len,
-                                         0))) {
-        *url = UTF8ToWide(file_url);
-        title->assign(*url);
-        success = true;
+    {
+      // filename using ascii
+      ScopedHGlobal<char> data(store.hGlobal);
+      if (data.get() && data.get()[0] && (PathFileExistsA(data.get()) ||
+                                          PathIsUNCA(data.get()))) {
+        char file_url[INTERNET_MAX_URL_LENGTH];
+        DWORD file_url_len = arraysize(file_url);
+        if (SUCCEEDED(::UrlCreateFromPathA(data.get(), file_url, &file_url_len,
+                                           0))) {
+          url->assign(UTF8ToWide(file_url));
+          title->assign(*url);
+          success = true;
+        }
       }
     }
     ReleaseStgMedium(&store);
@@ -296,58 +297,62 @@ bool ClipboardUtil::GetPlainText(IDataObject* data_object,
     return false;
 
   STGMEDIUM store;
-  bool success = false;
   if (SUCCEEDED(data_object->GetData(GetPlainTextWFormat(), &store))) {
-    // Unicode text
-    ScopedHGlobal<wchar_t> data(store.hGlobal);
-    plain_text->assign(data.get());
+    {
+      // Unicode text
+      ScopedHGlobal<wchar_t> data(store.hGlobal);
+      plain_text->assign(data.get());
+    }
     ReleaseStgMedium(&store);
-    success = true;
-  } else if (SUCCEEDED(data_object->GetData(GetPlainTextFormat(), &store))) {
-    // ascii text
-    ScopedHGlobal<char> data(store.hGlobal);
-    plain_text->assign(UTF8ToWide(data.get()));
-    ReleaseStgMedium(&store);
-    success = true;
-  } else {
-    // If a file is dropped on the window, it does not provide either of the
-    // plain text formats, so here we try to forcibly get a url.
-    std::wstring title;
-    success = GetUrl(data_object, plain_text, &title);
+    return true;
   }
 
-  return success;
+  if (SUCCEEDED(data_object->GetData(GetPlainTextFormat(), &store))) {
+    {
+      // ascii text
+      ScopedHGlobal<char> data(store.hGlobal);
+      plain_text->assign(UTF8ToWide(data.get()));
+    }
+    ReleaseStgMedium(&store);
+    return true;
+  }
+
+  // If a file is dropped on the window, it does not provide either of the
+  // plain text formats, so here we try to forcibly get a url.
+  std::wstring title;
+  return GetUrl(data_object, plain_text, &title);
 }
 
 bool ClipboardUtil::GetHtml(IDataObject* data_object,
                             std::wstring* html, std::string* base_url) {
   DCHECK(data_object && html && base_url);
 
-  if (SUCCEEDED(data_object->QueryGetData(GetHtmlFormat()))) {
-    STGMEDIUM store;
-    if (SUCCEEDED(data_object->GetData(GetHtmlFormat(), &store))) {
+  STGMEDIUM store;
+  if (SUCCEEDED(data_object->QueryGetData(GetHtmlFormat())) &&
+      SUCCEEDED(data_object->GetData(GetHtmlFormat(), &store))) {
+    {
       // MS CF html
       ScopedHGlobal<char> data(store.hGlobal);
 
       std::string html_utf8;
       CFHtmlToHtml(std::string(data.get(), data.Size()), &html_utf8, base_url);
       html->assign(UTF8ToWide(html_utf8));
-
-      ReleaseStgMedium(&store);
-      return true;
     }
+    ReleaseStgMedium(&store);
+    return true;
   }
 
   if (FAILED(data_object->QueryGetData(GetTextHtmlFormat())))
     return false;
 
-  STGMEDIUM store;
   if (FAILED(data_object->GetData(GetTextHtmlFormat(), &store)))
     return false;
 
-  // text/html
-  ScopedHGlobal<wchar_t> data(store.hGlobal);
-  html->assign(data.get());
+  {
+    // text/html
+    ScopedHGlobal<wchar_t> data(store.hGlobal);
+    html->assign(data.get());
+  }
   ReleaseStgMedium(&store);
   return true;
 }
@@ -355,11 +360,8 @@ bool ClipboardUtil::GetHtml(IDataObject* data_object,
 bool ClipboardUtil::GetFileContents(IDataObject* data_object,
     std::wstring* filename, std::string* file_contents) {
   DCHECK(data_object && filename && file_contents);
-  bool has_data =
-      SUCCEEDED(data_object->QueryGetData(GetFileContentFormatZero())) ||
-      SUCCEEDED(data_object->QueryGetData(GetFileDescriptorFormat()));
-
-  if (!has_data)
+  if (!SUCCEEDED(data_object->QueryGetData(GetFileContentFormatZero())) &&
+      !SUCCEEDED(data_object->QueryGetData(GetFileDescriptorFormat())))
     return false;
 
   STGMEDIUM content;
@@ -376,10 +378,12 @@ bool ClipboardUtil::GetFileContents(IDataObject* data_object,
   STGMEDIUM description;
   if (SUCCEEDED(data_object->GetData(GetFileDescriptorFormat(),
                                      &description))) {
-    ScopedHGlobal<FILEGROUPDESCRIPTOR> fgd(description.hGlobal);
-    // We expect there to be at least one file in here.
-    DCHECK_GE(fgd->cItems, 1u);
-    filename->assign(fgd->fgd[0].cFileName);
+    {
+      ScopedHGlobal<FILEGROUPDESCRIPTOR> fgd(description.hGlobal);
+      // We expect there to be at least one file in here.
+      DCHECK_GE(fgd->cItems, 1u);
+      filename->assign(fgd->fgd[0].cFileName);
+    }
     ReleaseStgMedium(&description);
   }
   return true;
@@ -485,14 +489,36 @@ void ClipboardUtil::CFHtmlToHtml(const std::string& cf_html,
     }
   }
 
-  // Find the markup between "<!--StartFragment -->" and "<!--EndFragment-->".
+  // Find the markup between "<!--StartFragment-->" and "<!--EndFragment-->".
+  // If the comments cannot be found, like copying from OpenOffice Writer,
+  // we simply fall back to using StartFragment/EndFragment bytecount values
+  // to get the markup.
   if (html) {
+    size_t fragment_start = std::string::npos;
+    size_t fragment_end = std::string::npos;
+
     std::string cf_html_lower = StringToLowerASCII(cf_html);
     size_t markup_start = cf_html_lower.find("<html", 0);
-    size_t tag_start = cf_html.find("StartFragment", markup_start);
-    size_t fragment_start = cf_html.find('>', tag_start) + 1;
-    size_t tag_end = cf_html.rfind("EndFragment", std::string::npos);
-    size_t fragment_end = cf_html.rfind('<', tag_end);
+    size_t tag_start = cf_html.find("<!--StartFragment", markup_start);
+    if (tag_start == std::string::npos) {
+      static std::string start_fragment_str("StartFragment:");
+      size_t start_fragment_start = cf_html.find(start_fragment_str);
+      if (start_fragment_start != std::string::npos) {
+        fragment_start = static_cast<size_t>(atoi(cf_html.c_str() +
+            start_fragment_start + start_fragment_str.length()));
+      }
+
+      static std::string end_fragment_str("EndFragment:");
+      size_t end_fragment_start = cf_html.find(end_fragment_str);
+      if (end_fragment_start != std::string::npos) {
+        fragment_end = static_cast<size_t>(atoi(cf_html.c_str() +
+            end_fragment_start + end_fragment_str.length()));
+      }
+    } else {
+      fragment_start = cf_html.find('>', tag_start) + 1;
+      size_t tag_end = cf_html.rfind("<!--EndFragment", std::string::npos);
+      fragment_end = cf_html.rfind('<', tag_end);
+    }
     if (fragment_start != std::string::npos &&
         fragment_end != std::string::npos) {
       *html = cf_html.substr(fragment_start, fragment_end - fragment_start);

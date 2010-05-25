@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <Cocoa/Cocoa.h>
-
-#include "base/scoped_ptr.h"
-#include "base/scoped_nsobject.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_window.h"
@@ -13,6 +9,7 @@
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/cocoa/find_bar_cocoa_controller.h"
 #import "chrome/browser/cocoa/find_pasteboard.h"
+#import "chrome/browser/cocoa/find_bar_text_field.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -20,8 +17,7 @@
 @interface FindBarCocoaController(Testing)
 - (NSView*)findBarView;
 - (NSString*)findText;
-- (NSTextField*)findTextField;
-- (NSTextField*)resultsLabel;
+- (FindBarTextField*)findTextField;
 @end
 
 @implementation FindBarCocoaController(Testing)
@@ -36,29 +32,23 @@
 - (NSTextField*)findTextField {
   return findText_;
 }
-
-- (NSTextField*)resultsLabel {
-  return resultsLabel_;
-}
 @end
 
 namespace {
 
-class FindBarCocoaControllerTest : public PlatformTest {
+class FindBarCocoaControllerTest : public CocoaTest {
  public:
   virtual void SetUp() {
-    PlatformTest::SetUp();
-
-    // TODO(rohitrao): We don't really need to do this once per test.
-    // Consider moving it to SetUpTestCase().
+    CocoaTest::SetUp();
     controller_.reset([[FindBarCocoaController alloc] init]);
-    [helper_.contentView() addSubview:[controller_ view]];
+    [[test_window() contentView] addSubview:[controller_ view]];
   }
 
  protected:
-  CocoaTestHelper helper_;
   scoped_nsobject<FindBarCocoaController> controller_;
 };
+
+TEST_VIEW(FindBarCocoaControllerTest, [controller_ view])
 
 TEST_F(FindBarCocoaControllerTest, ShowAndHide) {
   NSView* findBarView = [controller_ findBarView];
@@ -109,7 +99,7 @@ TEST_F(FindBarCocoaControllerTest, ResultLabelUpdatesCorrectly) {
 TEST_F(FindBarCocoaControllerTest, FindTextIsGlobal) {
   scoped_nsobject<FindBarCocoaController> otherController(
       [[FindBarCocoaController alloc] init]);
-  [helper_.contentView() addSubview:[otherController view]];
+  [[test_window() contentView] addSubview:[otherController view]];
 
   // Setting the text in one controller should update the other controller's
   // text as well.

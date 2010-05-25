@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,11 +31,9 @@ class RenderViewHostManagerTest : public RenderViewHostTestHarness {
 // different SiteInstances, BrowsingInstances, and RenderProcessHosts. This is
 // a regression test for bug 9364.
 TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
+  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
   GURL ntp(chrome::kChromeUINewTabURL);
   GURL dest("http://www.google.com/");
-
-  // The sync service must be created to host the sync NTP advertisement.
-  profile_->CreateProfileSyncService();
 
   // Navigate our first tab to the new tab page and then to the destination.
   NavigateActiveAndCommit(ntp);
@@ -78,11 +76,9 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
 // EnableViewSourceMode message is sent on every navigation regardless
 // RenderView is being newly created or reused.
 TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
+  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
   const GURL kNtpUrl(chrome::kChromeUINewTabURL);
   const GURL kUrl("view-source:http://foo");
-
-  // The sync service must be created to host the sync NTP advertisement.
-  profile_->CreateProfileSyncService();
 
   // We have to navigate to some page at first since without this, the first
   // navigation will reuse the SiteInstance created by Init(), and the second
@@ -93,8 +89,6 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   NavigateActiveAndCommit(kNtpUrl);
 
   // Navigate.
-  // The sync service must be available to show the NTP sync advertisement.
-  profile_->CreateProfileSyncService();
   controller().LoadURL(kUrl, GURL() /* referer */, PageTransition::TYPED);
   // Simulate response from RenderView for FirePageBeforeUnload.
   rvh()->TestOnMessageReceived(
@@ -142,7 +136,7 @@ TEST_F(RenderViewHostManagerTest, Init) {
   ASSERT_TRUE(host);
   EXPECT_TRUE(instance == host->site_instance());
   EXPECT_TRUE(&tab_contents == host->delegate());
-  EXPECT_TRUE(manager.current_view());
+  EXPECT_TRUE(manager.GetRenderWidgetHostView());
   EXPECT_FALSE(manager.pending_render_view_host());
 }
 
@@ -228,6 +222,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
 
 // Tests DOMUI creation.
 TEST_F(RenderViewHostManagerTest, DOMUI) {
+  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
   SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
 
   TestTabContents tab_contents(profile_.get(), instance);
@@ -235,9 +230,7 @@ TEST_F(RenderViewHostManagerTest, DOMUI) {
 
   manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
 
-  // The sync service must be created to host the sync advertisement on the NTP.
-  profile_->CreateProfileSyncService();
-  GURL url("chrome://newtab");
+  GURL url(chrome::kChromeUINewTabURL);
   NavigationEntry entry(NULL /* instance */, -1 /* page_id */, url,
                         GURL() /* referrer */, string16() /* title */,
                         PageTransition::TYPED);
@@ -248,6 +241,13 @@ TEST_F(RenderViewHostManagerTest, DOMUI) {
   EXPECT_FALSE(manager.pending_render_view_host());
   EXPECT_TRUE(manager.pending_dom_ui());
   EXPECT_FALSE(manager.dom_ui());
+
+  // It's important that the site instance get set on the DOM UI page as soon
+  // as the navigation starts, rather than lazily after it commits, so we don't
+  // try to re-use the SiteInstance/process for non DOM-UI things that may
+  // get loaded in between.
+  EXPECT_TRUE(host->site_instance()->has_site());
+  EXPECT_EQ(url, host->site_instance()->site());
 
   // Commit.
   manager.DidNavigateMainFrame(host);

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 
 #include "app/clipboard/scoped_clipboard_writer.h"
 
-#include "base/gfx/size.h"
 #include "base/pickle.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/size.h"
 
 ScopedClipboardWriter::ScopedClipboardWriter(Clipboard* clipboard)
     : clipboard_(clipboard) {
@@ -65,7 +65,7 @@ void ScopedClipboardWriter::WriteBookmark(const string16& bookmark_title,
   objects_[Clipboard::CBF_BOOKMARK] = parameters;
 }
 
-void ScopedClipboardWriter::WriteHyperlink(const std::string& anchor_text,
+void ScopedClipboardWriter::WriteHyperlink(const string16& anchor_text,
                                            const std::string& url) {
   if (anchor_text.empty() || url.empty())
     return;
@@ -74,47 +74,9 @@ void ScopedClipboardWriter::WriteHyperlink(const std::string& anchor_text,
   std::string html("<a href=\"");
   html.append(url);
   html.append("\">");
-  html.append(anchor_text);
+  html.append(UTF16ToUTF8(anchor_text));
   html.append("</a>");
   WriteHTML(UTF8ToUTF16(html), std::string());
-}
-
-void ScopedClipboardWriter::WriteFile(const FilePath& file) {
-  WriteFiles(std::vector<FilePath>(1, file));
-}
-
-// Save the filenames as a string separated by nulls and terminated with an
-// extra null.
-void ScopedClipboardWriter::WriteFiles(const std::vector<FilePath>& files) {
-  if (files.empty())
-    return;
-
-  Clipboard::ObjectMapParam parameter;
-
-  for (std::vector<FilePath>::const_iterator iter = files.begin();
-       iter != files.end(); ++iter) {
-    FilePath filepath = *iter;
-    FilePath::StringType filename = filepath.value();
-
-    size_t data_length = filename.length() * sizeof(FilePath::CharType);
-    const char* data = reinterpret_cast<const char*>(filename.data());
-    const char* data_end = data + data_length;
-
-    for (const char* ch = data; ch < data_end; ++ch)
-      parameter.push_back(*ch);
-
-    // NUL-terminate the string.
-    for (size_t i = 0; i < sizeof(FilePath::CharType); ++i)
-      parameter.push_back('\0');
-  }
-
-  // NUL-terminate the string list.
-  for (size_t i = 0; i < sizeof(FilePath::CharType); ++i)
-    parameter.push_back('\0');
-
-  Clipboard::ObjectMapParams parameters;
-  parameters.push_back(parameter);
-  objects_[Clipboard::CBF_FILES] = parameters;
 }
 
 void ScopedClipboardWriter::WriteWebSmartPaste() {
@@ -172,4 +134,3 @@ void ScopedClipboardWriter::WriteTextOrURL(const string16& text, bool is_url) {
     url_text_.clear();
   }
 }
-

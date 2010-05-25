@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_file.h"
@@ -18,8 +19,7 @@
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
 
-using std::string;
-using std::wstring;
+const char* URLFixerUpper::home_directory_override = NULL;
 
 namespace {
 
@@ -29,22 +29,23 @@ namespace {
 // UTF8 to UTF16. Instead of this after-the-fact adjustment, we should parse it
 // in the correct string format to begin with.
 url_parse::Component UTF8ComponentToWideComponent(
-    const string& text_utf8,
+    const std::string& text_utf8,
     const url_parse::Component& component_utf8) {
   if (component_utf8.len == -1)
     return url_parse::Component();
 
-  string before_component_string = text_utf8.substr(0, component_utf8.begin);
-  string component_string = text_utf8.substr(component_utf8.begin,
-                                             component_utf8.len);
-  wstring before_component_string_w = UTF8ToWide(before_component_string);
-  wstring component_string_w = UTF8ToWide(component_string);
+  std::string before_component_string =
+      text_utf8.substr(0, component_utf8.begin);
+  std::string component_string = text_utf8.substr(component_utf8.begin,
+                                                  component_utf8.len);
+  std::wstring before_component_string_w = UTF8ToWide(before_component_string);
+  std::wstring component_string_w = UTF8ToWide(component_string);
   url_parse::Component component_w(before_component_string_w.length(),
                                    component_string_w.length());
   return component_w;
 }
 
-void UTF8PartsToWideParts(const string& text_utf8,
+void UTF8PartsToWideParts(const std::string& text_utf8,
                           const url_parse::Parsed& parts_utf8,
                           url_parse::Parsed* parts) {
   if (IsStringASCII(text_utf8)) {
@@ -113,13 +114,42 @@ static bool ValidPathForFile(const FilePath::StringType& text,
   return true;
 }
 
+#if defined(OS_POSIX)
+// Given a path that starts with ~, return a path that starts with an
+// expanded-out /user/foobar directory.
+static std::string FixupHomedir(const std::string& text) {
+  DCHECK(text.length() > 0 && text[0] == '~');
+
+  if (text.length() == 1 || text[1] == '/') {
+    const char* home = getenv("HOME");
+    if (URLFixerUpper::home_directory_override)
+      home = URLFixerUpper::home_directory_override;
+    // We'll probably break elsewhere if $HOME is undefined, but check here
+    // just in case.
+    if (!home)
+      return text;
+    return home + text.substr(1);
+  }
+
+  // Otherwise, this is a path like ~foobar/baz, where we must expand to
+  // user foobar's home directory.  Officially, we should use getpwent(),
+  // but that is a nasty blocking call.
+
+#if defined(OS_MACOSX)
+  static const char kHome[] = "/Users/";
+#else
+  static const char kHome[] = "/home/";
+#endif
+  return kHome + text.substr(1);
+}
+#endif
+
 // Tries to create a file: URL from |text| if it looks like a filename, even if
-// it doesn't resolve as a valid path or to an existing file.  Returns true
-// with a (possibly invalid) file: URL in |fixed_up_url| for input beginning
-// with a drive specifier or "\\".  Returns false in other cases (including
-// file: URLs: these don't look like filenames), leaving fixed_up_url
-// unchanged.
-static string FixupPath(const string& text) {
+// it doesn't resolve as a valid path or to an existing file.  Returns a
+// (possibly invalid) file: URL in |fixed_up_url| for input beginning
+// with a drive specifier or "\\".  Returns the unchanged input in other cases
+// (including file: URLs: these don't look like filenames).
+static std::string FixupPath(const std::string& text) {
   DCHECK(!text.empty());
 
   FilePath::StringType filename;
@@ -133,13 +163,15 @@ static string FixupPath(const string& text) {
 #elif defined(OS_POSIX)
   FilePath input_path(text);
   PrepareStringForFileOps(input_path, &filename);
+  if (filename.length() > 0 && filename[0] == '~')
+    filename = FixupHomedir(filename);
 #endif
 
   // Here, we know the input looks like a file.
   GURL file_url = net::FilePathToFileURL(FilePath(filename));
   if (file_url.is_valid()) {
     return WideToUTF8(net::FormatUrl(file_url, std::wstring(), true,
-        UnescapeRule::NORMAL, NULL, NULL));
+        UnescapeRule::NORMAL, NULL, NULL, NULL));
   }
 
   // Invalid file URL, just return the input.
@@ -148,43 +180,44 @@ static string FixupPath(const string& text) {
 
 // Checks |domain| to see if a valid TLD is already present.  If not, appends
 // |desired_tld| to the domain, and prepends "www." unless it's already present.
-// Then modifies |fixed_up_url| to reflect the changes.
-static void AddDesiredTLD(const string& desired_tld,
-                          string* domain) {
+static void AddDesiredTLD(const std::string& desired_tld,
+                          std::string* domain) {
   if (desired_tld.empty() || domain->empty())
     return;
 
   // Check the TLD.  If the return value is positive, we already have a TLD, so
-  // abort; if the return value is string::npos, there's no valid host (e.g. if
-  // the user pasted in garbage for which HistoryURLProvider is trying to
-  // suggest an exact match), so adding a TLD makes no sense.  The only useful
-  // case is where the return value is 0 (there's a valid host with no known
-  // TLD).  We disallow unknown registries here so users can input "mail.yahoo"
-  // and hit ctrl-enter to get "www.mail.yahoo.com".
+  // abort.  If the return value is std::string::npos, there's no valid host,
+  // but we can try to append a TLD anyway, since the host may become valid once
+  // the TLD is attached -- for example, "999999999999" is detected as a broken
+  // IP address and marked invalid, but attaching ".com" makes it legal.  When
+  // the return value is 0, there's a valid host with no known TLD, so we can
+  // definitely append the user's TLD.  We disallow unknown registries here so
+  // users can input "mail.yahoo" and hit ctrl-enter to get
+  // "www.mail.yahoo.com".
   const size_t registry_length =
       net::RegistryControlledDomainService::GetRegistryLength(*domain, false);
-  if (registry_length != 0)
+  if ((registry_length != 0) && (registry_length != std::string::npos))
     return;
 
   // Add the suffix at the end of the domain.
   const size_t domain_length(domain->length());
-  DCHECK(domain_length > 0);
-  DCHECK(desired_tld[0] != '.');
+  DCHECK_GT(domain_length, 0U);
+  DCHECK_NE(desired_tld[0], '.');
   if ((*domain)[domain_length - 1] != '.')
     domain->push_back('.');
   domain->append(desired_tld);
 
   // Now, if the domain begins with "www.", stop.
-  const string prefix("www.");
+  const std::string prefix("www.");
   if (domain->compare(0, prefix.length(), prefix) != 0) {
     // Otherwise, add www. to the beginning of the URL.
     domain->insert(0, prefix);
   }
 }
 
-static inline void FixupUsername(const string& text,
+static inline void FixupUsername(const std::string& text,
                                  const url_parse::Component& part,
-                                 string* url) {
+                                 std::string* url) {
   if (!part.is_valid())
     return;
 
@@ -194,9 +227,9 @@ static inline void FixupUsername(const string& text,
   // password.  FixupURL itself will append the '@' for us.
 }
 
-static inline void FixupPassword(const string& text,
+static inline void FixupPassword(const std::string& text,
                                  const url_parse::Component& part,
-                                 string* url) {
+                                 std::string* url) {
   if (!part.is_valid())
     return;
 
@@ -205,11 +238,11 @@ static inline void FixupPassword(const string& text,
   url->append(text, part.begin, part.len);
 }
 
-static void FixupHost(const string& text,
+static void FixupHost(const std::string& text,
                       const url_parse::Component& part,
                       bool has_scheme,
-                      const string& desired_tld,
-                      string* url) {
+                      const std::string& desired_tld,
+                      std::string* url) {
   if (!part.is_valid())
     return;
 
@@ -217,13 +250,13 @@ static void FixupHost(const string& text,
   // Strip all leading dots and all but one trailing dot, unless the user only
   // typed dots, in which case their input is totally invalid and we should just
   // leave it unchanged.
-  string domain(text, part.begin, part.len);
+  std::string domain(text, part.begin, part.len);
   const size_t first_nondot(domain.find_first_not_of('.'));
-  if (first_nondot != string::npos) {
+  if (first_nondot != std::string::npos) {
     domain.erase(0, first_nondot);
     size_t last_nondot(domain.find_last_not_of('.'));
-    DCHECK(last_nondot != string::npos);
-    last_nondot += 2; // Point at second period in ending string
+    DCHECK(last_nondot != std::string::npos);
+    last_nondot += 2;  // Point at second period in ending string
     if (last_nondot < domain.length())
       domain.erase(last_nondot);
   }
@@ -234,35 +267,20 @@ static void FixupHost(const string& text,
   url->append(domain);
 }
 
-// Looks for a port number, including initial colon, at port_start.  If
-// something invalid (which cannot be fixed up) is found, like ":foo" or
-// ":7:7", returns false.  Otherwise, removes any extra colons
-// ("::1337" -> ":1337", ":/" -> "/") and returns true.
-static void FixupPort(const string& text,
+static void FixupPort(const std::string& text,
                       const url_parse::Component& part,
-                      string* url) {
+                      std::string* url) {
   if (!part.is_valid())
     return;
 
-  // Look for non-digit in port and strip if found.
-  string port(text, part.begin, part.len);
-  for (string::iterator i = port.begin(); i != port.end();) {
-    if (IsAsciiDigit(*i))
-      ++i;
-    else
-      i = port.erase(i);
-  }
-
-  if (port.empty())
-    return;  // Nothing to append.
-
+  // We don't fix up the port at the moment.
   url->append(":");
-  url->append(port);
+  url->append(text, part.begin, part.len);
 }
 
-static inline void FixupPath(const string& text,
+static inline void FixupPath(const std::string& text,
                              const url_parse::Component& part,
-                             string* url) {
+                             std::string* url) {
   if (!part.is_valid() || part.len == 0) {
     // We should always have a path.
     url->append("/");
@@ -273,9 +291,9 @@ static inline void FixupPath(const string& text,
   url->append(text, part.begin, part.len);
 }
 
-static inline void FixupQuery(const string& text,
+static inline void FixupQuery(const std::string& text,
                               const url_parse::Component& part,
-                              string* url) {
+                              std::string* url) {
   if (!part.is_valid())
     return;
 
@@ -284,9 +302,9 @@ static inline void FixupQuery(const string& text,
   url->append(text, part.begin, part.len);
 }
 
-static inline void FixupRef(const string& text,
+static inline void FixupRef(const std::string& text,
                             const url_parse::Component& part,
-                            string* url) {
+                            std::string* url) {
   if (!part.is_valid())
     return;
 
@@ -332,9 +350,9 @@ static bool HasPort(const std::string& original_text,
 // If successful, set |scheme_component| to the text range where the scheme
 // was located, and fill |canon_scheme| with its canonicalized form.
 // Otherwise, return false and leave the outputs in an indeterminate state.
-static bool GetValidScheme(const string &text,
-                           url_parse::Component *scheme_component,
-                           string *canon_scheme) {
+static bool GetValidScheme(const std::string &text,
+                           url_parse::Component* scheme_component,
+                           std::string* canon_scheme) {
   // Locate everything up to (but not including) the first ':'
   if (!url_parse::ExtractScheme(text.data(), static_cast<int>(text.length()),
                                 scheme_component))
@@ -356,7 +374,7 @@ static bool GetValidScheme(const string &text,
 
   // We need to fix up the segmentation for "www.example.com:/".  For this
   // case, we guess that schemes with a "." are not actually schemes.
-  if (canon_scheme->find('.') != string::npos)
+  if (canon_scheme->find('.') != std::string::npos)
     return false;
 
   // We need to fix up the segmentation for "www:123/".  For this case, we
@@ -369,28 +387,28 @@ static bool GetValidScheme(const string &text,
   return true;
 }
 
-string URLFixerUpper::SegmentURL(const string& text,
-                                 url_parse::Parsed* parts) {
+std::string URLFixerUpper::SegmentURL(const std::string& text,
+                                      url_parse::Parsed* parts) {
   // Initialize the result.
   *parts = url_parse::Parsed();
 
-  string trimmed;
+  std::string trimmed;
   TrimWhitespaceUTF8(text, TRIM_ALL, &trimmed);
   if (trimmed.empty())
-    return string();  // Nothing to segment.
+    return std::string();  // Nothing to segment.
 
 #if defined(OS_WIN)
   int trimmed_length = static_cast<int>(trimmed.length());
   if (url_parse::DoesBeginWindowsDriveSpec(trimmed.data(), 0, trimmed_length) ||
-      url_parse::DoesBeginUNCPath(trimmed.data(), 0, trimmed_length, false))
+      url_parse::DoesBeginUNCPath(trimmed.data(), 0, trimmed_length, true))
     return "file";
 #elif defined(OS_POSIX)
-  if (FilePath::IsSeparator(trimmed.c_str()[0]))
+  if (FilePath::IsSeparator(trimmed.data()[0]) || trimmed.data()[0] == '~')
     return "file";
 #endif
 
   // Otherwise, we need to look at things carefully.
-  string scheme;
+  std::string scheme;
   if (!GetValidScheme(text, &parts->scheme, &scheme)) {
     // Couldn't determine the scheme, so just pick one.
     parts->scheme.reset();
@@ -400,7 +418,7 @@ string URLFixerUpper::SegmentURL(const string& text,
 
   // Not segmenting file schemes or nonstandard schemes.
   if ((scheme == chrome::kFileScheme) ||
-      !url_util::IsStandard(scheme.c_str(), static_cast<int>(scheme.length()),
+      !url_util::IsStandard(scheme.c_str(),
       url_parse::Component(0, static_cast<int>(scheme.length()))))
     return scheme;
 
@@ -413,14 +431,14 @@ string URLFixerUpper::SegmentURL(const string& text,
 
   // We need to add a scheme in order for ParseStandardURL to be happy.
   // Find the first non-whitespace character.
-  string::const_iterator first_nonwhite = text.begin();
+  std::string::const_iterator first_nonwhite = text.begin();
   while ((first_nonwhite != text.end()) && IsWhitespace(*first_nonwhite))
     ++first_nonwhite;
 
   // Construct the text to parse by inserting the scheme.
-  string inserted_text(scheme);
+  std::string inserted_text(scheme);
   inserted_text.append("://");
-  string text_to_parse(text.begin(), first_nonwhite);
+  std::string text_to_parse(text.begin(), first_nonwhite);
   text_to_parse.append(inserted_text);
   text_to_parse.append(first_nonwhite, text.end());
 
@@ -443,25 +461,25 @@ string URLFixerUpper::SegmentURL(const string& text,
   return scheme;
 }
 
-string URLFixerUpper::FixupURL(const string& text,
-                               const string& desired_tld) {
-  string trimmed;
+std::string URLFixerUpper::FixupURL(const std::string& text,
+                                    const std::string& desired_tld) {
+  std::string trimmed;
   TrimWhitespaceUTF8(text, TRIM_ALL, &trimmed);
   if (trimmed.empty())
-    return string();  // Nothing here.
+    return std::string();  // Nothing here.
 
   // Segment the URL.
   url_parse::Parsed parts;
-  string scheme(SegmentURL(trimmed, &parts));
+  std::string scheme(SegmentURL(trimmed, &parts));
 
   // We handle the file scheme separately.
   if (scheme == "file")
     return (parts.scheme.is_valid() ? text : FixupPath(text));
 
   // For some schemes whose layouts we understand, we rebuild it.
-  if (url_util::IsStandard(scheme.c_str(), static_cast<int>(scheme.length()),
+  if (url_util::IsStandard(scheme.c_str(),
           url_parse::Component(0, static_cast<int>(scheme.length())))) {
-    string url(scheme);
+    std::string url(scheme);
     url.append("://");
 
     // We need to check whether the |username| is valid because it is our
@@ -484,7 +502,7 @@ string URLFixerUpper::FixupURL(const string& text,
 
   // In the worst-case, we insert a scheme if the URL lacks one.
   if (!parts.scheme.is_valid()) {
-    string fixed_scheme(scheme);
+    std::string fixed_scheme(scheme);
     fixed_scheme.append("://");
     trimmed.insert(0, fixed_scheme);
   }
@@ -497,8 +515,8 @@ string URLFixerUpper::FixupURL(const string& text,
 // fixup will look for cues that it is actually a file path before trying to
 // figure out what file it is.  If our logic doesn't work, we will fall back on
 // regular fixup.
-string URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
-                                        const FilePath& text) {
+std::string URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
+                                             const FilePath& text) {
   FilePath old_cur_directory;
   if (!base_dir.empty()) {
     // Save the old current directory before we move to the new one.
@@ -539,34 +557,30 @@ string URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
     GURL file_url = net::FilePathToFileURL(full_path);
     if (file_url.is_valid())
       return WideToUTF8(net::FormatUrl(file_url, std::wstring(),
-          true, UnescapeRule::NORMAL, NULL, NULL));
+          true, UnescapeRule::NORMAL, NULL, NULL, NULL));
     // Invalid files fall through to regular processing.
   }
 
   // Fall back on regular fixup for this input.
 #if defined(OS_WIN)
-  string text_utf8 = WideToUTF8(text.value());
+  std::string text_utf8 = WideToUTF8(text.value());
 #elif defined(OS_POSIX)
-  string text_utf8 = text.value();
+  std::string text_utf8 = text.value();
 #endif
   return FixupURL(text_utf8, "");
 }
 
 // Deprecated functions. To be removed when all callers are updated.
-wstring URLFixerUpper::SegmentURL(const wstring& text,
-                                  url_parse::Parsed* parts) {
-  string text_utf8 = WideToUTF8(text);
+std::wstring URLFixerUpper::SegmentURL(const std::wstring& text,
+                                       url_parse::Parsed* parts) {
+  std::string text_utf8 = WideToUTF8(text);
   url_parse::Parsed parts_utf8;
-  string scheme_utf8 = SegmentURL(text_utf8, &parts_utf8);
+  std::string scheme_utf8 = SegmentURL(text_utf8, &parts_utf8);
   UTF8PartsToWideParts(text_utf8, parts_utf8, parts);
   return UTF8ToWide(scheme_utf8);
 }
-wstring URLFixerUpper::FixupURL(const wstring& text,
-                                const wstring& desired_tld) {
-  return UTF8ToWide(FixupURL(WideToUTF8(text), WideToUTF8(desired_tld)));
-}
-wstring URLFixerUpper::FixupRelativeFile(const wstring& base_dir,
-                                         const wstring& text) {
+std::wstring URLFixerUpper::FixupRelativeFile(const std::wstring& base_dir,
+                                              const std::wstring& text) {
   return UTF8ToWide(FixupRelativeFile(FilePath::FromWStringHack(base_dir),
                                       FilePath::FromWStringHack(text)));
 }

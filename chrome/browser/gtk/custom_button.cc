@@ -4,8 +4,6 @@
 
 #include "chrome/browser/gtk/custom_button.h"
 
-#include "app/gfx/gtk_util.h"
-#include "app/gfx/skbitmap_operations.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
@@ -13,18 +11,22 @@
 #include "chrome/browser/gtk/cairo_cached_surface.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/gtk_util.h"
+#include "gfx/skbitmap_operations.h"
 #include "grit/theme_resources.h"
 
 CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeProvider* theme_provider,
-    int normal_id, int active_id, int highlight_id, int depressed_id)
+    int normal_id, int active_id, int highlight_id, int depressed_id,
+    int background_id)
     : background_image_(NULL),
       paint_override_(-1),
       normal_id_(normal_id),
       active_id_(active_id),
       highlight_id_(highlight_id),
       depressed_id_(depressed_id),
+      button_background_id_(background_id),
       theme_provider_(theme_provider) {
   for (int i = 0; i < (GTK_STATE_INSENSITIVE + 1); ++i)
     surfaces_[i].reset(new CairoCachedSurface);
@@ -64,16 +66,24 @@ int CustomDrawButtonBase::Height() const {
   return surfaces_[0]->Height();
 }
 
-gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
-  CairoCachedSurface* pixbuf =
-      surfaces_[paint_override_ >= 0 ?
-                paint_override_ : GTK_WIDGET_STATE(widget)].get();
+gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
+                                        GdkEventExpose* e,
+                                        gdouble hover_state) {
+  int paint_state = paint_override_ >= 0 ?
+                    paint_override_ : GTK_WIDGET_STATE(widget);
 
-  // Fall back to the default image if we don't have one for this state.
-  if (!pixbuf || !pixbuf->valid())
-    pixbuf = surfaces_[GTK_STATE_NORMAL].get();
+  // If the paint state is PRELIGHT then set it to NORMAL (we will paint the
+  // hover state according to |hover_state_|).
+  if (paint_state == GTK_STATE_PRELIGHT)
+    paint_state = GTK_STATE_NORMAL;
+  bool animating_hover = hover_state > 0.0 &&
+      paint_state == GTK_STATE_NORMAL;
+  CairoCachedSurface* pixbuf = PixbufForState(paint_state);
+  CairoCachedSurface* hover_pixbuf = PixbufForState(GTK_STATE_PRELIGHT);
 
   if (!pixbuf || !pixbuf->valid())
+    return FALSE;
+  if (animating_hover && (!hover_pixbuf || !hover_pixbuf->valid()))
     return FALSE;
 
   cairo_t* cairo_context = gdk_cairo_create(GDK_DRAWABLE(widget->window));
@@ -92,6 +102,12 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
 
   pixbuf->SetSource(cairo_context, x, y);
   cairo_paint(cairo_context);
+
+  if (animating_hover) {
+    hover_pixbuf->SetSource(cairo_context, x, y);
+    cairo_paint_with_alpha(cairo_context, hover_state);
+  }
+
   cairo_destroy(cairo_context);
 
   return TRUE;
@@ -127,11 +143,86 @@ void CustomDrawButtonBase::Observe(NotificationType type,
   surfaces_[GTK_STATE_SELECTED]->UsePixbuf(NULL);
   surfaces_[GTK_STATE_INSENSITIVE]->UsePixbuf(depressed_id_ ?
       theme_provider_->GetRTLEnabledPixbufNamed(depressed_id_) : NULL);
+
+  // Use the tinted background in some themes.
+  if (button_background_id_) {
+    SkColor color = theme_provider_->GetColor(
+        BrowserThemeProvider::COLOR_BUTTON_BACKGROUND);
+    SkBitmap* background = theme_provider_->GetBitmapNamed(
+        IDR_THEME_BUTTON_BACKGROUND);
+    SkBitmap* mask = theme_provider_->GetBitmapNamed(button_background_id_);
+
+    SetBackground(color, background, mask);
+  }
 }
+
+CairoCachedSurface* CustomDrawButtonBase::PixbufForState(int state) {
+  CairoCachedSurface* pixbuf = surfaces_[state].get();
+
+  // Fall back to the default image if we don't have one for this state.
+  if (!pixbuf || !pixbuf->valid())
+    pixbuf = surfaces_[GTK_STATE_NORMAL].get();
+
+  return pixbuf;
+}
+
+// CustomDrawHoverController ---------------------------------------------------
+
+CustomDrawHoverController::CustomDrawHoverController(GtkWidget* widget)
+    : slide_animation_(this),
+      widget_(NULL) {
+  Init(widget);
+}
+
+CustomDrawHoverController::CustomDrawHoverController()
+    : slide_animation_(this),
+      widget_(NULL) {
+}
+
+CustomDrawHoverController::~CustomDrawHoverController() {
+}
+
+void CustomDrawHoverController::Init(GtkWidget* widget) {
+  DCHECK(widget_ == NULL);
+  widget_ = widget;
+  g_signal_connect(widget_, "enter-notify-event",
+                   G_CALLBACK(OnEnter), this);
+  g_signal_connect(widget_, "leave-notify-event",
+                   G_CALLBACK(OnLeave), this);
+}
+
+void CustomDrawHoverController::AnimationProgressed(
+    const Animation* animation) {
+  gtk_widget_queue_draw(widget_);
+}
+
+// static
+gboolean CustomDrawHoverController::OnEnter(
+    GtkWidget* widget,
+    GdkEventCrossing* event,
+    CustomDrawHoverController* controller) {
+  controller->slide_animation_.Show();
+  return FALSE;
+}
+
+// static
+gboolean CustomDrawHoverController::OnLeave(
+    GtkWidget* widget,
+    GdkEventCrossing* event,
+    CustomDrawHoverController* controller) {
+  // When the user is holding a mouse button, we don't want to animate.
+  if (event->state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK))
+    controller->slide_animation_.Reset();
+  else
+    controller->slide_animation_.Hide();
+  return FALSE;
+}
+
+// CustomDrawButton ------------------------------------------------------------
 
 CustomDrawButton::CustomDrawButton(int normal_id, int active_id,
     int highlight_id, int depressed_id)
-    : button_base_(NULL, normal_id, active_id, highlight_id, depressed_id),
+    : button_base_(NULL, normal_id, active_id, highlight_id, depressed_id, 0),
       theme_provider_(NULL),
       gtk_stock_name_(NULL),
       icon_size_(GTK_ICON_SIZE_INVALID) {
@@ -143,9 +234,9 @@ CustomDrawButton::CustomDrawButton(int normal_id, int active_id,
 
 CustomDrawButton::CustomDrawButton(GtkThemeProvider* theme_provider,
     int normal_id, int active_id, int highlight_id, int depressed_id,
-    const char* stock_id, GtkIconSize stock_size)
+    int background_id, const char* stock_id, GtkIconSize stock_size)
     : button_base_(theme_provider, normal_id, active_id, highlight_id,
-                   depressed_id),
+                   depressed_id, background_id),
       theme_provider_(theme_provider),
       gtk_stock_name_(stock_id),
       icon_size_(stock_size) {
@@ -163,9 +254,10 @@ CustomDrawButton::~CustomDrawButton() {
 
 void CustomDrawButton::Init() {
   widget_.Own(gtk_chrome_button_new());
-  GTK_WIDGET_UNSET_FLAGS(widget_.get(), GTK_CAN_FOCUS);
-  g_signal_connect(G_OBJECT(widget_.get()), "expose-event",
+  GTK_WIDGET_UNSET_FLAGS(widget(), GTK_CAN_FOCUS);
+  g_signal_connect(widget(), "expose-event",
                    G_CALLBACK(OnCustomExpose), this);
+  hover_controller_.Init(widget());
 }
 
 void CustomDrawButton::Observe(NotificationType type,
@@ -176,14 +268,14 @@ void CustomDrawButton::Observe(NotificationType type,
 
 void CustomDrawButton::SetPaintOverride(GtkStateType state) {
   button_base_.set_paint_override(state);
-  gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(widget_.get()), state);
-  gtk_widget_queue_draw(widget_.get());
+  gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(widget()), state);
+  gtk_widget_queue_draw(widget());
 }
 
 void CustomDrawButton::UnsetPaintOverride() {
   button_base_.set_paint_override(-1);
-  gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(widget_.get()));
-  gtk_widget_queue_draw(widget_.get());
+  gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(widget()));
+  gtk_widget_queue_draw(widget());
 }
 
 void CustomDrawButton::SetBackground(SkColor color,
@@ -199,7 +291,8 @@ gboolean CustomDrawButton::OnCustomExpose(GtkWidget* widget,
     // Continue processing this expose event.
     return FALSE;
   } else {
-    return button->button_base_.OnExpose(widget, e);
+    double hover_state = button->hover_controller_.GetCurrentValue();
+    return button->button_base_.OnExpose(widget, e, hover_state);
   }
 }
 
@@ -208,7 +301,7 @@ CustomDrawButton* CustomDrawButton::CloseButton(
     GtkThemeProvider* theme_provider) {
   CustomDrawButton* button = new CustomDrawButton(
       theme_provider, IDR_CLOSE_BAR, IDR_CLOSE_BAR_P,
-      IDR_CLOSE_BAR_H, 0, GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU);
+      IDR_CLOSE_BAR_H, 0, 0, GTK_STOCK_CLOSE, GTK_ICON_SIZE_MENU);
   return button;
 }
 
@@ -217,20 +310,17 @@ void CustomDrawButton::SetBrowserTheme() {
 
   if (use_gtk && gtk_stock_name_) {
     gtk_button_set_image(
-        GTK_BUTTON(widget_.get()),
+        GTK_BUTTON(widget()),
         gtk_image_new_from_stock(gtk_stock_name_, icon_size_));
-    gtk_widget_set_size_request(widget_.get(), -1, -1);
-    gtk_widget_set_app_paintable(widget_.get(), FALSE);
-    gtk_widget_set_double_buffered(widget_.get(), TRUE);
+    gtk_widget_set_size_request(widget(), -1, -1);
+    gtk_widget_set_app_paintable(widget(), FALSE);
   } else {
-    gtk_widget_set_size_request(widget_.get(), button_base_.Width(),
+    gtk_widget_set_size_request(widget(), button_base_.Width(),
                                 button_base_.Height());
 
-    gtk_widget_set_app_paintable(widget_.get(), TRUE);
-    // We effectively double-buffer by virtue of having only one image...
-    gtk_widget_set_double_buffered(widget_.get(), FALSE);
+    gtk_widget_set_app_paintable(widget(), TRUE);
   }
 
   gtk_chrome_button_set_use_gtk_rendering(
-      GTK_CHROME_BUTTON(widget_.get()), use_gtk);
+      GTK_CHROME_BUTTON(widget()), use_gtk);
 }

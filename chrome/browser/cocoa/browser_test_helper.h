@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_COCOA_BROWSER_TEST_HELPER_H_
 
 #include "chrome/browser/browser.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/test/testing_profile.h"
 
@@ -18,20 +19,48 @@
 // navigation_controller_unittest.cc, ..
 class BrowserTestHelper {
  public:
-  BrowserTestHelper() {
+  BrowserTestHelper()
+      : ui_thread_(ChromeThread::UI, &message_loop_),
+        file_thread_(ChromeThread::FILE, &message_loop_) {
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
     profile_->BlockUntilBookmarkModelLoaded();
     browser_.reset(new Browser(Browser::TYPE_NORMAL, profile_.get()));
   }
 
+  ~BrowserTestHelper() {
+    // Delete the testing profile on the UI thread. But first release the
+    // browser, since it may trigger accesses to the profile upon destruction.
+    browser_.reset(NULL);
+    message_loop_.DeleteSoon(FROM_HERE, profile_.release());
+    message_loop_.RunAllPending();
+  }
+
   TestingProfile* profile() const { return profile_.get(); }
   Browser* browser() const { return browser_.get(); }
+
+  // Creates the browser window. To close this window call |CloseBrowserWindow|.
+  // Do NOT call close directly on the window.
+  BrowserWindow* CreateBrowserWindow() {
+    browser_->CreateBrowserWindow();
+    return browser_->window();
+  }
+
+  // Closes the window for this browser.
+  void CloseBrowserWindow() {
+    // Check to make sure a window was actually created.
+    DCHECK(browser_->window());
+    browser_->CloseAllTabs();
+    browser_->CloseWindow();
+    browser_.release();
+  }
 
  private:
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<Browser> browser_;
   MessageLoopForUI message_loop_;
+  ChromeThread ui_thread_;
+  ChromeThread file_thread_;
 };
 
 #endif  // CHROME_BROWSER_COCOA_BROWSER_TEST_HELPER_H_

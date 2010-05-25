@@ -5,16 +5,13 @@
 #include "net/socket/socks_client_socket.h"
 
 #include "base/basictypes.h"
-#include "build/build_config.h"
-#if defined(OS_WIN)
-#include <ws2tcpip.h>
-#elif defined(OS_POSIX)
-#include <netdb.h>
-#endif
 #include "base/compiler_specific.h"
 #include "base/trace_event.h"
 #include "net/base/io_buffer.h"
+#include "net/base/net_log.h"
 #include "net/base/net_util.h"
+#include "net/base/sys_addrinfo.h"
+#include "net/socket/client_socket_handle.h"
 
 namespace net {
 
@@ -63,7 +60,7 @@ struct SOCKS4ServerResponse {
 COMPILE_ASSERT(sizeof(SOCKS4ServerResponse) == kReadHeaderSize,
                socks4_server_response_struct_wrong_size);
 
-SOCKSClientSocket::SOCKSClientSocket(ClientSocket* transport_socket,
+SOCKSClientSocket::SOCKSClientSocket(ClientSocketHandle* transport_socket,
                                      const HostResolver::RequestInfo& req_info,
                                      HostResolver* host_resolver)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -79,13 +76,32 @@ SOCKSClientSocket::SOCKSClientSocket(ClientSocket* transport_socket,
       host_request_info_(req_info) {
 }
 
+SOCKSClientSocket::SOCKSClientSocket(ClientSocket* transport_socket,
+                                     const HostResolver::RequestInfo& req_info,
+                                     HostResolver* host_resolver)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+          io_callback_(this, &SOCKSClientSocket::OnIOComplete)),
+      transport_(new ClientSocketHandle()),
+      next_state_(STATE_NONE),
+      socks_version_(kSOCKS4Unresolved),
+      user_callback_(NULL),
+      completed_handshake_(false),
+      bytes_sent_(0),
+      bytes_received_(0),
+      host_resolver_(host_resolver),
+      host_request_info_(req_info) {
+  transport_->set_socket(transport_socket);
+}
+
 SOCKSClientSocket::~SOCKSClientSocket() {
   Disconnect();
 }
 
-int SOCKSClientSocket::Connect(CompletionCallback* callback) {
+int SOCKSClientSocket::Connect(CompletionCallback* callback,
+                               const BoundNetLog& net_log) {
   DCHECK(transport_.get());
-  DCHECK(transport_->IsConnected());
+  DCHECK(transport_->socket());
+  DCHECK(transport_->socket()->IsConnected());
   DCHECK_EQ(STATE_NONE, next_state_);
   DCHECK(!user_callback_);
 
@@ -94,24 +110,38 @@ int SOCKSClientSocket::Connect(CompletionCallback* callback) {
     return OK;
 
   next_state_ = STATE_RESOLVE_HOST;
+  net_log_ = net_log;
+
+  net_log.BeginEvent(NetLog::TYPE_SOCKS_CONNECT);
 
   int rv = DoLoop(OK);
-  if (rv == ERR_IO_PENDING)
+  if (rv == ERR_IO_PENDING) {
     user_callback_ = callback;
+  } else {
+    net_log.EndEvent(NetLog::TYPE_SOCKS_CONNECT);
+    net_log_ = BoundNetLog();
+  }
   return rv;
 }
 
 void SOCKSClientSocket::Disconnect() {
   completed_handshake_ = false;
-  transport_->Disconnect();
+  host_resolver_.Cancel();
+  transport_->socket()->Disconnect();
+
+  // Reset other states to make sure they aren't mistakenly used later.
+  // These are the states initialized by Connect().
+  next_state_ = STATE_NONE;
+  user_callback_ = NULL;
+  net_log_ = BoundNetLog();
 }
 
 bool SOCKSClientSocket::IsConnected() const {
-  return completed_handshake_ && transport_->IsConnected();
+  return completed_handshake_ && transport_->socket()->IsConnected();
 }
 
 bool SOCKSClientSocket::IsConnectedAndIdle() const {
-  return completed_handshake_ && transport_->IsConnectedAndIdle();
+  return completed_handshake_ && transport_->socket()->IsConnectedAndIdle();
 }
 
 // Read is called by the transport layer above to read. This can only be done
@@ -122,7 +152,7 @@ int SOCKSClientSocket::Read(IOBuffer* buf, int buf_len,
   DCHECK_EQ(STATE_NONE, next_state_);
   DCHECK(!user_callback_);
 
-  return transport_->Read(buf, buf_len, callback);
+  return transport_->socket()->Read(buf, buf_len, callback);
 }
 
 // Write is called by the transport layer. This can only be done if the
@@ -133,15 +163,15 @@ int SOCKSClientSocket::Write(IOBuffer* buf, int buf_len,
   DCHECK_EQ(STATE_NONE, next_state_);
   DCHECK(!user_callback_);
 
-  return transport_->Write(buf, buf_len, callback);
+  return transport_->socket()->Write(buf, buf_len, callback);
 }
 
 bool SOCKSClientSocket::SetReceiveBufferSize(int32 size) {
-  return transport_->SetReceiveBufferSize(size);
+  return transport_->socket()->SetReceiveBufferSize(size);
 }
 
 bool SOCKSClientSocket::SetSendBufferSize(int32 size) {
-  return transport_->SetSendBufferSize(size);
+  return transport_->socket()->SetSendBufferSize(size);
 }
 
 void SOCKSClientSocket::DoCallback(int result) {
@@ -159,8 +189,11 @@ void SOCKSClientSocket::DoCallback(int result) {
 void SOCKSClientSocket::OnIOComplete(int result) {
   DCHECK_NE(STATE_NONE, next_state_);
   int rv = DoLoop(result);
-  if (rv != ERR_IO_PENDING)
+  if (rv != ERR_IO_PENDING) {
+    net_log_.EndEvent(NetLog::TYPE_SOCKS_CONNECT);
+    net_log_ = BoundNetLog();
     DoCallback(rv);
+  }
 }
 
 int SOCKSClientSocket::DoLoop(int last_io_result) {
@@ -205,7 +238,7 @@ int SOCKSClientSocket::DoResolveHost() {
 
   next_state_ = STATE_RESOLVE_HOST_COMPLETE;
   return host_resolver_.Resolve(
-      host_request_info_, &addresses_, &io_callback_, NULL);
+      host_request_info_, &addresses_, &io_callback_, net_log_);
 }
 
 int SOCKSClientSocket::DoResolveHostComplete(int result) {
@@ -292,7 +325,8 @@ int SOCKSClientSocket::DoHandshakeWrite() {
   handshake_buf_ = new IOBuffer(handshake_buf_len);
   memcpy(handshake_buf_->data(), &buffer_[bytes_sent_],
          handshake_buf_len);
-  return transport_->Write(handshake_buf_, handshake_buf_len, &io_callback_);
+  return transport_->socket()->Write(handshake_buf_, handshake_buf_len,
+                                     &io_callback_);
 }
 
 int SOCKSClientSocket::DoHandshakeWriteComplete(int result) {
@@ -328,7 +362,8 @@ int SOCKSClientSocket::DoHandshakeRead() {
 
   int handshake_buf_len = kReadHeaderSize - bytes_received_;
   handshake_buf_ = new IOBuffer(handshake_buf_len);
-  return transport_->Read(handshake_buf_, handshake_buf_len, &io_callback_);
+  return transport_->socket()->Read(handshake_buf_, handshake_buf_len,
+                                    &io_callback_);
 }
 
 int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
@@ -341,8 +376,10 @@ int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
   if (result == 0)
     return ERR_CONNECTION_CLOSED;
 
-  if (bytes_received_ + result > kReadHeaderSize)
-    return ERR_INVALID_RESPONSE;
+  if (bytes_received_ + result > kReadHeaderSize) {
+    // TODO(eroman): Describe failure in NetLog.
+    return ERR_SOCKS_CONNECTION_FAILED;
+  }
 
   buffer_.append(handshake_buf_->data(), result);
   bytes_received_ += result;
@@ -356,38 +393,34 @@ int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
 
   if (response->reserved_null != 0x00) {
     LOG(ERROR) << "Unknown response from SOCKS server.";
-    return ERR_INVALID_RESPONSE;
+    return ERR_SOCKS_CONNECTION_FAILED;
   }
 
-  // TODO(arindam): Add SOCKS specific failure codes in net_error_list.h
   switch (response->code) {
     case kServerResponseOk:
       completed_handshake_ = true;
       return OK;
     case kServerResponseRejected:
       LOG(ERROR) << "SOCKS request rejected or failed";
-      return ERR_FAILED;
+      return ERR_SOCKS_CONNECTION_FAILED;
     case kServerResponseNotReachable:
       LOG(ERROR) << "SOCKS request failed because client is not running "
                  << "identd (or not reachable from the server)";
-      return ERR_NAME_NOT_RESOLVED;
+      return ERR_SOCKS_CONNECTION_HOST_UNREACHABLE;
     case kServerResponseMismatchedUserId:
       LOG(ERROR) << "SOCKS request failed because client's identd could "
                  << "not confirm the user ID string in the request";
-      return ERR_FAILED;
+      return ERR_SOCKS_CONNECTION_FAILED;
     default:
       LOG(ERROR) << "SOCKS server sent unknown response";
-      return ERR_INVALID_RESPONSE;
+      return ERR_SOCKS_CONNECTION_FAILED;
   }
 
   // Note: we ignore the last 6 bytes as specified by the SOCKS protocol
 }
 
-#if defined(OS_LINUX)
-int SOCKSClientSocket::GetPeerName(struct sockaddr* name,
-                                   socklen_t* namelen) {
-  return transport_->GetPeerName(name, namelen);
+int SOCKSClientSocket::GetPeerAddress(AddressList* address) const {
+  return transport_->socket()->GetPeerAddress(address);
 }
-#endif
 
 }  // namespace net

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/env_var.h"
 #include "base/file_util.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
-#include "base/sys_info.h"
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
@@ -73,8 +73,7 @@ void SilentRuntimeReportHandler(const std::string& str) {
 FilePath GetInputFilePath() {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kInputFilePathSwitch)) {
-    return FilePath::FromWStringHack(
-        parsed_command_line.GetSwitchValue(kInputFilePathSwitch));
+    return parsed_command_line.GetSwitchValuePath(kInputFilePathSwitch);
   } else {
     return FilePath(kDefaultInputFilePath);
   }
@@ -83,8 +82,7 @@ FilePath GetInputFilePath() {
 FilePath GetOutputFilePath() {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kOutputFilePathSwitch)) {
-    return FilePath::FromWStringHack(
-        parsed_command_line.GetSwitchValue(kOutputFilePathSwitch));
+    return parsed_command_line.GetSwitchValuePath(kOutputFilePathSwitch);
   } else {
     return FilePath(kDefaultOutputFilePath);
   }
@@ -125,14 +123,15 @@ AutomatedUITest::AutomatedUITest()
   if (parsed_command_line.HasSwitch(kDebugModeSwitch))
     debug_logging_enabled_ = true;
   if (parsed_command_line.HasSwitch(kWaitSwitch)) {
-    std::wstring str = parsed_command_line.GetSwitchValue(kWaitSwitch);
+    std::string str = parsed_command_line.GetSwitchValueASCII(kWaitSwitch);
     if (str.empty()) {
       post_action_delay_ = 1;
     } else {
-      post_action_delay_ = static_cast<int>(StringToInt64(WideToUTF16(str)));
+      post_action_delay_ = StringToInt(str);
     }
   }
-  if (base::SysInfo::HasEnvVar(env_vars::kHeadless))
+  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+  if (env->HasEnv(env_vars::kHeadless))
     logging::SetLogReportHandler(SilentRuntimeReportHandler);
 }
 
@@ -143,17 +142,15 @@ void AutomatedUITest::RunReproduction() {
   xml_writer_.StartWriting();
   xml_writer_.StartElement("Report");
   std::string action_string =
-      WideToASCII(parsed_command_line.GetSwitchValue(kReproSwitch));
+      parsed_command_line.GetSwitchValueASCII(kReproSwitch);
 
   int64 num_reproductions = 1;
   if (parsed_command_line.HasSwitch(kReproRepeatSwitch)) {
-    std::wstring num_reproductions_string =
-        parsed_command_line.GetSwitchValue(kReproRepeatSwitch);
-    std::string test = WideToASCII(num_reproductions_string);
-    num_reproductions = StringToInt64(test);
+    num_reproductions = StringToInt64(
+        parsed_command_line.GetSwitchValueASCII(kReproRepeatSwitch));
   }
   std::vector<std::string> actions;
-  SplitString(action_string, L',', &actions);
+  SplitString(action_string, ',', &actions);
   bool did_crash = false;
   bool command_complete = false;
 
@@ -597,11 +594,9 @@ bool AutomatedUITest::FuzzyTestDialog(int num_actions) {
 bool AutomatedUITest::ForceCrash() {
   scoped_refptr<TabProxy> tab(GetActiveTab());
   GURL test_url(chrome::kAboutCrashURL);
-  bool did_timeout;
-  tab->NavigateToURLWithTimeout(test_url, 1, kDebuggingTimeoutMsec,
-                                &did_timeout);
-  if (!did_timeout) {
-    AddInfoAttribute("expected_crash");
+  AutomationMsg_NavigationResponseValues result = tab->NavigateToURL(test_url);
+  if (result != AUTOMATION_MSG_NAVIGATION_SUCCESS) {
+    AddErrorAttribute("navigation_failed");
     return false;
   }
   return true;

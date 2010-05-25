@@ -4,6 +4,8 @@
 //
 // Parse the data returned from the SafeBrowsing v2.1 protocol response.
 
+#include "chrome/browser/safe_browsing/protocol_parser.h"
+
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -12,8 +14,7 @@
 #include <arpa/inet.h>
 #endif
 
-#include "chrome/browser/safe_browsing/protocol_parser.h"
-
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 
@@ -115,7 +116,7 @@ void SafeBrowsingProtocolParser::FormatGetHash(
   DCHECK(request);
 
   // Format the request for GetHash.
-  request->append(StringPrintf("%d:%d\n",
+  request->append(StringPrintf("%" PRIuS ":%" PRIuS "\n",
                                sizeof(SBPrefix),
                                sizeof(SBPrefix) * prefixes.size()));
   for (size_t i = 0; i < prefixes.size(); ++i) {
@@ -248,7 +249,7 @@ bool SafeBrowsingProtocolParser::ParseChunk(const char* data,
                                             const std::string& key,
                                             const std::string& mac,
                                             bool* re_key,
-                                            std::deque<SBChunk>* chunks) {
+                                            SBChunkList* chunks) {
   int remaining = length;
   const char* chunk_data = data;
 
@@ -432,7 +433,7 @@ bool SafeBrowsingProtocolParser::ReadPrefixes(
         return false;
     }
 
-    if (hash_len == sizeof(SBPrefix)) {
+    if (entry->IsPrefix()) {
       entry->SetPrefixAt(index_start + i,
                          *reinterpret_cast<const SBPrefix*>(*data));
     } else {

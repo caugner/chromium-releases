@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ static const int kMenuTimerDelay = 500;
 ////////////////////////////////////////////////////////////////////////////////
 
 ButtonDropDown::ButtonDropDown(ButtonListener* listener,
-                               Menu2Model* model)
+                               menus::MenuModel* model)
     : ImageButton(listener),
       model_(model),
       y_position_on_lbuttondown_(0),
@@ -106,7 +106,8 @@ void ButtonDropDown::OnMouseExited(const MouseEvent& e) {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-void ButtonDropDown::ShowContextMenu(int x, int y, bool is_mouse_gesture) {
+void ButtonDropDown::ShowContextMenu(const gfx::Point& p,
+                                     bool is_mouse_gesture) {
   show_menu_factory_.RevokeAll();
   // Make the button look depressed while the menu is open.
   // NOTE: SetState() schedules a paint, but it won't occur until after the
@@ -148,10 +149,7 @@ void ButtonDropDown::ShowDropDownMenu(gfx::NativeView window) {
       menu_position.set_x(left_bound);
 
     menu_.reset(new Menu2(model_));
-    Menu2::Alignment align = Menu2::ALIGN_TOPLEFT;
-    if (UILayoutIsRightToLeft())
-      align = Menu2::ALIGN_TOPLEFT;
-    menu_->RunMenuAt(menu_position, align);
+    menu_->RunMenuAt(menu_position, Menu2::ALIGN_TOPLEFT);
 
     // Need to explicitly clear mouse handler so that events get sent
     // properly after the menu finishes running. If we don't do this, then

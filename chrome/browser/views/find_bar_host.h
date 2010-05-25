@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,35 +6,25 @@
 #define CHROME_BROWSER_VIEWS_FIND_BAR_HOST_H_
 
 #include "app/animation.h"
-#include "app/gfx/native_widget_types.h"
-#include "base/gfx/rect.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/views/dropdown_bar_host.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/rect.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/focus/focus_manager.h"
-#include "views/widget/widget.h"
 
 class BrowserView;
 class FindBarController;
 class FindBarView;
 class FindNotificationDetails;
-class RenderViewHost;
-class SlideAnimation;
-
-namespace views {
-class ExternalFocusTracker;
-class View;
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// The FindBarHost implements the container window for the
+// The FindBarHost implements the container widget for the
 // find-in-page functionality. It uses the appropriate implementation from
 // find_bar_host_win.cc or find_bar_host_gtk.cc to draw its content and is
-// responsible for showing, hiding, closing, and moving the window if needed,
-// for example if the window is obscuring the selection results. It also
+// responsible for showing, hiding, closing, and moving the widget if needed,
+// for example if the widget is obscuring the selection results. It also
 // receives notifications about the search results and communicates that to
 // the view.
 //
@@ -43,17 +33,12 @@ class View;
 // the BrowserView is attached to the frame's Widget for the first time.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class FindBarHost : public views::AcceleratorTarget,
-                    public views::FocusChangeListener,
-                    public AnimationDelegate,
+class FindBarHost : public DropdownBarHost,
                     public FindBar,
                     public FindBarTesting {
  public:
   explicit FindBarHost(BrowserView* browser_view);
   virtual ~FindBarHost();
-
-  // Whether we are animating the position of the Find window.
-  bool IsAnimating();
 
   // Forwards selected keystrokes to the renderer. This is useful to make sure
   // that arrow keys and PageUp and PageDown result in scrolling, instead of
@@ -62,8 +47,6 @@ class FindBarHost : public views::AcceleratorTarget,
   bool MaybeForwardKeystrokeToWebpage(
       const views::Textfield::Keystroke& key_stroke);
 
-  bool IsVisible();
-
   // FindBar implementation:
   virtual FindBarController* GetFindBarController() const {
     return find_bar_controller_;
@@ -71,7 +54,7 @@ class FindBarHost : public views::AcceleratorTarget,
   virtual void SetFindBarController(FindBarController* find_bar_controller) {
     find_bar_controller_ = find_bar_controller;
   }
-  virtual void Show();
+  virtual void Show(bool animate);
   virtual void Hide(bool animate);
   virtual void SetFocusAndSelection();
   virtual void ClearResults(const FindNotificationDetails& results);
@@ -82,110 +65,68 @@ class FindBarHost : public views::AcceleratorTarget,
   virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
                                      const string16& find_text);
   virtual void AudibleAlert();
-  virtual gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
-  virtual void SetDialogPosition(const gfx::Rect& new_pos, bool no_redraw);
   virtual bool IsFindBarVisible();
   virtual void RestoreSavedFocus();
   virtual FindBarTesting* GetFindBarTesting();
 
-  // Overridden from views::FocusChangeListener:
-  virtual void FocusWillChange(views::View* focused_before,
-                               views::View* focused_now);
-
-  // Overridden from views::AcceleratorTarget:
+  // Overridden from views::AcceleratorTarget in DropdownBarHost class:
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
-
-  // AnimationDelegate implementation:
-  virtual void AnimationProgressed(const Animation* animation);
-  virtual void AnimationEnded(const Animation* animation);
 
   // FindBarTesting implementation:
   virtual bool GetFindBarWindowInfo(gfx::Point* position,
                                     bool* fully_visible);
+  virtual string16 GetFindText();
 
-  // Get the offset with which to paint the theme image.
-  void GetThemePosition(gfx::Rect* bounds);
+  // Overridden from DropdownBarHost:
+  // Returns the rectangle representing where to position the find bar. It uses
+  // GetDialogBounds and positions itself within that, either to the left (if an
+  // InfoBar is present) or to the right (no InfoBar). If
+  // |avoid_overlapping_rect| is specified, the return value will be a rectangle
+  // located immediately to the left of |avoid_overlapping_rect|, as long as
+  // there is enough room for the dialog to draw within the bounds. If not, the
+  // dialog position returned will overlap |avoid_overlapping_rect|.
+  // Note: |avoid_overlapping_rect| is expected to use coordinates relative to
+  // the top of the page area, (it will be converted to coordinates relative to
+  // the top of the browser window, when comparing against the dialog
+  // coordinates). The returned value is relative to the browser window.
+  virtual gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
+  // Moves the dialog window to the provided location, moves it to top in the
+  // z-order (HWND_TOP, not HWND_TOPMOST) and shows the window (if hidden).
+  // It then calls UpdateWindowEdges to make sure we don't overwrite the Chrome
+  // window border. If |no_redraw| is set, the window is getting moved but not
+  // sized, and should not be redrawn to reduce update flicker.
+  virtual void SetDialogPosition(const gfx::Rect& new_pos, bool no_redraw);
 
-  // During testing we can disable animations by setting this flag to true,
-  // so that opening and closing the Find box happens instantly, instead of
-  // having to poll it while it animates to open/closed status.
-  static bool disable_animations_during_testing_;
+  // Retrieves the boundaries that the find bar widget has to work with
+  // within the Chrome frame window. The resulting rectangle will be a
+  // rectangle that overlaps the bottom of the Chrome toolbar by one
+  // pixel (so we can create the illusion that the dropdown widget is
+  // part of the toolbar) and covers the page area, except that we
+  // deflate the rect width by subtracting (from both sides) the width
+  // of the toolbar and some extra pixels to account for the width of
+  // the Chrome window borders. |bounds| is relative to the browser
+  // window. If the function fails to determine the browser
+  // window/client area rectangle or the rectangle for the page area
+  // then |bounds| will be an empty rectangle.
+  virtual void GetWidgetBounds(gfx::Rect* bounds);
+
+  // Additional accelerator handling (on top of what DropDownBarHost does).
+  virtual void RegisterAccelerators();
+  virtual void UnregisterAccelerators();
 
  private:
-  // Retrieves the boundaries that the find bar has to work with within the
-  // Chrome frame window. The resulting rectangle will be a rectangle that
-  // overlaps the bottom of the Chrome toolbar by one pixel (so we can create
-  // the illusion that the find bar is part of the toolbar) and covers the page
-  // area, except that we deflate the rect width by subtracting (from both
-  // sides) the width of the toolbar and some extra pixels to account for the
-  // width of the Chrome window borders. |bounds| is relative to the browser
-  // window. If the function fails to determine the browser window/client area
-  // rectangle or the rectangle for the page area then |bounds| will
-  // be an empty rectangle.
-  void GetDialogBounds(gfx::Rect* bounds);
+  // Allows implementation to tweak widget position.
+  void GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect);
 
-  // The dialog needs rounded edges, so we create a polygon that corresponds to
-  // the background images for this window (and make the polygon only contain
-  // the pixels that we want to draw). The polygon is then given to SetWindowRgn
-  // which changes the window from being a rectangle in shape, to being a rect
-  // with curved edges. We also check to see if the region should be truncated
-  // to prevent from drawing onto Chrome's window border.
-  void UpdateWindowEdges(const gfx::Rect& new_pos);
-
-
-  // Registers this class as the handler for when Escape is pressed. We will
-  // unregister once we loose focus. See also: SetFocusChangeListener().
-  void RegisterEscAccelerator();
-
-  // When we loose focus, we unregister the handler for Escape. See
-  // also: SetFocusChangeListener().
-  void UnregisterEscAccelerator();
-
-  // Creates and returns the native Widget.
-  views::Widget* CreateHost();
-  // Allows implementation to tweak dialog position.
-  void SetDialogPositionNative(const gfx::Rect& new_pos, bool no_redraw);
-  // Allows implementation to tweak dialog position.
-  void GetDialogPositionNative(gfx::Rect* avoid_overlapping_rect);
-  // Returns the native view (is a child of the window widget in gtk).
-  gfx::NativeView GetNativeView(BrowserView* browser_view);
-  // Returns a keyboard event suitable for fowarding.
-  NativeWebKeyboardEvent GetKeyboardEvent(
-      const TabContents* contents,
-      const views::Textfield::Keystroke& key_stroke);
   // Allows native implementation to prevent keystrokes from being forwarded.
   bool ShouldForwardKeystrokeToWebpageNative(
       const views::Textfield::Keystroke& key_stroke);
 
-  // The BrowserView that created us.
-  BrowserView* browser_view_;
-
-  // Our view, which is responsible for drawing the UI.
-  FindBarView* view_;
-
-  // The y position pixel offset of the window while animating the Find dialog.
-  int find_dialog_animation_offset_;
-
-  // The animation class to use when opening the Find window.
-  scoped_ptr<SlideAnimation> animation_;
-
-  // The focus manager we register with to keep track of focus changes.
-  views::FocusManager* focus_manager_;
-
-  // True if the accelerator target for Esc key is registered.
-  bool esc_accel_target_registered_;
-
-  // Tracks and stores the last focused view which is not the FindBarView
-  // or any of its children. Used to restore focus once the FindBarView is
-  // closed.
-  scoped_ptr<views::ExternalFocusTracker> focus_tracker_;
+  // Returns the FindBarView.
+  FindBarView* find_bar_view();
 
   // A pointer back to the owning controller.
   FindBarController* find_bar_controller_;
-
-  // Host is the Widget implementation that is created and maintained by the
-  // find bar. It contains the FindBarView.
-  scoped_ptr<views::Widget> host_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarHost);
 };

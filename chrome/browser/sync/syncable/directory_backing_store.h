@@ -6,13 +6,23 @@
 #define CHROME_BROWSER_SYNC_SYNCABLE_DIRECTORY_BACKING_STORE_H_
 
 #include <set>
+#include <string>
 
+#include "base/file_path.h"
 #include "chrome/browser/sync/syncable/dir_open_result.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
 extern "C" {
 struct sqlite3;
 struct sqlite3_stmt;
+}
+
+class SQLStatement;
+
+namespace sync_pb {
+class EntitySpecifics;
 }
 
 namespace syncable {
@@ -44,8 +54,8 @@ typedef Directory::MetahandlesIndex MetahandlesIndex;
 // thread that "uses" the DBS is the thread that destroys it.
 class DirectoryBackingStore {
  public:
-  DirectoryBackingStore(const PathString& dir_name,
-                        const PathString& backing_filepath);
+  DirectoryBackingStore(const std::string& dir_name,
+                        const FilePath& backing_filepath);
 
   virtual ~DirectoryBackingStore();
 
@@ -66,21 +76,40 @@ class DirectoryBackingStore {
   virtual bool SaveChanges(const Directory::SaveChangesSnapshot& snapshot);
 
  private:
+  FRIEND_TEST(DirectoryBackingStoreTest, MigrateVersion67To68);
+  FRIEND_TEST(DirectoryBackingStoreTest, MigrateVersion68To69);
+  FRIEND_TEST(DirectoryBackingStoreTest, MigrateVersion69To70);
+  FRIEND_TEST(DirectoryBackingStoreTest, MigrateVersion70To71);
+  FRIEND_TEST(DirectoryBackingStoreTest, ModelTypeIds);
+  FRIEND_TEST(DirectoryBackingStoreTest, Corruption);
+  FRIEND_TEST(MigrationTest, ToCurrentVersion);
+
   // General Directory initialization and load helpers.
   DirOpenResult InitializeTables();
   // Returns an sqlite return code, usually SQLITE_DONE.
   int CreateTables();
+
+  // Create 'share_info' or 'temp_share_info' depending on value of
+  // is_temporary.  Returns an sqlite return code, SQLITE_DONE on success.
+  int CreateShareInfoTable(bool is_temporary);
+  // Create 'metas' or 'temp_metas' depending on value of is_temporary.
+  // Returns an sqlite return code, SQLITE_DONE on success.
+  int CreateMetasTable(bool is_temporary);
+  // Returns an sqlite return code, SQLITE_DONE on success.
+  int CreateModelsTable();
+  // Returns an sqlite return code, SQLITE_DONE on success.
   int CreateExtendedAttributeTable();
+
   // We don't need to load any synced and applied deleted entries, we can
   // in fact just purge them forever on startup.
-  void DropDeletedEntries();
+  bool DropDeletedEntries();
   // Drops a table if it exists, harmless if the table did not already exist.
-  void SafeDropTable(const char* table_name);
+  int SafeDropTable(const char* table_name);
 
   // Load helpers for entries and attributes.
-  void LoadEntries(MetahandlesIndex* entry_bucket);
-  void LoadExtendedAttributes(ExtendedAttributes* xattrs_bucket);
-  void LoadInfo(Directory::KernelLoadInfo* info);
+  bool LoadEntries(MetahandlesIndex* entry_bucket);
+  bool LoadExtendedAttributes(ExtendedAttributes* xattrs_bucket);
+  bool LoadInfo(Directory::KernelLoadInfo* info);
 
   // Save/update helpers for entries.  Return false if sqlite commit fails.
   bool SaveEntryToDB(const EntryKernel& entry);
@@ -96,12 +125,40 @@ class DirectoryBackingStore {
   // said handle.  Returns true on success, false if the sqlite open operation
   // did not succeed.
   bool OpenAndConfigureHandleHelper(sqlite3** handle) const;
+  // Initialize and destroy load_dbhandle_.  Broken out for testing.
+  bool BeginLoad();
+  void EndLoad();
 
   // Lazy creation of save_dbhandle_ for use by SaveChanges code path.
   sqlite3* LazyGetSaveHandle();
 
   // Drop all tables in preparation for reinitialization.
   void DropAllTables();
+
+  // Serialization helpers for syncable::ModelType.  These convert between
+  // the ModelType enum and the values we persist in the database to identify
+  // a model.  We persist a default instance of the specifics protobuf as the
+  // ID, rather than the enum value.
+  static ModelType ModelIdToModelTypeEnum(const string& model_id);
+  static string ModelTypeEnumToModelId(ModelType model_type);
+
+  // Migration utilities.
+  bool AddColumn(const ColumnSpec* column);
+  bool RefreshColumns();
+  bool SetVersion(int version);
+  int GetVersion();
+  bool MigrateToSpecifics(const char* old_columns,
+                          const char* specifics_column,
+                          void (*handler_function) (
+                              SQLStatement* old_value_query,
+                              int old_value_column,
+                              sync_pb::EntitySpecifics* mutable_new_value));
+
+  // Individual version migrations.
+  bool MigrateVersion67To68();
+  bool MigrateVersion68To69();
+  bool MigrateVersion69To70();
+  bool MigrateVersion70To71();
 
   // The handle to our sqlite on-disk store for initialization and loading, and
   // for saving changes periodically via SaveChanges, respectively.
@@ -112,8 +169,12 @@ class DirectoryBackingStore {
   sqlite3* load_dbhandle_;
   sqlite3* save_dbhandle_;
 
-  PathString dir_name_;
-  PathString backing_filepath_;
+  std::string dir_name_;
+  FilePath backing_filepath_;
+
+  // Set to true if migration left some old columns around that need to be
+  // discarded.
+  bool needs_column_refresh_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectoryBackingStore);
 };

@@ -4,104 +4,37 @@
 
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 
-#include "base/json_writer.h"
+#include "base/json/json_writer.h"
+#include "base/sha1.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
+#include "chrome/browser/bookmarks/bookmark_html_writer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/extensions/extension_bookmark_helpers.h"
 #include "chrome/browser/extensions/extension_bookmarks_module_constants.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extensions_quota_service.h"
+#include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_data_types.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 
 namespace keys = extension_bookmarks_module_constants;
 
-// Helper functions.
-class ExtensionBookmarks {
- public:
-  // Convert |node| into a JSON value.
-  static DictionaryValue* GetNodeDictionary(const BookmarkNode* node,
-                                            bool recurse) {
-    DictionaryValue* dict = new DictionaryValue();
-    dict->SetString(keys::kIdKey, Int64ToString(node->id()));
-
-    const BookmarkNode* parent = node->GetParent();
-    if (parent) {
-      dict->SetString(keys::kParentIdKey, Int64ToString(parent->id()));
-      dict->SetInteger(keys::kIndexKey, parent->IndexOfChild(node));
-    }
-
-    if (!node->is_folder()) {
-      dict->SetString(keys::kUrlKey, node->GetURL().spec());
-    } else {
-      // Javascript Date wants milliseconds since the epoch, ToDoubleT is
-      // seconds.
-      base::Time t = node->date_group_modified();
-      if (!t.is_null())
-        dict->SetReal(keys::kDateGroupModifiedKey, floor(t.ToDoubleT() * 1000));
-    }
-
-    dict->SetString(keys::kTitleKey, node->GetTitle());
-    if (!node->date_added().is_null()) {
-      // Javascript Date wants milliseconds since the epoch, ToDoubleT is
-      // seconds.
-      dict->SetReal(keys::kDateAddedKey,
-                    floor(node->date_added().ToDoubleT() * 1000));
-    }
-
-    if (recurse && node->is_folder()) {
-      int childCount = node->GetChildCount();
-      ListValue* children = new ListValue();
-      for (int i = 0; i < childCount; ++i) {
-        const BookmarkNode* child = node->GetChild(i);
-        DictionaryValue* dict = GetNodeDictionary(child, true);
-        children->Append(dict);
-      }
-      dict->Set(keys::kChildrenKey, children);
-    }
-    return dict;
-  }
-
-  // Add a JSON representation of |node| to the JSON |list|.
-  static void AddNode(const BookmarkNode* node, ListValue* list, bool recurse) {
-    DictionaryValue* dict = GetNodeDictionary(node, recurse);
-    list->Append(dict);
-  }
-
-  static bool RemoveNode(BookmarkModel* model, int64 id, bool recursive,
-                         std::string* error) {
-    const BookmarkNode* node = model->GetNodeByID(id);
-    if (!node) {
-      *error = keys::kNoNodeError;
-      return false;
-    }
-    if (node == model->root_node() ||
-        node == model->other_node() ||
-        node == model->GetBookmarkBarNode()) {
-      *error = keys::kModifySpecialError;
-      return false;
-    }
-    if (node->is_folder() && node->GetChildCount() > 0 && !recursive) {
-      *error = keys::kFolderNotEmptyError;
-      return false;
-    }
-
-    const BookmarkNode* parent = node->GetParent();
-    int index = parent->IndexOfChild(node);
-    model->Remove(parent, index);
-    return true;
-  }
-
- private:
-  ExtensionBookmarks();
-};
+using base::TimeDelta;
+typedef QuotaLimitHeuristic::Bucket Bucket;
+typedef QuotaLimitHeuristic::Config Config;
+typedef QuotaLimitHeuristic::BucketList BucketList;
+typedef ExtensionsQuotaService::TimedLimit TimedLimit;
+typedef ExtensionsQuotaService::SustainedLimit SustainedLimit;
+typedef QuotaLimitHeuristic::BucketMapper BucketMapper;
 
 void BookmarksFunction::Run() {
-  // TODO(erikkay) temporary hack until adding an event listener can notify the
-  // browser.
   BookmarkModel* model = profile()->GetBookmarkModel();
   if (!model->IsLoaded()) {
     // Bookmarks are not ready yet.  We'll wait.
@@ -111,10 +44,14 @@ void BookmarksFunction::Run() {
     return;
   }
 
-  ExtensionBookmarkEventRouter* event_router =
-      ExtensionBookmarkEventRouter::GetSingleton();
-  event_router->Observe(model);
-  SendResponse(RunImpl());
+  bool success = RunImpl();
+  if (success) {
+    NotificationService::current()->Notify(
+        NotificationType::EXTENSION_BOOKMARKS_API_INVOKED,
+        Source<const Extension>(GetExtension()),
+        Details<const BookmarksFunction>(this));
+  }
+  SendResponse(success);
 }
 
 bool BookmarksFunction::GetBookmarkIdAsInt64(
@@ -157,8 +94,8 @@ void ExtensionBookmarkEventRouter::DispatchEvent(Profile *profile,
                                                  const char* event_name,
                                                  const std::string json_args) {
   if (profile->GetExtensionMessageService()) {
-    profile->GetExtensionMessageService()->
-        DispatchEventToRenderers(event_name, json_args);
+    profile->GetExtensionMessageService()->DispatchEventToRenderers(
+        event_name, json_args, profile->IsOffTheRecord());
   }
 }
 
@@ -185,7 +122,7 @@ void ExtensionBookmarkEventRouter::BookmarkNodeMoved(
   args.Append(object_args);
 
   std::string json_args;
-  JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, false, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkMoved, json_args);
 }
 
@@ -195,11 +132,12 @@ void ExtensionBookmarkEventRouter::BookmarkNodeAdded(BookmarkModel* model,
   ListValue args;
   const BookmarkNode* node = parent->GetChild(index);
   args.Append(new StringValue(Int64ToString(node->id())));
-  DictionaryValue* obj = ExtensionBookmarks::GetNodeDictionary(node, false);
+  DictionaryValue* obj =
+      extension_bookmark_helpers::GetNodeDictionary(node, false, false);
   args.Append(obj);
 
   std::string json_args;
-  JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, false, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkCreated, json_args);
 }
 
@@ -216,7 +154,7 @@ void ExtensionBookmarkEventRouter::BookmarkNodeRemoved(
   args.Append(object_args);
 
   std::string json_args;
-  JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, false, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkRemoved, json_args);
 }
 
@@ -225,17 +163,19 @@ void ExtensionBookmarkEventRouter::BookmarkNodeChanged(
   ListValue args;
   args.Append(new StringValue(Int64ToString(node->id())));
 
-  // TODO(erikkay) The only two things that BookmarkModel sends this
-  // notification for are title and favicon.  Since we're currently ignoring
-  // favicon and since the notification doesn't say which one anyway, for now
-  // we only include title.  The ideal thing would be to change BookmarkModel
-  // to indicate what changed.
+  // TODO(erikkay) The only three things that BookmarkModel sends this
+  // notification for are title, url and favicon.  Since we're currently
+  // ignoring favicon and since the notification doesn't say which one anyway,
+  // for now we only include title and url.  The ideal thing would be to change
+  // BookmarkModel to indicate what changed.
   DictionaryValue* object_args = new DictionaryValue();
   object_args->SetString(keys::kTitleKey, node->GetTitle());
+  if (node->is_url())
+    object_args->SetString(keys::kUrlKey, node->GetURL().spec());
   args.Append(object_args);
 
   std::string json_args;
-  JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, false, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkChanged, json_args);
 }
 
@@ -260,9 +200,28 @@ void ExtensionBookmarkEventRouter::BookmarkNodeChildrenReordered(
   args.Append(reorder_info);
 
   std::string json_args;
-  JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, false, &json_args);
   DispatchEvent(model->profile(),
                 keys::kOnBookmarkChildrenReordered,
+                json_args);
+}
+
+void ExtensionBookmarkEventRouter::
+    BookmarkImportBeginning(BookmarkModel* model) {
+  ListValue args;
+  std::string json_args;
+  base::JSONWriter::Write(&args, false, &json_args);
+  DispatchEvent(model->profile(),
+                keys::kOnBookmarkImportBegan,
+                json_args);
+}
+
+void ExtensionBookmarkEventRouter::BookmarkImportEnding(BookmarkModel* model) {
+  ListValue args;
+  std::string json_args;
+  base::JSONWriter::Write(&args, false, &json_args);
+  DispatchEvent(model->profile(),
+                keys::kOnBookmarkImportEnded,
                 json_args);
 }
 
@@ -270,7 +229,7 @@ bool GetBookmarksFunction::RunImpl() {
   BookmarkModel* model = profile()->GetBookmarkModel();
   scoped_ptr<ListValue> json(new ListValue());
   if (args_->IsType(Value::TYPE_LIST)) {
-    ListValue* ids = static_cast<ListValue*>(args_);
+    const ListValue* ids = args_as_list();
     size_t count = ids->GetSize();
     EXTENSION_FUNCTION_VALIDATE(count > 0);
     for (size_t i = 0; i < count; ++i) {
@@ -284,7 +243,7 @@ bool GetBookmarksFunction::RunImpl() {
         error_ = keys::kNoNodeError;
         return false;
       } else {
-        ExtensionBookmarks::AddNode(node, json.get(), false);
+        extension_bookmark_helpers::AddNode(node, json.get(), false);
       }
     }
   } else {
@@ -298,7 +257,7 @@ bool GetBookmarksFunction::RunImpl() {
       error_ = keys::kNoNodeError;
       return false;
     }
-    ExtensionBookmarks::AddNode(node, json.get(), false);
+    extension_bookmark_helpers::AddNode(node, json.get(), false);
   }
 
   result_.reset(json.release());
@@ -321,10 +280,30 @@ bool GetBookmarkChildrenFunction::RunImpl() {
   int child_count = node->GetChildCount();
   for (int i = 0; i < child_count; ++i) {
     const BookmarkNode* child = node->GetChild(i);
-    ExtensionBookmarks::AddNode(child, json.get(), false);
+    extension_bookmark_helpers::AddNode(child, json.get(), false);
   }
 
   result_.reset(json.release());
+  return true;
+}
+
+bool GetBookmarkRecentFunction::RunImpl() {
+  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_INTEGER));
+  int number_of_items;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetAsInteger(&number_of_items));
+  if (number_of_items < 1)
+    return false;
+
+  BookmarkModel* model = profile()->GetBookmarkModel();
+  ListValue* json = new ListValue();
+  std::vector<const BookmarkNode*> nodes;
+  bookmark_utils::GetMostRecentlyAddedEntries(model, number_of_items, &nodes);
+  std::vector<const BookmarkNode*>::iterator i = nodes.begin();
+  for (; i != nodes.end(); ++i) {
+    const BookmarkNode* node = *i;
+    extension_bookmark_helpers::AddNode(node, json, false);
+  }
+  result_.reset(json);
   return true;
 }
 
@@ -332,7 +311,7 @@ bool GetBookmarkTreeFunction::RunImpl() {
   BookmarkModel* model = profile()->GetBookmarkModel();
   scoped_ptr<ListValue> json(new ListValue());
   const BookmarkNode* node = model->root_node();
-  ExtensionBookmarks::AddNode(node, json.get(), true);
+  extension_bookmark_helpers::AddNode(node, json.get(), true);
   result_.reset(json.release());
   return true;
 }
@@ -347,48 +326,77 @@ bool SearchBookmarksFunction::RunImpl() {
   ListValue* json = new ListValue();
   std::wstring lang = profile()->GetPrefs()->GetString(prefs::kAcceptLanguages);
   std::vector<const BookmarkNode*> nodes;
-  bookmark_utils::GetBookmarksContainingText(model, query, 50, lang, &nodes);
+  bookmark_utils::GetBookmarksContainingText(model, query,
+                                             std::numeric_limits<int>::max(),
+                                             lang, &nodes);
   std::vector<const BookmarkNode*>::iterator i = nodes.begin();
   for (; i != nodes.end(); ++i) {
     const BookmarkNode* node = *i;
-    ExtensionBookmarks::AddNode(node, json, false);
+    extension_bookmark_helpers::AddNode(node, json, false);
   }
 
   result_.reset(json);
   return true;
 }
 
+// static
+bool RemoveBookmarkFunction::ExtractIds(const Value* args,
+    std::list<int64>* ids, bool* invalid_id) {
+  std::string id_string;
+  if (args->IsType(Value::TYPE_STRING) &&
+      args->GetAsString(&id_string)) {
+    int64 id;
+    if (StringToInt64(id_string, &id))
+      ids->push_back(id);
+    else
+      *invalid_id = true;
+  } else {
+    if (!args->IsType(Value::TYPE_LIST))
+      return false;
+    const ListValue* ids_list = static_cast<const ListValue*>(args);
+    size_t count = ids_list->GetSize();
+    if (count <= 0)
+      return false;
+    for (size_t i = 0; i < count; ++i) {
+      if (!ids_list->GetString(i, &id_string))
+        return false;
+      int64 id;
+      if (StringToInt64(id_string, &id)) {
+        ids->push_back(id);
+      } else {
+        *invalid_id = true;
+        break;
+      }
+    }
+  }
+  return true;
+}
+
 bool RemoveBookmarkFunction::RunImpl() {
+  std::list<int64> ids;
+  bool invalid_id = false;
+  EXTENSION_FUNCTION_VALIDATE(ExtractIds(args_.get(), &ids, &invalid_id));
+  if (invalid_id) {
+    error_ = keys::kInvalidIdError;
+    return false;
+  }
   bool recursive = false;
   if (name() == RemoveTreeBookmarkFunction::function_name())
     recursive = true;
 
   BookmarkModel* model = profile()->GetBookmarkModel();
-  int64 id;
-  std::string id_string;
-  if (args_->IsType(Value::TYPE_STRING) &&
-      args_->GetAsString(&id_string) &&
-      StringToInt64(id_string, &id)) {
-    return ExtensionBookmarks::RemoveNode(model, id, recursive, &error_);
-  } else {
-    EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-    ListValue* ids = static_cast<ListValue*>(args_);
-    size_t count = ids->GetSize();
-    EXTENSION_FUNCTION_VALIDATE(count > 0);
-    for (size_t i = 0; i < count; ++i) {
-      EXTENSION_FUNCTION_VALIDATE(ids->GetString(i, &id_string));
-      if (!GetBookmarkIdAsInt64(id_string, &id))
-        return false;
-      if (!ExtensionBookmarks::RemoveNode(model, id, recursive, &error_))
-        return false;
-    }
-    return true;
+  size_t count = ids.size();
+  EXTENSION_FUNCTION_VALIDATE(count > 0);
+  for (std::list<int64>::iterator it = ids.begin(); it != ids.end(); ++it) {
+    if (!extension_bookmark_helpers::RemoveNode(model, *it, recursive, &error_))
+      return false;
   }
+  return true;
 }
 
 bool CreateBookmarkFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  DictionaryValue* json = static_cast<DictionaryValue*>(args_);
+  const DictionaryValue* json = args_as_dictionary();
 
   BookmarkModel* model = profile()->GetBookmarkModel();
   int64 parentId;
@@ -444,25 +452,37 @@ bool CreateBookmarkFunction::RunImpl() {
     return false;
   }
 
-  DictionaryValue* ret = ExtensionBookmarks::GetNodeDictionary(node, false);
+  DictionaryValue* ret =
+      extension_bookmark_helpers::GetNodeDictionary(node, false, false);
   result_.reset(ret);
 
   return true;
 }
 
+// static
+bool MoveBookmarkFunction::ExtractIds(const Value* args,
+                                      std::list<int64>* ids,
+                                      bool* invalid_id) {
+  // For now, Move accepts ID parameters in the same way as an Update.
+  return UpdateBookmarkFunction::ExtractIds(args, ids, invalid_id);
+}
+
 bool MoveBookmarkFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-  const ListValue* args = static_cast<const ListValue*>(args_);
-  int64 id;
-  std::string id_string;
-  EXTENSION_FUNCTION_VALIDATE(args->GetString(0, &id_string));
-  if (!GetBookmarkIdAsInt64(id_string, &id))
+  std::list<int64> ids;
+  bool invalid_id = false;
+  EXTENSION_FUNCTION_VALIDATE(ExtractIds(args_.get(), &ids, &invalid_id));
+  if (invalid_id) {
+    error_ = keys::kInvalidIdError;
     return false;
+  }
+  EXTENSION_FUNCTION_VALIDATE(ids.size() == 1);
+  const ListValue* args = args_as_list();
+
   DictionaryValue* destination;
   EXTENSION_FUNCTION_VALIDATE(args->GetDictionary(1, &destination));
 
   BookmarkModel* model = profile()->GetBookmarkModel();
-  const BookmarkNode* node = model->GetNodeByID(id);
+  const BookmarkNode* node = model->GetNodeByID(ids.front());
   if (!node) {
     error_ = keys::kNoNodeError;
     return false;
@@ -474,7 +494,7 @@ bool MoveBookmarkFunction::RunImpl() {
     return false;
   }
 
-  const BookmarkNode* parent;
+  const BookmarkNode* parent = NULL;
   if (!destination->HasKey(keys::kParentIdKey)) {
     // Optional, defaults to current parent.
     parent = node->GetParent();
@@ -512,27 +532,63 @@ bool MoveBookmarkFunction::RunImpl() {
 
   model->Move(node, parent, index);
 
-  DictionaryValue* ret = ExtensionBookmarks::GetNodeDictionary(node, false);
+  DictionaryValue* ret =
+      extension_bookmark_helpers::GetNodeDictionary(node, false, false);
   result_.reset(ret);
 
   return true;
 }
 
-bool UpdateBookmarkFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-  const ListValue* args = static_cast<const ListValue*>(args_);
-  int64 id;
+// static
+bool UpdateBookmarkFunction::ExtractIds(const Value* args,
+                                        std::list<int64>* ids,
+                                        bool* invalid_id) {
   std::string id_string;
-  EXTENSION_FUNCTION_VALIDATE(args->GetString(0, &id_string));
-  if (!GetBookmarkIdAsInt64(id_string, &id))
+  if (!args->IsType(Value::TYPE_LIST))
     return false;
+  const ListValue* args_list = static_cast<const ListValue*>(args);
+  if (!args_list->GetString(0, &id_string))
+    return false;
+  int64 id;
+  if (StringToInt64(id_string, &id))
+    ids->push_back(id);
+  else
+    *invalid_id = true;
+  return true;
+}
+
+bool UpdateBookmarkFunction::RunImpl() {
+  std::list<int64> ids;
+  bool invalid_id = false;
+  EXTENSION_FUNCTION_VALIDATE(ExtractIds(args_.get(), &ids, &invalid_id));
+  if (invalid_id) {
+    error_ = keys::kInvalidIdError;
+    return false;
+  }
+  EXTENSION_FUNCTION_VALIDATE(ids.size() == 1);
+
+  const ListValue* args = args_as_list();
   DictionaryValue* updates;
   EXTENSION_FUNCTION_VALIDATE(args->GetDictionary(1, &updates));
+
   std::wstring title;
-  updates->GetString(keys::kTitleKey, &title);  // Optional (empty is clear).
+  std::string url_string;
+
+  // Optional but we need to distinguish non present from an empty title.
+  const bool has_title = updates->GetString(keys::kTitleKey, &title);
+  updates->GetString(keys::kUrlKey, &url_string);  // Optional.
+
+  GURL url;
+  if (!url_string.empty()) {
+    url = GURL(url_string);
+
+    // If URL is present then it needs to be a non empty valid URL.
+    EXTENSION_FUNCTION_VALIDATE(!url.is_empty());
+    EXTENSION_FUNCTION_VALIDATE(url.is_valid());
+  }
 
   BookmarkModel* model = profile()->GetBookmarkModel();
-  const BookmarkNode* node = model->GetNodeByID(id);
+  const BookmarkNode* node = model->GetNodeByID(ids.front());
   if (!node) {
     error_ = keys::kNoNodeError;
     return false;
@@ -543,10 +599,252 @@ bool UpdateBookmarkFunction::RunImpl() {
     error_ = keys::kModifySpecialError;
     return false;
   }
-  model->SetTitle(node, title);
+  if (has_title)
+    model->SetTitle(node, title);
+  if (!url.is_empty())
+    model->SetURL(node, url);
 
-  DictionaryValue* ret = ExtensionBookmarks::GetNodeDictionary(node, false);
+  DictionaryValue* ret =
+      extension_bookmark_helpers::GetNodeDictionary(node, false, false);
   result_.reset(ret);
 
   return true;
+}
+
+// Mapper superclass for BookmarkFunctions.
+template <typename BucketIdType>
+class BookmarkBucketMapper : public BucketMapper {
+ public:
+  virtual ~BookmarkBucketMapper() { STLDeleteValues(&buckets_); }
+ protected:
+  Bucket* GetBucket(const BucketIdType& id) {
+    Bucket* b = buckets_[id];
+    if (b == NULL) {
+      b = new Bucket();
+      buckets_[id] = b;
+    }
+    return b;
+  }
+ private:
+  std::map<BucketIdType, Bucket*> buckets_;
+};
+
+// Mapper for 'bookmarks.create'.  Maps "same input to bookmarks.create" to a
+// unique bucket.
+class CreateBookmarkBucketMapper : public BookmarkBucketMapper<std::string> {
+ public:
+  explicit CreateBookmarkBucketMapper(Profile* profile) : profile_(profile) {}
+  // TODO(tim): This should share code with CreateBookmarkFunction::RunImpl,
+  // but I can't figure out a good way to do that with all the macros.
+  virtual void GetBucketsForArgs(const Value* args, BucketList* buckets) {
+    if (!args->IsType(Value::TYPE_DICTIONARY))
+      return;
+
+    std::string parent_id;
+    const DictionaryValue* json = static_cast<const DictionaryValue*>(args);
+    if (json->HasKey(keys::kParentIdKey)) {
+      if (!json->GetString(keys::kParentIdKey, &parent_id))
+        return;
+    }
+    BookmarkModel* model = profile_->GetBookmarkModel();
+    const BookmarkNode* parent = model->GetNodeByID(StringToInt64(parent_id));
+    if (!parent)
+      return;
+
+    std::string bucket_id = WideToUTF8(parent->GetTitle());
+    std::wstring title;
+    json->GetString(keys::kTitleKey, &title);
+    std::string url_string;
+    json->GetString(keys::kUrlKey, &url_string);
+
+    bucket_id += WideToUTF8(title);
+    bucket_id += url_string;
+    // 20 bytes (SHA1 hash length) is very likely less than most of the
+    // |bucket_id| strings we construct here, so we hash it to save space.
+    buckets->push_back(GetBucket(base::SHA1HashString(bucket_id)));
+  }
+ private:
+  Profile* profile_;
+};
+
+// Mapper for 'bookmarks.remove'.
+class RemoveBookmarksBucketMapper : public BookmarkBucketMapper<std::string> {
+ public:
+  explicit RemoveBookmarksBucketMapper(Profile* profile) : profile_(profile) {}
+  virtual void GetBucketsForArgs(const Value* args, BucketList* buckets) {
+    typedef std::list<int64> IdList;
+    IdList ids;
+    bool invalid_id = false;
+    if (!RemoveBookmarkFunction::ExtractIds(args, &ids, &invalid_id) ||
+        invalid_id) {
+      return;
+    }
+
+    for (IdList::iterator it = ids.begin(); it != ids.end(); ++it) {
+      BookmarkModel* model = profile_->GetBookmarkModel();
+      const BookmarkNode* node = model->GetNodeByID(*it);
+      if (!node || !node->GetParent())
+        return;
+
+      std::string bucket_id;
+      bucket_id += WideToUTF8(node->GetParent()->GetTitle());
+      bucket_id += WideToUTF8(node->GetTitle());
+      bucket_id += node->GetURL().spec();
+      buckets->push_back(GetBucket(base::SHA1HashString(bucket_id)));
+    }
+  }
+ private:
+  Profile* profile_;
+};
+
+// Mapper for any bookmark function accepting bookmark IDs as parameters, where
+// a distinct ID corresponds to a single item in terms of quota limiting.  This
+// is inappropriate for bookmarks.remove, for example, since repeated removals
+// of the same item will actually have a different ID each time.
+template <class FunctionType>
+class BookmarkIdMapper : public BookmarkBucketMapper<int64> {
+ public:
+  typedef std::list<int64> IdList;
+  virtual void GetBucketsForArgs(const Value* args, BucketList* buckets) {
+    IdList ids;
+    bool invalid_id = false;
+    if (!FunctionType::ExtractIds(args, &ids, &invalid_id) || invalid_id)
+      return;
+    for (IdList::iterator it = ids.begin(); it != ids.end(); ++it)
+      buckets->push_back(GetBucket(*it));
+  }
+};
+
+// Builds heuristics for all BookmarkFunctions using specialized BucketMappers.
+class BookmarksQuotaLimitFactory {
+ public:
+  // For id-based bookmark functions.
+  template <class FunctionType>
+  static void Build(QuotaLimitHeuristics* heuristics) {
+    BuildWithMappers(heuristics, new BookmarkIdMapper<FunctionType>(),
+                                 new BookmarkIdMapper<FunctionType>());
+  }
+
+  // For bookmarks.create.
+  static void BuildForCreate(QuotaLimitHeuristics* heuristics,
+                             Profile* profile) {
+    BuildWithMappers(heuristics, new CreateBookmarkBucketMapper(profile),
+                                 new CreateBookmarkBucketMapper(profile));
+  }
+
+  // For bookmarks.remove.
+  static void BuildForRemove(QuotaLimitHeuristics* heuristics,
+                             Profile* profile) {
+    BuildWithMappers(heuristics, new RemoveBookmarksBucketMapper(profile),
+                                 new RemoveBookmarksBucketMapper(profile));
+  }
+
+ private:
+  static void BuildWithMappers(QuotaLimitHeuristics* heuristics,
+      BucketMapper* short_mapper, BucketMapper* long_mapper) {
+    TimedLimit* timed = new TimedLimit(kLongLimitConfig, long_mapper);
+    // A max of two operations per minute, sustained over 10 minutes.
+    SustainedLimit* sustained = new SustainedLimit(TimeDelta::FromMinutes(10),
+        kShortLimitConfig, short_mapper);
+    heuristics->push_back(timed);
+    heuristics->push_back(sustained);
+  }
+
+  // The quota configurations used for all BookmarkFunctions.
+  static const Config kShortLimitConfig;
+  static const Config kLongLimitConfig;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(BookmarksQuotaLimitFactory);
+};
+
+const Config BookmarksQuotaLimitFactory::kShortLimitConfig = {
+  2,                         // 2 tokens per interval.
+  TimeDelta::FromMinutes(1)  // 1 minute long refill interval.
+};
+
+const Config BookmarksQuotaLimitFactory::kLongLimitConfig = {
+  100,                       // 100 tokens per interval.
+  TimeDelta::FromHours(1)    // 1 hour long refill interval.
+};
+
+// And finally, building the individual heuristics for each function.
+void RemoveBookmarkFunction::GetQuotaLimitHeuristics(
+    QuotaLimitHeuristics* heuristics) const {
+  BookmarksQuotaLimitFactory::BuildForRemove(heuristics, profile());
+}
+
+void MoveBookmarkFunction::GetQuotaLimitHeuristics(
+    QuotaLimitHeuristics* heuristics) const {
+  BookmarksQuotaLimitFactory::Build<MoveBookmarkFunction>(heuristics);
+}
+
+void UpdateBookmarkFunction::GetQuotaLimitHeuristics(
+    QuotaLimitHeuristics* heuristics) const {
+  BookmarksQuotaLimitFactory::Build<UpdateBookmarkFunction>(heuristics);
+};
+
+void CreateBookmarkFunction::GetQuotaLimitHeuristics(
+    QuotaLimitHeuristics* heuristics) const {
+  BookmarksQuotaLimitFactory::BuildForCreate(heuristics, profile());
+}
+
+void BookmarksIOFunction::SelectFile(SelectFileDialog::Type type) {
+  // Balanced in one of the three callbacks of SelectFileDialog:
+  // either FileSelectionCanceled, MultiFilesSelected, or FileSelected
+  AddRef();
+  select_file_dialog_ = SelectFileDialog::Create(this);
+  SelectFileDialog::FileTypeInfo file_type_info;
+  file_type_info.extensions.resize(1);
+  file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
+
+  select_file_dialog_->SelectFile(type,
+                                  string16(),
+                                  FilePath(),
+                                  &file_type_info,
+                                  0,
+                                  FILE_PATH_LITERAL(""),
+                                  NULL,
+                                  NULL);
+}
+
+void BookmarksIOFunction::FileSelectionCanceled(void* params) {
+  Release();  // Balanced in BookmarksIOFunction::SelectFile()
+}
+
+void BookmarksIOFunction::MultiFilesSelected(
+    const std::vector<FilePath>& files, void* params) {
+  Release();  // Balanced in BookmarsIOFunction::SelectFile()
+  NOTREACHED() << "Should not be able to select multiple files";
+}
+
+bool ImportBookmarksFunction::RunImpl() {
+  SelectFile(SelectFileDialog::SELECT_OPEN_FILE);
+  return true;
+}
+
+void ImportBookmarksFunction::FileSelected(const FilePath& path,
+                                           int index,
+                                           void* params) {
+  ImporterHost* host = new ImporterHost();
+  importer::ProfileInfo profile_info;
+  profile_info.browser_type = importer::BOOKMARKS_HTML;
+  profile_info.source_path = path.ToWStringHack();
+  host->StartImportSettings(profile_info,
+                            profile(),
+                            importer::FAVORITES,
+                            new ProfileWriter(profile()),
+                            true);
+  Release();  // Balanced in BookmarksIOFunction::SelectFile()
+}
+
+bool ExportBookmarksFunction::RunImpl() {
+  SelectFile(SelectFileDialog::SELECT_SAVEAS_FILE);
+  return true;
+}
+
+void ExportBookmarksFunction::FileSelected(const FilePath& path,
+                                           int index,
+                                           void* params) {
+  bookmark_html_writer::WriteBookmarks(profile(), path, NULL);
+  Release();  // Balanced in BookmarksIOFunction::SelectFile()
 }

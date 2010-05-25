@@ -8,16 +8,18 @@
 
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/win_util.h"
+#include "base/i18n/rtl.h"
 #include "base/keyboard_codes.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
+#include "gfx/native_theme_win.h"
 #include "grit/app_strings.h"
 #include "skia/ext/skia_utils_win.h"
 #include "views/controls/menu/menu_win.h"
+#include "views/controls/menu/menu_2.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/focus/focus_manager.h"
@@ -100,7 +102,8 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
   // Set up the text_object_model_.
   ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
   ole_interface.Attach(GetOleInterface());
-  text_object_model_.QueryFrom(ole_interface);
+  if (ole_interface)
+    text_object_model_.QueryFrom(ole_interface);
 }
 
 NativeTextfieldWin::~NativeTextfieldWin() {
@@ -129,7 +132,7 @@ void NativeTextfieldWin::UpdateText() {
   // Adjusting the string direction before setting the text in order to make
   // sure both RTL and LTR strings are displayed properly.
   std::wstring text_to_set;
-  if (!l10n_util::AdjustStringForLocaleDirection(text, &text_to_set))
+  if (!base::i18n::AdjustStringForLocaleDirection(text, &text_to_set))
     text_to_set = text;
   if (textfield_->style() & Textfield::STYLE_LOWERCASE)
     text_to_set = l10n_util::ToLower(text_to_set);
@@ -202,6 +205,10 @@ void NativeTextfieldWin::UpdateFont() {
   UpdateTextColor();
 }
 
+void NativeTextfieldWin::UpdateIsPassword() {
+  // TODO: Need to implement for Windows.
+}
+
 void NativeTextfieldWin::UpdateEnabled() {
   SendMessage(m_hWnd, WM_ENABLE, textfield_->IsEnabled(), 0);
 }
@@ -237,8 +244,22 @@ gfx::NativeView NativeTextfieldWin::GetTestingHandle() const {
   return m_hWnd;
 }
 
+bool NativeTextfieldWin::IsIMEComposing() const {
+  // Retrieve the length of the composition string to check if an IME is
+  // composing text. (If this length is > 0 then an IME is being used to compose
+  // text.)
+  HIMC imm_context = ImmGetContext(m_hWnd);
+  if (!imm_context)
+    return false;
+
+  const int composition_size = ImmGetCompositionString(imm_context, GCS_COMPSTR,
+                                                       NULL, 0);
+  ImmReleaseContext(m_hWnd, imm_context);
+  return composition_size > 0;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-// NativeTextfieldWin, SimpleMenuModel::Delegate implementation:
+// NativeTextfieldWin, menus::SimpleMenuModel::Delegate implementation:
 
 bool NativeTextfieldWin::IsCommandIdChecked(int command_id) const {
   return false;
@@ -258,7 +279,7 @@ bool NativeTextfieldWin::IsCommandIdEnabled(int command_id) const {
 }
 
 bool NativeTextfieldWin::GetAcceleratorForCommandId(int command_id,
-                                                    Accelerator* accelerator) {
+    menus::Accelerator* accelerator) {
   // The standard Ctrl-X, Ctrl-V and Ctrl-C are not defined as accelerators
   // anywhere so we need to check for them explicitly here.
   switch (command_id) {
@@ -801,7 +822,7 @@ LONG NativeTextfieldWin::ClipXCoordToVisibleText(LONG x,
   // paragraph.
   bool ltr_text_in_ltr_layout = true;
   if ((pf2.wEffects & PFE_RTLPARA) ||
-      l10n_util::StringContainsStrongRTLChars(GetText())) {
+      base::i18n::StringContainsStrongRTLChars(GetText())) {
     ltr_text_in_ltr_layout = false;
   }
   const int length = GetTextLength();
@@ -871,7 +892,8 @@ ITextDocument* NativeTextfieldWin::GetTextObjectModel() const {
   if (!text_object_model_) {
     ScopedComPtr<IRichEditOle, &IID_IRichEditOle> ole_interface;
     ole_interface.Attach(GetOleInterface());
-    text_object_model_.QueryFrom(ole_interface);
+    if (ole_interface)
+      text_object_model_.QueryFrom(ole_interface);
   }
   return text_object_model_;
 }
@@ -879,7 +901,7 @@ ITextDocument* NativeTextfieldWin::GetTextObjectModel() const {
 void NativeTextfieldWin::BuildContextMenu() {
   if (context_menu_contents_.get())
     return;
-  context_menu_contents_.reset(new SimpleMenuModel(this));
+  context_menu_contents_.reset(new menus::SimpleMenuModel(this));
   context_menu_contents_->AddItemWithStringId(IDS_APP_UNDO, IDS_APP_UNDO);
   context_menu_contents_->AddSeparator();
   context_menu_contents_->AddItemWithStringId(IDS_APP_CUT, IDS_APP_CUT);

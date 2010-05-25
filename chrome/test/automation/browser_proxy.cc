@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "base/gfx/point.h"
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/time.h"
@@ -16,24 +15,22 @@
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
+#include "gfx/point.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
 
 
 bool BrowserProxy::ActivateTab(int tab_index) {
-  return ActivateTabWithTimeout(tab_index, base::kNoTimeout, NULL);
-}
-
-bool BrowserProxy::ActivateTabWithTimeout(int tab_index, uint32 timeout_ms,
-                                          bool* is_timeout) {
   if (!is_valid())
     return false;
 
   int activate_tab_response = -1;
 
-  sender_->SendWithTimeout(new AutomationMsg_ActivateTab(
-      0, handle_, tab_index, &activate_tab_response), timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_ActivateTab(
+                         0, handle_, tab_index, &activate_tab_response))) {
+    return false;
+  }
 
   if (activate_tab_response >= 0)
     return true;
@@ -42,34 +39,25 @@ bool BrowserProxy::ActivateTabWithTimeout(int tab_index, uint32 timeout_ms,
 }
 
 bool BrowserProxy::BringToFront() {
-  return BringToFrontWithTimeout(base::kNoTimeout, NULL);
-}
-
-bool BrowserProxy::BringToFrontWithTimeout(uint32 timeout_ms,
-                                           bool* is_timeout) {
   if (!is_valid())
     return false;
 
   bool succeeded = false;
 
-  sender_->SendWithTimeout(new AutomationMsg_BringBrowserToFront(
-      0, handle_, &succeeded), timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_BringBrowserToFront(
+                         0, handle_, &succeeded))) {
+    return false;
+  }
 
   return succeeded;
 }
 
-bool BrowserProxy::IsPageMenuCommandEnabledWithTimeout(int id,
-                                                       uint32 timeout_ms,
-                                                       bool* is_timeout) {
+bool BrowserProxy::IsPageMenuCommandEnabled(int id, bool* enabled) {
   if (!is_valid())
     return false;
 
-  bool succeeded = false;
-
-  sender_->SendWithTimeout(new AutomationMsg_IsPageMenuCommandEnabled(
-      0, handle_, id, &succeeded), timeout_ms, is_timeout);
-
-  return succeeded;
+  return sender_->Send(new AutomationMsg_IsPageMenuCommandEnabled(
+                           0, handle_, id, enabled));
 }
 
 bool BrowserProxy::AppendTab(const GURL& tab_url) {
@@ -84,12 +72,6 @@ bool BrowserProxy::AppendTab(const GURL& tab_url) {
 }
 
 bool BrowserProxy::GetActiveTabIndex(int* active_tab_index) const {
-  return GetActiveTabIndexWithTimeout(active_tab_index, base::kNoTimeout, NULL);
-}
-
-bool BrowserProxy::GetActiveTabIndexWithTimeout(int* active_tab_index,
-                                                uint32 timeout_ms,
-                                                bool* is_timeout) const {
   if (!is_valid())
     return false;
 
@@ -100,17 +82,17 @@ bool BrowserProxy::GetActiveTabIndexWithTimeout(int* active_tab_index,
 
   int active_tab_index_response = -1;
 
-  bool succeeded = sender_->SendWithTimeout(
-      new AutomationMsg_ActiveTabIndex(0, handle_, &active_tab_index_response),
-      timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_ActiveTabIndex(
+                         0, handle_, &active_tab_index_response))) {
+    return false;
+  }
 
   if (active_tab_index_response >= 0) {
     *active_tab_index = active_tab_index_response;
-  } else {
-    succeeded = false;
+    return true;
   }
 
-  return succeeded;
+  return false;
 }
 
 scoped_refptr<TabProxy> BrowserProxy::GetTab(int tab_index) const {
@@ -136,23 +118,13 @@ scoped_refptr<TabProxy> BrowserProxy::GetTab(int tab_index) const {
 }
 
 scoped_refptr<TabProxy> BrowserProxy::GetActiveTab() const {
-  return GetActiveTabWithTimeout(base::kNoTimeout, NULL);
-}
-
-scoped_refptr<TabProxy> BrowserProxy::GetActiveTabWithTimeout(uint32 timeout_ms,
-    bool* is_timeout) const {
   int active_tab_index;
-  if (!GetActiveTabIndexWithTimeout(&active_tab_index, timeout_ms, is_timeout))
+  if (!GetActiveTabIndex(&active_tab_index))
     return NULL;
   return GetTab(active_tab_index);
 }
 
 bool BrowserProxy::GetTabCount(int* num_tabs) const {
-  return GetTabCountWithTimeout(num_tabs, base::kNoTimeout, NULL);
-}
-
-bool BrowserProxy::GetTabCountWithTimeout(int* num_tabs, uint32 timeout_ms,
-                                          bool* is_timeout) const {
   if (!is_valid())
     return false;
 
@@ -163,16 +135,34 @@ bool BrowserProxy::GetTabCountWithTimeout(int* num_tabs, uint32 timeout_ms,
 
   int tab_count_response = -1;
 
-  bool succeeded = sender_->SendWithTimeout(new AutomationMsg_TabCount(
-      0, handle_, &tab_count_response), timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_TabCount(
+                         0, handle_, &tab_count_response))) {
+    return false;
+  }
 
   if (tab_count_response >= 0) {
     *num_tabs = tab_count_response;
-  } else {
-    succeeded = false;
+    return true;
   }
 
-  return succeeded;
+  return false;
+}
+
+bool BrowserProxy::GetType(Browser::Type* type) const {
+  if (!is_valid())
+    return false;
+
+  if (!type) {
+    NOTREACHED();
+    return false;
+  }
+
+  int type_as_int;
+  if (!sender_->Send(new AutomationMsg_Type(0, handle_, &type_as_int)))
+    return false;
+
+  *type = static_cast<Browser::Type>(type_as_int);
+  return true;
 }
 
 bool BrowserProxy::ApplyAccelerator(int id) {
@@ -183,16 +173,6 @@ bool BrowserProxy::SimulateDrag(const gfx::Point& start,
                                 const gfx::Point& end,
                                 int flags,
                                 bool press_escape_en_route) {
-  return SimulateDragWithTimeout(start, end, flags, base::kNoTimeout, NULL,
-                                 press_escape_en_route);
-}
-
-bool BrowserProxy::SimulateDragWithTimeout(const gfx::Point& start,
-                                           const gfx::Point& end,
-                                           int flags,
-                                           uint32 timeout_ms,
-                                           bool* is_timeout,
-                                           bool press_escape_en_route) {
   if (!is_valid())
     return false;
 
@@ -202,9 +182,10 @@ bool BrowserProxy::SimulateDragWithTimeout(const gfx::Point& start,
 
   bool result = false;
 
-  sender_->SendWithTimeout(new AutomationMsg_WindowDrag(
-      0, handle_, drag_path, flags, press_escape_en_route, &result),
-      timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_WindowDrag(
+          0, handle_, drag_path, flags, press_escape_en_route, &result))) {
+    return false;
+  }
 
   return result;
 }
@@ -214,11 +195,8 @@ bool BrowserProxy::WaitForTabCountToBecome(int count, int wait_timeout) {
   const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
   while (TimeTicks::Now() - start < timeout) {
     PlatformThread::Sleep(automation::kSleepTime);
-    bool is_timeout;
     int new_count;
-    bool succeeded = GetTabCountWithTimeout(&new_count, wait_timeout,
-                                            &is_timeout);
-    if (!succeeded)
+    if (!GetTabCount(&new_count))
       return false;
     if (count == new_count)
       return true;
@@ -310,6 +288,95 @@ bool BrowserProxy::GetBookmarkBarVisibility(bool* is_visible,
       0, handle_, is_visible, is_animating));
 }
 
+bool BrowserProxy::GetBookmarksAsJSON(std::string *json_string) {
+  if (!is_valid())
+    return false;
+
+  if (!WaitForBookmarkModelToLoad())
+    return false;
+
+  bool result = false;
+  sender_->Send(new AutomationMsg_GetBookmarksAsJSON(0, handle_,
+                                                     json_string,
+                                                     &result));
+  return result;
+}
+
+bool BrowserProxy::WaitForBookmarkModelToLoad() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  sender_->Send(new AutomationMsg_WaitForBookmarkModelToLoad(0, handle_,
+                                                             &result));
+  return result;
+}
+
+bool BrowserProxy::AddBookmarkGroup(int64 parent_id, int index,
+                                    std::wstring& title) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_AddBookmarkGroup(0, handle_,
+                                                   parent_id, index,
+                                                   title,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::AddBookmarkURL(int64 parent_id, int index,
+                                  std::wstring& title, const GURL& url) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_AddBookmarkURL(0, handle_,
+                                                 parent_id, index,
+                                                 title, url,
+                                                 &result));
+  return result;
+}
+
+bool BrowserProxy::ReparentBookmark(int64 id, int64 new_parent_id, int index) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_ReparentBookmark(0, handle_,
+                                                   id, new_parent_id,
+                                                   index,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::SetBookmarkTitle(int64 id, std::wstring& title) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_SetBookmarkTitle(0, handle_,
+                                                   id, title,
+                                                   &result));
+  return result;
+}
+
+bool BrowserProxy::SetBookmarkURL(int64 id, const GURL& url) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_SetBookmarkURL(0, handle_,
+                                                 id, url,
+                                                 &result));
+  return result;
+}
+
+bool BrowserProxy::RemoveBookmark(int64 id) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_RemoveBookmark(0, handle_,
+                                                 id,
+                                                 &result));
+  return result;
+}
+
 bool BrowserProxy::IsShelfVisible(bool* is_visible) {
   if (!is_valid())
     return false;
@@ -378,6 +445,25 @@ bool BrowserProxy::SetBooleanPreference(const std::wstring& name,
   return result;
 }
 
+bool BrowserProxy::SetDefaultContentSetting(ContentSettingsType content_type,
+                                            ContentSetting setting) {
+  return SetContentSetting(std::string(), content_type, setting);
+}
+
+bool BrowserProxy::SetContentSetting(const std::string& host,
+                                     ContentSettingsType content_type,
+                                     ContentSetting setting) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_SetContentSetting(0, handle_, host,
+                                                    content_type, setting,
+                                                    &result));
+  return result;
+}
+
 bool BrowserProxy::TerminateSession() {
   if (!is_valid())
     return false;
@@ -438,5 +524,73 @@ scoped_refptr<AutocompleteEditProxy> BrowserProxy::GetAutocompleteEdit() {
   // Since there is no scoped_refptr::attach.
   scoped_refptr<AutocompleteEditProxy> result;
   result.swap(&p);
+  return result;
+}
+
+bool BrowserProxy::IsFullscreen(bool* is_fullscreen) {
+  DCHECK(is_fullscreen);
+
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_IsFullscreen(0, handle_,
+                                                      is_fullscreen));
+}
+
+bool BrowserProxy::IsFullscreenBubbleVisible(bool* is_visible) {
+  DCHECK(is_visible);
+
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_IsFullscreenBubbleVisible(0, handle_,
+                                                                   is_visible));
+}
+
+bool BrowserProxy::ShutdownSessionService() {
+  bool did_shutdown = false;
+  bool succeeded = sender_->Send(
+      new AutomationMsg_ShutdownSessionService(0, handle_, &did_shutdown));
+
+  if (!succeeded) {
+    DLOG(ERROR) <<
+        "ShutdownSessionService did not complete in a timely fashion";
+    return false;
+  }
+
+  return did_shutdown;
+}
+
+bool BrowserProxy::StartTrackingPopupMenus() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  if (!sender_->Send(new AutomationMsg_StartTrackingPopupMenus
+      (0, handle_, &result)))
+    return false;
+  return result;
+}
+
+bool BrowserProxy::WaitForPopupMenuToOpen() {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  if (!sender_->Send(new AutomationMsg_WaitForPopupMenuToOpen
+      (0, &result)))
+    return false;
+  return result;
+}
+
+bool BrowserProxy::SendJSONRequest(const std::string& request,
+                                   std::string* response) {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+  return sender_->Send(new AutomationMsg_SendJSONRequest(0, handle_,
+                                                         request, response,
+                                                         &result));
   return result;
 }

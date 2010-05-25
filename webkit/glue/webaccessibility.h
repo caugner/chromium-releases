@@ -7,6 +7,10 @@
 
 #include "base/string16.h"
 
+namespace WebKit {
+class WebAccessibilityCache;
+}
+
 namespace webkit_glue {
 
 class WebAccessibility {
@@ -119,6 +123,12 @@ class WebAccessibility {
     STATE_UNAVAILABLE
   };
 
+  enum ReturnCode {
+    RETURNCODE_TRUE,    // MSAA S_OK
+    RETURNCODE_FALSE,   // MSAA S_FALSE
+    RETURNCODE_FAIL     // E_FAIL
+  };
+
   // Parameters structure to hold a union of the possible accessibility function
   // INPUT variables, with the unused fields always set to default value. Used
   // in ViewMsg_GetAccessibilityInfo, as only parameter.
@@ -159,12 +169,12 @@ class WebAccessibility {
     // String output parameter.
     string16 output_string;
 
-    // Return code, either true (MSAA S_OK) or false (MSAA S_FALSE).
-    // Interface-specific error return codes (e.g. MSAA's E_POINTER,
-    // E_INVALIDARG, E_FAIL, E_NOTIMPL) must be handled on the browser side by
-    // input validation.
-    bool return_code;
+    // Return code of the accessibility function call.
+    int32 return_code;
   };
+
+  static int32 GetAccObjInfo(WebKit::WebAccessibilityCache* cache,
+      const InParams& in_params, OutParams* out_params);
 };
 
 }  // namespace webkit_glue

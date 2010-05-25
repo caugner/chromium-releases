@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,15 @@
 #include "chrome/browser/hung_renderer_dialog.h"
 #import "chrome/browser/cocoa/multi_key_equivalent_button.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/result_codes.h"
 #include "grit/chromium_strings.h"
+#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 
 namespace {
@@ -43,6 +46,7 @@ HungRendererController* g_instance = NULL;
 
 - (void)dealloc {
   DCHECK(!g_instance);
+  [tableView_ setDataSource:nil];
   [super dealloc];
 }
 
@@ -77,7 +81,7 @@ HungRendererController* g_instance = NULL;
 
 - (IBAction)kill:(id)sender {
   if (hungContents_)
-    base::KillProcess(hungContents_->process()->process().handle(),
+    base::KillProcess(hungContents_->GetRenderProcessHost()->GetHandle(),
                       ResultCodes::HUNG, false);
   // Cannot call performClose:, because the close button is disabled.
   [self close];
@@ -90,25 +94,36 @@ HungRendererController* g_instance = NULL;
   [self close];
 }
 
-- (int)numberOfRowsInTableView:(NSTableView *)aTableView {
-  return hungRenderers_.size();
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)aTableView {
+  return [hungTitles_ count];
 }
 
 - (id)tableView:(NSTableView*)aTableView
       objectValueForTableColumn:(NSTableColumn*)column
-            row:(int)rowIndex {
-  // TODO(rohitrao): Add favicons.
-  TabContents* contents = hungRenderers_[rowIndex];
-  string16 title = contents->GetTitle();
-  if (!title.empty())
-    return base::SysUTF16ToNSString(title);
-  return l10n_util::GetNSStringWithFixup(IDS_TAB_UNTITLED_TITLE);
+            row:(NSInteger)rowIndex {
+  return [NSNumber numberWithInt:NSOffState];
+}
+
+- (NSCell*)tableView:(NSTableView*)tableView
+    dataCellForTableColumn:(NSTableColumn*)tableColumn
+                       row:(NSInteger)rowIndex {
+  NSCell* cell = [tableColumn dataCellForRow:rowIndex];
+
+  if ([[tableColumn identifier] isEqualToString:@"title"]) {
+    DCHECK([cell isKindOfClass:[NSButtonCell class]]);
+    NSButtonCell* buttonCell = static_cast<NSButtonCell*>(cell);
+    [buttonCell setTitle:[hungTitles_ objectAtIndex:rowIndex]];
+    [buttonCell setImage:[hungFavicons_ objectAtIndex:rowIndex]];
+    [buttonCell setRefusesFirstResponder:YES];  // Don't push in like a button.
+    [buttonCell setHighlightsBy:NSNoCellMask];
+  }
+  return cell;
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
   // We have to reset g_instance before autoreleasing the window,
   // because we want to avoid reusing the same dialog if someone calls
-  // HungRendererDialog::ShowForTabContents() between the autorelease
+  // hung_renderer_dialog::ShowForTabContents() between the autorelease
   // call and the actual dealloc.
   g_instance = nil;
 
@@ -118,11 +133,28 @@ HungRendererController* g_instance = NULL;
 - (void)showForTabContents:(TabContents*)contents {
   DCHECK(contents);
   hungContents_ = contents;
-  hungRenderers_.clear();
+  scoped_nsobject<NSMutableArray> titles([[NSMutableArray alloc] init]);
+  scoped_nsobject<NSMutableArray> favicons([[NSMutableArray alloc] init]);
   for (TabContentsIterator it; !it.done(); ++it) {
-    if (it->process() == hungContents_->process())
-      hungRenderers_.push_back(*it);
+    if (it->GetRenderProcessHost() == hungContents_->GetRenderProcessHost()) {
+      string16 title = (*it)->GetTitle();
+      if (title.empty())
+        title = TabContents::GetDefaultTitle();
+      [titles addObject:base::SysUTF16ToNSString(title)];
+
+      // TabContents can return a null SkBitmap if it has no favicon.  If this
+      // happens, use the default favicon.
+      const SkBitmap& bitmap = it->GetFavIcon();
+      if (!bitmap.isNull()) {
+        [favicons addObject:gfx::SkBitmapToNSImage(bitmap)];
+      } else {
+        ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+        [favicons addObject:rb.GetNSImageNamed(IDR_DEFAULT_FAVICON)];
+      }
+    }
   }
+  hungTitles_.reset([titles copy]);
+  hungFavicons_.reset([favicons copy]);
   [tableView_ reloadData];
 
   [[self window] center];
@@ -132,7 +164,8 @@ HungRendererController* g_instance = NULL;
 - (void)endForTabContents:(TabContents*)contents {
   DCHECK(contents);
   DCHECK(hungContents_);
-  if (hungContents_ && hungContents_->process() == contents->process()) {
+  if (hungContents_ && hungContents_->GetRenderProcessHost() ==
+      contents->GetRenderProcessHost()) {
     // Cannot call performClose:, because the close button is disabled.
     [self close];
   }
@@ -150,8 +183,9 @@ HungRendererController* g_instance = NULL;
 }
 @end
 
-// static
-void HungRendererDialog::ShowForTabContents(TabContents* contents) {
+namespace hung_renderer_dialog {
+
+void ShowForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = [[HungRendererController alloc]
@@ -161,7 +195,9 @@ void HungRendererDialog::ShowForTabContents(TabContents* contents) {
 }
 
 // static
-void HungRendererDialog::HideForTabContents(TabContents* contents) {
+void HideForTabContents(TabContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     [g_instance endForTabContents:contents];
 }
+
+}  // namespace hung_renderer_dialog

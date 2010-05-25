@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <atlmisc.h>
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl.
 
-#include "app/gfx/font.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
@@ -20,11 +20,11 @@
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/common/page_transition_types.h"
-#include "views/controls/menu/simple_menu_model.h"
+#include "gfx/font.h"
 #include "webkit/glue/window_open_disposition.h"
+#include "views/controls/menu/menu_2.h"
 
 class AutocompletePopupModel;
-class CommandUpdater;
 class Profile;
 class TabContents;
 namespace views {
@@ -45,7 +45,7 @@ class AutocompleteEditViewWin
                          CWinTraits<WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL |
                                     ES_NOHIDESEL> >,
       public CRichEditCommands<AutocompleteEditViewWin>,
-      public views::SimpleMenuModel::Delegate,
+      public menus::SimpleMenuModel::Delegate,
       public AutocompleteEditView {
  public:
   struct State {
@@ -120,6 +120,7 @@ class AutocompleteEditViewWin
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
   virtual gfx::NativeView GetNativeView() const;
+  virtual CommandUpdater* GetCommandUpdater();
 
   // Exposes custom IAccessible implementation to the overall MSAA hierarchy.
   IAccessible* GetIAccessible();
@@ -176,6 +177,7 @@ class AutocompleteEditViewWin
     MSG_WM_RBUTTONDOWN(OnNonLButtonDown)
     MSG_WM_RBUTTONUP(OnNonLButtonUp)
     MSG_WM_SETFOCUS(OnSetFocus)
+    MSG_WM_SETTEXT(OnSetText)
     MSG_WM_SYSCHAR(OnSysChar)  // WM_SYSxxx == WM_xxx with ALT down
     MSG_WM_SYSKEYDOWN(OnKeyDown)
     MSG_WM_SYSKEYUP(OnKeyUp)
@@ -183,11 +185,11 @@ class AutocompleteEditViewWin
     DEFAULT_REFLECTION_HANDLER()  // avoids black margin area
   END_MSG_MAP()
 
-  // SimpleMenuModel::Delegate
+  // menus::SimpleMenuModel::Delegate
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          views::Accelerator* accelerator);
+                                          menus::Accelerator* accelerator);
   virtual bool IsLabelForCommandIdDynamic(int command_id) const;
   virtual std::wstring GetLabelForCommandId(int command_id) const;
   virtual void ExecuteCommand(int command_id);
@@ -259,6 +261,7 @@ class AutocompleteEditViewWin
   void OnPaint(HDC bogus_hdc);
   void OnPaste();
   void OnSetFocus(HWND focus_wnd);
+  LRESULT OnSetText(const wchar_t* text);
   void OnSysChar(TCHAR ch, UINT repeat_count, UINT flags);
   void OnWindowPosChanging(WINDOWPOS* window_pos);
 
@@ -342,10 +345,9 @@ class AutocompleteEditViewWin
   // Determines whether the user can "paste and go", given the specified text.
   bool CanPasteAndGo(const std::wstring& text) const;
 
-  // Getter for the text_object_model_, used by the ScopedXXX classes.  Note
-  // that the pointer returned here is only valid as long as the
-  // AutocompleteEdit is still alive.  Also, if the underlying call fails, this
-  // may return NULL.
+  // Getter for the text_object_model_.  Note that the pointer returned here is
+  // only valid as long as the AutocompleteEdit is still alive.  Also, if the
+  // underlying call fails, this may return NULL.
   ITextDocument* GetTextObjectModel() const;
 
   // Invoked during a mouse move. As necessary starts a drag and drop session.
@@ -441,7 +443,7 @@ class AutocompleteEditViewWin
   CHARRANGE saved_selection_for_focus_change_;
 
   // The context menu for the edit.
-  scoped_ptr<views::SimpleMenuModel> context_menu_contents_;
+  scoped_ptr<menus::SimpleMenuModel> context_menu_contents_;
   scoped_ptr<views::Menu2> context_menu_;
 
   // Font we're using.  We keep a reference to make sure the font supplied to
@@ -477,7 +479,7 @@ class AutocompleteEditViewWin
   ToolbarModel::SecurityLevel scheme_security_level_;
 
   // This interface is useful for accessing the CRichEditCtrl at a low level.
-  mutable ScopedComPtr<ITextDocument> text_object_model_;
+  mutable ITextDocument* text_object_model_;
 
   // This contains the scheme char start and stop indexes that should be
   // striken-out when displaying an insecure scheme.

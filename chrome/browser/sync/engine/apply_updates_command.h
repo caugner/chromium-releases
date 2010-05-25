@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_SYNC_ENGINE_APPLY_UPDATES_COMMAND_H_
 
 #include "chrome/browser/sync/engine/model_changing_syncer_command.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
 namespace syncable {
@@ -22,7 +21,8 @@ class ApplyUpdatesCommand : public ModelChangingSyncerCommand {
   ApplyUpdatesCommand();
   virtual ~ApplyUpdatesCommand();
 
-  virtual void ModelChangingExecuteImpl(SyncerSession* session);
+  // ModelChangingSyncerCommand implementation.
+  virtual void ModelChangingExecuteImpl(sessions::SyncSession* session);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ApplyUpdatesCommand);

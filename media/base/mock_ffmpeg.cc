@@ -5,7 +5,7 @@
 #include "media/base/mock_ffmpeg.h"
 
 #include "base/logging.h"
-#include "media/filters/ffmpeg_common.h"
+#include "media/ffmpeg/ffmpeg_common.h"
 
 using ::testing::_;
 using ::testing::AtMost;
@@ -40,6 +40,11 @@ MockFFmpeg::MockFFmpeg()
         .Times(AtMost(1))
         .WillOnce(Return());
   }
+  // av_lockmgr_register() is also called from ~FFmpegLock(), so we expect
+  // it to be called at the end.
+  EXPECT_CALL(*this, AVRegisterLockManager(_))
+    .Times(AtMost(2))
+    .WillRepeatedly(Return(0));
 }
 
 MockFFmpeg::~MockFFmpeg() {
@@ -92,6 +97,16 @@ void av_register_all() {
   media::MockFFmpeg::get()->AVRegisterAll();
 }
 
+int av_lockmgr_register(int (*cb)(void**, enum AVLockOp)) {
+  media::MockFFmpeg* mock = media::MockFFmpeg::get();
+  // Here |mock| may be NULL when this function is called from ~FFmpegGlue().
+  if (mock != NULL) {
+    return mock->AVRegisterLockManager(cb);
+  } else {
+    return 0;
+  }
+}
+
 AVCodec* avcodec_find_decoder(enum CodecID id) {
   return media::MockFFmpeg::get()->AVCodecFindDecoder(id);
 }
@@ -120,6 +135,27 @@ int avcodec_decode_video2(AVCodecContext* avctx, AVFrame* picture,
                           int* got_picture_ptr, AVPacket* avpkt) {
   return media::MockFFmpeg::get()->
       AVCodecDecodeVideo2(avctx, picture, got_picture_ptr, avpkt);
+}
+
+AVBitStreamFilterContext* av_bitstream_filter_init(const char* name) {
+  return media::MockFFmpeg::get()->AVBitstreamFilterInit(name);
+}
+
+int av_bitstream_filter_filter(AVBitStreamFilterContext* bsfc,
+                               AVCodecContext* avctx,
+                               const char* args,
+                               uint8_t** poutbuf,
+                               int* poutbuf_size,
+                               const uint8_t* buf,
+                               int buf_size,
+                               int keyframe) {
+  return media::MockFFmpeg::get()->
+      AVBitstreamFilterFilter(bsfc, avctx, args, poutbuf, poutbuf_size, buf,
+                              buf_size, keyframe);
+}
+
+void av_bitstream_filter_close(AVBitStreamFilterContext* bsf) {
+  return media::MockFFmpeg::get()->AVBitstreamFilterClose(bsf);
 }
 
 int av_open_input_file(AVFormatContext** format, const char* filename,
@@ -183,6 +219,11 @@ int av_dup_packet(AVPacket* packet) {
 void av_log_set_level(int level) {
   media::MockFFmpeg::get()->AVLogSetLevel(level);
 }
+
+void av_destruct_packet(AVPacket *pkt) {
+  media::MockFFmpeg::get()->AVDestructPacket(pkt);
+}
+
 }  // extern "C"
 
 }  // namespace media

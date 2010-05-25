@@ -38,6 +38,10 @@
 #include "base/third_party/nspr/prcpucfg_linux.h"
 #elif defined(__FreeBSD__)
 #include "base/third_party/nspr/prcpucfg_freebsd.h"
+#elif defined(__OpenBSD__)
+#include "base/third_party/nspr/prcpucfg_openbsd.h"
+#elif defined(__sun)
+#include "base/third_party/nspr/prcpucfg_solaris.h"
 #else
 #error Provide a prcpucfg.h appropriate for your platform
 #endif

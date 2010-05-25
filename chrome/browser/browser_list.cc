@@ -19,7 +19,7 @@
 #include "chrome/common/result_codes.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/browser/chrome_application_mac.h"
+#include "chrome/browser/chrome_browser_application_mac.h"
 #endif
 
 namespace {
@@ -79,6 +79,53 @@ class BrowserActivityObserver : public NotificationObserver {
 
 BrowserActivityObserver* activity_observer = NULL;
 
+// Returns true if the specified |browser| has a matching profile and type to
+// those specified. |type| can also be TYPE_ANY, which means only |profile|
+// must be matched. If |match_incognito| is true, we check both the incognito
+// and regular versions of the profile.
+bool BrowserMatchesProfileAndType(Browser* browser,
+                                  Profile* profile,
+                                  Browser::Type type,
+                                  bool match_incognito) {
+  bool profile_match = match_incognito ?
+      browser->profile()->GetOriginalProfile() ==
+          profile->GetOriginalProfile() :
+      browser->profile() == profile;
+  return (type == Browser::TYPE_ANY || browser->type() == type) &&
+      profile_match;
+}
+
+// Finds a registered Browser object matching |profile| and |type|. This
+// walks the list of Browsers that have ever been activated from most recently
+// activated to least. If a Browser has never been activated, such as in a test
+// scenario, this function will _not_ find it. Fall back to
+// FindBrowserMatching() in that case.
+Browser* FindInLastActiveMatching(Profile* profile, Browser::Type type,
+                                  bool match_incognito) {
+  for (BrowserList::list_type::const_reverse_iterator i =
+       BrowserList::begin_last_active(); i != BrowserList::end_last_active();
+       ++i) {
+    if (BrowserMatchesProfileAndType(*i, profile, type, match_incognito))
+      return *i;
+  }
+  return NULL;
+}
+
+// Finds a registered Browser object matching |profile| and |type| even if that
+// Browser has never been activated. This is a forward walk, and intended as a
+// last ditch fallback mostly to handle tests run on machines where no window is
+// ever activated. The user experience if this function is relied on is not good
+// since matching browsers will be returned in registration (creation) order.
+Browser* FindBrowserMatching(Profile* profile, Browser::Type type,
+                             bool match_incognito) {
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if (BrowserMatchesProfileAndType(*i, profile, type, match_incognito))
+      return *i;
+  }
+  return NULL;
+}
+
 }  // namespace
 
 BrowserList::list_type BrowserList::browsers_;
@@ -101,8 +148,8 @@ void BrowserList::AddBrowser(Browser* browser) {
 
   // Send out notifications after add has occurred. Do some basic checking to
   // try to catch evil observers that change the list from under us.
-  std::vector<Observer*>::size_type original_count = observers_.size();
-  for (int i = 0; i < static_cast<int>(observers_.size()); i++)
+  size_t original_count = observers_.size();
+  for (size_t i = 0; i < observers_.size(); ++i)
     observers_[i]->OnBrowserAdded(browser);
   DCHECK_EQ(original_count, observers_.size())
       << "observer list modified during notification";
@@ -112,15 +159,19 @@ void BrowserList::AddBrowser(Browser* browser) {
 void BrowserList::RemoveBrowser(Browser* browser) {
   RemoveBrowserFrom(browser, &last_active_browsers_);
 
-  bool close_app = (browsers_.size() == 1);
+  // Closing all windows does not indicate quitting the application on the Mac,
+  // however, many UI tests rely on this behavior so leave it be for now and
+  // simply ignore the behavior on the Mac outside of unit tests.
+  // TODO(andybons): Fix the UI tests to Do The Right Thing.
+  bool close_app_non_mac = (browsers_.size() == 1);
   NotificationService::current()->Notify(
       NotificationType::BROWSER_CLOSED,
-      Source<Browser>(browser), Details<bool>(&close_app));
+      Source<Browser>(browser), Details<bool>(&close_app_non_mac));
 
   // Send out notifications before anything changes. Do some basic checking to
   // try to catch evil observers that change the list from under us.
-  std::vector<Observer*>::size_type original_count = observers_.size();
-  for (int i = 0; i < static_cast<int>(observers_.size()); i++)
+  size_t original_count = observers_.size();
+  for (size_t i = 0; i < observers_.size(); ++i)
     observers_[i]->OnBrowserRemoving(browser);
   DCHECK_EQ(original_count, observers_.size())
       << "observer list modified during notification";
@@ -148,13 +199,13 @@ void BrowserList::AddObserver(BrowserList::Observer* observer) {
 
 // static
 void BrowserList::RemoveObserver(BrowserList::Observer* observer) {
-  std::vector<Observer*>::iterator place =
+  std::vector<Observer*>::iterator i =
       std::find(observers_.begin(), observers_.end(), observer);
-  if (place == observers_.end()) {
+  if (i == observers_.end()) {
     NOTREACHED() << "Removing an observer that isn't registered.";
     return;
   }
-  observers_.erase(place);
+  observers_.erase(i);
 }
 
 // static
@@ -163,15 +214,15 @@ void BrowserList::CloseAllBrowsers(bool use_post) {
   // exit can restore all browsers open before exiting.
   ProfileManager::ShutdownSessionServices();
 
-  BrowserList::const_iterator iter;
-  for (iter = BrowserList::begin(); iter != BrowserList::end();) {
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end();) {
     if (use_post) {
-      (*iter)->window()->Close();
-      ++iter;
+      (*i)->window()->Close();
+      ++i;
     } else {
       // This path is hit during logoff/power-down. In this case we won't get
       // a final message and so we force the browser to be deleted.
-      Browser* browser = *iter;
+      Browser* browser = *i;
       browser->window()->Close();
       // Close doesn't immediately destroy the browser
       // (Browser::TabStripEmpty() uses invoke later) but when we're ending the
@@ -179,8 +230,8 @@ void BrowserList::CloseAllBrowsers(bool use_post) {
       // DestroyBrowser to make sure the browser is deleted and cleanup can
       // happen.
       browser->window()->DestroyBrowser();
-      iter = BrowserList::begin();
-      if (iter != BrowserList::end() && browser == *iter) {
+      i = BrowserList::begin();
+      if (i != BrowserList::end() && browser == *i) {
         // Destroying the browser should have removed it from the browser list.
         // We should never get here.
         NOTREACHED();
@@ -192,14 +243,19 @@ void BrowserList::CloseAllBrowsers(bool use_post) {
 
 // static
 void BrowserList::CloseAllBrowsersAndExit() {
+  NotificationService::current()->Notify(
+      NotificationType::APP_EXITING,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
+
 #if !defined(OS_MACOSX)
   // On most platforms, closing all windows causes the application to exit.
   CloseAllBrowsers(true);
 #else
   // On the Mac, the application continues to run once all windows are closed.
-  // Terminate will result in a CloseAllBrowsers(true) call, and additionally,
-  // will cause the application to exit cleanly.
-  CrApplicationCC::Terminate();
+  // Terminate will result in a CloseAllBrowsers(true) call, and once (and if)
+  // that is done, will cause the application to exit cleanly.
+  chrome_browser_application_mac::Terminate();
 #endif
 }
 
@@ -212,6 +268,11 @@ void BrowserList::WindowsSessionEnding() {
   already_ended = true;
 
   browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
+
+  NotificationService::current()->Notify(
+      NotificationType::APP_EXITING,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
 
   // Write important data first.
   g_browser_process->EndSession();
@@ -240,11 +301,18 @@ void BrowserList::WindowsSessionEnding() {
 
 // static
 bool BrowserList::HasBrowserWithProfile(Profile* profile) {
-  BrowserList::const_iterator iter;
-  for (size_t i = 0; i < browsers_.size(); ++i) {
-    if (browsers_[i]->profile() == profile)
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if (BrowserMatchesProfileAndType(*i, profile, Browser::TYPE_ANY, false))
       return true;
   }
+  return false;
+}
+
+// static
+bool BrowserList::IsInPersistentMode() {
+  // TODO(atwilson): check the boolean state variable that you will set for
+  // persisent instances.
   return false;
 }
 
@@ -256,8 +324,10 @@ void BrowserList::SetLastActive(Browser* browser) {
   RemoveBrowserFrom(browser, &last_active_browsers_);
   last_active_browsers_.push_back(browser);
 
-  for (int i = 0; i < static_cast<int>(observers_.size()); i++)
-    observers_[i]->OnBrowserSetLastActive(browser);
+  for (std::vector<Observer*>::const_iterator i = observers_.begin();
+       i != observers_.end(); ++i) {
+    (*i)->OnBrowserSetLastActive(browser);
+  }
 }
 
 // static
@@ -270,54 +340,28 @@ Browser* BrowserList::GetLastActive() {
 
 // static
 Browser* BrowserList::GetLastActiveWithProfile(Profile* p) {
-  list_type::reverse_iterator browser = last_active_browsers_.rbegin();
-  for (; browser != last_active_browsers_.rend(); ++browser) {
-    if ((*browser)->profile() == p) {
-      return *browser;
-    }
-  }
-
-  return NULL;
+  // We are only interested in last active browsers, so we don't fall back to all
+  // browsers like FindBrowserWith* do.
+  return FindInLastActiveMatching(p, Browser::TYPE_ANY, false);
 }
 
 // static
-Browser* BrowserList::FindBrowserWithType(Profile* p, Browser::Type t) {
-  Browser* last_active = GetLastActive();
-  if (last_active && last_active->profile() == p && last_active->type() == t)
-    return last_active;
-
-  BrowserList::const_iterator i;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
-    if (*i == last_active)
-      continue;
-
-    if ((*i)->profile() == p && (*i)->type() == t)
-      return *i;
-  }
-  return NULL;
+Browser* BrowserList::FindBrowserWithType(Profile* p, Browser::Type t,
+                                          bool match_incognito) {
+  Browser* browser = FindInLastActiveMatching(p, t, match_incognito);
+  // Fall back to a forward scan of all Browsers if no active one was found.
+  return browser ? browser : FindBrowserMatching(p, t, match_incognito);
 }
 
 // static
 Browser* BrowserList::FindBrowserWithProfile(Profile* p) {
-  Browser* last_active = GetLastActive();
-  if (last_active && last_active->profile() == p)
-    return last_active;
-
-  BrowserList::const_iterator i;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
-    if (*i == last_active)
-      continue;
-
-    if ((*i)->profile() == p)
-      return *i;
-  }
-  return NULL;
+  return FindBrowserWithType(p, Browser::TYPE_ANY, false);
 }
 
 // static
 Browser* BrowserList::FindBrowserWithID(SessionID::id_type desired_id) {
-  BrowserList::const_iterator i;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
     if ((*i)->session_id().id() == desired_id)
       return *i;
   }
@@ -326,21 +370,21 @@ Browser* BrowserList::FindBrowserWithID(SessionID::id_type desired_id) {
 
 // static
 size_t BrowserList::GetBrowserCountForType(Profile* p, Browser::Type type) {
-  BrowserList::const_iterator i;
   size_t result = 0;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
-    if ((*i)->profile() == p && (*i)->type() == type)
-      result++;
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if (BrowserMatchesProfileAndType(*i, p, type, false))
+      ++result;
   }
   return result;
 }
 
 // static
 size_t BrowserList::GetBrowserCount(Profile* p) {
-  BrowserList::const_iterator i;
   size_t result = 0;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
-    if ((*i)->profile() == p)
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if (BrowserMatchesProfileAndType(*i, p, Browser::TYPE_ANY, false))
       result++;
   }
   return result;
@@ -348,8 +392,8 @@ size_t BrowserList::GetBrowserCount(Profile* p) {
 
 // static
 bool BrowserList::IsOffTheRecordSessionActive() {
-  BrowserList::const_iterator i;
-  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
     if ((*i)->profile()->IsOffTheRecord())
       return true;
   }
@@ -359,7 +403,7 @@ bool BrowserList::IsOffTheRecordSessionActive() {
 // static
 void BrowserList::RemoveBrowserFrom(Browser* browser, list_type* browser_list) {
   const iterator remove_browser =
-      find(browser_list->begin(), browser_list->end(), browser);
+      std::find(browser_list->begin(), browser_list->end(), browser);
   if (remove_browser != browser_list->end())
     browser_list->erase(remove_browser);
 }

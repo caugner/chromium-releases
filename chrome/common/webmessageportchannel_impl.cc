@@ -7,8 +7,8 @@
 #include "chrome/common/child_process.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/worker_messages.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebMessagePortChannelClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebMessagePortChannelClient.h"
 
 using WebKit::WebMessagePortChannel;
 using WebKit::WebMessagePortChannelArray;
@@ -86,6 +86,7 @@ void WebMessagePortChannelImpl::postMessage(
 
   std::vector<int> message_port_ids(channels ? channels->size() : 0);
   if (channels) {
+    // Extract the port IDs from the source array, then free it.
     for (size_t i = 0; i < channels->size(); ++i) {
       WebMessagePortChannelImpl* webchannel =
           static_cast<WebMessagePortChannelImpl*>((*channels)[i]);
@@ -93,6 +94,7 @@ void WebMessagePortChannelImpl::postMessage(
       webchannel->QueueMessages();
       DCHECK(message_port_ids[i] != MSG_ROUTING_NONE);
     }
+    delete channels;
   }
 
   IPC::Message* msg = new WorkerProcessHostMsg_PostMessage(
@@ -150,7 +152,7 @@ void WebMessagePortChannelImpl::Entangle(
 
 void WebMessagePortChannelImpl::QueueMessages() {
   // This message port is being sent elsewhere (perhaps to another process).
-  // The new endpoint needs to recieve the queued messages, including ones that
+  // The new endpoint needs to receive the queued messages, including ones that
   // could still be in-flight.  So we tell the browser to queue messages, and it
   // sends us an ack, whose receipt we know means that no more messages are
   // in-flight.  We then send the queued messages to the browser, which prepends

@@ -12,14 +12,19 @@
 #if defined(OS_WIN)
 namespace views {
 class WindowDelegate;
+class DialogDelegate;
 }
 typedef views::WindowDelegate ConstrainedWindowDelegate;
-#elif defined(OS_LINUX)
-class ConstrainedWindowGtkDelegate;
-typedef ConstrainedWindowGtkDelegate ConstrainedWindowDelegate;
+typedef views::DialogDelegate ConstrainedDialogDelegate;
 #elif defined(OS_MACOSX)
 class ConstrainedWindowMacDelegate;
+class ConstrainedWindowMacDelegateSystemSheet;
 typedef ConstrainedWindowMacDelegate ConstrainedWindowDelegate;
+typedef ConstrainedWindowMacDelegateSystemSheet ConstrainedDialogDelegate;
+#elif defined(TOOLKIT_USES_GTK)
+class ConstrainedWindowGtkDelegate;
+typedef ConstrainedWindowGtkDelegate ConstrainedWindowDelegate;
+typedef ConstrainedWindowGtkDelegate ConstrainedDialogDelegate;
 #endif
 
 class TabContents;
@@ -39,8 +44,15 @@ class ConstrainedWindow {
       TabContents* owner,
       ConstrainedWindowDelegate* delegate);
 
+  // Makes the Constrained Window visible. Only one Constrained Window is shown
+  // at a time per tab.
+  virtual void ShowConstrainedWindow() = 0;
+
   // Closes the Constrained Window.
   virtual void CloseConstrainedWindow() = 0;
+
+  // Sets focus on the Constrained Window.
+  virtual void FocusConstrainedWindow() {}
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_CONSTRAINED_WINDOW_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,41 +19,67 @@ const CGFloat kWidth(300.0);
 // A narrow width for tests which test things that don't fit.
 const CGFloat kNarrowWidth(5.0);
 
-class AutocompleteTextFieldCellTest : public PlatformTest {
+// A testing subclass that doesn't bother hooking up the Page Action itself.
+class TestPageActionImageView : public LocationBarViewMac::PageActionImageView {
  public:
-  AutocompleteTextFieldCellTest() {
+  TestPageActionImageView() {}
+  ~TestPageActionImageView() {}
+};
+
+class TestPageActionViewList : public LocationBarViewMac::PageActionViewList {
+ public:
+  TestPageActionViewList()
+      : LocationBarViewMac::PageActionViewList(NULL, NULL, NULL) {}
+  ~TestPageActionViewList() {
+    // |~PageActionViewList()| calls delete on the contents of
+    // |views_|, which here are refs to stack objects.
+    views_.clear();
+  }
+
+  void Add(LocationBarViewMac::PageActionImageView* view) {
+    views_.push_back(view);
+  }
+};
+
+class AutocompleteTextFieldCellTest : public CocoaTest {
+ public:
+  AutocompleteTextFieldCellTest() : security_image_view_(NULL, NULL, NULL),
+                                    page_action_views_() {
     // Make sure this is wide enough to play games with the cell
     // decorations.
     const NSRect frame = NSMakeRect(0, 0, kWidth, 30);
-    view_.reset([[NSTextField alloc] initWithFrame:frame]);
+
+    scoped_nsobject<NSTextField> view(
+        [[NSTextField alloc] initWithFrame:frame]);
+    view_ = view.get();
+
     scoped_nsobject<AutocompleteTextFieldCell> cell(
         [[AutocompleteTextFieldCell alloc] initTextCell:@"Testing"]);
     [cell setEditable:YES];
     [cell setBordered:YES];
+    [cell setSecurityImageView:&security_image_view_];
+    [cell setPageActionViewList:&page_action_views_];
     [view_ setCell:cell.get()];
-    [cocoa_helper_.contentView() addSubview:view_.get()];
+
+    [[test_window() contentView] addSubview:view_];
   }
 
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
-  scoped_nsobject<NSTextField> view_;
+  NSTextField* view_;
+  LocationBarViewMac::SecurityImageView security_image_view_;
+  TestPageActionViewList page_action_views_;
 };
 
-// Test adding/removing from the view hierarchy, mostly to ensure nothing
-// leaks or crashes.
-TEST_F(AutocompleteTextFieldCellTest, AddRemove) {
-  EXPECT_EQ(cocoa_helper_.contentView(), [view_ superview]);
-  [view_.get() removeFromSuperview];
-  EXPECT_FALSE([view_ superview]);
-}
+// Basic view tests (AddRemove, Display).
+TEST_VIEW(AutocompleteTextFieldCellTest, view_);
 
 // Test drawing, mostly to ensure nothing leaks or crashes.
-TEST_F(AutocompleteTextFieldCellTest, Display) {
+TEST_F(AutocompleteTextFieldCellTest, FocusedDisplay) {
   [view_ display];
 
-  // Test focussed drawing.
-  cocoa_helper_.makeFirstResponder(view_);
+  // Test focused drawing.
+  [test_window() makePretendKeyWindowAndSetFirstResponder:view_];
   [view_ display];
-  cocoa_helper_.clearFirstResponder();
+  [test_window() clearPretendKeyWindowAndFirstResponder];
 
   // Test display of various cell configurations.
   AutocompleteTextFieldCell* cell =
@@ -73,227 +99,41 @@ TEST_F(AutocompleteTextFieldCellTest, Display) {
   [view_ display];
 }
 
-TEST_F(AutocompleteTextFieldCellTest, SearchHint) {
-  AutocompleteTextFieldCell* cell =
-      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
-
-  // At default settings, everything is already good to go.
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Setting a search hint will need a reset.
-  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing the search hint needs a reset.
-  [cell setSearchHintString:@"Type to find" availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing to an identical string doesn't need a reset.
-  [cell setSearchHintString:@"Type to find" availableWidth:kWidth];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-}
-
-TEST_F(AutocompleteTextFieldCellTest, KeywordHint) {
+// Verify that transitions between states clear other states.
+TEST_F(AutocompleteTextFieldCellTest, StateTransitionsResetOthers) {
   AutocompleteTextFieldCell* cell =
       static_cast<AutocompleteTextFieldCell*>([view_ cell]);
   NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
 
-  // At default settings, everything is already good to go.
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  // Setting hint leaves keyword empty.
+  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
+  EXPECT_TRUE([cell hintString]);
+  EXPECT_FALSE([cell keywordString]);
 
-  // Setting a keyword hint will need a reset.
-  [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing the keyword hint needs a reset.
-  [cell setKeywordHintPrefix:@"Type " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing to identical strings doesn't need a reset.
-  [cell setKeywordHintPrefix:@"Type " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-}
-
-TEST_F(AutocompleteTextFieldCellTest, KeywordString) {
-  AutocompleteTextFieldCell* cell =
-      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
-
-  // At default settings, everything is already good to go.
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Setting a keyword string will need a reset.
+  // Setting keyword clears hint.
   [cell setKeywordString:@"Search Engine:"
            partialString:@"Search Eng:"
           availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell hintString]);
+  EXPECT_TRUE([cell keywordString]);
 
-  // Changing the keyword string needs a reset.
-  [cell setKeywordString:@"Search on Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing to an identical string doesn't need a reset.
-  [cell setKeywordString:@"Search on Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-}
-
-TEST_F(AutocompleteTextFieldCellTest, SecurityIcon) {
-  AutocompleteTextFieldCell* cell =
-      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
-
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  NSImage* image1 = [NSImage imageNamed:@"NSApplicationIcon"];
-  // Setting a security icon will need a reset.
-  [cell setHintIcon:image1 label:nil color:nil];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing the security icon needs a reset.
-  NSImage* image2 = [NSImage imageNamed:@"NSComputer"];
-  [cell setHintIcon:image2 label:nil color:nil];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing to an identical security icon doesn't need a reset.
-  [cell setHintIcon:image2 label:nil color:nil];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Adding a label without changing the icon needs a reset.
-  NSColor *color = [NSColor blackColor];
-  [cell setHintIcon:image2 label:@"New Label" color:color];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  // Removing the label without changing the icon needs a reset.
-  [cell setHintIcon:image2 label:nil color:nil];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-}
-
-TEST_F(AutocompleteTextFieldCellTest, SecurityIconLabel) {
-  AutocompleteTextFieldCell* cell =
-      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
-  NSColor *color = [NSColor blackColor];
-
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
-  // Setting a security icon will need a reset.
-  [cell setHintIcon:image label:@"Hello, world" color:color];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing the label needs a reset.
-  [cell setHintIcon:image label:@"Hello, you" color:color];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-
-  // Changing to an identical label doesn't need a reset
-  [cell setHintIcon:image label:@"Hello, you" color:color];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-}
-
-// Test that transitions between various modes set the reset flag.
-TEST_F(AutocompleteTextFieldCellTest, Transitions) {
-  AutocompleteTextFieldCell* cell =
-      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
-  NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
-
-  // Transitions from hint to keyword string, keyword hint, and
-  // cleared.
-  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  [cell setKeywordString:@"Search Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  // Setting hint clears keyword.
   [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
               availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_TRUE([cell hintString]);
+  EXPECT_FALSE([cell keywordString]);
 
-  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  // Clear clears keyword.
   [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell hintString]);
+  EXPECT_FALSE([cell keywordString]);
 
-  // Transitions from keyword hint to keyword string, simple hint, and
-  // cleared.
-  [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  // Clear clears hint.
   [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  [cell setKeywordString:@"Search Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
+  EXPECT_TRUE([cell hintString]);
   [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  // Transitions from keyword string to either type of hint, or
-  // cleared.
-  [cell setKeywordString:@"Search on Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  [cell setKeywordString:@"Search on Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  [cell setKeywordHintPrefix:@"Press " image:image suffix:@" to search Engine"
-              availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-
-  [cell setKeywordString:@"Search on Engine:"
-           partialString:@"Search Eng:"
-          availableWidth:kWidth];
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell hintString]);
+  EXPECT_FALSE([cell keywordString]);
 }
 
 TEST_F(AutocompleteTextFieldCellTest, TextFrame) {
@@ -359,8 +199,11 @@ TEST_F(AutocompleteTextFieldCellTest, TextFrame) {
   EXPECT_EQ(NSMaxX(bounds), NSMaxX(textFrame));
   EXPECT_TRUE(NSContainsRect(cursorFrame, textFrame));
 
-  // Hint icon takes up space on the right
-  [cell setHintIcon:[NSImage imageNamed:@"NSComputer"] label:nil color:nil];
+  // Security icon takes up space on the right
+  security_image_view_.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
+  security_image_view_.SetVisible(true);
+
   textFrame = [cell textFrameForFrame:bounds];
   EXPECT_FALSE(NSIsEmptyRect(textFrame));
   EXPECT_TRUE(NSContainsRect(bounds, textFrame));
@@ -422,7 +265,10 @@ TEST_F(AutocompleteTextFieldCellTest, DrawingRectForBounds) {
   EXPECT_TRUE(NSContainsRect(NSInsetRect(textFrame, 1, 1), drawingRect));
   EXPECT_TRUE(NSEqualRects(drawingRect, originalDrawingRect));
 
-  [cell setHintIcon:[NSImage imageNamed:@"NSComputer"] label:nil color:nil];
+  security_image_view_.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
+  security_image_view_.SetVisible(true);
+
   textFrame = [cell textFrameForFrame:bounds];
   drawingRect = [cell drawingRectForBounds:bounds];
   EXPECT_FALSE(NSIsEmptyRect(drawingRect));
@@ -430,21 +276,21 @@ TEST_F(AutocompleteTextFieldCellTest, DrawingRectForBounds) {
 }
 
 // Test that the security icon is at the right side of the cell.
-TEST_F(AutocompleteTextFieldCellTest, HintImageFrame) {
+TEST_F(AutocompleteTextFieldCellTest, SecurityImageFrame) {
   AutocompleteTextFieldCell* cell =
       static_cast<AutocompleteTextFieldCell*>([view_ cell]);
   const NSRect bounds([view_ bounds]);
-  scoped_nsobject<NSImage> hintIcon(
-      [[NSImage alloc] initWithSize:NSMakeSize(20, 20)]);
+  security_image_view_.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
 
-  NSRect iconRect = [cell hintImageFrameForFrame:bounds];
-  EXPECT_TRUE(NSIsEmptyRect(iconRect));
+  security_image_view_.SetVisible(false);
+  EXPECT_EQ(0u, [[cell layedOutIcons:bounds] count]);
 
-  // Save the starting frame for after clear.
-  const NSRect originalIconRect(iconRect);
+  security_image_view_.SetVisible(true);
+  NSArray* icons = [cell layedOutIcons:bounds];
+  ASSERT_EQ(1u, [icons count]);
+  NSRect iconRect = [[icons objectAtIndex:0] rect];
 
-  [cell setHintIcon:hintIcon label:nil color:nil];
-  iconRect = [cell hintImageFrameForFrame:bounds];
   EXPECT_FALSE(NSIsEmptyRect(iconRect));
   EXPECT_TRUE(NSContainsRect(bounds, iconRect));
 
@@ -456,15 +302,125 @@ TEST_F(AutocompleteTextFieldCellTest, HintImageFrame) {
   NSRect textFrame = [cell textFrameForFrame:bounds];
   EXPECT_LE(NSMaxX(textFrame), NSMinX(iconRect));
 
+  // Now add a label.
+  NSFont* font = [NSFont controlContentFontOfSize:12.0];
+  NSColor* color = [NSColor blackColor];
+  security_image_view_.SetLabel(@"Label", font, color);
+  icons = [cell layedOutIcons:bounds];
+  ASSERT_EQ(1u, [icons count]);
+  iconRect = [[icons objectAtIndex:0] rect];
+
+  EXPECT_FALSE(NSIsEmptyRect(iconRect));
+  EXPECT_TRUE(NSContainsRect(bounds, iconRect));
+
+  // Make sure we are right of the |drawingRect|.
+  drawingRect = [cell drawingRectForBounds:bounds];
+  EXPECT_LE(NSMaxX(drawingRect), NSMinX(iconRect));
+
+  // Make sure we're right of the |textFrame|.
+  textFrame = [cell textFrameForFrame:bounds];
+  EXPECT_LE(NSMaxX(textFrame), NSMinX(iconRect));
+
   // Make sure we clear correctly.
-  [cell setHintIcon:nil label:nil color:nil];
-  iconRect = [cell hintImageFrameForFrame:bounds];
-  EXPECT_TRUE(NSEqualRects(iconRect, originalIconRect));
-  EXPECT_TRUE(NSIsEmptyRect(iconRect));
+  security_image_view_.SetVisible(false);
+  EXPECT_EQ(0u, [[cell layedOutIcons:bounds] count]);
+}
+
+// Test Page Action counts.
+TEST_F(AutocompleteTextFieldCellTest, PageActionCount) {
+  AutocompleteTextFieldCell* cell =
+      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
+
+  TestPageActionImageView page_action_view;
+  TestPageActionImageView page_action_view2;
+
+  TestPageActionViewList list;
+  [cell setPageActionViewList:&list];
+
+  EXPECT_EQ(0u, [cell pageActionCount]);
+  list.Add(&page_action_view);
+  EXPECT_EQ(1u, [cell pageActionCount]);
+  list.Add(&page_action_view2);
+  EXPECT_EQ(2u, [cell pageActionCount]);
+}
+
+// Test that Page Action icons are properly placed.
+TEST_F(AutocompleteTextFieldCellTest, PageActionImageFrame) {
+  AutocompleteTextFieldCell* cell =
+      static_cast<AutocompleteTextFieldCell*>([view_ cell]);
+  const NSRect bounds([view_ bounds]);
+  security_image_view_.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
+
+  TestPageActionImageView page_action_view;
+  // We'll assume that the extensions code enforces icons smaller than the
+  // location bar.
+  NSImage* image = [[[NSImage alloc]
+      initWithSize:NSMakeSize(NSHeight(bounds) - 4, NSHeight(bounds) - 4)]
+      autorelease];
+  page_action_view.SetImage(image);
+
+  TestPageActionImageView page_action_view2;
+  page_action_view2.SetImage(image);
+
+  TestPageActionViewList list;
+  list.Add(&page_action_view);
+  list.Add(&page_action_view2);
+  [cell setPageActionViewList:&list];
+
+  security_image_view_.SetVisible(false);
+  page_action_view.SetVisible(false);
+  page_action_view2.SetVisible(false);
+  EXPECT_TRUE(NSIsEmptyRect([cell pageActionFrameForIndex:0 inFrame:bounds]));
+  EXPECT_TRUE(NSIsEmptyRect([cell pageActionFrameForIndex:1 inFrame:bounds]));
+
+  // One page action, no security icon.
+  page_action_view.SetVisible(true);
+  NSRect iconRect0 = [cell pageActionFrameForIndex:0 inFrame:bounds];
+
+  EXPECT_FALSE(NSIsEmptyRect(iconRect0));
+  EXPECT_TRUE(NSContainsRect(bounds, iconRect0));
+
+  // Make sure we are right of the |drawingRect|.
+  NSRect drawingRect = [cell drawingRectForBounds:bounds];
+  EXPECT_LE(NSMaxX(drawingRect), NSMinX(iconRect0));
+
+  // Make sure we're right of the |textFrame|.
+  NSRect textFrame = [cell textFrameForFrame:bounds];
+  EXPECT_LE(NSMaxX(textFrame), NSMinX(iconRect0));
+
+  // Two page actions plus a security icon.
+  page_action_view2.SetVisible(true);
+  security_image_view_.SetVisible(true);
+  NSArray* icons = [cell layedOutIcons:bounds];
+  EXPECT_EQ(3u, [icons count]);
+  iconRect0 = [cell pageActionFrameForIndex:0 inFrame:bounds];
+  NSRect iconRect1 = [cell pageActionFrameForIndex:1 inFrame:bounds];
+  NSRect lockRect = [[icons objectAtIndex:0] rect];
+
+  EXPECT_TRUE(NSEqualRects(iconRect0, [[icons objectAtIndex:1] rect]));
+  EXPECT_TRUE(NSEqualRects(iconRect1, [[icons objectAtIndex:2] rect]));
+
+  // Make sure they're all in the expected order, and right of the |drawingRect|
+  // and |textFrame|.
+  drawingRect = [cell drawingRectForBounds:bounds];
+  textFrame = [cell textFrameForFrame:bounds];
+
+  EXPECT_FALSE(NSIsEmptyRect(iconRect0));
+  EXPECT_TRUE(NSContainsRect(bounds, iconRect0));
+  EXPECT_FALSE(NSIsEmptyRect(iconRect1));
+  EXPECT_TRUE(NSContainsRect(bounds, iconRect1));
+  EXPECT_FALSE(NSIsEmptyRect(lockRect));
+  EXPECT_TRUE(NSContainsRect(bounds, lockRect));
+
+  EXPECT_LE(NSMaxX(drawingRect), NSMinX(iconRect1));
+  EXPECT_LE(NSMaxX(textFrame), NSMinX(iconRect1));
+  EXPECT_LE(NSMaxX(iconRect1), NSMinX(iconRect0));
+  EXPECT_LE(NSMaxX(iconRect0), NSMinX(lockRect));
 }
 
 // Test that the cell correctly chooses the partial keyword if there's
-// no enough room.
+// not enough room.
 TEST_F(AutocompleteTextFieldCellTest, UsesPartialKeywordIfNarrow) {
   AutocompleteTextFieldCell* cell =
       static_cast<AutocompleteTextFieldCell*>([view_ cell]);

@@ -42,6 +42,7 @@ class WindowGtk : public WidgetGtk, public Window {
   virtual bool IsMinimized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
+  virtual void SetUseDragFrame(bool use_drag_frame);
   virtual void EnableClose(bool enable);
   virtual void UpdateWindowTitle();
   virtual void UpdateWindowIcon();
@@ -78,7 +79,7 @@ class WindowGtk : public WidgetGtk, public Window {
   // Initializes the window to the passed in bounds.
   void Init(GtkWindow* parent, const gfx::Rect& bounds);
 
-  virtual void OnDestroy();
+  virtual void OnDestroy(GtkWidget* widget);
 
  private:
   static gboolean CallConfigureEvent(GtkWidget* widget,

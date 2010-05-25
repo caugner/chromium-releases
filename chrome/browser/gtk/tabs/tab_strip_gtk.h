@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/task.h"
 #include "base/message_loop.h"
 #include "chrome/browser/gtk/tabstrip_origin_provider.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "gfx/rect.h"
 
 class BrowserWindowGtk;
 class CustomDrawButton;
@@ -84,6 +84,11 @@ class TabStripGtk : public TabStripModelObserver,
   // Retrieve the ideal bounds for the Tab at the specified index.
   gfx::Rect GetIdealBounds(int index);
 
+  // Sets the vertical offset that each tab will use to offset against the
+  // background image. Passed in from the titlebar and based on the size of the
+  // alignment that sits above the tabstrip.
+  void SetVerticalOffset(int offset);
+
   // TabstripOriginProvider implementation -------------------------------------
   virtual gfx::Point GetTabStripOriginForWidget(GtkWidget* widget);
 
@@ -102,14 +107,19 @@ class TabStripGtk : public TabStripModelObserver,
                              bool user_gesture);
   virtual void TabMoved(TabContents* contents,
                         int from_index,
-                        int to_index,
-                        bool pinned_state_changed);
+                        int to_index);
   virtual void TabChangedAt(TabContents* contents, int index,
-                            bool loading_only);
-  virtual void TabPinnedStateChanged(TabContents* contents, int index);
+                            TabChangeType change_type);
+  virtual void TabReplacedAt(TabContents* old_contents,
+                             TabContents* new_contents,
+                             int index);
+  virtual void TabMiniStateChanged(TabContents* contents, int index);
+  virtual void TabBlockedStateChanged(TabContents* contents,
+                                      int index);
 
   // TabGtk::TabDelegate implementation:
   virtual bool IsTabSelected(const TabGtk* tab) const;
+  virtual bool IsTabPinned(const TabGtk* tab) const;
   virtual bool IsTabDetached(const TabGtk* tab) const;
   virtual void SelectTab(TabGtk* tab);
   virtual void CloseTab(TabGtk* tab);
@@ -137,16 +147,17 @@ class TabStripGtk : public TabStripModelObserver,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Horizontal gap between pinned and non-pinned tabs.
-  static const int pinned_to_non_pinned_gap_;
+  // Horizontal gap between mini-tabs and normal tabs.
+  static const int mini_to_non_mini_gap_;
 
  private:
+  friend class BrowserWindowGtk;
   friend class DraggedTabControllerGtk;
   friend class InsertTabAnimation;
-  friend class RemoveTabAnimation;
+  friend class MiniMoveAnimation;
+  friend class MiniTabAnimation;
   friend class MoveTabAnimation;
-  friend class PinAndMoveAnimation;
-  friend class PinnedTabAnimation;
+  friend class RemoveTabAnimation;
   friend class ResizeLayoutAnimation;
   friend class TabAnimation;
 
@@ -238,7 +249,7 @@ class TabStripGtk : public TabStripModelObserver,
   static gboolean OnDragFailed(GtkWidget* widget, GdkDragContext* context,
                                GtkDragResult result, TabStripGtk* tabstrip);
 
-  // drag-data-received handler that receives the data assocated with the drag.
+  // drag-data-received handler that receives the data associated with the drag.
   static gboolean OnDragDataReceived(GtkWidget* widget, GdkDragContext* context,
                                      gint x, gint y, GtkSelectionData* data,
                                      guint info, guint time,
@@ -267,8 +278,8 @@ class TabStripGtk : public TabStripModelObserver,
   // Gets the number of Tabs in the collection.
   int GetTabCount() const;
 
-  // Returns the number of pinned tabs.
-  int GetPinnedTabCount() const;
+  // Returns the number of mini-tabs.
+  int GetMiniTabCount() const;
 
   // Retrieves the Tab at the specified index. Take care in using this, you may
   // need to use GetTabAtAdjustForAnimation.
@@ -291,10 +302,10 @@ class TabStripGtk : public TabStripModelObserver,
   // desired strip width and number of tabs.  If
   // |width_of_tabs_for_mouse_close_| is nonnegative we use that value in
   // calculating the desired strip width; otherwise we use the current width.
-  // |pinned_tab_count| gives the number of pinned tabs, and |tab_count| the
-  // number of pinned and non-pinned tabs.
+  // |mini_tab_count| gives the number of mini-tabs, and |tab_count| the
+  // number of mini and non-mini-tabs.
   void GetDesiredTabWidths(int tab_count,
-                           int pinned_tab_count,
+                           int mini_tab_count,
                            double* unselected_width,
                            double* selected_width) const;
 
@@ -367,6 +378,9 @@ class TabStripGtk : public TabStripModelObserver,
 
   // -- Animations -------------------------------------------------------------
 
+  // Stops the current animation.
+  void StopAnimation();
+
   // A generic Layout method for various classes of TabStrip animations,
   // including Insert, Remove and Resize Layout cases.
   void AnimationLayout(double unselected_width);
@@ -375,16 +389,11 @@ class TabStripGtk : public TabStripModelObserver,
   void StartInsertTabAnimation(int index);
   void StartRemoveTabAnimation(int index, TabContents* contents);
   void StartMoveTabAnimation(int from_index, int to_index);
+  void StartMiniTabAnimation(int index);
+  void StartMiniMoveTabAnimation(int from_index,
+                                 int to_index,
+                                 const gfx::Rect& start_bounds);
   void StartResizeLayoutAnimation();
-  void StartPinnedTabAnimation(int index);
-  void StartPinAndMoveTabAnimation(int from_index, int to_index,
-                                   const gfx::Rect& start_bounds);
-
-  // Returns true if detach or select changes in the model should be reflected
-  // in the TabStrip. This returns false if we're closing all tabs in the
-  // TabStrip and so we should prevent updating. This is not const because we
-  // use this as a signal to cancel any active animations.
-  bool CanUpdateDisplay();
 
   // Notifies the TabStrip that the specified TabAnimation has completed.
   // Optionally a full Layout will be performed, specified by |layout|.
@@ -413,14 +422,17 @@ class TabStripGtk : public TabStripModelObserver,
 
   // True if a resize layout animation should be run a short delay after the
   // mouse exits the TabStrip.
-  // TODO(beng): (Cleanup) this would be better named "needs_resize_layout_".
-  bool resize_layout_scheduled_;
+  bool needs_resize_layout_;
 
   // The GtkFixed widget.
   OwnedWidgetGtk tabstrip_;
 
   // The bounds of the tabstrip.
   gfx::Rect bounds_;
+
+  // The amount to offset tab backgrounds when we are using an autogenerated
+  // tab background image.
+  int tab_vertical_offset_;
 
   // Our model.
   TabStripModel* model_;

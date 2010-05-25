@@ -12,11 +12,13 @@
 #ifndef CHROME_BROWSER_SYNC_SYNCABLE_DIRECTORY_MANAGER_H_
 #define CHROME_BROWSER_SYNC_SYNCABLE_DIRECTORY_MANAGER_H_
 
+#include <string>
 #include <vector>
 
 #include "base/atomicops.h"
-#include "base/lock.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/lock.h"
 #include "chrome/browser/sync/syncable/dir_open_result.h"
 #include "chrome/browser/sync/syncable/path_name_cmp.h"
 #include "chrome/browser/sync/syncable/syncable.h"
@@ -35,7 +37,7 @@ struct DirectoryManagerEvent {
     CLOSED_ALL,
     SHUTDOWN,
   } what_happened;
-  PathString dirname;
+  std::string dirname;
   DirOpenResult error;  // Only for OPEN_FAILED.
   typedef DirectoryManagerEvent EventType;
   static inline bool IsChannelShutdownEvent(const EventType& event) {
@@ -50,38 +52,38 @@ class DirectoryManager {
   typedef EventChannel<DirectoryManagerEvent> Channel;
 
   // root_path specifies where db is stored.
-  explicit DirectoryManager(const PathString& root_path);
+  explicit DirectoryManager(const FilePath& root_path);
   ~DirectoryManager();
 
-  static const PathString GetSyncDataDatabaseFilename();
-  const PathString GetSyncDataDatabasePath() const;
+  static const FilePath GetSyncDataDatabaseFilename();
+  const FilePath GetSyncDataDatabasePath() const;
 
   // Opens a directory.  Returns false on error.
   // Name parameter is the the user's login,
   // MUST already have been converted to a common case.
-  bool Open(const PathString& name);
+  bool Open(const std::string& name);
 
   // Marks a directory as closed.  It might take a while until all the
   // file handles and resources are freed by other threads.
-  void Close(const PathString& name);
+  void Close(const std::string& name);
 
   // Should be called at App exit.
   void FinalSaveChangesForAll();
 
   // Gets the list of currently open directory names.
-  typedef std::vector<PathString> DirNames;
+  typedef std::vector<std::string> DirNames;
   void GetOpenDirectories(DirNames* result);
 
   Channel* channel() const { return channel_; }
 
  protected:
-  DirOpenResult OpenImpl(const PathString& name, const PathString& path,
+  DirOpenResult OpenImpl(const std::string& name, const FilePath& path,
                          bool* was_open);
 
   // Helpers for friend class ScopedDirLookup:
   friend class ScopedDirLookup;
 
-  const PathString root_path_;
+  const FilePath root_path_;
 
   // protects managed_directory_
   Lock lock_;
@@ -97,7 +99,7 @@ class DirectoryManager {
 
 class ScopedDirLookup {
  public:
-  ScopedDirLookup(DirectoryManager* dirman, const PathString& name);
+  ScopedDirLookup(DirectoryManager* dirman, const std::string& name);
   ~ScopedDirLookup();
 
   inline bool good() {

@@ -13,6 +13,7 @@
 #include "base/scoped_ptr.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/ssl_client_socket.h"
 
@@ -35,12 +36,14 @@ class SSLClientSocketMac : public SSLClientSocket {
   // SSLClientSocket methods:
   virtual void GetSSLInfo(SSLInfo* ssl_info);
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
+  virtual NextProtoStatus GetNextProto(std::string* proto);
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback);
+  virtual int Connect(CompletionCallback* callback, const BoundNetLog& net_log);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
+  virtual int GetPeerAddress(AddressList* address) const;
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -49,18 +52,29 @@ class SSLClientSocketMac : public SSLClientSocket {
   virtual bool SetSendBufferSize(int32 size);
 
  private:
-  void DoCallback(int result);
-  void OnIOComplete(int result);
+  // Initializes the SSLContext.  Returns a net error code.
+  int InitializeSSLContext();
 
-  int DoLoop(int last_io_result);
+  OSStatus EnableBreakOnAuth(bool enabled);
+
+  void DoConnectCallback(int result);
+  void DoReadCallback(int result);
+  void DoWriteCallback(int result);
+  void OnHandshakeIOComplete(int result);
+  void OnTransportReadComplete(int result);
+  void OnTransportWriteComplete(int result);
+
+  int DoHandshakeLoop(int last_io_result);
+
   int DoPayloadRead();
   int DoPayloadWrite();
   int DoHandshakeStart();
   int DoVerifyCert();
   int DoVerifyCertComplete(int result);
   int DoHandshakeFinish();
-  int DoReadComplete(int result);
-  void OnWriteComplete(int result);
+  void HandshakeFinished();
+
+  int SetClientCert();
 
   static OSStatus SSLReadCallback(SSLConnectionRef connection,
                                   void* data,
@@ -69,53 +83,55 @@ class SSLClientSocketMac : public SSLClientSocket {
                                    const void* data,
                                    size_t* data_length);
 
-  CompletionCallbackImpl<SSLClientSocketMac> io_callback_;
-  CompletionCallbackImpl<SSLClientSocketMac> write_callback_;
+  CompletionCallbackImpl<SSLClientSocketMac> handshake_io_callback_;
+  CompletionCallbackImpl<SSLClientSocketMac> transport_read_callback_;
+  CompletionCallbackImpl<SSLClientSocketMac> transport_write_callback_;
 
   scoped_ptr<ClientSocket> transport_;
   std::string hostname_;
   SSLConfig ssl_config_;
 
-  CompletionCallback* user_callback_;
+  CompletionCallback* user_connect_callback_;
+  CompletionCallback* user_read_callback_;
+  CompletionCallback* user_write_callback_;
 
-  // Used by both Read and Write functions.
-  scoped_refptr<IOBuffer> user_buf_;
-  int user_buf_len_;
+  // Used by Read function.
+  scoped_refptr<IOBuffer> user_read_buf_;
+  int user_read_buf_len_;
+
+  // Used by Write function.
+  scoped_refptr<IOBuffer> user_write_buf_;
+  int user_write_buf_len_;
 
   enum State {
     STATE_NONE,
-    STATE_PAYLOAD_READ,
-    STATE_PAYLOAD_WRITE,
     STATE_HANDSHAKE_START,
     STATE_VERIFY_CERT,
     STATE_VERIFY_CERT_COMPLETE,
     STATE_HANDSHAKE_FINISH,
-    STATE_READ_COMPLETE,
   };
-  State next_state_;
-  State next_io_state_;
+  State next_handshake_state_;
 
   scoped_refptr<X509Certificate> server_cert_;
-  std::vector<scoped_refptr<X509Certificate> > intermediate_certs_;
   scoped_ptr<CertVerifier> verifier_;
   CertVerifyResult server_cert_verify_result_;
 
   bool completed_handshake_;
   bool handshake_interrupted_;
+  bool client_cert_requested_;
   SSLContextRef ssl_context_;
 
-  // These are buffers for holding data during I/O. The "slop" is the amount of
-  // space at the ends of the receive buffer that are allocated for holding data
-  // but don't (yet).
+  // These buffers hold data retrieved from/sent to the underlying transport
+  // before it's fed to the SSL engine.
   std::vector<char> send_buffer_;
   int pending_send_error_;
   std::vector<char> recv_buffer_;
-  int recv_buffer_head_slop_;
-  int recv_buffer_tail_slop_;
 
-  // This buffer holds data for Read() operations on the underlying transport
-  // (ClientSocket::Read()).
+  // These are the IOBuffers used for operations on the underlying transport.
   scoped_refptr<IOBuffer> read_io_buf_;
+  scoped_refptr<IOBuffer> write_io_buf_;
+
+  BoundNetLog net_log_;
 };
 
 }  // namespace net

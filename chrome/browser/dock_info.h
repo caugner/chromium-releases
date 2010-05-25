@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include <set>
 
-#include "app/gfx/native_widget_types.h"
-#include "base/gfx/point.h"
-#include "base/gfx/rect.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/point.h"
+#include "gfx/rect.h"
 
 // DockInfo is used to do determine possible dock locations for a dragged
 // tab. To use DockInfo invoke GetDockInfoAtPoint. This returns a new
@@ -32,6 +32,9 @@ class DockInfo {
     virtual gfx::NativeWindow GetLocalProcessWindowAtPoint(
         const gfx::Point& screen_point,
         const std::set<gfx::NativeView>& ignore) = 0;
+
+   protected:
+    virtual ~Factory() {}
   };
 
   // Possible dock positions.

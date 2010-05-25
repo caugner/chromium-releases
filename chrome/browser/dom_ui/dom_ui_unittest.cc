@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 class DOMUITest : public RenderViewHostTestHarness {
  public:
-  DOMUITest() {}
+  DOMUITest() : ui_thread_(ChromeThread::UI, MessageLoop::current()) {}
 
   // Tests navigating with a DOM UI from a fresh (nothing pending or committed)
   // state, through pending, committed, then another navigation. The first page
@@ -75,6 +75,8 @@ class DOMUITest : public RenderViewHostTestHarness {
   }
 
  private:
+  ChromeThread ui_thread_;
+
   DISALLOW_COPY_AND_ASSIGN(DOMUITest);
 };
 
@@ -82,9 +84,6 @@ class DOMUITest : public RenderViewHostTestHarness {
 // TabContents when we first navigate to a DOM UI page, then to a standard
 // non-DOM-UI page.
 TEST_F(DOMUITest, DOMUIToStandard) {
-  // The sync service must be created to host the sync NTP advertisement.
-  profile_->CreateProfileSyncService();
-
   DoNavigationTest(contents(), 1);
 
   // Test the case where we're not doing the initial navigation. This is
@@ -97,9 +96,6 @@ TEST_F(DOMUITest, DOMUIToStandard) {
 }
 
 TEST_F(DOMUITest, DOMUIToDOMUI) {
-  // The sync service must be created to host the sync NTP advertisement.
-  profile_->CreateProfileSyncService();
-
   // Do a load (this state is tested above).
   GURL new_tab_url(chrome::kChromeUINewTabURL);
   controller().LoadURL(new_tab_url, GURL(), PageTransition::LINK);
@@ -135,9 +131,6 @@ TEST_F(DOMUITest, StandardToDOMUI) {
   EXPECT_FALSE(contents()->ShouldShowBookmarkBar());
   EXPECT_FALSE(contents()->FocusLocationBarByDefault());
 
-  // The sync service must be created to host the sync NTP advertisement.
-  profile_->CreateProfileSyncService();
-
   // Start a pending load for a DOMUI.
   GURL new_tab_url(chrome::kChromeUINewTabURL);
   controller().LoadURL(new_tab_url, GURL(), PageTransition::LINK);
@@ -147,4 +140,55 @@ TEST_F(DOMUITest, StandardToDOMUI) {
   EXPECT_TRUE(contents()->FocusLocationBarByDefault());
 
   // Committing DOM UI is tested above.
+}
+
+class TabContentsForFocusTest : public TestTabContents {
+ public:
+  TabContentsForFocusTest(Profile* profile, SiteInstance* instance)
+      : TestTabContents(profile, instance), focus_called_(0) {
+  }
+
+  virtual void SetFocusToLocationBar(bool select_all) { ++focus_called_; }
+  int focus_called() const { return focus_called_; }
+
+ private:
+  int focus_called_;
+};
+
+TEST_F(DOMUITest, FocusOnNavigate) {
+  // Setup.  |tc| will be used to track when we try to focus the location bar.
+  TabContentsForFocusTest* tc = new TabContentsForFocusTest(
+      contents()->profile(),
+      SiteInstance::CreateSiteInstance(contents()->profile()));
+  tc->controller().CopyStateFrom(controller());
+  scoped_ptr<TestTabContents> tc_scoped_ptr(tc);
+  contents_.swap(tc_scoped_ptr);
+  int page_id = 200;
+
+  // Load the NTP.
+  GURL new_tab_url(chrome::kChromeUINewTabURL);
+  controller().LoadURL(new_tab_url, GURL(), PageTransition::LINK);
+  rvh()->SendNavigate(page_id, new_tab_url);
+
+  // Navigate to another page.
+  GURL next_url("http://google.com/");
+  int next_page_id = page_id + 1;
+  controller().LoadURL(next_url, GURL(), PageTransition::LINK);
+  pending_rvh()->SendNavigate(next_page_id, next_url);
+
+  // Navigate back.  Should focus the location bar.
+  int focus_called = tc->focus_called();
+  ASSERT_TRUE(controller().CanGoBack());
+  controller().GoBack();
+  pending_rvh()->SendNavigate(page_id, new_tab_url);
+  EXPECT_LT(focus_called, tc->focus_called());
+
+  // Navigate forward.  Shouldn't focus the location bar.
+  focus_called = tc->focus_called();
+  ASSERT_TRUE(controller().CanGoForward());
+  controller().GoForward();
+  pending_rvh()->SendNavigate(next_page_id, next_url);
+  EXPECT_EQ(focus_called, tc->focus_called());
+
+  contents_.swap(tc_scoped_ptr);
 }

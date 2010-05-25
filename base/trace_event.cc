@@ -29,7 +29,14 @@ static const FilePath::CharType* kLogFileName =
 
 TraceLog::TraceLog() : enabled_(false), log_file_(NULL) {
   base::ProcessHandle proc = base::GetCurrentProcessHandle();
+#if !defined(OS_MACOSX)
   process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(proc));
+#else
+  // The default port provider is sufficient to get data for the current
+  // process.
+  process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(proc,
+                                                                    NULL));
+#endif
 }
 
 TraceLog::~TraceLog() {
@@ -76,7 +83,7 @@ void TraceLog::Stop() {
 }
 
 void TraceLog::Heartbeat() {
-  std::string cpu = StringPrintf("%d", process_metrics_->GetCPUUsage());
+  std::string cpu = StringPrintf("%.0f", process_metrics_->GetCPUUsage());
   TRACE_EVENT_INSTANT("heartbeat.cpu", 0, cpu);
 }
 
@@ -133,10 +140,10 @@ void TraceLog::Trace(const std::string& name,
   int64 usec = delta.InMicroseconds();
   std::string msg =
     StringPrintf("{'pid':'0x%lx', 'tid':'0x%lx', 'type':'%s', "
-                 "'name':'%s', 'id':'0x%lx', 'extra':'%s', 'file':'%s', "
+                 "'name':'%s', 'id':'%p', 'extra':'%s', 'file':'%s', "
                  "'line_number':'%d', 'usec_begin': %" PRId64 "},\n",
-                 base::GetCurrentProcId(),
-                 PlatformThread::CurrentId(),
+                 static_cast<unsigned long>(base::GetCurrentProcId()),
+                 static_cast<unsigned long>(PlatformThread::CurrentId()),
                  kEventTypeNames[type],
                  name.c_str(),
                  id,

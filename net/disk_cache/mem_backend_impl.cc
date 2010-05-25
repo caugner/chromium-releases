@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/sys_info.h"
+#include "net/base/net_errors.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/mem_entry_impl.h"
 
@@ -99,6 +100,14 @@ bool MemBackendImpl::OpenEntry(const std::string& key, Entry** entry) {
   return true;
 }
 
+int MemBackendImpl::OpenEntry(const std::string& key, Entry** entry,
+                              CompletionCallback* callback) {
+  if (OpenEntry(key, entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool MemBackendImpl::CreateEntry(const std::string& key, Entry** entry) {
   EntryMap::iterator it = entries_.find(key);
   if (it != entries_.end())
@@ -117,6 +126,14 @@ bool MemBackendImpl::CreateEntry(const std::string& key, Entry** entry) {
   return true;
 }
 
+int MemBackendImpl::CreateEntry(const std::string& key, Entry** entry,
+                                CompletionCallback* callback) {
+  if (CreateEntry(key, entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool MemBackendImpl::DoomEntry(const std::string& key) {
   Entry* entry;
   if (!OpenEntry(key, &entry))
@@ -125,6 +142,14 @@ bool MemBackendImpl::DoomEntry(const std::string& key) {
   entry->Doom();
   entry->Close();
   return true;
+}
+
+int MemBackendImpl::DoomEntry(const std::string& key,
+                              CompletionCallback* callback) {
+  if (DoomEntry(key))
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 void MemBackendImpl::InternalDoomEntry(MemEntryImpl* entry) {
@@ -144,6 +169,13 @@ void MemBackendImpl::InternalDoomEntry(MemEntryImpl* entry) {
 bool MemBackendImpl::DoomAllEntries() {
   TrimCache(true);
   return true;
+}
+
+int MemBackendImpl::DoomAllEntries(CompletionCallback* callback) {
+  if (DoomAllEntries())
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 bool MemBackendImpl::DoomEntriesBetween(const Time initial_time,
@@ -172,6 +204,15 @@ bool MemBackendImpl::DoomEntriesBetween(const Time initial_time,
   return true;
 }
 
+int MemBackendImpl::DoomEntriesBetween(const base::Time initial_time,
+                                       const base::Time end_time,
+                                       CompletionCallback* callback) {
+  if (DoomEntriesBetween(initial_time, end_time))
+    return net::OK;
+
+  return net::ERR_FAILED;
+}
+
 bool MemBackendImpl::DoomEntriesSince(const Time initial_time) {
   for (;;) {
     // Get the entry in the front.
@@ -182,6 +223,14 @@ bool MemBackendImpl::DoomEntriesSince(const Time initial_time) {
       return true;
     entry->Doom();
   }
+}
+
+int MemBackendImpl::DoomEntriesSince(const base::Time initial_time,
+                                     CompletionCallback* callback) {
+  if (DoomEntriesSince(initial_time))
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 bool MemBackendImpl::OpenNextEntry(void** iter, Entry** next_entry) {
@@ -199,6 +248,14 @@ bool MemBackendImpl::OpenNextEntry(void** iter, Entry** next_entry) {
     node->Open();
 
   return NULL != node;
+}
+
+int MemBackendImpl::OpenNextEntry(void** iter, Entry** next_entry,
+                                  CompletionCallback* callback) {
+  if (OpenNextEntry(iter, next_entry))
+    return net::OK;
+
+  return net::ERR_FAILED;
 }
 
 void MemBackendImpl::EndEnumeration(void** iter) {

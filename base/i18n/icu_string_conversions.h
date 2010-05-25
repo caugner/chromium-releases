@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/string16.h"
-#include "base/string_piece.h"
 
 namespace base {
 
@@ -47,7 +46,6 @@ bool UTF16ToCodepage(const string16& utf16,
                      const char* codepage_name,
                      OnStringConversionError::Type on_error,
                      std::string* encoded);
-
 bool CodepageToUTF16(const std::string& encoded,
                      const char* codepage_name,
                      OnStringConversionError::Type on_error,

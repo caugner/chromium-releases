@@ -44,21 +44,31 @@
 
 namespace {
 
-class EditSearchEngineControllerTest : public PlatformTest {
+class EditSearchEngineControllerTest : public CocoaTest {
  public:
-   void SetUp() {
+   virtual void SetUp() {
+     CocoaTest::SetUp();
      TestingProfile* profile =
         static_cast<TestingProfile*>(browser_helper_.profile());
      profile->CreateTemplateURLModel();
-     controller_.reset([[FakeEditSearchEngineController alloc]
-        initWithProfile:profile
-               delegate:nil
-            templateURL:nil]);
+     controller_ = [[FakeEditSearchEngineController alloc]
+                    initWithProfile:profile
+                    delegate:nil
+                    templateURL:nil];
    }
 
-   CocoaTestHelper cocoa_helper_;
-   BrowserTestHelper browser_helper_;
-   scoped_nsobject<FakeEditSearchEngineController> controller_;
+  virtual void TearDown() {
+    // Force the window to load so we hit |-awakeFromNib| to register as the
+    // window's delegate so that the controller can clean itself up in
+    // |-windowWillClose:|.
+    ASSERT_TRUE([controller_ window]);
+
+    [controller_ close];
+    CocoaTest::TearDown();
+  }
+
+  BrowserTestHelper browser_helper_;
+  FakeEditSearchEngineController* controller_;
 };
 
 TEST_F(EditSearchEngineControllerTest, ValidImageOriginals) {
@@ -79,8 +89,8 @@ TEST_F(EditSearchEngineControllerTest, ValidImageOriginals) {
 TEST_F(EditSearchEngineControllerTest, SetImageViews) {
   EXPECT_TRUE([controller_ window]);  // Force the window to load.
   EXPECT_EQ([controller_ badImage], [[controller_ nameImage] image]);
-  // An empty keyword is OK.
-  EXPECT_EQ([controller_ goodImage], [[controller_ keywordImage] image]);
+  // An empty keyword is not OK.
+  EXPECT_EQ([controller_ badImage], [[controller_ keywordImage] image]);
   EXPECT_EQ([controller_ badImage], [[controller_ urlImage] image]);
 }
 
@@ -97,11 +107,11 @@ TEST_F(EditSearchEngineControllerTest, InvalidState) {
   EXPECT_TRUE([toolTip isEqualToString:[[controller_ nameField] toolTip]]);
   EXPECT_TRUE([toolTip isEqualToString:[[controller_ nameImage] toolTip]]);
 
-  // Keywords can be empty strings.
+  // Keywords can not be empty strings.
   EXPECT_TRUE([@"" isEqualToString:[[controller_ keywordField] stringValue]]);
-  EXPECT_EQ([controller_ goodImage], [[controller_ keywordImage] image]);
-  EXPECT_FALSE([[controller_ keywordField] toolTip]);
-  EXPECT_FALSE([[controller_ keywordImage] toolTip]);
+  EXPECT_EQ([controller_ badImage], [[controller_ keywordImage] image]);
+  EXPECT_TRUE([[controller_ keywordField] toolTip]);
+  EXPECT_TRUE([[controller_ keywordImage] toolTip]);
 
   EXPECT_TRUE([@"" isEqualToString:[[controller_ urlField] stringValue]]);
   EXPECT_EQ([controller_ badImage], [[controller_ urlImage] image]);
@@ -128,14 +138,14 @@ TEST_F(EditSearchEngineControllerTest, ValidateName) {
   EXPECT_FALSE([[controller_ doneButton] isEnabled]);
 }
 
-// The keyword field is valid even if empty.
+// The keyword field is not valid if it is empty.
 TEST_F(EditSearchEngineControllerTest, ValidateKeyword) {
   EXPECT_TRUE([controller_ window]);  // Force window load.
 
-  EXPECT_EQ([controller_ goodImage], [[controller_ keywordImage] image]);
+  EXPECT_EQ([controller_ badImage], [[controller_ keywordImage] image]);
   EXPECT_FALSE([controller_ validateFields]);
-  EXPECT_FALSE([[controller_ keywordField] toolTip]);
-  EXPECT_FALSE([[controller_ keywordImage] toolTip]);
+  EXPECT_TRUE([[controller_ keywordField] toolTip]);
+  EXPECT_TRUE([[controller_ keywordImage] toolTip]);
   [[controller_ keywordField] setStringValue:@"foobar"];
   EXPECT_FALSE([controller_ validateFields]);
   EXPECT_EQ([controller_ goodImage], [[controller_ keywordImage] image]);
@@ -169,7 +179,7 @@ TEST_F(EditSearchEngineControllerTest, ValidateFields) {
 
   // State before entering data.
   EXPECT_EQ([controller_ badImage], [[controller_ nameImage] image]);
-  EXPECT_EQ([controller_ goodImage], [[controller_ keywordImage] image]);
+  EXPECT_EQ([controller_ badImage], [[controller_ keywordImage] image]);
   EXPECT_EQ([controller_ badImage], [[controller_ urlImage] image]);
   EXPECT_FALSE([[controller_ doneButton] isEnabled]);
   EXPECT_FALSE([controller_ validateFields]);
@@ -199,21 +209,23 @@ TEST_F(EditSearchEngineControllerTest, EditTemplateURL) {
   std::wstring urlString = TemplateURLRef::DisplayURLToURLRef(
       L"http://foo-bar.com");
   url.SetURL(urlString, 0, 1);
-  controller_.reset([[FakeEditSearchEngineController alloc]
-      initWithProfile:browser_helper_.profile()
-             delegate:nil
-          templateURL:&url]);
-  EXPECT_TRUE([controller_ window]);
+  TestingProfile* profile = browser_helper_.profile();
+  FakeEditSearchEngineController *controller =
+      [[FakeEditSearchEngineController alloc] initWithProfile:profile
+                                                     delegate:nil
+                                                  templateURL:&url];
+  EXPECT_TRUE([controller window]);
   NSString* title = l10n_util::GetNSString(
       IDS_SEARCH_ENGINES_EDITOR_EDIT_WINDOW_TITLE);
-  EXPECT_TRUE([title isEqualToString:[[controller_ window] title]]);
-  NSString* nameString = [[controller_ nameField] stringValue];
+  EXPECT_TRUE([title isEqualToString:[[controller window] title]]);
+  NSString* nameString = [[controller nameField] stringValue];
   EXPECT_TRUE([@"Foobar" isEqualToString:nameString]);
-  NSString* keywordString = [[controller_ keywordField] stringValue];
+  NSString* keywordString = [[controller keywordField] stringValue];
   EXPECT_TRUE([@"keyword" isEqualToString:keywordString]);
-  NSString* urlValueString = [[controller_ urlField] stringValue];
+  NSString* urlValueString = [[controller urlField] stringValue];
   EXPECT_TRUE([@"http://foo-bar.com" isEqualToString:urlValueString]);
-  EXPECT_TRUE([controller_ validateFields]);
+  EXPECT_TRUE([controller validateFields]);
+  [controller close];
 }
 
 }  // namespace

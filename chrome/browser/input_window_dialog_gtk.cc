@@ -8,7 +8,8 @@
 
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
 
 class GtkInputWindowDialog : public InputWindowDialog {
  public:
@@ -72,7 +73,7 @@ GtkInputWindowDialog::GtkInputWindowDialog(GtkWindow* parent,
 
   input_ = gtk_entry_new();
   gtk_entry_set_text(GTK_ENTRY(input_), contents.c_str());
-  g_signal_connect(G_OBJECT(input_), "changed",
+  g_signal_connect(input_, "changed",
                    G_CALLBACK(OnEntryChanged), this);
   g_object_set(G_OBJECT(input_), "activates-default", TRUE, NULL);
   gtk_box_pack_start(GTK_BOX(hbox), input_, TRUE, TRUE, 0);

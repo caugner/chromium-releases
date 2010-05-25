@@ -4,11 +4,11 @@
 
 #include "webkit/glue/webdropdata.h"
 
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebDragData.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebVector.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 
 using WebKit::WebData;
 using WebKit::WebDragData;
@@ -19,6 +19,7 @@ WebDropData::WebDropData(const WebDragData& drag_data)
     : identity(0),
       url(drag_data.url()),
       url_title(drag_data.urlTitle()),
+      download_metadata(drag_data.downloadMetadata()),
       file_extension(drag_data.fileExtension()),
       plain_text(drag_data.plainText()),
       text_html(drag_data.htmlText()),

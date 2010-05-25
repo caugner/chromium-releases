@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/scoped_ptr.h"
 #include "chrome/browser/task_manager.h"
 #include "grit/generated_resources.h"
 
@@ -69,6 +70,9 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   gint CompareImpl(GtkTreeModel* tree_model, GtkTreeIter* a,
                    GtkTreeIter* b, int id);
 
+  // response signal handler that notifies us of dialog destruction.
+  static void OnDestroy(GtkDialog* dialog, TaskManagerGtk* task_manager);
+
   // response signal handler that notifies us of dialog responses.
   static void OnResponse(GtkDialog* dialog, gint response_id,
                          TaskManagerGtk* task_manager);
@@ -78,8 +82,11 @@ class TaskManagerGtk : public TaskManagerModelObserver {
                                 TaskManagerGtk* task_manager);
 
   // changed signal handler that is sent when the treeview selection changes.
-  static void OnSelectionChanged(GtkTreeSelection* selection,
-                                 TaskManagerGtk* task_manager);
+  static void OnSelectionChangedThunk(GtkTreeSelection* selection,
+                                      TaskManagerGtk* task_manager) {
+    task_manager->OnSelectionChanged(selection);
+  }
+  void OnSelectionChanged(GtkTreeSelection* selection);
 
   // button-press-event handler that activates a process on double-click.
   static gboolean OnButtonPressEvent(GtkWidget* widget, GdkEventButton* event,
@@ -193,6 +200,9 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   // The number of processes in |process_list_|.
   int process_count_;
 
+  // The id of the |dialog_| destroy signal handler.
+  gulong destroy_handler_id_;
+
   // The context menu controller.
   scoped_ptr<ContextMenuController> menu_controller_;
 
@@ -201,6 +211,11 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   // An open task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.
   static TaskManagerGtk* instance_;
+
+  // We edit the selection in the OnSelectionChanged handler, and we use this
+  // variable to prevent ourselves from handling further changes that we
+  // ourselves caused.
+  bool ignore_selection_changed_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerGtk);
 };

@@ -2,8 +2,8 @@
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
-#ifndef CHROME_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_CLIENT_IMPL_H_
-#define CHROME_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_CLIENT_IMPL_H_
+#ifndef CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_
+#define CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_
 
 #include "webkit/glue/webkitclient_impl.h"
 
@@ -19,22 +19,25 @@ class BrowserWebKitClientImpl : public webkit_glue::WebKitClientImpl {
   virtual bool isLinkVisited(unsigned long long linkHash);
   virtual WebKit::WebMessagePortChannel* createMessagePortChannel();
   virtual void setCookies(const WebKit::WebURL& url,
-                          const WebKit::WebURL& policy_url,
+                          const WebKit::WebURL& first_party_for_cookies,
                           const WebKit::WebString& value);
-  virtual WebKit::WebString cookies(const WebKit::WebURL& url,
-                                    const WebKit::WebURL& policy_url);
+  virtual WebKit::WebString cookies(
+      const WebKit::WebURL& url,
+      const WebKit::WebURL& first_party_for_cookies);
   virtual void prefetchHostName(const WebKit::WebString&);
   virtual WebKit::WebString defaultLocale();
   virtual WebKit::WebThemeEngine* themeEngine();
   virtual WebKit::WebURLLoader* createURLLoader();
+  virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();
   virtual void getPluginList(bool refresh, WebKit::WebPluginListBuilder*);
   virtual WebKit::WebData loadResource(const char* name);
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
-      const WebKit::WebString& path);
-  virtual WebKit::WebStorageNamespace* createSessionStorageNamespace();
+      const WebKit::WebString& path, unsigned quota);
   virtual void dispatchStorageEvent(const WebKit::WebString& key,
       const WebKit::WebString& oldValue, const WebKit::WebString& newValue,
-      const WebKit::WebString& origin, bool isLocalStorage);
+      const WebKit::WebString& origin, const WebKit::WebURL& url,
+      bool isLocalStorage);
+  virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
 };
 
-#endif  // CHROME_BROWSER_IN_PROCESS_WEBKIT_WEBKIT_CLIENT_IMPL_H_
+#endif  // CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_

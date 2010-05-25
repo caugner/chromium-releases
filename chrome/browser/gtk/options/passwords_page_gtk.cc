@@ -4,14 +4,18 @@
 
 #include "chrome/browser/gtk/options/passwords_page_gtk.h"
 
-#include "app/gfx/gtk_util.h"
+#include <string>
+
+#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "chrome/common/gtk_tree.h"
-#include "chrome/common/gtk_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/gtk_tree.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
+#include "gfx/gtk_util.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -40,13 +44,13 @@ PasswordsPageGtk::PasswordsPageGtk(Profile* profile)
   remove_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_REMOVE_BUTTON).c_str());
   gtk_widget_set_sensitive(remove_button_, FALSE);
-  g_signal_connect(G_OBJECT(remove_button_), "clicked",
-                   G_CALLBACK(OnRemoveButtonClicked), this);
+  g_signal_connect(remove_button_, "clicked",
+                   G_CALLBACK(OnRemoveButtonClickedThunk), this);
   remove_all_button_ = gtk_button_new_with_label(l10n_util::GetStringUTF8(
           IDS_PASSWORDS_PAGE_VIEW_REMOVE_ALL_BUTTON).c_str());
   gtk_widget_set_sensitive(remove_all_button_, FALSE);
-  g_signal_connect(G_OBJECT(remove_all_button_), "clicked",
-                   G_CALLBACK(OnRemoveAllButtonClicked), this);
+  g_signal_connect(remove_all_button_, "clicked",
+                   G_CALLBACK(OnRemoveAllButtonClickedThunk), this);
 
   show_password_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON).c_str());
@@ -66,8 +70,8 @@ PasswordsPageGtk::PasswordsPageGtk(Profile* profile)
   gtk_widget_set_size_request(show_password_button_, show_size.width,
                               show_size.height);
   gtk_widget_set_sensitive(show_password_button_, FALSE);
-  g_signal_connect(G_OBJECT(show_password_button_), "clicked",
-                   G_CALLBACK(OnShowPasswordButtonClicked), this);
+  g_signal_connect(show_password_button_, "clicked",
+                   G_CALLBACK(OnShowPasswordButtonClickedThunk), this);
 
   password_ = gtk_label_new("");
 
@@ -119,8 +123,8 @@ void PasswordsPageGtk::InitPasswordTree() {
       GTK_TREE_VIEW(password_tree_));
   gtk_tree_selection_set_mode(password_selection_,
                               GTK_SELECTION_SINGLE);
-  g_signal_connect(G_OBJECT(password_selection_), "changed",
-                   G_CALLBACK(OnPasswordSelectionChanged), this);
+  g_signal_connect(password_selection_, "changed",
+                   G_CALLBACK(OnPasswordSelectionChangedThunk), this);
 
   GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN).c_str(),
@@ -156,10 +160,9 @@ void PasswordsPageGtk::SetPasswordList(
   for (size_t i = 0; i < result.size(); ++i) {
     password_list_[i] = *result[i];
     std::wstring formatted = net::FormatUrl(result[i]->origin, languages,
-                                            false, UnescapeRule::NONE,
-                                            NULL, NULL);
+        false, UnescapeRule::NONE, NULL, NULL, NULL);
     std::string site = WideToUTF8(formatted);
-    std::string user = WideToUTF8(result[i]->username_value);
+    std::string user = UTF16ToUTF8(result[i]->username_value);
     GtkTreeIter iter;
     gtk_list_store_insert_with_values(password_list_store_, &iter, (gint) i,
                                       COL_SITE, site.c_str(),
@@ -168,58 +171,54 @@ void PasswordsPageGtk::SetPasswordList(
   gtk_widget_set_sensitive(remove_all_button_, result.size() > 0);
 }
 
-// static
-void PasswordsPageGtk::OnRemoveButtonClicked(GtkButton* widget,
-                                             PasswordsPageGtk* page) {
+void PasswordsPageGtk::OnRemoveButtonClicked(GtkWidget* widget) {
   GtkTreeIter iter;
-  if (!gtk_tree_selection_get_selected(page->password_selection_,
+  if (!gtk_tree_selection_get_selected(password_selection_,
                                        NULL, &iter)) {
     NOTREACHED();
     return;
   }
 
   GtkTreePath* path = gtk_tree_model_get_path(
-      GTK_TREE_MODEL(page->password_list_sort_), &iter);
+      GTK_TREE_MODEL(password_list_sort_), &iter);
   gint index = gtk_tree::GetTreeSortChildRowNumForPath(
-      page->password_list_sort_, path);
+      password_list_sort_, path);
   gtk_tree_path_free(path);
 
   GtkTreeIter child_iter;
   gtk_tree_model_sort_convert_iter_to_child_iter(
-      GTK_TREE_MODEL_SORT(page->password_list_sort_), &child_iter, &iter);
+      GTK_TREE_MODEL_SORT(password_list_sort_), &child_iter, &iter);
 
   // Remove from GTK list, DB, and vector.
-  gtk_list_store_remove(page->password_list_store_, &child_iter);
-  page->GetPasswordStore()->RemoveLogin(page->password_list_[index]);
-  page->password_list_.erase(page->password_list_.begin() + index);
+  gtk_list_store_remove(password_list_store_, &child_iter);
+  GetPasswordStore()->RemoveLogin(password_list_[index]);
+  password_list_.erase(password_list_.begin() + index);
 
-  gtk_widget_set_sensitive(page->remove_all_button_,
-                           page->password_list_.size() > 0);
+  gtk_widget_set_sensitive(remove_all_button_,
+                           password_list_.size() > 0);
 }
 
-// static
-void PasswordsPageGtk::OnRemoveAllButtonClicked(GtkButton* widget,
-                                                PasswordsPageGtk* page) {
-  GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(page->page_));
-  GtkWidget* confirm = gtk_message_dialog_new(window,
-                                              GTK_DIALOG_DESTROY_WITH_PARENT,
-                                              GTK_MESSAGE_QUESTION,
-                                              GTK_BUTTONS_YES_NO,
-                                              "%s",
-                                              l10n_util::GetStringUTF8(
+void PasswordsPageGtk::OnRemoveAllButtonClicked(GtkWidget* widget) {
+  GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(page_));
+  GtkWidget* confirm = gtk_message_dialog_new(
+      window,
+      static_cast<GtkDialogFlags>(
+          GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+      GTK_MESSAGE_QUESTION,
+      GTK_BUTTONS_YES_NO,
+      "%s",
+      l10n_util::GetStringUTF8(
           IDS_PASSWORDS_PAGE_VIEW_TEXT_DELETE_ALL_PASSWORDS).c_str());
-  gtk_window_set_modal(GTK_WINDOW(confirm), TRUE);
+  gtk_util::ApplyMessageDialogQuirks(confirm);
   gtk_window_set_title(GTK_WINDOW(confirm), l10n_util::GetStringUTF8(
           IDS_PASSWORDS_PAGE_VIEW_CAPTION_DELETE_ALL_PASSWORDS).c_str());
-  g_signal_connect(confirm, "response", G_CALLBACK(OnRemoveAllConfirmResponse),
-                   page);
+  g_signal_connect(confirm, "response",
+                   G_CALLBACK(OnRemoveAllConfirmResponseThunk), this);
   gtk_widget_show_all(confirm);
 }
 
-// static
-void PasswordsPageGtk::OnRemoveAllConfirmResponse(GtkDialog* confirm,
-                                                  gint response,
-                                                  PasswordsPageGtk* page) {
+void PasswordsPageGtk::OnRemoveAllConfirmResponse(GtkWidget* confirm,
+                                                  gint response) {
   bool confirmed = false;
   switch (response) {
     case GTK_RESPONSE_YES:
@@ -228,66 +227,62 @@ void PasswordsPageGtk::OnRemoveAllConfirmResponse(GtkDialog* confirm,
     default:
       break;
   }
-  gtk_widget_destroy(GTK_WIDGET(confirm));
+  gtk_widget_destroy(confirm);
   if (!confirmed)
     return;
 
   // Remove from GTK list, DB, and vector.
-  PasswordStore* store = page->GetPasswordStore();
-  gtk_list_store_clear(page->password_list_store_);
-  for (size_t i = 0; i < page->password_list_.size(); ++i) {
-    store->RemoveLogin(page->password_list_[i]);
+  PasswordStore* store = GetPasswordStore();
+  gtk_list_store_clear(password_list_store_);
+  for (size_t i = 0; i < password_list_.size(); ++i) {
+    store->RemoveLogin(password_list_[i]);
   }
-  page->password_list_.clear();
-  gtk_widget_set_sensitive(page->remove_all_button_, FALSE);
+  password_list_.clear();
+  gtk_widget_set_sensitive(remove_all_button_, FALSE);
 }
 
-// static
-void PasswordsPageGtk::OnShowPasswordButtonClicked(GtkButton* widget,
-                                                   PasswordsPageGtk* page) {
-  page->password_showing_ = !page->password_showing_;
-  if (!page->password_showing_) {
+void PasswordsPageGtk::OnShowPasswordButtonClicked(GtkWidget* widget) {
+  password_showing_ = !password_showing_;
+  if (!password_showing_) {
     // Hide the password.
-    gtk_label_set_text(GTK_LABEL(page->password_), "");
-    gtk_button_set_label(GTK_BUTTON(page->show_password_button_),
+    gtk_label_set_text(GTK_LABEL(password_), "");
+    gtk_button_set_label(GTK_BUTTON(show_password_button_),
         l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_SHOW_BUTTON).c_str());
     return;
   }
   // Show the password.
   GtkTreeIter iter;
-  if (!gtk_tree_selection_get_selected(page->password_selection_,
+  if (!gtk_tree_selection_get_selected(password_selection_,
                                        NULL, &iter)) {
     NOTREACHED();
     return;
   }
   GtkTreePath* path = gtk_tree_model_get_path(
-      GTK_TREE_MODEL(page->password_list_sort_), &iter);
+      GTK_TREE_MODEL(password_list_sort_), &iter);
   gint index = gtk_tree::GetTreeSortChildRowNumForPath(
-      page->password_list_sort_, path);
+      password_list_sort_, path);
   gtk_tree_path_free(path);
-  std::string pass = WideToUTF8(page->password_list_[index].password_value);
-  gtk_label_set_text(GTK_LABEL(page->password_), pass.c_str());
-  gtk_button_set_label(GTK_BUTTON(page->show_password_button_),
+  std::string pass = UTF16ToUTF8(password_list_[index].password_value);
+  gtk_label_set_text(GTK_LABEL(password_), pass.c_str());
+  gtk_button_set_label(GTK_BUTTON(show_password_button_),
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON).c_str());
 }
 
-// static
-void PasswordsPageGtk::OnPasswordSelectionChanged(GtkTreeSelection* selection,
-                                                  PasswordsPageGtk* page) {
+void PasswordsPageGtk::OnPasswordSelectionChanged(GtkTreeSelection* selection) {
   // No matter how the selection changed, we want to hide the old password.
-  gtk_label_set_text(GTK_LABEL(page->password_), "");
-  gtk_button_set_label(GTK_BUTTON(page->show_password_button_),
+  gtk_label_set_text(GTK_LABEL(password_), "");
+  gtk_button_set_label(GTK_BUTTON(show_password_button_),
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_SHOW_BUTTON).c_str());
-  page->password_showing_ = false;
+  password_showing_ = false;
 
   GtkTreeIter iter;
   if (!gtk_tree_selection_get_selected(selection, NULL, &iter)) {
-    gtk_widget_set_sensitive(page->show_password_button_, FALSE);
-    gtk_widget_set_sensitive(page->remove_button_, FALSE);
+    gtk_widget_set_sensitive(show_password_button_, FALSE);
+    gtk_widget_set_sensitive(remove_button_, FALSE);
     return;
   }
-  gtk_widget_set_sensitive(page->show_password_button_, TRUE);
-  gtk_widget_set_sensitive(page->remove_button_, TRUE);
+  gtk_widget_set_sensitive(show_password_button_, TRUE);
+  gtk_widget_set_sensitive(remove_button_, TRUE);
 }
 
 // static

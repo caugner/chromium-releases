@@ -12,12 +12,12 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
-#include "webkit/api/public/gtk/WebInputEventFactory.h"
-#include "webkit/api/public/x11/WebScreenInfoFactory.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/api/public/WebPopupMenu.h"
-#include "webkit/api/public/WebScreenInfo.h"
-#include "webkit/api/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_x11.h"
 
@@ -212,7 +212,7 @@ class WebWidgetHostGtkWidget {
     // other's focus when running in parallel.
     if (!TestShell::layout_test_mode())
       host->webwidget()->setFocus(true);
-    return FALSE;
+    return TRUE;
   }
 
   // Keyboard focus left.
@@ -223,13 +223,17 @@ class WebWidgetHostGtkWidget {
     // other's focus when running in parallel.
     if (!TestShell::layout_test_mode())
       host->webwidget()->setFocus(false);
-    return FALSE;
+    return TRUE;
   }
 
   // Mouse button down.
   static gboolean HandleButtonPress(GtkWidget* widget,
                                     GdkEventButton* event,
                                     WebWidgetHost* host) {
+    if (!(event->button == 1 || event->button == 2 || event->button == 3))
+      return FALSE;  // We do not forward any other buttons to the renderer.
+    if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS)
+      return FALSE;
     host->webwidget()->handleInputEvent(
         WebInputEventFactory::mouseEvent(event));
     return FALSE;

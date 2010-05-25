@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "chrome/common/notification_registrar.h"
 
 class DownloadRequestInfoBarDelegate;
-class MessageLoop;
 class NavigationController;
 class TabContents;
 
@@ -41,8 +40,8 @@ class TabContents;
 //   the user allowed the download, multiple downloads are allowed without any
 //   user intervention until the user navigates to a different host.
 
-class DownloadRequestManager :
-    public base::RefCountedThreadSafe<DownloadRequestManager> {
+class DownloadRequestManager
+    : public base::RefCountedThreadSafe<DownloadRequestManager> {
  public:
   // Download status for a particular page. See class description for details.
   enum DownloadStatus {
@@ -52,11 +51,18 @@ class DownloadRequestManager :
     DOWNLOADS_NOT_ALLOWED
   };
 
+  // Max number of downloads before a "Prompt Before Download" Dialog is shown.
+  static const size_t kMaxDownloadsAtOnce = 50;
+
   // The callback from CanDownloadOnIOThread. This is invoked on the io thread.
   class Callback {
    public:
     virtual void ContinueDownload() = 0;
     virtual void CancelDownload() = 0;
+    virtual int GetRequestId() = 0;
+
+   protected:
+    virtual ~Callback() {}
   };
 
   // TabDownloadState maintains the download state for a particular tab.
@@ -74,7 +80,7 @@ class DownloadRequestManager :
     TabDownloadState(DownloadRequestManager* host,
                      NavigationController* controller,
                      NavigationController* originating_controller);
-    ~TabDownloadState();
+    virtual ~TabDownloadState();
 
     // Status of the download.
     void set_download_status(DownloadRequestManager::DownloadStatus status) {
@@ -82,6 +88,14 @@ class DownloadRequestManager :
     }
     DownloadRequestManager::DownloadStatus download_status() const {
       return status_;
+    }
+
+    // Number of "ALLOWED" downloads.
+    void increment_download_count() {
+      download_count_++;
+    }
+    size_t download_count() const {
+      return download_count_;
     }
 
     // Invoked when a user gesture occurs (mouse click, enter or space). This
@@ -111,6 +125,7 @@ class DownloadRequestManager :
         : host_(NULL),
           controller_(NULL),
           status_(DownloadRequestManager::ALLOW_ONE_DOWNLOAD),
+          download_count_(0),
           infobar_(NULL) {
     }
 
@@ -133,6 +148,8 @@ class DownloadRequestManager :
 
     DownloadRequestManager::DownloadStatus status_;
 
+    size_t download_count_;
+
     // Callbacks we need to notify. This is only non-empty if we're showing a
     // dialog.
     // See description above CanDownloadOnIOThread for details on lifetime of
@@ -148,8 +165,7 @@ class DownloadRequestManager :
     DISALLOW_COPY_AND_ASSIGN(TabDownloadState);
   };
 
-  DownloadRequestManager(MessageLoop* io_loop, MessageLoop* ui_loop);
-  ~DownloadRequestManager();
+  DownloadRequestManager();
 
   // Returns the download status for a page. This does not change the state in
   // anyway.
@@ -170,13 +186,19 @@ class DownloadRequestManager :
   void OnUserGesture(TabContents* tab);
 
  private:
+  friend class base::RefCountedThreadSafe<DownloadRequestManager>;
   friend class DownloadRequestManagerTest;
   friend class TabDownloadState;
+
+  ~DownloadRequestManager();
 
   // For unit tests. If non-null this is used instead of creating a dialog.
   class TestingDelegate {
    public:
     virtual bool ShouldAllowDownload() = 0;
+
+   protected:
+    virtual ~TestingDelegate() {}
   };
   static void SetTestingDelegate(TestingDelegate* delegate);
 
@@ -214,11 +236,6 @@ class DownloadRequestManager :
   // it. This has the effect of resetting the status for the tab to
   // ALLOW_ONE_DOWNLOAD.
   void Remove(TabDownloadState* state);
-
-  // Two threads we use. NULL during testing, in which case messages are
-  // dispatched immediately.
-  MessageLoop* io_loop_;
-  MessageLoop* ui_loop_;
 
   // Maps from tab to download state. The download state for a tab only exists
   // if the state is other than ALLOW_ONE_DOWNLOAD. Similarly once the state

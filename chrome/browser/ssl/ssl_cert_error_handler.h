@@ -23,8 +23,7 @@ class SSLCertErrorHandler : public SSLErrorHandler {
                       const std::string& frame_origin,
                       const std::string& main_frame_origin,
                       int cert_error,
-                      net::X509Certificate* cert,
-                      MessageLoop* ui_loop);
+                      net::X509Certificate* cert);
 
   virtual SSLCertErrorHandler* AsSSLCertErrorHandler() { return this; }
 
@@ -38,6 +37,8 @@ class SSLCertErrorHandler : public SSLErrorHandler {
   virtual void OnDispatched();
 
  private:
+  ~SSLCertErrorHandler() {}
+
   // These read-only members may be accessed on any thread.
   net::SSLInfo ssl_info_;
   const int cert_error_;  // The error we represent.

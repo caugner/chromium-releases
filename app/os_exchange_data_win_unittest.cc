@@ -9,7 +9,7 @@
 #include "base/ref_counted.h"
 #include "base/scoped_handle.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -270,7 +270,7 @@ TEST(OSExchangeDataTest, TestURLExchangeFormats) {
     CLIPFORMAT cfstr_file_contents =
         RegisterClipboardFormat(CFSTR_FILECONTENTS);
     FORMATETC format_etc =
-        { cfstr_file_contents, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        { cfstr_file_contents, NULL, DVASPECT_CONTENT, 0, TYMED_HGLOBAL };
     EXPECT_EQ(S_OK, com_data->QueryGetData(&format_etc));
 
     STGMEDIUM medium;

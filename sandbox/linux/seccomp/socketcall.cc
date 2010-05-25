@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 
@@ -7,7 +11,8 @@ namespace playground {
 
 ssize_t Sandbox::sandbox_recvfrom(int sockfd, void* buf, size_t len, int flags,
                                   void* from, socklen_t* fromlen) {
-  Debug::syscall(__NR_recvfrom, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_recvfrom, "Executing handler");
 
   SysCalls sys;
   if (!from && !flags) {
@@ -16,8 +21,10 @@ ssize_t Sandbox::sandbox_recvfrom(int sockfd, void* buf, size_t len, int flags,
     Debug::message("Replaced recv() with call to read()");
     ssize_t rc = sys.read(sockfd, buf, len);
     if (rc < 0) {
+      Debug::elapsed(tm, __NR_recvfrom);
       return -sys.my_errno;
     } else {
+      Debug::elapsed(tm, __NR_recvfrom);
       return rc;
     }
   }
@@ -42,11 +49,13 @@ ssize_t Sandbox::sandbox_recvfrom(int sockfd, void* buf, size_t len, int flags,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward recvfrom() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_recvfrom);
   return static_cast<int>(rc);
 }
 
 ssize_t Sandbox::sandbox_recvmsg(int sockfd, struct msghdr* msg, int flags) {
-  Debug::syscall(__NR_recvmsg, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_recvmsg, "Executing handler");
 
   // We cannot simplify recvmsg() to recvfrom(), recv() or read(), as we do
   // not know whether the caller needs us to set msg->msg_flags.
@@ -68,12 +77,14 @@ ssize_t Sandbox::sandbox_recvmsg(int sockfd, struct msghdr* msg, int flags) {
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward recvmsg() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_recvmsg);
   return static_cast<int>(rc);
 }
 
 size_t Sandbox::sandbox_sendmsg(int sockfd, const struct msghdr* msg,
                                 int flags) {
-  Debug::syscall(__NR_sendmsg, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_sendmsg, "Executing handler");
 
   if (msg->msg_iovlen == 1 && msg->msg_controllen == 0) {
     // sendmsg() can sometimes be simplified as sendto()
@@ -107,12 +118,14 @@ size_t Sandbox::sandbox_sendmsg(int sockfd, const struct msghdr* msg,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward sendmsg() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_sendmsg);
   return static_cast<int>(rc);
 }
 
 ssize_t Sandbox::sandbox_sendto(int sockfd, const void* buf, size_t len,
                                 int flags, const void* to, socklen_t tolen) {
-  Debug::syscall(__NR_sendto, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_sendto, "Executing handler");
 
   SysCalls sys;
   if (!to && !flags) {
@@ -121,8 +134,10 @@ ssize_t Sandbox::sandbox_sendto(int sockfd, const void* buf, size_t len,
     Debug::message("Replaced sendto() with call to write()");
     ssize_t rc = sys.write(sockfd, buf, len);
     if (rc < 0) {
+      Debug::elapsed(tm, __NR_sendto);
       return -sys.my_errno;
     } else {
+      Debug::elapsed(tm, __NR_sendto);
       return rc;
     }
   }
@@ -147,12 +162,14 @@ ssize_t Sandbox::sandbox_sendto(int sockfd, const void* buf, size_t len,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward sendto() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_sendto);
   return static_cast<int>(rc);
 }
 
 int Sandbox::sandbox_setsockopt(int sockfd, int level, int optname,
                                 const void* optval, socklen_t optlen) {
-  Debug::syscall(__NR_setsockopt, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_setsockopt, "Executing handler");
 
   struct {
     int        sysnum;
@@ -174,12 +191,14 @@ int Sandbox::sandbox_setsockopt(int sockfd, int level, int optname,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward setsockopt() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_setsockopt);
   return static_cast<int>(rc);
 }
 
 int Sandbox::sandbox_getsockopt(int sockfd, int level, int optname,
                                 void* optval, socklen_t* optlen) {
-  Debug::syscall(__NR_getsockopt, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_getsockopt, "Executing handler");
 
   struct {
     int        sysnum;
@@ -201,11 +220,13 @@ int Sandbox::sandbox_getsockopt(int sockfd, int level, int optname,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward getsockopt() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_getsockopt);
   return static_cast<int>(rc);
 }
 
-bool Sandbox::process_recvfrom(int parentProc, int sandboxFd, int threadFdPub,
-                               int threadFd, SecureMem::Args* mem) {
+bool Sandbox::process_recvfrom(int parentMapsFd, int sandboxFd,
+                               int threadFdPub, int threadFd,
+                               SecureMem::Args* mem) {
   // Read request
   RecvFrom recvfrom_req;
   SysCalls sys;
@@ -231,7 +252,7 @@ bool Sandbox::process_recvfrom(int parentProc, int sandboxFd, int threadFdPub,
   return true;
 }
 
-bool Sandbox::process_recvmsg(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_recvmsg(int parentMapsFd, int sandboxFd, int threadFdPub,
                               int threadFd, SecureMem::Args* mem) {
   // Read request
   RecvMsg  recvmsg_req;
@@ -255,7 +276,7 @@ bool Sandbox::process_recvmsg(int parentProc, int sandboxFd, int threadFdPub,
   return true;
 }
 
-bool Sandbox::process_sendmsg(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_sendmsg(int parentMapsFd, int sandboxFd, int threadFdPub,
                               int threadFd, SecureMem::Args* mem) {
   // Read request
   struct {
@@ -267,8 +288,7 @@ bool Sandbox::process_sendmsg(int parentProc, int sandboxFd, int threadFdPub,
     die("Failed to read parameters for sendmsg() [process]");
   }
 
-  if (data.msg.msg_namelen    < 0 || data.msg.msg_namelen    > 4096 ||
-      data.msg.msg_controllen < 0 || data.msg.msg_controllen > 4096) {
+  if (data.msg.msg_namelen > 4096 || data.msg.msg_controllen > 4096) {
     die("Unexpected size for socketcall() payload [process]");
   }
   char extra[data.msg.msg_namelen + data.msg.msg_controllen];
@@ -307,7 +327,7 @@ bool Sandbox::process_sendmsg(int parentProc, int sandboxFd, int threadFdPub,
 
   // This must be a locked system call, because we have to ensure that the
   // untrusted code does not tamper with the msghdr after we have examined it.
-  SecureMem::lockSystemCall(parentProc, mem);
+  SecureMem::lockSystemCall(parentMapsFd, mem);
   if (sizeof(extra) > 0) {
     if (data.msg.msg_namelen > 0) {
       data.msg.msg_name = mem->pathname + sizeof(struct msghdr);
@@ -319,14 +339,14 @@ bool Sandbox::process_sendmsg(int parentProc, int sandboxFd, int threadFdPub,
     memcpy(mem->pathname + sizeof(struct msghdr), extra, sizeof(extra));
   }
   memcpy(mem->pathname, &data.msg, sizeof(struct msghdr));
-  SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem,
+  SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem,
                             __NR_sendmsg, data.sendmsg_req.sockfd,
                             mem->pathname - (char*)mem + (char*)mem->self,
                             data.sendmsg_req.flags);
   return true;
 }
 
-bool Sandbox::process_sendto(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_sendto(int parentMapsFd, int sandboxFd, int threadFdPub,
                              int threadFd, SecureMem::Args* mem) {
   // Read request
   SendTo   sendto_req;
@@ -359,7 +379,7 @@ bool Sandbox::process_sendto(int parentProc, int sandboxFd, int threadFdPub,
   return true;
 }
 
-bool Sandbox::process_setsockopt(int parentProc, int sandboxFd,
+bool Sandbox::process_setsockopt(int parentMapsFd, int sandboxFd,
                                  int threadFdPub, int threadFd,
                                  SecureMem::Args* mem) {
   // Read request
@@ -423,7 +443,7 @@ bool Sandbox::process_setsockopt(int parentProc, int sandboxFd,
   return false;
 }
 
-bool Sandbox::process_getsockopt(int parentProc, int sandboxFd,
+bool Sandbox::process_getsockopt(int parentMapsFd, int sandboxFd,
                                  int threadFdPub, int threadFd,
                                  SecureMem::Args* mem) {
   // Read request
@@ -548,11 +568,13 @@ const struct Sandbox::SocketCallArgInfo Sandbox::socketCallArgInfo[] = {
 };
 
 int Sandbox::sandbox_socketcall(int call, void* args) {
-  Debug::syscall(__NR_socketcall, "Executing handler", call);
+  long long tm;
+  Debug::syscall(&tm, __NR_socketcall, "Executing handler", call);
 
   // When demultiplexing socketcall(), only accept calls that have a valid
   // "call" opcode.
   if (call < SYS_SOCKET || call > SYS_ACCEPT4) {
+    Debug::elapsed(tm, __NR_socketcall, call);
     return -ENOSYS;
   }
 
@@ -642,8 +664,10 @@ int Sandbox::sandbox_socketcall(int call, void* args) {
                            request->socketcall_req.args.send.buf,
                            request->socketcall_req.args.send.len);
     if (rc < 0) {
+      Debug::elapsed(tm, __NR_socketcall, call);
       return -sys.my_errno;
     } else {
+      Debug::elapsed(tm, __NR_socketcall, call);
       return rc;
     }
   }
@@ -665,8 +689,10 @@ int Sandbox::sandbox_socketcall(int call, void* args) {
                           request->socketcall_req.args.recv.buf,
                           request->socketcall_req.args.recv.len);
     if (rc < 0) {
+      Debug::elapsed(tm, __NR_socketcall, call);
       return -sys.my_errno;
     } else {
+      Debug::elapsed(tm, __NR_socketcall, call);
       return rc;
     }
   }
@@ -703,10 +729,11 @@ int Sandbox::sandbox_socketcall(int call, void* args) {
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward socketcall() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_socketcall, call);
   return static_cast<int>(rc);
 }
 
-bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
+bool Sandbox::process_socketcall(int parentMapsFd, int sandboxFd,
                                  int threadFdPub, int threadFd,
                                  SecureMem::Args* mem) {
   // Read request
@@ -739,7 +766,7 @@ bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
   // Verify that the length for the payload is reasonable. We don't want to
   // blow up our stack, and excessive (or negative) buffer sizes are almost
   // certainly a bug.
-  if (numExtraData < 0 || numExtraData > 4096) {
+  if (numExtraData > 4096) {
     die("Unexpected size for socketcall() payload [process]");
   }
 
@@ -755,8 +782,7 @@ bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
   ssize_t numSendmsgExtra = 0;
   if (socketcall_req.call == SYS_SENDMSG) {
     struct msghdr* msg = reinterpret_cast<struct msghdr*>(extra);
-    if (msg->msg_namelen    < 0 || msg->msg_namelen    > 4096 ||
-        msg->msg_controllen < 0 || msg->msg_controllen > 4096) {
+    if (msg->msg_namelen > 4096 || msg->msg_controllen > 4096) {
       die("Unexpected size for socketcall() payload [process]");
     }
     numSendmsgExtra = msg->msg_namelen + msg->msg_controllen;
@@ -824,9 +850,9 @@ bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
       // that should not be tampered with after it has been inspected. Copy it
       // into the write-protected securely shared memory before telling the
       // trusted thread to execute the socket call.
-      SecureMem::lockSystemCall(parentProc, mem);
+      SecureMem::lockSystemCall(parentMapsFd, mem);
       memcpy(mem->pathname, &socketcall_req.args, sizeof(socketcall_req.args));
-      SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem,
+      SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem,
                                 __NR_socketcall, socketcall_req.call,
                                 mem->pathname - (char*)mem + (char*)mem->self);
       return true;
@@ -970,7 +996,7 @@ bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
       // This must be a locked system call, because we have to ensure that
       // the untrusted code does not tamper with the msghdr after we have
       // examined it.
-      SecureMem::lockSystemCall(parentProc, mem);
+      SecureMem::lockSystemCall(parentMapsFd, mem);
       socketcall_req.args.sendmsg.msg =
           reinterpret_cast<struct msghdr*>(mem->pathname +
                                            sizeof(socketcall_req.args) -
@@ -989,7 +1015,7 @@ bool Sandbox::process_socketcall(int parentProc, int sandboxFd,
                sendmsgExtra, numSendmsgExtra);
       }
       memcpy(mem->pathname + sizeof(socketcall_req.args), msg, sizeof(*msg));
-      SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem,
+      SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem,
                                 __NR_socketcall, socketcall_req.call,
                                 mem->pathname - (char*)mem + (char*)mem->self);
       return true;

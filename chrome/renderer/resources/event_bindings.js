@@ -10,6 +10,40 @@ var chrome = chrome || {};
 
   var chromeHidden = GetChromeHidden();
 
+  // Local implementation of JSON.parse & JSON.stringify that protect us
+  // from being clobbered by an extension.
+  chromeHidden.JSON = new (function() {
+    var $Object = Object;
+    var $Array = Array;
+    var $jsonStringify = JSON.stringify;
+    var $jsonParse = JSON.parse;
+
+    this.stringify = function(thing) {
+      var customizedObjectToJSON = $Object.prototype.toJSON;
+      var customizedArrayToJSON = $Array.prototype.toJSON;
+      if (customizedObjectToJSON !== undefined) {
+        $Object.prototype.toJSON = null;
+      }
+      if (customizedArrayToJSON !== undefined) {
+        $Array.prototype.toJSON = null;
+      }
+      try {
+        return $jsonStringify(thing);
+      } finally {
+        if (customizedObjectToJSON !== undefined) {
+          $Object.prototype.toJSON = customizedObjectToJSON;
+        }
+        if (customizedArrayToJSON !== undefined) {
+          $Array.prototype.toJSON = customizedArrayToJSON;
+        }
+      }
+    };
+
+    this.parse = function(thing) {
+      return $jsonParse(thing);
+    };
+  })();
+
   // Event object.  If opt_eventName is provided, this object represents
   // the unique instance of that named event, and dispatching an event
   // with that name will route through this object's listeners.
@@ -23,7 +57,7 @@ var chrome = chrome || {};
     this.eventName_ = opt_eventName;
     this.listeners_ = [];
 
-    // Validate event parameters if we are in debug.     
+    // Validate event parameters if we are in debug.
     if (opt_argSchemas &&
         chromeHidden.validateCallbacks &&
         chromeHidden.validate) {
@@ -53,7 +87,7 @@ var chrome = chrome || {};
   chromeHidden.Event.dispatchJSON = function(name, args) {
     if (attachedNamedEvents[name]) {
       if (args) {
-        args = JSON.parse(args);
+        args = chromeHidden.JSON.parse(args);
       }
       return attachedNamedEvents[name].dispatch.apply(
           attachedNamedEvents[name], args);
@@ -97,7 +131,7 @@ var chrome = chrome || {};
 
   // Test if the given callback is registered for this event.
   chrome.Event.prototype.hasListener = function(cb) {
-    return this.findListeners_(cb) > -1;
+    return this.findListener_(cb) > -1;
   };
 
   // Test if any callbacks are registered for this event.
@@ -181,8 +215,11 @@ var chrome = chrome || {};
 
   chromeHidden.dispatchOnUnload = function() {
     chromeHidden.onUnload.dispatch();
-    for (var i in allAttachedEvents)
-      allAttachedEvents[i].detach_();
+    for (var i = 0; i < allAttachedEvents.length; ++i) {
+      var event = allAttachedEvents[i];
+      if (event)
+        event.detach_();
+    }
   }
 
   chromeHidden.dispatchError = function(msg) {

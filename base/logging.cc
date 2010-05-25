@@ -5,15 +5,20 @@
 #include "base/logging.h"
 
 #if defined(OS_WIN)
+#include <io.h>
 #include <windows.h>
 typedef HANDLE FileHandle;
 typedef HANDLE MutexHandle;
+// Windows warns on using write().  It prefers _write().
+#define write(fd, buf, count) _write(fd, buf, static_cast<unsigned int>(count))
+// Windows doesn't define STDERR_FILENO.  Define it here.
+#define STDERR_FILENO 2
 #elif defined(OS_MACOSX)
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach-o/dyld.h>
-#elif defined(OS_LINUX)
+#elif defined(OS_POSIX)
 #include <sys/syscall.h>
 #include <time.h>
 #endif
@@ -37,10 +42,12 @@ typedef pthread_mutex_t* MutexHandle;
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
+#include "base/eintr_wrapper.h"
 #include "base/lock_impl.h"
 #if defined(OS_POSIX)
 #include "base/safe_strerror_posix.h"
 #endif
+#include "base/process_util.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -98,6 +105,8 @@ LogAssertHandlerFunction log_assert_handler = NULL;
 // An report handler override specified by the client to be called instead of
 // the debug message dialog.
 LogReportHandlerFunction log_report_handler = NULL;
+// A log message handler that gets notified of every log message we process.
+LogMessageHandlerFunction log_message_handler = NULL;
 
 // The lock is used if log file locking is false. It helps us avoid problems
 // with multiple threads writing to the log file at the same time.  Use
@@ -129,6 +138,9 @@ int32 CurrentThreadId() {
   return mach_thread_self();
 #elif defined(OS_LINUX)
   return syscall(__NR_gettid);
+#elif defined(OS_FREEBSD)
+  // TODO(BSD): find a better thread ID
+  return reinterpret_cast<int64>(pthread_self());
 #endif
 }
 
@@ -137,7 +149,7 @@ uint64 TickCount() {
   return GetTickCount();
 #elif defined(OS_MACOSX)
   return mach_absolute_time();
-#elif defined(OS_LINUX)
+#elif defined(OS_POSIX)
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
 
@@ -217,16 +229,6 @@ bool InitializeLogFileHandle() {
 
   return true;
 }
-
-#if defined(OS_LINUX)
-int GetLoggingFileDescriptor() {
-  // No locking needed, since this is only called by the zygote server,
-  // which is single-threaded.
-  if (log_file)
-    return fileno(log_file);
-  return -1;
-}
-#endif
 
 void InitLogMutex() {
 #if defined(OS_WIN)
@@ -312,19 +314,24 @@ void SetLogReportHandler(LogReportHandlerFunction handler) {
   log_report_handler = handler;
 }
 
-// Displays a message box to the user with the error message in it. For
-// Windows programs, it's possible that the message loop is messed up on
-// a fatal error, and creating a MessageBox will cause that message loop
-// to be run. Instead, we try to spawn another process that displays its
-// command line. We look for "Debug Message.exe" in the same directory as
-// the application. If it exists, we use it, otherwise, we use a regular
-// message box.
-void DisplayDebugMessage(const std::string& str) {
+void SetLogMessageHandler(LogMessageHandlerFunction handler) {
+  log_message_handler = handler;
+}
+
+
+// Displays a message box to the user with the error message in it.
+// Used for fatal messages, where we close the app simultaneously.
+void DisplayDebugMessageInDialog(const std::string& str) {
   if (str.empty())
     return;
 
 #if defined(OS_WIN)
-  // look for the debug dialog program next to our application
+  // For Windows programs, it's possible that the message loop is
+  // messed up on a fatal error, and creating a MessageBox will cause
+  // that message loop to be run. Instead, we try to spawn another
+  // process that displays its command line. We look for "Debug
+  // Message.exe" in the same directory as the application. If it
+  // exists, we use it, otherwise, we use a regular message box.
   wchar_t prog_name[MAX_PATH];
   GetModuleFileNameW(NULL, prog_name, MAX_PATH);
   wchar_t* backslash = wcsrchr(prog_name, '\\');
@@ -351,8 +358,19 @@ void DisplayDebugMessage(const std::string& str) {
     MessageBoxW(NULL, &cmdline[0], L"Fatal error",
                 MB_OK | MB_ICONHAND | MB_TOPMOST);
   }
+#elif defined(USE_X11)
+  // Shell out to xmessage, which behaves like debug_message.exe, but is
+  // way more retro.  We could use zenity/kdialog but then we're starting
+  // to get into needing to check the desktop env and this dialog should
+  // only be coming up in Very Bad situations.
+  std::vector<std::string> argv;
+  argv.push_back("xmessage");
+  argv.push_back(str);
+  base::LaunchApp(argv, base::file_handle_mapping_vector(), true /* wait */,
+                  NULL);
 #else
-  fprintf(stderr, "%s\n", str.c_str());
+  // http://code.google.com/p/chromium/issues/detail?id=37026
+  NOTIMPLEMENTED();
 #endif
 }
 
@@ -440,12 +458,20 @@ LogMessage::~LogMessage() {
   if (severity_ < min_log_level)
     return;
 
-  std::string str_newline(stream_.str());
-#if defined(OS_WIN)
-  str_newline.append("\r\n");
-#else
-  str_newline.append("\n");
+#ifndef NDEBUG
+  if (severity_ == LOG_FATAL) {
+    // Include a stack trace on a fatal.
+    StackTrace trace;
+    stream_ << std::endl;  // Newline to separate from log message.
+    trace.OutputToStream(&stream_);
+  }
 #endif
+  stream_ << std::endl;
+  std::string str_newline(stream_.str());
+
+  // Give any log message handler first dibs on the message.
+  if (log_message_handler && log_message_handler(severity_, str_newline))
+    return;
 
   if (log_filter_prefix && severity_ <= kMaxFilteredLogLevel &&
       str_newline.compare(message_start_, log_filter_prefix->size(),
@@ -457,23 +483,28 @@ LogMessage::~LogMessage() {
       logging_destination == LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG) {
 #if defined(OS_WIN)
     OutputDebugStringA(str_newline.c_str());
-    if (severity_ >= kAlwaysPrintErrorLevel)
+    if (severity_ >= kAlwaysPrintErrorLevel) {
+#else
+    {
 #endif
-    // TODO(erikkay): this interferes with the layout tests since it grabs
-    // stderr and stdout and diffs them against known data. Our info and warn
-    // logs add noise to that.  Ideally, the layout tests would set the log
-    // level to ignore anything below error.  When that happens, we should
-    // take this fprintf out of the #else so that Windows users can benefit
-    // from the output when running tests from the command-line.  In the
-    // meantime, we leave this in for Mac and Linux, but until this is fixed
-    // they won't be able to pass any layout tests that have info or warn logs.
-    // See http://b/1343647
-    fprintf(stderr, "%s", str_newline.c_str());
+      // TODO(erikkay): this interferes with the layout tests since it grabs
+      // stderr and stdout and diffs them against known data. Our info and warn
+      // logs add noise to that.  Ideally, the layout tests would set the log
+      // level to ignore anything below error.  When that happens, we should
+      // take this fprintf out of the #else so that Windows users can benefit
+      // from the output when running tests from the command-line.  In the
+      // meantime, we leave this in for Mac and Linux, but until this is fixed
+      // they won't be able to pass any layout tests that have info or warn
+      // logs.  See http://b/1343647
+      fprintf(stderr, "%s", str_newline.c_str());
+      fflush(stderr);
+    }
   } else if (severity_ >= kAlwaysPrintErrorLevel) {
     // When we're only outputting to a log file, above a certain log level, we
     // should still output to stderr so that we can better detect and diagnose
     // problems with unit tests, especially on the buildbots.
     fprintf(stderr, "%s", str_newline.c_str());
+    fflush(stderr);
   }
 
   // write to log file
@@ -520,6 +551,7 @@ LogMessage::~LogMessage() {
               NULL);
 #else
     fprintf(log_file, "%s", str_newline.c_str());
+    fflush(log_file);
 #endif
 
     if (lock_log_file == LOCK_LOG_FILE) {
@@ -538,13 +570,6 @@ LogMessage::~LogMessage() {
     if (DebugUtil::BeingDebugged()) {
       DebugUtil::BreakDebugger();
     } else {
-#ifndef NDEBUG
-      // Dump a stack trace on a fatal.
-      StackTrace trace;
-      stream_ << "\n";  // Newline to separate from log message.
-      trace.OutputToStream(&stream_);
-#endif
-
       if (log_assert_handler) {
         // make a copy of the string for the handler out of paranoia
         log_assert_handler(std::string(stream_.str()));
@@ -555,7 +580,7 @@ LogMessage::~LogMessage() {
         // information, and displaying message boxes when the application is
         // hosed can cause additional problems.
 #ifndef NDEBUG
-        DisplayDebugMessage(stream_.str());
+        DisplayDebugMessageInDialog(stream_.str());
 #endif
         // Crash the process to generate a dump.
         DebugUtil::BreakDebugger();
@@ -566,7 +591,7 @@ LogMessage::~LogMessage() {
     if (log_report_handler) {
       log_report_handler(std::string(stream_.str()));
     } else {
-      DisplayDebugMessage(stream_.str());
+      DisplayDebugMessageInDialog(stream_.str());
     }
   }
 }
@@ -665,6 +690,37 @@ void CloseLogFile() {
 
   CloseFile(log_file);
   log_file = NULL;
+}
+
+void RawLog(int level, const char* message) {
+  if (level >= min_log_level) {
+    size_t bytes_written = 0;
+    const size_t message_len = strlen(message);
+    int rv;
+    while (bytes_written < message_len) {
+      rv = HANDLE_EINTR(
+          write(STDERR_FILENO, message + bytes_written,
+                message_len - bytes_written));
+      if (rv < 0) {
+        // Give up, nothing we can do now.
+        break;
+      }
+      bytes_written += rv;
+    }
+
+    if (message_len > 0 && message[message_len - 1] != '\n') {
+      do {
+        rv = HANDLE_EINTR(write(STDERR_FILENO, "\n", 1));
+        if (rv < 0) {
+          // Give up, nothing we can do now.
+          break;
+        }
+      } while (rv != 1);
+    }
+  }
+
+  if (level == LOG_FATAL)
+    DebugUtil::BreakDebugger();
 }
 
 }  // namespace logging

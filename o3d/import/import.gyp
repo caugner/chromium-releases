@@ -53,7 +53,7 @@
       'conditions' : [
         ['OS == "win"',
           {
-            'include_dirs': [
+            'msvs_system_include_dirs': [
               '$(DXSDK_DIR)/Include',
             ],
             'sources': [
@@ -83,13 +83,6 @@
             ],
             'include_dirs': [
               '../../third_party/glew/files/include',
-              '/usr/include/cairo',
-              '/usr/include/glib-2.0',
-              '/usr/include/gtk-2.0',
-              '/usr/include/pango-1.0',
-              '/usr/lib/glib-2.0/include',
-              '/usr/lib/gtk-2.0/include',
-              '/usr/include/atk-1.0',
             ],
           },
         ],

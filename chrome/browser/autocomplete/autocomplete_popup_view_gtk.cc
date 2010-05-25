@@ -7,26 +7,27 @@
 #include <gtk/gtk.h>
 
 #include <algorithm>
+#include <string>
 
-#include "app/gfx/font.h"
-#include "app/gfx/gtk_util.h"
-#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/font.h"
+#include "gfx/gtk_util.h"
+#include "gfx/rect.h"
 #include "grit/theme_resources.h"
 
 namespace {
@@ -66,33 +67,6 @@ const float kContentWidthPercentage = 0.7;
 
 // UTF-8 Left-to-right embedding.
 const char* kLRE = "\xe2\x80\xaa";
-
-// TODO(deanm): We should put this on gfx::Font so it can be shared.
-// Returns a new pango font, free with pango_font_description_free().
-PangoFontDescription* PangoFontFromGfxFont(const gfx::Font& chrome_font) {
-  gfx::Font font = chrome_font;  // Copy so we can call non-const methods.
-  PangoFontDescription* pfd = pango_font_description_new();
-  pango_font_description_set_family(pfd, WideToUTF8(font.FontName()).c_str());
-  pango_font_description_set_size(pfd, font.FontSize() * PANGO_SCALE);
-
-  switch (font.style()) {
-    case gfx::Font::NORMAL:
-      // Nothing to do, should already be PANGO_STYLE_NORMAL.
-      break;
-    case gfx::Font::BOLD:
-      pango_font_description_set_weight(pfd, PANGO_WEIGHT_BOLD);
-      break;
-    case gfx::Font::ITALIC:
-      pango_font_description_set_style(pfd, PANGO_STYLE_ITALIC);
-      break;
-    case gfx::Font::UNDERLINED:
-      // TODO(deanm): How to do underlined?  Where do we use it?  Probably have
-      // to paint it ourselves, see pango_font_metrics_get_underline_position.
-      break;
-  }
-
-  return pfd;
-}
 
 // Return a Rect covering the whole area of |window|.
 gfx::Rect GetWindowRect(GdkWindow* window) {
@@ -271,7 +245,7 @@ AutocompletePopupViewGtk::AutocompletePopupViewGtk(
   // For now, force the font size.
   gfx::Font font = gfx::Font::CreateFont(
       gfx::Font().FontName(), browser_defaults::kAutocompletePopupFontSize);
-  PangoFontDescription* pfd = PangoFontFromGfxFont(font);
+  PangoFontDescription* pfd = gfx::Font::PangoFontFromGfxFont(font);
   pango_layout_set_font_description(layout_, pfd);
   pango_font_description_free(pfd);
 
@@ -423,7 +397,7 @@ gboolean AutocompletePopupViewGtk::HandleButtonRelease(GtkWidget* widget,
 
 gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
                                                 GdkEventExpose* event) {
-  bool ltr = (l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT);
+  bool ltr = !base::i18n::IsRTL();
   const AutocompleteResult& result = model_->result();
 
   gfx::Rect window_rect = GetWindowRect(event->window);
@@ -498,7 +472,7 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
     actual_content_width /= PANGO_SCALE;
     actual_content_height /= PANGO_SCALE;
 
-    //DCHECK_LT(actual_content_height, kHeightPerResult);  // Font is too tall.
+    // DCHECK_LT(actual_content_height, kHeightPerResult);  // Font is too tall.
     // Center the text within the line.
     int content_y = std::max(line_rect.y(),
         line_rect.y() + ((kHeightPerResult - actual_content_height) / 2));

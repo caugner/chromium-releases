@@ -1,11 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/menu_item_view.h"
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
+#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_controller.h"
@@ -66,23 +66,26 @@ MenuItemView::MenuItemView(MenuDelegate* delegate) {
 }
 
 MenuItemView::~MenuItemView() {
-  if (controller_) {
-    // We're currently showing.
-
-    // We can't delete ourselves while we're blocking.
-    DCHECK(!controller_->IsBlockingRun());
-
-    // Invoking Cancel is going to call us back and notify the delegate.
-    // Notifying the delegate from the destructor can be problematic. To avoid
-    // this the delegate is set to NULL.
-    delegate_ = NULL;
-
-    controller_->Cancel(true);
-  }
+  // TODO(sky): ownership is bit wrong now. In particular if a nested message
+  // loop is running deletion can't be done, otherwise the stack gets
+  // thoroughly screwed. The destructor should be made private, and
+  // MenuController should be the only place handling deletion of the menu.
   delete submenu_;
 }
 
+bool MenuItemView::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+  *tooltip = tooltip_;
+  return !tooltip_.empty();
+}
+
+bool MenuItemView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+  *role = AccessibilityTypes::ROLE_MENUITEM;
+  return true;
+}
+
 void MenuItemView::RunMenuAt(gfx::NativeWindow parent,
+                             MenuButton* button,
                              const gfx::Rect& bounds,
                              AnchorPosition anchor,
                              bool has_mnemonics) {
@@ -115,7 +118,7 @@ void MenuItemView::RunMenuAt(gfx::NativeWindow parent,
 
   // Run the loop.
   MenuItemView* result =
-      controller->Run(parent, this, bounds, anchor, &mouse_event_flags);
+      controller->Run(parent, button, this, bounds, anchor, &mouse_event_flags);
 
   RemoveEmptyMenus();
 
@@ -151,7 +154,7 @@ void MenuItemView::RunMenuForDropAt(gfx::NativeWindow parent,
   // Set the instance, that way it can be canceled by another menu.
   MenuController::SetActiveInstance(controller_);
 
-  controller_->Run(parent, this, bounds, anchor, NULL);
+  controller_->Run(parent, NULL, this, bounds, anchor, NULL);
 }
 
 void MenuItemView::Cancel() {
@@ -172,8 +175,14 @@ void MenuItemView::SetSelected(bool selected) {
   SchedulePaint();
 }
 
+void MenuItemView::SetTooltip(const std::wstring& tooltip, int item_id) {
+  MenuItemView* item = GetMenuItemByID(item_id);
+  DCHECK(item);
+  item->tooltip_ = tooltip;
+}
+
 void MenuItemView::SetIcon(const SkBitmap& icon, int item_id) {
-  MenuItemView* item = GetDescendantByID(item_id);
+  MenuItemView* item = GetMenuItemByID(item_id);
   DCHECK(item);
   item->SetIcon(icon);
 }
@@ -222,6 +231,45 @@ wchar_t MenuItemView::GetMnemonic() {
     }
   } while (index != std::wstring::npos);
   return 0;
+}
+
+MenuItemView* MenuItemView::GetMenuItemByID(int id) {
+  if (GetCommand() == id)
+    return this;
+  if (!HasSubmenu())
+    return NULL;
+  for (int i = 0; i < GetSubmenu()->GetChildViewCount(); ++i) {
+    View* child = GetSubmenu()->GetChildViewAt(i);
+    if (child->GetID() == MenuItemView::kMenuItemViewID) {
+      MenuItemView* result = static_cast<MenuItemView*>(child)->
+          GetMenuItemByID(id);
+      if (result)
+        return result;
+    }
+  }
+  return NULL;
+}
+
+void MenuItemView::ChildrenChanged() {
+  MenuController* controller = GetMenuController();
+  if (!controller)
+    return;  // We're not showing, nothing to do.
+
+  // Handles the case where we were empty and are no longer empty.
+  RemoveEmptyMenus();
+
+  // Handles the case where we were not empty, but now are.
+  AddEmptyMenus();
+
+  controller->MenuChildrenChanged(this);
+
+  if (submenu_) {
+    // Force a paint and layout. This handles the case of the top level window's
+    // size remaining the same, resulting in no change to the submenu's size and
+    // no layout.
+    submenu_->Layout();
+    submenu_->SchedulePaint();
+  }
 }
 
 MenuItemView::MenuItemView(MenuItemView* parent,
@@ -299,23 +347,6 @@ MenuItemView* MenuItemView::AppendMenuItemInternal(int item_id,
   return item;
 }
 
-MenuItemView* MenuItemView::GetDescendantByID(int id) {
-  if (GetCommand() == id)
-    return this;
-  if (!HasSubmenu())
-    return NULL;
-  for (int i = 0; i < GetSubmenu()->GetChildViewCount(); ++i) {
-    View* child = GetSubmenu()->GetChildViewAt(i);
-    if (child->GetID() == MenuItemView::kMenuItemViewID) {
-      MenuItemView* result = static_cast<MenuItemView*>(child)->
-          GetDescendantByID(id);
-      if (result)
-        return result;
-    }
-  }
-  return NULL;
-}
-
 void MenuItemView::DropMenuClosed(bool notify_delegate) {
   DCHECK(controller_);
   DCHECK(!controller_->IsBlockingRun());
@@ -336,9 +367,6 @@ void MenuItemView::DropMenuClosed(bool notify_delegate) {
 void MenuItemView::PrepareForRun(bool has_mnemonics) {
   // Currently we only support showing the root.
   DCHECK(!parent_menu_item_);
-
-  // Don't invoke run from within run on the same menu.
-  DCHECK(!controller_);
 
   // Force us to have a submenu.
   CreateSubmenu();

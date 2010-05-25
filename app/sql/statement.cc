@@ -30,6 +30,7 @@ Statement::~Statement() {
 }
 
 void Statement::Assign(scoped_refptr<Connection::StatementRef> ref) {
+  Reset();
   ref_ = ref;
 }
 
@@ -175,7 +176,7 @@ double Statement::ColumnDouble(int col) const {
 std::string Statement::ColumnString(int col) const {
   if (!is_valid()) {
     NOTREACHED();
-    return 0;
+    return "";
   }
   const char* str = reinterpret_cast<const char*>(
       sqlite3_column_text(ref_->stmt(), col));

@@ -29,34 +29,45 @@
 #elif defined(__FreeBSD__)
 #define OS_FREEBSD 1
 #define TOOLKIT_GTK
+#elif defined(__OpenBSD__)
+#define OS_OPENBSD 1
+#define TOOLKIT_GTK
+#elif defined(__sun)
+#define OS_SOLARIS 1
+#define TOOLKIT_GTK
 #else
 #error Please add support for your platform in build/build_config.h
 #endif
 
-// For access to standard POSIXish features, use OS_POSIX instead of a
-// more specific macro.
-#if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_FREEBSD)
-#define OS_POSIX 1
+// A flag derived from the above flags, used to cover GTK code in
+// both TOOLKIT_GTK and TOOLKIT_VIEWS.
+#if defined(TOOLKIT_GTK) || (defined(TOOLKIT_VIEWS) && !defined(OS_WIN))
+#define TOOLKIT_USES_GTK 1
 #endif
 
+#if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_OPENBSD) || \
+    defined(OS_SOLARIS)
+#define USE_NSS 1  // Use NSS for crypto.
+#define USE_X11 1  // Use X for graphics.
+#endif
+
+// For access to standard POSIXish features, use OS_POSIX instead of a
+// more specific macro.
+#if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_FREEBSD) || \
+    defined(OS_OPENBSD) || defined(OS_SOLARIS)
+#define OS_POSIX 1
 // Use base::DataPack for name/value pairs.
-#if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_FREEBSD)
 #define USE_BASE_DATA_PACK 1
 #endif
 
-// Use NSS for crypto.
-#if defined(OS_LINUX) || defined(OS_FREEBSD)
-#define USE_NSS 1
-#endif
-
-// Use X11 (and hence GTK/GDK)
-#if defined(OS_LINUX) || defined(OS_FREEBSD)
-#define USE_X11 1
-#endif
-
 // Use tcmalloc
-#if defined(OS_WIN) && ! defined(NO_TCMALLOC)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(NO_TCMALLOC)
 #define USE_TCMALLOC 1
+#endif
+
+// Use heapchecker.
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(NO_HEAPCHECKER)
+#define USE_HEAPCHECKER 1
 #endif
 
 // Compiler detection.
@@ -96,6 +107,14 @@
     defined(__WCHAR_MAX__) && \
     (__WCHAR_MAX__ == 0x7fffffff || __WCHAR_MAX__ == 0xffffffff)
 #define WCHAR_T_IS_UTF32
+#elif defined(OS_POSIX) && defined(COMPILER_GCC) && \
+    defined(__WCHAR_MAX__) && \
+    (__WCHAR_MAX__ == 0x7fff || __WCHAR_MAX__ == 0xffff)
+// On Posix, we'll detect short wchar_t, but projects aren't guaranteed to
+// compile in this mode (in particular, Chrome doesn't). This is intended for
+// other projects using base who manage their own dependencies and make sure
+// short wchar works for them.
+#define WCHAR_T_IS_UTF16
 #else
 #error Please add support for your compiler in build/build_config.h
 #endif

@@ -5,8 +5,8 @@
 #include "chrome/browser/automation/extension_port_container.h"
 
 #include "base/logging.h"
-#include "base/json_reader.h"
-#include "base/json_writer.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/values.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/extension_automation_constants.h"
@@ -69,11 +69,12 @@ bool ExtensionPortContainer::Connect(const std::string &extension_id,
                                      int process_id,
                                      int routing_id,
                                      int connection_id,
-                                     const std::string& channel_name) {
+                                     const std::string& channel_name,
+                                     const std::string& tab_json) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
   port_id_ = service_->OpenSpecialChannelToExtension(
-      extension_id, channel_name, this);
+      extension_id, channel_name, tab_json, this);
   if (port_id_ == -1) {
     // In this case a disconnect message has been dispatched.
     return false;
@@ -92,7 +93,7 @@ void ExtensionPortContainer::SendConnectionResponse(int connection_id,
   msg_dict->SetInteger(ext::kAutomationPortIdKey, port_id);
 
   std::string msg_json;
-  JSONWriter::Write(msg_dict.get(), false, &msg_json);
+  base::JSONWriter::Write(msg_dict.get(), false, &msg_json);
 
   PostResponseToExternalPort(msg_json);
 }
@@ -111,7 +112,9 @@ bool ExtensionPortContainer::Send(IPC::Message *message) {
 }
 
 void ExtensionPortContainer::OnExtensionMessageInvoke(
-    const std::string& function_name, const ListValue& args) {
+    const std::string& function_name,
+    const ListValue& args,
+    bool requires_incognito_access) {
   if (function_name == ExtensionMessageService::kDispatchOnMessage) {
     DCHECK_EQ(args.GetSize(), 2u);
 
@@ -141,7 +144,7 @@ void ExtensionPortContainer::OnExtensionHandleMessage(
   msg_dict.SetString(ext::kAutomationMessageDataKey, message);
 
   std::string msg_json;
-  JSONWriter::Write(&msg_dict, false, &msg_json);
+  base::JSONWriter::Write(&msg_dict, false, &msg_json);
 
   PostMessageToExternalPort(msg_json);
 }
@@ -153,7 +156,7 @@ void ExtensionPortContainer::OnExtensionPortDisconnected(int source_port_id) {
   msg_dict.SetInteger(ext::kAutomationPortIdKey, port_id_);
 
   std::string msg_json;
-  JSONWriter::Write(&msg_dict, false, &msg_json);
+  base::JSONWriter::Write(&msg_dict, false, &msg_json);
 
   PostMessageToExternalPort(msg_json);
 }
@@ -170,7 +173,7 @@ bool ExtensionPortContainer::InterceptMessageFromExternalHost(
     LOG(WARNING) << "Wrong origin on automation port message " << origin;
   }
 
-  scoped_ptr<Value> message_value(JSONReader::Read(message, false));
+  scoped_ptr<Value> message_value(base::JSONReader::Read(message, false));
   DCHECK(message_value->IsType(Value::TYPE_DICTIONARY));
   if (!message_value->IsType(Value::TYPE_DICTIONARY))
     return true;
@@ -205,6 +208,13 @@ bool ExtensionPortContainer::InterceptMessageFromExternalHost(
     // Channel name is optional.
     message_dict->GetString(ext::kAutomationChannelNameKey, &channel_name);
 
+    // Tab information is optional, try to retrieve it
+    // and re-flatten it to a string.
+    std::string tab_json("null");
+    DictionaryValue* tab = NULL;
+    if (message_dict->GetDictionary(ext::kAutomationTabJsonKey, &tab))
+      base::JSONWriter::Write(tab, false, &tab_json);
+
     int routing_id = view_host->routing_id();
     // Create the extension port and connect it.
     scoped_ptr<ExtensionPortContainer> port(
@@ -212,7 +222,7 @@ bool ExtensionPortContainer::InterceptMessageFromExternalHost(
 
     int process_id = view_host->process()->id();
     if (port->Connect(extension_id, process_id, routing_id, connection_id,
-                      channel_name)) {
+                      channel_name, tab_json)) {
       // We have a successful connection.
       automation->AddPortContainer(port.release());
     }

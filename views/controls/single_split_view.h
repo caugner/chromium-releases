@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,14 +25,15 @@ class SingleSplitView : public views::View {
 
   virtual void Layout();
 
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+
   // SingleSplitView's preferred size is the sum of the preferred widths
   // and the max of the heights.
   virtual gfx::Size GetPreferredSize();
 
   // Overriden to return a resize cursor when over the divider.
   virtual gfx::NativeCursor GetCursorForPoint(Event::EventType event_type,
-                                              int x,
-                                              int y);
+                                              const gfx::Point& p);
 
   void set_divider_offset(int divider_offset) {
     divider_offset_ = divider_offset;
@@ -53,7 +54,7 @@ class SingleSplitView : public views::View {
 
  private:
   // Returns true if |x| or |y| is over the divider.
-  bool IsPointInDivider(int x, int y);
+  bool IsPointInDivider(const gfx::Point& p);
 
   // Returns width in case of horizontal split and height otherwise.
   int GetPrimaryAxisSize() {
@@ -81,6 +82,9 @@ class SingleSplitView : public views::View {
   int divider_offset_;
 
   bool resize_leading_on_bounds_change_;
+
+  // The accessible name of this view.
+  std::wstring accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(SingleSplitView);
 };

@@ -40,7 +40,12 @@
 // clash with ::testing::Mock.
 class Mock {
  public:
+  Mock() {}
+
   MOCK_METHOD0(DoThis, void());
+
+ private:
+  GTEST_DISALLOW_COPY_AND_ASSIGN_(Mock);
 };
 
 namespace testing {
@@ -51,6 +56,11 @@ using testing::GMOCK_FLAG(verbose);
 using testing::HasSubstr;
 using testing::NiceMock;
 using testing::StrictMock;
+
+#if GTEST_HAS_STREAM_REDIRECTION_
+using testing::internal::CaptureStdout;
+using testing::internal::GetCapturedStdout;
+#endif  // GTEST_HAS_STREAM_REDIRECTION_
 
 // Defines some mock classes needed by the tests.
 
@@ -64,10 +74,14 @@ class Foo {
 
 class MockFoo : public Foo {
  public:
+  MockFoo() {}
   void Delete() { delete this; }
 
   MOCK_METHOD0(DoThis, void());
   MOCK_METHOD1(DoThat, int(bool flag));
+
+ private:
+  GTEST_DISALLOW_COPY_AND_ASSIGN_(MockFoo);
 };
 
 class MockBar {
@@ -89,19 +103,20 @@ class MockBar {
 
  private:
   string str_;
+
+  GTEST_DISALLOW_COPY_AND_ASSIGN_(MockBar);
 };
 
-// TODO(wan@google.com): find a way to re-enable these tests.
-#if 0
+#if GTEST_HAS_STREAM_REDIRECTION_
 
 // Tests that a nice mock generates no warning for uninteresting calls.
 TEST(NiceMockTest, NoWarningForUninterestingCall) {
   NiceMock<MockFoo> nice_foo;
 
-  CaptureTestStdout();
+  CaptureStdout();
   nice_foo.DoThis();
   nice_foo.DoThat(true);
-  EXPECT_EQ("", GetCapturedTestStdout());
+  EXPECT_STREQ("", GetCapturedStdout().c_str());
 }
 
 // Tests that a nice mock generates no warning for uninteresting calls
@@ -112,9 +127,9 @@ TEST(NiceMockTest, NoWarningForUninterestingCallAfterDeath) {
   ON_CALL(*nice_foo, DoThis())
       .WillByDefault(Invoke(nice_foo, &MockFoo::Delete));
 
-  CaptureTestStdout();
+  CaptureStdout();
   nice_foo->DoThis();
-  EXPECT_EQ("", GetCapturedTestStdout());
+  EXPECT_STREQ("", GetCapturedStdout().c_str());
 }
 
 // Tests that a nice mock generates informational logs for
@@ -123,18 +138,18 @@ TEST(NiceMockTest, InfoForUninterestingCall) {
   NiceMock<MockFoo> nice_foo;
 
   GMOCK_FLAG(verbose) = "info";
-  CaptureTestStdout();
+  CaptureStdout();
   nice_foo.DoThis();
-  EXPECT_THAT(GetCapturedTestStdout(),
+  EXPECT_THAT(GetCapturedStdout(),
               HasSubstr("Uninteresting mock function call"));
 
-  CaptureTestStdout();
+  CaptureStdout();
   nice_foo.DoThat(true);
-  EXPECT_THAT(GetCapturedTestStdout(),
+  EXPECT_THAT(GetCapturedStdout(),
               HasSubstr("Uninteresting mock function call"));
 }
 
-#endif  // 0
+#endif  // GTEST_HAS_STREAM_REDIRECTION_
 
 // Tests that a nice mock allows expected calls.
 TEST(NiceMockTest, AllowsExpectedCall) {
@@ -173,21 +188,21 @@ TEST(NiceMockTest, NonDefaultConstructor10) {
   nice_bar.That(5, true);
 }
 
-#if !GTEST_OS_SYMBIAN
+#if !GTEST_OS_SYMBIAN && !GTEST_OS_WINDOWS_MOBILE
 // Tests that NiceMock<Mock> compiles where Mock is a user-defined
 // class (as opposed to ::testing::Mock).  We had to workaround an
 // MSVC 8.0 bug that caused the symbol Mock used in the definition of
 // NiceMock to be looked up in the wrong context, and this test
 // ensures that our fix works.
 //
-// We have to skip this test on Symbian, as it causes the program to
-// crash there, for reasons unclear to us yet.
+// We have to skip this test on Symbian and Windows Mobile, as it
+// causes the program to crash there, for reasons unclear to us yet.
 TEST(NiceMockTest, AcceptsClassNamedMock) {
   NiceMock< ::Mock> nice;
   EXPECT_CALL(nice, DoThis());
   nice.DoThis();
 }
-#endif  // !GTEST_OS_SYMBIAN
+#endif  // !GTEST_OS_SYMBIAN && !GTEST_OS_WINDOWS_MOBILE
 
 // Tests that a strict mock allows expected calls.
 TEST(StrictMockTest, AllowsExpectedCall) {
@@ -247,21 +262,21 @@ TEST(StrictMockTest, NonDefaultConstructor10) {
                           "Uninteresting mock function call");
 }
 
-#if !GTEST_OS_SYMBIAN
+#if !GTEST_OS_SYMBIAN && !GTEST_OS_WINDOWS_MOBILE
 // Tests that StrictMock<Mock> compiles where Mock is a user-defined
 // class (as opposed to ::testing::Mock).  We had to workaround an
 // MSVC 8.0 bug that caused the symbol Mock used in the definition of
 // StrictMock to be looked up in the wrong context, and this test
 // ensures that our fix works.
 //
-// We have to skip this test on Symbian, as it causes the program to
-// crash there, for reasons unclear to us yet.
+// We have to skip this test on Symbian and Windows Mobile, as it
+// causes the program to crash there, for reasons unclear to us yet.
 TEST(StrictMockTest, AcceptsClassNamedMock) {
   StrictMock< ::Mock> strict;
   EXPECT_CALL(strict, DoThis());
   strict.DoThis();
 }
-#endif  // !GTEST_OS_SYMBIAN
+#endif  // !GTEST_OS_SYMBIAN && !GTEST_OS_WINDOWS_MOBILE
 
 }  // namespace gmock_nice_strict_test
 }  // namespace testing

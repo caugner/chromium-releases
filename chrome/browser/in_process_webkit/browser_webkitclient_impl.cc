@@ -6,9 +6,9 @@
 
 #include "base/logging.h"
 #include "chrome/browser/in_process_webkit/dom_storage_dispatcher_host.h"
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 
 WebKit::WebClipboard* BrowserWebKitClientImpl::clipboard() {
   NOTREACHED();
@@ -47,14 +47,16 @@ BrowserWebKitClientImpl::createMessagePortChannel() {
   return NULL;
 }
 
-void BrowserWebKitClientImpl::setCookies(const WebKit::WebURL& url,
-                                         const WebKit::WebURL& policy_url,
-                                         const WebKit::WebString& value) {
+void BrowserWebKitClientImpl::setCookies(
+    const WebKit::WebURL& url,
+    const WebKit::WebURL& first_party_for_cookies,
+    const WebKit::WebString& value) {
   NOTREACHED();
 }
 
 WebKit::WebString BrowserWebKitClientImpl::cookies(
-    const WebKit::WebURL& url, const WebKit::WebURL& policy_url) {
+    const WebKit::WebURL& url,
+    const WebKit::WebURL& first_party_for_cookies) {
   NOTREACHED();
   return WebKit::WebString();
 }
@@ -78,6 +80,11 @@ WebKit::WebURLLoader* BrowserWebKitClientImpl::createURLLoader() {
   return NULL;
 }
 
+WebKit::WebSocketStreamHandle* BrowserWebKitClientImpl::createSocketStreamHandle() {
+  NOTREACHED();
+  return NULL;
+}
+
 void BrowserWebKitClientImpl::getPluginList(bool refresh,
     WebKit::WebPluginListBuilder* builder) {
   NOTREACHED();
@@ -90,16 +97,7 @@ WebKit::WebData BrowserWebKitClientImpl::loadResource(const char* name) {
 
 WebKit::WebStorageNamespace*
 BrowserWebKitClientImpl::createLocalStorageNamespace(
-    const WebKit::WebString& path) {
-  // The "WebStorage" interface is used for renderer WebKit -> browser WebKit
-  // communication only.  "WebStorageClient" will be used for browser WebKit ->
-  // renderer WebKit.  So this will never be implemented.
-  NOTREACHED();
-  return 0;
-}
-
-WebKit::WebStorageNamespace*
-BrowserWebKitClientImpl::createSessionStorageNamespace() {
+    const WebKit::WebString& path, unsigned quota) {
   // The "WebStorage" interface is used for renderer WebKit -> browser WebKit
   // communication only.  "WebStorageClient" will be used for browser WebKit ->
   // renderer WebKit.  So this will never be implemented.
@@ -110,11 +108,17 @@ BrowserWebKitClientImpl::createSessionStorageNamespace() {
 void BrowserWebKitClientImpl::dispatchStorageEvent(
     const WebKit::WebString& key, const WebKit::WebString& old_value,
     const WebKit::WebString& new_value, const WebKit::WebString& origin,
-    bool is_local_storage) {
+    const WebKit::WebURL& url, bool is_local_storage) {
   // TODO(jorlow): Implement
   if (!is_local_storage)
     return;
 
   DOMStorageDispatcherHost::DispatchStorageEvent(key, old_value, new_value,
-                                                 origin, is_local_storage);
+                                                 origin, url, is_local_storage);
+}
+
+WebKit::WebSharedWorkerRepository*
+BrowserWebKitClientImpl::sharedWorkerRepository() {
+    NOTREACHED();
+    return NULL;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gfx/point.h"
-#include "base/gfx/rect.h"
 #include "base/string16.h"
+#include "base/values.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
+#include "gfx/point.h"
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 
@@ -364,6 +366,8 @@ IPC_BEGIN_MESSAGES(Automation)
                              int /* view_handle */)
 
   // Opens a new browser window.
+  // TODO(sky): remove this and replace with OpenNewBrowserWindowOfType.
+  // Doing this requires updating the reference build.
   IPC_SYNC_MESSAGE_ROUTED1_0(AutomationMsg_OpenNewBrowserWindow,
                              bool /* show */ )
 
@@ -547,9 +551,12 @@ IPC_BEGIN_MESSAGES(Automation)
   //   - bool: |reverse|
   //      true: Focus will be set to the last focusable element
   //      false: Focus will be set to the first focusable element
+  //   - bool: |restore_focus_to_view|
+  //      true: The renderer view associated with the current tab will be
+  //            infomed that it is receiving focus.
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED2(AutomationMsg_SetInitialFocus, int, bool)
+  IPC_MESSAGE_ROUTED3(AutomationMsg_SetInitialFocus, int, bool, bool)
 
   // This message is an outgoing message from Chrome to an external host.
   // It is a request to open a url
@@ -771,16 +778,16 @@ IPC_BEGIN_MESSAGES(Automation)
                              bool, /* is_visible */
                              bool  /* still_animating */)
 
-  // This message requests the number of SSL related info bars opened.  It
+  // This message requests the number of related info bars opened.  It
   // returns -1 if an error occurred.
-  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GetSSLInfoBarCount,
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GetInfoBarCount,
                              int /* tab_handle */,
                              int /* info bar count */)
 
-  // This message triggers the action associated with the link in the info-bar
-  // at the specified index.  If |wait for navigation| is true, it won't return
-  // until a navigation has occurred.
-  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_ClickSSLInfoBarLink,
+  // This message triggers the action associated with the "accept" button in
+  // the info-bar at the specified index.  If |wait for navigation| is true, it
+  // won't return until a navigation has occurred.
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_ClickInfoBarAccept,
                              int /* tab_handle */,
                              int /* info bar index */,
                              bool /* wait for navigation */,
@@ -903,10 +910,19 @@ IPC_BEGIN_MESSAGES(Automation)
   // value is the number of windows.
   IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_NormalBrowserWindowCount, int)
 
-  // Used to put the browser into "extension automation mode" for the
-  // current profile, or turn off the mode.
-  IPC_MESSAGE_ROUTED1(AutomationMsg_SetEnableExtensionAutomation,
-                      bool /* true to enable extension automation */)
+  // Used to put the browser into "extension automation mode" for a given
+  // set of Chrome Extensions API functions for the current profile, or turn
+  // off automation mode.  The specified tab is used as the conduit for all
+  // automated API functions.  It must be an external tab (as in
+  // AutomationMsg_CreateExternalTab).
+  IPC_MESSAGE_ROUTED2(AutomationMsg_SetEnableExtensionAutomation,
+                      // Tab handle.
+                      int,
+                      // Empty to disable automation, non-empty to enable
+                      // automation of the specified API functions, single
+                      // entry of "*" to enable automation of all API
+                      // functions.
+                      std::vector<std::string>)
 
   // This message tells the browser to start using the new proxy configuration
   // represented by the given JSON string. The parameters used in the JSON
@@ -933,12 +949,11 @@ IPC_BEGIN_MESSAGES(Automation)
                              string16 /* chrome_locale */)
 
 #if defined(OS_WIN)
-  IPC_MESSAGE_ROUTED5(AutomationMsg_ForwardContextMenuToExternalHost,
+  IPC_MESSAGE_ROUTED4(AutomationMsg_ForwardContextMenuToExternalHost,
                       int /* tab_handle */,
                       HANDLE /* source menu handle */,
-                      int    /* the x coordinate for displaying the menu */,
-                      int    /* the y coordinate for displaying the menu */,
-                      int    /* align flags */)
+                      int    /* align flags */,
+                      IPC::ContextMenuParams /* params */)
 
   IPC_MESSAGE_ROUTED2(AutomationMsg_ForwardContextMenuCommandToChrome,
                       int /* tab_handle */,
@@ -1005,7 +1020,17 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetFilteredInetHitCount,
                              int /* hit_count */)
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+  // Is the browser in fullscreen mode?
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_IsFullscreen,
+                             int /* browser_handle */,
+                             bool /* is_fullscreen */)
+
+  // Is the fullscreen bubble visible?
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_IsFullscreenBubbleVisible,
+                             int /* browser_handle */,
+                             bool /* is_visible */)
+
+#if defined(OS_POSIX)
   // See previous definition of this message for explanation of why it is
   // defined twice.
   IPC_MESSAGE_ROUTED3(AutomationMsg_WindowClick, int, gfx::Point, int)
@@ -1065,29 +1090,29 @@ IPC_BEGIN_MESSAGES(Automation)
       AutomationMsg_GoForwardBlockUntilNavigationsComplete, int, int,
       AutomationMsg_NavigationResponseValues)
 
-  // This message is used by automaton clients to upload histogram data to the
+  // This message is used by automation clients to upload histogram data to the
   // browser process.
   IPC_MESSAGE_ROUTED1(AutomationMsg_RecordHistograms,
                       std::vector<std::string> /* histogram_list */)
 
-  IPC_MESSAGE_ROUTED3(AutomationMsg_AttachExternalTab,
-                      int /* tab_handle */,
-                      intptr_t /* cookie */,
-                      int /* disposition */)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_AttachExternalTab,
+                      int     /* 'source' tab_handle */,
+                      IPC::AttachExternalTabParams)
 
   // Sent when the automation client connects to an existing tab.
-  IPC_SYNC_MESSAGE_ROUTED1_3(AutomationMsg_ConnectExternalTab,
-                             intptr_t /* cookie */,
+  IPC_SYNC_MESSAGE_ROUTED2_3(AutomationMsg_ConnectExternalTab,
+                             uint64 /* cookie */,
+                             bool   /* allow/block tab*/,
                              gfx::NativeWindow  /* Tab container window */,
                              gfx::NativeWindow  /* Tab window */,
                              int  /* Handle to the new tab */)
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_POSIX)
   // TODO(estade): this should be merged with the windows message of the same
   // name. See comment for WindowClick.
   IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_WindowDrag,
                              int, std::vector<gfx::Point>, int, bool, bool)
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+#endif  // defined(OS_POSIX)
 
   // This message gets the bounds of the window.
   // Request:
@@ -1129,5 +1154,227 @@ IPC_BEGIN_MESSAGES(Automation)
                              int,   // tab handle
                              int)   // numbers of entries (negative or positive)
 
+  // Silently install the extension in the given crx file.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_InstallExtension,
+                             FilePath /* full path to crx file */,
+                             AutomationMsg_ExtensionResponseValues)
+
+  // Silently load the extension in the given directory.  This expects an
+  // extension expanded into the directory, not a crx file.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_LoadExpandedExtension,
+                             FilePath /* root directory of extension */,
+                             AutomationMsg_ExtensionResponseValues)
+
+  // Retrieves a list of the root directories of all enabled extensions
+  // that have been installed into Chrome by dropping a .crx file onto
+  // Chrome or an equivalent action.  Other types of extensions are not
+  // included on the list (e.g. "component" extensions, "external"
+  // extensions or extensions loaded via --load-extension since the first
+  // two are generally not useful for testing (e.g. an external extension
+  // could mess with an automated test if it's present on some systems only)
+  // and the last would generally be explicitly loaded by tests.
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetEnabledExtensions,
+                             std::vector<FilePath>)
+
+  // This message requests the type of the window with the given handle. The
+  // return value contains the type (Browser::Type), or -1 if the request
+  // failed.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_Type, int, int)
+
+  // Opens a new browser window of a specific type.
+  IPC_SYNC_MESSAGE_ROUTED2_0(AutomationMsg_OpenNewBrowserWindowOfType,
+                             int   /* Type (Browser::Type) */,
+                             bool  /* show */ )
+
+  // This message requests that the mouse be moved to this location, in
+  // window coordinate space.
+  // Request:
+  //   int - the handle of the window that's the context for this click
+  //   gfx::Point - the location to move to
+  IPC_MESSAGE_ROUTED2(AutomationMsg_WindowMouseMove, int, gfx::Point)
+
+  // Called when requests should be downloaded using a host browser's
+  // download mechanism when chrome is being embedded.
+  IPC_MESSAGE_ROUTED2(AutomationMsg_DownloadRequestInHost,
+                      int /* tab_handle */,
+                      int /* request_id */)
+
+  // Shuts down the session service for the browser identified by
+  // |browser_handle|. On success |result| is set to true.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_ShutdownSessionService,
+                             int   /* browser_handle */,
+                             bool  /* result */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_SaveAsAsync,
+                      int /* tab handle */)
+
+#if defined(OS_WIN)
+  // An incoming message from an automation host to Chrome.  Signals that
+  // the browser containing |tab_handle| has moved.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_BrowserMove,
+                      int /* tab handle */)
+#endif
+
+  // Used to get cookies for the given URL.
+  IPC_MESSAGE_ROUTED3(AutomationMsg_GetCookiesFromHost,
+                      int /* tab_handle */,
+                      GURL /* url */,
+                      int /* opaque_cookie_id */)
+
+  IPC_MESSAGE_ROUTED5(AutomationMsg_GetCookiesHostResponse,
+                      int /* tab_handle */,
+                      bool /* success */,
+                      GURL /* url */,
+                      std::string /* cookies */,
+                      int /* opaque_cookie_id */)
+
+  // If the given host is empty, then the default content settings are
+  // modified.
+  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_SetContentSetting,
+                             int /* browser handle */,
+                             std::string /* host */,
+                             ContentSettingsType /* content type */,
+                             ContentSetting /* setting */,
+                             bool /* success */)
+
+#if defined(OS_CHROMEOS)
+  // Logs in through the browser's login wizard if available.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_LoginWithUserAndPass,
+                             std::string /* username*/,
+                             std::string /* password*/,
+                             bool /* Whether successful*/)
+#endif
+
+  // Return the bookmarks encoded as a JSON string.
+  IPC_SYNC_MESSAGE_ROUTED1_2(AutomationMsg_GetBookmarksAsJSON,
+                             int /* browser_handle */,
+                             std::string /* bookmarks as a JSON string */,
+                             bool /* success */)
+
+  // Wait for the bookmark model to load.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_WaitForBookmarkModelToLoad,
+                             int /* browser_handle */,
+                             bool /* success */)
+
+  // Bookmark addition, modification, and removal.
+  // Bookmarks are indexed by their id.
+  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_AddBookmarkGroup,
+                             int /* browser_handle */,
+                             int64 /* parent_id */,
+                             int /* index */,
+                             std::wstring /* title */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED5_1(AutomationMsg_AddBookmarkURL,
+                             int /* browser_handle */,
+                             int64 /* parent_id */,
+                             int /* index */,
+                             std::wstring /* title */,
+                             GURL /* url */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_ReparentBookmark,
+                             int /* browser_handle */,
+                             int64 /* id */,
+                             int64 /* new_parent_id */,
+                             int /* index */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetBookmarkTitle,
+                             int /* browser_handle */,
+                             int64 /* id */,
+                             std::wstring /* title */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetBookmarkURL,
+                             int /* browser_handle */,
+                             int64 /* id */,
+                             GURL /* url */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_RemoveBookmark,
+                             int /* browser_handle */,
+                             int64 /* id */,
+                             bool /* success */)
+
+  // This message informs the browser process to remove the history entries
+  // for the specified types across all time ranges. See
+  // browsing_data_remover.h for a list of REMOVE_* types supported in the
+  // remove_mask parameter.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_RemoveBrowsingData, int)
+
+  // Block until the focused view id changes to something other than
+  // |previous_view_id|.
+  IPC_SYNC_MESSAGE_ROUTED2_2(AutomationMsg_WaitForFocusedViewIDToChange,
+                             int /* window handle */,
+                             int /* previous_view_id */,
+                             bool /* success */,
+                             int /* new_view_id */)
+
+  // To avoid race conditions, waiting until a popup menu opens is a
+  // three-step process:
+  //   1. Call StartTrackingPopupMenus.
+  //   2. Call an automation method that results in opening the popup menu.
+  //   3. Call WaitForPopupMenuToOpen and check for success.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_StartTrackingPopupMenus,
+                             int /* browser handle */,
+                             bool /* success */)
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_WaitForPopupMenuToOpen,
+                             bool /* success */)
+
+  // Generic pyauto pattern to help avoid future addition of
+  // automation messages.
+  IPC_SYNC_MESSAGE_ROUTED2_2(AutomationMsg_SendJSONRequest,
+                             int /* browser_handle */,
+                             std::string /* JSON request */,
+                             std::string /* JSON response */,
+                             bool /* success */)
+
+  // Installs an extension from the crx file and returns its id.
+  // On error, |extension handle| will be 0.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_InstallExtensionAndGetHandle,
+                             FilePath     /* full path to crx file */,
+                             int          /* extension handle */)
+
+  // Waits for the next extension test result. Sets |test result| as the
+  // received result and |message| as any accompanying message with the
+  // result, which could be the empty string.
+  IPC_SYNC_MESSAGE_ROUTED0_2(AutomationMsg_WaitForExtensionTestResult,
+                             bool         /* test result */,
+                             std::string  /* message */)
+
+  // Uninstalls an extension. On success |success| is true.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_UninstallExtension,
+                             int   /* extension handle */,
+                             bool  /* success */)
+
+  // Enables an extension. On success |success| is true.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_EnableExtension,
+                             int   /* extension handle */,
+                             bool  /* success */)
+
+  // Disables an extension. On success |success| is true.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_DisableExtension,
+                             int   /* extension handle */,
+                             bool  /* success */)
+
+  // Executes the action associated with the given extension. This executes
+  // the extension's page or browser action in the given browser, but does
+  // not open popups. On success |success| is true.
+  IPC_SYNC_MESSAGE_ROUTED2_1(
+      AutomationMsg_ExecuteExtensionActionInActiveTabAsync,
+      int   /* extension handle */,
+      int   /* browser handle */,
+      bool  /* success */)
+
+  // Moves the browser action to the given index in the browser action toolbar.
+  // On success |success| is true.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_MoveExtensionBrowserAction,
+                             int   /* extension handle */,
+                             int   /* index */,
+                             bool  /* success */)
+
+  // Gets an extension property |property type|. On success |success| is true,
+  // and |property value| is set.
+  IPC_SYNC_MESSAGE_ROUTED2_2(AutomationMsg_GetExtensionProperty,
+      int                              /* extension handle */,
+      AutomationMsg_ExtensionProperty  /* property type */,
+      bool                             /* success */,
+      std::string                      /* property value */)
 
 IPC_END_MESSAGES(Automation)

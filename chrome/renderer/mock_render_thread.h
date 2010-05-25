@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/common/ipc_test_sink.h"
 #include "chrome/renderer/mock_printer.h"
 #include "chrome/renderer/render_thread.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
 
 struct ViewMsg_Print_Params;
 struct ViewMsg_PrintPages_Params;
@@ -40,9 +41,9 @@ class MockRenderThread : public RenderThreadBase {
   // class.
   virtual bool Send(IPC::Message* msg);
 
-  // Our mock thread doesn't do filtering.
-  virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter) { }
-  virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) { }
+  // Filtering support.
+  virtual void AddFilter(IPC::ChannelProxy::MessageFilter* filter);
+  virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter);
 
   // Our mock thread doesn't deal with hidden and restored tabs.
   virtual void WidgetHidden() { }
@@ -78,7 +79,7 @@ class MockRenderThread : public RenderThreadBase {
 
   // The Widget expects to be returned valid route_id.
   void OnMsgCreateWidget(int opener_id,
-                         bool activatable,
+                         WebKit::WebPopupType popup_type,
                          int* route_id);
 
   // The callee expects to be returned a valid channel_id.
@@ -93,7 +94,7 @@ class MockRenderThread : public RenderThreadBase {
 #endif
 
 #if defined(OS_MACOSX)
-  void OnAllocatePDFTransport(size_t buffer_size,
+  void OnAllocatePDFTransport(uint32 buffer_size,
                               base::SharedMemoryHandle* handle);
 #endif
 

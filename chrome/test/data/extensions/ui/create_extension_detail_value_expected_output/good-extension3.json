@@ -5,11 +5,10 @@
   "enabled": true,
   "description": "",
   "permissions": [],
-  "content_scripts": [
-    {
-      "matches": ["file://*"],
-      "js": ["page.js"]
-    }
-  ],
-  "views": []
+  "allow_reload": false,
+  "order": 2,
+  "enabledIncognito": false,
+  "content_scripts": [],
+  "views": [],
+  "hasPopupAction": false
 }

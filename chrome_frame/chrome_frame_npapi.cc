@@ -11,6 +11,8 @@
 #include "base/win_util.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/ff_privilege_check.h"
+#include "chrome_frame/np_utils.h"
+#include "chrome_frame/scoped_ns_ptr_win.h"
 #include "chrome_frame/utils.h"
 
 MessageLoop* ChromeFrameNPAPI::message_loop_ = NULL;
@@ -55,11 +57,19 @@ const NPUTF8* ChromeFrameNPAPI::plugin_property_identifier_names_[] = {
 const NPUTF8* ChromeFrameNPAPI::plugin_method_identifier_names_[] = {
   "postMessage",
   "postPrivateMessage",
+  "installExtension",
+  "loadExtension",
+  "enableExtensionAutomation",
+  "getEnabledExtensions"
 };
 
 ChromeFrameNPAPI::PluginMethod ChromeFrameNPAPI::plugin_methods_[] = {
   &ChromeFrameNPAPI::postMessage,
   &ChromeFrameNPAPI::postPrivateMessage,
+  &ChromeFrameNPAPI::installExtension,
+  &ChromeFrameNPAPI::loadExtension,
+  &ChromeFrameNPAPI::enableExtensionAutomation,
+  &ChromeFrameNPAPI::getEnabledExtensions,
 };
 
 NPIdentifier
@@ -79,8 +89,6 @@ void ChromeFrameNPAPI::CompileAsserts() {
                  you_must_add_both_plugin_property_and_name);
 }
 
-static const int kMaxBytesForPluginConsumption = 0x7FFFFFFF;
-
 static const char kPluginSrcAttribute[] = "src";
 static const char kPluginForceFullPageAttribute[] = "force_full_page";
 static const char kPluginOnloadAttribute[] = "onload";
@@ -98,156 +106,12 @@ static const char kPluginChromeExtraArguments[] = "chrome_extra_arguments";
 // If privileged mode is enabled, the string value of this argument will
 // be used as the profile name for our chrome.exe instance.
 static const char kPluginChromeProfileName[] = "chrome_profile_name";
+// If privileged mode is enabled, this argument will be taken as a
+// comma-separated list of API function calls to automate.
+static const char kPluginChromeFunctionsAutomatedAttribute[] =
+    "chrome_functions_automated";
 // If chrome network stack is to be used
 static const char kPluginUseChromeNetwork[] = "usechromenetwork";
-
-
-NPError NPP_New(NPMIMEType plugin_type, NPP instance, uint16 mode, int16 argc,
-                char* argn[], char* argv[], NPSavedData* saved) {
-  if (instance == NULL)
-    return NPERR_INVALID_INSTANCE_ERROR;
-
-  ChromeFrameNPAPI::ChromeFrameNPObject* chrome_frame_npapi_obj =
-      reinterpret_cast<ChromeFrameNPAPI::ChromeFrameNPObject*>(
-          npapi::CreateObject(instance, ChromeFrameNPAPI::PluginClass()));
-  DCHECK(chrome_frame_npapi_obj != NULL);
-
-  ChromeFrameNPAPI* plugin_instance =
-      chrome_frame_npapi_obj->chrome_frame_plugin_instance;
-  DCHECK(plugin_instance != NULL);
-
-  // Note that we MUST set instance->pdata BEFORE calling Initialize. This is
-  // because Initialize can call back into the NPAPI host which will need the
-  // pdata field to be set.
-  chrome_frame_npapi_obj->chrome_frame_plugin_instance =
-      plugin_instance;
-  instance->pdata = chrome_frame_npapi_obj;
-
-  bool init = plugin_instance->Initialize(plugin_type, instance,
-                                          mode, argc, argn, argv);
-  DCHECK(init);
-
-  return NPERR_NO_ERROR;
-}
-
-NPError NPP_Destroy(NPP instance, NPSavedData** save) {
-  // Takes ownership and releases the object at the end of scope.
-  ScopedNpObject<ChromeFrameNPAPI::ChromeFrameNPObject> chrome_frame_npapi_obj(
-      reinterpret_cast<ChromeFrameNPAPI::ChromeFrameNPObject*>(
-          instance->pdata));
-
-  if (chrome_frame_npapi_obj.get()) {
-    ChromeFrameNPAPI* plugin_instance =
-        ChromeFrameNPAPI::ChromeFrameInstanceFromPluginInstance(instance);
-
-    plugin_instance->Uninitialize();
-    instance->pdata = NULL;
-  }
-
-  return NPERR_NO_ERROR;
-}
-
-NPError NPP_SetWindow(NPP instance, NPWindow* window_info) {
-  if (window_info == NULL) {
-    NOTREACHED();
-    return NPERR_GENERIC_ERROR;
-  }
-
-  ChromeFrameNPAPI* plugin_instance =
-      ChromeFrameNPAPI::ChromeFrameInstanceFromPluginInstance(instance);
-
-  if (plugin_instance == NULL) {
-    return NPERR_INVALID_INSTANCE_ERROR;
-  }
-
-  plugin_instance->SetWindow(window_info);
-  return NPERR_NO_ERROR;
-}
-
-NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream* stream,
-                      NPBool seekable, uint16* stream_type) {
-  NPAPIUrlRequest* url_request = ChromeFrameNPAPI::ValidateRequest(
-      instance, stream->notifyData);
-  if (url_request) {
-    if (!url_request->OnStreamCreated(type, stream))
-      return NPERR_GENERIC_ERROR;
-  }
-
-  // We need to return the requested stream mode if we are returning a success
-  // code. If we don't do this it causes Opera to blow up.
-  *stream_type = NP_NORMAL;
-  return NPERR_NO_ERROR;
-}
-
-NPError NPP_DestroyStream(NPP instance, NPStream* stream, NPReason reason) {
-  NPAPIUrlRequest* url_request = ChromeFrameNPAPI::ValidateRequest(
-      instance, stream->notifyData);
-  if (url_request) {
-    url_request->OnStreamDestroyed(reason);
-  }
-
-  return NPERR_NO_ERROR;
-}
-
-NPError NPP_GetValue(NPP instance, NPPVariable variable, void* value) {
-  if (variable == NPPVpluginScriptableNPObject) {
-    void** plugin = reinterpret_cast<void**>(value);
-    ChromeFrameNPAPI::ChromeFrameNPObject* chrome_frame_npapi_obj =
-        reinterpret_cast<ChromeFrameNPAPI::ChromeFrameNPObject*>(
-            instance->pdata);
-    // Return value is expected to be retained
-    npapi::RetainObject(reinterpret_cast<NPObject*>(chrome_frame_npapi_obj));
-    *plugin = chrome_frame_npapi_obj;
-    return NPERR_NO_ERROR;
-  }
-  return NPERR_GENERIC_ERROR;
-}
-
-NPError NPP_SetValue(NPP instance, NPNVariable variable, void* value) {
-  return NPERR_GENERIC_ERROR;
-}
-
-int32 NPP_WriteReady(NPP instance, NPStream* stream) {
-  NPAPIUrlRequest* url_request = ChromeFrameNPAPI::ValidateRequest(
-      instance, stream->notifyData);
-  if (url_request) {
-    return url_request->OnWriteReady();
-  }
-
-  return kMaxBytesForPluginConsumption;
-}
-
-int32 NPP_Write(NPP instance, NPStream* stream, int32 offset, int32 len,
-                void* buffer) {
-  NPAPIUrlRequest* url_request = ChromeFrameNPAPI::ValidateRequest(
-      instance, stream->notifyData);
-  if (url_request) {
-    return url_request->OnWrite(buffer, len);
-  }
-
-  return len;
-}
-
-void NPP_URLNotify(NPP instance, const char* url, NPReason reason,
-                   void* notifyData) {
-  ChromeFrameNPAPI* plugin_instance =
-      ChromeFrameNPAPI::ChromeFrameInstanceFromPluginInstance(instance);
-  if (plugin_instance) {
-    plugin_instance->UrlNotify(url, reason, notifyData);
-  }
-}
-
-void NPP_Print(NPP instance, NPPrint* print_info) {
-  ChromeFrameNPAPI* plugin_instance =
-      ChromeFrameNPAPI::ChromeFrameInstanceFromPluginInstance(instance);
-
-  if (plugin_instance == NULL) {
-    NOTREACHED();
-    return;
-  }
-
-  plugin_instance->Print(print_info);
-}
 
 // ChromeFrameNPAPI member defines.
 
@@ -282,40 +146,9 @@ ChromeFrameNPAPI::~ChromeFrameNPAPI() {
   Uninitialize();
 }
 
-std::string GetLocation(NPP instance, NPObject* window) {
-  if (!window) {
-    // Can fail if the browser is closing (seen in Opera).
-    return "";
-  }
-
-  std::string result;
-  ScopedNpVariant href;
-  ScopedNpVariant location;
-
-  bool ok = npapi::GetProperty(instance, window,
-      npapi::GetStringIdentifier("location"), &location);
-  DCHECK(ok);
-  DCHECK(location.type == NPVariantType_Object);
-
-  if (ok) {
-    ok = npapi::GetProperty(instance,
-        location.value.objectValue,
-        npapi::GetStringIdentifier("href"),
-        &href);
-    DCHECK(ok);
-    DCHECK(href.type == NPVariantType_String);
-    if (ok) {
-      result.assign(href.value.stringValue.UTF8Characters,
-                    href.value.stringValue.UTF8Length);
-    }
-  }
-
-  return result;
-}
-
 std::string ChromeFrameNPAPI::GetLocation() {
   // Note that GetWindowObject() will cache the window object here.
-  return ::GetLocation(instance_, GetWindowObject());
+  return np_utils::GetLocation(instance_, GetWindowObject());
 }
 
 bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
@@ -373,6 +206,13 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
       chrome_extra_arguments_arg = argv[i];
     } else if (LowerCaseEqualsASCII(argn[i], kPluginChromeProfileName)) {
       chrome_profile_name_arg = argv[i];
+    } else if (LowerCaseEqualsASCII(argn[i],
+                                    kPluginChromeFunctionsAutomatedAttribute)) {
+      functions_enabled_.clear();
+      // SplitString writes one empty entry for blank strings, so we need this
+      // to allow specifying zero automation of API functions.
+      if (argv[i][0] != '\0')
+        SplitString(argv[i], ',', &functions_enabled_);
     } else if (LowerCaseEqualsASCII(argn[i], kPluginUseChromeNetwork)) {
       chrome_network_arg_set = true;
       chrome_network_arg = atoi(argv[i]) ? true : false;
@@ -402,8 +242,12 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
 
     if (chrome_network_arg_set)
       automation_client_->set_use_chrome_network(chrome_network_arg);
-
   }
+
+  // Setup Url fetcher.
+  url_fetcher_.set_NPPInstance(instance_);
+  url_fetcher_.set_frame_busting(!is_privileged_);
+  automation_client_->SetUrlFetcher(&url_fetcher_);
 
   // TODO(joshia): Initialize navigation here and send proxy config as
   // part of LaunchSettings
@@ -428,7 +272,7 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
   // TODO(stoyan): Ask host for specific interface whether to honor
   // host's in-private mode.
   return InitializeAutomation(profile_name, extra_arguments,
-                              GetBrowserIncognitoMode());
+                              GetBrowserIncognitoMode(), true);
 }
 
 void ChromeFrameNPAPI::Uninitialize() {
@@ -567,12 +411,7 @@ void ChromeFrameNPAPI::UrlNotify(const char* url, NPReason reason,
     npapi::PopPopupsEnabledState(instance_);
   }
 
-  // It is now safe to release the additional reference on the request
-  NPAPIUrlRequest* request = RequestFromNotifyData(notify_data);
-  if (request) {
-    request->Stop();
-    request->Release();
-  }
+  url_fetcher_.UrlNotify(url, reason, notify_data);
 }
 
 void ChromeFrameNPAPI::OnAcceleratorPressed(int tab_handle,
@@ -633,6 +472,7 @@ void ChromeFrameNPAPI::OnOpenURL(int tab_handle,
       target = "_blank";
       break;
     case NEW_WINDOW:
+    case NEW_POPUP:
       target = "_new";
       break;
     default:
@@ -643,49 +483,6 @@ void ChromeFrameNPAPI::OnOpenURL(int tab_handle,
   enabled_popups_ = true;
   npapi::PushPopupsEnabledState(instance_, TRUE);
   npapi::GetURLNotify(instance_, url.spec().c_str(), target.c_str(), NULL);
-}
-
-void ChromeFrameNPAPI::OnRequestStart(int tab_handle, int request_id,
-    const IPC::AutomationURLRequest& request) {
-  scoped_refptr<NPAPIUrlRequest> new_request(new NPAPIUrlRequest(instance_));
-  DCHECK(new_request);
-  if (new_request->Initialize(automation_client_.get(), tab_handle,
-                              request_id, request.url, request.method,
-                              request.referrer, request.extra_request_headers,
-                              request.upload_data.get(), true)) {
-    if (new_request->Start()) {
-      // Keep additional reference on request for NPSTREAM
-      // This will be released in NPP_UrlNotify
-      new_request->AddRef();
-    }
-  }
-}
-
-void ChromeFrameNPAPI::OnRequestRead(int tab_handle, int request_id,
-                                     int bytes_to_read) {
-  automation_client_->ReadRequest(request_id, bytes_to_read);
-}
-
-void ChromeFrameNPAPI::OnRequestEnd(int tab_handle, int request_id,
-                                    const URLRequestStatus& status) {
-  automation_client_->RemoveRequest(request_id, status.status(), true);
-}
-
-void ChromeFrameNPAPI::OnSetCookieAsync(int tab_handle, const GURL& url,
-                                        const std::string& cookie) {
-  // Use the newer NPAPI way if available
-  if (npapi::VersionMinor() >= NPVERS_HAS_URL_AND_AUTH_INFO) {
-    npapi::SetValueForURL(instance_, NPNURLVCookie, url.spec().c_str(),
-                          cookie.c_str(), cookie.length());
-  } else if (url == GURL(document_url_)) {
-    std::string script = "javascript:document.cookie=";
-    script.append(cookie);
-    script.append(1, ';');
-    ExecuteScript(script, NULL);
-  } else {
-    // Third party cookie, use nsICookieService to set the cookie.
-    NOTREACHED();
-  }
 }
 
 bool ChromeFrameNPAPI::HasMethod(NPObject* obj, NPIdentifier name) {
@@ -1324,6 +1121,7 @@ bool ChromeFrameNPAPI::NavigateToURL(const NPVariant* args, uint32_t arg_count,
 
 bool ChromeFrameNPAPI::postMessage(NPObject* npobject, const NPVariant* args,
                                    uint32_t arg_count, NPVariant* result) {
+  // TODO(tommi) See if we can factor these checks out somehow.
   if (arg_count < 1 || arg_count > 2 || !NPVARIANT_IS_STRING(args[0])) {
     NOTREACHED();
     return false;
@@ -1383,6 +1181,184 @@ bool ChromeFrameNPAPI::postPrivateMessage(NPObject* npobject,
   return true;
 }
 
+bool ChromeFrameNPAPI::installExtension(NPObject* npobject,
+                                        const NPVariant* args,
+                                        uint32_t arg_count,
+                                        NPVariant* result) {
+  if (arg_count > 2 || !NPVARIANT_IS_STRING(args[0]) ||
+      (arg_count == 2 && !NPVARIANT_IS_OBJECT(args[1]))) {
+    NOTREACHED();
+    return false;
+  }
+
+  if (!is_privileged_) {
+    DLOG(WARNING) << "installExtension invoked in non-privileged mode";
+    return false;
+  }
+
+  if (!automation_client_.get()) {
+    DLOG(WARNING) << "installExtension invoked with no automaton client";
+    NOTREACHED();
+    return false;
+  }
+
+  const NPString& crx_path_str = args[0].value.stringValue;
+  std::string crx_path_a(crx_path_str.UTF8Characters, crx_path_str.UTF8Length);
+  FilePath::StringType crx_path_u(UTF8ToWide(crx_path_a));
+  FilePath crx_path(crx_path_u);
+  NPObject* retained_function = npapi::RetainObject(args[1].value.objectValue);
+
+  automation_client_->InstallExtension(crx_path, retained_function);
+  // The response to this command will be returned in the OnExtensionInstalled
+  // delegate callback function.
+
+  return true;
+}
+
+void ChromeFrameNPAPI::OnExtensionInstalled(
+    const FilePath& path,
+    void* user_data,
+    AutomationMsg_ExtensionResponseValues res) {
+  ScopedNpVariant result;
+  NPVariant param;
+  INT32_TO_NPVARIANT(res, param);
+  NPObject* func = reinterpret_cast<NPObject*>(user_data);
+
+  InvokeDefault(func, param, &result);
+  npapi::ReleaseObject(func);
+}
+
+bool ChromeFrameNPAPI::loadExtension(NPObject* npobject,
+                                     const NPVariant* args,
+                                     uint32_t arg_count,
+                                     NPVariant* result) {
+  if (arg_count > 2 || !NPVARIANT_IS_STRING(args[0]) ||
+      (arg_count == 2 && !NPVARIANT_IS_OBJECT(args[1]))) {
+    NOTREACHED();
+    return false;
+  }
+
+  if (!is_privileged_) {
+    DLOG(WARNING) << "loadExtension invoked in non-privileged mode";
+    return false;
+  }
+
+  if (!automation_client_.get()) {
+    DLOG(WARNING) << "loadExtension invoked with no automaton client";
+    NOTREACHED();
+    return false;
+  }
+
+  const NPString& path_str = args[0].value.stringValue;
+  std::string path_a(path_str.UTF8Characters, path_str.UTF8Length);
+  FilePath::StringType path_u(UTF8ToWide(path_a));
+  FilePath path(path_u);
+  NPObject* retained_function = npapi::RetainObject(args[1].value.objectValue);
+
+  automation_client_->LoadExpandedExtension(path, retained_function);
+  // The response to this command will be returned in the OnExtensionInstalled
+  // delegate callback function.
+
+  return true;
+}
+
+bool ChromeFrameNPAPI::enableExtensionAutomation(NPObject* npobject,
+                                                 const NPVariant* args,
+                                                 uint32_t arg_count,
+                                                 NPVariant* result) {
+  if (arg_count > 1 || (arg_count == 1 && !NPVARIANT_IS_STRING(args[0]))) {
+    NOTREACHED();
+    return false;
+  }
+
+  if (!is_privileged_) {
+    DLOG(WARNING) <<
+        "enableExtensionAutomation invoked in non-privileged mode";
+    return false;
+  }
+
+  if (!automation_client_.get()) {
+    DLOG(WARNING) <<
+        "enableExtensionAutomation invoked with no automaton client";
+    NOTREACHED();
+    return false;
+  }
+
+  if (!automation_client_->tab()) {
+    DLOG(WARNING) << "enableExtensionAutomation invoked with no hosted tab";
+    NOTREACHED();
+    return false;
+  }
+
+  // Empty by default e.g. if no arguments passed.
+  std::vector<std::string> functions;
+
+  if (arg_count == 1) {
+    const NPString& functions_str = args[0].value.stringValue;
+    std::string functions_a(functions_str.UTF8Characters,
+                            functions_str.UTF8Length);
+
+    // SplitString writes one empty entry for blank strings, so we need this
+    // to allow specifying zero automation of API functions.
+    if (functions_a[0] != '\0')
+      SplitString(functions_a, ',', &functions);
+  }
+
+  automation_client_->tab()->SetEnableExtensionAutomation(functions);
+  // This function returns no result.
+
+  return true;
+}
+
+bool ChromeFrameNPAPI::getEnabledExtensions(NPObject* npobject,
+                                            const NPVariant* args,
+                                            uint32_t arg_count,
+                                            NPVariant* result) {
+  if (arg_count > 1 || !NPVARIANT_IS_OBJECT(args[0])) {
+    NOTREACHED();
+    return false;
+  }
+
+  if (!is_privileged_) {
+    DLOG(WARNING) << "getEnabledExtensions invoked in non-privileged mode";
+    return false;
+  }
+
+  if (!automation_client_.get()) {
+    DLOG(WARNING) << "getEnabledExtensions invoked with no automaton client";
+    NOTREACHED();
+    return false;
+  }
+
+  NPObject* retained_function = npapi::RetainObject(args[0].value.objectValue);
+
+  automation_client_->GetEnabledExtensions(retained_function);
+  // The response to this command will be returned in the
+  // OnGetEnabledExtensionsCompleted delegate callback function.
+
+  return true;
+}
+
+void ChromeFrameNPAPI::OnGetEnabledExtensionsComplete(
+    void* user_data,
+    const std::vector<FilePath>& extension_directories) {
+  std::vector<std::wstring> extension_paths;
+  for (size_t i = 0; i < extension_directories.size(); ++i) {
+    extension_paths.push_back(extension_directories[i].ToWStringHack());
+  }
+  std::wstring tab_delimited = JoinString(extension_paths, L'\t');
+
+  std::string res = WideToUTF8(tab_delimited);
+
+  ScopedNpVariant result;
+  NPVariant param;
+  STRINGN_TO_NPVARIANT(res.c_str(), res.length(), param);
+
+  NPObject* func = reinterpret_cast<NPObject*>(user_data);
+  InvokeDefault(func, param, &result);
+  npapi::ReleaseObject(func);
+}
+
 void ChromeFrameNPAPI::FireEvent(const std::string& event_type,
                                  const std::string& data) {
   NPVariant arg;
@@ -1440,27 +1416,28 @@ bool ChromeFrameNPAPI::GetBrowserIncognitoMode() {
   return incognito_mode;
 }
 
-NPAPIUrlRequest* ChromeFrameNPAPI::ValidateRequest(
-    NPP instance, void* notify_data) {
-  ChromeFrameNPAPI* plugin_instance =
-      ChromeFrameNPAPI::ChromeFrameInstanceFromPluginInstance(instance);
-  if (plugin_instance) {
-    return plugin_instance->RequestFromNotifyData(notify_data);
-  }
-
-  return NULL;
-}
-
-NPAPIUrlRequest* ChromeFrameNPAPI::RequestFromNotifyData(
-    void* notify_data) const {
-  NPAPIUrlRequest* request = reinterpret_cast<NPAPIUrlRequest*>(notify_data);
-  DCHECK(request ? automation_client_->IsValidRequest(request) : 1);
-  return request;
-}
-
-bool ChromeFrameNPAPI::HandleContextMenuCommand(UINT cmd) {
+bool ChromeFrameNPAPI::HandleContextMenuCommand(UINT cmd,
+    const IPC::ContextMenuParams& params) {
   if (cmd == IDC_ABOUT_CHROME_FRAME) {
     // TODO: implement "About Chrome Frame"
   }
   return false;
+}
+
+NPError ChromeFrameNPAPI::NewStream(NPMIMEType type, NPStream* stream,
+                                    NPBool seekable, uint16* stream_type) {
+  return url_fetcher_.NewStream(type, stream, seekable, stream_type);
+}
+
+int32 ChromeFrameNPAPI::WriteReady(NPStream* stream) {
+  return url_fetcher_.WriteReady(stream);
+}
+
+int32 ChromeFrameNPAPI::Write(NPStream* stream, int32 offset, int32 len,
+                              void* buffer) {
+  return url_fetcher_.Write(stream, offset, len, buffer);
+}
+
+NPError ChromeFrameNPAPI::DestroyStream(NPStream* stream, NPReason reason) {
+  return url_fetcher_.DestroyStream(stream, reason);
 }

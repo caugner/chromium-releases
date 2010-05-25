@@ -1,15 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/sessions/session_types.h"
+#include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-
 
 // Create subclass that overrides TimeNow so that we can control the time used
 // for closed tabs and windows.
@@ -127,6 +127,7 @@ TEST_F(TabRestoreServiceTest, Basic) {
   ASSERT_EQ(TabRestoreService::TAB, entry->type);
   TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
   EXPECT_FALSE(tab->pinned);
+  EXPECT_TRUE(tab->app_extension_id.empty());
   ASSERT_EQ(3U, tab->navigations.size());
   EXPECT_TRUE(url1_ == tab->navigations[0].url());
   EXPECT_TRUE(url2_ == tab->navigations[1].url());
@@ -192,7 +193,7 @@ TEST_F(TabRestoreServiceTest, Restore) {
 }
 
 // Tests restoring a single pinned tab.
-TEST_F(TabRestoreServiceTest, RestorePinned) {
+TEST_F(TabRestoreServiceTest, RestorePinnedAndApp) {
   AddThreeNavigations();
 
   // Have the service record the tab.
@@ -207,6 +208,8 @@ TEST_F(TabRestoreServiceTest, RestorePinned) {
   ASSERT_EQ(TabRestoreService::TAB, entry->type);
   TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
   tab->pinned = true;
+  const std::string app_extension_id("test");
+  tab->app_extension_id = app_extension_id;
 
   // Recreate the service and have it load the tabs.
   RecreateService();
@@ -224,6 +227,7 @@ TEST_F(TabRestoreServiceTest, RestorePinned) {
   EXPECT_TRUE(url2_ == tab->navigations[1].url());
   EXPECT_TRUE(url3_ == tab->navigations[2].url());
   EXPECT_EQ(2, tab->current_navigation_index);
+  EXPECT_TRUE(app_extension_id == tab->app_extension_id);
 }
 
 // Make sure we persist entries to disk that have post data.

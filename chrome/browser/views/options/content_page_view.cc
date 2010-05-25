@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,28 @@
 #include <vsstyle.h>
 #include <vssym32.h>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
+#include "base/string_util.h"
+#include "chrome/browser/autofill/autofill_dialog.h"
+#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/sync/sync_status_ui_helper.h"
-#include "chrome/browser/views/clear_browsing_data.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/importer/importer_data_types.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/views/importer_view.h"
+#include "chrome/browser/views/options/customize_sync_window_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
 #include "chrome/browser/views/options/passwords_exceptions_window_view.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "gfx/canvas.h"
+#include "gfx/native_theme_win.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "views/controls/button/radio_button.h"
@@ -35,51 +44,44 @@ namespace {
 const int kPasswordSavingRadioGroup = 1;
 const int kFormAutofillRadioGroup = 2;
 
-#if defined(BROWSER_SYNC)
 // Background color for the status label when it's showing an error.
 static const SkColor kSyncLabelErrorBgColor = SkColorSetRGB(0xff, 0x9a, 0x9a);
 
 static views::Background* CreateErrorBackground() {
   return views::Background::CreateSolidBackground(kSyncLabelErrorBgColor);
 }
-#endif
+
 }  // namespace
 
 ContentPageView::ContentPageView(Profile* profile)
-    : passwords_exceptions_button_(NULL),
+    : show_passwords_button_(NULL),
       passwords_group_(NULL),
       passwords_asktosave_radio_(NULL),
       passwords_neversave_radio_(NULL),
-      form_autofill_asktosave_radio_(NULL),
-      form_autofill_neversave_radio_(NULL),
+      change_autofill_settings_button_(NULL),
+      form_autofill_enable_radio_(NULL),
+      form_autofill_disable_radio_(NULL),
       themes_group_(NULL),
       themes_reset_button_(NULL),
       themes_gallery_link_(NULL),
-      browsing_data_label_(NULL),
       browsing_data_group_(NULL),
       import_button_(NULL),
-      clear_data_button_(NULL),
-#if defined(BROWSER_SYNC)
       sync_group_(NULL),
-      sync_status_label_(NULL),
       sync_action_link_(NULL),
+      sync_status_label_(NULL),
       sync_start_stop_button_(NULL),
+      sync_customize_button_(NULL),
       sync_service_(NULL),
-#endif
       OptionsPageView(profile) {
-#if defined(BROWSER_SYNC)
   if (profile->GetProfileSyncService()) {
     sync_service_ = profile->GetProfileSyncService();
     sync_service_->AddObserver(this);
-#endif
   }
 }
 
 ContentPageView::~ContentPageView() {
-#if defined(BROWSER_SYNC)
   if (sync_service_)
     sync_service_->RemoveObserver(this);
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -91,41 +93,45 @@ void ContentPageView::ButtonPressed(
       sender == passwords_neversave_radio_) {
     bool enabled = passwords_asktosave_radio_->checked();
     if (enabled) {
-      UserMetricsRecordAction(L"Options_PasswordManager_Enable",
-                              profile()->GetPrefs());
+      UserMetricsRecordAction(
+          UserMetricsAction("Options_PasswordManager_Enable"),
+          profile()->GetPrefs());
     } else {
-      UserMetricsRecordAction(L"Options_PasswordManager_Disable",
-                              profile()->GetPrefs());
+      UserMetricsRecordAction(
+          UserMetricsAction("Options_PasswordManager_Disable"),
+          profile()->GetPrefs());
     }
     ask_to_save_passwords_.SetValue(enabled);
-  } else if (sender == form_autofill_asktosave_radio_ ||
-             sender == form_autofill_neversave_radio_) {
-    bool enabled = form_autofill_asktosave_radio_->checked();
+  } else if (sender == form_autofill_enable_radio_ ||
+             sender == form_autofill_disable_radio_) {
+    bool enabled = form_autofill_enable_radio_->checked();
     if (enabled) {
-      UserMetricsRecordAction(L"Options_FormAutofill_Enable",
+      UserMetricsRecordAction(UserMetricsAction("Options_FormAutofill_Enable"),
                               profile()->GetPrefs());
     } else {
-      UserMetricsRecordAction(L"Options_FormAutofill_Disable",
+      UserMetricsRecordAction(UserMetricsAction("Options_FormAutofill_Disable"),
                               profile()->GetPrefs());
     }
     ask_to_save_form_autofill_.SetValue(enabled);
-  } else if (sender == passwords_exceptions_button_) {
-    UserMetricsRecordAction(L"Options_ShowPasswordsExceptions", NULL);
+  } else if (sender == show_passwords_button_) {
+    UserMetricsRecordAction(
+        UserMetricsAction("Options_ShowPasswordsExceptions"), NULL);
     PasswordsExceptionsWindowView::Show(profile());
+  } else if (sender == change_autofill_settings_button_) {
+    // This button should be disabled if we lack PersonalDataManager.
+    DCHECK(profile()->GetPersonalDataManager());
+    ShowAutoFillDialog(GetWindow()->GetNativeWindow(),
+                       profile()->GetPersonalDataManager(),
+                       profile());
   } else if (sender == themes_reset_button_) {
-    UserMetricsRecordAction(L"Options_ThemesReset", profile()->GetPrefs());
+    UserMetricsRecordAction(UserMetricsAction("Options_ThemesReset"),
+                            profile()->GetPrefs());
     profile()->ClearTheme();
   } else if (sender == import_button_) {
     views::Window::CreateChromeWindow(
       GetWindow()->GetNativeWindow(),
       gfx::Rect(),
-      new ImporterView(profile()))->Show();
-  } else if (sender == clear_data_button_) {
-    views::Window::CreateChromeWindow(
-      GetWindow()->GetNativeWindow(),
-      gfx::Rect(),
-      new ClearBrowsingDataView(profile()))->Show();
-#if defined(BROWSER_SYNC)
+      new ImporterView(profile(), importer::ALL))->Show();
   } else if (sender == sync_start_stop_button_) {
     DCHECK(sync_service_);
 
@@ -133,8 +139,9 @@ void ContentPageView::ButtonPressed(
       ConfirmMessageBoxDialog::RunWithCustomConfiguration(
           GetWindow()->GetNativeWindow(),
           this,
-          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_EXPLANATION_LABEL),
-          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL),
+          l10n_util::GetStringF(IDS_SYNC_STOP_SYNCING_EXPLANATION_LABEL,
+              l10n_util::GetString(IDS_PRODUCT_NAME)),
+          l10n_util::GetString(IDS_SYNC_STOP_SYNCING_DIALOG_TITLE),
           l10n_util::GetString(IDS_SYNC_STOP_SYNCING_CONFIRM_BUTTON_LABEL),
           l10n_util::GetString(IDS_CANCEL),
           gfx::Size(views::Window::GetLocalizedContentsSize(
@@ -145,23 +152,23 @@ void ContentPageView::ButtonPressed(
       sync_service_->EnableForUser();
       ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_OPTIONS);
     }
-#endif
+  } else if (sender == sync_customize_button_) {
+    // sync_customize_button_ should be invisible if sync is not yet set up.
+    DCHECK(sync_service_->HasSyncSetupCompleted());
+    CustomizeSyncWindowView::Show(GetWindow()->GetNativeWindow(), profile());
   }
 }
 
 void ContentPageView::LinkActivated(views::Link* source, int event_flags) {
   if (source == themes_gallery_link_) {
-    UserMetricsRecordAction(L"Options_ThemesGallery", profile()->GetPrefs());
-    BrowserList::GetLastActive()->OpenURL(
-        GURL(l10n_util::GetString(IDS_THEMES_GALLERY_URL)),
-        GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+    UserMetricsRecordAction(UserMetricsAction("Options_ThemesGallery"),
+                            profile()->GetPrefs());
+    BrowserList::GetLastActive()->OpenThemeGalleryTabAndActivate();
     return;
   }
-#if defined(BROWSER_SYNC)
   DCHECK_EQ(source, sync_action_link_);
   DCHECK(sync_service_);
   sync_service_->ShowLoginDialog();
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -180,14 +187,12 @@ void ContentPageView::InitControlLayout() {
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
-#if defined(BROWSER_SYNC)
   if (sync_service_) {
     layout->StartRow(0, single_column_view_set_id);
     InitSyncGroup();
     layout->AddView(sync_group_);
     layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   }
-#endif
 
   layout->StartRow(0, single_column_view_set_id);
   InitPasswordSavingGroup();
@@ -212,8 +217,16 @@ void ContentPageView::InitControlLayout() {
   // Init member prefs so we can update the controls if prefs change.
   ask_to_save_passwords_.Init(prefs::kPasswordManagerEnabled,
                               profile()->GetPrefs(), this);
-  ask_to_save_form_autofill_.Init(prefs::kFormAutofillEnabled,
-                                  profile()->GetPrefs(), this);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableAutoFill)) {
+    ask_to_save_form_autofill_.Init(prefs::kAutoFillEnabled,
+                                    profile()->GetPrefs(), this);
+  } else {
+    ask_to_save_form_autofill_.Init(prefs::kFormAutofillEnabled,
+                                    profile()->GetPrefs(), this);
+  }
+
   is_using_default_theme_.Init(prefs::kCurrentThemeID,
                                profile()->GetPrefs(), this);
 }
@@ -226,11 +239,18 @@ void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
       passwords_neversave_radio_->SetChecked(true);
     }
   }
-  if (!pref_name || *pref_name == prefs::kFormAutofillEnabled) {
+  std::wstring autofill_pref;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableAutoFill)) {
+    autofill_pref = prefs::kAutoFillEnabled;
+  } else {
+    autofill_pref = prefs::kFormAutofillEnabled;
+  }
+  if (!pref_name || *pref_name == prefs::kAutoFillEnabled) {
     if (ask_to_save_form_autofill_.GetValue()) {
-      form_autofill_asktosave_radio_->SetChecked(true);
+      form_autofill_enable_radio_->SetChecked(true);
     } else {
-      form_autofill_neversave_radio_->SetChecked(true);
+      form_autofill_disable_radio_->SetChecked(true);
     }
   }
   if (!pref_name || *pref_name == prefs::kCurrentThemeID) {
@@ -243,24 +263,18 @@ void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
 // ContentsPageView, views::View overrides:
 
 void ContentPageView::Layout() {
-#if defined(BROWSER_SYNC)
   if (is_initialized())
     UpdateSyncControls();
-#endif
   // We need to Layout twice - once to get the width of the contents box...
   View::Layout();
   passwords_asktosave_radio_->SetBounds(
       0, 0, passwords_group_->GetContentsWidth(), 0);
   passwords_neversave_radio_->SetBounds(
       0, 0, passwords_group_->GetContentsWidth(), 0);
-  browsing_data_label_->SetBounds(
-      0, 0, browsing_data_group_->GetContentsWidth(), 0);
-#if defined(BROWSER_SYNC)
   if (is_initialized()) {
     sync_status_label_->SetBounds(
         0, 0, sync_group_->GetContentsWidth(), 0);
   }
-#endif
   // ... and twice to get the height of multi-line items correct.
   View::Layout();
 }
@@ -268,7 +282,7 @@ void ContentPageView::Layout() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentsPageView, ProfileSyncServiceObserver implementation:
-#if defined(BROWSER_SYNC)
+
 void ContentPageView::OnStateChanged() {
   // If the UI controls are not yet initialized, then don't do anything. This
   // can happen if the Options dialog is up, but the Content tab is not yet
@@ -276,7 +290,6 @@ void ContentPageView::OnStateChanged() {
   if (is_initialized())
     Layout();
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // ContentPageView, private:
@@ -292,8 +305,8 @@ void ContentPageView::InitPasswordSavingGroup() {
       kPasswordSavingRadioGroup);
   passwords_neversave_radio_->set_listener(this);
   passwords_neversave_radio_->SetMultiLine(true);
-  passwords_exceptions_button_ = new views::NativeButton(
-      this, l10n_util::GetString(IDS_OPTIONS_PASSWORDS_EXCEPTIONS));
+  show_passwords_button_ = new views::NativeButton(
+      this, l10n_util::GetString(IDS_OPTIONS_PASSWORDS_SHOWPASSWORDS));
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -314,7 +327,7 @@ void ContentPageView::InitPasswordSavingGroup() {
   layout->AddView(passwords_neversave_radio_);
   layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(passwords_exceptions_button_);
+  layout->AddView(show_passwords_button_);
 
   passwords_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_PASSWORDS_GROUP_NAME), L"",
@@ -322,16 +335,21 @@ void ContentPageView::InitPasswordSavingGroup() {
 }
 
 void ContentPageView::InitFormAutofillGroup() {
-  form_autofill_asktosave_radio_ = new views::RadioButton(
-      l10n_util::GetString(IDS_OPTIONS_AUTOFILL_SAVE),
+  form_autofill_enable_radio_ = new views::RadioButton(
+      l10n_util::GetString(IDS_OPTIONS_AUTOFILL_ENABLE),
       kFormAutofillRadioGroup);
-  form_autofill_asktosave_radio_->set_listener(this);
-  form_autofill_asktosave_radio_->SetMultiLine(true);
-  form_autofill_neversave_radio_ = new views::RadioButton(
-      l10n_util::GetString(IDS_OPTIONS_AUTOFILL_NEVERSAVE),
+  form_autofill_enable_radio_->set_listener(this);
+  form_autofill_enable_radio_->SetMultiLine(true);
+  form_autofill_disable_radio_ = new views::RadioButton(
+      l10n_util::GetString(IDS_OPTIONS_AUTOFILL_DISABLE),
       kFormAutofillRadioGroup);
-  form_autofill_neversave_radio_->set_listener(this);
-  form_autofill_neversave_radio_->SetMultiLine(true);
+  form_autofill_disable_radio_->set_listener(this);
+  form_autofill_disable_radio_->SetMultiLine(true);
+
+  change_autofill_settings_button_ = new views::NativeButton(
+      this, l10n_util::GetString(IDS_OPTIONS_AUTOFILL_SETTINGS));
+  if (!profile()->GetPersonalDataManager())
+    change_autofill_settings_button_->SetEnabled(false);
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -340,16 +358,27 @@ void ContentPageView::InitFormAutofillGroup() {
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 
-  const int single_column_view_set_id = 0;
-  ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
+  const int fill_column_view_set_id = 0;
+  const int leading_column_view_set_id = 1;
+  ColumnSet* column_set = layout->AddColumnSet(fill_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
+  column_set = layout->AddColumnSet(leading_column_view_set_id);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
+                        GridLayout::USE_PREF, 0, 0);
 
-  layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(form_autofill_asktosave_radio_);
+  layout->StartRow(0, fill_column_view_set_id);
+  layout->AddView(form_autofill_enable_radio_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
-  layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(form_autofill_neversave_radio_);
+  layout->StartRow(0, fill_column_view_set_id);
+  layout->AddView(form_autofill_disable_radio_);
+  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->StartRow(0, leading_column_view_set_id);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableAutoFill)) {
+    layout->AddView(change_autofill_settings_button_);
+  }
 
   form_autofill_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME),
@@ -388,14 +417,8 @@ void ContentPageView::InitThemesGroup() {
 }
 
 void ContentPageView::InitBrowsingDataGroup() {
-  clear_data_button_ = new views::NativeButton(this,
-      l10n_util::GetString(IDS_OPTIONS_CLEAR_DATA_BUTTON));
   import_button_ = new views::NativeButton(this,
       l10n_util::GetString(IDS_OPTIONS_IMPORT_DATA_BUTTON));
-  browsing_data_label_ = new views::Label(
-      l10n_util::GetString(IDS_OPTIONS_BROWSING_DATA_INFO));
-  browsing_data_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  browsing_data_label_->SetMultiLine(true);
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -404,28 +427,13 @@ void ContentPageView::InitBrowsingDataGroup() {
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 
-  // Add the browsing data label component.
+  // Add the browsing data import button.
   const int single_column_view_set_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
-      GridLayout::USE_PREF, 0, 0);
+                        GridLayout::USE_PREF, 0, 0);
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(browsing_data_label_);
-
-  // Add some padding for not making the next component close together.
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
-
-  // Add double column layout for import and clear browsing buttons.
-  const int double_column_view_set_id = 1;
-  ColumnSet* double_col_set = layout->AddColumnSet(double_column_view_set_id);
-  double_col_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
-                            GridLayout::USE_PREF, 0, 0);
-  double_col_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
-  double_col_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
-                            GridLayout::USE_PREF, 0, 0);
-  layout->StartRow(0, double_column_view_set_id);
   layout->AddView(import_button_);
-  layout->AddView(clear_data_button_);
 
   browsing_data_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_BROWSING_DATA_GROUP_NAME),
@@ -437,7 +445,6 @@ void ContentPageView::OnConfirmMessageAccept() {
   ProfileSyncService::SyncEvent(ProfileSyncService::STOP_FROM_OPTIONS);
 }
 
-#if defined(BROWSER_SYNC)
 void ContentPageView::InitSyncGroup() {
   sync_status_label_ = new views::Label;
   sync_status_label_->SetMultiLine(true);
@@ -448,6 +455,7 @@ void ContentPageView::InitSyncGroup() {
   sync_action_link_->SetController(this);
 
   sync_start_stop_button_ = new views::NativeButton(this, std::wstring());
+  sync_customize_button_ = new views::NativeButton(this, std::wstring());
 
   using views::GridLayout;
   using views::ColumnSet;
@@ -458,15 +466,20 @@ void ContentPageView::InitSyncGroup() {
 
   const int single_column_view_set_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
+
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(sync_status_label_);
+  layout->AddView(sync_status_label_, 3, 1);
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(sync_action_link_);
+  layout->AddView(sync_action_link_, 3, 1);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(sync_start_stop_button_);
+  layout->AddView(sync_customize_button_);
 
   sync_group_ = new OptionsGroupView(contents,
       l10n_util::GetString(IDS_SYNC_OPTIONS_GROUP_NAME), std::wstring(), true);
@@ -476,10 +489,13 @@ void ContentPageView::UpdateSyncControls() {
   DCHECK(sync_service_);
   std::wstring status_label;
   std::wstring link_label;
+  std::wstring customize_button_label;
   std::wstring button_label;
   bool sync_setup_completed = sync_service_->HasSyncSetupCompleted();
-  bool status_has_error = SyncStatusUIHelper::GetLabels(sync_service_,
-      &status_label, &link_label) == SyncStatusUIHelper::SYNC_ERROR;
+  bool status_has_error = sync_ui_util::GetStatusLabels(sync_service_,
+      &status_label, &link_label) == sync_ui_util::SYNC_ERROR;
+  customize_button_label =
+    l10n_util::GetString(IDS_SYNC_CUSTOMIZE_BUTTON_LABEL);
   if (sync_setup_completed) {
     button_label = l10n_util::GetString(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL);
   } else if (sync_service_->SetupInProgress()) {
@@ -491,8 +507,11 @@ void ContentPageView::UpdateSyncControls() {
   sync_status_label_->SetText(status_label);
   sync_start_stop_button_->SetEnabled(!sync_service_->WizardIsVisible());
   sync_start_stop_button_->SetLabel(button_label);
+  sync_customize_button_->SetLabel(customize_button_label);
+  sync_customize_button_->SetVisible(sync_setup_completed);
   sync_action_link_->SetText(link_label);
   sync_action_link_->SetVisible(!link_label.empty());
+
   if (status_has_error) {
     sync_status_label_->set_background(CreateErrorBackground());
     sync_action_link_->set_background(CreateErrorBackground());
@@ -501,5 +520,3 @@ void ContentPageView::UpdateSyncControls() {
     sync_action_link_->set_background(NULL);
   }
 }
-
-#endif  // defined(BROWSER_SYNC)

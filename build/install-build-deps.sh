@@ -8,6 +8,30 @@
 # See http://code.google.com/p/chromium/wiki/LinuxBuildInstructions
 # and http://code.google.com/p/chromium/wiki/LinuxBuild64Bit
 
+usage() {
+  echo "Usage: $0 [--options]"
+  echo "Options:"
+  echo "--[no-]syms: enable or disable installation of debugging symbols"
+  echo "--[no-]gold: enable or disable installation of gold linker"
+  echo "--[no-]lib32: enable or disable installation of 32 bit libraries"
+  echo "Script will prompt interactively if options not given."
+  exit 1
+}
+
+while test "$1" != ""
+do
+  case "$1" in
+  --syms)     do_inst_syms=1;;
+  --no-syms)  do_inst_syms=0;;
+  --gold)     do_inst_gold=1;;
+  --no-gold)  do_inst_gold=0;;
+  --lib32)    do_inst_lib32=1;;
+  --no-lib32) do_inst_lib32=0;;
+  *) usage;;
+  esac
+  shift
+done
+
 install_gold() {
   # Gold is optional; it's a faster replacement for ld,
   # and makes life on 2GB machines much more pleasant.
@@ -21,95 +45,53 @@ install_gold() {
     return
   fi
 
-  BINUTILS=binutils-2.19.1
+  BINUTILS=binutils-2.20
   BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
-  BINUTILS_SHA1=88c91e36cde93433e4c4c2b2e3417777aad84526
+  BINUTILS_SHA1=747e7b4d94bce46587236dc5f428e5b412a590dc
 
   test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
-  if `sha1sum $BINUTILS.tar.bz2` != $BINUTILS_SHA1
+  if test "`sha1sum $BINUTILS.tar.bz2|cut -d' ' -f1`" != "$BINUTILS_SHA1"
   then
     echo Bad sha1sum for $BINUTILS.tar.bz2
     exit 1
   fi
 
   cat > binutils-fix.patch <<__EOF__
---- binutils-2.19.1/gold/reduced_debug_output.h.orig	2009-05-10 14:44:52.000000000 -0700
-+++ binutils-2.19.1/gold/reduced_debug_output.h	2009-05-10 14:46:51.000000000 -0700
-@@ -64,7 +64,7 @@
-   void
-   failed(std::string reason)
-   {
--    gold_warning(reason.c_str());
-+    gold_warning("%s", reason.c_str());
-     failed_ = true;
-   }
+--- binutils-2.20/gold/output.cc.orig	2009-11-17 17:40:49.000000000 -0800
++++ binutils-2.20/gold/output.cc	2009-11-17 18:27:21.000000000 -0800
+@@ -22,6 +22,10 @@
  
-@@ -110,7 +110,7 @@
-   void
-   failed(std::string reason)
-   {
--    gold_warning(reason.c_str());
-+    gold_warning("%s", reason.c_str());
-     this->failed_ = true;
-   }
+ #include "gold.h"
  
-diff -u -r1.3 -r1.4
---- binutils-2.19.1/gold/descriptors.h	2009/01/15 01:29:25	1.3
-+++ binutils-2.19.1/gold/descriptors.h	2009/02/28 03:05:08	1.4
-@@ -69,6 +69,8 @@
-     bool inuse;
-     // Whether this is a write descriptor.
-     bool is_write;
-+    // Whether the descriptor is on the stack.
-+    bool is_on_stack;
-   };
++#if !defined(__STDC_FORMAT_MACROS)
++#define __STDC_FORMAT_MACROS
++#endif
++
+ #include <cstdlib>
+ #include <cstring>
+ #include <cerrno>
+@@ -29,6 +33,7 @@
+ #include <unistd.h>
+ #include <sys/mman.h>
+ #include <sys/stat.h>
++#include <inttypes.h>
+ #include <algorithm>
+ #include "libiberty.h"
  
-   bool
---- binutils-2.19.1/gold/descriptors.cc	2009/01/15 01:29:25	1.3
-+++ binutils-2.19.1/gold/descriptors.cc	2009/02/28 03:05:08	1.4
-@@ -75,6 +75,12 @@
- 	{
- 	  gold_assert(!pod->inuse);
- 	  pod->inuse = true;
-+	  if (descriptor == this->stack_top_)
-+	    {
-+	      this->stack_top_ = pod->stack_next;
-+	      pod->stack_next = -1;
-+	      pod->is_on_stack = false;
-+	    }
- 	  return descriptor;
- 	}
-     }
-@@ -114,6 +120,7 @@
- 	  pod->stack_next = -1;
- 	  pod->inuse = true;
- 	  pod->is_write = (flags & O_ACCMODE) != O_RDONLY;
-+	  pod->is_on_stack = false;
- 
- 	  ++this->current_;
- 	  if (this->current_ >= this->limit_)
-@@ -158,10 +165,11 @@
-   else
-     {
-       pod->inuse = false;
--      if (!pod->is_write)
-+      if (!pod->is_write && !pod->is_on_stack)
- 	{
- 	  pod->stack_next = this->stack_top_;
- 	  this->stack_top_ = descriptor;
-+	  pod->is_on_stack = true;
- 	}
-     }
- }
-@@ -193,6 +201,8 @@
- 	    this->stack_top_ = pod->stack_next;
- 	  else
- 	    this->open_descriptors_[last].stack_next = pod->stack_next;
-+	  pod->stack_next = -1;
-+	  pod->is_on_stack = false;
- 	  return true;
- 	}
-       last = i;
+@@ -3505,11 +3510,11 @@
+ 		  Output_section* os = (*p)->output_section();
+ 		  if (os == NULL)
+ 		    gold_error(_("dot moves backward in linker script "
+-				 "from 0x%llx to 0x%llx"),
++				 "from 0x%"PRIx64" to 0x%"PRIx64),
+ 			       addr + (off - startoff), (*p)->address());
+ 		  else
+ 		    gold_error(_("address of section '%s' moves backward "
+-				 "from 0x%llx to 0x%llx"),
++				 "from 0x%"PRIx64" to 0x%"PRIx64),
+ 			       os->name(), addr + (off - startoff),
+ 			       (*p)->address());
+ 		}
 __EOF__
 
   tar -xjvf $BINUTILS.tar.bz2
@@ -124,7 +106,8 @@ __EOF__
     # variables.  That will go into bootstrap-linux.sh when it's ready.
     echo "Installing gold as /usr/bin/ld."
     echo "To uninstall, do 'cd /usr/bin; sudo rm ld; sudo mv ld.orig ld'"
-    test -f /usr/bin/ld && sudo mv /usr/bin/ld /usr/bin/ld.orig
+    test -f /usr/bin/ld && test ! -f /usr/bin/ld.orig && \
+        sudo mv /usr/bin/ld /usr/bin/ld.orig
     sudo strip /usr/local/gold/bin/ld
     sudo ln -fs /usr/local/gold/bin/ld /usr/bin/ld.gold
     sudo ln -fs /usr/bin/ld.gold /usr/bin/ld
@@ -133,8 +116,8 @@ __EOF__
   fi
 }
 
-if ! egrep -q "Ubuntu 8.04|Ubuntu 8.10|Ubuntu 9.04" /etc/issue; then
-  echo "Only Ubuntu 8.04, 8.10, and 9.04 are currently supported" >&2
+if ! egrep -q 'Ubuntu (8\.04|8\.10|9\.04|9\.10|karmic|lucid)' /etc/issue; then
+  echo "Only Ubuntu 8.04, 8.10, 9.04, and 9.10 are currently supported" >&2
   exit 1
 fi
 
@@ -150,30 +133,33 @@ if [ "x$(id -u)" != x0 ]; then
 fi
 
 # Packages need for development
-dev_list="bison fakeroot flex g++ g++-multilib gperf libasound2-dev
-          libcairo2-dev libgconf2-dev libglib2.0-dev libgtk2.0-dev libnspr4-dev
-          libnss3-dev libsqlite3-dev lighttpd msttcorefonts patch perl php5-cgi
-          pkg-config python rpm subversion wdiff"
+dev_list="apache2 bison fakeroot flex g++ g++-multilib gperf libapache2-mod-php5
+          libasound2-dev libbz2-dev libcairo2-dev libdbus-glib-1-dev
+          libgconf2-dev libgl1-mesa-dev libglu1-mesa-dev libglib2.0-dev
+          libgtk2.0-dev libjpeg62-dev libnspr4-dev libnss3-dev libpam0g-dev
+          libsqlite3-dev libxslt1-dev libxss-dev lighttpd mesa-common-dev
+          msttcorefonts patch perl php5-cgi pkg-config python python2.5-dev rpm
+          subversion ttf-dejavu-core ttf-kochi-gothic ttf-kochi-mincho wdiff"
 
 # Full list of required run-time libraries
-lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libexpat1 libfontconfig1
-          libfreetype6 libglib2.0-0 libgtk2.0-0 libnspr4-0d libnss3-1d
-          libpango1.0-0 libpcre3 libpixman-1-0 libpng12-0 libstdc++6
+lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libdbus-glib-1-2 libexpat1
+          libfontconfig1 libfreetype6 libglib2.0-0 libgtk2.0-0 libnspr4-0d
+          libnss3-1d libpango1.0-0 libpcre3 libpixman-1-0 libpng12-0 libstdc++6
           libsqlite3-0 libx11-6 libxau6 libxcb1 libxcomposite1
           libxcursor1 libxdamage1 libxdmcp6 libxext6 libxfixes3 libxi6
           libxinerama1 libxrandr2 libxrender1 zlib1g"
 
 # Debugging symbols for all of the run-time libraries
-dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libfontconfig1-dbg
-          libglib2.0-0-dbg libgtk2.0-0-dbg libnspr4-0d-dbg libnss3-1d-dbg
-          libpango1.0-0-dbg libpcre3-dbg libpixman-1-0-dbg libx11-6-dbg
-          libxau6-dbg libxcb1-dbg libxcomposite1-dbg
+dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg
+          libfontconfig1-dbg libglib2.0-0-dbg libgtk2.0-0-dbg libnspr4-0d-dbg
+          libnss3-1d-dbg libpango1.0-0-dbg libpcre3-dbg libpixman-1-0-dbg
+          libx11-6-dbg libxau6-dbg libxcb1-dbg libxcomposite1-dbg
           libxcursor1-dbg libxdamage1-dbg libxdmcp6-dbg libxext6-dbg
           libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
           libxrender1-dbg zlib1g-dbg"
 
 # Standard 32bit compatibility libraries
-cmp_list="ia32-libs lib32asound2-dev lib32readline-dev lib32stdc++6 lib32z1
+cmp_list="ia32-libs lib32asound2-dev lib32readline5-dev lib32stdc++6 lib32z1
           lib32z1-dev libc6-dev-i386 libc6-i386"
 
 # Waits for the user to press 'Y' or 'N'. Either uppercase of lowercase is
@@ -211,13 +197,19 @@ yes_no() {
   done
 }
 
-echo "This script installs all tools and libraries needed to build Chromium."
-echo ""
-echo "For most of the libraries, it can also install debugging symbols, which"
-echo "will allow you to debug code in the system libraries. Most developers"
-echo "won't need these symbols."
-echo -n "Do you want me to install them for you (y/N) "
-if yes_no 1; then
+if test "$do_inst_syms" = ""
+then
+  echo "This script installs all tools and libraries needed to build Chromium."
+  echo ""
+  echo "For most of the libraries, it can also install debugging symbols, which"
+  echo "will allow you to debug code in the system libraries. Most developers"
+  echo "won't need these symbols."
+  echo -n "Do you want me to install them for you (y/N) "
+  if yes_no 1; then
+    do_inst_syms=1
+  fi
+fi
+if test "$do_inst_syms" = "1"; then
   echo "Installing debugging symbols."
 else
   echo "Skipping installation of debugging symbols."
@@ -278,15 +270,28 @@ fi
 # So just install from source if it isn't the default linker.
 
 case `ld --version` in
-*gold*) ;;
+*gold*2.2*) ;;
 * )
-  # FIXME: avoid installing as /usr/bin/ld
-  echo "Gold is a new linker that links Chrome 5x faster than ld."
-  echo "Don't use it if you need to link other apps (e.g. valgrind, wine)"
-  echo -n "REPLACE SYSTEM LINKER ld with gold and back up ld as ld.orig? (y/N) "
-  if yes_no 1; then
-    echo "Building binutils."
-    install_gold || exit 99
+  if test "$do_inst_gold" = ""
+  then
+    echo "Gold is a new linker that links Chrome 5x faster than ld."
+    echo "Don't use it if you need to link other apps (e.g. valgrind, wine)"
+    echo -n "REPLACE SYSTEM LINKER ld with gold and back up ld? (y/N) "
+    if yes_no 1; then
+      do_inst_gold=1
+    fi
+  fi
+  if test "$do_inst_gold" = "1"
+  then
+    # If the system provides gold, just install it.
+    if apt-cache show binutils-gold >/dev/null; then
+      echo "Installing binutils-gold. Backing up ld as ld.single."
+      sudo apt-get install binutils-gold
+    else
+      # FIXME: avoid installing as /usr/bin/ld
+      echo "Building binutils. Backing up ld as ld.orig."
+      install_gold || exit 99
+    fi
   else
     echo "Not installing gold."
   fi
@@ -294,18 +299,25 @@ esac
 
 # Install 32bit backwards compatibility support for 64bit systems
 if [ "$(uname -m)" = "x86_64" ]; then
-  echo "Installing 32bit libraries that are not already provided by the system"
-  echo
-  echo "While we only need to install a relatively small number of library"
-  echo "files, we temporarily need to download a lot of large *.deb packages"
-  echo "that contain these files. We will create new *.deb packages that"
-  echo "include just the 32bit libraries. These files will then be found on"
-  echo "your system in places like /lib32, /usr/lib32, /usr/lib/debug/lib32,"
-  echo "/usr/lib/debug/usr/lib32. If you ever need to uninstall these files,"
-  echo "look for packages named *-ia32.deb."
-  echo "Do you want me to download all packages needed to build new 32bit"
-  echo -n "package files (Y/n) "
-  if ! yes_no 0; then
+  if test "$do_inst_lib32" = ""
+  then
+    echo "Installing 32bit libraries not already provided by the system"
+    echo
+    echo "While we only need to install a relatively small number of library"
+    echo "files, we temporarily need to download a lot of large *.deb packages"
+    echo "that contain these files. We will create new *.deb packages that"
+    echo "include just the 32bit libraries. These files will then be found on"
+    echo "your system in places like /lib32, /usr/lib32, /usr/lib/debug/lib32,"
+    echo "/usr/lib/debug/usr/lib32. If you ever need to uninstall these files,"
+    echo "look for packages named *-ia32.deb."
+    echo "Do you want me to download all packages needed to build new 32bit"
+    echo -n "package files (Y/n) "
+    if yes_no 0; then
+      do_inst_lib32=1
+    fi
+  fi
+  if test "$do_inst_lib32" != "1"
+  then
     echo "Exiting without installing any 32bit libraries."
     exit 0
   fi

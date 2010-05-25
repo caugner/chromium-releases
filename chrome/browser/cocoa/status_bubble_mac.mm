@@ -6,16 +6,17 @@
 
 #include <limits>
 
-#include "app/gfx/text_elider.h"
+#include "app/text_elider.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/cocoa/bubble_view.h"
+#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 #import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
 
 namespace {
 
@@ -105,7 +106,7 @@ StatusBubbleMac::~StatusBubbleMac() {
 
   if (window_) {
     [[[window_ animationForKey:kFadeAnimationKey] delegate] invalidate];
-    [parent_ removeChildWindow:window_];
+    Detach();
     [window_ release];
     window_ = nil;
   }
@@ -205,10 +206,15 @@ void StatusBubbleMac::Hide() {
   url_text_ = nil;
 }
 
-void StatusBubbleMac::MouseMoved() {
+void StatusBubbleMac::MouseMoved(
+    const gfx::Point& location, bool left_content) {
+  if (left_content)
+    return;
+
   if (!window_)
     return;
 
+  // TODO(thakis): Use 'location' here instead of NSEvent.
   NSPoint cursor_location = [NSEvent mouseLocation];
   --cursor_location.y;  // docs say the y coord starts at 1 not 0; don't ask why
 
@@ -216,14 +222,19 @@ void StatusBubbleMac::MouseMoved() {
   NSRect window_frame = [window_ frame];
   window_frame.origin = [parent_ frame].origin;
 
+  bool isShelfVisible = false;
+
   // Adjust the position to sit on top of download and extension shelves.
   // |delegate_| can be nil during unit tests.
-  if ([delegate_ respondsToSelector:@selector(verticalOffsetForStatusBubble)])
+  if ([delegate_ respondsToSelector:@selector(verticalOffsetForStatusBubble)]) {
     window_frame.origin.y += [delegate_ verticalOffsetForStatusBubble];
+    isShelfVisible = [delegate_ verticalOffsetForStatusBubble] > 0;
+  }
 
   // Get the cursor position relative to the popup.
   cursor_location.x -= NSMaxX(window_frame);
   cursor_location.y -= NSMaxY(window_frame);
+
 
   // If the mouse is in a position where we think it would move the
   // status bubble, figure out where and how the bubble should be moved.
@@ -240,22 +251,37 @@ void StatusBubbleMac::MouseMoved() {
       offset = offset * ((kMousePadding - cursor_location.x) / kMousePadding);
     }
 
-    // Cap the offset and change the visual presentation of the bubble
-    // depending on where it ends up (so that rounded corners square off
-    // and mate to the edges of the tab content).
-    if (offset >= NSHeight(window_frame)) {
-      offset = NSHeight(window_frame);
-      [[window_ contentView] setCornerFlags:
-          kRoundedBottomLeftCorner | kRoundedBottomRightCorner];
-    } else if (offset > 0) {
-      [[window_ contentView] setCornerFlags:
-          kRoundedTopRightCorner | kRoundedBottomLeftCorner |
-          kRoundedBottomRightCorner];
-    } else {
-      [[window_ contentView] setCornerFlags:kRoundedTopRightCorner];
+    bool isOnScreen = true;
+    NSScreen* screen = [window_ screen];
+    if (screen &&
+        NSMinY([screen visibleFrame]) > NSMinY(window_frame) - offset) {
+      isOnScreen = false;
     }
 
-    window_frame.origin.y -= offset;
+    if (isOnScreen && !isShelfVisible) {
+      // Cap the offset and change the visual presentation of the bubble
+      // depending on where it ends up (so that rounded corners square off
+      // and mate to the edges of the tab content).
+      if (offset >= NSHeight(window_frame)) {
+        offset = NSHeight(window_frame);
+        [[window_ contentView] setCornerFlags:
+            kRoundedBottomLeftCorner | kRoundedBottomRightCorner];
+      } else if (offset > 0) {
+        [[window_ contentView] setCornerFlags:
+            kRoundedTopRightCorner | kRoundedBottomLeftCorner |
+            kRoundedBottomRightCorner];
+      } else {
+        [[window_ contentView] setCornerFlags:kRoundedTopRightCorner];
+      }
+      window_frame.origin.y -= offset;
+    } else {
+      // The bubble will obscure the download shelf.  Move the bubble to the
+      // right and reset Y offset_ to zero.
+      [[window_ contentView] setCornerFlags:kRoundedTopLeftCorner];
+
+      // Subtract border width + bubble width.
+      window_frame.origin.x += NSWidth([parent_ frame]) - NSWidth(window_frame);
+    }
   } else {
     [[window_ contentView] setCornerFlags:kRoundedTopRightCorner];
   }
@@ -271,7 +297,12 @@ void StatusBubbleMac::Create() {
     return;
 
   // TODO(avi):fix this for RTL
-  window_ = [[NSWindow alloc] initWithContentRect:CalculateWindowFrame()
+  NSRect window_rect = CalculateWindowFrame();
+  // initWithContentRect has origin in screen coords and size in scaled window
+  // coordinates.
+  window_rect.size =
+      [[parent_ contentView] convertSize:window_rect.size fromView:nil];
+  window_ = [[NSWindow alloc] initWithContentRect:window_rect
                                         styleMask:NSBorderlessWindowMask
                                           backing:NSBackingStoreBuffered
                                             defer:YES];
@@ -306,23 +337,33 @@ void StatusBubbleMac::Create() {
   [animation_dictionary setObject:animation forKey:kFadeAnimationKey];
   [window_ setAnimations:animation_dictionary];
 
-  Attach();
+  // Don't |Attach()| since we don't know the appropriate state; let the
+  // |SetState()| call do that.
 
   [view setCornerFlags:kRoundedTopRightCorner];
-  MouseMoved();
+  MouseMoved(gfx::Point(), false);
 }
 
 void StatusBubbleMac::Attach() {
-  // If the parent window is offscreen when the child is added, the child will
-  // never be displayed, even when the parent moves on-screen.  This method
-  // may be called several times during the process of creating or showing a
-  // status bubble to attach the bubble to its parent window.
-  if (![window_ parentWindow] && [parent_ isVisible])
+  // This method may be called several times during the process of creating or
+  // showing a status bubble to attach the bubble to its parent window.
+  if (!is_attached())
     [parent_ addChildWindow:window_ ordered:NSWindowAbove];
 }
 
+void StatusBubbleMac::Detach() {
+  // This method may be called several times in the process of hiding or
+  // destroying a status bubble.
+  if (is_attached()) {
+    [parent_ removeChildWindow:window_];  // See crbug.com/28107 ...
+    [window_ orderOut:nil];               // ... and crbug.com/29054.
+  }
+}
+
 void StatusBubbleMac::AnimationDidStop(CAAnimation* animation, bool finished) {
+  DCHECK([NSThread isMainThread]);
   DCHECK(state_ == kBubbleShowingFadeIn || state_ == kBubbleHidingFadeOut);
+  DCHECK(is_attached());
 
   if (finished) {
     // Because of the mechanism used to interrupt animations, this is never
@@ -331,17 +372,25 @@ void StatusBubbleMac::AnimationDidStop(CAAnimation* animation, bool finished) {
     // properly synchronized.
     if (state_ == kBubbleShowingFadeIn) {
       DCHECK_EQ([[window_ animator] alphaValue], kBubbleOpacity);
-      state_ = kBubbleShown;
+      SetState(kBubbleShown);
     } else {
       DCHECK_EQ([[window_ animator] alphaValue], 0.0);
-      state_ = kBubbleHidden;
+      SetState(kBubbleHidden);
     }
   }
 }
 
 void StatusBubbleMac::SetState(StatusBubbleState state) {
+  // We must be hidden or attached, but not both.
+  DCHECK((state_ == kBubbleHidden) ^ is_attached());
+
   if (state == state_)
     return;
+
+  if (state == kBubbleHidden)
+    Detach();
+  else
+    Attach();
 
   if ([delegate_ respondsToSelector:@selector(statusBubbleWillEnterState:)])
     [delegate_ statusBubbleWillEnterState:state];
@@ -350,6 +399,8 @@ void StatusBubbleMac::SetState(StatusBubbleState state) {
 }
 
 void StatusBubbleMac::Fade(bool show) {
+  DCHECK([NSThread isMainThread]);
+
   StatusBubbleState fade_state = kBubbleShowingFadeIn;
   StatusBubbleState target_state = kBubbleShown;
   NSTimeInterval full_duration = kShowFadeInDurationSeconds;
@@ -366,8 +417,6 @@ void StatusBubbleMac::Fade(bool show) {
 
   if (state_ == target_state)
     return;
-
-  Attach();
 
   if (immediate_) {
     [window_ setAlphaValue:opacity];
@@ -387,12 +436,15 @@ void StatusBubbleMac::Fade(bool show) {
 
   // This will cancel an in-progress transition and replace it with this fade.
   [NSAnimationContext beginGrouping];
+  // Don't use the GTM additon for the "Steve" slowdown because this can happen
+  // async from user actions and the effects could be a surprise.
   [[NSAnimationContext currentContext] setDuration:duration];
   [[window_ animator] setAlphaValue:opacity];
   [NSAnimationContext endGrouping];
 }
 
 void StatusBubbleMac::StartTimer(int64 delay_ms) {
+  DCHECK([NSThread isMainThread]);
   DCHECK(state_ == kBubbleShowingTimer || state_ == kBubbleHidingTimer);
 
   if (immediate_) {
@@ -410,12 +462,15 @@ void StatusBubbleMac::StartTimer(int64 delay_ms) {
 }
 
 void StatusBubbleMac::CancelTimer() {
+  DCHECK([NSThread isMainThread]);
+
   if (!timer_factory_.empty())
     timer_factory_.RevokeAll();
 }
 
 void StatusBubbleMac::TimerFired() {
   DCHECK(state_ == kBubbleShowingTimer || state_ == kBubbleHidingTimer);
+  DCHECK([NSThread isMainThread]);
 
   if (state_ == kBubbleShowingTimer) {
     SetState(kBubbleShowingFadeIn);
@@ -427,7 +482,7 @@ void StatusBubbleMac::TimerFired() {
 }
 
 void StatusBubbleMac::StartShowing() {
-  Attach();
+  // Note that |SetState()| will |Attach()| or |Detach()| as required.
 
   if (state_ == kBubbleHidden) {
     // Arrange to begin fading in after a delay.
@@ -484,11 +539,32 @@ void StatusBubbleMac::UpdateSizeAndPosition() {
   [window_ setFrame:CalculateWindowFrame() display:YES];
 }
 
+void StatusBubbleMac::SwitchParentWindow(NSWindow* parent) {
+  DCHECK(parent);
+
+  // If not attached, just update our member variable and position.
+  if (!is_attached()) {
+    parent_ = parent;
+    [[window_ contentView] setThemeProvider:parent];
+    UpdateSizeAndPosition();
+    return;
+  }
+
+  Detach();
+  parent_ = parent;
+  [[window_ contentView] setThemeProvider:parent];
+  Attach();
+  UpdateSizeAndPosition();
+}
+
 NSRect StatusBubbleMac::CalculateWindowFrame() {
   DCHECK(parent_);
 
+  NSSize size = NSMakeSize(0, kWindowHeight);
+  size = [[parent_ contentView] convertSize:size toView:nil];
+
   NSRect rect = [parent_ frame];
-  rect.size.height = kWindowHeight;
+  rect.size.height = size.height;
   rect.size.width = static_cast<int>(kWindowWidthPercent * rect.size.width);
   return rect;
 }

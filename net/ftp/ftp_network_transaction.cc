@@ -1,15 +1,17 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.  Use of this
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
 #include "net/ftp/ftp_network_transaction.h"
 
 #include "base/compiler_specific.h"
+#include "base/histogram.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/connection_type_histograms.h"
 #include "net/base/escape.h"
-#include "net/base/load_log.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/ftp/ftp_network_session.h"
 #include "net/ftp/ftp_request_info.h"
@@ -58,10 +60,12 @@ FtpNetworkTransaction::FtpNetworkTransaction(
       read_ctrl_buf_(new IOBuffer(kCtrlBufLen)),
       ctrl_response_buffer_(new FtpCtrlResponseBuffer()),
       read_data_buf_len_(0),
-      file_data_len_(0),
       last_error_(OK),
       system_type_(SYSTEM_TYPE_UNKNOWN),
-      retr_failed_(false),
+      // Use image (binary) transfer by default. It should always work,
+      // whereas the ascii transfer may damage binary data.
+      data_type_(DATA_TYPE_IMAGE),
+      resource_type_(RESOURCE_TYPE_UNKNOWN),
       data_connection_port_(0),
       socket_factory_(socket_factory),
       next_state_(STATE_NONE) {
@@ -72,8 +76,8 @@ FtpNetworkTransaction::~FtpNetworkTransaction() {
 
 int FtpNetworkTransaction::Start(const FtpRequestInfo* request_info,
                                  CompletionCallback* callback,
-                                 LoadLog* load_log) {
-  load_log_ = load_log;
+                                 const BoundNetLog& net_log) {
+  net_log_ = net_log;
   request_ = request_info;
 
   if (request_->url.has_username()) {
@@ -82,6 +86,8 @@ int FtpNetworkTransaction::Start(const FtpRequestInfo* request_info,
     username_ = L"anonymous";
     password_ = L"chrome@example.com";
   }
+
+  DetectTypecode();
 
   next_state_ = STATE_CTRL_INIT;
   int rv = DoLoop(OK);
@@ -258,6 +264,9 @@ int FtpNetworkTransaction::ProcessCtrlResponse() {
     case COMMAND_CWD:
       rv = ProcessResponseCWD(response);
       break;
+    case COMMAND_MLSD:
+      rv = ProcessResponseMLSD(response);
+      break;
     case COMMAND_LIST:
       rv = ProcessResponseLIST(response);
       break;
@@ -281,6 +290,12 @@ int FtpNetworkTransaction::ProcessCtrlResponse() {
       case COMMAND_RETR:
         rv = ProcessResponseRETR(response);
         break;
+      case COMMAND_MLSD:
+        rv = ProcessResponseMLSD(response);
+        break;
+      case COMMAND_LIST:
+        rv = ProcessResponseLIST(response);
+        break;
       default:
         // Multiple responses for other commands are invalid.
         return Stop(ERR_INVALID_RESPONSE);
@@ -298,11 +313,9 @@ void FtpNetworkTransaction::ResetStateForRestart() {
   ctrl_response_buffer_.reset(new FtpCtrlResponseBuffer());
   read_data_buf_ = NULL;
   read_data_buf_len_ = 0;
-  file_data_len_ = 0;
   if (write_buf_)
     write_buf_->SetOffset(0);
   last_error_ = OK;
-  retr_failed_ = false;
   data_connection_port_ = 0;
   ctrl_socket_.reset();
   data_socket_.reset();
@@ -328,8 +341,16 @@ void FtpNetworkTransaction::OnIOComplete(int result) {
 std::string FtpNetworkTransaction::GetRequestPathForFtpCommand(
     bool is_directory) const {
   std::string path(current_remote_directory_);
-  if (request_->url.has_path())
-    path.append(request_->url.path());
+  if (request_->url.has_path()) {
+    std::string gurl_path(request_->url.path());
+
+    // Get rid of the typecode, see RFC 1738 section 3.2.2. FTP url-path.
+    std::string::size_type pos = gurl_path.rfind(';');
+    if (pos != std::string::npos)
+      gurl_path.resize(pos);
+
+    path.append(gurl_path);
+  }
   // Make sure that if the path is expected to be a file, it won't end
   // with a trailing slash.
   if (!is_directory && path.length() > 1 && path[path.length() - 1] == '/')
@@ -349,6 +370,27 @@ std::string FtpNetworkTransaction::GetRequestPathForFtpCommand(
 
   DCHECK(IsValidFTPCommandString(path));
   return path;
+}
+
+void FtpNetworkTransaction::DetectTypecode() {
+  if (!request_->url.has_path())
+    return;
+  std::string gurl_path(request_->url.path());
+
+  // Extract the typecode, see RFC 1738 section 3.2.2. FTP url-path.
+  std::string::size_type pos = gurl_path.rfind(';');
+  if (pos == std::string::npos)
+    return;
+  std::string typecode_string(gurl_path.substr(pos));
+  if (typecode_string == ";type=a") {
+    data_type_ = DATA_TYPE_ASCII;
+    resource_type_ = RESOURCE_TYPE_FILE;
+  } else if (typecode_string == ";type=i") {
+    data_type_ = DATA_TYPE_IMAGE;
+    resource_type_ = RESOURCE_TYPE_FILE;
+  } else if (typecode_string == ";type=d") {
+    resource_type_ = RESOURCE_TYPE_DIRECTORY;
+  }
 }
 
 int FtpNetworkTransaction::DoLoop(int result) {
@@ -434,6 +476,10 @@ int FtpNetworkTransaction::DoLoop(int result) {
         DCHECK(rv == OK);
         rv = DoCtrlWriteCWD();
         break;
+      case STATE_CTRL_WRITE_MLSD:
+        DCHECK(rv == 0);
+        rv = DoCtrlWriteMLSD();
+        break;
       case STATE_CTRL_WRITE_LIST:
         DCHECK(rv == OK);
         rv = DoCtrlWriteLIST();
@@ -487,12 +533,15 @@ int FtpNetworkTransaction::DoCtrlResolveHost() {
   std::string host;
   int port;
 
-  host = request_->url.host();
+  host = request_->url.HostNoBrackets();
   port = request_->url.EffectiveIntPort();
 
   HostResolver::RequestInfo info(host, port);
+  // TODO(wtc): Until we support the FTP extensions for IPv6 specified in
+  // RFC 2428, we have to turn off IPv6 in FTP.  See http://crbug.com/32945.
+  info.set_address_family(ADDRESS_FAMILY_IPV4);
   // No known referrer.
-  return resolver_.Resolve(info, &addresses_, &io_callback_, load_log_);
+  return resolver_.Resolve(info, &addresses_, &io_callback_, net_log_);
 }
 
 int FtpNetworkTransaction::DoCtrlResolveHostComplete(int result) {
@@ -504,7 +553,7 @@ int FtpNetworkTransaction::DoCtrlResolveHostComplete(int result) {
 int FtpNetworkTransaction::DoCtrlConnect() {
   next_state_ = STATE_CTRL_CONNECT_COMPLETE;
   ctrl_socket_.reset(socket_factory_->CreateTCPClientSocket(addresses_));
-  return ctrl_socket_->Connect(&io_callback_);
+  return ctrl_socket_->Connect(&io_callback_, net_log_);
 }
 
 int FtpNetworkTransaction::DoCtrlConnectComplete(int result) {
@@ -522,6 +571,14 @@ int FtpNetworkTransaction::DoCtrlRead() {
 }
 
 int FtpNetworkTransaction::DoCtrlReadComplete(int result) {
+  if (result == 0) {
+    // Some servers (for example Pure-FTPd) apparently close the control
+    // connection when anonymous login is not permitted. For more details
+    // see http://crbug.com/25023.
+    if (command_sent_ == COMMAND_USER && username_ == L"anonymous")
+      response_.needs_auth = true;
+    return Stop(ERR_EMPTY_RESPONSE);
+  }
   if (result < 0)
     return Stop(result);
 
@@ -715,7 +772,7 @@ int FtpNetworkTransaction::ProcessResponsePWD(const FtpCtrlResponse& response) {
       }
       if (system_type_ == SYSTEM_TYPE_VMS)
         line = FtpUtil::VMSPathToUnix(line);
-      if (line[line.length() - 1] == '/')
+      if (line.length() && line[line.length() - 1] == '/')
         line.erase(line.length() - 1);
       current_remote_directory_ = line;
       next_state_ = STATE_CTRL_WRITE_TYPE;
@@ -736,7 +793,15 @@ int FtpNetworkTransaction::ProcessResponsePWD(const FtpCtrlResponse& response) {
 
 // TYPE command.
 int FtpNetworkTransaction::DoCtrlWriteTYPE() {
-  std::string command = "TYPE I";
+  std::string command = "TYPE ";
+  if (data_type_ == DATA_TYPE_ASCII) {
+    command += "A";
+  } else if (data_type_ == DATA_TYPE_IMAGE) {
+    command += "I";
+  } else {
+    NOTREACHED();
+    return Stop(ERR_UNEXPECTED);
+  }
   next_state_ = STATE_CTRL_READ;
   return SendFtpCommand(command, COMMAND_TYPE);
 }
@@ -842,9 +907,9 @@ int FtpNetworkTransaction::ProcessResponsePASV(
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_TRANSIENT_ERROR:
-      return Stop(ERR_FAILED);
+      return Stop(ERR_FTP_PASV_COMMAND_FAILED);
     case ERROR_CLASS_PERMANENT_ERROR:
-      return Stop(ERR_FAILED);
+      return Stop(ERR_FTP_PASV_COMMAND_FAILED);
     default:
       NOTREACHED();
       return Stop(ERR_UNEXPECTED);
@@ -867,10 +932,12 @@ int FtpNetworkTransaction::ProcessResponseSIZE(
     case ERROR_CLASS_OK:
       if (response.lines.size() != 1)
         return Stop(ERR_INVALID_RESPONSE);
-      if (!StringToInt(response.lines[0], &file_data_len_))
+      int64 size;
+      if (!StringToInt64(response.lines[0], &size))
         return Stop(ERR_INVALID_RESPONSE);
-      if (file_data_len_ < 0)
+      if (size < 0)
         return Stop(ERR_INVALID_RESPONSE);
+      response_.expected_content_size = size;
       break;
     case ERROR_CLASS_INFO_NEEDED:
       break;
@@ -919,12 +986,13 @@ int FtpNetworkTransaction::ProcessResponseRETR(
       if (response.status_code != 550)
         return Stop(ERR_FAILED);
 
-      DCHECK(!retr_failed_);  // Should not get here twice.
-      retr_failed_ = true;
-
       // It's possible that RETR failed because the path is a directory.
-      // Try CWD next, to see if that's the case.
-      next_state_ = STATE_CTRL_WRITE_CWD;
+      resource_type_ = RESOURCE_TYPE_DIRECTORY;
+
+      // We're going to try CWD next, but first send a PASV one more time,
+      // because some FTP servers, including FileZilla, require that.
+      // See http://crbug.com/25316.
+      next_state_ = STATE_CTRL_WRITE_PASV;
       break;
     default:
       NOTREACHED();
@@ -975,21 +1043,56 @@ int FtpNetworkTransaction::ProcessResponseCWD(const FtpCtrlResponse& response) {
     case ERROR_CLASS_INITIATED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_OK:
-      next_state_ = STATE_CTRL_WRITE_LIST;
+      next_state_ = STATE_CTRL_WRITE_MLSD;
       break;
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_TRANSIENT_ERROR:
       return Stop(ERR_FAILED);
     case ERROR_CLASS_PERMANENT_ERROR:
-      if (retr_failed_ && response.status_code == 550) {
-        // Both RETR and CWD failed with codes 550. That means that the path
-        // we're trying to access is not a file, and not a directory. The most
-        // probable interpretation is that it doesn't exist (with FTP we can't
-        // be sure).
+      if (resource_type_ == RESOURCE_TYPE_DIRECTORY &&
+          response.status_code == 550) {
+        // We're assuming that the resource is a directory, but the server says
+        // it's not true. The most probable interpretation is that it doesn't
+        // exist (with FTP we can't be sure).
         return Stop(ERR_FILE_NOT_FOUND);
       }
       return Stop(ERR_FAILED);
+    default:
+      NOTREACHED();
+      return Stop(ERR_UNEXPECTED);
+  }
+  return OK;
+}
+
+// MLSD command
+int FtpNetworkTransaction::DoCtrlWriteMLSD() {
+  next_state_ = STATE_CTRL_READ;
+  return SendFtpCommand("MLSD", COMMAND_MLSD);
+}
+
+int FtpNetworkTransaction::ProcessResponseMLSD(
+    const FtpCtrlResponse& response) {
+  switch (GetErrorClass(response.status_code)) {
+    case ERROR_CLASS_INITIATED:
+      // We want the client to start reading the response at this point.
+      // It got here either through Start or RestartWithAuth. We want that
+      // method to complete. Not setting next state here will make DoLoop exit
+      // and in turn make Start/RestartWithAuth complete.
+      response_.is_directory_listing = true;
+      break;
+    case ERROR_CLASS_OK:
+      response_.is_directory_listing = true;
+      next_state_ = STATE_CTRL_WRITE_QUIT;
+      break;
+    case ERROR_CLASS_INFO_NEEDED:
+      return Stop(ERR_INVALID_RESPONSE);
+    case ERROR_CLASS_TRANSIENT_ERROR:
+    case ERROR_CLASS_PERMANENT_ERROR:
+      // Fallback to the LIST command, more widely supported,
+      // but without a specified output format.
+      next_state_ = STATE_CTRL_WRITE_LIST;
+      break;
     default:
       NOTREACHED();
       return Stop(ERR_UNEXPECTED);
@@ -1008,6 +1111,10 @@ int FtpNetworkTransaction::ProcessResponseLIST(
     const FtpCtrlResponse& response) {
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
+      // We want the client to start reading the response at this point.
+      // It got here either through Start or RestartWithAuth. We want that
+      // method to complete. Not setting next state here will make DoLoop exit
+      // and in turn make Start/RestartWithAuth complete.
       response_.is_directory_listing = true;
       break;
     case ERROR_CLASS_OK:
@@ -1044,19 +1151,20 @@ int FtpNetworkTransaction::ProcessResponseQUIT(
 
 int FtpNetworkTransaction::DoDataConnect() {
   next_state_ = STATE_DATA_CONNECT_COMPLETE;
-  AddressList data_addresses;
-  // TODO(phajdan.jr): Use exactly same IP address as the control socket.
-  // If the DNS name resolves to several different IPs, and they are different
-  // physical servers, this will break. However, that configuration is very rare
-  // in practice.
-  data_addresses.Copy(addresses_.head());
-  data_addresses.SetPort(data_connection_port_);
-  data_socket_.reset(socket_factory_->CreateTCPClientSocket(data_addresses));
-  return data_socket_->Connect(&io_callback_);
+  AddressList data_address;
+  // Connect to the same host as the control socket to prevent PASV port
+  // scanning attacks.
+  int rv = ctrl_socket_->GetPeerAddress(&data_address);
+  if (rv != OK)
+    return Stop(rv);
+  data_address.SetPort(data_connection_port_);
+  data_socket_.reset(socket_factory_->CreateTCPClientSocket(data_address));
+  return data_socket_->Connect(&io_callback_, net_log_);
 }
 
 int FtpNetworkTransaction::DoDataConnectComplete(int result) {
-  if (retr_failed_) {
+  RecordDataConnectionError(result);
+  if (resource_type_ == RESOURCE_TYPE_DIRECTORY) {
     next_state_ = STATE_CTRL_WRITE_CWD;
   } else {
     next_state_ = STATE_CTRL_WRITE_SIZE;
@@ -1074,7 +1182,13 @@ int FtpNetworkTransaction::DoDataRead() {
     // to be closed on our side too.
     data_socket_.reset();
 
-    // No more data so send QUIT Command now and wait for response.
+    if (ctrl_socket_->IsConnected()) {
+      // Wait for the server's response, we should get it before sending QUIT.
+      next_state_ = STATE_CTRL_READ;
+      return OK;
+    }
+
+    // We are no longer connected to the server, so just finish the transaction.
     return Stop(OK);
   }
 
@@ -1086,6 +1200,93 @@ int FtpNetworkTransaction::DoDataRead() {
 
 int FtpNetworkTransaction::DoDataReadComplete(int result) {
   return result;
+}
+
+// We're using a histogram as a group of counters, with one bucket for each
+// enumeration value.  We're only interested in the values of the counters.
+// Ignore the shape, average, and standard deviation of the histograms because
+// they are meaningless.
+//
+// We use two histograms.  In the first histogram we tally whether the user has
+// seen an error of that type during the session.  In the second histogram we
+// tally the total number of times the users sees each errer.
+void FtpNetworkTransaction::RecordDataConnectionError(int result) {
+  // Gather data for http://crbug.com/3073. See how many users have trouble
+  // establishing FTP data connection in passive FTP mode.
+  enum {
+    // Data connection successful.
+    NET_ERROR_OK = 0,
+
+    // Local firewall blocked the connection.
+    NET_ERROR_ACCESS_DENIED = 1,
+
+    // Connection timed out.
+    NET_ERROR_TIMED_OUT = 2,
+
+    // Connection has been estabilished, but then got broken (either reset
+    // or aborted).
+    NET_ERROR_CONNECTION_BROKEN = 3,
+
+    // Connection has been refused.
+    NET_ERROR_CONNECTION_REFUSED = 4,
+
+    // No connection to the internet.
+    NET_ERROR_INTERNET_DISCONNECTED = 5,
+
+    // Could not reach the destination address.
+    NET_ERROR_ADDRESS_UNREACHABLE = 6,
+
+    // A programming error in our network stack.
+    NET_ERROR_UNEXPECTED = 7,
+
+    // Other kind of error.
+    NET_ERROR_OTHER = 20,
+
+    NUM_OF_NET_ERROR_TYPES
+  } type;
+  switch (result) {
+    case OK:
+      type = NET_ERROR_OK;
+      break;
+    case ERR_ACCESS_DENIED:
+      type = NET_ERROR_ACCESS_DENIED;
+      break;
+    case ERR_TIMED_OUT:
+      type = NET_ERROR_TIMED_OUT;
+      break;
+    case ERR_CONNECTION_ABORTED:
+    case ERR_CONNECTION_RESET:
+    case ERR_CONNECTION_CLOSED:
+      type = NET_ERROR_CONNECTION_BROKEN;
+      break;
+    case ERR_CONNECTION_FAILED:
+    case ERR_CONNECTION_REFUSED:
+      type = NET_ERROR_CONNECTION_REFUSED;
+      break;
+    case ERR_INTERNET_DISCONNECTED:
+      type = NET_ERROR_INTERNET_DISCONNECTED;
+      break;
+    case ERR_ADDRESS_INVALID:
+    case ERR_ADDRESS_UNREACHABLE:
+      type = NET_ERROR_ADDRESS_UNREACHABLE;
+      break;
+    case ERR_UNEXPECTED:
+      type = NET_ERROR_UNEXPECTED;
+      break;
+    default:
+      type = NET_ERROR_OTHER;
+      break;
+  };
+  static bool had_error_type[NUM_OF_NET_ERROR_TYPES];
+
+  DCHECK(type >= 0 && type < NUM_OF_NET_ERROR_TYPES);
+  if (!had_error_type[type]) {
+    had_error_type[type] = true;
+    UMA_HISTOGRAM_ENUMERATION("Net.FtpDataConnectionErrorHappened",
+        type, NUM_OF_NET_ERROR_TYPES);
+  }
+  UMA_HISTOGRAM_ENUMERATION("Net.FtpDataConnectionErrorCount",
+      type, NUM_OF_NET_ERROR_TYPES);
 }
 
 }  // namespace net

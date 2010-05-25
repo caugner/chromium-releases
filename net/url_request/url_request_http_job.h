@@ -27,8 +27,6 @@ class URLRequestHttpJob : public URLRequestJob {
  public:
   static URLRequestJob* Factory(URLRequest* request, const std::string& scheme);
 
-  virtual ~URLRequestHttpJob();
-
  protected:
   explicit URLRequestHttpJob(URLRequest* request);
 
@@ -56,8 +54,8 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual void CancelAuth();
   virtual void ContinueWithCertificate(net::X509Certificate* client_cert);
   virtual void ContinueDespiteLastError();
-  virtual bool GetMoreData();
   virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
+  virtual void StopCaching();
 
   // Shadows URLRequestJob's version of this method so we can grab cookies.
   void NotifyHeadersComplete();
@@ -65,12 +63,17 @@ class URLRequestHttpJob : public URLRequestJob {
   void DestroyTransaction();
   void StartTransaction();
   void AddExtraHeaders();
-  std::string AssembleRequestCookies();
-  void FetchResponseCookies();
+  void AddCookieHeaderAndStart();
+  void SaveCookiesAndNotifyHeadersComplete();
+  void SaveNextCookie();
+  void FetchResponseCookies(const net::HttpResponseInfo* response_info,
+                            std::vector<std::string>* cookies);
 
   // Process the Strict-Transport-Security header, if one exists.
   void ProcessStrictTransportSecurityHeader();
 
+  void OnCanGetCookiesCompleted(int result);
+  void OnCanSetCookieCompleted(int result);
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
 
@@ -85,12 +88,19 @@ class URLRequestHttpJob : public URLRequestJob {
 
   net::HttpRequestInfo request_info_;
   const net::HttpResponseInfo* response_info_;
+
   std::vector<std::string> response_cookies_;
+  size_t response_cookies_save_index_;
 
   // Auth states for proxy and origin server.
   net::AuthState proxy_auth_state_;
   net::AuthState server_auth_state_;
 
+  std::wstring username_;
+  std::wstring password_;
+
+  net::CompletionCallbackImpl<URLRequestHttpJob> can_get_cookies_callback_;
+  net::CompletionCallbackImpl<URLRequestHttpJob> can_set_cookie_callback_;
   net::CompletionCallbackImpl<URLRequestHttpJob> start_callback_;
   net::CompletionCallbackImpl<URLRequestHttpJob> read_callback_;
 
@@ -115,6 +125,9 @@ class URLRequestHttpJob : public URLRequestJob {
 
   // For recording of stats, we need to remember if this is cached content.
   bool is_cached_content_;
+
+ private:
+  virtual ~URLRequestHttpJob();
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestHttpJob);
 };

@@ -4,15 +4,11 @@
 
 #include "net/base/ev_root_ca_metadata.h"
 
-#if defined(OS_LINUX)
-// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
-// until NSS 3.12.2 comes out and we update to it.
-#define Lock FOO_NSS_Lock
+#if defined(USE_NSS)
 #include <cert.h>
 #include <pkcs11n.h>
 #include <secerr.h>
 #include <secoid.h>
-#undef Lock
 #endif
 
 #include "base/logging.h"
@@ -206,6 +202,12 @@ static const EVMetadata ev_root_ca_metadata[] = {
         0x1e, 0xad, 0x56, 0xbe, 0x3d, 0x9b, 0x67, 0x44, 0xa5, 0xe5 } },
     "2.16.840.1.113733.1.7.23.6"
   },
+  // Wells Fargo WellsSecure Public Root Certificate Authority
+  // https://nerys.wellsfargo.com/test.html
+  { { { 0xe7, 0xb4, 0xf6, 0x9d, 0x61, 0xec, 0x90, 0x69, 0xdb, 0x7e,
+        0x90, 0xa7, 0x40, 0x1a, 0x3c, 0xf4, 0x7d, 0x4f, 0xe8, 0xee } },
+    "2.16.840.1.114171.500.9"
+  },
   // XRamp Global Certification Authority
   { { { 0xb8, 0x01, 0x86, 0xd1, 0xeb, 0x9c, 0x86, 0xa5, 0x41, 0x04,
         0xcf, 0x30, 0x54, 0xf3, 0x4c, 0x52, 0xb7, 0xe5, 0x58, 0xc6 } },
@@ -230,7 +232,7 @@ bool EVRootCAMetadata::GetPolicyOID(
 
 EVRootCAMetadata::EVRootCAMetadata() {
   // Constructs the object from the raw metadata in ev_root_ca_metadata.
-#if defined(OS_LINUX)
+#if defined(USE_NSS)
   for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {
     const EVMetadata& metadata = ev_root_ca_metadata[i];
     PRUint8 buf[1024];

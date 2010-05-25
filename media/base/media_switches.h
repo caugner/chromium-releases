@@ -15,6 +15,8 @@ namespace switches {
 extern const char kAlsaDevice[];
 #endif
 
+extern const char kEnableOpenMax[];
+
 }  // namespace switches
 
 #endif  // MEDIA_BASE_SWITCHES_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,15 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/linked_ptr.h"
+#include "base/ref_counted.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request.h"
 
+class DictionaryValue;
 class FilePath;
+class ListValue;
+class PrefService;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -22,23 +27,20 @@ class FilePath;
 // A blacklist is essentially a map from resource-match patterns to filter-
 // attributes. Each time a resources matches a pattern the filter-attributes
 // are used to determine how the browser handles the matching resource.
-//
-// TODO(idanan): Implement this efficiently.
-// To get things started, the initial implementation is as simple as
-// it gets and cannot scale to large blacklists but it should be enough
-// for testing on the order of a hundred or so entries.
-//
 ////////////////////////////////////////////////////////////////////////////////
-class Blacklist {
+class Blacklist : public base::RefCountedThreadSafe<Blacklist> {
  public:
+  class Entry;
+  class Provider;
+
+  typedef std::vector<linked_ptr<Entry> > EntryList;
+  typedef std::vector<linked_ptr<Provider> > ProviderList;
+
   // Filter attributes (more to come):
   static const unsigned int kBlockAll;
-  static const unsigned int kDontSendCookies;
-  static const unsigned int kDontStoreCookies;
-  static const unsigned int kDontPersistCookies;
+  static const unsigned int kBlockCookies;
   static const unsigned int kDontSendReferrer;
   static const unsigned int kDontSendUserAgent;
-  static const unsigned int kBlockByType;
   static const unsigned int kBlockUnsecure;
 
   // Aggregate filter types:
@@ -46,25 +48,31 @@ class Blacklist {
   static const unsigned int kBlockResponse;
   static const unsigned int kModifySentHeaders;
   static const unsigned int kModifyReceivedHeaders;
-  static const unsigned int kFilterByHeaders;
-
-  // Key used to access data attached to URLRequest objects.
-  static const void* const kRequestDataKey;
-
-  // Takes a string an returns the matching attribute, 0 if none matches.
-  static unsigned int String2Attribute(const std::string&);
 
   // Blacklist entries come from a provider, defined by a name and source URL.
   class Provider {
    public:
     Provider() {}
-    Provider(const char* name, const char* url) : name_(name), url_(url) {}
+    Provider(const std::string& name, const std::string& url,
+             const std::wstring& pref_path)
+        : name_(name),
+          pref_path_(pref_path),
+          url_(url) {}
+
     const std::string& name() const { return name_; }
-    const std::string& url() const { return url_; }
     void set_name(const std::string& name) { name_ = name; }
+
+    const std::wstring& pref_path() const { return pref_path_; }
+    void set_pref_path(const std::wstring& pref_path) {
+      pref_path_ = pref_path;
+    }
+
+    const std::string& url() const { return url_; }
     void set_url(const std::string& url) { url_ = url; }
+
    private:
     std::string name_;
+    std::wstring pref_path_;
     std::string url_;
   };
 
@@ -72,48 +80,38 @@ class Blacklist {
   // the patterns. Entry objects are owned by the Blacklist that stores them.
   class Entry {
    public:
+    // Construct with given pattern.
+    Entry(const std::string& pattern, const Provider* provider,
+          bool is_exception);
+
     // Returns the pattern which this entry matches.
     const std::string& pattern() const { return pattern_; }
 
     // Bitfield of filter-attributes matching the pattern.
     unsigned int attributes() const { return attributes_; }
 
+    // True if this entry is an exception to the blacklist.
+    bool is_exception() const { return is_exception_; }
+
     // Provider of this blacklist entry, used for assigning blame ;)
     const Provider* provider() const { return provider_; }
-
-    // Returns true if the given type matches one of the types for which
-    // the filter-attributes of this pattern apply. This needs only to be
-    // checked for content-type specific rules, as determined by calling
-    // attributes().
-    bool MatchType(const std::string&) const;
 
     // Returns true of the given URL is blocked, assumes it matches the
     // pattern of this entry.
     bool IsBlocked(const GURL&) const;
 
-   private:
-    // Construct with given pattern.
-    explicit Entry(const std::string& pattern, const Provider* provider);
-
     void AddAttributes(unsigned int attributes);
-    void AddType(const std::string& type);
 
-    // Merge the attributes and types of the given entry with this one.
-    void Merge(const Entry& entry);
-
-    // Swap the given vector content for the type vector for quick loading.
-    void SwapTypes(std::vector<std::string>* types);
-
-    std::string pattern_;
+   private:
     unsigned int attributes_;
-    std::vector<std::string> types_;
+
+    // True if this entry is an exception to the blacklist.
+    bool is_exception_;
+    std::string pattern_;
 
     // Points to the provider of this entry, the providers are all
     // owned by the blacklist.
     const Provider* provider_;
-
-    friend class Blacklist;
-    friend class BlacklistIO;
   };
 
   // A request may match one or more Blacklist rules. The Match class packages
@@ -125,58 +123,99 @@ class Blacklist {
   class Match : public URLRequest::UserData {
    public:
     // Functions that return combined results from all entries.
-    unsigned int attributes() const { return attributes_; }
-    bool MatchType(const std::string&) const;
+    unsigned int attributes() const {
+      return (matching_attributes_ & (~exception_attributes_));
+    }
     bool IsBlocked(const GURL&) const;
 
     // Access to individual entries, mostly for display/logging purposes.
-    const std::vector<const Entry*>& entries() const { return entries_; }
+    const std::vector<const Entry*>& entries() const {
+      return matching_entries_;
+    }
 
    private:
     Match();
     void AddEntry(const Entry* entry);
-    std::vector<const Entry*> entries_;
-    unsigned int attributes_;  // Precomputed ORed attributes of entries.
+
+    std::vector<const Entry*> matching_entries_;
+    std::vector<const Entry*> exception_entries_;
+
+    // Precomputed ORed attributes of matching/exception entries.
+    unsigned int matching_attributes_;
+    unsigned int exception_attributes_;
 
     friend class Blacklist;  // Only blacklist constructs and sets these.
   };
 
-  // Constructs a Blacklist given the filename of the persistent version.
-  //
-  // For startup efficiency, and because the blacklist must be available
-  // before any http request is made (including the homepage, if one is
-  // set to be loaded at startup), it is important to load the blacklist
-  // from a local source as efficiently as possible. For this reason, the
-  // combined rules from all active blacklists are stored in one local file.
-  explicit Blacklist(const FilePath& path);
+  // Constructs a blacklist and populates it from the preferences associated
+  // with this profile.
+  explicit Blacklist(PrefService* prefs);
+
+#ifdef UNIT_TEST
+  // Constructs an empty blacklist.
+  Blacklist() : prefs_(NULL) {}
+#endif
 
   // Destructor.
   ~Blacklist();
 
+  // Adds a new entry to the blacklist. It is now owned by the blacklist.
+  void AddEntry(Entry* entry);
+
+  // Adds a new provider to the blacklist. It is now owned by the blacklist.
+  void AddProvider(Provider* provider);
+
+  EntryList::const_iterator entries_begin() const {
+    return blacklist_.begin();
+  }
+
+  EntryList::const_iterator entries_end() const {
+    return blacklist_.end();
+  }
+
+  ProviderList::const_iterator providers_begin() const {
+    return providers_.begin();
+  }
+
+  ProviderList::const_iterator providers_end() const {
+    return providers_.end();
+  }
+
   // Returns a pointer to a Match structure holding all matching entries.
   // If no matching Entry is found, returns null. Ownership belongs to the
   // caller.
-  Match* findMatch(const GURL&) const;
+  Match* FindMatch(const GURL&) const;
 
-  // Returns true if the blacklist object is in good health.
-  bool is_good() const { return is_good_; }
+  static void RegisterUserPrefs(PrefService* user_prefs);
 
   // Helper to remove cookies from a header.
   static std::string StripCookies(const std::string&);
 
-  // Helper to remove cookie expiration from a header.
-  static std::string StripCookieExpiry(const std::string&);
-
  private:
+  // Converts a GURL into the string to match against.
+  static std::string GetURLAsLookupString(const GURL& url);
+
+  // Loads the list of entries for a given provider. Returns true on success.
+  bool LoadEntryPreference(const ListValue& pref, const Provider* provider);
+
+  // Loads patterns from preferences. Returns true on success.
+  bool LoadPreferences();
+
+  // Loads a provider and subsequently all of its entries. Returns true on
+  // success. If an error occurs reading a provider or one of its entries,
+  // the complete provider is dropped.
+  bool LoadProviderPreference(const DictionaryValue& pref,
+                              const std::wstring& path);
+
   // Matches a pattern to a core URL which is host/path with all the other
-  // optional parts (scheme, user, password, port) stripped away. Used only
-  // internally but made static so that access can be given to tests.
+  // optional parts (scheme, user, password, port) stripped away.
   static bool Matches(const std::string& pattern, const std::string& url);
 
-  std::vector<Entry*> blacklist_;
-  std::vector<Provider*> providers_;
+  EntryList blacklist_;
+  ProviderList providers_;
 
-  bool is_good_;  // True if the blacklist was read successfully.
+  // Preferences where blacklist entries are stored.
+  PrefService* prefs_;
 
   FRIEND_TEST(BlacklistTest, Generic);
   FRIEND_TEST(BlacklistTest, PatternMatch);

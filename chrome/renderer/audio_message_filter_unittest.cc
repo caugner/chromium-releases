@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,28 +16,32 @@ class MockAudioDelegate : public AudioMessageFilter::Delegate {
     Reset();
   }
 
-  virtual void OnRequestPacket(size_t bytes_in_buffer,
+  virtual void OnRequestPacket(uint32 bytes_in_buffer,
                                const base::Time& message_timestamp) {
     request_packet_received_ = true;
     bytes_in_buffer_ = bytes_in_buffer;
     message_timestamp_ = message_timestamp;
   }
 
-  virtual void OnStateChanged(ViewMsg_AudioStreamState state) {
+  virtual void OnStateChanged(const ViewMsg_AudioStreamState_Params& state) {
     state_changed_received_ = true;
     state_ = state;
   }
 
-  virtual void OnCreated(base::SharedMemoryHandle handle, size_t length) {
+  virtual void OnCreated(base::SharedMemoryHandle handle, uint32 length) {
     created_received_ = true;
     handle_ = handle;
     length_ = length;
   }
 
-  virtual void OnVolume(double left, double right) {
+  virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
+                                   base::SyncSocket::Handle,
+                                   uint32 length) {
+  }
+
+  virtual void OnVolume(double volume) {
     volume_received_ = true;
-    left_ = left;
-    right_ = right;
+    volume_ = volume;
   }
 
   void Reset() {
@@ -46,47 +50,44 @@ class MockAudioDelegate : public AudioMessageFilter::Delegate {
     message_timestamp_ = base::Time();
 
     state_changed_received_ = false;
-    state_.state = ViewMsg_AudioStreamState::kError;
+    state_.state = ViewMsg_AudioStreamState_Params::kError;
 
     created_received_ = false;
     handle_ = base::SharedMemory::NULLHandle();
     length_ = 0;
 
     volume_received_ = false;
-    left_ = 0;
-    right_ = 0;
+    volume_ = 0;
   }
 
   bool request_packet_received() { return request_packet_received_; }
-  size_t bytes_in_buffer() { return bytes_in_buffer_; }
+  uint32 bytes_in_buffer() { return bytes_in_buffer_; }
   const base::Time& message_timestamp() { return message_timestamp_; }
 
   bool state_changed_received() { return state_changed_received_; }
-  ViewMsg_AudioStreamState state() { return state_; }
+  ViewMsg_AudioStreamState_Params state() { return state_; }
 
   bool created_received() { return created_received_; }
   base::SharedMemoryHandle handle() { return handle_; }
-  size_t length() { return length_; }
+  uint32 length() { return length_; }
 
   bool volume_received() { return volume_received_; }
-  double left() { return left_; }
-  double right() { return right_; }
+  double volume() { return volume_; }
 
  private:
   bool request_packet_received_;
-  size_t bytes_in_buffer_;
+  uint32 bytes_in_buffer_;
   base::Time message_timestamp_;
 
   bool state_changed_received_;
-  ViewMsg_AudioStreamState state_;
+  ViewMsg_AudioStreamState_Params state_;
 
   bool created_received_;
   base::SharedMemoryHandle handle_;
-  size_t length_;
+  uint32 length_;
 
   bool volume_received_;
-  double left_;
-  double right_;
+  double volume_;
 
   DISALLOW_COPY_AND_ASSIGN(MockAudioDelegate);
 };
@@ -103,7 +104,7 @@ TEST(AudioMessageFilterTest, Basic) {
   int stream_id = filter->AddDelegate(&delegate);
 
   // ViewMsg_RequestAudioPacket
-  const size_t kSizeInBuffer = 1024;
+  const uint32 kSizeInBuffer = 1024;
   const int64 kMessageTimestamp = 99;
   EXPECT_FALSE(delegate.request_packet_received());
   filter->OnMessageReceived(ViewMsg_RequestAudioPacket(kRouteId,
@@ -116,8 +117,8 @@ TEST(AudioMessageFilterTest, Basic) {
   delegate.Reset();
 
   // ViewMsg_NotifyAudioStreamStateChanged
-  const ViewMsg_AudioStreamState kState =
-      { ViewMsg_AudioStreamState::kPlaying };
+  const ViewMsg_AudioStreamState_Params kState =
+      { ViewMsg_AudioStreamState_Params::kPlaying };
   EXPECT_FALSE(delegate.state_changed_received());
   filter->OnMessageReceived(
       ViewMsg_NotifyAudioStreamStateChanged(kRouteId, stream_id, kState));
@@ -126,7 +127,7 @@ TEST(AudioMessageFilterTest, Basic) {
   delegate.Reset();
 
   // ViewMsg_NotifyAudioStreamCreated
-  const size_t kLength = 1024;
+  const uint32 kLength = 1024;
   EXPECT_FALSE(delegate.created_received());
   filter->OnMessageReceived(
       ViewMsg_NotifyAudioStreamCreated(kRouteId,
@@ -139,15 +140,12 @@ TEST(AudioMessageFilterTest, Basic) {
   delegate.Reset();
 
   // ViewMsg_NotifyAudioStreamVolume
-  const double kLeftVolume = 1.0;
-  const double kRightVolume = 2.0;
+  const double kVolume = 1.0;
   EXPECT_FALSE(delegate.volume_received());
   filter->OnMessageReceived(
-      ViewMsg_NotifyAudioStreamVolume(kRouteId, stream_id,
-                                      kLeftVolume, kRightVolume));
+      ViewMsg_NotifyAudioStreamVolume(kRouteId, stream_id, kVolume));
   EXPECT_TRUE(delegate.volume_received());
-  EXPECT_EQ(kLeftVolume, delegate.left());
-  EXPECT_EQ(kRightVolume, delegate.right());
+  EXPECT_EQ(kVolume, delegate.volume());
   delegate.Reset();
 
   message_loop.RunAllPending();

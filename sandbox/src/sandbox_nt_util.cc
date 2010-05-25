@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,86 @@
 
 namespace sandbox {
 
-// Handle for our private heap.
-void* g_heap = NULL;
-
 // This is the list of all imported symbols from ntdll.dll.
 SANDBOX_INTERCEPT NtExports g_nt = { NULL };
+
+}
+
+namespace {
+
+#if defined(_WIN64)
+void* AllocateNearTo(void* source, size_t size) {
+  using sandbox::g_nt;
+
+  // Start with 1 GB above the source.
+  const unsigned int kOneGB = 0x40000000;
+  void* base = reinterpret_cast<char*>(source) + kOneGB;
+  SIZE_T actual_size = size;
+  ULONG_PTR zero_bits = 0;  // Not the correct type if used.
+  ULONG type = MEM_RESERVE;
+
+  if (reinterpret_cast<SIZE_T>(source) > 0x7ff80000000) {
+    // We are at the top of the address space. Let's try the highest available
+    // address.
+    base = NULL;
+    type |= MEM_TOP_DOWN;
+  }
+
+  NTSTATUS ret;
+  int attempts = 0;
+  for (; attempts < 20; attempts++) {
+    ret = g_nt.AllocateVirtualMemory(NtCurrentProcess, &base, zero_bits,
+                                     &actual_size, type, PAGE_READWRITE);
+    if (NT_SUCCESS(ret)) {
+      if (base < source) {
+        // We won't be able to patch this dll.
+        VERIFY_SUCCESS(g_nt.FreeVirtualMemory(NtCurrentProcess, &base, &size,
+                                              MEM_RELEASE));
+        return NULL;
+      }
+      break;
+    }
+
+    // Try 100 MB higher.
+    base = reinterpret_cast<char*>(base) + 100 * 0x100000;
+  };
+
+  if (attempts == 20)
+    return NULL;
+
+  ret = g_nt.AllocateVirtualMemory(NtCurrentProcess, &base, zero_bits,
+                                   &actual_size, MEM_COMMIT, PAGE_READWRITE);
+
+  if (!NT_SUCCESS(ret)) {
+    VERIFY_SUCCESS(g_nt.FreeVirtualMemory(NtCurrentProcess, &base, &size,
+                                          MEM_RELEASE));
+    base = NULL;
+  }
+
+  return base;
+}
+#else  // defined(_WIN64).
+void* AllocateNearTo(void* source, size_t size) {
+  using sandbox::g_nt;
+  UNREFERENCED_PARAMETER(source);
+  void* base = 0;
+  SIZE_T actual_size = size;
+  ULONG_PTR zero_bits = 0;  // Not the correct type if used.
+  NTSTATUS ret = g_nt.AllocateVirtualMemory(NtCurrentProcess, &base,
+                                            zero_bits, &actual_size,
+                                            MEM_COMMIT, PAGE_READWRITE);
+  if (!NT_SUCCESS(ret))
+    return NULL;
+  return base;
+}
+#endif  // defined(_WIN64).
+
+}  // namespace.
+
+namespace sandbox {
+
+// Handle for our private heap.
+void* g_heap = NULL;
 
 SANDBOX_INTERCEPT HANDLE g_shared_section;
 SANDBOX_INTERCEPT size_t g_shared_IPC_size = 0;
@@ -217,7 +292,7 @@ bool IsSameProcess(HANDLE process) {
 }
 
 bool IsValidImageSection(HANDLE section, PVOID *base, PLARGE_INTEGER offset,
-                         PULONG view_size) {
+                         PSIZE_T view_size) {
   if (!section || !base || !view_size || offset)
     return false;
 
@@ -230,7 +305,7 @@ bool IsValidImageSection(HANDLE section, PVOID *base, PLARGE_INTEGER offset,
     return false;
 
   SECTION_BASIC_INFORMATION basic_info;
-  ULONG bytes_returned;
+  SIZE_T bytes_returned;
   ret = g_nt.QuerySection(query_section, SectionBasicInformation, &basic_info,
                           sizeof(basic_info), &bytes_returned);
 
@@ -366,14 +441,18 @@ UNICODE_STRING* ExtractModuleName(const UNICODE_STRING* module_path) {
 
   // Add one to the size so we can null terminate the string.
   size_t size_bytes = (start_pos - ix + 1) * sizeof(wchar_t);
+
+  // Based on the code above, size_bytes should always be small enough
+  // to make the static_cast below safe.
+  DCHECK_NT(kuint16max > size_bytes);
   char* str_buffer = new(NT_ALLOC) char[size_bytes + sizeof(UNICODE_STRING)];
   if (!str_buffer)
     return NULL;
 
   UNICODE_STRING* out_string = reinterpret_cast<UNICODE_STRING*>(str_buffer);
   out_string->Buffer = reinterpret_cast<wchar_t*>(&out_string[1]);
-  out_string->Length = size_bytes - sizeof(wchar_t);
-  out_string->MaximumLength = size_bytes;
+  out_string->Length = static_cast<USHORT>(size_bytes - sizeof(wchar_t));
+  out_string->MaximumLength = static_cast<USHORT>(size_bytes);
 
   NTSTATUS ret = CopyData(out_string->Buffer, &sep[1], out_string->Length);
   if (!NT_SUCCESS(ret)) {
@@ -448,7 +527,8 @@ bool IsSupportedRenameCall(FILE_RENAME_INFORMATION* file_info, DWORD length,
 
 }  // namespace sandbox
 
-void* operator new(size_t size, sandbox::AllocationType type) {
+void* operator new(size_t size, sandbox::AllocationType type,
+                   void* near_to) {
   using namespace sandbox;
 
   if (NT_ALLOC == type) {
@@ -458,15 +538,7 @@ void* operator new(size_t size, sandbox::AllocationType type) {
     // Use default flags for the allocation.
     return g_nt.RtlAllocateHeap(sandbox::g_heap, 0, size);
   } else if (NT_PAGE == type) {
-    void* base = 0;
-    SIZE_T actual_size = size;
-    ULONG_PTR zero_bits = 0;
-    NTSTATUS ret = g_nt.AllocateVirtualMemory(NtCurrentProcess, &base,
-                                              zero_bits, &actual_size,
-                                              MEM_COMMIT, PAGE_READWRITE);
-    if (!NT_SUCCESS(ret))
-      return NULL;
-    return base;
+    return AllocateNearTo(near_to, size);
   }
   NOTREACHED_NT();
   return NULL;

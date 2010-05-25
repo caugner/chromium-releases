@@ -14,8 +14,11 @@ namespace NPAPIClient {
 class WindowlessPluginTest : public PluginTest {
  public:
   // Constructor.
-  WindowlessPluginTest(NPP id, NPNetscapeFuncs *host_functions,
-                       const std::string& test_name);
+  WindowlessPluginTest(NPP id, NPNetscapeFuncs *host_functions);
+
+  // These tests run in windowless plugin mode.
+  virtual bool IsWindowless() const { return true; }
+
   // NPAPI HandleEvent handler
   virtual int16 HandleEvent(void* event);
 
@@ -24,9 +27,7 @@ class WindowlessPluginTest : public PluginTest {
       const std::string& script, NPVariant* result);
   void ExecuteScriptDeleteInPaint(NPNetscapeFuncs* browser);
   void MultipleInstanceSyncCalls(NPNetscapeFuncs* browser);
-
- private:
-  std::string test_name_;
+  void ConvertPoint(NPNetscapeFuncs* browser);
 };
 
 } // namespace NPAPIClient

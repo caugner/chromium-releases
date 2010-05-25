@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,18 @@
 
 #include <string>
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
-#include "base/task.h"
+#include "base/callback.h"
+#include "chrome/browser/gtk/gtk_tree.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/common/gtk_tree.h"
 
+class AccessibleWidgetHelper;
 class GURL;
 class Profile;
 class PossibleURLModel;
 
-class UrlPickerDialogGtk : public gtk_tree::ModelAdapter::Delegate {
+class UrlPickerDialogGtk : public gtk_tree::TableAdapter::Delegate {
  public:
   typedef Callback1<const GURL&>::Type UrlPickerCallback;
 
@@ -26,7 +28,7 @@ class UrlPickerDialogGtk : public gtk_tree::ModelAdapter::Delegate {
 
   ~UrlPickerDialogGtk();
 
-  // gtk_tree::ModelAdapter::Delegate implementation.
+  // gtk_tree::TableAdapter::Delegate implementation.
   virtual void SetColumnValues(int row, GtkTreeIter* iter);
 
  private:
@@ -45,26 +47,15 @@ class UrlPickerDialogGtk : public gtk_tree::ModelAdapter::Delegate {
   static gint CompareURL(GtkTreeModel* model, GtkTreeIter* a, GtkTreeIter* b,
                          gpointer window);
 
-  // Callback for URL entry changes.
-  static void OnUrlEntryChanged(GtkEditable* editable,
-                                UrlPickerDialogGtk* window);
+  CHROMEGTK_CALLBACK_0(UrlPickerDialogGtk, void, OnUrlEntryChanged);
+  CHROMEGTK_CALLBACK_2(UrlPickerDialogGtk, void, OnHistoryRowActivated,
+                       GtkTreePath*, GtkTreeViewColumn*);
+  CHROMEGTK_CALLBACK_1(UrlPickerDialogGtk, void, OnResponse, int);
+  CHROMEGTK_CALLBACK_0(UrlPickerDialogGtk, void, OnWindowDestroy);
 
   // Callback for user selecting rows in recent history list.
   static void OnHistorySelectionChanged(GtkTreeSelection* selection,
                                         UrlPickerDialogGtk* window);
-
-  // Callback for user activating a row in recent history list.
-  static void OnHistoryRowActivated(GtkTreeView* tree_view,
-                                    GtkTreePath* path,
-                                    GtkTreeViewColumn* column,
-                                    UrlPickerDialogGtk* window);
-
-  // Callback for dialog buttons.
-  static void OnResponse(GtkDialog* dialog, int response_id,
-                         UrlPickerDialogGtk* window);
-
-  // Callback for window destruction.
-  static void OnWindowDestroy(GtkWidget* widget, UrlPickerDialogGtk* window);
 
   // The dialog window.
   GtkWidget* dialog_;
@@ -87,10 +78,13 @@ class UrlPickerDialogGtk : public gtk_tree::ModelAdapter::Delegate {
 
   // The table model.
   scoped_ptr<PossibleURLModel> url_table_model_;
-  scoped_ptr<gtk_tree::ModelAdapter> url_table_adapter_;
+  scoped_ptr<gtk_tree::TableAdapter> url_table_adapter_;
 
   // Called if the user selects an url.
   UrlPickerCallback* callback_;
+
+  // Helper object to manage accessibility metadata.
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlPickerDialogGtk);
 };

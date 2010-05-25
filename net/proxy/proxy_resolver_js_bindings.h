@@ -24,8 +24,20 @@ class ProxyResolverJSBindings {
   // Handler for "myIpAddress()". Returns empty string on failure.
   virtual std::string MyIpAddress() = 0;
 
+  // Handler for "myIpAddressEx()". Returns empty string on failure.
+  //
+  // This is a Microsoft extension to PAC for IPv6, see:
+  // http://blogs.msdn.com/wndp/articles/IPV6_PAC_Extensions_v0_9.aspx
+  virtual std::string MyIpAddressEx() = 0;
+
   // Handler for "dnsResolve(host)". Returns empty string on failure.
   virtual std::string DnsResolve(const std::string& host) = 0;
+
+  // Handler for "dnsResolveEx(host)". Returns empty string on failure.
+  //
+  // This is a Microsoft extension to PAC for IPv6, see:
+  // http://blogs.msdn.com/wndp/articles/IPV6_PAC_Extensions_v0_9.aspx
+  virtual std::string DnsResolveEx(const std::string& host) = 0;
 
   // Handler for when an error is encountered. |line_number| may be -1
   // if a line number is not applicable to this error.
@@ -36,11 +48,8 @@ class ProxyResolverJSBindings {
   //   - Send script alert()s to LOG(INFO)
   //   - Use the provided host resolver to service dnsResolve().
   //
-  // |host_resolver| will be used in async mode on |host_resolver_loop|. If
-  // |host_resolver_loop| is NULL, then |host_resolver| will be used in sync
-  // mode on the PAC thread.
-  static ProxyResolverJSBindings* CreateDefault(
-      HostResolver* host_resolver, MessageLoop* host_resolver_loop);
+  // Note that |host_resolver| will be used in sync mode mode.
+  static ProxyResolverJSBindings* CreateDefault(HostResolver* host_resolver);
 };
 
 }  // namespace net

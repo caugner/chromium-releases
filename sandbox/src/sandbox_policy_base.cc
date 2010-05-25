@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "sandbox/src/sandbox_policy_base.h"
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "sandbox/src/filesystem_dispatcher.h"
 #include "sandbox/src/filesystem_policy.h"
@@ -70,23 +71,28 @@ PolicyBase::PolicyBase()
   // Initialize the IPC dispatcher array.
   memset(&ipc_targets_, NULL, sizeof(ipc_targets_));
   Dispatcher* dispatcher = NULL;
+
   dispatcher = new FilesystemDispatcher(this);
   ipc_targets_[IPC_NTCREATEFILE_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENFILE_TAG] = dispatcher;
   ipc_targets_[IPC_NTSETINFO_RENAME_TAG] = dispatcher;
   ipc_targets_[IPC_NTQUERYATTRIBUTESFILE_TAG] = dispatcher;
   ipc_targets_[IPC_NTQUERYFULLATTRIBUTESFILE_TAG] = dispatcher;
+
+  dispatcher = new NamedPipeDispatcher(this);
+  ipc_targets_[IPC_CREATENAMEDPIPEW_TAG] = dispatcher;
+
   dispatcher = new ThreadProcessDispatcher(this);
   ipc_targets_[IPC_NTOPENTHREAD_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENPROCESS_TAG] = dispatcher;
   ipc_targets_[IPC_CREATEPROCESSW_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENPROCESSTOKEN_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENPROCESSTOKENEX_TAG] = dispatcher;
-  dispatcher = new NamedPipeDispatcher(this);
-  ipc_targets_[IPC_CREATENAMEDPIPEW_TAG] = dispatcher;
+
   dispatcher = new SyncDispatcher(this);
   ipc_targets_[IPC_CREATEEVENT_TAG] = dispatcher;
   ipc_targets_[IPC_OPENEVENT_TAG] = dispatcher;
+
   dispatcher = new RegistryDispatcher(this);
   ipc_targets_[IPC_NTCREATEKEY_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENKEY_TAG] = dispatcher;
@@ -99,8 +105,8 @@ PolicyBase::~PolicyBase() {
     delete target;
   }
   delete ipc_targets_[IPC_NTCREATEFILE_TAG];
-  delete ipc_targets_[IPC_NTOPENTHREAD_TAG];
   delete ipc_targets_[IPC_CREATENAMEDPIPEW_TAG];
+  delete ipc_targets_[IPC_NTOPENTHREAD_TAG];
   delete ipc_targets_[IPC_CREATEEVENT_TAG];
   delete ipc_targets_[IPC_NTCREATEKEY_TAG];
   delete policy_maker_;
@@ -386,13 +392,10 @@ bool PolicyBase::SetupService(InterceptionManager* manager, int service) {
 // IPC subsystem. We receive a integer cookie and we are expected to return the
 // cookie times two (or three) and the current tick count.
 bool PolicyBase::Ping(IPCInfo* ipc, void* arg1) {
-  uint32 tag = ipc->ipc_tag;
-
-  switch (tag) {
+  switch (ipc->ipc_tag) {
     case IPC_PING1_TAG: {
-      uint32 cookie = bit_cast<uint32>(arg1);
-      COMPILE_ASSERT(sizeof(cookie) == sizeof(arg1), breaks_with_64_bit);
-
+      IPCInt ipc_int(arg1);
+      uint32 cookie = ipc_int.As32Bit();
       ipc->return_info.extended_count = 2;
       ipc->return_info.extended[0].unsigned_int = ::GetTickCount();
       ipc->return_info.extended[1].unsigned_int = 2 * cookie;

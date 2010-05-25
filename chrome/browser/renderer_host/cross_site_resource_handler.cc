@@ -7,67 +7,14 @@
 #include "chrome/browser/renderer_host/cross_site_resource_handler.h"
 
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/renderer_host/render_view_host_notification_task.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "net/base/io_buffer.h"
-
-namespace {
-
-// Task to notify the TabContents that a cross-site response has begun, so that
-// TabContents can tell the old page to run its onunload handler.
-class CrossSiteNotifyTask : public Task {
- public:
-  CrossSiteNotifyTask(int render_process_host_id,
-                      int render_view_id,
-                      int request_id)
-    : render_process_host_id_(render_process_host_id),
-      render_view_id_(render_view_id),
-      request_id_(request_id) {}
-
-  void Run() {
-    RenderViewHost* view =
-        RenderViewHost::FromID(render_process_host_id_, render_view_id_);
-    if (view) {
-      view->OnCrossSiteResponse(render_process_host_id_, request_id_);
-    } else {
-      // The view couldn't be found.
-      // TODO(creis): Should notify the IO thread to proceed anyway, using
-      // ResourceDispatcherHost::OnClosePageACK.
-    }
-  }
-
- private:
-  int render_process_host_id_;
-  int render_view_id_;
-  int request_id_;
-};
-
-class CancelPendingRenderViewTask : public Task {
- public:
-  CancelPendingRenderViewTask(int render_process_host_id,
-                              int render_view_id)
-    : render_process_host_id_(render_process_host_id),
-      render_view_id_(render_view_id) {}
-
-  void Run() {
-    RenderViewHost* view =
-        RenderViewHost::FromID(render_process_host_id_, render_view_id_);
-    if (view) {
-      RenderViewHostDelegate::RendererManagement* management_delegate =
-          view->delegate()->GetRendererManagementDelegate();
-      if (management_delegate)
-        management_delegate->OnCrossSiteNavigationCanceled();
-    }
-  }
-
- private:
-  int render_process_host_id_;
-  int render_view_id_;
-};
-
-}  // namespace
 
 CrossSiteResourceHandler::CrossSiteResourceHandler(
     ResourceHandler* handler,
@@ -84,6 +31,12 @@ CrossSiteResourceHandler::CrossSiteResourceHandler(
       completed_status_(),
       response_(NULL),
       rdh_(resource_dispatcher_host) {}
+
+bool CrossSiteResourceHandler::OnUploadProgress(int request_id,
+                                                uint64 position,
+                                                uint64 size) {
+  return next_handler_->OnUploadProgress(request_id, position, size);
+}
 
 bool CrossSiteResourceHandler::OnRequestRedirected(int request_id,
                                                    const GURL& new_url,
@@ -105,8 +58,7 @@ bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
   has_started_response_ = true;
 
   // Look up the request and associated info.
-  ResourceDispatcherHost::GlobalRequestID global_id(render_process_host_id_,
-                                                    request_id);
+  GlobalRequestID global_id(render_process_host_id_, request_id);
   URLRequest* request = rdh_->GetURLRequest(global_id);
   if (!request) {
     DLOG(WARNING) << "Request wasn't found";
@@ -126,6 +78,12 @@ bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
   // reply.
   StartCrossSiteTransition(request_id, response, global_id);
   return true;
+}
+
+bool CrossSiteResourceHandler::OnWillStart(int request_id,
+                                           const GURL& url,
+                                           bool* defer) {
+  return next_handler_->OnWillStart(request_id, url, defer);
 }
 
 bool CrossSiteResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
@@ -155,27 +113,12 @@ bool CrossSiteResourceHandler::OnResponseCompleted(
       return next_handler_->OnResponseCompleted(request_id, status,
                                                 security_info);
     } else {
-      // Some types of failures will call OnResponseCompleted without calling
-      // CrossSiteResourceHandler::OnResponseStarted.
-      if (status.status() == URLRequestStatus::CANCELED) {
-        // Here the request was canceled, which happens when selecting "take me
-        // back" from an interstitial.  Nothing to do but cancel the pending
-        // render view host.
-        CancelPendingRenderViewTask* task =
-            new CancelPendingRenderViewTask(render_process_host_id_,
-                                            render_view_id_);
-        rdh_->ui_loop()->PostTask(FROM_HERE, task);
-        return next_handler_->OnResponseCompleted(request_id, status,
-                                                  security_info);
-      } else {
-        // An error occured, we should wait now for the cross-site transition,
-        // so that the error message (e.g., 404) can be displayed to the user.
-        // Also continue with the logic below to remember that we completed
-        // during the cross-site transition.
-        ResourceDispatcherHost::GlobalRequestID global_id(
-            render_process_host_id_, request_id);
-        StartCrossSiteTransition(request_id, NULL, global_id);
-      }
+      // An error occured, we should wait now for the cross-site transition,
+      // so that the error message (e.g., 404) can be displayed to the user.
+      // Also continue with the logic below to remember that we completed
+      // during the cross-site transition.
+      GlobalRequestID global_id(render_process_host_id_, request_id);
+      StartCrossSiteTransition(request_id, NULL, global_id);
     }
   }
 
@@ -189,6 +132,10 @@ bool CrossSiteResourceHandler::OnResponseCompleted(
   return false;
 }
 
+void CrossSiteResourceHandler::OnRequestClosed() {
+  next_handler_->OnRequestClosed();
+}
+
 // We can now send the response to the new renderer, which will cause
 // TabContents to swap in the new renderer and destroy the old one.
 void CrossSiteResourceHandler::ResumeResponse() {
@@ -197,8 +144,7 @@ void CrossSiteResourceHandler::ResumeResponse() {
   in_cross_site_transition_ = false;
 
   // Find the request for this response.
-  ResourceDispatcherHost::GlobalRequestID global_id(render_process_host_id_,
-                                                    request_id_);
+  GlobalRequestID global_id(render_process_host_id_, request_id_);
   URLRequest* request = rdh_->GetURLRequest(global_id);
   if (!request) {
     DLOG(WARNING) << "Resuming a request that wasn't found";
@@ -238,7 +184,7 @@ void CrossSiteResourceHandler::ResumeResponse() {
 void CrossSiteResourceHandler::StartCrossSiteTransition(
     int request_id,
     ResourceResponse* response,
-    ResourceDispatcherHost::GlobalRequestID global_id) {
+    const GlobalRequestID& global_id) {
   in_cross_site_transition_ = true;
   request_id_ = request_id;
   response_ = response;
@@ -266,9 +212,11 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
   // Tell the tab responsible for this request that a cross-site response is
   // starting, so that it can tell its old renderer to run its onunload
   // handler now.  We will wait to hear the corresponding ClosePage_ACK.
-  CrossSiteNotifyTask* task =
-      new CrossSiteNotifyTask(render_process_host_id_,
-                              render_view_id_,
-                              request_id);
-  rdh_->ui_loop()->PostTask(FROM_HERE, task);
+  CallRenderViewHostRendererManagementDelegate(
+      render_process_host_id_, render_view_id_,
+      &RenderViewHostDelegate::RendererManagement::OnCrossSiteResponse,
+      render_process_host_id_, request_id);
+
+  // TODO(creis): If the above call should fail, then we need to notify the IO
+  // thread to proceed anyway, using ResourceDispatcherHost::OnClosePageACK.
 }

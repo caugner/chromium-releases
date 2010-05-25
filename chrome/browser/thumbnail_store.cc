@@ -7,18 +7,20 @@
 #include <string.h>
 #include <algorithm>
 
-#include "app/gfx/codec/jpeg_codec.h"
 #include "app/sql/statement.h"
 #include "app/sql/transaction.h"
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_util.h"
 #include "base/md5.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/codec/jpeg_codec.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -218,7 +220,7 @@ void ThumbnailStore::NotifyThumbnailStoreReady() {
 void ThumbnailStore::UpdateURLData() {
   DCHECK(url_blacklist_);
 
-  int result_count = ThumbnailStore::kMaxCacheSize + url_blacklist_->GetSize();
+  int result_count = ThumbnailStore::kMaxCacheSize + url_blacklist_->size();
   hs_->QueryTopURLsAndRedirects(result_count, &consumer_,
       NewCallback(this, &ThumbnailStore::OnURLDataAvailable));
 }

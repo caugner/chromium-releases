@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,17 +12,20 @@
 
 #include "base/ref_counted.h"
 #include "base/string_util.h"
-#include "net/base/cookie_policy.h"
 #include "net/base/cookie_store.h"
 #include "net/base/host_resolver.h"
+#include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
-#include "net/base/strict_transport_security_state.h"
+#include "net/base/transport_security_state.h"
 #include "net/ftp/ftp_auth_cache.h"
 #include "net/proxy/proxy_service.h"
 
 namespace net {
+class CookiePolicy;
 class FtpTransactionFactory;
+class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
+class SocketStream;
 }
 class URLRequest;
 
@@ -31,10 +34,15 @@ class URLRequestContext :
     public base::RefCountedThreadSafe<URLRequestContext> {
  public:
   URLRequestContext()
-      : http_transaction_factory_(NULL),
+      : net_log_(NULL),
+        http_transaction_factory_(NULL),
         ftp_transaction_factory_(NULL),
-        cookie_store_(NULL),
-        strict_transport_security_state_(NULL) {
+        cookie_policy_(NULL),
+        transport_security_state_(NULL) {
+  }
+
+  net::NetLog* net_log() const {
+    return net_log_;
   }
 
   net::HostResolver* host_resolver() const {
@@ -61,17 +69,25 @@ class URLRequestContext :
     return ftp_transaction_factory_;
   }
 
-  // Gets the cookie store for this context.
+  // Gets the cookie store for this context (may be null, in which case
+  // cookies are not stored).
   net::CookieStore* cookie_store() { return cookie_store_.get(); }
 
-  // Gets the cookie policy for this context.
-  net::CookiePolicy* cookie_policy() { return &cookie_policy_; }
+  // Gets the cookie policy for this context (may be null, in which case
+  // cookies are allowed).
+  net::CookiePolicy* cookie_policy() { return cookie_policy_; }
 
-  net::StrictTransportSecurityState* strict_transport_security_state() {
-      return strict_transport_security_state_; }
+  net::TransportSecurityState* transport_security_state() {
+      return transport_security_state_; }
 
   // Gets the FTP authentication cache for this context.
   net::FtpAuthCache* ftp_auth_cache() { return &ftp_auth_cache_; }
+
+  // Gets the HTTP Authentication Handler Factory for this context.
+  // The factory is only valid for the lifetime of this URLRequestContext
+  net::HttpAuthHandlerFactory* http_auth_handler_factory() {
+    return http_auth_handler_factory_;
+  }
 
   // Gets the value of 'Accept-Charset' header field.
   const std::string& accept_charset() const { return accept_charset_; }
@@ -93,16 +109,17 @@ class URLRequestContext :
     referrer_charset_ = charset;
   }
 
-  // Called for each cookie returning for the given request. A pointer to
-  // the cookie is passed so that it can be modified. Returns true if the
-  // cookie was not dropped (it could still be modified though).
-  virtual bool InterceptCookie(const URLRequest* request, std::string* cookie) {
+  // Called before adding cookies to requests. Returns true if cookie can
+  // be added to the request. The cookie might still be modified though.
+  virtual bool InterceptRequestCookies(const URLRequest* request,
+                                       const std::string& cookies) const {
     return true;
   }
 
-  // Called before adding cookies to sent requests. Allows overriding
-  // requests to block sending of cookies.
-  virtual bool AllowSendingCookies(const URLRequest* request) const {
+  // Called before adding cookies from respones to the cookie monster. Returns
+  // true if the cookie can be added. The cookie might still be modified though.
+  virtual bool InterceptResponseCookie(const URLRequest* request,
+                                       const std::string& cookie) const {
     return true;
   }
 
@@ -113,15 +130,16 @@ class URLRequestContext :
 
   // The following members are expected to be initialized and owned by
   // subclasses.
+  net::NetLog* net_log_;
   scoped_refptr<net::HostResolver> host_resolver_;
   scoped_refptr<net::ProxyService> proxy_service_;
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
   net::HttpTransactionFactory* http_transaction_factory_;
   net::FtpTransactionFactory* ftp_transaction_factory_;
+  net::HttpAuthHandlerFactory* http_auth_handler_factory_;
   scoped_refptr<net::CookieStore> cookie_store_;
-  net::CookiePolicy cookie_policy_;
-  scoped_refptr<net::StrictTransportSecurityState>
-      strict_transport_security_state_;
+  net::CookiePolicy* cookie_policy_;
+  scoped_refptr<net::TransportSecurityState> transport_security_state_;
   net::FtpAuthCache ftp_auth_cache_;
   std::string accept_language_;
   std::string accept_charset_;

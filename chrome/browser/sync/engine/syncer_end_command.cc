@@ -1,13 +1,11 @@
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE entry.
+// found in the LICENSE file.
 
 #include "chrome/browser/sync/engine/syncer_end_command.h"
 
-#include "chrome/browser/sync/engine/conflict_resolution_view.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
-#include "chrome/browser/sync/engine/syncer_status.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/util/event_sys-inl.h"
 
@@ -16,29 +14,34 @@ namespace browser_sync {
 SyncerEndCommand::SyncerEndCommand() {}
 SyncerEndCommand::~SyncerEndCommand() {}
 
-void SyncerEndCommand::ExecuteImpl(SyncerSession* session) {
-  ConflictResolutionView conflict_view(session);
-  conflict_view.increment_num_sync_cycles();
-  SyncerStatus status(session);
-  status.set_syncing(false);
+void SyncerEndCommand::ExecuteImpl(sessions::SyncSession* session) {
+  sessions::StatusController* status(session->status_controller());
+  status->set_syncing(false);
 
-  if (!session->HasMoreToSync()) {
-    // This might be the first time we've fully completed a sync cycle.
-    DCHECK(session->got_zero_updates());
-
-    syncable::ScopedDirLookup dir(session->dirman(), session->account_name());
+  // This might be the first time we've fully completed a sync cycle, for
+  // some subset of the currently synced datatypes.
+  if (!session->HasMoreToSync() &&
+      status->ServerSaysNothingMoreToDownload()) {
+    syncable::ScopedDirLookup dir(session->context()->directory_manager(),
+                                  session->context()->account_name());
     if (!dir.good()) {
       LOG(ERROR) << "Scoped dir lookup failed!";
       return;
     }
 
-    // This gets persisted to the directory's backing store.
-    dir->set_initial_sync_ended(true);
+    for (int i = 0; i < syncable::MODEL_TYPE_COUNT; ++i) {
+      syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
+      if (status->updates_request_parameters().data_types[i]) {
+        // This gets persisted to the directory's backing store.
+        dir->set_initial_sync_ended_for_type(model_type, true);
+      }
+    }
   }
 
-  SyncerEvent event = { SyncerEvent::SYNC_CYCLE_ENDED };
-  event.last_session = session;
-  session->syncer_event_channel()->NotifyListeners(event);
+  SyncerEvent event(SyncerEvent::SYNC_CYCLE_ENDED);
+  sessions::SyncSessionSnapshot snapshot(session->TakeSnapshot());
+  event.snapshot = &snapshot;
+  session->context()->syncer_event_channel()->NotifyListeners(event);
 }
 
 }  // namespace browser_sync

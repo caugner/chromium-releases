@@ -4,11 +4,64 @@
 
 #include "chrome/browser/shell_integration.h"
 
-#include "base/message_loop.h"
+#include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/thread.h"
-#include "chrome/browser/browser_process.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/chrome_thread.h"
+
+std::string ShellIntegration::GetCommandLineArgumentsCommon(const GURL& url,
+    const string16& extension_app_id) {
+  const CommandLine cmd = *CommandLine::ForCurrentProcess();
+  std::wstring arguments_w;
+
+  // Use the same UserDataDir for new launches that we currently have set.
+  std::wstring user_data_dir = cmd.GetSwitchValue(switches::kUserDataDir);
+  if (!user_data_dir.empty()) {
+    // Make sure user_data_dir is an absolute path.
+    if (file_util::AbsolutePath(&user_data_dir) &&
+        file_util::PathExists(FilePath::FromWStringHack(user_data_dir))) {
+      arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kUserDataDir) +
+                     L"=\"" + user_data_dir + L"\" ";
+    }
+  }
+
+#if defined (OS_CHROMEOS)
+  std::wstring profile = cmd.GetSwitchValue(switches::kProfile);
+  if (!profile.empty()) {
+    arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kProfile) +
+                   L"=\"" + profile + L"\" ";
+  }
+#endif
+
+  // If |extension_app_id| is present, we use the kAppId switch rather than
+  // the kApp switch (the launch url will be read from the extension app
+  // during launch.
+  if (cmd.HasSwitch(switches::kEnableExtensionApps) &&
+      !extension_app_id.empty()) {
+    arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kAppId) +
+        L"=\"" + ASCIIToWide(UTF16ToASCII(extension_app_id)) + L"\" --" +
+        ASCIIToWide(switches::kEnableExtensionApps);
+  } else {
+    // Use '--app=url' instead of just 'url' to launch the browser with minimal
+    // chrome.
+    // Note: Do not change this flag!  Old Gears shortcuts will break if you do!
+    std::string url_string = url.spec();
+    ReplaceSubstringsAfterOffset(&url_string, 0, "\\", "%5C");
+    ReplaceSubstringsAfterOffset(&url_string, 0, "\"", "%22");
+    ReplaceSubstringsAfterOffset(&url_string, 0, ";",  "%3B");
+    ReplaceSubstringsAfterOffset(&url_string, 0, "$",  "%24");
+#if defined(OS_WIN)  // Windows shortcuts can't escape % so we use \x instead.
+    ReplaceSubstringsAfterOffset(&url_string, 0, "%",  "\\x");
+#endif
+    std::wstring url_w = UTF8ToWide(url_string);
+    arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kApp) +
+        L"=\"" + url_w + L"\"";
+  }
+  return WideToUTF8(arguments_w);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // ShellIntegration::DefaultBrowserWorker
@@ -16,21 +69,23 @@
 
 ShellIntegration::DefaultBrowserWorker::DefaultBrowserWorker(
     DefaultBrowserObserver* observer)
-    : observer_(observer),
-      ui_loop_(MessageLoop::current()),
-      file_loop_(g_browser_process->file_thread()->message_loop()) {
+    : observer_(observer) {
 }
 
 void ShellIntegration::DefaultBrowserWorker::StartCheckDefaultBrowser() {
   observer_->SetDefaultBrowserUIState(STATE_PROCESSING);
-  file_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::ExecuteCheckDefaultBrowser));
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          this, &DefaultBrowserWorker::ExecuteCheckDefaultBrowser));
 }
 
 void ShellIntegration::DefaultBrowserWorker::StartSetAsDefaultBrowser() {
   observer_->SetDefaultBrowserUIState(STATE_PROCESSING);
-  file_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::ExecuteSetAsDefaultBrowser));
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          this, &DefaultBrowserWorker::ExecuteSetAsDefaultBrowser));
 }
 
 void ShellIntegration::DefaultBrowserWorker::ObserverDestroyed() {
@@ -43,27 +98,31 @@ void ShellIntegration::DefaultBrowserWorker::ObserverDestroyed() {
 // DefaultBrowserWorker, private:
 
 void ShellIntegration::DefaultBrowserWorker::ExecuteCheckDefaultBrowser() {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   DefaultBrowserState state = ShellIntegration::IsDefaultBrowser();
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::CompleteCheckDefaultBrowser, state));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &DefaultBrowserWorker::CompleteCheckDefaultBrowser, state));
 }
 
 void ShellIntegration::DefaultBrowserWorker::CompleteCheckDefaultBrowser(
     DefaultBrowserState state) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   UpdateUI(state);
 }
 
 void ShellIntegration::DefaultBrowserWorker::ExecuteSetAsDefaultBrowser() {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   ShellIntegration::SetAsDefaultBrowser();
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::CompleteSetAsDefaultBrowser));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &DefaultBrowserWorker::CompleteSetAsDefaultBrowser));
 }
 
 void ShellIntegration::DefaultBrowserWorker::CompleteSetAsDefaultBrowser() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   if (observer_) {
     // Set as default completed, check again to make sure it stuck...
     StartCheckDefaultBrowser();

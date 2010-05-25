@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,13 @@
 #include "app/win_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/dock_info.h"
+#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/views/frame/app_panel_browser_frame_view.h"
 #include "chrome/browser/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/views/frame/browser_root_view.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/frame/glass_browser_frame_view.h"
 #include "chrome/browser/views/frame/opaque_browser_frame_view.h"
-#include "chrome/browser/views/tabs/browser_tab_strip.h"
 #include "grit/theme_resources.h"
 #include "views/screen.h"
 #include "views/window/window_delegate.h"
@@ -37,16 +37,18 @@ BrowserFrame* BrowserFrame::Create(BrowserView* browser_view,
   return frame;
 }
 
+// static
+const gfx::Font& BrowserFrame::GetTitleFont() {
+  static gfx::Font* title_font = new gfx::Font(win_util::GetWindowTitleFont());
+  return *title_font;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrame, public:
 
 BrowserFrameWin::BrowserFrameWin(BrowserView* browser_view, Profile* profile)
     : WindowWin(browser_view),
       browser_view_(browser_view),
-      saved_window_style_(0),
-      saved_window_ex_style_(0),
-      detached_drag_mode_(false),
-      drop_tabstrip_(NULL),
       root_view_(NULL),
       frame_initialized_(false),
       profile_(profile) {
@@ -67,7 +69,7 @@ views::Window* BrowserFrameWin::GetWindow() {
   return this;
 }
 
-void BrowserFrameWin::TabStripCreated(TabStripWrapper* tabstrip) {
+void BrowserFrameWin::TabStripCreated(BaseTabStrip* tabstrip) {
 }
 
 int BrowserFrameWin::GetMinimizeButtonOffset() const {
@@ -82,8 +84,7 @@ int BrowserFrameWin::GetMinimizeButtonOffset() const {
   return minimize_button_corner.x;
 }
 
-gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(
-    TabStripWrapper* tabstrip) const {
+gfx::Rect BrowserFrameWin::GetBoundsForTabStrip(BaseTabStrip* tabstrip) const {
   return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
 }
 
@@ -92,11 +93,6 @@ void BrowserFrameWin::UpdateThrobber(bool running) {
 }
 
 void BrowserFrameWin::ContinueDraggingDetachedTab() {
-  detached_drag_mode_ = true;
-
-  // Set the frame to partially transparent.
-  UpdateWindowAlphaForTabDragging(detached_drag_mode_);
-
   // Send the message directly, so that the window is positioned appropriately.
   SendMessage(GetNativeWindow(), WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(0, 0));
 }
@@ -108,21 +104,52 @@ ThemeProvider* BrowserFrameWin::GetThemeProviderForFrame() const {
 }
 
 bool BrowserFrameWin::AlwaysUseNativeFrame() const {
-  // We use the native frame when we're told we should by the theme provider
-  // (e.g. no custom theme is active), or when we're a popup or app window. We
-  // don't theme popup or app windows, so regardless of whether or not a theme
-  // is active for normal browser windows, we don't want to use the custom frame
-  // for popups/apps.
-  return GetThemeProvider()->ShouldUseNativeFrame() ||
-      (!browser_view_->IsBrowserTypeNormal() &&
-      win_util::ShouldUseVistaFrame());
+  // App panel windows draw their own frame.
+  if (browser_view_->IsBrowserTypePanel())
+    return false;
+
+  // We don't theme popup or app windows, so regardless of whether or not a
+  // theme is active for normal browser windows, we don't want to use the custom
+  // frame for popups/apps.
+  if (!browser_view_->IsBrowserTypeNormal() && win_util::ShouldUseVistaFrame())
+    return true;
+
+  // Otherwise, we use the native frame when we're told we should by the theme
+  // provider (e.g. no custom theme is active).
+  return GetThemeProvider()->ShouldUseNativeFrame();
+}
+
+views::View* BrowserFrameWin::GetFrameView() const {
+  return browser_frame_view_;
+}
+
+void BrowserFrameWin::PaintTabStripShadow(gfx::Canvas* canvas) {
+  browser_frame_view_->PaintTabStripShadow(canvas);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// BrowserFrame, views::WidgetWin overrides:
+// BrowserFrame, views::WindowWin overrides:
+
+gfx::Insets BrowserFrameWin::GetClientAreaInsets() const {
+  // Use the default client insets for an opaque frame or a glass popup/app
+  // frame.
+  if (!GetNonClientView()->UseNativeFrame() ||
+      !browser_view_->IsBrowserTypeNormal()) {
+    return WindowWin::GetClientAreaInsets();
+  }
+
+  int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
+  // In fullscreen mode, we have no frame. In restored mode, we draw our own
+  // client edge over part of the default frame.
+  if (IsFullscreen())
+    border_thickness = 0;
+  else if (!IsMaximized())
+    border_thickness -= kClientEdgeThickness;
+  return gfx::Insets(0, border_thickness, border_thickness, border_thickness);
+}
 
 bool BrowserFrameWin::GetAccelerator(int cmd_id,
-                                     views::Accelerator* accelerator) {
+                                     menus::Accelerator* accelerator) {
   return browser_view_->GetAccelerator(cmd_id, accelerator);
 }
 
@@ -131,26 +158,10 @@ void BrowserFrameWin::OnEndSession(BOOL ending, UINT logoff) {
 }
 
 void BrowserFrameWin::OnEnterSizeMove() {
-  drop_tabstrip_ = NULL;
   browser_view_->WindowMoveOrResizeStarted();
 }
 
 void BrowserFrameWin::OnExitSizeMove() {
-  if (TabStrip2::Enabled()) {
-    if (detached_drag_mode_) {
-      detached_drag_mode_ = false;
-      if (drop_tabstrip_) {
-        gfx::Point screen_point = views::Screen::GetCursorScreenPoint();
-        BrowserTabStrip* tabstrip =
-            browser_view_->tabstrip()->AsBrowserTabStrip();
-        gfx::Rect tsb = tabstrip->GetDraggedTabScreenBounds(screen_point);
-        drop_tabstrip_->AttachTab(tabstrip->DetachTab(0), screen_point, tsb);
-      } else {
-        UpdateWindowAlphaForTabDragging(detached_drag_mode_);
-        browser_view_->tabstrip()->AsBrowserTabStrip()->SendDraggedTabHome();
-      }
-    }
-  }
   WidgetWin::OnExitSizeMove();
 }
 
@@ -181,59 +192,6 @@ LRESULT BrowserFrameWin::OnNCActivate(BOOL active) {
   return WindowWin::OnNCActivate(active);
 }
 
-LRESULT BrowserFrameWin::OnNCCalcSize(BOOL mode, LPARAM l_param) {
-  // We don't adjust the client area unless we're a tabbed browser window and
-  // are using the native frame.
-  if (!GetNonClientView()->UseNativeFrame() ||
-      !browser_view_->IsBrowserTypeNormal()) {
-    return WindowWin::OnNCCalcSize(mode, l_param);
-  }
-
-  RECT* client_rect = mode ?
-      &reinterpret_cast<NCCALCSIZE_PARAMS*>(l_param)->rgrc[0] :
-      reinterpret_cast<RECT*>(l_param);
-  int border_thickness = 0;
-  if (browser_view_->IsMaximized()) {
-    // Make the maximized mode client rect fit the screen exactly, by
-    // subtracting the border Windows automatically adds for maximized mode.
-    border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
-    // Find all auto-hide taskbars along the screen edges and adjust in by the
-    // thickness of the auto-hide taskbar on each such edge, so the window isn't
-    // treated as a "fullscreen app", which would cause the taskbars to
-    // disappear.
-    HMONITOR monitor = MonitorFromWindow(GetNativeView(),
-                                         MONITOR_DEFAULTTONULL);
-    if (win_util::EdgeHasTopmostAutoHideTaskbar(ABE_LEFT, monitor))
-      client_rect->left += win_util::kAutoHideTaskbarThicknessPx;
-    if (win_util::EdgeHasTopmostAutoHideTaskbar(ABE_RIGHT, monitor))
-      client_rect->right -= win_util::kAutoHideTaskbarThicknessPx;
-    if (win_util::EdgeHasTopmostAutoHideTaskbar(ABE_BOTTOM, monitor)) {
-      client_rect->bottom -= win_util::kAutoHideTaskbarThicknessPx;
-    } else if (win_util::EdgeHasTopmostAutoHideTaskbar(ABE_TOP, monitor)) {
-      // Tricky bit.  Due to a bug in DwmDefWindowProc()'s handling of
-      // WM_NCHITTEST, having any nonclient area atop the window causes the
-      // caption buttons to draw onscreen but not respond to mouse hover/clicks.
-      // So for a taskbar at the screen top, we can't push the client_rect->top
-      // down; instead, we move the bottom up by one pixel, which is the
-      // smallest change we can make and still get a client area less than the
-      // screen size. This is visibly ugly, but there seems to be no better
-      // solution.
-      --client_rect->bottom;
-    }
-  } else if (!browser_view_->IsFullscreen()) {
-    // We draw our own client edge over part of the default frame would be.
-    border_thickness = GetSystemMetrics(SM_CXSIZEFRAME) - kClientEdgeThickness;
-  }
-  client_rect->left += border_thickness;
-  client_rect->right -= border_thickness;
-  client_rect->bottom -= border_thickness;
-
-  // We'd like to return WVR_REDRAW in some cases here, but because we almost
-  // always have nonclient area (except in fullscreen mode, where it doesn't
-  // matter), we can't.  See comments in window.cc:OnNCCalcSize() for more info.
-  return 0;
-}
-
 LRESULT BrowserFrameWin::OnNCHitTest(const CPoint& pt) {
   // Only do DWM hit-testing when we are using the native frame.
   if (GetNonClientView()->UseNativeFrame()) {
@@ -247,31 +205,6 @@ LRESULT BrowserFrameWin::OnNCHitTest(const CPoint& pt) {
 }
 
 void BrowserFrameWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
-  if (TabStrip2::Enabled()) {
-    if (detached_drag_mode_) {
-      // TODO(beng): move all to BrowserTabStrip...
-
-      // We check to see if the mouse cursor is in the magnetism zone of another
-      // visible TabStrip. If so, we should dock to it.
-      std::set<HWND> ignore_windows;
-      ignore_windows.insert(GetNativeWindow());
-
-      gfx::Point screen_point = views::Screen::GetCursorScreenPoint();
-      HWND local_window =
-          DockInfo::GetLocalProcessWindowAtPoint(screen_point, ignore_windows);
-      if (local_window) {
-        BrowserView* browser_view =
-            BrowserView::GetBrowserViewForNativeWindow(local_window);
-        drop_tabstrip_ = browser_view->tabstrip()->AsBrowserTabStrip();
-        if (TabStrip2::IsDragRearrange(drop_tabstrip_, screen_point)) {
-          ReleaseCapture();
-          return;
-        }
-      }
-      drop_tabstrip_ = NULL;
-    }
-  }
-
   // Windows lies to us about the position of the minimize button before a
   // window is visible. We use the position of the minimize button to place the
   // distributor logo in official builds. When the window is shown, we need to
@@ -308,17 +241,33 @@ int BrowserFrameWin::GetShowState() const {
   return browser_view_->GetShowState();
 }
 
+void BrowserFrameWin::Activate() {
+  // When running under remote desktop, if the remote desktop client is not
+  // active on the users desktop, then none of the windows contained in the
+  // remote desktop will be activated.  However, WindowWin::Activate will still
+  // bring this browser window to the foreground.  We explicitly set ourselves
+  // as the last active browser window to ensure that we get treated as such by
+  // the rest of Chrome.
+  BrowserList::SetLastActive(browser_view_->browser());
+
+  WindowWin::Activate();
+}
+
 views::NonClientFrameView* BrowserFrameWin::CreateFrameViewForWindow() {
   if (AlwaysUseNativeFrame())
     browser_frame_view_ = new GlassBrowserFrameView(this, browser_view_);
+  else if (browser_view_->IsBrowserTypePanel())
+    browser_frame_view_ = new AppPanelBrowserFrameView(this, browser_view_);
   else
     browser_frame_view_ = new OpaqueBrowserFrameView(this, browser_view_);
   return browser_frame_view_;
 }
 
 void BrowserFrameWin::UpdateFrameAfterFrameChange() {
-  WindowWin::UpdateFrameAfterFrameChange();
+  // We need to update the glass region on or off before the base class adjusts
+  // the window region.
   UpdateDWMFrame();
+  WindowWin::UpdateFrameAfterFrameChange();
 }
 
 views::RootView* BrowserFrameWin::CreateRootView() {
@@ -343,37 +292,31 @@ void BrowserFrameWin::UpdateDWMFrame() {
       margins.cxLeftWidth = kClientEdgeThickness + 1;
       margins.cxRightWidth = kClientEdgeThickness + 1;
       margins.cyBottomHeight = kClientEdgeThickness + 1;
+      margins.cyTopHeight = kClientEdgeThickness + 1;
     }
     // In maximized mode, we only have a titlebar strip of glass, no side/bottom
     // borders.
     if (!browser_view_->IsFullscreen()) {
-      margins.cyTopHeight =
-          GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
+      if (browser_view_->UsingSideTabs()) {
+        margins.cxLeftWidth +=
+            GetBoundsForTabStrip(browser_view_->tabstrip()).right();
+        margins.cyTopHeight += GetSystemMetrics(SM_CYSIZEFRAME);
+      } else {
+        margins.cyTopHeight =
+            GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
+      }
     }
   } else {
     // For popup and app windows we want to use the default margins.
-    margins.cxLeftWidth = margins.cxRightWidth = margins.cyTopHeight =
-        margins.cyBottomHeight = 0;
   }
   DwmExtendFrameIntoClientArea(GetNativeView(), &margins);
-}
 
-void BrowserFrameWin::UpdateWindowAlphaForTabDragging(bool dragging) {
-  HWND frame_hwnd = GetNativeWindow();
-  if (dragging) {
-    // Make the frame slightly transparent during the drag operation.
-    saved_window_style_ = ::GetWindowLong(frame_hwnd, GWL_STYLE);
-    saved_window_ex_style_ = ::GetWindowLong(frame_hwnd, GWL_EXSTYLE);
-    ::SetWindowLong(frame_hwnd, GWL_EXSTYLE,
-                    saved_window_ex_style_ | WS_EX_LAYERED);
-    // Remove the captions tyle so the window doesn't have window controls for a
-    // more "transparent" look.
-    ::SetWindowLong(frame_hwnd, GWL_STYLE,
-                    saved_window_style_ & ~WS_CAPTION);
-    SetLayeredWindowAttributes(frame_hwnd, RGB(0xFF, 0xFF, 0xFF),
-                               kTabDragWindowAlpha, LWA_ALPHA);
+  DWORD window_style = GetWindowLong(GWL_STYLE);
+  if (browser_view_->UsingSideTabs()) {
+    if (window_style & WS_CAPTION)
+      SetWindowLong(GWL_STYLE, window_style & ~WS_CAPTION);
   } else {
-    ::SetWindowLong(frame_hwnd, GWL_STYLE, saved_window_style_);
-    ::SetWindowLong(frame_hwnd, GWL_EXSTYLE, saved_window_ex_style_);
+    if (!(window_style & WS_CAPTION))
+      SetWindowLong(GWL_STYLE, window_style | WS_CAPTION);
   }
 }

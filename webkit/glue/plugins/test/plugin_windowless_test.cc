@@ -6,17 +6,54 @@
 #include "webkit/glue/plugins/test/plugin_windowless_test.h"
 #include "webkit/glue/plugins/test/plugin_client.h"
 
+#if defined(OS_MACOSX)
+#include <ApplicationServices/ApplicationServices.h>
+#include <Carbon/Carbon.h>
+#endif
+
 namespace NPAPIClient {
 
 // Remember the first plugin instance for tests involving multiple instances
 WindowlessPluginTest* g_other_instance = NULL;
 
-WindowlessPluginTest::WindowlessPluginTest(
-    NPP id, NPNetscapeFuncs *host_functions, const std::string& test_name)
-  : PluginTest(id, host_functions),
-    test_name_(test_name) {
+WindowlessPluginTest::WindowlessPluginTest(NPP id,
+                                           NPNetscapeFuncs *host_functions)
+    : PluginTest(id, host_functions) {
   if (!g_other_instance)
     g_other_instance = this;
+}
+
+static bool IsPaintEvent(NPEvent* np_event) {
+#if defined(OS_WIN)
+  return WM_PAINT == np_event->event;
+#elif defined(OS_MACOSX)
+  return np_event->what == updateEvt;
+#endif
+}
+
+static bool IsMouseMoveEvent(NPEvent* np_event) {
+#if defined(OS_WIN)
+  return WM_MOUSEMOVE == np_event->event;
+#elif defined(OS_MACOSX)
+  return np_event->what == nullEvent;
+#endif
+}
+
+static bool IsMouseUpEvent(NPEvent* np_event) {
+#if defined(OS_WIN)
+  return WM_LBUTTONUP == np_event->event;
+#elif defined(OS_MACOSX)
+  return np_event->what == mouseUp;
+#endif
+}
+
+static bool IsWindowActivationEvent(NPEvent* np_event) {
+#if defined(OS_WIN)
+  NOTIMPLEMENTED();
+  return false;
+#elif defined(OS_MACOSX)
+  return np_event->what == activateEvt;
+#endif
 }
 
 int16 WindowlessPluginTest::HandleEvent(void* event) {
@@ -33,7 +70,8 @@ int16 WindowlessPluginTest::HandleEvent(void* event) {
   }
 
   NPEvent* np_event = reinterpret_cast<NPEvent*>(event);
-  if (WM_PAINT == np_event->event) {
+  if (IsPaintEvent(np_event)) {
+#if defined(OS_WIN)
     HDC paint_dc = reinterpret_cast<HDC>(np_event->wParam);
     if (paint_dc == NULL) {
       SetError("Invalid Window DC passed to HandleEvent for WM_PAINT");
@@ -50,19 +88,24 @@ int16 WindowlessPluginTest::HandleEvent(void* event) {
     }
 
     DeleteObject(clipping_region);
+#endif
 
-    if (test_name_ == "execute_script_delete_in_paint") {
+    if (test_name() == "execute_script_delete_in_paint") {
       ExecuteScriptDeleteInPaint(browser);
-    } else if (test_name_ == "multiple_instances_sync_calls") {
+    } else if (test_name() == "multiple_instances_sync_calls") {
       MultipleInstanceSyncCalls(browser);
     }
-
-  } else if (WM_MOUSEMOVE == np_event->event &&
-             test_name_ == "execute_script_delete_in_mouse_move") {
+#if OS_MACOSX
+  } else if (IsWindowActivationEvent(np_event) &&
+             test_name() == "convert_point") {
+      ConvertPoint(browser);
+#endif
+  } else if (IsMouseMoveEvent(np_event) &&
+             test_name() == "execute_script_delete_in_mouse_move") {
     ExecuteScript(browser, id(), "DeletePluginWithinScript();", NULL);
     SignalTestCompleted();
-  } else if (WM_LBUTTONUP == np_event->event &&
-            test_name_ == "delete_frame_test") {
+  } else if (IsMouseUpEvent(np_event) &&
+             test_name() == "delete_frame_test") {
     ExecuteScript(
         browser, id(),
         "parent.document.getElementById('frame').outerHTML = ''", NULL);
@@ -89,8 +132,8 @@ NPError WindowlessPluginTest::ExecuteScript(NPNetscapeFuncs* browser, NPP id,
 
 void WindowlessPluginTest::ExecuteScriptDeleteInPaint(
     NPNetscapeFuncs* browser) {
-  NPUTF8* urlString = "javascript:DeletePluginWithinScript()";
-  NPUTF8* targetString = NULL;
+  const NPUTF8* urlString = "javascript:DeletePluginWithinScript()";
+  const NPUTF8* targetString = NULL;
   browser->geturl(id(), urlString, targetString);
   SignalTestCompleted();
 }
@@ -101,6 +144,81 @@ void WindowlessPluginTest::MultipleInstanceSyncCalls(NPNetscapeFuncs* browser) {
 
   DCHECK(g_other_instance);
   ExecuteScript(browser, g_other_instance->id(), "TestCallback();", NULL);
+  SignalTestCompleted();
+}
+
+void WindowlessPluginTest::ConvertPoint(NPNetscapeFuncs* browser) {
+#if defined(OS_MACOSX)
+  // First, just sanity-test that round trips work.
+  NPCoordinateSpace spaces[] = { NPCoordinateSpacePlugin,
+                                 NPCoordinateSpaceWindow,
+                                 NPCoordinateSpaceFlippedWindow,
+                                 NPCoordinateSpaceScreen,
+                                 NPCoordinateSpaceFlippedScreen };
+  for (unsigned int i = 0; i < arraysize(spaces); ++i) {
+    for (unsigned int j = 0; j < arraysize(spaces); ++j) {
+      double x, y, round_trip_x, round_trip_y;
+      if (!(browser->convertpoint(id(), 0, 0, spaces[i], &x, &y, spaces[j])) ||
+          !(browser->convertpoint(id(), x, y, spaces[j], &round_trip_x,
+                                  &round_trip_y, spaces[i]))) {
+        SetError("Conversion failed");
+        SignalTestCompleted();
+        return;
+      }
+      if (i != j && x == 0 && y == 0) {
+        SetError("Converting a coordinate should change it");
+        SignalTestCompleted();
+        return;
+      }
+      if (round_trip_x != 0 || round_trip_y != 0) {
+        SetError("Round-trip conversion should give return the original point");
+        SignalTestCompleted();
+        return;
+      }
+    }
+  }
+
+  // Now, more extensive testing on a single point.
+  double screen_x, screen_y;
+  browser->convertpoint(id(), 0, 0, NPCoordinateSpacePlugin,
+                        &screen_x, &screen_y, NPCoordinateSpaceScreen);
+  double flipped_screen_x, flipped_screen_y;
+  browser->convertpoint(id(), 0, 0, NPCoordinateSpacePlugin,
+                        &flipped_screen_x, &flipped_screen_y,
+                        NPCoordinateSpaceFlippedScreen);
+  double window_x, window_y;
+  browser->convertpoint(id(), 0, 0, NPCoordinateSpacePlugin,
+                        &window_x, &window_y, NPCoordinateSpaceWindow);
+  double flipped_window_x, flipped_window_y;
+  browser->convertpoint(id(), 0, 0, NPCoordinateSpacePlugin,
+                        &flipped_window_x, &flipped_window_y,
+                        NPCoordinateSpaceFlippedWindow);
+
+  CGRect main_display_bounds = CGDisplayBounds(CGMainDisplayID());
+
+  // Check that all the coordinates are right. The plugin is in a 600x600 window
+  // at (100, 100), with a content area origin of (100, 100).
+  // Y-coordinates are not checked exactly so that the test is robust against
+  // toolbar changes, info bar visibility, etc.
+  if (screen_x != flipped_screen_x)
+    SetError("Flipping screen coordinates shouldn't change x");
+  else if (flipped_screen_y != main_display_bounds.size.height - screen_y)
+    SetError("Flipped screen coordinates should be flipped vertically!");
+  else if (screen_x != 200)
+    SetError("Screen x location is wrong");
+  else if (flipped_screen_y < 200 || flipped_screen_y > 400)
+    SetError("Screen y location is wrong");
+  if (window_x != flipped_window_x)
+    SetError("Flipping window coordinates shouldn't change x");
+  else if (flipped_window_y != 600 - window_y)
+    SetError("Flipped window coordinates should be flipped vertically!");
+  else if (window_x != 100)
+    SetError("Window x location is wrong");
+  else if (flipped_screen_y < 100 || flipped_screen_y > 300)
+    SetError("Window y location is wrong");
+#else
+  SetError("Unimplemented");
+#endif
   SignalTestCompleted();
 }
 

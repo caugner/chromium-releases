@@ -5,16 +5,44 @@
 #ifndef CHROME_FRAME_UTILS_H_
 #define CHROME_FRAME_UTILS_H_
 
+#include <shdeprecated.h>
+#include <urlmon.h>
+#include <wininet.h>
+
 #include <atlbase.h>
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/histogram.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/thread.h"
+
+#include "googleurl/src/gurl.h"
 
 // utils.h : Various utility functions and classes
 
 extern const wchar_t kChromeContentPrefix[];
 extern const wchar_t kChromeProtocolPrefix[];
+extern const wchar_t kChromeFrameHeadlessMode[];
+extern const wchar_t kChromeFrameUnpinnedMode[];
+extern const wchar_t kEnableGCFProtocol[];
+extern const wchar_t kChromeMimeType[];
+
+typedef enum ProtocolPatchMethod {
+  PATCH_METHOD_IBROWSER = 0,
+  PATCH_METHOD_INET_PROTOCOL,  // 1
+  PATCH_METHOD_MONIKER,  // 2
+};
+
+// A REG_DWORD config value that maps to the ProtocolPatchMethod enum.
+// To get the config value, call:
+// ProtocolPatchMethod patch_method =
+//     static_cast<ProtocolPatchMethod>(
+//          GetConfigInt(PATCH_METHOD_IBROWSER, kPatchProtocols));
+extern const wchar_t kPatchProtocols[];
+
 
 // This function is very similar to the AtlRegisterTypeLib function except
 // that it takes a parameter that specifies whether to register the typelib
@@ -46,6 +74,16 @@ HRESULT UtilRegisterTypeLib(ITypeLib* typelib,
 HRESULT UtilUnRegisterTypeLib(ITypeLib* typelib,
                               bool for_current_user_only);
 
+// Utility function to tell if the NPAPI plugin is registered.
+bool UtilIsNPAPIPluginRegistered();
+
+// Sets or clears a marker that causes NPAPI registration to persist across
+// updates. The marker is added if set is true and is deleted otherwise.
+bool UtilChangePersistentNPAPIMarker(bool set);
+
+// Returns true if the persistent NPAPI marker is set, false otherwise.
+bool UtilIsPersistentNPAPIMarkerSet();
+
 // Given an HTML fragment, this function looks for the
 // <meta http-equiv="X-UA-Compatible"> tag and extracts the value of the
 // "content" attribute
@@ -53,34 +91,6 @@ HRESULT UtilUnRegisterTypeLib(ITypeLib* typelib,
 // inside a string in a <SCRIPT> block.
 HRESULT UtilGetXUACompatContentValue(const std::wstring& html_string,
                                      std::wstring* content_value);
-
-
-// Appends |suffix| to the substring |channel_name| of |string| iff
-// the first instance of |channel_name| in |string| is not already followed by
-// |suffix|.
-// Returns true if |string| was modified.
-bool AppendSuffixToChannelName(std::wstring* string,
-                               const std::wstring& channel_name,
-                               const std::wstring& suffix);
-
-// Removes |suffix| from |string| if |string| contains |channel_name| followed
-// by |suffix|.
-// Returns true if |string| was modified.
-bool RemoveSuffixFromChannelName(std::wstring* string,
-                                 const std::wstring& channel_name,
-                                 const std::wstring& suffix);
-
-// Looks for and alters if found the Omaha configuration for Chrome in the
-// registry. This changes the auto-update release channel to prevent installed
-// builds of Chrome that include Chrome Frame from getting replaced by
-// Chrome updates without it.
-// Adds the Chrome Frame suffix if add_cf_suffix is true, removes it
-// otherwise.
-// Returns S_OK if the Chrome Omaha configuration was found and updated.
-// Returns S_FALSE if the configuration was found but didn't need updating.
-// Returns REGDB_E_READREGDB if the Chrome Omaha key could not be read.
-// Returns REGDB_E_WRITEREGDB if the Chrome Omaha key could not be written.
-HRESULT UtilUpdateOmahaConfig(bool add_cf_suffix);
 
 // Returns a string from ChromeFrame's string table by resource. Must be
 // provided with a valid resource id.
@@ -166,6 +176,8 @@ typedef enum IEVersion {
 // will be returned.
 IEVersion GetIEVersion();
 
+FilePath GetIETemporaryFilesFolder();
+
 // Retrieves the file version from a module handle without extra round trips
 // to the disk (as happens with the regular GetFileVersionInfo API).
 //
@@ -180,6 +192,9 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low);
 // Return if the IEXPLORE is in private mode. The IEIsInPrivateBrowsing() checks
 // whether current process is IEXPLORE.
 bool IsIEInPrivate();
+
+// Calls [ieframe|shdocvw]!DoFileDownload to initiate a download.
+HRESULT DoFileDownloadInIE(const wchar_t* url);
 
 // Creates a copy of a menu. We need this when original menu comes from
 // a process with higher integrity.
@@ -198,6 +213,23 @@ bool GetConfigBool(bool default_value, const wchar_t* value_name);
 // Gets an integer configuration value from the registry.
 int GetConfigInt(int default_value, const wchar_t* value_name);
 
+// Sets an integer configuration value in the registry.
+bool SetConfigInt(const wchar_t* value_name, int value);
+
+// Sets a boolean integer configuration value in the registry.
+bool SetConfigBool(const wchar_t* value_name, bool value);
+
+// Deletes the configuration value passed in.
+bool DeleteConfigValue(const wchar_t* value_name);
+
+// Returns true if we are running in headless mode in which case we need to
+// gather crash dumps, etc to send them to the crash server.
+bool IsHeadlessMode();
+
+// Returns true if we are running in unpinned mode in which case DLL
+// eviction should be possible.
+bool IsUnpinnedMode();
+
 // Check if this url is opting into Chrome Frame based on static settings.
 bool IsOptInUrl(const wchar_t* url);
 
@@ -210,22 +242,48 @@ HRESULT DoQueryService(const IID& service_id, IUnknown* unk, T** service) {
   ScopedComPtr<IServiceProvider> service_provider;
   HRESULT hr = service_provider.QueryFrom(unk);
   if (!service_provider)
-    return hr;
+    return E_NOINTERFACE;
 
-  return service_provider->QueryService(service_id, service);
+  hr = service_provider->QueryService(service_id, service);
+  if (*service == NULL)
+    return E_NOINTERFACE;
+  return hr;
 }
 
-// Get url (display name) from a moniker, |bind_context| is optional
-HRESULT GetUrlFromMoniker(IMoniker* moniker, IBindCtx* bind_context,
-                          std::wstring* url);
+// Navigates an IWebBrowser2 object to a moniker.
+// |headers| can be NULL.
+HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
+                                 const wchar_t* headers, IBindCtx* bind_ctx,
+                                 const wchar_t* fragment);
+
+// Raises a flag on the current thread (using TLS) to indicate that an
+// in-progress navigation should be rendered in chrome frame.
+void MarkBrowserOnThreadForCFNavigation(IBrowserService* browser);
+
+// Checks if this browser instance has been marked as currently navigating
+// to a CF document.  If clear_flag is set to true, the tls flag is cleared but
+// only if the browser has been marked.
+bool CheckForCFNavigation(IBrowserService* browser, bool clear_flag);
 
 // Returns true if the URL passed in is something which can be handled by
 // Chrome. If this function returns false then we should fail the navigation.
 // When is_privileged is true, chrome extension URLs will be considered valid.
 bool IsValidUrlScheme(const std::wstring& url, bool is_privileged);
 
-// This returns the base directory in which to store user profiles.
-bool GetUserProfileBaseDirectory(std::wstring* path);
+// Returns the raw http headers for the current request given an
+// IWinInetHttpInfo pointer.
+std::string GetRawHttpHeaders(IWinInetHttpInfo* info);
+
+// Can be used to determine whether a given request is being performed for
+// a sub-frame or iframe in Internet Explorer. This can be called
+// from various places, notably in request callbacks and the like.
+//
+// |service_provider| must not be NULL and should be a pointer to something
+// that implements IServiceProvider (if it isn't this method returns false).
+//
+// Returns true if this method can determine with some certainty that the
+// request did NOT originate from a top level frame, returns false otherwise.
+bool IsSubFrameRequest(IUnknown* service_provider);
 
 // See COM_INTERFACE_BLIND_DELEGATE below for details.
 template <class T>
@@ -282,5 +340,107 @@ STDMETHODIMP QueryInterfaceIfDelegateSupports(void* obj, REFIID iid,
 // Queries the delegated COM object for an interface, bypassing the wrapper.
 #define COM_INTERFACE_BLIND_DELEGATE() \
     COM_INTERFACE_ENTRY_FUNC_BLIND(0, CheckOutgoingInterface<_ComMapClass>)
+
+// Thread that enters STA and has a UI message loop.
+class STAThread : public base::Thread {
+ public:
+  explicit STAThread(const char *name) : Thread(name) {}
+  bool Start() {
+    return StartWithOptions(Options(MessageLoop::TYPE_UI, 0));
+  }
+ protected:
+  // Called just prior to starting the message loop
+  virtual void Init() {
+    ::CoInitialize(0);
+  }
+
+  // Called just after the message loop ends
+  virtual void CleanUp() {
+    ::CoUninitialize();
+  }
+};
+
+std::wstring GuidToString(const GUID& guid);
+
+// The urls retrieved from the IMoniker interface don't contain the anchor
+// portion of the actual url navigated to. This function checks whether the
+// url passed in the bho_url parameter contains an anchor and if yes checks
+// whether it matches the url retrieved from the moniker. If yes it returns
+// the bho url, if not the moniker url.
+std::wstring GetActualUrlFromMoniker(IMoniker* moniker,
+                                     IBindCtx* bind_context,
+                                     const std::wstring& bho_url);
+
+// Checks if a window is a top level window
+bool IsTopLevelWindow(HWND window);
+
+// Seeks a stream back to position 0.
+HRESULT RewindStream(IStream* stream);
+
+extern Lock g_ChromeFrameHistogramLock;
+
+// Thread safe versions of the UMA histogram macros we use for ChromeFrame.
+// These should be used for histograms in ChromeFrame. If other histogram
+// macros from base/histogram.h are needed then thread safe versions of those
+// should be defined and used.
+#define THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, \
+                                                bucket_count) { \
+  AutoLock lock(g_ChromeFrameHistogramLock); \
+  UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, bucket_count); \
+}
+
+#define THREAD_SAFE_UMA_HISTOGRAM_TIMES(name, sample) { \
+  AutoLock lock(g_ChromeFrameHistogramLock); \
+  UMA_HISTOGRAM_TIMES(name, sample); \
+}
+
+// Fired when we want to notify IE about privacy changes.
+#define WM_FIRE_PRIVACY_CHANGE_NOTIFICATION (WM_APP + 1)
+
+// Sent (not posted) when a request needs to be downloaded in the host browser
+// instead of Chrome.  WPARAM is 0 and LPARAM is a pointer to an IMoniker
+// object.
+// NOTE: Since the message is sent synchronously, the handler should only
+// start asynchronous operations in order to not block the sender unnecessarily.
+#define WM_DOWNLOAD_IN_HOST (WM_APP + 2)
+
+// Maps the InternetCookieState enum to the corresponding CookieAction values
+// used for IE privacy stuff.
+int32 MapCookieStateToCookieAction(InternetCookieState cookie_state);
+
+// Parses the url passed in and returns a GURL instance without the fragment.
+GURL GetUrlWithoutFragment(const wchar_t* url);
+
+// Compares the URLs passed in after removing the fragments from them.
+bool CompareUrlsWithoutFragment(const wchar_t* url1, const wchar_t* url2);
+
+// Returns the Referrer from the HTTP headers and additional headers.
+std::string FindReferrerFromHeaders(const wchar_t* headers,
+                                     const wchar_t* additional_headers);
+
+// Returns the HTTP headers from the binding passed in.
+std::string GetHttpHeadersFromBinding(IBinding* binding);
+
+// Returns the HTTP response code from the binding passed in.
+int GetHttpResponseStatusFromBinding(IBinding* binding);
+
+// Returns the desired patch method (moniker, http_equiv, protocol sink).
+// Defaults to moniker patch.
+ProtocolPatchMethod GetPatchMethod();
+
+// Returns true if the IMoniker patch is enabled.
+bool MonikerPatchEnabled();
+
+// STL helper class that implements a functor to delete objects.
+// E.g: std::for_each(v.begin(), v.end(), utils::DeleteObject());
+namespace utils {
+class DeleteObject {
+ public:
+  template <typename T>
+  void operator()(T* obj) {
+    delete obj;
+  }
+};
+}
 
 #endif  // CHROME_FRAME_UTILS_H_

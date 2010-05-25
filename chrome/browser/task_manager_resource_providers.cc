@@ -6,18 +6,11 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include <atlbase.h>
-#endif  // defined(OS_WIN)
-
-#if defined(OS_WIN)
-#include "app/gfx/icon_util.h"
-#endif  // defined(OS_WIN)
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/file_version_info.h"
-#include "base/message_loop.h"
+#include "base/i18n/rtl.h"
 #include "base/process_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
@@ -25,20 +18,33 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/child_process_host.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/notifications/balloon_collection.h"
+#include "chrome/browser/notifications/balloon_host.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/child_process_host.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/sqlite_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+
+#if defined(OS_MACOSX)
+#include "skia/ext/skia_utils_mac.h"
+#endif
+#if defined(OS_WIN)
+#include <atlbase.h>
+#include "gfx/icon_util.h"
+#endif  // defined(OS_WIN)
 
 ////////////////////////////////////////////////////////////////////////////////
 // TaskManagerTabContentsResource class
@@ -47,10 +53,13 @@
 TaskManagerTabContentsResource::TaskManagerTabContentsResource(
     TabContents* tab_contents)
     : tab_contents_(tab_contents),
-      pending_stats_update_(false) {
+      pending_stats_update_(false),
+      v8_memory_allocated_(0),
+      v8_memory_used_(0),
+      pending_v8_memory_allocated_update_(false) {
   // We cache the process as when the TabContents is closed the process
   // becomes NULL and the TaskManager still needs it.
-  process_ = tab_contents_->process()->process().handle();
+  process_ = tab_contents_->GetRenderProcessHost()->GetHandle();
   pid_ = base::GetProcId(process_);
   stats_.images.size = 0;
   stats_.cssStyleSheets.size = 0;
@@ -68,8 +77,8 @@ std::wstring TaskManagerTabContentsResource::GetTitle() const {
   if (tab_title.empty()) {
     tab_title = UTF8ToWide(tab_contents_->GetURL().spec());
     // Force URL to be LTR.
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-      l10n_util::WrapStringWithLTRFormatting(&tab_title);
+    if (base::i18n::IsRTL())
+      base::i18n::WrapStringWithLTRFormatting(&tab_title);
   } else {
     // Since the tab_title will be concatenated with
     // IDS_TASK_MANAGER_TAB_PREFIX, we need to explicitly set the tab_title to
@@ -80,7 +89,7 @@ std::wstring TaskManagerTabContentsResource::GetTitle() const {
     // as LTR format, the concatenated result will be "!Yahoo! Mail: The best
     // web-based Email :BAT", in which the capital letters "BAT" stands for
     // the Hebrew word for "tab".
-    l10n_util::AdjustStringForLocaleDirection(tab_title, &tab_title);
+    base::i18n::AdjustStringForLocaleDirection(tab_title, &tab_title);
   }
 
   return l10n_util::GetStringF(IDS_TASK_MANAGER_TAB_PREFIX, tab_title);
@@ -91,6 +100,10 @@ void TaskManagerTabContentsResource::Refresh() {
     tab_contents_->render_view_host()->Send(new ViewMsg_GetCacheResourceStats);
     pending_stats_update_ = true;
   }
+  if (!pending_v8_memory_allocated_update_) {
+    tab_contents_->render_view_host()->Send(new ViewMsg_GetV8HeapStats);
+    pending_v8_memory_allocated_update_ = true;
+  }
 }
 
 WebKit::WebCache::ResourceTypeStats
@@ -98,10 +111,25 @@ WebKit::WebCache::ResourceTypeStats
   return stats_;
 }
 
+size_t TaskManagerTabContentsResource::GetV8MemoryAllocated() const {
+  return v8_memory_allocated_;
+}
+
+size_t TaskManagerTabContentsResource::GetV8MemoryUsed() const {
+  return v8_memory_used_;
+}
+
 void TaskManagerTabContentsResource::NotifyResourceTypeStats(
     const WebKit::WebCache::ResourceTypeStats& stats) {
   stats_ = stats;
   pending_stats_update_ = false;
+}
+
+void TaskManagerTabContentsResource::NotifyV8HeapStats(
+    size_t v8_memory_allocated, size_t v8_memory_used) {
+  v8_memory_allocated_ = v8_memory_allocated;
+  v8_memory_used_ = v8_memory_used;
+  pending_v8_memory_allocated_update_ = false;
 }
 
 SkBitmap TaskManagerTabContentsResource::GetIcon() const {
@@ -140,14 +168,16 @@ TaskManager::Resource* TaskManagerTabContentsResourceProvider::GetResource(
   if (!tab_contents)  // Not one of our resource.
     return NULL;
 
-  if (!tab_contents->process()->process().handle()) {
+  base::ProcessHandle process_handle =
+      tab_contents->GetRenderProcessHost()->GetHandle();
+  if (!process_handle) {
     // We should not be holding on to a dead tab (it should have been removed
     // through the NOTIFY_TAB_CONTENTS_DISCONNECTED notification.
     NOTREACHED();
     return NULL;
   }
 
-  int pid = tab_contents->process()->process().pid();
+  int pid = base::GetProcId(process_handle);
   if (pid != origin_pid)
     return NULL;
 
@@ -219,7 +249,7 @@ void TaskManagerTabContentsResourceProvider::Add(TabContents* tab_contents) {
   // Don't add dead tabs or tabs that haven't yet connected.
   // Also ignore tabs which display extension content. We collapse
   // all of these into one extension row.
-  if (!tab_contents->process()->process().handle() ||
+  if (!tab_contents->GetRenderProcessHost()->GetHandle() ||
       !tab_contents->notify_disconnection() ||
       tab_contents->HostsExtension()) {
     return;
@@ -331,8 +361,7 @@ base::ProcessHandle TaskManagerChildProcessResource::GetProcess() const {
 TaskManagerChildProcessResourceProvider::
     TaskManagerChildProcessResourceProvider(TaskManager* task_manager)
     : updating_(false),
-      task_manager_(task_manager),
-      ui_loop_(MessageLoop::current()) {
+      task_manager_(task_manager) {
 }
 
 TaskManagerChildProcessResourceProvider::
@@ -355,16 +384,18 @@ void TaskManagerChildProcessResourceProvider::StartUpdating() {
   DCHECK(!updating_);
   updating_ = true;
 
-  // Register for notifications to get new plugin processes.
+  // Register for notifications to get new child processes.
   registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
                  NotificationService::AllSources());
 
-  // Get the existing plugins
-  MessageLoop* io_loop_ = g_browser_process->io_thread()->message_loop();
-  io_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &TaskManagerChildProcessResourceProvider::RetrieveChildProcessInfo));
+  // Get the existing child processes.
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          this,
+          &TaskManagerChildProcessResourceProvider::RetrieveChildProcessInfo));
 }
 
 void TaskManagerChildProcessResourceProvider::StopUpdating() {
@@ -459,12 +490,16 @@ void TaskManagerChildProcessResourceProvider::AddToTaskManager(
 // The ChildProcessInfo::Iterator has to be used from the IO thread.
 void TaskManagerChildProcessResourceProvider::RetrieveChildProcessInfo() {
   for (ChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
-    existing_child_process_info_.push_back(**iter);
+    // Only add processes which are already started, since we need their handle.
+    if ((*iter)->handle() != base::kNullProcessHandle)
+      existing_child_process_info_.push_back(**iter);
   }
   // Now notify the UI thread that we have retrieved information about child
   // processes.
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &TaskManagerChildProcessResourceProvider::ChildProcessInfoRetreived));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(this,
+          &TaskManagerChildProcessResourceProvider::ChildProcessInfoRetreived));
 }
 
 // This is called on the UI thread.
@@ -490,10 +525,9 @@ TaskManagerExtensionProcessResource::TaskManagerExtensionProcessResource(
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
   }
-  base::Process process(extension_host_->render_process_host()->process());
-  process_handle_ = process.handle();
-  pid_ = process.pid();
-  std::wstring extension_name(UTF8ToWide(extension()->name()));
+  process_handle_ = extension_host_->render_process_host()->GetHandle();
+  pid_ = base::GetProcId(process_handle_);
+  std::wstring extension_name(UTF8ToWide(GetExtension()->name()));
   DCHECK(!extension_name.empty());
   // Since the extension_name will be concatenated with a prefix, we need
   // to explicitly set the extension_name to be LTR format if there is no
@@ -502,7 +536,7 @@ TaskManagerExtensionProcessResource::TaskManagerExtensionProcessResource(
   // "Great Extension!" the concatenated result would be something like
   // "!Great Extension :NOISNETXE", in which capital letters "NOISNETXE"
   // stand for the Hebrew word for "extension".
-  l10n_util::AdjustStringForLocaleDirection(extension_name, &extension_name);
+  base::i18n::AdjustStringForLocaleDirection(extension_name, &extension_name);
   title_ = l10n_util::GetStringF(IDS_TASK_MANAGER_EXTENSION_PREFIX,
                                  extension_name);
 }
@@ -522,7 +556,7 @@ base::ProcessHandle TaskManagerExtensionProcessResource::GetProcess() const {
   return process_handle_;
 }
 
-Extension* TaskManagerExtensionProcessResource::extension() const {
+const Extension* TaskManagerExtensionProcessResource::GetExtension() const {
   return extension_host_->extension();
 }
 
@@ -570,7 +604,9 @@ void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
   // Register for notifications about extension process changes.
   registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CREATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CRASHED,
+  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_TERMINATED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_HOST_DESTROYED,
                  NotificationService::AllSources());
 }
 
@@ -581,7 +617,9 @@ void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
   // Unregister for notifications about extension process changes.
   registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_CREATED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_CRASHED,
+  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_TERMINATED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::EXTENSION_HOST_DESTROYED,
                     NotificationService::AllSources());
 
   // Delete all the resources.
@@ -599,7 +637,8 @@ void TaskManagerExtensionProcessResourceProvider::Observe(
     case NotificationType::EXTENSION_PROCESS_CREATED:
       AddToTaskManager(Details<ExtensionHost>(details).ptr());
       break;
-    case NotificationType::EXTENSION_PROCESS_CRASHED:
+    case NotificationType::EXTENSION_PROCESS_TERMINATED:
+    case NotificationType::EXTENSION_HOST_DESTROYED:
       RemoveFromTaskManager(Details<ExtensionHost>(details).ptr());
       break;
     default:
@@ -650,6 +689,139 @@ void TaskManagerExtensionProcessResourceProvider::RemoveFromTaskManager(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// TaskManagerNotificationResource class
+////////////////////////////////////////////////////////////////////////////////
+
+SkBitmap* TaskManagerNotificationResource::default_icon_ = NULL;
+
+TaskManagerNotificationResource::TaskManagerNotificationResource(
+    BalloonHost* balloon_host)
+    : balloon_host_(balloon_host) {
+  if (!default_icon_) {
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
+  }
+  process_handle_ = balloon_host_->render_view_host()->process()->GetHandle();
+  pid_ = base::GetProcId(process_handle_);
+  title_ = l10n_util::GetStringF(IDS_TASK_MANAGER_NOTIFICATION_PREFIX,
+                                 balloon_host_->GetSource());
+}
+
+TaskManagerNotificationResource::~TaskManagerNotificationResource() {
+}
+
+SkBitmap TaskManagerNotificationResource::GetIcon() const {
+  return *default_icon_;
+}
+
+base::ProcessHandle TaskManagerNotificationResource::GetProcess() const {
+  return process_handle_;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// TaskManagerNotificationResourceProvider class
+////////////////////////////////////////////////////////////////////////////////
+
+TaskManagerNotificationResourceProvider::
+    TaskManagerNotificationResourceProvider(TaskManager* task_manager)
+    : task_manager_(task_manager),
+      updating_(false) {
+}
+
+TaskManagerNotificationResourceProvider::
+    ~TaskManagerNotificationResourceProvider() {
+}
+
+TaskManager::Resource* TaskManagerNotificationResourceProvider::GetResource(
+    int origin_pid,
+    int render_process_host_id,
+    int routing_id) {
+  // TODO(johnnyg): provide resources by pid if necessary.
+  return NULL;
+}
+
+void TaskManagerNotificationResourceProvider::StartUpdating() {
+  DCHECK(!updating_);
+  updating_ = true;
+
+  // Add all the existing BalloonHosts.
+  BalloonCollection* collection =
+      g_browser_process->notification_ui_manager()->balloon_collection();
+  const BalloonCollection::Balloons& balloons = collection->GetActiveBalloons();
+  for (BalloonCollection::Balloons::const_iterator it = balloons.begin();
+       it != balloons.end(); ++it) {
+    AddToTaskManager((*it)->view()->GetHost());
+  }
+
+  // Register for notifications about extension process changes.
+  registrar_.Add(this, NotificationType::NOTIFY_BALLOON_CONNECTED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::NOTIFY_BALLOON_DISCONNECTED,
+                 NotificationService::AllSources());
+}
+
+void TaskManagerNotificationResourceProvider::StopUpdating() {
+  DCHECK(updating_);
+  updating_ = false;
+
+  // Unregister for notifications about extension process changes.
+  registrar_.Remove(this, NotificationType::NOTIFY_BALLOON_CONNECTED,
+                    NotificationService::AllSources());
+  registrar_.Remove(this, NotificationType::NOTIFY_BALLOON_DISCONNECTED,
+                    NotificationService::AllSources());
+
+  // Delete all the resources.
+  STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
+  resources_.clear();
+}
+
+void TaskManagerNotificationResourceProvider::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  switch (type.value) {
+    case NotificationType::NOTIFY_BALLOON_CONNECTED:
+      AddToTaskManager(Source<BalloonHost>(source).ptr());
+      break;
+    case NotificationType::NOTIFY_BALLOON_DISCONNECTED:
+      RemoveFromTaskManager(Source<BalloonHost>(source).ptr());
+      break;
+    default:
+      NOTREACHED() << "Unexpected notification.";
+      return;
+  }
+}
+
+void TaskManagerNotificationResourceProvider::AddToTaskManager(
+    BalloonHost* balloon_host) {
+  TaskManagerNotificationResource* resource =
+      new TaskManagerNotificationResource(balloon_host);
+  DCHECK(resources_.find(balloon_host) == resources_.end());
+  resources_[balloon_host] = resource;
+  task_manager_->AddResource(resource);
+}
+
+void TaskManagerNotificationResourceProvider::RemoveFromTaskManager(
+    BalloonHost* balloon_host) {
+  if (!updating_)
+    return;
+  std::map<BalloonHost*, TaskManagerNotificationResource*>::iterator iter =
+      resources_.find(balloon_host);
+  if (iter == resources_.end())
+    return;
+
+  // Remove the resource from the Task Manager.
+  TaskManagerNotificationResource* resource = iter->second;
+  task_manager_->RemoveResource(resource);
+
+  // Remove it from the map.
+  resources_.erase(iter);
+
+  // Finally, delete the resource.
+  delete resource;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // TaskManagerBrowserProcessResource class
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -679,6 +851,12 @@ TaskManagerBrowserProcessResource::TaskManagerBrowserProcessResource()
   if (!default_icon_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     default_icon_ = rb.GetBitmapNamed(IDR_PRODUCT_LOGO_16);
+  }
+#elif defined(OS_MACOSX)
+  if (!default_icon_) {
+    // IDR_PRODUCT_LOGO_16 doesn't quite look like chrome/mac's icns icon. Load
+    // the real app icon (requires a nsimage->skbitmap->nsimage conversion :-().
+    default_icon_ = new SkBitmap(gfx::AppplicationIconAtSize(16));
   }
 #else
   // TODO(port): Port icon code.

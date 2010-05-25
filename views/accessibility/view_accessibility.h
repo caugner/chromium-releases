@@ -81,13 +81,13 @@ class ATL_NO_VTABLE ViewAccessibility
   // Retrieves the current state of the specified object.
   STDMETHODIMP get_accState(VARIANT var_id, VARIANT* state);
 
+  // Retrieves the current value associated with the specified object.
+  STDMETHODIMP get_accValue(VARIANT var_id, BSTR* value);
+
   // Non-supported IAccessible methods.
 
   // Out-dated and can be safely said to be very rarely used.
   STDMETHODIMP accDoDefaultAction(VARIANT var_id);
-
-  // No value associated with views.
-  STDMETHODIMP get_accValue(VARIANT var_id, BSTR* value);
 
   // Selections not applicable to views.
   STDMETHODIMP get_accSelection(VARIANT* selected);
@@ -130,11 +130,11 @@ class ATL_NO_VTABLE ViewAccessibility
 
   // Returns a conversion from the Role (as defined in accessibility_types.h)
   // to an MSAA role.
-  long MSAARole(AccessibilityTypes::Role role);
+  int32 MSAARole(AccessibilityTypes::Role role);
 
   // Returns a conversion from the State (as defined in accessibility_types.h)
   // to MSAA states set.
-  long MSAAState(AccessibilityTypes::State state);
+  int32 MSAAState(AccessibilityTypes::State state);
 
   // Returns the IAccessible interface for a native view if applicable.
   // Returns S_OK on success.
@@ -144,7 +144,7 @@ class ATL_NO_VTABLE ViewAccessibility
   // Member View needed for view-specific calls.
   views::View* view_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ViewAccessibility);
+  DISALLOW_COPY_AND_ASSIGN(ViewAccessibility);
 };
 
 extern const wchar_t kViewsUninitializeAccessibilityInstance[];

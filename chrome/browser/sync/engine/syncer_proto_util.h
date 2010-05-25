@@ -7,11 +7,13 @@
 
 #include <string>
 
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/syncable/blob.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/sync_types.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
 namespace syncable {
+class Directory;
 class Entry;
 class ScopedDirLookup;
 class SyncName;
@@ -19,12 +21,18 @@ class SyncName;
 
 namespace sync_pb {
 class ClientToServerResponse;
+class EntitySpecifics;
 }  // namespace sync_pb
 
 namespace browser_sync {
 
+namespace sessions {
+class SyncSession;
+}
+
+class AuthWatcher;
 class ClientToServerMessage;
-class SyncerSession;
+class ServerConnectionManager;
 class SyncEntity;
 class CommitResponse_EntryResponse;
 
@@ -35,7 +43,8 @@ class SyncerProtoUtil {
   // session->status()->syncer_stuck_ is set true if the birthday is
   // incorrect.  A false value will always be returned if birthday is bad.
   static bool PostClientToServerMessage(ClientToServerMessage* msg,
-      sync_pb::ClientToServerResponse* response, SyncerSession* session);
+      sync_pb::ClientToServerResponse* response,
+      sessions::SyncSession* session);
 
   // Compares a syncable Entry to SyncEntity, returns true iff the data is
   // identical.
@@ -56,15 +65,56 @@ class SyncerProtoUtil {
   static void CopyBlobIntoProtoBytes(const syncable::Blob& blob,
                                      std::string* proto_bytes);
 
-  // Extract the name fields from a sync entity.
-  static syncable::SyncName NameFromSyncEntity(const SyncEntity& entry);
+  // Extract the name field from a sync entity.
+  static const std::string& NameFromSyncEntity(const SyncEntity& entry);
 
-  // Extract the name fields from a commit entry response.
-  static syncable::SyncName NameFromCommitEntryResponse(
+
+  // Extract the name field from a commit entry response.
+  static const std::string& NameFromCommitEntryResponse(
       const CommitResponse_EntryResponse& entry);
+
+  // EntitySpecifics is used as a filter for the GetUpdates message to tell
+  // the server which datatypes to send back.  This adds a datatype so that
+  // it's included in the filter.
+  static void AddToEntitySpecificDatatypesFilter(syncable::ModelType datatype,
+      sync_pb::EntitySpecifics* filter);
+
+  // Get a debug string representation of the client to server response.
+  static std::string ClientToServerResponseDebugString(
+      const sync_pb::ClientToServerResponse& response);
+
+  // Get update contents as a string. Intended for logging, and intended
+  // to have a smaller footprint than the protobuf's built-in pretty printer.
+  static std::string SyncEntityDebugString(const sync_pb::SyncEntity& entry);
 
  private:
   SyncerProtoUtil() {}
+
+  // Helper functions for PostClientToServerMessage.
+
+  // Verifies the store birthday, alerting/resetting as appropriate if there's a
+  // mismatch. Return false if the syncer should be stuck.
+  static bool VerifyResponseBirthday(syncable::Directory* dir,
+      const sync_pb::ClientToServerResponse* response);
+
+  // Pull the birthday from the dir and put it into the msg.
+  static void AddRequestBirthday(syncable::Directory* dir,
+                                 ClientToServerMessage* msg);
+
+  // Post the message using the scm, and do some processing on the returned
+  // headers. Decode the server response.
+  static bool PostAndProcessHeaders(browser_sync::ServerConnectionManager* scm,
+                                    browser_sync::AuthWatcher* authwatcher,
+                                    ClientToServerMessage* msg,
+                                    sync_pb::ClientToServerResponse* response);
+
+  friend class SyncerProtoUtilTest;
+
+  FRIEND_TEST(SyncerProtoUtilTest, AddRequestBirthday);
+  FRIEND_TEST(SyncerProtoUtilTest, PostAndProcessHeaders);
+  FRIEND_TEST(SyncerProtoUtilTest, VerifyResponseBirthday);
+
+
   DISALLOW_COPY_AND_ASSIGN(SyncerProtoUtil);
 };
 

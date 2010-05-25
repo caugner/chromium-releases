@@ -25,7 +25,7 @@
 //
 //
 // A caller can also send a synchronous message, while the receiver can respond
-// at a later time.  This is transparent from the sender's size.  The receiver
+// at a later time.  This is transparent from the sender's side.  The receiver
 // needs to use a different handler that takes in a IPC::Message* as the output
 // type, stash the message, and when it has the data it can Send the message.
 //
@@ -133,20 +133,22 @@
 #undef IPC_SYNC_MESSAGE_ROUTED4_1
 #undef IPC_SYNC_MESSAGE_ROUTED4_2
 #undef IPC_SYNC_MESSAGE_ROUTED4_3
+#undef IPC_SYNC_MESSAGE_ROUTED5_0
+#undef IPC_SYNC_MESSAGE_ROUTED5_1
+#undef IPC_SYNC_MESSAGE_ROUTED5_2
+#undef IPC_SYNC_MESSAGE_ROUTED5_3
 
 #if defined(IPC_MESSAGE_MACROS_ENUMS)
 #undef IPC_MESSAGE_MACROS_ENUMS
 
-// TODO(jabdelmalek): we're using the lowest 12 bits of type for the message
-// id, and the highest 4 bits for the channel type.  This constrains us to
-// 16 channel types (currently using 8) and 4K messages per type.  Should
-// really make type be 32 bits, but then we break automation with older Chrome
-// builds..
+// We're using the lowest 16 bits of type for the message id, and the highest
+// 16 bits for the channel type.
+//
 // Do label##PreStart so that automation messages keep the same id as before.
 #define IPC_BEGIN_MESSAGES(label) \
   enum label##MsgType { \
-  label##Start = label##MsgStart << 12, \
-  label##PreStart = (label##MsgStart << 12) - 1,
+  label##Start = label##MsgStart << 16, \
+  label##PreStart = (label##MsgStart << 16) - 1,
 
 #define IPC_END_MESSAGES(label) \
   label##End \
@@ -302,6 +304,18 @@
 #define IPC_SYNC_MESSAGE_ROUTED4_3(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out, type2_out, type3_out) \
   msg_class##__ID,
 
+#define IPC_SYNC_MESSAGE_ROUTED5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
+  msg_class##__ID,
+
+#define IPC_SYNC_MESSAGE_ROUTED5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
+  msg_class##__ID,
+
+#define IPC_SYNC_MESSAGE_ROUTED5_2(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out) \
+  msg_class##__ID,
+
+#define IPC_SYNC_MESSAGE_ROUTED5_3(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out) \
+  msg_class##__ID,
+
 // Message crackers and handlers.
 // Prefer to use the IPC_BEGIN_MESSAGE_MAP_EX to the older macros since they
 // allow you to detect when a message could not be de-serialized. Usage:
@@ -387,7 +401,7 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 
 #ifndef IPC_LOG_TABLE_CREATED
 #define IPC_LOG_TABLE_CREATED
-typedef void (*LogFunction)(uint16 type,
+typedef void (*LogFunction)(uint32 type,
                            std::wstring* name,
                            const IPC::Message* msg,
                            std::wstring* params);
@@ -397,7 +411,7 @@ LogFunction g_log_function_mapping[LastMsgIndex];
 
 
 #define IPC_BEGIN_MESSAGES(label) \
-  void label##MsgLog(uint16 type, std::wstring* name, const IPC::Message* msg, std::wstring* params) { \
+  void label##MsgLog(uint32 type, std::wstring* name, const IPC::Message* msg, std::wstring* params) { \
   switch (type) {
 
 #define IPC_END_MESSAGES(label) \
@@ -570,6 +584,18 @@ LogFunction g_log_function_mapping[LastMsgIndex];
   IPC_MESSAGE_LOG(msg_class)
 
 #define IPC_SYNC_MESSAGE_ROUTED4_3(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out, type2_out, type3_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
+#define IPC_SYNC_MESSAGE_ROUTED5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
+  IPC_MESSAGE_LOG(msg_class)
+
+#define IPC_SYNC_MESSAGE_ROUTED5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
+#define IPC_SYNC_MESSAGE_ROUTED5_2(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
+#define IPC_SYNC_MESSAGE_ROUTED5_3(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out) \
   IPC_MESSAGE_LOG(msg_class)
 
 #elif defined(IPC_MESSAGE_MACROS_CLASSES)
@@ -1145,6 +1171,54 @@ LogFunction g_log_function_mapping[LastMsgIndex];
       : IPC::MessageWithReply<Tuple4<type1_in, type2_in, type3_in, type4_in>, \
           Tuple3<type1_out&, type2_out&, type3_out&> >(routing_id, ID, \
           MakeRefTuple(arg1, arg2, arg3, arg4), MakeRefTuple(*arg5, *arg6, *arg7)) {} \
+  };
+
+#define IPC_SYNC_MESSAGE_ROUTED5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+          Tuple0 > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, const type4_in& arg4, const type5_in& arg5) \
+        : IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+            Tuple0 >(routing_id, ID, \
+            MakeRefTuple(arg1, arg2, arg3, arg4, arg5), MakeTuple()) {} \
+  };
+
+#define IPC_SYNC_MESSAGE_ROUTED5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+          Tuple1<type1_out&> > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, const type4_in& arg4, const type5_in& arg5, type1_out* arg6) \
+        : IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+            Tuple1<type1_out&> >(routing_id, ID, \
+            MakeRefTuple(arg1, arg2, arg3, arg4, arg5), MakeRefTuple(*arg6)) {} \
+  };
+
+#define IPC_SYNC_MESSAGE_ROUTED5_2(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+          Tuple2<type1_out&, type2_out&> > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, const type4_in& arg4, const type4_in& arg5, type1_out* arg6, type2_out* arg7) \
+        : IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+            Tuple2<type1_out&, type2_out&> >(routing_id, ID, \
+            MakeRefTuple(arg1, arg2, arg3, arg4, arg5), MakeRefTuple(*arg6, *arg7)) {} \
+  };
+
+#define IPC_SYNC_MESSAGE_ROUTED5_3(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out, type2_out, type3_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+          Tuple3<type1_out&, type2_out&, type3_out&> > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, const type4_in& arg4, const type4_in& arg5, type1_out* arg6, type2_out* arg7, type3_out* arg8) \
+      : IPC::MessageWithReply<Tuple5<type1_in, type2_in, type3_in, type4_in, type5_in>, \
+          Tuple3<type1_out&, type2_out&, type3_out&> >(routing_id, ID, \
+          MakeRefTuple(arg1, arg2, arg3, arg4, arg5), MakeRefTuple(*arg6, *arg7, *arg8)) {} \
   };
 
 #endif  // #if defined()

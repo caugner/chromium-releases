@@ -3,71 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/file_version_info.h"
-#include "chrome_frame/test/chrome_frame_unittests.h"
 #include "chrome_frame/utils.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 const wchar_t kChannelName[] = L"-dev";
 const wchar_t kSuffix[] = L"-fix";
-
-TEST(UtilTests, AppendSuffixToChannelNameTest) {
-  std::wstring str_base;
-  std::wstring channel_name(kChannelName);
-  std::wstring suffix(kSuffix);
-
-  str_base = L"2.0-dev-bar";
-  EXPECT_TRUE(AppendSuffixToChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-fix-bar", str_base.c_str());
-
-  str_base = L"2.0-dev-fix-bar";
-  EXPECT_FALSE(AppendSuffixToChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-fix-bar", str_base.c_str());
-
-  str_base = L"2.0-dev-bar-dev-bar";
-  EXPECT_TRUE(AppendSuffixToChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-fix-bar-dev-bar", str_base.c_str());
-
-  str_base = L"2.0";
-  EXPECT_FALSE(AppendSuffixToChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0", str_base.c_str());
-
-  str_base = L"2.0-devvvv";
-  EXPECT_TRUE(AppendSuffixToChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-fixvvv", str_base.c_str());
-}
-
-TEST(UtilTests, RemoveSuffixFromStringTest) {
-  std::wstring str_base;
-  std::wstring channel_name(kChannelName);
-  std::wstring suffix(kSuffix);
-
-  str_base = L"2.0-dev-fix";
-  EXPECT_TRUE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev", str_base.c_str());
-
-  str_base = L"2.0-dev-fix-full";
-  EXPECT_TRUE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-full", str_base.c_str());
-
-  str_base = L"2.0";
-  EXPECT_FALSE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0", str_base.c_str());
-
-  str_base = L"2.0-dev";
-  EXPECT_FALSE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev", str_base.c_str());
-
-  str_base = L"2.0-fix";
-  EXPECT_FALSE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-fix", str_base.c_str());
-
-  str_base = L"2.0-full-fix";
-  EXPECT_FALSE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-full-fix", str_base.c_str());
-
-  str_base = L"2.0-dev-dev-fix";
-  EXPECT_TRUE(RemoveSuffixFromChannelName(&str_base, channel_name, suffix));
-  EXPECT_STREQ(L"2.0-dev-dev", str_base.c_str());
-}
 
 TEST(UtilTests, GetModuleVersionTest) {
   HMODULE mod = GetModuleHandle(L"kernel32.dll");
@@ -150,4 +90,22 @@ TEST(UtilTests, IsValidUrlScheme) {
     const Cases& test = test_cases[i];
     EXPECT_EQ(test.expected, IsValidUrlScheme(test.url, test.is_privileged));
   }
+}
+
+TEST(UtilTests, GuidToString) {
+  // {3C5E2125-35BA-48df-A841-5F669B9D69FC}
+  const GUID test_guid = { 0x3c5e2125, 0x35ba, 0x48df,
+      { 0xa8, 0x41, 0x5f, 0x66, 0x9b, 0x9d, 0x69, 0xfc } };
+
+  wchar_t compare[64] = {0};
+  ::StringFromGUID2(test_guid, compare, arraysize(compare));
+
+  std::wstring str_guid(GuidToString(test_guid));
+  EXPECT_EQ(0, str_guid.compare(compare));
+  EXPECT_EQ(static_cast<size_t>(lstrlenW(compare)), str_guid.length());
+}
+
+TEST(UtilTests, GetTempInternetFiles) {
+  FilePath path = GetIETemporaryFilesFolder();
+  EXPECT_FALSE(path.empty());
 }

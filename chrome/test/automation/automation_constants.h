@@ -25,4 +25,20 @@ enum AutomationMsg_NavigationResponseValues {
   AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
 };
 
+enum AutomationMsg_ExtensionResponseValues {
+  AUTOMATION_MSG_EXTENSION_INSTALL_SUCCEEDED = 0,
+  AUTOMATION_MSG_EXTENSION_INSTALL_FAILED,
+  AUTOMATION_MSG_EXTENSION_ALREADY_INSTALLED,
+};
+
+// Used in the AutomationMsg_GetExtensionProperty to identify which extension
+// property should be retrieved, instead of having separate messages for each
+// property.
+enum AutomationMsg_ExtensionProperty {
+  AUTOMATION_MSG_EXTENSION_ID = 0,
+  AUTOMATION_MSG_EXTENSION_NAME,
+  AUTOMATION_MSG_EXTENSION_VERSION,
+  AUTOMATION_MSG_EXTENSION_BROWSER_ACTION_INDEX,
+};
+
 #endif  // CHROME_TEST_AUTOMATION_AUTOMATION_CONSTANTS_H_

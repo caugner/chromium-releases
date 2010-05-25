@@ -17,15 +17,6 @@
 namespace base {
 
 namespace {
-
-inline bool IsValidCodepoint(uint32 code_point) {
-  // Excludes the surrogate code points ([0xD800, 0xDFFF]) and
-  // codepoints larger than 0x10FFFF (the highest codepoint allowed).
-  // Non-characters and unassigned codepoints are allowed.
-  return code_point < 0xD800u ||
-         (code_point >= 0xE000u && code_point <= 0x10FFFFu);
-}
-
 // ToUnicodeCallbackSubstitute() is based on UCNV_TO_U_CALLBACK_SUSBSTITUTE
 // in source/common/ucnv_err.c.
 
@@ -157,8 +148,56 @@ const char kCodepageUTF16LE[] = "UTF-16LE";
 
 // Codepage <-> Wide/UTF-16  ---------------------------------------------------
 
-// Convert a wstring into the specified codepage_name.  If the codepage
-// isn't found, return false.
+bool UTF16ToCodepage(const string16& utf16,
+                     const char* codepage_name,
+                     OnStringConversionError::Type on_error,
+                     std::string* encoded) {
+  encoded->clear();
+
+  UErrorCode status = U_ZERO_ERROR;
+  UConverter* converter = ucnv_open(codepage_name, &status);
+  if (!U_SUCCESS(status))
+    return false;
+
+  return ConvertFromUTF16(converter, utf16.c_str(),
+                          static_cast<int>(utf16.length()), on_error, encoded);
+}
+
+bool CodepageToUTF16(const std::string& encoded,
+                     const char* codepage_name,
+                     OnStringConversionError::Type on_error,
+                     string16* utf16) {
+  utf16->clear();
+
+  UErrorCode status = U_ZERO_ERROR;
+  UConverter* converter = ucnv_open(codepage_name, &status);
+  if (!U_SUCCESS(status))
+    return false;
+
+  // Even in the worst case, the maximum length in 2-byte units of UTF-16
+  // output would be at most the same as the number of bytes in input. There
+  // is no single-byte encoding in which a character is mapped to a
+  // non-BMP character requiring two 2-byte units.
+  //
+  // Moreover, non-BMP characters in legacy multibyte encodings
+  // (e.g. EUC-JP, GB18030) take at least 2 bytes. The only exceptions are
+  // BOCU and SCSU, but we don't care about them.
+  size_t uchar_max_length = encoded.length() + 1;
+
+  SetUpErrorHandlerForToUChars(on_error, converter, &status);
+  int actual_size = ucnv_toUChars(converter, WriteInto(utf16, uchar_max_length),
+      static_cast<int>(uchar_max_length), encoded.data(),
+      static_cast<int>(encoded.length()), &status);
+  ucnv_close(converter);
+  if (!U_SUCCESS(status)) {
+    utf16->clear();  // Make sure the output is empty on error.
+    return false;
+  }
+
+  utf16->resize(actual_size);
+  return true;
+}
+
 bool WideToCodepage(const std::wstring& wide,
                     const char* codepage_name,
                     OnStringConversionError::Type on_error,
@@ -188,25 +227,6 @@ bool WideToCodepage(const std::wstring& wide,
 #endif  // defined(WCHAR_T_IS_UTF32)
 }
 
-// Convert a UTF-16 string into the specified codepage_name.  If the codepage
-// isn't found, return false.
-bool UTF16ToCodepage(const string16& utf16,
-                    const char* codepage_name,
-                    OnStringConversionError::Type on_error,
-                    std::string* encoded) {
-  encoded->clear();
-
-  UErrorCode status = U_ZERO_ERROR;
-  UConverter* converter = ucnv_open(codepage_name, &status);
-  if (!U_SUCCESS(status))
-    return false;
-
-  return ConvertFromUTF16(converter, utf16.c_str(),
-                          static_cast<int>(utf16.length()), on_error, encoded);
-}
-
-// Converts a string of the given codepage into wstring.
-// If the codepage isn't found, return false.
 bool CodepageToWide(const std::string& encoded,
                     const char* codepage_name,
                     OnStringConversionError::Type on_error,
@@ -227,70 +247,21 @@ bool CodepageToWide(const std::string& encoded,
   // this can be 4 times larger than actually needed.
   size_t wchar_max_length = encoded.length() + 1;
 
-  // The byte buffer and its length to pass to ucnv_toAlgorithimic.
-  char* byte_buffer = reinterpret_cast<char*>(
-      WriteInto(wide, wchar_max_length));
-  int byte_buffer_length = static_cast<int>(wchar_max_length) * 4;
-
   SetUpErrorHandlerForToUChars(on_error, converter, &status);
-  int actual_size = ucnv_toAlgorithmic(utf32_platform_endian(),
-                                       converter,
-                                       byte_buffer,
-                                       byte_buffer_length,
-                                       encoded.data(),
-                                       static_cast<int>(encoded.length()),
-                                       &status);
+  int actual_size = ucnv_toAlgorithmic(utf32_platform_endian(), converter,
+      reinterpret_cast<char*>(WriteInto(wide, wchar_max_length)),
+      static_cast<int>(wchar_max_length) * sizeof(wchar_t), encoded.data(),
+      static_cast<int>(encoded.length()), &status);
   ucnv_close(converter);
-
   if (!U_SUCCESS(status)) {
     wide->clear();  // Make sure the output is empty on error.
     return false;
   }
 
   // actual_size is # of bytes.
-  wide->resize(actual_size / 4);
+  wide->resize(actual_size / sizeof(wchar_t));
   return true;
 #endif  // defined(WCHAR_T_IS_UTF32)
-}
-
-// Converts a string of the given codepage into UTF-16.
-// If the codepage isn't found, return false.
-bool CodepageToUTF16(const std::string& encoded,
-                     const char* codepage_name,
-                     OnStringConversionError::Type on_error,
-                     string16* utf16) {
-  utf16->clear();
-
-  UErrorCode status = U_ZERO_ERROR;
-  UConverter* converter = ucnv_open(codepage_name, &status);
-  if (!U_SUCCESS(status))
-    return false;
-
-  // Even in the worst case, the maximum length in 2-byte units of UTF-16
-  // output would be at most the same as the number of bytes in input. There
-  // is no single-byte encoding in which a character is mapped to a
-  // non-BMP character requiring two 2-byte units.
-  //
-  // Moreover, non-BMP characters in legacy multibyte encodings
-  // (e.g. EUC-JP, GB18030) take at least 2 bytes. The only exceptions are
-  // BOCU and SCSU, but we don't care about them.
-  size_t uchar_max_length = encoded.length() + 1;
-
-  SetUpErrorHandlerForToUChars(on_error, converter, &status);
-  int actual_size = ucnv_toUChars(converter,
-                                  WriteInto(utf16, uchar_max_length),
-                                  static_cast<int>(uchar_max_length),
-                                  encoded.data(),
-                                  static_cast<int>(encoded.length()),
-                                  &status);
-  ucnv_close(converter);
-  if (!U_SUCCESS(status)) {
-    utf16->clear();  // Make sure the output is empty on error.
-    return false;
-  }
-
-  utf16->resize(actual_size);
-  return true;
 }
 
 }  // namespace base

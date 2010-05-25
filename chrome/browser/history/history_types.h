@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_HISTORY_HISTORY_TYPES_H__
-#define CHROME_BROWSER_HISTORY_HISTORY_TYPES_H__
+#ifndef CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_
+#define CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_
 
 #include <map>
 #include <set>
@@ -37,17 +37,6 @@ typedef int64 DownloadID;   // Identifier for a download.
 typedef int64 FavIconID;  // For FavIcons.
 typedef int64 SegmentID;  // URL segments for the most visited view.
 
-// Used as the return value for some databases' init function.
-enum InitStatus {
-  INIT_OK,
-
-  // Some error, usually I/O related opening the file.
-  INIT_FAILURE,
-
-  // The database is from a future version of the app and can not be read.
-  INIT_TOO_NEW,
-};
-
 // URLRow ---------------------------------------------------------------------
 
 typedef int64 URLID;
@@ -73,6 +62,7 @@ class URLRow {
     // Initialize will not set the URL, so our initialization above will stay.
     Initialize();
   }
+  virtual ~URLRow() {}
 
   URLID id() const { return id_; }
   const GURL& url() const { return url_; }
@@ -467,17 +457,15 @@ class QueryResults {
 // QueryOptions ----------------------------------------------------------------
 
 struct QueryOptions {
-  QueryOptions()
-      : most_recent_visit_only(false),
-        max_count(0) {
-  }
+  QueryOptions() : max_count(0) {}
 
   // The time range to search for matches in.
   //
-  // For text search queries, this will match only the most recent visit of the
-  // URL. If the URL was visited in the given time period, but has also been
+  // This will match only the one recent visit of a URL.  For text search
+  // queries, if the URL was visited in the given time period, but has also been
   // visited more recently than that, it will not be returned. When the text
-  // query is empty, this will return all URLs visited in the time range.
+  // query is empty, this will return the most recent visit within the time
+  // range.
   //
   // As a special case, if both times are is_null(), then the entire database
   // will be searched. However, if you set one, you must set the other.
@@ -491,14 +479,6 @@ struct QueryOptions {
     end_time = base::Time::Now();
     begin_time = end_time - base::TimeDelta::FromDays(days_ago);
   }
-
-  // When set, only one visit for each URL will be returned, which will be the
-  // most recent one in the result set. When false, each URL may have multiple
-  // visit entries corresponding to each time the URL was visited in the given
-  // time range.
-  //
-  // Defaults to false (all visits).
-  bool most_recent_visit_only;
 
   // The maximum number of results to return. The results will be sorted with
   // the most recent first, so older results may not be returned if there is not
@@ -531,4 +511,4 @@ struct MostVisitedURL {
 
 }  // history
 
-#endif  // CHROME_BROWSER_HISTORY_HISTORY_TYPES_H__
+#endif  // CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_

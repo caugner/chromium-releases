@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,54 +6,79 @@
 
 #include "base/logging.h"
 #include "base/nsimage_cache_mac.h"
+#include "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/tab_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
+#import "chrome/browser/cocoa/themed_window.h"
+#include "grit/theme_resources.h"
+
+namespace {
 
 // Constants for inset and control points for tab shape.
-static const CGFloat kInsetMultiplier = 2.0/3.0;
-static const CGFloat kControlPoint1Multiplier = 1.0/3.0;
-static const CGFloat kControlPoint2Multiplier = 3.0/8.0;
+const CGFloat kInsetMultiplier = 2.0/3.0;
+const CGFloat kControlPoint1Multiplier = 1.0/3.0;
+const CGFloat kControlPoint2Multiplier = 3.0/8.0;
 
-static const NSTimeInterval kAnimationShowDuration = 0.2;
-static const NSTimeInterval kAnimationHideDuration = 0.4;
+// The amount of time in seconds during which each type of glow increases, holds
+// steady, and decreases, respectively.
+const NSTimeInterval kHoverShowDuration = 0.2;
+const NSTimeInterval kHoverHoldDuration = 0.02;
+const NSTimeInterval kHoverHideDuration = 0.4;
+const NSTimeInterval kAlertShowDuration = 0.4;
+const NSTimeInterval kAlertHoldDuration = 0.4;
+const NSTimeInterval kAlertHideDuration = 0.4;
+
+// The default time interval in seconds between glow updates (when
+// increasing/decreasing).
+const NSTimeInterval kGlowUpdateInterval = 0.025;
+
+const CGFloat kTearDistance = 36.0;
+const NSTimeInterval kTearDuration = 0.333;
+
+// This is used to judge whether the mouse has moved during rapid closure; if it
+// has moved less than the threshold, we want to close the tab.
+const CGFloat kRapidCloseDist = 2.5;
+
+}  // namespace
+
+@interface TabView(Private)
+
+- (void)resetLastGlowUpdateTime;
+- (NSTimeInterval)timeElapsedSinceLastGlowUpdate;
+- (void)adjustGlowValue;
+
+@end  // TabView(Private)
 
 @implementation TabView
 
 @synthesize state = state_;
 @synthesize hoverAlpha = hoverAlpha_;
+@synthesize alertAlpha = alertAlpha_;
+@synthesize closing = closing_;
 
 - (id)initWithFrame:(NSRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    chromeIsVisible_ = YES;
     [self setShowsDivider:NO];
-    // TODO(alcor): register for theming, either here or the cell
-    // [self gtm_registerForThemeNotifications];
+    // TODO(alcor): register for theming
   }
   return self;
 }
 
 - (void)awakeFromNib {
   [self setShowsDivider:NO];
-  // Set up the tracking rect for the close button mouseover.  Add it
-  // to the |closeButton_| view, but we'll handle the message ourself.
-  // The mouseover is always enabled, because the close button works
-  // regardless of key/main/active status.
-  closeTrackingArea_.reset(
-      [[NSTrackingArea alloc] initWithRect:[closeButton_ bounds]
-                                   options:NSTrackingMouseEnteredAndExited |
-                                           NSTrackingActiveAlways
-                                     owner:self
-                                  userInfo:nil]);
-  [closeButton_ addTrackingArea:closeTrackingArea_.get()];
 }
 
 - (void)dealloc {
   // Cancel any delayed requests that may still be pending (drags or hover).
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
-  // [self gtm_unregisterForThemeNotifications];
-  [closeButton_ removeTrackingArea:closeTrackingArea_.get()];
   [super dealloc];
+}
+
+// Use the TabController to provide the menu rather than obtaining it from the
+// nib file.
+- (NSMenu*)menu {
+  return [controller_ menu];
 }
 
 // Overridden so that mouse clicks come to this view (the parent of the
@@ -63,40 +88,10 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   return YES;
 }
 
-- (void)adjustHoverValue {
-  NSTimeInterval thisUpdate = [NSDate timeIntervalSinceReferenceDate];
-
-  NSTimeInterval elapsed = thisUpdate - lastHoverUpdate_;
-
-  CGFloat opacity = [self hoverAlpha];
-  if (isMouseInside_) {
-    opacity += elapsed / kAnimationShowDuration;
-  } else {
-    opacity -= elapsed / kAnimationHideDuration;
-  }
-
-  if (!isMouseInside_ && opacity < 0) {
-    opacity = 0;
-  } else if (isMouseInside_ && opacity > 1) {
-    opacity = 1;
-  } else {
-    [self performSelector:_cmd withObject:nil afterDelay:0.02];
-  }
-  lastHoverUpdate_ = thisUpdate;
-  [self setHoverAlpha:opacity];
-
-  [self setNeedsDisplay:YES];
-}
-
 - (void)mouseEntered:(NSEvent*)theEvent {
-  if ([theEvent trackingArea] == closeTrackingArea_) {
-    [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar_h.pdf")];
-  } else {
-    lastHoverUpdate_ = [NSDate timeIntervalSinceReferenceDate];
-    isMouseInside_ = YES;
-    [self adjustHoverValue];
-    [self setNeedsDisplay:YES];
-  }
+  isMouseInside_ = YES;
+  [self resetLastGlowUpdateTime];
+  [self adjustGlowValue];
 }
 
 - (void)mouseMoved:(NSEvent*)theEvent {
@@ -106,14 +101,15 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 }
 
 - (void)mouseExited:(NSEvent*)theEvent {
-  if ([theEvent trackingArea] == closeTrackingArea_) {
-    [closeButton_ setImage:nsimage_cache::ImageNamed(@"close_bar.pdf")];
-  } else {
-    lastHoverUpdate_ = [NSDate timeIntervalSinceReferenceDate];
-    isMouseInside_ = NO;
-    [self adjustHoverValue];
-    [self setNeedsDisplay:YES];
-  }
+  isMouseInside_ = NO;
+  hoverHoldEndTime_ =
+      [NSDate timeIntervalSinceReferenceDate] + kHoverHoldDuration;
+  [self resetLastGlowUpdateTime];
+  [self adjustGlowValue];
+}
+
+- (void)setTrackingEnabled:(BOOL)enabled {
+  [closeButton_ setTrackingEnabled:enabled];
 }
 
 // Determines which view a click in our frame actually hit. It's either this
@@ -136,6 +132,8 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 
 // Returns |YES| if this tab can be torn away into a new window.
 - (BOOL)canBeDragged {
+  if ([self isClosing])
+    return NO;
   NSWindowController* controller = [sourceWindow_ windowController];
   if ([controller isKindOfClass:[TabWindowController class]]) {
     TabWindowController* realController =
@@ -175,27 +173,49 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   targetController_ = nil;
 }
 
+// Sets whether the window background should be visible or invisible when
+// dragging a tab. The background should be invisible when the mouse is over a
+// potential drop target for the tab (the tab strip). It should be visible when
+// there's no drop target so the window looks more fully realized and ready to
+// become a stand-alone window.
+- (void)setWindowBackgroundVisibility:(BOOL)shouldBeVisible {
+  if (chromeIsVisible_ == shouldBeVisible)
+    return;
+
+  // There appears to be a race-condition in CoreAnimation where if we use
+  // animators to set the alpha values, we can't guarantee that we cancel them.
+  // This has the side effect of sometimes leaving the dragged window
+  // translucent or invisible. As a result, don't animate the alpha change.
+  [[draggedController_ overlayWindow] setAlphaValue:1.0];
+  if (targetController_) {
+    [dragWindow_ setAlphaValue:0.0];
+    [[draggedController_ overlayWindow] setHasShadow:YES];
+    [[targetController_ window] makeMainWindow];
+  } else {
+    [dragWindow_ setAlphaValue:0.5];
+    [[draggedController_ overlayWindow] setHasShadow:NO];
+    [[draggedController_ window] makeMainWindow];
+  }
+  chromeIsVisible_ = shouldBeVisible;
+}
+
 // Handle clicks and drags in this button. We get here because we have
 // overridden acceptsFirstMouse: and the click is within our bounds.
-// TODO(pinkerton/alcor): This routine needs *a lot* of work to marry Cole's
-// ideas of dragging cocoa views between windows and how the Browser and
-// TabStrip models want to manage tabs.
-
-static const CGFloat kTearDistance = 36.0;
-static const NSTimeInterval kTearDuration = 0.333;
-
-// This is used to judge whether the mouse has moved during rapid closure; if it
-// has moved less than the threshold, we want to close the tab.
-static const CGFloat kRapidCloseDist = 2.5;
-
 - (void)mouseDown:(NSEvent*)theEvent {
+  if ([self isClosing])
+    return;
+
   NSPoint downLocation = [theEvent locationInWindow];
+
+  // Record the state of the close button here, because selecting the tab will
+  // unhide it.
+  BOOL closeButtonActive = [closeButton_ isHidden] ? NO : YES;
 
   // During the tab closure animation (in particular, during rapid tab closure),
   // we may get incorrectly hit with a mouse down. If it should have gone to the
   // close button, we send it there -- it should then track the mouse, so we
   // don't have to worry about mouse ups.
-  if ([controller_ inRapidClosureMode]) {
+  if (closeButtonActive && [controller_ inRapidClosureMode]) {
     NSPoint hitLocation = [[self superview] convertPoint:downLocation
                                                 fromView:nil];
     if ([self hitTest:hitLocation] == closeButton_) {
@@ -223,6 +243,7 @@ static const CGFloat kRapidCloseDist = 2.5;
   tabWasDragged_ = NO;
   tearTime_ = 0.0;
   draggingWithinTabStrip_ = YES;
+  chromeIsVisible_ = NO;
 
   // If there's more than one potential window to be a drop target, we want to
   // treat a drag of a tab just like dragging around a tab that's already
@@ -232,7 +253,8 @@ static const CGFloat kRapidCloseDist = 2.5;
   NSArray* targets = [self dropTargetsForController:sourceController_];
   moveWindowOnDrag_ =
       ([sourceController_ numberOfTabs] < 2 && ![targets count]) ||
-      ![self canBeDragged];
+      ![self canBeDragged] ||
+      ![sourceController_ tabDraggingAllowed];
   // If we are dragging a tab, a window with a single tab should immediately
   // snap off and not drag within the tab strip.
   if (!moveWindowOnDrag_)
@@ -240,13 +262,19 @@ static const CGFloat kRapidCloseDist = 2.5;
 
   dragOrigin_ = [NSEvent mouseLocation];
 
+  // If the tab gets torn off, the tab controller will be removed from the tab
+  // strip and then deallocated. This will also result in *us* being
+  // deallocated. Both these are bad, so we prevent this by retaining the
+  // controller.
+  scoped_nsobject<TabController> controller([controller_ retain]);
+
   // Because we move views between windows, we need to handle the event loop
   // ourselves. Ideally we should use the standard event loop.
   while (1) {
     theEvent =
-    [NSApp nextEventMatchingMask:NSLeftMouseUpMask | NSLeftMouseDraggedMask
-                       untilDate:[NSDate distantFuture]
-                          inMode:NSDefaultRunLoopMode dequeue:YES];
+        [NSApp nextEventMatchingMask:NSLeftMouseUpMask | NSLeftMouseDraggedMask
+                           untilDate:[NSDate distantFuture]
+                              inMode:NSDefaultRunLoopMode dequeue:YES];
     NSPoint thisPoint = [NSEvent mouseLocation];
 
     NSEventType type = [theEvent type];
@@ -260,13 +288,14 @@ static const CGFloat kRapidCloseDist = 2.5;
       // During rapid tab closure (mashing tab close buttons), we may get hit
       // with a mouse down. As long as the mouse up is over the close button,
       // and the mouse hasn't moved too much, we close the tab.
-      if ((dx*dx + dy*dy) <= kRapidCloseDist*kRapidCloseDist &&
-          [controller_ inRapidClosureMode]) {
+      if (closeButtonActive &&
+          (dx*dx + dy*dy) <= kRapidCloseDist*kRapidCloseDist &&
+          [controller inRapidClosureMode]) {
         NSPoint hitLocation =
             [[self superview] convertPoint:[theEvent locationInWindow]
                                   fromView:nil];
         if ([self hitTest:hitLocation] == closeButton_) {
-          [controller_ closeTab:self];
+          [controller closeTab:self];
           break;
         }
       }
@@ -286,11 +315,13 @@ static const CGFloat kRapidCloseDist = 2.5;
 - (void)mouseDragged:(NSEvent*)theEvent {
   // Special-case this to keep the logic below simpler.
   if (moveWindowOnDrag_) {
-    NSPoint thisPoint = [NSEvent mouseLocation];
-    NSPoint origin = sourceWindowFrame_.origin;
-    origin.x += (thisPoint.x - dragOrigin_.x);
-    origin.y += (thisPoint.y - dragOrigin_.y);
-    [sourceWindow_ setFrameOrigin:NSMakePoint(origin.x, origin.y)];
+    if ([sourceController_ windowMovementAllowed]) {
+      NSPoint thisPoint = [NSEvent mouseLocation];
+      NSPoint origin = sourceWindowFrame_.origin;
+      origin.x += (thisPoint.x - dragOrigin_.x);
+      origin.y += (thisPoint.y - dragOrigin_.y);
+      [sourceWindow_ setFrameOrigin:NSMakePoint(origin.x, origin.y)];
+    }  // else do nothing.
     return;
   }
 
@@ -315,11 +346,13 @@ static const CGFloat kRapidCloseDist = 2.5;
     // strip that would cause it to no longer be fully visible.
     BOOL stillVisible = [sourceController_ isTabFullyVisible:self];
     CGFloat tearForce = fabs(thisPoint.y - dragOrigin_.y);
-    if (tearForce > kTearDistance || !stillVisible) {
+    if ([sourceController_ tabTearingAllowed] &&
+        (tearForce > kTearDistance || !stillVisible)) {
       draggingWithinTabStrip_ = NO;
       // When you finally leave the strip, we treat that as the origin.
       dragOrigin_.x = thisPoint.x;
     } else {
+      // Still dragging within the tab strip, wait for the next drag event.
       return;
     }
   }
@@ -343,10 +376,6 @@ static const CGFloat kRapidCloseDist = 2.5;
   for (TabWindowController* target in targets) {
     NSRect windowFrame = [[target window] frame];
     if (NSPointInRect(thisPoint, windowFrame)) {
-      // TODO(pinkerton): If bringing the window to the front immediately is too
-      // annoying, use another dwell date. Can't use |targetDwellDate| because
-      // this hasn't yet become the new target until the mouse is in the tab
-      // strip.
       [[target window] orderFront:self];
       NSRect tabStripFrame = [[target tabStripView] frame];
       tabStripFrame.origin = [[target window]
@@ -372,6 +401,9 @@ static const CGFloat kRapidCloseDist = 2.5;
 
   // Create or identify the dragged controller.
   if (!draggedController_) {
+    // Get rid of any placeholder remaining in the original source window.
+    [sourceController_ removePlaceholder];
+
     // Detach from the current window and put it in a new window. If there are
     // no more tabs remaining after detaching, the source window is about to
     // go away (it's been autoreleased) so we need to ensure we don't reference
@@ -380,7 +412,7 @@ static const CGFloat kRapidCloseDist = 2.5;
     draggedController_ = [sourceController_ detachTabToNewWindow:self];
     dragWindow_ = [draggedController_ window];
     [dragWindow_ setAlphaValue:0.0];
-    if (![sourceController_ numberOfTabs]) {
+    if (![sourceController_ hasLiveTabs]) {
       sourceController_ = draggedController_;
       sourceWindow_ = dragWindow_;
     }
@@ -389,20 +421,22 @@ static const CGFloat kRapidCloseDist = 2.5;
     // so that sheets stay on top of the window.
     // Bring the target window to the front and make sure it has a border.
     [dragWindow_ setLevel:NSFloatingWindowLevel];
+    [dragWindow_ setHasShadow:YES];
     [dragWindow_ orderFront:nil];
     [dragWindow_ makeMainWindow];
     [draggedController_ showOverlay];
     dragOverlay_ = [draggedController_ overlayWindow];
     // Force the new tab button to be hidden. We'll reset it on mouse up.
     [draggedController_ showNewTabButton:NO];
-    //if (![targets count])
-    //  [dragOverlay_ setHasShadow:NO];
     tearTime_ = [NSDate timeIntervalSinceReferenceDate];
     tearOrigin_ = sourceWindowFrame_.origin;
   }
 
-  DCHECK(draggedController_);
-  DCHECK(sourceController_);
+  // TODO(pinkerton): http://crbug.com/25682 demonstrates a way to get here by
+  // some weird circumstance that doesn't first go through mouseDown:. We
+  // really shouldn't go any farther.
+  if (!draggedController_ || !sourceController_)
+    return;
 
   // When the user first tears off the window, we want slide the window to
   // the current mouse location (to reduce the jarring appearance). We do this
@@ -411,7 +445,8 @@ static const CGFloat kRapidCloseDist = 2.5;
   // tear "animation" (of length kTearDuration) we are and has values [0..1].
   // We use sqrt() so the animation is non-linear (slow down near the end
   // point).
-  float tearProgress = [NSDate timeIntervalSinceReferenceDate] - tearTime_;
+  NSTimeInterval tearProgress =
+      [NSDate timeIntervalSinceReferenceDate] - tearTime_;
   tearProgress /= kTearDuration;  // Normalize.
   tearProgress = sqrtf(MAX(MIN(tearProgress, 1.0), 0.0));
 
@@ -446,7 +481,7 @@ static const CGFloat kRapidCloseDist = 2.5;
   }
   [dragWindow_ setFrameOrigin:NSMakePoint(origin.x, origin.y)];
 
-  // If we're not hovering over any window, make the window is fully
+  // If we're not hovering over any window, make the window fully
   // opaque. Otherwise, find where the tab might be dropped and insert
   // a placeholder so it appears like it's part of that window.
   if (targetController_) {
@@ -465,10 +500,10 @@ static const CGFloat kRapidCloseDist = 2.5;
     tabFrame.origin = [[targetController_ window]
                         convertScreenToBase:tabFrame.origin];
     tabFrame = [[targetController_ tabStripView]
-                convertRectFromBase:tabFrame];
+                convertRect:tabFrame fromView:nil];
     NSPoint point =
       [sourceWindow_ convertBaseToScreen:
-       [draggedTabView convertPointToBase:NSZeroPoint]];
+       [draggedTabView convertPoint:NSZeroPoint toView:nil]];
     [targetController_ insertPlaceholderForTab:self
                                          frame:tabFrame
                                  yStretchiness:0];
@@ -476,25 +511,13 @@ static const CGFloat kRapidCloseDist = 2.5;
   } else {
     [dragWindow_ makeKeyAndOrderFront:nil];
   }
-  BOOL chromeShouldBeVisible = targetController_ == nil;
 
-  if (chromeIsVisible_ != chromeShouldBeVisible) {
-    // TODO(pinkerton): There appears to be a race-condition in CoreAnimation
-    // where if we use animators to set the alpha values, we can't guarantee
-    // that we cancel them. This has the side effect of sometimes leaving
-    // the dragged window translucent or invisible. We should re-visit this,
-    // but for now, don't animate the alpha change.
-    [dragWindow_ setHasShadow:YES];
-    [[draggedController_ overlayWindow] setAlphaValue:1.0];
-    if (targetController_) {
-      [dragWindow_ setAlphaValue:0.0];
-      [[draggedController_ overlayWindow] setHasShadow:YES];
-    } else {
-      [dragWindow_ setAlphaValue:0.5];
-      [[draggedController_ overlayWindow] setHasShadow:NO];
-    }
-    chromeIsVisible_ = chromeShouldBeVisible;
-  }
+  // Adjust the visibility of the window background. If there is a drop target,
+  // we want to hide the window background so the tab stands out for
+  // positioning. If not, we want to show it so it looks like a new window will
+  // be realized.
+  BOOL chromeShouldBeVisible = targetController_ == nil;
+  [self setWindowBackgroundVisibility:chromeShouldBeVisible];
 }
 
 - (void)mouseUp:(NSEvent*)theEvent {
@@ -507,6 +530,12 @@ static const CGFloat kRapidCloseDist = 2.5;
 
   // Cancel any delayed -mouseDragged: requests that may still be pending.
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
+
+  // TODO(pinkerton): http://crbug.com/25682 demonstrates a way to get here by
+  // some weird circumstance that doesn't first go through mouseDown:. We
+  // really shouldn't go any farther.
+  if (!sourceController_)
+    return;
 
   // We are now free to re-display the new tab button in the window we're
   // dragging. It will show when the next call to -layoutTabs (which happens
@@ -525,10 +554,13 @@ static const CGFloat kRapidCloseDist = 2.5;
     // Move between windows. If |targetController_| is nil, we're not dropping
     // into any existing window.
     NSView* draggedTabView = [draggedController_ selectedTabView];
-    [draggedController_ removeOverlay];
     [targetController_ moveTabView:draggedTabView
                     fromController:draggedController_];
+    // Force redraw to avoid flashes of old content before returning to event
+    // loop.
+    [[targetController_ window] display];
     [targetController_ showWindow:nil];
+    [draggedController_ removeOverlay];
   } else {
     // Only move the window around on screen. Make sure it's set back to
     // normal state (fully opaque, has shadow, has key, etc).
@@ -550,18 +582,33 @@ static const CGFloat kRapidCloseDist = 2.5;
 }
 
 - (void)otherMouseUp:(NSEvent*)theEvent {
+  if ([self isClosing])
+    return;
+
   // Support middle-click-to-close.
   if ([theEvent buttonNumber] == 2) {
-    [controller_ closeTab:self];
+    // |-hitTest:| takes a location in the superview's coordinates.
+    NSPoint upLocation =
+        [[self superview] convertPoint:[theEvent locationInWindow]
+                              fromView:nil];
+    // If the mouse up occurred in our view or over the close button, then
+    // close.
+    if ([self hitTest:upLocation])
+      [controller_ closeTab:self];
   }
 }
 
 - (void)drawRect:(NSRect)rect {
+  // If this tab is phantom, do not draw the tab background itself. The only UI
+  // element that will represent this tab is the favicon.
+  if ([controller_ phantom])
+    return;
+
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
   [context saveGraphicsState];
   rect = [self bounds];
   BOOL active = [[self window] isKeyWindow] || [[self window] isMainWindow];
-  BOOL selected = [(NSButton*)self state];
+  BOOL selected = [self state];
 
   // Inset by 0.5 in order to draw on pixels rather than on borders (which would
   // cause blurry pixels). Decrease height by 1 in order to move away from the
@@ -578,8 +625,8 @@ static const CGFloat kRapidCloseDist = 2.5;
       NSMakePoint(NSMinX(rect)  + kInsetMultiplier * NSHeight(rect),
                   NSMaxY(rect));
 
-  float baseControlPointOutset = NSHeight(rect) * kControlPoint1Multiplier;
-  float bottomControlPointInset = NSHeight(rect) * kControlPoint2Multiplier;
+  CGFloat baseControlPointOutset = NSHeight(rect) * kControlPoint1Multiplier;
+  CGFloat bottomControlPointInset = NSHeight(rect) * kControlPoint2Multiplier;
 
   // Outset many of these values by 1 to cause the fill to bleed outside the
   // clip area.
@@ -601,60 +648,73 @@ static const CGFloat kRapidCloseDist = 2.5;
   [path lineToPoint:NSMakePoint(bottomRight.x + 1, bottomRight.y)];
   [path lineToPoint:NSMakePoint(bottomRight.x + 1, bottomRight.y - 2)];
 
-  GTMTheme* theme = [self gtm_theme];
+  ThemeProvider* themeProvider = [[self window] themeProvider];
 
-  // Setting the pattern phase
-  NSPoint phase = [self gtm_themePatternPhase];
+  // Set the pattern phase.
+  NSPoint phase = [[self window] themePatternPhase];
   [context setPatternPhase:phase];
 
+  // Don't draw the window/tab bar background when selected, since the tab
+  // background overlay drawn over it (see below) will be fully opaque.
+  BOOL hasBackgroundImage = NO;
   if (!selected) {
-    NSColor* windowColor =
-        [theme backgroundPatternColorForStyle:GTMThemeStyleWindow
-                                        state:GTMThemeStateActiveWindow];
-    if (windowColor) {
-      [windowColor set];
-    } else {
-      [[NSColor windowBackgroundColor] set];
-    }
+    // ThemeProvider::HasCustomImage is true only if the theme provides the
+    // image. However, even if the theme doesn't provide a tab background, the
+    // theme machinery will make one if given a frame image. See
+    // BrowserThemePack::GenerateTabBackgroundImages for details.
+    hasBackgroundImage = themeProvider &&
+        (themeProvider->HasCustomImage(IDR_THEME_TAB_BACKGROUND) ||
+         themeProvider->HasCustomImage(IDR_THEME_FRAME));
 
-    [path fill];
-
-    NSColor* tabColor =
-        [theme backgroundPatternColorForStyle:GTMThemeStyleTabBarDeselected
-                                        state:GTMThemeStateActiveWindow];
-    if (tabColor) {
-      [tabColor set];
+    NSColor* backgroundImageColor =
+        hasBackgroundImage ?
+          themeProvider->GetNSImageColorNamed(IDR_THEME_TAB_BACKGROUND, true) :
+          nil;
+    if (backgroundImageColor) {
+      [backgroundImageColor set];
+      [path fill];
     } else {
+      // Use the window's background color rather than |[NSColor
+      // windowBackgroundColor]|, which gets confused by the fullscreen window.
+      // (The result is the same for normal, non-fullscreen windows.)
+      [[[self window] backgroundColor] set];
+      [path fill];
       [[NSColor colorWithCalibratedWhite:1.0 alpha:0.3] set];
+      [path fill];
     }
-    [path fill];
   }
 
   [context saveGraphicsState];
   [path addClip];
 
-  if (selected || hoverAlpha_ > 0) {
-    // Draw the background.
-    CGFloat backgroundAlpha = hoverAlpha_ * 0.5;
+  // Use the same overlay for the selected state and for hover and alert glows;
+  // for the selected state, it's fully opaque.
+  CGFloat hoverAlpha = [self hoverAlpha];
+  CGFloat alertAlpha = [self alertAlpha];
+  if (selected || hoverAlpha > 0 || alertAlpha > 0) {
+    // Draw the selected background / glow overlay.
     [context saveGraphicsState];
     CGContextRef cgContext =
         (CGContextRef)([context graphicsPort]);
     CGContextBeginTransparencyLayer(cgContext, 0);
-    if (!selected)
+    if (!selected) {
+      // The alert glow overlay is like the selected state but at most at most
+      // 80% opaque. The hover glow brings up the overlay's opacity at most 50%.
+      CGFloat backgroundAlpha = 0.8 * alertAlpha;
+      backgroundAlpha += (1 - backgroundAlpha) * 0.5 * hoverAlpha;
       CGContextSetAlpha(cgContext, backgroundAlpha);
+    }
     [path addClip];
     [context saveGraphicsState];
     [super drawBackground];
     [context restoreGraphicsState];
 
-    // Draw a mouse hover gradient for the default themes
-    if (!selected) {
-      if (![theme backgroundImageForStyle:GTMThemeStyleTabBarDeselected
-                                    state:GTMThemeStateActiveWindow]) {
+    // Draw a mouse hover gradient for the default themes.
+    if (!selected && hoverAlpha > 0) {
+      if (themeProvider && !hasBackgroundImage) {
         scoped_nsobject<NSGradient> glow([NSGradient alloc]);
         [glow initWithStartingColor:[NSColor colorWithCalibratedWhite:1.0
-                                                                alpha:1.0 *
-                                                                    hoverAlpha_]
+                                        alpha:1.0 * hoverAlpha]
                         endingColor:[NSColor colorWithCalibratedWhite:1.0
                                                                 alpha:0.0]];
 
@@ -679,7 +739,7 @@ static const CGFloat kRapidCloseDist = 2.5;
   [highlightTransform translateXBy:1 yBy:-1];
   scoped_nsobject<NSBezierPath> highlightPath([path copy]);
   [highlightPath transformUsingAffineTransform:highlightTransform];
-  [[NSColor colorWithCalibratedWhite:1.0 alpha:0.2 + 0.3 * hoverAlpha_]
+  [[NSColor colorWithCalibratedWhite:1.0 alpha:0.2 + 0.3 * hoverAlpha]
       setStroke];
   [highlightPath stroke];
 
@@ -711,6 +771,8 @@ static const CGFloat kRapidCloseDist = 2.5;
 // Called when the user hits the right mouse button (or control-clicks) to
 // show a context menu.
 - (void)rightMouseDown:(NSEvent*)theEvent {
+  if ([self isClosing])
+    return;
   [NSMenu popUpContextMenu:[self menu] withEvent:theEvent forView:self];
 }
 
@@ -721,4 +783,186 @@ static const CGFloat kRapidCloseDist = 2.5;
   }
 }
 
-@end
+- (void)setClosing:(BOOL)closing {
+  closing_ = closing;  // Safe because the property is nonatomic.
+  // When closing, ensure clicks to the close button go nowhere.
+  if (closing) {
+    [closeButton_ setTarget:nil];
+    [closeButton_ setAction:nil];
+  }
+}
+
+- (void)startAlert {
+  // Do not start a new alert while already alerting or while in a decay cycle.
+  if (alertState_ == tabs::kAlertNone) {
+    alertState_ = tabs::kAlertRising;
+    [self resetLastGlowUpdateTime];
+    [self adjustGlowValue];
+  }
+}
+
+- (void)cancelAlert {
+  if (alertState_ != tabs::kAlertNone) {
+    alertState_ = tabs::kAlertFalling;
+    alertHoldEndTime_ =
+        [NSDate timeIntervalSinceReferenceDate] + kGlowUpdateInterval;
+    [self resetLastGlowUpdateTime];
+    [self adjustGlowValue];
+  }
+}
+
+- (BOOL)accessibilityIsIgnored {
+  return NO;
+}
+
+- (NSArray*)accessibilityActionNames {
+  NSArray* parentActions = [super accessibilityActionNames];
+
+  return [parentActions arrayByAddingObject:NSAccessibilityPressAction];
+}
+
+- (NSArray*)accessibilityAttributeNames {
+  NSMutableArray* attributes =
+      [[super accessibilityAttributeNames] mutableCopy];
+  [attributes addObject:NSAccessibilityTitleAttribute];
+  [attributes addObject:NSAccessibilityEnabledAttribute];
+
+  return attributes;
+}
+
+- (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute {
+  if ([attribute isEqual:NSAccessibilityTitleAttribute])
+    return NO;
+
+  if ([attribute isEqual:NSAccessibilityEnabledAttribute])
+    return NO;
+
+  return [super accessibilityIsAttributeSettable:attribute];
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  if ([attribute isEqual:NSAccessibilityRoleAttribute])
+    return NSAccessibilityButtonRole;
+
+  if ([attribute isEqual:NSAccessibilityTitleAttribute])
+    return [controller_ title];
+
+  if ([attribute isEqual:NSAccessibilityEnabledAttribute])
+    return [NSNumber numberWithBool:YES];
+
+  if ([attribute isEqual:NSAccessibilityChildrenAttribute]) {
+    // The subviews (icon and text) are clutter; filter out everything but
+    // useful controls.
+    NSArray* children = [super accessibilityAttributeValue:attribute];
+    NSMutableArray* okChildren = [NSMutableArray array];
+    for (id child in children) {
+      if ([child isKindOfClass:[NSButtonCell class]])
+        [okChildren addObject:child];
+    }
+
+    return okChildren;
+  }
+
+  return [super accessibilityAttributeValue:attribute];
+}
+
+@end  // @implementation TabView
+
+@implementation TabView (TabControllerInterface)
+
+- (void)setController:(TabController*)controller {
+  controller_ = controller;
+}
+
+@end  // @implementation TabView (TabControllerInterface)
+
+@implementation TabView(Private)
+
+- (void)resetLastGlowUpdateTime {
+  lastGlowUpdate_ = [NSDate timeIntervalSinceReferenceDate];
+}
+
+- (NSTimeInterval)timeElapsedSinceLastGlowUpdate {
+  return [NSDate timeIntervalSinceReferenceDate] - lastGlowUpdate_;
+}
+
+- (void)adjustGlowValue {
+  // A time interval long enough to represent no update.
+  const NSTimeInterval kNoUpdate = 1000000;
+
+  // Time until next update for either glow.
+  NSTimeInterval nextUpdate = kNoUpdate;
+
+  NSTimeInterval elapsed = [self timeElapsedSinceLastGlowUpdate];
+  NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
+
+  // TODO(viettrungluu): <http://crbug.com/30617> -- split off the stuff below
+  // into a pure function and add a unit test.
+
+  CGFloat hoverAlpha = [self hoverAlpha];
+  if (isMouseInside_) {
+    // Increase hover glow until it's 1.
+    if (hoverAlpha < 1) {
+      hoverAlpha = MIN(hoverAlpha + elapsed / kHoverShowDuration, 1);
+      [self setHoverAlpha:hoverAlpha];
+      nextUpdate = MIN(kGlowUpdateInterval, nextUpdate);
+    }  // Else already 1 (no update needed).
+  } else {
+    if (currentTime >= hoverHoldEndTime_) {
+      // No longer holding, so decrease hover glow until it's 0.
+      if (hoverAlpha > 0) {
+        hoverAlpha = MAX(hoverAlpha - elapsed / kHoverHideDuration, 0);
+        [self setHoverAlpha:hoverAlpha];
+        nextUpdate = MIN(kGlowUpdateInterval, nextUpdate);
+      }  // Else already 0 (no update needed).
+    } else {
+      // Schedule update for end of hold time.
+      nextUpdate = MIN(hoverHoldEndTime_ - currentTime, nextUpdate);
+    }
+  }
+
+  CGFloat alertAlpha = [self alertAlpha];
+  if (alertState_ == tabs::kAlertRising) {
+    // Increase alert glow until it's 1 ...
+    alertAlpha = MIN(alertAlpha + elapsed / kAlertShowDuration, 1);
+    [self setAlertAlpha:alertAlpha];
+
+    // ... and having reached 1, switch to holding.
+    if (alertAlpha >= 1) {
+      alertState_ = tabs::kAlertHolding;
+      alertHoldEndTime_ = currentTime + kAlertHoldDuration;
+      nextUpdate = MIN(kAlertHoldDuration, nextUpdate);
+    } else {
+      nextUpdate = MIN(kGlowUpdateInterval, nextUpdate);
+    }
+  } else if (alertState_ != tabs::kAlertNone) {
+    if (alertAlpha > 0) {
+      if (currentTime >= alertHoldEndTime_) {
+        // Stop holding, then decrease alert glow (until it's 0).
+        if (alertState_ == tabs::kAlertHolding) {
+          alertState_ = tabs::kAlertFalling;
+          nextUpdate = MIN(kGlowUpdateInterval, nextUpdate);
+        } else {
+          DCHECK_EQ(tabs::kAlertFalling, alertState_);
+          alertAlpha = MAX(alertAlpha - elapsed / kAlertHideDuration, 0);
+          [self setAlertAlpha:alertAlpha];
+          nextUpdate = MIN(kGlowUpdateInterval, nextUpdate);
+        }
+      } else {
+        // Schedule update for end of hold time.
+        nextUpdate = MIN(alertHoldEndTime_ - currentTime, nextUpdate);
+      }
+    } else {
+      // Done the alert decay cycle.
+      alertState_ = tabs::kAlertNone;
+    }
+  }
+
+  if (nextUpdate < kNoUpdate)
+    [self performSelector:_cmd withObject:nil afterDelay:nextUpdate];
+
+  [self resetLastGlowUpdateTime];
+  [self setNeedsDisplay:YES];
+}
+
+@end  // @implementation TabView(Private)

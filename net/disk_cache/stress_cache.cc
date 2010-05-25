@@ -39,7 +39,7 @@ int RunSlave(int iteration) {
   FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
 
-  CommandLine cmdline(exe.ToWStringHack());
+  CommandLine cmdline(exe);
   cmdline.AppendLooseValue(ASCIIToWide(IntToString(iteration)));
 
   base::ProcessHandle handle;
@@ -115,7 +115,8 @@ void StressTheCache(int iteration) {
       CHECK(cache->CreateEntry(keys[key], &entries[slot]));
 
     base::snprintf(buffer->data(), kSize, "%d %d", iteration, i);
-    CHECK(kSize == entries[slot]->WriteData(0, 0, buffer, kSize, NULL, false));
+    CHECK_EQ(kSize,
+             entries[slot]->WriteData(0, 0, buffer, kSize, NULL, false));
 
     if (rand() % 100 > 80) {
       key = rand() % kNumKeys;

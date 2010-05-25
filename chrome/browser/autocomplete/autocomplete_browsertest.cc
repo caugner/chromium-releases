@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,7 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
@@ -35,8 +34,7 @@ std::wstring AutocompleteResultAsString(const AutocompleteResult& result) {
 
 }  // namespace
 
-class AutocompleteBrowserTest : public InProcessBrowserTest,
-                                public NotificationObserver {
+class AutocompleteBrowserTest : public InProcessBrowserTest {
  protected:
   LocationBar* GetLocationBar() const {
     return browser()->window()->GetLocationBar();
@@ -50,19 +48,8 @@ class AutocompleteBrowserTest : public InProcessBrowserTest,
   void WaitForHistoryBackendToLoad() {
     HistoryService* history_service =
         browser()->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
-    if (!history_service->BackendLoaded()) {
-      NotificationRegistrar registrar;
-      registrar.Add(this, NotificationType::HISTORY_LOADED,
-                    NotificationService::AllSources());
-      ui_test_utils::RunMessageLoop();
-    }
-  }
-
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    DCHECK(type == NotificationType::HISTORY_LOADED);
-    MessageLoop::current()->Quit();
+    if (!history_service->BackendLoaded())
+      ui_test_utils::WaitForNotification(NotificationType::HISTORY_LOADED);
   }
 };
 
@@ -75,7 +62,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
   // TODO(phajdan.jr): check state of IsSelectAll when it's consistent across
   // platforms.
 
-  location_bar->FocusLocation();
+  location_bar->FocusLocation(true);
 
   EXPECT_EQ(std::wstring(), location_bar->GetInputString());
   EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
@@ -137,4 +124,24 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Autocomplete) {
     const AutocompleteResult& result = autocomplete_controller->result();
     EXPECT_TRUE(result.empty()) << AutocompleteResultAsString(result);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
+  // http://code.google.com/p/chromium/issues/detail?id=38385
+  // Make sure that tabbing away from an empty omnibar causes a revert
+  // and select all.
+  LocationBar* location_bar = GetLocationBar();
+  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
+            location_bar->location_entry()->GetText());
+  location_bar->location_entry()->SetUserText(L"");
+  browser()->AddTabWithURL(GURL(chrome::kAboutBlankURL), GURL(),
+                         PageTransition::START_PAGE, true, -1, false, NULL);
+  ui_test_utils::WaitForNavigation(
+      &browser()->GetSelectedTabContents()->controller());
+  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
+            location_bar->location_entry()->GetText());
+  browser()->CloseTab();
+  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
+            location_bar->location_entry()->GetText());
+  EXPECT_TRUE(location_bar->location_entry()->IsSelectAll());
 }

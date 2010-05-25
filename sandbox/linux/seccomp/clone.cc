@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 
@@ -5,7 +9,8 @@ namespace playground {
 
 int Sandbox::sandbox_clone(int flags, void* stack, int* pid, int* ctid,
                            void* tls, void *wrapper_sp) {
-  Debug::syscall(__NR_clone, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_clone, "Executing handler");
   struct {
     int       sysnum;
     long long cookie;
@@ -39,10 +44,11 @@ int Sandbox::sandbox_clone(int flags, void* stack, int* pid, int* ctid,
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward clone() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_clone);
   return static_cast<int>(rc);
 }
 
-bool Sandbox::process_clone(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_clone(int parentMapsFd, int sandboxFd, int threadFdPub,
                             int threadFd, SecureMem::Args* mem) {
   // Read request
   Clone clone_req;
@@ -66,7 +72,7 @@ bool Sandbox::process_clone(int parentProc, int sandboxFd, int threadFdPub,
       // clone() has unusual semantics. We don't want to return back into the
       // trusted thread, but instead we need to continue execution at the IP
       // where we got called initially.
-      SecureMem::lockSystemCall(parentProc, mem);
+      SecureMem::lockSystemCall(parentMapsFd, mem);
       mem->ret              = clone_req.ret;
       #if defined(__x86_64__)
       mem->rbp              = clone_req.regs64.rbp;
@@ -84,7 +90,6 @@ bool Sandbox::process_clone(int parentProc, int sandboxFd, int threadFdPub,
       mem->r14              = clone_req.regs64.r14;
       mem->r15              = clone_req.regs64.r15;
       #elif defined(__i386__)
-      mem->ret2             = clone_req.regs32.ret2;
       mem->ebp              = clone_req.regs32.ebp;
       mem->edi              = clone_req.regs32.edi;
       mem->esi              = clone_req.regs32.esi;
@@ -100,8 +105,8 @@ bool Sandbox::process_clone(int parentProc, int sandboxFd, int threadFdPub,
       mem->processFdPub     = processFdPub_;
       mem->cloneFdPub       = cloneFdPub_;
 
-      SecureMem::sendSystemCall(threadFdPub, true, parentProc, mem, __NR_clone,
-                                clone_req.flags, clone_req.stack,
+      SecureMem::sendSystemCall(threadFdPub, true, parentMapsFd, mem,
+                                __NR_clone, clone_req.flags, clone_req.stack,
                                 clone_req.pid, clone_req.ctid, clone_req.tls);
       return true;
     }

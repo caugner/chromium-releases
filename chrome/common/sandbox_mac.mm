@@ -13,16 +13,170 @@ extern "C" {
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/mac_util.h"
+#include "base/rand_util_c.h"
 #include "base/scoped_cftyperef.h"
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/string16.h"
-#include "base/string_escape.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
+#include "unicode/uchar.h"
+
+namespace {
+
+// Try to escape |c| as a "SingleEscapeCharacter" (\n, etc).  If successful,
+// returns true and appends the escape sequence to |dst|.
+bool EscapeSingleChar(char c, std::string* dst) {
+  const char *append = NULL;
+  switch (c) {
+    case '\b':
+      append = "\\b";
+      break;
+    case '\f':
+      append = "\\f";
+      break;
+    case '\n':
+      append = "\\n";
+      break;
+    case '\r':
+      append = "\\r";
+      break;
+    case '\t':
+      append = "\\t";
+      break;
+    case '\\':
+      append = "\\\\";
+      break;
+    case '"':
+      append = "\\\"";
+      break;
+  }
+
+  if (!append) {
+    return false;
+  }
+
+  dst->append(append);
+  return true;
+}
+
+}  // namespace
 
 namespace sandbox {
+
+// Escape |str_utf8| for use in a plain string variable in a sandbox
+// configuraton file.  On return |dst| is set to the utf-8 encoded quoted
+// output.
+// Returns: true on success, false otherwise.
+bool QuotePlainString(const std::string& str_utf8, std::string* dst) {
+  dst->clear();
+
+  const char* src = str_utf8.c_str();
+  int32_t length = str_utf8.length();
+  int32_t position = 0;
+  while (position < length) {
+    UChar32 c;
+    U8_NEXT(src, position, length, c);  // Macro increments |position|.
+    DCHECK_GE(c, 0);
+    if (c < 0)
+      return false;
+
+    if (c < 128) {  // EscapeSingleChar only handles ASCII.
+      char as_char = static_cast<char>(c);
+      if (EscapeSingleChar(as_char, dst)) {
+        continue;
+      }
+    }
+
+    if (c < 32 || c > 126) {
+      // Any characters that aren't printable ASCII get the \u treatment.
+      unsigned int as_uint = static_cast<unsigned int>(c);
+      StringAppendF(dst, "\\u%04X", as_uint);
+      continue;
+    }
+
+    // If we got here we know that the character in question is strictly
+    // in the ASCII range so there's no need to do any kind of encoding
+    // conversion.
+    dst->push_back(static_cast<char>(c));
+  }
+  return true;
+}
+
+// Escape |str_utf8| for use in a regex literal in a sandbox
+// configuraton file.  On return |dst| is set to the utf-8 encoded quoted
+// output.
+//
+// The implementation of this function is based on empirical testing of the
+// OS X sandbox on 10.5.8 & 10.6.2 which is undocumented and subject to change.
+//
+// Note: If str_utf8 contains any characters < 32 || >125 then the function
+// fails and false is returned.
+//
+// Returns: true on success, false otherwise.
+bool QuoteStringForRegex(const std::string& str_utf8, std::string* dst) {
+  // List of chars with special meaning to regex.
+  // This list is derived from http://perldoc.perl.org/perlre.html .
+  const char regex_special_chars[] = {
+    '\\',
+
+    // Metacharacters
+    '^',
+    '.',
+    '$',
+    '|',
+    '(',
+    ')',
+    '[',
+    ']',
+
+    // Quantifiers
+    '*',
+    '+',
+    '?',
+    '{',
+    '}',
+  };
+
+  // Anchor regex at start of path.
+  dst->assign("^");
+
+  const char* src = str_utf8.c_str();
+  int32_t length = str_utf8.length();
+  int32_t position = 0;
+  while (position < length) {
+    UChar32 c;
+    U8_NEXT(src, position, length, c);  // Macro increments |position|.
+    DCHECK_GE(c, 0);
+    if (c < 0)
+      return false;
+
+    // The Mac sandbox regex parser only handles printable ASCII characters.
+    // 33 >= c <= 126
+    if (c < 32 || c > 125) {
+      return false;
+    }
+
+    for (size_t i = 0; i < arraysize(regex_special_chars); ++i) {
+      if (c == regex_special_chars[i]) {
+        dst->push_back('\\');
+        break;
+      }
+    }
+
+    dst->push_back(static_cast<char>(c));
+  }
+
+  // Make sure last element of path is interpreted as a directory. Leaving this
+  // off would allow access to files if they start with the same name as the
+  // directory.
+  dst->append("(/|$)");
+
+  return true;
+}
 
 // Warm up System APIs that empirically need to be accessed before the Sandbox
 // is turned on.
@@ -81,21 +235,73 @@ void SandboxWarmup() {
         NULL));
     CGImageSourceGetStatus(img);
   }
+
+  { // Native Client access to /dev/random.
+    GetUrandomFD();
+  }
 }
 
 // Turns on the OS X sandbox for this process.
-bool EnableSandbox() {
-  // For the renderer, we give it a custom sandbox to lock things down as
-  // tightly as possible, while still enabling drawing.
+bool EnableSandbox(SandboxProcessType sandbox_type,
+                   const FilePath& allowed_dir) {
+  // Sanity - currently only SANDBOX_TYPE_UTILITY supports a directory being
+  // passed in.
+  if (sandbox_type != SANDBOX_TYPE_UTILITY) {
+    DCHECK(allowed_dir.empty())
+        << "Only SANDBOX_TYPE_UTILITY allows a custom directory parameter.";
+  }
+  // We use a custom sandbox definition file to lock things down as
+  // tightly as possible.
+  // TODO(jeremy): Look at using include syntax to unify common parts of sandbox
+  // definition files.
+  NSString* sandbox_config_filename = nil;
+  bool allow_nacl_lines = false;
+  switch (sandbox_type) {
+    case SANDBOX_TYPE_RENDERER:
+      sandbox_config_filename = @"renderer";
+      break;
+    case SANDBOX_TYPE_WORKER:
+      sandbox_config_filename = @"worker";
+      break;
+    case SANDBOX_TYPE_UTILITY:
+      sandbox_config_filename = @"utility";
+      break;
+    case SANDBOX_TYPE_NACL_PLUGIN:
+      // The Native Client plugin is a standard renderer sandbox with some
+      // additional lines to support use of Unix sockets.
+      // TODO(msneck): Remove the use of Unix sockets from Native Client and
+      // then remove the associated rules from chrome/renderer/renderer.sb.
+      // See http://code.google.com/p/nativeclient/issues/detail?id=344
+      sandbox_config_filename = @"renderer";
+      allow_nacl_lines = true;
+      break;
+    case SANDBOX_TYPE_NACL_LOADER:
+      // The Native Client loader is used for safeguarding the user's
+      // untrusted code within Native Client.
+      // TODO(msneck): Remove the use of Unix sockets from Native Client and
+      // then decide on an appropriate sandbox type for the untrusted code.
+      // This might simply mean removing the Unix socket rules from
+      // chrome/browser/nacl-loader.sb or it might mean sharing the
+      // sandbox configuration with SANDBOX_TYPE_WORKER.
+      // See http://code.google.com/p/nativeclient/issues/detail?id=344
+      sandbox_config_filename = @"nacl-loader";
+      break;
+    default:
+      NOTREACHED();
+      return false;
+  }
+
   NSString* sandbox_profile_path =
-      [mac_util::MainAppBundle() pathForResource:@"renderer" ofType:@"sb"];
+      [mac_util::MainAppBundle() pathForResource:sandbox_config_filename
+                                          ofType:@"sb"];
   NSString* sandbox_data = [NSString
       stringWithContentsOfFile:sandbox_profile_path
-      encoding:NSUTF8StringEncoding
-      error:nil];
+                      encoding:NSUTF8StringEncoding
+                         error:nil];
 
   if (!sandbox_data) {
-    LOG(ERROR) << "Failed to find the sandbox profile on disk";
+    PLOG(ERROR) << "Failed to find the sandbox profile on disk "
+                << base::SysNSStringToUTF8(sandbox_profile_path);
     return false;
   }
 
@@ -106,6 +312,41 @@ bool EnableSandbox() {
     sandbox_data = [sandbox_data
         stringByReplacingOccurrencesOfString:@";ENABLE_LOGGING"
                                   withString:@""];
+  }
+
+  // Enable Native Client lines if they are allowed.
+  if (allow_nacl_lines) {
+    sandbox_data = [sandbox_data
+        stringByReplacingOccurrencesOfString:@";NACL"
+                                  withString:@""];
+  }
+
+  if (!allowed_dir.empty()) {
+    // The sandbox only understands "real" paths.  This resolving step is
+    // needed so the caller doesn't need to worry about things like /var
+    // being a link to /private/var (like in the paths CreateNewTempDirectory()
+    // returns).
+    FilePath allowed_dir_absolute(allowed_dir);
+    if (!file_util::AbsolutePath(&allowed_dir_absolute)) {
+      PLOG(ERROR) << "Failed to resolve absolute path";
+      return false;
+    }
+
+    std::string allowed_dir_escaped;
+    if (!QuoteStringForRegex(allowed_dir_absolute.value(),
+                             &allowed_dir_escaped)) {
+      LOG(ERROR) << "Regex string quoting failed " << allowed_dir.value();
+      return false;
+    }
+    NSString* allowed_dir_escaped_ns = base::SysUTF8ToNSString(
+        allowed_dir_escaped.c_str());
+    sandbox_data = [sandbox_data
+        stringByReplacingOccurrencesOfString:@";ENABLE_DIRECTORY_ACCESS"
+                                  withString:@""];
+    sandbox_data = [sandbox_data
+        stringByReplacingOccurrencesOfString:@"DIR_TO_ALLOW_ACCESS"
+                                  withString:allowed_dir_escaped_ns];
+
   }
 
   int32 major_version, minor_version, bugfix_version;
@@ -123,21 +364,30 @@ bool EnableSandbox() {
     // for this "subdir" is only supported on 10.6.
     // If we ever need this on pre-10.6 OSs then we'll have to rethink the
     // surrounding sandbox syntax.
-    string16 home_dir = base::SysNSStringToUTF16(NSHomeDirectory());
+    std::string home_dir = base::SysNSStringToUTF8(NSHomeDirectory());
     std::string home_dir_escaped;
-    string_escape::JsonDoubleQuote(home_dir, false, &home_dir_escaped);
+    if (!QuotePlainString(home_dir, &home_dir_escaped)) {
+      LOG(ERROR) << "Sandbox string quoting failed";
+      return false;
+    }
     NSString* home_dir_escaped_ns = base::SysUTF8ToNSString(home_dir_escaped);
     sandbox_data = [sandbox_data
         stringByReplacingOccurrencesOfString:@"USER_HOMEDIR"
                                   withString:home_dir_escaped_ns];
+  } else if (major_version == 10 && minor_version < 6) {
+    // Sandbox rules only for versions before 10.6.
+    sandbox_data = [sandbox_data
+        stringByReplacingOccurrencesOfString:@";BEFORE_10.6"
+                                  withString:@""];
   }
 
   char* error_buff = NULL;
   int error = sandbox_init([sandbox_data UTF8String], 0, &error_buff);
   bool success = (error == 0 && error_buff == NULL);
-  if (error == -1) {
-    LOG(ERROR) << "Failed to Initialize Sandbox: " << error_buff;
-  }
+  LOG_IF(ERROR, !success) << "Failed to initialize sandbox: "
+                          << error
+                          << " "
+                          << error_buff;
   sandbox_free_error(error_buff);
   return success;
 }

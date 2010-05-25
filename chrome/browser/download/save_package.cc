@@ -1,25 +1,30 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/save_package.h"
 
 #include "app/l10n_util.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
+#include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
 #include "base/task.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/save_file.h"
 #include "chrome/browser/download/save_file_manager.h"
 #include "chrome/browser/download/save_item.h"
+#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -32,16 +37,16 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context.h"
-#include "webkit/glue/dom_serializer_delegate.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPageSerializerClient.h"
 
 using base::Time;
+using WebKit::WebPageSerializerClient;
 
 // This structure is for storing parameters which we will use to create a
 // SavePackage object later.
@@ -65,7 +70,8 @@ namespace {
 
 // Default name which will be used when we can not get proper name from
 // resource URL.
-const wchar_t kDefaultSaveName[] = L"saved_resource";
+const FilePath::CharType kDefaultSaveName[] =
+    FILE_PATH_LITERAL("saved_resource");
 
 const FilePath::CharType kDefaultHtmlExtension[] =
 #if defined(OS_WIN)
@@ -158,10 +164,10 @@ SavePackage::SavePackage(TabContents* web_content,
       save_type_(save_type),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(web_content->process()->id()),
+      tab_id_(web_content->GetRenderProcessHost()->id()),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(web_content);
-  const GURL& current_page_url = tab_contents_->GetURL();
+  const GURL& current_page_url = GetUrlToBeSaved();
   DCHECK(current_page_url.is_valid());
   page_url_ = current_page_url;
   DCHECK(save_type_ == SAVE_AS_ONLY_HTML ||
@@ -183,9 +189,10 @@ SavePackage::SavePackage(TabContents* tab_contents)
       save_type_(SAVE_TYPE_UNKNOWN),
       all_save_items_count_(0),
       wait_state_(INITIALIZE),
-      tab_id_(tab_contents->process()->id()),
+      tab_id_(tab_contents->GetRenderProcessHost()->id()),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
-  const GURL& current_page_url = tab_contents_->GetURL();
+
+  const GURL& current_page_url = GetUrlToBeSaved();
   DCHECK(current_page_url.is_valid());
   page_url_ = current_page_url;
   InternalInit();
@@ -194,10 +201,11 @@ SavePackage::SavePackage(TabContents* tab_contents)
 // This is for testing use. Set |finished_| as true because we don't want
 // method Cancel to be be called in destructor in test mode.
 // We also don't call InternalInit().
-SavePackage::SavePackage(const FilePath& file_full_path,
+SavePackage::SavePackage(TabContents* tab_contents,
+                         const FilePath& file_full_path,
                          const FilePath& directory_full_path)
     : file_manager_(NULL),
-      tab_contents_(NULL),
+      tab_contents_(tab_contents),
       download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
@@ -253,6 +261,18 @@ SavePackage::~SavePackage() {
     select_file_dialog_->ListenerDestroyed();
 }
 
+// Retrieves the URL to be saved from tab_contents_ variable.
+GURL SavePackage::GetUrlToBeSaved() {
+  // Instead of using tab_contents_.GetURL here, we use url()
+  // (which is the "real" url of the page)
+  // from the NavigationEntry because it reflects its' origin
+  // rather than the displayed one (returned by GetURL) which may be
+  // different (like having "view-source:" on the front).
+  NavigationEntry* active_entry =
+           tab_contents_->controller().GetActiveEntry();
+  return active_entry->url();
+}
+
 // Cancel all in progress request, might be called by user or internal error.
 void SavePackage::Cancel(bool user_action) {
   if (!canceled()) {
@@ -295,11 +315,12 @@ bool SavePackage::Init() {
     return false;
   }
 
-  request_context_ = profile->GetRequestContext();
+  request_context_getter_ = profile->GetRequestContext();
 
   // Create the fake DownloadItem and display the view.
   download_ = new DownloadItem(1, saved_main_file_path_, 0, page_url_, GURL(),
-      "", FilePath(), Time::Now(), 0, -1, -1, false, false);
+      "", FilePath(), Time::Now(), 0, -1, -1, false, false,
+      profile->IsOffTheRecord(), false, false);
   download_->set_manager(tab_contents_->profile()->GetDownloadManager());
   tab_contents_->OnStartDownload(download_);
 
@@ -330,14 +351,14 @@ bool SavePackage::Init() {
 }
 
 // Generate name for saving resource.
-bool SavePackage::GenerateFilename(const std::string& disposition,
+bool SavePackage::GenerateFileName(const std::string& disposition,
                                    const GURL& url,
                                    bool need_html_ext,
                                    FilePath::StringType* generated_name) {
   // TODO(jungshik): Figure out the referrer charset when having one
   // makes sense and pass it to GetSuggestedFilename.
-  FilePath file_path = FilePath::FromWStringHack(
-      net::GetSuggestedFilename(url, disposition, "", kDefaultSaveName));
+  FilePath file_path = net::GetSuggestedFilename(url, disposition, "",
+                                                 FilePath(kDefaultSaveName));
 
   DCHECK(!file_path.empty());
   FilePath::StringType pure_file_name =
@@ -443,7 +464,7 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
     // instead of opening it as HTML.
     bool need_html_ext =
         info->save_source == SaveFileCreateInfo::SAVE_FILE_FROM_DOM;
-    if (!GenerateFilename(info->content_disposition,
+    if (!GenerateFileName(info->content_disposition,
                           GURL(info->url),
                           need_html_ext,
                           &generated_name)) {
@@ -465,7 +486,7 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
     DCHECK(save_type_ == SAVE_AS_COMPLETE_HTML);
     DCHECK(!saved_main_directory_path_.empty());
 
-    // Now we get final name retrieved from GenerateFilename, we will use it
+    // Now we get final name retrieved from GenerateFileName, we will use it
     // rename the SaveItem.
     FilePath final_name = saved_main_directory_path_.Append(generated_name);
     save_item->Rename(final_name);
@@ -477,7 +498,8 @@ void SavePackage::StartSave(const SaveFileCreateInfo* info) {
   // If the save source is from file system, inform SaveFileManager to copy
   // corresponding file to the file path which this SaveItem specifies.
   if (info->save_source == SaveFileCreateInfo::SAVE_FILE_FROM_FILE) {
-    file_manager_->file_loop()->PostTask(FROM_HERE,
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::SaveLocalFile,
                           save_item->url(),
@@ -583,7 +605,8 @@ void SavePackage::Stop() {
       it != saved_failed_items_.end(); ++it)
     save_ids.push_back(it->second->save_id());
 
-  file_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RemoveSavedFileFromFileMap,
                         save_ids));
@@ -612,12 +635,13 @@ void SavePackage::CheckFinish() {
     final_names.push_back(std::make_pair(it->first,
                                          it->second->full_path()));
 
-  file_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RenameAllFiles,
                         final_names,
                         dir,
-                        tab_contents_->process()->id(),
+                        tab_contents_->GetRenderProcessHost()->id(),
                         tab_contents_->render_view_host()->routing_id()));
 }
 
@@ -637,12 +661,16 @@ void SavePackage::Finish() {
        it != saved_failed_items_.end(); ++it)
     save_ids.push_back(it->second->save_id());
 
-  file_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::RemoveSavedFileFromFileMap,
                         save_ids));
 
   download_->Finished(all_save_items_count_);
+  // Notify download observers that we are complete (the call to Finished() set
+  // the state to complete but did not notify).
+  download_->UpdateObservers();
 
   NotificationService::current()->Notify(
       NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
@@ -733,7 +761,8 @@ void SavePackage::SaveCanceled(SaveItem* save_item) {
                                 save_item->url(),
                                 this);
   if (save_item->save_id() != -1)
-    file_manager_->file_loop()->PostTask(FROM_HERE,
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::CancelSave,
                           save_item->save_id()));
@@ -760,11 +789,11 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
     save_item->Start();
     file_manager_->SaveURL(save_item->url(),
                            save_item->referrer(),
-                           tab_contents_->process()->id(),
+                           tab_contents_->GetRenderProcessHost()->id(),
                            tab_contents_->render_view_host()->routing_id(),
                            save_item->save_source(),
                            save_item->full_path(),
-                           request_context_.get(),
+                           request_context_getter_.get(),
                            this);
   } while (process_all_remaining_items && waiting_item_queue_.size());
 }
@@ -775,12 +804,13 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
 void SavePackage::ShowDownloadInShell() {
   DCHECK(file_manager_);
   DCHECK(finished_ && !canceled() && !saved_main_file_path_.empty());
-  DCHECK(MessageLoop::current() == file_manager_->ui_loop());
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 #if defined(OS_MACOSX)
   // Mac OS X requires opening downloads on the UI thread.
   platform_util::ShowItemInFolder(saved_main_file_path_);
 #else
-  file_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &SaveFileManager::OnShowSavedFileInShell,
                         saved_main_file_path_));
@@ -888,9 +918,8 @@ void SavePackage::GetSerializedHtmlDataForCurrentPageWithLocalLinks() {
 void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
                                                const std::string& data,
                                                int32 status) {
-  webkit_glue::DomSerializerDelegate::PageSavingSerializationStatus flag =
-      static_cast<webkit_glue::DomSerializerDelegate::
-                      PageSavingSerializationStatus>(status);
+  WebPageSerializerClient::PageSerializationStatus flag =
+      static_cast<WebPageSerializerClient::PageSerializationStatus>(status);
   // Check current state.
   if (wait_state_ != HTML_DATA)
     return;
@@ -898,10 +927,11 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
   int id = tab_id();
   // If the all frames are finished saving, we need to close the
   // remaining SaveItems.
-  if (flag == webkit_glue::DomSerializerDelegate::ALL_FRAMES_ARE_FINISHED) {
+  if (flag == WebPageSerializerClient::AllFramesAreFinished) {
     for (SaveUrlItemMap::iterator it = in_progress_items_.begin();
          it != in_progress_items_.end(); ++it) {
-      file_manager_->file_loop()->PostTask(FROM_HERE,
+      ChromeThread::PostTask(
+          ChromeThread::FILE, FROM_HERE,
           NewRunnableMethod(file_manager_,
                             &SaveFileManager::SaveFinished,
                             it->second->save_id(),
@@ -925,7 +955,8 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
     memcpy(new_data->data(), data.data(), data.size());
 
     // Call write file functionality in file thread.
-    file_manager_->file_loop()->PostTask(FROM_HERE,
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::UpdateSaveProgress,
                           save_item->save_id(),
@@ -934,8 +965,9 @@ void SavePackage::OnReceivedSerializedHtmlData(const GURL& frame_url,
   }
 
   // Current frame is completed saving, call finish in file thread.
-  if (flag == webkit_glue::DomSerializerDelegate::CURRENT_FRAME_IS_FINISHED) {
-    file_manager_->file_loop()->PostTask(FROM_HERE,
+  if (flag == WebPageSerializerClient::CurrentFrameIsFinished) {
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(file_manager_,
                           &SaveFileManager::SaveFinished,
                           save_item->save_id(),
@@ -1008,7 +1040,8 @@ void SavePackage::SetShouldPromptUser(bool should_prompt) {
 
 // static.
 FilePath SavePackage::GetSuggestedNameForSaveAs(const FilePath& name,
-                                                bool can_save_as_complete) {
+    bool can_save_as_complete,
+    const FilePath::StringType& contents_mime_type) {
   // If the name is a URL, try to use the last path component or if there is
   // none, the domain as the file name.
   FilePath name_with_proper_ext = name;
@@ -1030,16 +1063,15 @@ FilePath SavePackage::GetSuggestedNameForSaveAs(const FilePath& name,
   }
 
   // Ask user for getting final saving name.
+  name_with_proper_ext = EnsureMimeExtension(name_with_proper_ext,
+                                             contents_mime_type);
+  // Adjust extension for complete types.
   if (can_save_as_complete)
     name_with_proper_ext = EnsureHtmlExtension(name_with_proper_ext);
 
-  std::wstring file_name = name_with_proper_ext.ToWStringHack();
-  // TODO(port): we need a version of ReplaceIllegalCharacters() that takes
-  // FilePaths.
-  file_util::ReplaceIllegalCharacters(&file_name, L' ');
-  TrimWhitespace(file_name, TRIM_ALL, &file_name);
-
-  return FilePath::FromWStringHack(file_name);
+  FilePath::StringType file_name = name_with_proper_ext.value();
+  file_util::ReplaceIllegalCharactersInPath(&file_name, ' ');
+  return FilePath(file_name);
 }
 
 FilePath SavePackage::EnsureHtmlExtension(const FilePath& name) {
@@ -1055,16 +1087,55 @@ FilePath SavePackage::EnsureHtmlExtension(const FilePath& name) {
   return name;
 }
 
+FilePath SavePackage::EnsureMimeExtension(const FilePath& name,
+    const FilePath::StringType& contents_mime_type) {
+  // Start extension at 1 to skip over period if non-empty.
+  FilePath::StringType ext = name.Extension().length() ?
+      name.Extension().substr(1) : name.Extension();
+  FilePath::StringType suggested_extension =
+      ExtensionForMimeType(contents_mime_type);
+  std::string mime_type;
+  if (!suggested_extension.empty() &&
+      (!net::GetMimeTypeFromExtension(ext, &mime_type) ||
+      !IsSavableContents(mime_type))) {
+    // Extension is absent or needs to be updated.
+    return FilePath(name.value() + FILE_PATH_LITERAL(".") +
+                    suggested_extension);
+  }
+  return name;
+}
+
+const FilePath::CharType *SavePackage::ExtensionForMimeType(
+    const FilePath::StringType& contents_mime_type) {
+  static const struct {
+    const FilePath::CharType *mime_type;
+    const FilePath::CharType *suggested_extension;
+  } extensions[] = {
+    { FILE_PATH_LITERAL("text/html"), kDefaultHtmlExtension },
+    { FILE_PATH_LITERAL("text/xml"), FILE_PATH_LITERAL("xml") },
+    { FILE_PATH_LITERAL("application/xhtml+xml"), FILE_PATH_LITERAL("xhtml") },
+    { FILE_PATH_LITERAL("text/plain"), FILE_PATH_LITERAL("txt") },
+    { FILE_PATH_LITERAL("text/css"), FILE_PATH_LITERAL("css") },
+  };
+  for (uint32 i = 0; i < ARRAYSIZE_UNSAFE(extensions); ++i) {
+    if (contents_mime_type == extensions[i].mime_type)
+      return extensions[i].suggested_extension;
+  }
+  return FILE_PATH_LITERAL("");
+}
+
+
+
 // static.
 // Check whether the preference has the preferred directory for saving file. If
 // not, initialize it with default directory.
 FilePath SavePackage::GetSaveDirPreference(PrefService* prefs) {
   DCHECK(prefs);
 
-  if (!prefs->IsPrefRegistered(prefs::kSaveFileDefaultDirectory)) {
+  if (!prefs->FindPreference(prefs::kSaveFileDefaultDirectory)) {
     FilePath default_save_path;
     StringPrefMember default_download_path;
-    DCHECK(prefs->IsPrefRegistered(prefs::kDownloadDefaultDirectory));
+    DCHECK(prefs->FindPreference(prefs::kDownloadDefaultDirectory));
     default_download_path.Init(prefs::kDownloadDefaultDirectory, prefs, NULL);
     default_save_path =
         FilePath::FromWStringHack(default_download_path.GetValue());
@@ -1084,7 +1155,8 @@ void SavePackage::GetSaveInfo() {
   FilePath save_dir =
       GetSaveDirPreference(tab_contents_->profile()->GetPrefs());
 
-  file_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       new CreateDownloadDirectoryTask(save_dir,
           method_factory_.NewRunnableMethod(
               &SavePackage::ContinueGetSaveInfo, save_dir),
@@ -1106,19 +1178,40 @@ void SavePackage::ContinueGetSaveInfo(FilePath save_dir) {
 
   FilePath title =
       FilePath::FromWStringHack(UTF16ToWideHack(tab_contents_->GetTitle()));
+
+#if defined(OS_POSIX)
+  FilePath::StringType mime_type(save_params->current_tab_mime_type);
+#elif defined(OS_WIN)
+  FilePath::StringType mime_type(
+      UTF8ToWide(save_params->current_tab_mime_type));
+#endif  // OS_WIN
+
   FilePath suggested_path =
-      save_dir.Append(GetSuggestedNameForSaveAs(title, can_save_as_complete));
+      save_dir.Append(GetSuggestedNameForSaveAs(title, can_save_as_complete,
+      mime_type));
 
   // If the contents can not be saved as complete-HTML, do not show the
   // file filters.
   if (can_save_as_complete) {
+    bool add_extra_extension = false;
+    FilePath::StringType extra_extension;
+    if (!suggested_path.Extension().empty() &&
+        suggested_path.Extension().compare(FILE_PATH_LITERAL("htm")) &&
+        suggested_path.Extension().compare(FILE_PATH_LITERAL("html"))) {
+      add_extra_extension = true;
+      extra_extension = suggested_path.Extension().substr(1);
+    }
     file_type_info.extensions.resize(2);
     file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("htm"));
     file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
+    if (add_extra_extension)
+      file_type_info.extensions[0].push_back(extra_extension);
     file_type_info.extension_description_overrides.push_back(
         WideToUTF16(l10n_util::GetString(IDS_SAVE_PAGE_DESC_HTML_ONLY)));
     file_type_info.extensions[1].push_back(FILE_PATH_LITERAL("htm"));
     file_type_info.extensions[1].push_back(FILE_PATH_LITERAL("html"));
+    if (add_extra_extension)
+      file_type_info.extensions[1].push_back(extra_extension);
     file_type_info.extension_description_overrides.push_back(
         WideToUTF16(l10n_util::GetString(IDS_SAVE_PAGE_DESC_COMPLETE)));
     file_type_info.include_all_files = false;
@@ -1159,7 +1252,7 @@ void SavePackage::ContinueSave(SavePackageParam* param,
   param->saved_main_file_path = final_name;
   DownloadManager* dlm = tab_contents_->profile()->GetDownloadManager();
   DCHECK(dlm);
-  dlm->GenerateSafeFilename(param->current_tab_mime_type,
+  dlm->GenerateSafeFileName(param->current_tab_mime_type,
                             &param->saved_main_file_path);
 
   // The option index is not zero-based.
@@ -1215,7 +1308,8 @@ bool SavePackage::IsSavableContents(const std::string& contents_mime_type) {
 
 // Static
 bool SavePackage::CanSaveAsComplete(const std::string& contents_mime_type) {
-  return contents_mime_type == "text/html";
+  return contents_mime_type == "text/html" ||
+         contents_mime_type == "application/xhtml+xml";
 }
 
 // Static

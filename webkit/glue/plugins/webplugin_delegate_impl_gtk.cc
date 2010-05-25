@@ -10,23 +10,23 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
-#include "app/gfx/blit.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
-#include "webkit/api/public/WebCursorInfo.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/glue/glue_util.h"
-#include "webkit/glue/webplugin.h"
+#include "gfx/blit.h"
+#include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/plugins/gtk_plugin_container.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
+#include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 
 #include "third_party/npapi/bindings/npapi_x11.h"
@@ -50,13 +50,18 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       plug_(NULL),
       socket_(NULL),
       parent_(containing_view),
-      quirks_(0) {
+      quirks_(0),
+      handle_event_depth_(0) {
   memset(&window_, 0, sizeof(window_));
   if (instance_->mime_type() == "application/x-shockwave-flash") {
     // Flash is tied to Firefox's whacky behavior with windowless plugins. See
-    // comments in WindowlessPaint
+    // comments in WindowlessPaint.
+    // TODO(viettrungluu): PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK: Don't allow
+    // right-clicks in windowless content since Flash 10.1 (initial release, at
+    // least) hangs in that case. Remove this once Flash is fixed.
     quirks_ |= PLUGIN_QUIRK_WINDOWLESS_OFFSET_WINDOW_TO_DRAW
-        | PLUGIN_QUIRK_WINDOWLESS_INVALIDATE_AFTER_SET_WINDOW;
+        | PLUGIN_QUIRK_WINDOWLESS_INVALIDATE_AFTER_SET_WINDOW
+        | PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK;
   }
 
   // TODO(evanm): I played with this for quite a while but couldn't
@@ -84,24 +89,24 @@ WebPluginDelegateImpl::~WebPluginDelegateImpl() {
   }
 }
 
-void WebPluginDelegateImpl::PlatformInitialize() {
+bool WebPluginDelegateImpl::PlatformInitialize() {
   gfx::PluginWindowHandle handle =
       windowless_ ? 0 : gtk_plug_get_id(GTK_PLUG(plug_));
   plugin_->SetWindow(handle);
+  return true;
 }
 
 void WebPluginDelegateImpl::PlatformDestroyInstance() {
   // Nothing to do here.
 }
 
-void WebPluginDelegateImpl::PluginDestroyed() {
-  delete this;
-}
-
-void WebPluginDelegateImpl::Paint(cairo_t* context,
+void WebPluginDelegateImpl::Paint(WebKit::WebCanvas* canvas,
                                   const gfx::Rect& rect) {
-  if (windowless_)
-    WindowlessPaint(context, rect);
+  if (!windowless_)
+    return;
+  cairo_t* context = canvas->beginPlatformPaint();
+  WindowlessPaint(context, rect);
+  canvas->endPlatformPaint();
 }
 
 void WebPluginDelegateImpl::Print(cairo_t* context) {
@@ -116,12 +121,13 @@ bool WebPluginDelegateImpl::WindowedCreatePlugin() {
   DCHECK(!windowed_handle_);
   DCHECK(!plug_);
 
-  // NPP_GetValue() will write 4 bytes of data to this variable.  Don't use a
-  // single byte bool, use an int instead.
-  int xembed;
+  // NPP_GetValue() might write 4 bytes of data to this variable.  Don't use a
+  // single byte bool, use an int instead and make sure it is initialized.
+  int xembed = 0;
   NPError err = instance_->NPP_GetValue(NPPVpluginNeedsXEmbed, &xembed);
   if (err != NPERR_NO_ERROR || !xembed) {
-    NOTIMPLEMENTED() << " windowed plugin but without xembed.";
+    NOTIMPLEMENTED() << " windowed plugin but without xembed. "
+      "See http://code.google.com/p/chromium/issues/detail?id=38229";
     return false;
   }
 
@@ -683,9 +689,8 @@ static bool NPEventFromWebInputEvent(const WebInputEvent& event,
   }
 }
 
-bool WebPluginDelegateImpl::HandleInputEvent(const WebInputEvent& event,
-                                             WebCursorInfo* cursor_info) {
-  DCHECK(windowless_) << "events should only be received in windowless mode";
+bool WebPluginDelegateImpl::PlatformHandleInputEvent(
+    const WebInputEvent& event, WebCursorInfo* cursor_info) {
 
   if (first_event_time_ < 0.0)
     first_event_time_ = event.timeStampSeconds;
@@ -695,7 +700,18 @@ bool WebPluginDelegateImpl::HandleInputEvent(const WebInputEvent& event,
   if (!NPEventFromWebInputEvent(event, timestamp, &np_event)) {
     return false;
   }
+  // See comment about PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK in constructor.
+  if (windowless_ &&
+      (quirks_ & PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK) &&
+      (np_event.type == ButtonPress || np_event.type == ButtonRelease) &&
+      (np_event.xbutton.button == Button3)) {
+    return false;
+  }
+
   bool ret = instance()->NPP_HandleEvent(&np_event) != 0;
+
+  // Flash always returns false, even when the event is handled.
+  ret = true;
 
 #if 0
   if (event->event == WM_MOUSEMOVE) {

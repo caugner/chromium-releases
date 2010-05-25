@@ -14,6 +14,7 @@
 #include "base/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/host_resolver.h"
+#include "net/base/net_log.h"
 #include "net/ftp/ftp_ctrl_response_buffer.h"
 #include "net/ftp/ftp_response_info.h"
 #include "net/ftp/ftp_transaction.h"
@@ -33,7 +34,7 @@ class FtpNetworkTransaction : public FtpTransaction {
   // FtpTransaction methods:
   virtual int Start(const FtpRequestInfo* request_info,
                     CompletionCallback* callback,
-                    LoadLog* load_log);
+                    const BoundNetLog& net_log);
   virtual int Stop(int error);
   virtual int RestartWithAuth(const std::wstring& username,
                               const std::wstring& password,
@@ -57,6 +58,7 @@ class FtpNetworkTransaction : public FtpTransaction {
     COMMAND_SIZE,
     COMMAND_RETR,
     COMMAND_CWD,
+    COMMAND_MLSD,
     COMMAND_LIST,
     COMMAND_MDTM,
     COMMAND_QUIT
@@ -94,6 +96,22 @@ class FtpNetworkTransaction : public FtpTransaction {
     SYSTEM_TYPE_VMS,
   };
 
+  // Data representation type, see RFC 959 section 3.1.1. Data Types.
+  // We only support the two most popular data types.
+  enum DataType {
+    DATA_TYPE_ASCII,
+    DATA_TYPE_IMAGE,
+  };
+
+  // In FTP we need to issue different commands depending on whether a resource
+  // is a file or directory. If we don't know that, we're going to autodetect
+  // it.
+  enum ResourceType {
+    RESOURCE_TYPE_UNKNOWN,
+    RESOURCE_TYPE_FILE,
+    RESOURCE_TYPE_DIRECTORY,
+  };
+
   // Resets the members of the transaction so it can be restarted.
   void ResetStateForRestart();
 
@@ -113,6 +131,9 @@ class FtpNetworkTransaction : public FtpTransaction {
   // Returns request path suitable to be included in an FTP command. If the path
   // will be used as a directory, |is_directory| should be true.
   std::string GetRequestPathForFtpCommand(bool is_directory) const;
+
+  // See if the request URL contains a typecode and make us respect it.
+  void DetectTypecode();
 
   // Runs the state transition loop.
   int DoLoop(int result);
@@ -151,6 +172,8 @@ class FtpNetworkTransaction : public FtpTransaction {
   int ProcessResponseSIZE(const FtpCtrlResponse& response);
   int DoCtrlWriteCWD();
   int ProcessResponseCWD(const FtpCtrlResponse& response);
+  int DoCtrlWriteMLSD();
+  int ProcessResponseMLSD(const FtpCtrlResponse& response);
   int DoCtrlWriteLIST();
   int ProcessResponseLIST(const FtpCtrlResponse& response);
   int DoCtrlWriteMDTM();
@@ -163,6 +186,8 @@ class FtpNetworkTransaction : public FtpTransaction {
   int DoDataRead();
   int DoDataReadComplete(int result);
 
+  void RecordDataConnectionError(int result);
+
   Command command_sent_;
 
   CompletionCallbackImpl<FtpNetworkTransaction> io_callback_;
@@ -170,7 +195,7 @@ class FtpNetworkTransaction : public FtpTransaction {
 
   scoped_refptr<FtpNetworkSession> session_;
 
-  scoped_refptr<LoadLog> load_log_;
+  BoundNetLog net_log_;
   const FtpRequestInfo* request_;
   FtpResponseInfo response_;
 
@@ -185,7 +210,6 @@ class FtpNetworkTransaction : public FtpTransaction {
 
   scoped_refptr<IOBuffer> read_data_buf_;
   int read_data_buf_len_;
-  int file_data_len_;
 
   // Buffer holding the command line to be written to the control socket.
   scoped_refptr<IOBufferWithSize> write_command_buf_;
@@ -198,6 +222,12 @@ class FtpNetworkTransaction : public FtpTransaction {
 
   SystemType system_type_;
 
+  // Data type to be used for the TYPE command.
+  DataType data_type_;
+
+  // Detected resource type (file or directory).
+  ResourceType resource_type_;
+
   // We get username and password as wstrings in RestartWithAuth, so they are
   // also kept as wstrings here.
   std::wstring username_;
@@ -206,8 +236,6 @@ class FtpNetworkTransaction : public FtpTransaction {
   // Current directory on the remote server, as returned by last PWD command,
   // with any trailing slash removed.
   std::string current_remote_directory_;
-
-  bool retr_failed_;
 
   int data_connection_port_;
 
@@ -238,6 +266,7 @@ class FtpNetworkTransaction : public FtpTransaction {
     STATE_CTRL_WRITE_RETR,
     STATE_CTRL_WRITE_SIZE,
     STATE_CTRL_WRITE_CWD,
+    STATE_CTRL_WRITE_MLSD,
     STATE_CTRL_WRITE_LIST,
     STATE_CTRL_WRITE_MDTM,
     STATE_CTRL_WRITE_QUIT,

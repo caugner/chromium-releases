@@ -7,11 +7,11 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
 
-#include "base/gfx/rect.h"
+#include "gfx/rect.h"
 #include "base/keyboard_code_conversion_gtk.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/test/automation/automation_constants.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -197,23 +197,24 @@ bool SendKeyPress(gfx::NativeWindow window,
                 (shift ? GDK_SHIFT_MASK : 0) |
                 (alt ? GDK_MOD1_MASK : 0);
 
-  guint gdk_key = base::GdkKeyCodeForWindowsKeyCode(key);
+  guint gdk_key = base::GdkKeyCodeForWindowsKeyCode(key, shift);
   rv = rv && SendKeyEvent(event_window, true, gdk_key, state);
   rv = rv && SendKeyEvent(event_window, false, gdk_key, state);
 
   if (alt) {
     guint state = (control ? GDK_CONTROL_MASK : 0) |
-                  (shift ? GDK_SHIFT_MASK : 0);
+                  (shift ? GDK_SHIFT_MASK : 0) | GDK_MOD1_MASK;
     rv = rv && SendKeyEvent(event_window, false, GDK_Alt_L, state);
   }
 
   if (shift) {
     rv = rv && SendKeyEvent(event_window, false, GDK_Shift_L,
-                            control ? GDK_CONTROL_MASK : 0);
+                            (control ? GDK_CONTROL_MASK : 0) | GDK_SHIFT_MASK);
   }
 
   if (control)
-    rv = rv && SendKeyEvent(event_window, false, GDK_Control_L, 0);
+    rv = rv && SendKeyEvent(event_window, false, GDK_Control_L,
+                            GDK_CONTROL_MASK);
 
   return rv;
 }

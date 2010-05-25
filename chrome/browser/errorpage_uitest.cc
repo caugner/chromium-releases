@@ -3,9 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/string_util.h"
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#endif  // defined(OS_WIN)
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "chrome/browser/net/url_request_failed_dns_job.h"
@@ -15,22 +12,18 @@
 class ErrorPageTest : public UITest {
  protected:
   bool WaitForTitleMatching(const std::wstring& title) {
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 10; ++i) {
       if (GetActiveTabTitle() == title)
         return true;
-      PlatformThread::Sleep(sleep_timeout_ms() / 10);
+      PlatformThread::Sleep(sleep_timeout_ms());
     }
     EXPECT_EQ(title, GetActiveTabTitle());
     return false;
   }
 };
 
-TEST_F(ErrorPageTest, DNSError_Basic) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_DNSError_Basic) {
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
 
   // The first navigation should fail, and the second one should be the error
@@ -40,12 +33,8 @@ TEST_F(ErrorPageTest, DNSError_Basic) {
   EXPECT_TRUE(WaitForTitleMatching(L"Mock Link Doctor"));
 }
 
-TEST_F(ErrorPageTest, DNSError_GoBack1) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_DNSError_GoBack1) {
   // Test that a DNS error occuring in the main frame does not result in an
   // additional session history entry.
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
@@ -62,12 +51,8 @@ TEST_F(ErrorPageTest, DNSError_GoBack1) {
   EXPECT_TRUE(WaitForTitleMatching(L"Title Of Awesomeness"));
 }
 
-TEST_F(ErrorPageTest, DNSError_GoBack2) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_DNSError_GoBack2) {
   // Test that a DNS error occuring in the main frame does not result in an
   // additional session history entry.
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
@@ -90,12 +75,8 @@ TEST_F(ErrorPageTest, DNSError_GoBack2) {
   EXPECT_TRUE(WaitForTitleMatching(L"Title Of Awesomeness"));
 }
 
-TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_DNSError_GoBack2AndForward) {
   // Test that a DNS error occuring in the main frame does not result in an
   // additional session history entry.
 
@@ -122,12 +103,8 @@ TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
   EXPECT_TRUE(WaitForTitleMatching(L"Mock Link Doctor"));
 }
 
-TEST_F(ErrorPageTest, DNSError_GoBack2Forward2) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_DNSError_GoBack2Forward2) {
   // Test that a DNS error occuring in the main frame does not result in an
   // additional session history entry.
 
@@ -156,23 +133,15 @@ TEST_F(ErrorPageTest, DNSError_GoBack2Forward2) {
   EXPECT_TRUE(WaitForTitleMatching(L"Title Of Awesomeness"));
 }
 
-TEST_F(ErrorPageTest, IFrameDNSError_Basic) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_IFrameDNSError_Basic) {
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
                     FilePath(FILE_PATH_LITERAL("iframe_dns_error.html"))));
   EXPECT_TRUE(WaitForTitleMatching(L"Blah"));
 }
 
-TEST_F(ErrorPageTest, IFrameDNSError_GoBack) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_IFrameDNSError_GoBack) {
   // Test that a DNS error occuring in an iframe does not result in an
   // additional session history entry.
 
@@ -186,12 +155,8 @@ TEST_F(ErrorPageTest, IFrameDNSError_GoBack) {
   EXPECT_TRUE(WaitForTitleMatching(L"Title Of Awesomeness"));
 }
 
-TEST_F(ErrorPageTest, IFrameDNSError_GoBackAndForward) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_IFrameDNSError_GoBackAndForward) {
   // Test that a DNS error occuring in an iframe does not result in an
   // additional session history entry.
 
@@ -206,12 +171,8 @@ TEST_F(ErrorPageTest, IFrameDNSError_GoBackAndForward) {
   EXPECT_TRUE(WaitForTitleMatching(L"Blah"));
 }
 
-TEST_F(ErrorPageTest, IFrame404) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_IFrame404) {
   // iframes that have 404 pages should not trigger an alternate error page.
   // In this test, the iframe sets the title of the parent page to "SUCCESS"
   // when the iframe loads.  If the iframe fails to load (because an alternate
@@ -225,12 +186,8 @@ TEST_F(ErrorPageTest, IFrame404) {
   EXPECT_TRUE(WaitForTitleMatching(L"SUCCESS"));
 }
 
-TEST_F(ErrorPageTest, Page404) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_Page404) {
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
                     FilePath(FILE_PATH_LITERAL("title2.html"))));
   // The first navigation should fail, and the second one should be the error
@@ -242,12 +199,8 @@ TEST_F(ErrorPageTest, Page404) {
   EXPECT_TRUE(WaitForTitleMatching(L"Mock Link Doctor"));
 }
 
-TEST_F(ErrorPageTest, Page404_GoBack) {
-#if defined(OS_WIN)
-  // Flaky on XP, http://crbug.com/19361.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
-    return;
-#endif  // defined(OS_WIN)
+// Flaky, http://crbug.com/19361.
+TEST_F(ErrorPageTest, FLAKY_Page404_GoBack) {
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(
                     FilePath(FILE_PATH_LITERAL("title2.html"))));
   // The first navigation should fail, and the second one should be the error

@@ -8,12 +8,15 @@
 #include <vector>
 
 #include "app/sql/connection.h"
+#include "app/sql/init_status.h"
 #include "app/sql/meta_table.h"
+#include "base/ref_counted.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/url_database.h"  // For DBCloseScoper.
 #include "chrome/browser/meta_table_helper.h"
 
 class FilePath;
+class RefCountedMemory;
 struct ThumbnailScore;
 class SkBitmap;
 
@@ -40,8 +43,8 @@ class ThumbnailDatabase {
 
   // Must be called after creation but before any other methods are called.
   // When not INIT_OK, no other functions should be called.
-  InitStatus Init(const FilePath& db_name,
-                  const HistoryPublisher* history_publisher);
+  sql::InitStatus Init(const FilePath& db_name,
+                       const HistoryPublisher* history_publisher);
 
   // Transactions on the database.
   void BeginTransaction();
@@ -87,7 +90,7 @@ class ThumbnailDatabase {
   // The time indicates the access time, and is used to detect when the favicon
   // should be refreshed.
   bool SetFavIcon(FavIconID icon_id,
-                  const std::vector<unsigned char>& icon_data,
+                  scoped_refptr<RefCountedMemory> icon_data,
                   base::Time time);
 
   // Sets the time the favicon was last updated.

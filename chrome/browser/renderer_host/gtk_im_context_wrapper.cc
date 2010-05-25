@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,18 @@
 #include <gdk/gdkkeysyms.h>
 #include <gtk/gtk.h>
 
-#include "base/gfx/rect.h"
+#include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "chrome/common/native_web_keyboard_event.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
+#include "chrome/common/native_web_keyboard_event.h"
+#include "chrome/common/render_messages.h"
+#include "gfx/rect.h"
+#include "grit/generated_resources.h"
 
 GtkIMContextWrapper::GtkIMContextWrapper(RenderWidgetHostViewGtk* host_view)
     : host_view_(host_view),
@@ -247,6 +252,18 @@ void GtkIMContextWrapper::OnFocusOut() {
   host_view_->GetRenderWidgetHost()->ImeSetInputMode(false);
 }
 
+void GtkIMContextWrapper::AppendInputMethodsContextMenu(MenuGtk* menu) {
+  std::string label = gtk_util::ConvertAcceleratorsFromWindowsStyle(
+      l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_INPUT_METHODS_MENU));
+  GtkWidget* menuitem = gtk_menu_item_new_with_mnemonic(label.c_str());
+  GtkWidget* submenu = gtk_menu_new();
+  gtk_menu_item_set_submenu(GTK_MENU_ITEM(menuitem), submenu);
+  gtk_im_multicontext_append_menuitems(GTK_IM_MULTICONTEXT(context_),
+                                       GTK_MENU_SHELL(submenu));
+  menu->AppendSeparator();
+  menu->AppendMenuItem(IDC_INPUT_METHODS_MENU, menuitem);
+}
+
 bool GtkIMContextWrapper::NeedCommitByForwardingCharEvent() {
   // If there is no composition text and has only one character to be
   // committed, then the character will be send to webkit as a Char event
@@ -285,11 +302,7 @@ void GtkIMContextWrapper::ProcessFilteredKeyPressEvent(
     // Prevent RenderView::UnhandledKeyboardEvent() from processing it.
     // Otherwise unexpected result may occur. For example if it's a
     // Backspace key event, the browser may go back to previous page.
-    if (wke->os_event) {
-      wke->os_event->keyval = GDK_VoidSymbol;
-      wke->os_event->hardware_keycode = 0;
-      wke->os_event->state = 0;
-    }
+    wke->skip_in_browser = true;
   }
   host_view_->ForwardKeyboardEvent(*wke);
 }
@@ -313,6 +326,7 @@ void GtkIMContextWrapper::ProcessUnfilteredKeyPressEvent(
   // see WebInputEventFactory::keyboardEvent() for details.
   if (wke->text[0]) {
     wke->type = WebKit::WebInputEvent::Char;
+    wke->skip_in_browser = true;
     host_view_->ForwardKeyboardEvent(*wke);
   }
 }
@@ -336,6 +350,7 @@ void GtkIMContextWrapper::ProcessInputMethodResult(const GdkEventKey* event,
       NativeWebKeyboardEvent char_event(commit_text_[0],
                                         event->state,
                                         base::Time::Now().ToDoubleT());
+      char_event.skip_in_browser = true;
       host_view_->ForwardKeyboardEvent(char_event);
     } else {
       committed = true;

@@ -42,6 +42,8 @@
 #include "base/scoped_ptr.h"
 #include "plugin/cross/main.h"
 #include "plugin/cross/out_of_memory.h"
+#include "plugin/cross/whitelist.h"
+#include "plugin/linux/envvars.h"
 
 using glue::_o3d::PluginObject;
 using glue::StreamManager;
@@ -58,6 +60,10 @@ namespace {
 base::AtExitManager g_at_exit_manager;
 
 bool g_xembed_support = false;
+
+#ifdef O3D_PLUGIN_ENV_VARS_FILE
+static const char *kEnvVarsFilePath = O3D_PLUGIN_ENV_VARS_FILE;
+#endif
 
 static void DrawPlugin(PluginObject *obj) {
   // Limit drawing to no more than once every timer tick.
@@ -468,7 +474,7 @@ static gboolean GtkHandleMouseButton(GtkWidget *widget,
   }
   if (event.in_plugin() && event.type() == Event::TYPE_MOUSEDOWN &&
       obj->HitFullscreenClickRegion(event.x(), event.y())) {
-    obj->RequestFullscreenDisplay();
+    obj->RequestFullscreenDisplay(button_event->time);
   }
   return TRUE;
 }
@@ -624,6 +630,18 @@ NPError InitializePlugin() {
 
   DLOG(INFO) << "NP_Initialize";
 
+#ifdef O3D_PLUGIN_ENV_VARS_FILE
+  // Before doing anything more, we first load our environment variables file.
+  // This file is a newline-delimited list of any system-specific environment
+  // variables that need to be set in the browser. Since we are a shared library
+  // and not an executable, we can't set them at browser start time, so we
+  // instead set them in every process that loads our shared library. It is
+  // important that we do this as early as possible so that any relevant
+  // variables are already set when we initialize our shared library
+  // dependencies.
+  o3d::LoadEnvironmentVariablesFile(kEnvVarsFilePath);
+#endif
+
   // Check for XEmbed support in the browser.
   NPBool xembed_support = 0;
   NPError err = NPN_GetValue(NULL, NPNVSupportsXEmbedBool, &xembed_support);
@@ -686,6 +704,10 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc,
                 char *argn[], char *argv[], NPSavedData *saved) {
   HANDLE_CRASHES;
 
+  if (!IsDomainAuthorized(instance)) {
+    return NPERR_INVALID_URL;
+  }
+
   PluginObject* pluginObject = glue::_o3d::PluginObject::Create(
       instance);
   instance->pdata = pluginObject;
@@ -701,6 +723,8 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save) {
   HANDLE_CRASHES;
   PluginObject *obj = static_cast<PluginObject*>(instance->pdata);
   if (obj) {
+    obj->TearDown();
+
     if (obj->xt_widget_) {
       // NOTE: This crashes. Not sure why, possibly the widget has
       // already been destroyed, but we haven't received a SetWindow(NULL).
@@ -718,25 +742,24 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save) {
     }
     if (obj->gtk_container_) {
       gtk_widget_destroy(obj->gtk_container_);
-      gtk_widget_unref(obj->gtk_container_);
       obj->gtk_container_ = NULL;
     }
     if (obj->gtk_fullscreen_container_) {
       gtk_widget_destroy(obj->gtk_fullscreen_container_);
-      gtk_widget_unref(obj->gtk_fullscreen_container_);
-      obj->gtk_container_ = NULL;
+      obj->gtk_fullscreen_container_ = NULL;
+    }
+    if (obj->gdk_display_) {
+      gdk_display_close(obj->gdk_display_);
+      obj->gdk_display_ = NULL;
     }
     obj->gtk_event_source_ = NULL;
     obj->event_handler_id_ = 0;
     obj->window_ = 0;
     obj->drawable_ = 0;
-    obj->display_ = NULL;
 
-    obj->TearDown();
     NPN_ReleaseObject(obj);
     instance->pdata = NULL;
   }
-
   return NPERR_NO_ERROR;
 }
 
@@ -753,7 +776,17 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window) {
     if (g_xembed_support) {
       // We asked for a XEmbed plugin, the xwindow is a GtkSocket, we create
       // a GtkPlug to go into it.
-      obj->gtk_container_ = gtk_plug_new(xwindow);
+      obj->gdk_display_ = gdk_display_open(XDisplayString(display));
+      LOG_ASSERT(obj->gdk_display_) << "Unable to open X11 display";
+      display = GDK_DISPLAY_XDISPLAY(obj->gdk_display_);
+      obj->gtk_container_ =
+          gtk_plug_new_for_display(obj->gdk_display_, xwindow);
+      // Firefox has a bug where it sometimes destroys our parent widget before
+      // calling NPP_Destroy. We handle this by hiding our X window instead of
+      // destroying it. Without this, future OpenGL calls can raise a
+      // GLXBadDrawable error and kill the browser process.
+      g_signal_connect(obj->gtk_container_, "delete-event",
+                       G_CALLBACK(gtk_widget_hide_on_delete), NULL);
       gtk_widget_set_double_buffered(obj->gtk_container_, FALSE);
       if (!obj->fullscreen()) {
         obj->SetGtkEventSource(obj->gtk_container_);
@@ -790,7 +823,7 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window) {
 
     obj->CreateRenderer(default_display);
     obj->client()->Init();
-    obj->display_ = display;
+    obj->SetDisplay(display);
     obj->window_ = xwindow;
     obj->drawable_ = drawable;
   }
@@ -835,7 +868,7 @@ void PluginObject::SetGtkEventSource(GtkWidget *widget) {
                           GDK_EXPOSURE_MASK |
                           GDK_ENTER_NOTIFY_MASK |
                           GDK_LEAVE_NOTIFY_MASK);
-    event_handler_id_ = g_signal_connect(G_OBJECT(gtk_event_source_), "event",
+    event_handler_id_ = g_signal_connect(gtk_event_source_, "event",
                                          G_CALLBACK(GtkEventCallback), this);
   }
 }
@@ -846,16 +879,16 @@ gboolean PluginObject::OnGtkConfigure(GtkWidget *widget,
   if (fullscreen_pending_) {
     // Our fullscreen window has been placed and sized. Switch to it.
     fullscreen_pending_ = false;
-    Window fullscreen_window =
-        GDK_WINDOW_XID(gtk_fullscreen_container_->window);
+    fullscreen_window_ = GDK_WINDOW_XID(gtk_fullscreen_container_->window);
     DisplayWindowLinux display;
     display.set_display(display_);
-    display.set_window(fullscreen_window);
+    display.set_window(fullscreen_window_);
     prev_width_ = renderer()->width();
     prev_height_ = renderer()->height();
     if (!renderer()->GoFullscreen(display, fullscreen_region_mode_id_)) {
       gtk_widget_destroy(gtk_fullscreen_container_);
       gtk_fullscreen_container_ = NULL;
+      fullscreen_window_ = 0;
       // The return value is for whether we handled the event, not whether it
       // was successful, so return TRUE event for error.
       return TRUE;
@@ -882,7 +915,7 @@ bool PluginObject::GetDisplayMode(int id, o3d::DisplayMode *mode) {
 
 // TODO: Where should this really live?  It's platform-specific, but in
 // PluginObject, which mainly lives in cross/o3d_glue.h+cc.
-bool PluginObject::RequestFullscreenDisplay() {
+bool PluginObject::RequestFullscreenDisplay(guint32 timestamp) {
   if (fullscreen_ || fullscreen_pending_) {
     return false;
   }
@@ -897,6 +930,10 @@ bool PluginObject::RequestFullscreenDisplay() {
   GtkWidget *widget = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   // The returned object counts as both a widget and a window.
   GtkWindow *window = GTK_WINDOW(widget);
+  // Ensure that the fullscreen window is displayed on the same screen as the
+  // embedded window.
+  GdkScreen *screen = gtk_window_get_screen(GTK_WINDOW(gtk_container_));
+  gtk_window_set_screen(window, screen);
   // The window title shouldn't normally be visible, but the user will see it
   // if they Alt+Tab to another app.
   gtk_window_set_title(window, "O3D Application");
@@ -905,7 +942,7 @@ bool PluginObject::RequestFullscreenDisplay() {
   // Stops Gtk from writing an off-screen buffer to the display, which conflicts
   // with our GL rendering.
   gtk_widget_set_double_buffered(widget, FALSE);
-  GdkScreen *screen = gtk_window_get_screen(window);
+  gtk_window_set_keep_above(window, TRUE);
   // In the case of Xinerama or TwinView, these will be the dimensions of the
   // whole desktop, which is wrong, but the window manager is smart enough to
   // restrict our size to that of the main screen.
@@ -916,12 +953,16 @@ bool PluginObject::RequestFullscreenDisplay() {
   // size, but let's do it anyway. It could still be relevant for some window
   // managers.
   gtk_window_fullscreen(window);
-  g_signal_connect(G_OBJECT(window), "configure-event",
+  g_signal_connect(window, "configure-event",
                    G_CALLBACK(GtkConfigureEventCallback), this);
-  g_signal_connect(G_OBJECT(window), "delete-event",
+  g_signal_connect(window, "delete-event",
                    G_CALLBACK(GtkDeleteEventCallback), this);
   gtk_fullscreen_container_ = widget;
-  gtk_widget_show(widget);
+  // The timestamp here is optional, but its inclusion is preferred.
+  gtk_window_present_with_time(window, timestamp);
+  // Explicitly set focus, otherwise we may not get it depending on the window
+  // manager's policy for present.
+  gdk_window_focus(widget->window, timestamp);
   // We defer switching to the new window until it gets displayed and assigned
   // it's final dimensions in the configure-event.
   fullscreen_pending_ = true;
@@ -945,8 +986,8 @@ void PluginObject::CancelFullscreenDisplay() {
                             false);
   SetGtkEventSource(gtk_container_);
   gtk_widget_destroy(gtk_fullscreen_container_);
-  gtk_widget_unref(gtk_fullscreen_container_);
   gtk_fullscreen_container_ = NULL;
+  fullscreen_window_ = 0;
   fullscreen_ = false;
 }
 }  // namespace _o3d

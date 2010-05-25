@@ -7,14 +7,15 @@
 #include <set>
 
 #include "app/l10n_util.h"
-#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/mime_util.h"
-#include "base/thread.h"
-#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "base/thread.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "grit/generated_resources.h"
 
@@ -31,7 +32,6 @@ static const int kPreviewHeight = 512;
 class SelectFileDialogImpl : public SelectFileDialog {
  public:
   explicit SelectFileDialogImpl(Listener* listener);
-  virtual ~SelectFileDialogImpl();
 
   // BaseShellDialog implementation.
   virtual bool IsRunning(gfx::NativeWindow parent_window) const;
@@ -49,6 +49,8 @@ class SelectFileDialogImpl : public SelectFileDialog {
                           void* params);
 
  private:
+  virtual ~SelectFileDialogImpl();
+
   // Add the filters from |file_types_| to |chooser|.
   void AddFilters(GtkFileChooser* chooser);
 
@@ -80,21 +82,35 @@ class SelectFileDialogImpl : public SelectFileDialog {
   // |params_map_|.
   void* PopParamsForDialog(GtkWidget* dialog);
 
-  // Removes and returns the parent associated with |dialog| from |parents_|.
-  void RemoveParentForDialog(GtkWidget* dialog);
+  // Take care of internal data structures when a file dialog is destroyed.
+  void FileDialogDestroyed(GtkWidget* dialog);
 
   // Check whether response_id corresponds to the user cancelling/closing the
   // dialog. Used as a helper for the below callbacks.
   static bool IsCancelResponse(gint response_id);
 
-  // Callback for when the user responds to a Save As or Open File or
-  // Select Folder dialog.
+  // Common function for OnSelectSingleFileDialogResponse and
+  // OnSelectSingleFolderDialogResponse.
+  static void SelectSingleFileHelper(GtkWidget* dialog,
+                                     gint response_id,
+                                     SelectFileDialogImpl* dialog_impl,
+                                     bool allow_folder);
+
+  // Callback for when the user responds to a Save As or Open File dialog.
   static void OnSelectSingleFileDialogResponse(
+      GtkWidget* dialog, gint response_id, SelectFileDialogImpl* dialog_impl);
+
+  // Callback for when the user responds to a Select Folder dialog.
+  static void OnSelectSingleFolderDialogResponse(
       GtkWidget* dialog, gint response_id, SelectFileDialogImpl* dialog_impl);
 
   // Callback for when the user responds to a Open Multiple Files dialog.
   static void OnSelectMultiFileDialogResponse(
       GtkWidget* dialog, gint response_id, SelectFileDialogImpl* dialog_impl);
+
+  // Callback for when the file chooser gets destroyed.
+  static void OnFileChooserDestroy(GtkWidget* dialog,
+                                   SelectFileDialogImpl* dialog_impl);
 
   // Callback for when we update the preview for the selection.
   static void OnUpdatePreview(GtkFileChooser* chooser,
@@ -138,10 +154,8 @@ FilePath* SelectFileDialogImpl::last_opened_path_ = NULL;
 
 // static
 SelectFileDialog* SelectFileDialog::Create(Listener* listener) {
-  DCHECK(MessageLoop::current() !=
-         g_browser_process->io_thread()->message_loop());
-  DCHECK(MessageLoop::current() !=
-         g_browser_process->file_thread()->message_loop());
+  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::FILE));
   return new SelectFileDialogImpl(listener);
 }
 
@@ -154,9 +168,8 @@ SelectFileDialogImpl::SelectFileDialogImpl(Listener* listener)
 }
 
 SelectFileDialogImpl::~SelectFileDialogImpl() {
-  for (std::set<GtkWidget*>::iterator iter = dialogs_.begin();
-       iter != dialogs_.end(); ++iter) {
-    gtk_widget_destroy(*iter);
+  while (dialogs_.begin() != dialogs_.end()) {
+    gtk_widget_destroy(*(dialogs_.begin()));
   }
 }
 
@@ -179,10 +192,11 @@ void SelectFileDialogImpl::SelectFile(
     gfx::NativeWindow owning_window,
     void* params) {
   type_ = type;
-  // TODO(estade): on windows, owning_window may be null. But I'm not sure when
-  // that's used and how to deal with it here. For now, don't allow it.
-  DCHECK(owning_window);
-  parents_.insert(owning_window);
+  // |owning_window| can be null when user right-clicks on a downloadable item
+  // and chooses 'Open Link in New Tab' when 'Ask where to save each file
+  // before downloading.' preference is turned on. (http://crbug.com/29213)
+  if (owning_window)
+    parents_.insert(owning_window);
 
   std::string title_string = UTF16ToUTF8(title);
 
@@ -196,7 +210,7 @@ void SelectFileDialogImpl::SelectFile(
   switch (type) {
     case SELECT_FOLDER:
       dialog = CreateSelectFolderDialog(title_string, default_path,
-                                         owning_window);
+                                        owning_window);
       break;
     case SELECT_OPEN_FILE:
       dialog = CreateFileOpenDialog(title_string, default_path, owning_window);
@@ -215,6 +229,7 @@ void SelectFileDialogImpl::SelectFile(
   dialogs_.insert(dialog);
 
   preview_ = gtk_image_new();
+  g_signal_connect(dialog, "destroy", G_CALLBACK(OnFileChooserDestroy), this);
   g_signal_connect(dialog, "update-preview", G_CALLBACK(OnUpdatePreview), this);
   gtk_file_chooser_set_preview_widget(GTK_FILE_CHOOSER(dialog), preview_);
 
@@ -293,9 +308,7 @@ void SelectFileDialogImpl::FileSelected(GtkWidget* dialog,
     g_slist_free(filters);
     listener_->FileSelected(path, idx + 1, PopParamsForDialog(dialog));
   }
-  RemoveParentForDialog(dialog);
   gtk_widget_destroy(dialog);
-  dialogs_.erase(dialog);
 }
 
 void SelectFileDialogImpl::MultiFilesSelected(GtkWidget* dialog,
@@ -304,18 +317,14 @@ void SelectFileDialogImpl::MultiFilesSelected(GtkWidget* dialog,
 
   if (listener_)
     listener_->MultiFilesSelected(files, PopParamsForDialog(dialog));
-  RemoveParentForDialog(dialog);
   gtk_widget_destroy(dialog);
-  dialogs_.erase(dialog);
 }
 
 void SelectFileDialogImpl::FileNotSelected(GtkWidget* dialog) {
   void* params = PopParamsForDialog(dialog);
   if (listener_)
     listener_->FileSelectionCanceled(params);
-  RemoveParentForDialog(dialog);
   gtk_widget_destroy(dialog);
-  dialogs_.erase(dialog);
 }
 
 GtkWidget* SelectFileDialogImpl::CreateSelectFolderDialog(
@@ -340,8 +349,8 @@ GtkWidget* SelectFileDialogImpl::CreateSelectFolderDialog(
                                         last_opened_path_->value().c_str());
   }
   gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), FALSE);
-  g_signal_connect(G_OBJECT(dialog), "response",
-                   G_CALLBACK(OnSelectSingleFileDialogResponse), this);
+  g_signal_connect(dialog, "response",
+                   G_CALLBACK(OnSelectSingleFolderDialogResponse), this);
   return dialog;
 }
 
@@ -368,7 +377,7 @@ GtkWidget* SelectFileDialogImpl::CreateFileOpenDialog(const std::string& title,
                                         last_opened_path_->value().c_str());
   }
   gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), FALSE);
-  g_signal_connect(G_OBJECT(dialog), "response",
+  g_signal_connect(dialog, "response",
                    G_CALLBACK(OnSelectSingleFileDialogResponse), this);
   return dialog;
 }
@@ -398,7 +407,7 @@ GtkWidget* SelectFileDialogImpl::CreateMultiFileOpenDialog(
                                         last_opened_path_->value().c_str());
   }
   gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), TRUE);
-  g_signal_connect(G_OBJECT(dialog), "response",
+  g_signal_connect(dialog, "response",
                    G_CALLBACK(OnSelectMultiFileDialogResponse), this);
   return dialog;
 }
@@ -429,7 +438,9 @@ GtkWidget* SelectFileDialogImpl::CreateSaveAsDialog(const std::string& title,
                                         last_saved_path_->value().c_str());
   }
   gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), FALSE);
-  g_signal_connect(G_OBJECT(dialog), "response",
+  gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog),
+                                                 TRUE);
+  g_signal_connect(dialog, "response",
                    G_CALLBACK(OnSelectSingleFileDialogResponse), this);
   return dialog;
 }
@@ -442,12 +453,22 @@ void* SelectFileDialogImpl::PopParamsForDialog(GtkWidget* dialog) {
   return params;
 }
 
-void SelectFileDialogImpl::RemoveParentForDialog(GtkWidget* dialog) {
+void SelectFileDialogImpl::FileDialogDestroyed(GtkWidget* dialog) {
+  dialogs_.erase(dialog);
+
+  // Parent may be NULL in a few cases: 1) on shutdown when
+  // AllBrowsersClosed() trigger this handler after all the browser
+  // windows got destroyed, or 2) when the parent tab has been opened by
+  // 'Open Link in New Tab' context menu on a downloadable item and
+  // the tab has no content (see the comment in SelectFile as well).
   GtkWindow* parent = gtk_window_get_transient_for(GTK_WINDOW(dialog));
-  DCHECK(parent);
+  if (!parent)
+    return;
   std::set<GtkWindow*>::iterator iter = parents_.find(parent);
-  DCHECK(iter != parents_.end());
-  parents_.erase(iter);
+  if (iter != parents_.end())
+    parents_.erase(iter);
+  else
+    NOTREACHED();
 }
 
 // static
@@ -462,16 +483,50 @@ bool SelectFileDialogImpl::IsCancelResponse(gint response_id) {
 }
 
 // static
-void SelectFileDialogImpl::OnSelectSingleFileDialogResponse(
-    GtkWidget* dialog, gint response_id,
-    SelectFileDialogImpl* dialog_impl) {
+void SelectFileDialogImpl::SelectSingleFileHelper(GtkWidget* dialog,
+    gint response_id,
+    SelectFileDialogImpl* dialog_impl,
+    bool allow_folder) {
   if (IsCancelResponse(response_id)) {
     dialog_impl->FileNotSelected(dialog);
     return;
   }
 
   gchar* filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-  dialog_impl->FileSelected(dialog, FilePath(filename));
+  if (!filename) {
+    dialog_impl->FileNotSelected(dialog);
+    return;
+  }
+
+  FilePath path(filename);
+  g_free(filename);
+
+  if (allow_folder) {
+    dialog_impl->FileSelected(dialog, path);
+    return;
+  }
+
+  // We're accessing the disk from the UI thread here, but in this case it's
+  // ok because we may have just done lots of stats in the file selection
+  // dialog. One more won't hurt too badly.
+  if (file_util::DirectoryExists(path))
+    dialog_impl->FileNotSelected(dialog);
+  else
+    dialog_impl->FileSelected(dialog, path);
+}
+
+// static
+void SelectFileDialogImpl::OnSelectSingleFileDialogResponse(
+    GtkWidget* dialog, gint response_id,
+    SelectFileDialogImpl* dialog_impl) {
+  return SelectSingleFileHelper(dialog, response_id, dialog_impl, false);
+}
+
+// static
+void SelectFileDialogImpl::OnSelectSingleFolderDialogResponse(
+    GtkWidget* dialog, gint response_id,
+    SelectFileDialogImpl* dialog_impl) {
+  return SelectSingleFileHelper(dialog, response_id, dialog_impl, true);
 }
 
 // static
@@ -484,14 +539,32 @@ void SelectFileDialogImpl::OnSelectMultiFileDialogResponse(
   }
 
   GSList* filenames = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
-  std::vector<FilePath> filenames_fp;
-  for (GSList* iter = filenames; iter != NULL; iter = g_slist_next(iter)) {
-    filenames_fp.push_back(FilePath(static_cast<char*>(iter->data)));
-    g_free(iter->data);
+  if (!filenames) {
+    dialog_impl->FileNotSelected(dialog);
+    return;
   }
 
+  std::vector<FilePath> filenames_fp;
+  for (GSList* iter = filenames; iter != NULL; iter = g_slist_next(iter)) {
+    FilePath path(static_cast<char*>(iter->data));
+    g_free(iter->data);
+    if (file_util::DirectoryExists(path))
+      continue;
+    filenames_fp.push_back(path);
+  }
   g_slist_free(filenames);
+
+  if (filenames_fp.empty()) {
+    dialog_impl->FileNotSelected(dialog);
+    return;
+  }
   dialog_impl->MultiFilesSelected(dialog, filenames_fp);
+}
+
+// static
+void SelectFileDialogImpl::OnFileChooserDestroy(GtkWidget* dialog,
+    SelectFileDialogImpl* dialog_impl) {
+  dialog_impl->FileDialogDestroyed(dialog);
 }
 
 // static

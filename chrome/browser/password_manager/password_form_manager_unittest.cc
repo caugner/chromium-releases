@@ -4,6 +4,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/string_util.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profile_manager.h"
@@ -19,17 +20,17 @@ class PasswordFormManagerTest : public testing::Test {
   virtual void SetUp() {
     observed_form_.origin = GURL("http://www.google.com/a/LoginAuth");
     observed_form_.action = GURL("http://www.google.com/a/Login");
-    observed_form_.username_element = L"Email";
-    observed_form_.password_element = L"Passwd";
-    observed_form_.submit_element = L"signIn";
+    observed_form_.username_element = ASCIIToUTF16("Email");
+    observed_form_.password_element = ASCIIToUTF16("Passwd");
+    observed_form_.submit_element = ASCIIToUTF16("signIn");
     observed_form_.signon_realm = "http://www.google.com";
 
     saved_match_ = observed_form_;
     saved_match_.origin = GURL("http://www.google.com/a/ServiceLoginAuth");
     saved_match_.action = GURL("http://www.google.com/a/ServiceLogin");
     saved_match_.preferred = true;
-    saved_match_.username_value = L"test@gmail.com";
-    saved_match_.password_value = L"test1";
+    saved_match_.username_value = ASCIIToUTF16("test@gmail.com");
+    saved_match_.password_value = ASCIIToUTF16("test1");
     profile_ = new TestingProfile();
   }
 
@@ -65,7 +66,6 @@ class PasswordFormManagerTest : public testing::Test {
  private:
   PasswordForm observed_form_;
   PasswordForm saved_match_;
-  std::wstring test_dir_;
   Profile* profile_;
 };
 
@@ -100,8 +100,8 @@ TEST_F(PasswordFormManagerTest, TestNewLogin) {
   // will yield the previously saved login.
   SimulateMatchingPhase(manager, true);
   // Set up the new login.
-  std::wstring new_user = L"newuser";
-  std::wstring new_pass = L"newpass";
+  string16 new_user = ASCIIToUTF16("newuser");
+  string16 new_pass = ASCIIToUTF16("newpass");
   credentials.username_value = new_user;
   credentials.password_value = new_pass;
   manager->ProvisionallySave(credentials);
@@ -134,7 +134,7 @@ TEST_F(PasswordFormManagerTest, TestUpdatePassword) {
   // origin URL (as it does in this case) than the saved_match, but we want to
   // make sure the updated password is reflected in saved_match, because that is
   // what we autofilled.
-  std::wstring new_pass = L"newpassword";
+  string16 new_pass = ASCIIToUTF16("newpassword");
   PasswordForm credentials = *observed_form();
   credentials.username_value = saved_match()->username_value;
   credentials.password_value = new_pass;

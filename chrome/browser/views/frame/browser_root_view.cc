@@ -5,26 +5,28 @@
 #include "chrome/browser/views/frame/browser_root_view.h"
 
 #include "app/drag_drop_types.h"
+#include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/location_bar.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/search_versus_navigate_classifier.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/frame/browser_frame.h"
-#include "chrome/browser/views/tabs/tab_strip_wrapper.h"
+#include "chrome/browser/views/tabs/tab_strip.h"
+#include "grit/chromium_strings.h"
 
 BrowserRootView::BrowserRootView(BrowserView* browser_view,
                                  views::Widget* widget)
     : views::RootView(widget),
       browser_view_(browser_view),
       forwarding_to_tab_strip_(false) {
+  SetAccessibleName(l10n_util::GetString(IDS_PRODUCT_NAME));
 }
 
 bool BrowserRootView::GetDropFormats(
       int* formats,
       std::set<OSExchangeData::CustomFormat>* custom_formats) {
-  if (tabstrip() && tabstrip()->GetView()->IsVisible() &&
-      !tabstrip()->IsAnimating()) {
+  if (tabstrip() && tabstrip()->IsVisible() && !tabstrip()->IsAnimating()) {
     *formats = OSExchangeData::URL | OSExchangeData::STRING;
     return true;
   }
@@ -36,8 +38,7 @@ bool BrowserRootView::AreDropTypesRequired() {
 }
 
 bool BrowserRootView::CanDrop(const OSExchangeData& data) {
-  if (!tabstrip() || !tabstrip()->GetView()->IsVisible() ||
-      tabstrip()->IsAnimating())
+  if (!tabstrip() || !tabstrip()->IsVisible() || tabstrip()->IsAnimating())
     return false;
 
   // If there is a URL, we'll allow the drop.
@@ -53,7 +54,7 @@ void BrowserRootView::OnDragEntered(const views::DropTargetEvent& event) {
     forwarding_to_tab_strip_ = true;
     scoped_ptr<views::DropTargetEvent> mapped_event(
         MapEventToTabStrip(event, event.GetData()));
-    tabstrip()->GetView()->OnDragEntered(*mapped_event.get());
+    tabstrip()->OnDragEntered(*mapped_event.get());
   }
 }
 
@@ -62,13 +63,13 @@ int BrowserRootView::OnDragUpdated(const views::DropTargetEvent& event) {
     scoped_ptr<views::DropTargetEvent> mapped_event(
         MapEventToTabStrip(event, event.GetData()));
     if (!forwarding_to_tab_strip_) {
-      tabstrip()->GetView()->OnDragEntered(*mapped_event.get());
+      tabstrip()->OnDragEntered(*mapped_event.get());
       forwarding_to_tab_strip_ = true;
     }
-    return tabstrip()->GetView()->OnDragUpdated(*mapped_event.get());
+    return tabstrip()->OnDragUpdated(*mapped_event.get());
   } else if (forwarding_to_tab_strip_) {
     forwarding_to_tab_strip_ = false;
-    tabstrip()->GetView()->OnDragExited();
+    tabstrip()->OnDragExited();
   }
   return DragDropTypes::DRAG_NONE;
 }
@@ -76,7 +77,7 @@ int BrowserRootView::OnDragUpdated(const views::DropTargetEvent& event) {
 void BrowserRootView::OnDragExited() {
   if (forwarding_to_tab_strip_) {
     forwarding_to_tab_strip_ = false;
-    tabstrip()->GetView()->OnDragExited();
+    tabstrip()->OnDragExited();
   }
 }
 
@@ -103,54 +104,50 @@ int BrowserRootView::OnPerformDrop(const views::DropTargetEvent& event) {
   forwarding_to_tab_strip_ = false;
   scoped_ptr<views::DropTargetEvent> mapped_event(
       MapEventToTabStrip(event, mapped_data));
-  return tabstrip()->GetView()->OnPerformDrop(*mapped_event);
+  return tabstrip()->OnPerformDrop(*mapped_event);
 }
 
 bool BrowserRootView::ShouldForwardToTabStrip(
     const views::DropTargetEvent& event) {
-  if (!tabstrip()->GetView()->IsVisible())
+  if (!tabstrip()->IsVisible())
     return false;
 
   // Allow the drop as long as the mouse is over the tabstrip or vertically
   // before it.
   gfx::Point tab_loc_in_host;
-  ConvertPointToView(tabstrip()->GetView(), this, &tab_loc_in_host);
-  return event.y() < tab_loc_in_host.y() + tabstrip()->GetView()->height();
+  ConvertPointToView(tabstrip(), this, &tab_loc_in_host);
+  return event.y() < tab_loc_in_host.y() + tabstrip()->height();
 }
 
 views::DropTargetEvent* BrowserRootView::MapEventToTabStrip(
     const views::DropTargetEvent& event,
     const OSExchangeData& data) {
   gfx::Point tab_strip_loc(event.location());
-  ConvertPointToView(this, tabstrip()->GetView(), &tab_strip_loc);
+  ConvertPointToView(this, tabstrip(), &tab_strip_loc);
   return new views::DropTargetEvent(data, tab_strip_loc.x(),
                                     tab_strip_loc.y(),
                                     event.GetSourceOperations());
 }
 
-TabStripWrapper* BrowserRootView::tabstrip() const {
+BaseTabStrip* BrowserRootView::tabstrip() const {
   return browser_view_->tabstrip();
 }
 
-bool BrowserRootView::GetPasteAndGoURL(const OSExchangeData& data,
-                                       GURL* url) {
+bool BrowserRootView::GetPasteAndGoURL(const OSExchangeData& data, GURL* url) {
   if (!data.HasString())
     return false;
 
-  LocationBar* location_bar = browser_view_->GetLocationBar();
-  if (!location_bar)
-    return false;
-
-  AutocompleteEditView* edit = location_bar->location_entry();
-  if (!edit)
-    return false;
-
   std::wstring text;
-  if (!data.GetString(&text) || text.empty() ||
-      !edit->model()->CanPasteAndGo(text)) {
+  if (!data.GetString(&text) || text.empty())
     return false;
-  }
+
+  GURL destination_url;
+  browser_view_->browser()->profile()->GetSearchVersusNavigateClassifier()->
+      Classify(text, std::wstring(), NULL, &destination_url, NULL, NULL, NULL);
+  if (!destination_url.is_valid())
+    return false;
+
   if (url)
-    *url = edit->model()->paste_and_go_url();
+    *url = destination_url;
   return true;
 }

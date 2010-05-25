@@ -135,7 +135,7 @@ bool ParseManifest(const GURL& manifest_url, const char* data, int length,
       const wchar_t *line_end = line_p + line.length();
 
       // Look for whitespace separating the URL from subsequent ignored tokens.
-      while (line_p < line_end && *line_p != '\t' && *p != ' ')
+      while (line_p < line_end && *line_p != '\t' && *line_p != ' ')
         ++line_p;
 
       string16 url16;
@@ -151,6 +151,13 @@ bool ParseManifest(const GURL& manifest_url, const char* data, int length,
 
       // Scheme component must be the same as the manifest URL's.
       if (url.scheme() != manifest_url.scheme()) {
+        continue;
+      }
+
+      // If the manifest's scheme is https:, then manifest URL must have same
+      // origin as resulting absolute URL.
+      if (mode == EXPLICIT && manifest_url.SchemeIsSecure() &&
+          manifest_url.GetOrigin() != url.GetOrigin()) {
         continue;
       }
 

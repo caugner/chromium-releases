@@ -7,6 +7,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -72,7 +73,7 @@ class SessionRestoreUITest : public UITest {
 
     scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
-    ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+    ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
     ASSERT_TRUE(tab_proxy->GetCurrentURL(url));
   }
@@ -97,11 +98,12 @@ TEST_F(SessionRestoreUITest, Basic) {
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(0));
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
   ASSERT_EQ(url2_, GetActiveTabURL());
-  tab_proxy->GoBack();
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab_proxy->GoBack());
   ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
@@ -122,8 +124,9 @@ TEST_F(SessionRestoreUITest, RestoresForwardAndBackwardNavs) {
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(0));
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
   ASSERT_TRUE(GetActiveTabURL() == url2_);
   ASSERT_TRUE(tab_proxy->GoForward());
@@ -161,10 +164,12 @@ TEST_F(SessionRestoreUITest, RestoresCrossSiteForwardAndBackwardNavs) {
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
   int tab_count;
   ASSERT_TRUE(browser_proxy->GetTabCount(&tab_count));
   ASSERT_EQ(1, tab_count);
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(0));
+  ASSERT_TRUE(tab_proxy.get());
   ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
   // Check that back and forward work as expected.
@@ -194,6 +199,7 @@ TEST_F(SessionRestoreUITest, TwoTabsSecondSelected) {
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
 
   ASSERT_TRUE(browser_proxy->AppendTab(url2_));
 
@@ -214,16 +220,16 @@ TEST_F(SessionRestoreUITest, TwoTabsSecondSelected) {
 
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
-  ASSERT_TRUE(GetActiveTabURL() == url2_);
+  ASSERT_EQ(url2_, GetActiveTabURL());
 
   ASSERT_TRUE(browser_proxy->ActivateTab(0));
   tab_proxy = browser_proxy->GetActiveTab();
   ASSERT_TRUE(tab_proxy.get());
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
-  ASSERT_TRUE(GetActiveTabURL() == url1_);
+  ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
 // Creates two tabs, closes one, quits and makes sure only one tab is restored.
@@ -236,13 +242,15 @@ TEST_F(SessionRestoreUITest, ClosedTabStaysClosed) {
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(1, window_count);
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(0));
+  ASSERT_TRUE(tab_proxy.get());
 
-  browser_proxy->AppendTab(url2_);
+  ASSERT_TRUE(browser_proxy->AppendTab(url2_));
 
   scoped_refptr<TabProxy> active_tab(browser_proxy->GetActiveTab());
   ASSERT_TRUE(active_tab.get());
-  active_tab->Close(true);
+  ASSERT_TRUE(active_tab->Close(true));
 
   QuitBrowserAndRestore(1);
   browser_proxy = NULL;
@@ -250,13 +258,77 @@ TEST_F(SessionRestoreUITest, ClosedTabStaysClosed) {
 
   AssertOneWindowWithOneTab();
 
-  ASSERT_TRUE(GetActiveTabURL() == url1_);
+  ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
-#if defined(OS_WIN)
+// Creates a tabbed browser and popup and makes sure we restore both.
+TEST_F(SessionRestoreUITest, NormalAndPopup) {
+  if (!browser_defaults::kRestorePopups)
+    return;  // Test only applicable if restoring popups.
+
+  NavigateToURL(url1_);
+
+  // Make sure we have one window.
+  int window_count;
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(1, window_count);
+
+  // Open a popup.
+  ASSERT_TRUE(automation()->OpenNewBrowserWindow(Browser::TYPE_POPUP,
+                                                 true));
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(2, window_count);
+
+  scoped_refptr<BrowserProxy> popup(automation()->GetBrowserWindow(1));
+  ASSERT_TRUE(popup.get());
+
+  scoped_refptr<TabProxy> tab(popup->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(url1_));
+
+  // Simulate an exit by shuting down the session service. If we don't do this
+  // the first window close is treated as though the user closed the window
+  // and won't be restored.
+  ASSERT_TRUE(popup->ShutdownSessionService());
+
+  tab = NULL;
+  popup = NULL;
+
+  // Restart and make sure we have only one window with one tab and the url
+  // is url1_.
+  QuitBrowserAndRestore(1);
+
+  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+  ASSERT_EQ(2, window_count);
+
+  scoped_refptr<BrowserProxy> browser_proxy1(
+      automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy1.get());
+
+  scoped_refptr<BrowserProxy> browser_proxy2(
+      automation()->GetBrowserWindow(1));
+  ASSERT_TRUE(browser_proxy2.get());
+
+  Browser::Type type1, type2;
+  ASSERT_TRUE(browser_proxy1->GetType(&type1));
+  ASSERT_TRUE(browser_proxy2->GetType(&type2));
+
+  // The order of whether the normal window or popup is first depends upon
+  // activation order, which is not necessarily consistant across runs.
+  if (type1 == Browser::TYPE_NORMAL) {
+    EXPECT_EQ(type2, Browser::TYPE_POPUP);
+  } else {
+    EXPECT_EQ(type1, Browser::TYPE_POPUP);
+    EXPECT_EQ(type2, Browser::TYPE_NORMAL);
+  }
+}
+
 // Creates a browser, goes incognito, closes browser, launches and make sure
 // we don't restore.
-TEST_F(SessionRestoreUITest, DontRestoreWhileIncognito) {
+//
+// Flaky, http://crbug.com/39490.
+TEST_F(SessionRestoreUITest, FLAKY_DontRestoreWhileIncognito) {
   NavigateToURL(url1_);
 
   // Make sure we have one window.
@@ -265,6 +337,7 @@ TEST_F(SessionRestoreUITest, DontRestoreWhileIncognito) {
   ASSERT_EQ(1, initial_window_count);
 
   scoped_refptr<BrowserProxy> browser_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser_proxy.get());
 
   // Create an off the record window.
   ASSERT_TRUE(browser_proxy->RunCommand(IDC_NEW_INCOGNITO_WINDOW));
@@ -285,21 +358,22 @@ TEST_F(SessionRestoreUITest, DontRestoreWhileIncognito) {
   LaunchBrowser(launch_arguments_, false);
 
   // A new window should appear;
-  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, action_timeout_ms()));
+  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2));
 
   // And it shouldn't have url1_ in it.
   browser_proxy = automation()->GetBrowserWindow(1);
   ASSERT_TRUE(browser_proxy.get());
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(0));
   ASSERT_TRUE(tab_proxy.get());
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
   GURL url;
   ASSERT_TRUE(tab_proxy->GetCurrentURL(&url));
   ASSERT_TRUE(url != url1_);
 }
 
 // Creates two windows, closes one, restores, make sure only one window open.
-TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
+// http://crbug.com/39905
+TEST_F(SessionRestoreUITest, FLAKY_TwoWindowsCloseOneRestoreOnlyOne) {
   NavigateToURL(url1_);
 
   // Make sure we have one window.
@@ -308,7 +382,8 @@ TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
   ASSERT_EQ(1, window_count);
 
   // Open a second window.
-  ASSERT_TRUE(automation()->OpenNewBrowserWindow(true));
+  ASSERT_TRUE(automation()->OpenNewBrowserWindow(Browser::TYPE_NORMAL,
+                                                 true));
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   ASSERT_EQ(2, window_count);
 
@@ -321,13 +396,19 @@ TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
 
   AssertOneWindowWithOneTab();
 
-  ASSERT_TRUE(GetActiveTabURL() == url1_);
+  ASSERT_EQ(url1_, GetActiveTabURL());
 }
+
+#if defined(OS_LINUX)
+// Disabled on linux - http://crbug.com/40946.
+#define FLAKY_RestoreAfterClosingTabbedBrowserWithAppAndLaunching \
+    DISABLED_RestoreAfterClosingTabbedBrowserWithAppAndLaunching
+#endif
 
 // Launches an app window, closes tabbed browser, launches and makes sure
 // we restore the tabbed browser url.
 TEST_F(SessionRestoreUITest,
-       RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
+       FLAKY_RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
   NavigateToURL(url1_);
 
   // Launch an app.
@@ -341,7 +422,7 @@ TEST_F(SessionRestoreUITest,
   app_launch_arguments.AppendSwitchWithValue(switches::kApp,
                                              UTF8ToWide(url2_.spec()));
   LaunchBrowser(app_launch_arguments, false);
-  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, action_timeout_ms()));
+  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2));
 
   // Close the first window. The only window left is the App window.
   CloseWindow(0, 2);
@@ -355,7 +436,7 @@ TEST_F(SessionRestoreUITest,
 
   AssertOneWindowWithOneTab();
 
-  ASSERT_TRUE(GetActiveTabURL() == url1_);
+  ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
 // Make sure after a restore the number of processes matches that of the number
@@ -364,7 +445,8 @@ TEST_F(SessionRestoreUITest,
 // process-per-site and process-per-site-instance, because we treat the new tab
 // as a special case in process-per-site-instance so that it only ever uses one
 // process.)
-TEST_F(SessionRestoreUITest, ShareProcessesOnRestore) {
+// This is flaky on Vista dbg.  http://crbug.com/40181
+TEST_F(SessionRestoreUITest, FLAKY_ShareProcessesOnRestore) {
   if (in_process_renderer()) {
     // No point in running this test in single process mode.
     return;
@@ -377,28 +459,16 @@ TEST_F(SessionRestoreUITest, ShareProcessesOnRestore) {
 
   // Create two new tabs.
   ASSERT_TRUE(browser_proxy->RunCommand(IDC_NEW_TAB));
+  ASSERT_TRUE(browser_proxy->RunCommand(IDC_NEW_TAB));
   int new_tab_count;
   ASSERT_TRUE(browser_proxy->GetTabCount(&new_tab_count));
-  ASSERT_EQ(++tab_count, new_tab_count);
-  scoped_refptr<TabProxy> last_tab(browser_proxy->GetTab(tab_count - 1));
-  ASSERT_TRUE(last_tab.get() != NULL);
-  // Do a reload to ensure new tab page has loaded.
-  ASSERT_TRUE(last_tab->Reload());
-
-  ASSERT_TRUE(browser_proxy->RunCommand(IDC_NEW_TAB));
-  ASSERT_TRUE(browser_proxy->GetTabCount(&new_tab_count));
-  ASSERT_EQ(++tab_count, new_tab_count);
-  last_tab = browser_proxy->GetTab(tab_count - 1);
-  ASSERT_TRUE(last_tab.get() != NULL);
-  // Do a reload to ensure new tab page has loaded.
-  ASSERT_TRUE(last_tab->Reload());
+  ASSERT_EQ(tab_count + 2, new_tab_count);
 
   int expected_process_count = GetBrowserProcessCount();
-  int expected_tab_count = tab_count;
+  int expected_tab_count = new_tab_count;
 
   // Restart.
   browser_proxy = NULL;
-  last_tab = NULL;
   QuitBrowserAndRestore(3);
 
   // Wait for each tab to finish being restored, then make sure the process
@@ -410,13 +480,12 @@ TEST_F(SessionRestoreUITest, ShareProcessesOnRestore) {
 
   scoped_refptr<TabProxy> tab_proxy(browser_proxy->GetTab(tab_count - 2));
   ASSERT_TRUE(tab_proxy.get() != NULL);
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
   tab_proxy = browser_proxy->GetTab(tab_count - 1);
   ASSERT_TRUE(tab_proxy.get() != NULL);
-  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_timeout_ms()));
+  ASSERT_TRUE(tab_proxy->WaitForTabToBeRestored(action_max_timeout_ms()));
 
   ASSERT_EQ(expected_process_count, GetBrowserProcessCount());
 }
-#endif
 
 }  // namespace

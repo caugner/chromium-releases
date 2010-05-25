@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
 #include "base/task.h"
 #include "chrome/browser/gtk/info_bubble_gtk.h"
@@ -26,16 +27,12 @@
 
 class BookmarkNode;
 class Profile;
-namespace gfx {
-class Rect;
-}
 
 class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
                           public NotificationObserver {
  public:
-  // Shows the bookmark bubble, pointing at |rect|.
-  static void Show(GtkWindow* toplevel_window,
-                   const gfx::Rect& rect,
+  // Shows the bookmark bubble, pointing at |anchor_widget|.
+  static void Show(GtkWidget* anchor_widget,
                    Profile* profile,
                    const GURL& url,
                    bool newly_bookmarked);
@@ -52,63 +49,21 @@ class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
                        const NotificationDetails& details);
 
  private:
-  BookmarkBubbleGtk(GtkWindow* toplevel_window,
-                    const gfx::Rect& rect,
+  BookmarkBubbleGtk(GtkWidget* anchor,
                     Profile* profile,
                     const GURL& url,
                     bool newly_bookmarked);
   ~BookmarkBubbleGtk();
 
-  static void HandleDestroyThunk(GtkWidget* widget,
-                                 gpointer userdata) {
-    reinterpret_cast<BookmarkBubbleGtk*>(userdata)->
-        HandleDestroy();
-  }
   // Notified when |content_| is destroyed so we can delete our instance.
-  void HandleDestroy();
-
-  static void HandleNameActivateThunk(GtkWidget* widget,
-                                      gpointer user_data) {
-    reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleNameActivate();
-  }
-  void HandleNameActivate();
-
-  static void HandleFolderChangedThunk(GtkWidget* widget,
-                                       gpointer user_data) {
-    reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleFolderChanged();
-  }
-  void HandleFolderChanged();
-
-  static void HandleFolderPopupShownThunk(GObject* object,
-                                          GParamSpec* property,
-                                          gpointer user_data) {
-    return reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleFolderPopupShown();
-  }
-  void HandleFolderPopupShown();
-
-  static void HandleEditButtonThunk(GtkWidget* widget,
-                                    gpointer user_data) {
-    reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleEditButton();
-  }
-  void HandleEditButton();
-
-  static void HandleCloseButtonThunk(GtkWidget* widget,
-                                     gpointer user_data) {
-    reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleCloseButton();
-  }
-  void HandleCloseButton();
-
-  static void HandleRemoveButtonThunk(GtkWidget* widget,
-                                      gpointer user_data) {
-    reinterpret_cast<BookmarkBubbleGtk*>(user_data)->
-        HandleRemoveButton();
-  }
-  void HandleRemoveButton();
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnDestroy);
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnNameActivate);
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnFolderChanged);
+  CHROMEGTK_CALLBACK_1(BookmarkBubbleGtk, void, OnFolderPopupShown,
+                       GParamSpec*);
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnEditClicked);
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnCloseClicked);
+  CHROMEGTK_CALLBACK_0(BookmarkBubbleGtk, void, OnRemoveClicked);
 
   // Update the bookmark with any edits that have been made.
   void ApplyEdits();
@@ -127,8 +82,8 @@ class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
   // Provides colors and stuff.
   GtkThemeProvider* theme_provider_;
 
-  // The toplevel window our dialogs should be transient for.
-  GtkWindow* toplevel_window_;
+  // The widget relative to which we are positioned.
+  GtkWidget* anchor_;
 
   // We let the InfoBubble own our content, and then we delete ourself
   // when the widget is destroyed (when the InfoBubble is destroyed).

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,6 +101,13 @@ struct HistoryURLProviderParams {
   // we run the extra queries, the lack of signaling is not a problem.
   bool cancel;
 
+  // Set by ExecuteWithDB() on the history thread when the query could not be
+  // performed because the history system failed to properly init the database.
+  // If this is set when the main thread is called back, it avoids changing
+  // |matches_| at all, so it won't delete the default match
+  // RunAutocompletePasses() creates.
+  bool failed;
+
   // List of matches written by the history thread.  We keep this separate list
   // to avoid having the main thread read the provider's matches while the
   // history thread is manipulating them.  The provider copies this list back
@@ -128,18 +135,18 @@ class HistoryURLProvider : public AutocompleteProvider {
  public:
   HistoryURLProvider(ACProviderListener* listener, Profile* profile)
       : AutocompleteProvider(listener, profile, "HistoryURL"),
-        history_service_(NULL),
         prefixes_(GetPrefixes()),
         params_(NULL) {
   }
 
 #ifdef UNIT_TEST
   HistoryURLProvider(ACProviderListener* listener,
-                     HistoryService* history_service)
-      : AutocompleteProvider(listener, NULL, "History"),
-        history_service_(history_service),
+                     Profile* profile,
+                     const std::wstring& languages)
+      : AutocompleteProvider(listener, profile, "History"),
         prefixes_(GetPrefixes()),
-        params_(NULL) {
+        params_(NULL),
+        languages_(languages) {
   }
 #endif
   // no destructor (see note above)
@@ -170,6 +177,8 @@ class HistoryURLProvider : public AutocompleteProvider {
   void QueryComplete(HistoryURLProviderParams* params_gets_deleted);
 
  private:
+  ~HistoryURLProvider() {}
+
   struct Prefix {
     Prefix(std::wstring prefix, int num_components)
         : prefix(prefix),
@@ -370,10 +379,6 @@ class HistoryURLProvider : public AutocompleteProvider {
                                           MatchType match_type,
                                           size_t match_number);
 
-  // This is only non-null for testing, otherwise the HistoryService from the
-  // Profile is used.
-  HistoryService* history_service_;
-
   // Prefixes to try appending to user input when looking for a match.
   const Prefixes prefixes_;
 
@@ -382,6 +387,10 @@ class HistoryURLProvider : public AutocompleteProvider {
   // parameter itself is freed once it's no longer needed.  The only reason we
   // keep this member is so we can set the cancel bit on it.
   HistoryURLProviderParams* params_;
+
+  // Only used by unittests; if non-empty, overrides accept-languages in the
+  // profile's pref system.
+  std::wstring languages_;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_

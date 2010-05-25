@@ -1,20 +1,23 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 
-#include "base/gfx/rect.h"
-#include "chrome/browser/renderer_host/backing_store.h"
+#include "chrome/browser/browser_url_handler.h"
+#include "chrome/browser/renderer_host/test/test_backing_store.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
+#include "chrome/common/dom_storage_common.h"
 #include "chrome/common/render_messages.h"
+#include "gfx/rect.h"
 
 using webkit_glue::PasswordForm;
 
 TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                                        RenderViewHostDelegate* delegate,
                                        int routing_id)
-    : RenderViewHost(instance, delegate, routing_id),
+    : RenderViewHost(instance, delegate, routing_id,
+                     kInvalidSessionStorageNamespaceId),
       render_view_created_(false),
       delete_counter_(NULL) {
   set_view(new TestRenderWidgetHostView(this));
@@ -28,7 +31,8 @@ TestRenderViewHost::~TestRenderViewHost() {
   delete view();
 }
 
-bool TestRenderViewHost::CreateRenderView() {
+bool TestRenderViewHost::CreateRenderView(
+    URLRequestContextGetter* request_context) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
   process()->ViewCreated();
@@ -48,12 +52,11 @@ void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
 
   params.page_id = page_id;
   params.url = url;
-  params.referrer = GURL::EmptyGURL();
+  params.referrer = GURL();
   params.transition = PageTransition::LINK;
   params.redirects = std::vector<GURL>();
   params.should_update_history = true;
-  params.searchable_form_url = GURL::EmptyGURL();
-  params.searchable_form_element_name = std::wstring();
+  params.searchable_form_url = GURL();
   params.searchable_form_encoding = std::string();
   params.password_form = PasswordForm();
   params.security_info = std::string();
@@ -74,7 +77,13 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
 
 BackingStore* TestRenderWidgetHostView::AllocBackingStore(
     const gfx::Size& size) {
-  return new BackingStore(rwh_, size);
+  return new TestBackingStore(rwh_, size);
+}
+
+VideoLayer* TestRenderWidgetHostView::AllocVideoLayer(
+    const gfx::Size& size) {
+  NOTIMPLEMENTED();
+  return NULL;
 }
 
 #if defined(OS_MACOSX)
@@ -89,11 +98,53 @@ gfx::Rect TestRenderWidgetHostView::GetRootWindowRect() {
 void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
+
+gfx::PluginWindowHandle
+TestRenderWidgetHostView::AllocateFakePluginWindowHandle() {
+  return NULL;
+}
+
+void TestRenderWidgetHostView::DestroyFakePluginWindowHandle(
+    gfx::PluginWindowHandle window) {
+}
+
+void TestRenderWidgetHostView::AcceleratedSurfaceSetIOSurface(
+    gfx::PluginWindowHandle window,
+    int32 width,
+    int32 height,
+    uint64 io_surface_identifier) {
+}
+
+void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
+    gfx::PluginWindowHandle window,
+    int32 width,
+    int32 height,
+    TransportDIB::Handle transport_dib) {
+}
+
+void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
+    gfx::PluginWindowHandle window) {
+}
+
+void TestRenderWidgetHostView::DrawAcceleratedSurfaceInstances(
+    CGLContextObj context) {
+}
 #endif
 
 void RenderViewHostTestHarness::NavigateAndCommit(const GURL& url) {
   controller().LoadURL(url, GURL(), 0);
-  rvh()->SendNavigate(process()->max_page_id() + 1, url);
+  GURL loaded_url(url);
+  bool reverse_on_redirect = false;
+  BrowserURLHandler::RewriteURLIfNecessary(
+      &loaded_url, profile(), &reverse_on_redirect);
+  rvh()->SendNavigate(process()->max_page_id() + 1, loaded_url);
+}
+
+void RenderViewHostTestHarness::Reload() {
+  NavigationEntry* entry = controller().GetLastCommittedEntry();
+  DCHECK(entry);
+  controller().Reload(false);
+  rvh()->SendNavigate(entry->page_id(), entry->url());
 }
 
 void RenderViewHostTestHarness::SetUp() {
@@ -105,6 +156,8 @@ void RenderViewHostTestHarness::SetUp() {
   SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
 
   contents_.reset(new TestTabContents(profile_.get(), instance));
+
+  user_data_manager_.reset(UserDataManager::Create());
 }
 
 void RenderViewHostTestHarness::TearDown() {
@@ -113,4 +166,8 @@ void RenderViewHostTestHarness::TearDown() {
   // Make sure that we flush any messages related to TabContents destruction
   // before we destroy the profile.
   MessageLoop::current()->RunAllPending();
+
+  // Release the profile on the UI thread.
+  message_loop_.DeleteSoon(FROM_HERE, profile_.release());
+  message_loop_.RunAllPending();
 }

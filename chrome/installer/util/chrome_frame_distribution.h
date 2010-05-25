@@ -15,6 +15,8 @@
 
 class ChromeFrameDistribution : public BrowserDistribution {
  public:
+  virtual std::wstring GetAppGuid();
+
   virtual std::wstring GetApplicationName();
 
   virtual std::wstring GetAlternateApplicationName();
@@ -24,6 +26,10 @@ class ChromeFrameDistribution : public BrowserDistribution {
   virtual std::wstring GetPublisherName();
 
   virtual std::wstring GetAppDescription();
+
+  virtual std::wstring GetLongAppDescription();
+
+  virtual std::string GetSafeBrowsingName();
 
   virtual std::wstring GetStateKey();
 
@@ -37,7 +43,13 @@ class ChromeFrameDistribution : public BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
-  virtual int GetInstallReturnCode(installer_util::InstallStatus status);
+  virtual bool CanSetAsDefault();
+
+  // This is the point at which the Google Chrome installer removes the Google
+  // Update ap value. We implement this simply to have the same behaviour re.
+  // the ap value.
+  virtual void UpdateDiffInstallStatus(bool system_install,
+      bool incremental_install, installer_util::InstallStatus install_status);
 
  private:
   friend class BrowserDistribution;

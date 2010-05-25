@@ -20,12 +20,13 @@ class ViewSourceTest : public UITest {
 
   bool IsPageMenuCommandEnabled(int command) {
     scoped_refptr<BrowserProxy> window_proxy(automation()->GetBrowserWindow(0));
+    EXPECT_TRUE(window_proxy.get());
     if (!window_proxy.get())
       return false;
 
-    bool timed_out;
-    return window_proxy->IsPageMenuCommandEnabledWithTimeout(
-        command, 5000, &timed_out) && !timed_out;
+    bool enabled;
+    EXPECT_TRUE(window_proxy->IsPageMenuCommandEnabled(command, &enabled));
+    return enabled;
   }
 
  protected:
@@ -47,13 +48,12 @@ TEST_F(ViewSourceTest, DoesBrowserRenderInViewSource) {
   url = GURL("view-source:" + url.spec());
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
-  tab->NavigateToURL(url);
-  PlatformThread::Sleep(sleep_timeout_ms());
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(url));
 
   // Try to retrieve the cookie that the page sets
   // It should not be there (because we are in view-source mode
   std::string cookie_found;
-  tab->GetCookieByName(url, cookie, &cookie_found);
+  ASSERT_TRUE(tab->GetCookieByName(url, cookie, &cookie_found));
   EXPECT_NE(cookie_data, cookie_found);
 }
 

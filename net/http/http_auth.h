@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,55 +12,60 @@ template <class T> class scoped_refptr;
 namespace net {
 
 class HttpAuthHandler;
+class HttpAuthHandlerFactory;
 class HttpResponseHeaders;
 
 // Utility class for http authentication.
 class HttpAuth {
  public:
 
-   // Http authentication can be done the the proxy server, origin server,
-   // or both. This enum tracks who the target is.
-   enum Target {
-     AUTH_NONE = -1,
-     // We depend on the valid targets (!= AUTH_NONE) being usable as indexes
-     // in an array, so start from 0.
-     AUTH_PROXY = 0,
-     AUTH_SERVER = 1,
-   };
+  // Http authentication can be done the the proxy server, origin server,
+  // or both. This enum tracks who the target is.
+  enum Target {
+    AUTH_NONE = -1,
+    // We depend on the valid targets (!= AUTH_NONE) being usable as indexes
+    // in an array, so start from 0.
+    AUTH_PROXY = 0,
+    AUTH_SERVER = 1,
+  };
 
-   // Describes where the identity used for authentication came from.
-   enum IdentitySource {
-     // Came from nowhere -- the identity is not initialized.
-     IDENT_SRC_NONE,
+  // Describes where the identity used for authentication came from.
+  enum IdentitySource {
+    // Came from nowhere -- the identity is not initialized.
+    IDENT_SRC_NONE,
 
-     // The identity came from the auth cache, by doing a path-based
-     // lookup (premptive authorization).
-     IDENT_SRC_PATH_LOOKUP,
+    // The identity came from the auth cache, by doing a path-based
+    // lookup (premptive authorization).
+    IDENT_SRC_PATH_LOOKUP,
 
-     // The identity was extracted from a URL of the form:
-     // http://<username>:<password>@host:port
-     IDENT_SRC_URL,
+    // The identity was extracted from a URL of the form:
+    // http://<username>:<password>@host:port
+    IDENT_SRC_URL,
 
-     // The identity was retrieved from the auth cache, by doing a
-     // realm lookup.
-     IDENT_SRC_REALM_LOOKUP,
+    // The identity was retrieved from the auth cache, by doing a
+    // realm lookup.
+    IDENT_SRC_REALM_LOOKUP,
 
-     // The identity was provided by RestartWithAuth -- it likely
-     // came from a prompt (or maybe the password manager).
-     IDENT_SRC_EXTERNAL,
-   };
+    // The identity was provided by RestartWithAuth -- it likely
+    // came from a prompt (or maybe the password manager).
+    IDENT_SRC_EXTERNAL,
 
-   // Helper structure used by HttpNetworkTransaction to track
-   // the current identity being used for authorization.
-   struct Identity {
-     Identity() : source(IDENT_SRC_NONE), invalid(true) { }
+    // The identity used the default credentials for the computer,
+    // on schemes that support single sign-on.
+    IDENT_SRC_DEFAULT_CREDENTIALS,
+  };
 
-     IdentitySource source;
-     bool invalid;
-     // TODO(wtc): |username| and |password| should be string16.
-     std::wstring username;
-     std::wstring password;
-   };
+  // Helper structure used by HttpNetworkTransaction to track
+  // the current identity being used for authorization.
+  struct Identity {
+    Identity() : source(IDENT_SRC_NONE), invalid(true) { }
+
+    IdentitySource source;
+    bool invalid;
+    // TODO(wtc): |username| and |password| should be string16.
+    std::wstring username;
+    std::wstring password;
+  };
 
   // Get the name of the header containing the auth challenge
   // (either WWW-Authenticate or Proxy-Authenticate).
@@ -69,14 +74,6 @@ class HttpAuth {
   // Get the name of the header where the credentials go
   // (either Authorization or Proxy-Authorization).
   static std::string GetAuthorizationHeaderName(Target target);
-
-  // Create a handler to generate credentials for the challenge, and pass
-  // it back in |*handler|. If the challenge is unsupported or invalid
-  // |*handler| is set to NULL.
-  static void CreateAuthHandler(const std::string& challenge,
-                                Target target,
-                                const GURL& origin,
-                                scoped_refptr<HttpAuthHandler>* handler);
 
   // Iterate through the challenge headers, and pick the best one that
   // we support. Obtains the implementation class for handling the challenge,
@@ -91,10 +88,12 @@ class HttpAuth {
   // TODO(wtc): Continuing to use the existing handler in |*handler| (for
   // NTLM) is new behavior.  Rename ChooseBestChallenge to fully encompass
   // what it does now.
-  static void ChooseBestChallenge(const HttpResponseHeaders* headers,
-                                  Target target,
-                                  const GURL& origin,
-                                  scoped_refptr<HttpAuthHandler>* handler);
+  static void ChooseBestChallenge(
+      HttpAuthHandlerFactory* http_auth_handler_factory,
+      const HttpResponseHeaders* headers,
+      Target target,
+      const GURL& origin,
+      scoped_refptr<HttpAuthHandler>* handler);
 
   // ChallengeTokenizer breaks up a challenge string into the the auth scheme
   // and parameter list, according to RFC 2617 Sec 1.2:
@@ -107,7 +106,7 @@ class HttpAuth {
    public:
     ChallengeTokenizer(std::string::const_iterator begin,
                        std::string::const_iterator end)
-        : props_(begin, end, ','), valid_(true) {
+        : props_(begin, end, ','), valid_(true), expect_base64_token_(false) {
       Init(begin, end);
     }
 
@@ -126,6 +125,17 @@ class HttpAuth {
     // Advances the iterator to the next name-value pair, if any.
     // Returns true if there is none to consume.
     bool GetNext();
+
+    // Inform the tokenizer whether the next token should be treated as a base64
+    // encoded value. If |expect_base64_token| is true, |GetNext| will treat the
+    // next token as a base64 encoded value, and will include the trailing '='
+    // padding rather than attempt to split the token into a name/value pair.
+    // In this case, |name| will be empty, and |value| will contain the token.
+    // Subsequent calls to |GetNext()| will not treat the token like a base64
+    // encoded token unless the caller again calls |set_expect_base64_token|.
+    void set_expect_base64_token(bool expect_base64_token) {
+      expect_base64_token_ = expect_base64_token;
+    }
 
     // The name of the current name-value pair.
     std::string::const_iterator name_begin() const { return name_begin_; }
@@ -164,6 +174,7 @@ class HttpAuth {
     std::string::const_iterator value_end_;
 
     bool value_is_quoted_;
+    bool expect_base64_token_;
   };
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,16 @@
 #include <gtk/gtk.h>
 
 #include "app/gtk_dnd_util.h"
-#include "base/gfx/point.h"
-#include "base/gfx/rect.h"
-#include "base/gfx/size.h"
 #include "base/pickle.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/gtk/blocked_popup_container_view_gtk.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/constrained_window_gtk.h"
+#include "chrome/browser/gtk/gtk_expanded_container.h"
 #include "chrome/browser/gtk/gtk_floating_container.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/sad_tab_gtk.h"
 #include "chrome/browser/gtk/tab_contents_drag_source.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -31,10 +29,12 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
+#include "gfx/point.h"
+#include "gfx/rect.h"
+#include "gfx/size.h"
 #include "webkit/glue/webdropdata.h"
 
 using WebKit::WebDragOperation;
@@ -69,7 +69,8 @@ gboolean OnFocus(GtkWidget* widget, GtkDirectionType focus,
 gboolean OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event,
                        TabContents* tab_contents) {
   if (tab_contents->delegate())
-    tab_contents->delegate()->ContentsMouseEvent(tab_contents, false);
+    tab_contents->delegate()->ContentsMouseEvent(
+        tab_contents, gfx::Point(event->x_root, event->y_root), false);
   return FALSE;
 }
 
@@ -77,7 +78,8 @@ gboolean OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event,
 gboolean OnMouseMove(GtkWidget* widget, GdkEventMotion* event,
                      TabContents* tab_contents) {
   if (tab_contents->delegate())
-    tab_contents->delegate()->ContentsMouseEvent(tab_contents, true);
+    tab_contents->delegate()->ContentsMouseEvent(
+        tab_contents, gfx::Point(event->x_root, event->y_root), true);
   return FALSE;
 }
 
@@ -98,16 +100,6 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
   return FALSE;
 }
 
-// Used with gtk_container_foreach to change the sizes of the children of
-// |fixed_|.
-void SetSizeRequest(GtkWidget* widget, gpointer userdata) {
-  gfx::Size* size = static_cast<gfx::Size*>(userdata);
-  if (widget->allocation.width != size->width() ||
-      widget->allocation.height != size->height()) {
-    gtk_widget_set_size_request(widget, size->width(), size->height());
-  }
-}
-
 }  // namespace
 
 // static
@@ -118,16 +110,18 @@ TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
 TabContentsViewGtk::TabContentsViewGtk(TabContents* tab_contents)
     : TabContentsView(tab_contents),
       floating_(gtk_floating_container_new()),
-      fixed_(gtk_fixed_new()),
-      popup_view_(NULL) {
-  gtk_widget_set_name(fixed_, "chrome-tab-contents-view");
-  g_signal_connect(fixed_, "size-allocate",
-                   G_CALLBACK(OnSizeAllocate), this);
+      expanded_(gtk_expanded_container_new()),
+      constrained_window_(NULL) {
+  gtk_widget_set_name(expanded_, "chrome-tab-contents-view");
+  g_signal_connect(expanded_, "size-allocate",
+                   G_CALLBACK(OnSizeAllocateThunk), this);
+  g_signal_connect(expanded_, "child-size-request",
+                   G_CALLBACK(OnChildSizeRequestThunk), this);
   g_signal_connect(floating_.get(), "set-floating-position",
-                   G_CALLBACK(OnSetFloatingPosition), this);
+                   G_CALLBACK(OnSetFloatingPositionThunk), this);
 
-  gtk_container_add(GTK_CONTAINER(floating_.get()), fixed_);
-  gtk_widget_show(fixed_);
+  gtk_container_add(GTK_CONTAINER(floating_.get()), expanded_);
+  gtk_widget_show(expanded_);
   gtk_widget_show(floating_.get());
   registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
                  Source<TabContents>(tab_contents));
@@ -138,47 +132,26 @@ TabContentsViewGtk::~TabContentsViewGtk() {
   floating_.Destroy();
 }
 
-void TabContentsViewGtk::AttachBlockedPopupView(
-    BlockedPopupContainerViewGtk* popup_view) {
-  DCHECK(popup_view_ == NULL);
-  popup_view_ = popup_view;
-  gtk_floating_container_add_floating(GTK_FLOATING_CONTAINER(floating_.get()),
-                                      popup_view->widget());
-}
-
-void TabContentsViewGtk::RemoveBlockedPopupView(
-    BlockedPopupContainerViewGtk* popup_view) {
-  DCHECK(popup_view_ == popup_view);
-  gtk_container_remove(GTK_CONTAINER(floating_.get()), popup_view->widget());
-  popup_view_ = NULL;
-}
-
 void TabContentsViewGtk::AttachConstrainedWindow(
     ConstrainedWindowGtk* constrained_window) {
-  DCHECK(find(constrained_windows_.begin(), constrained_windows_.end(),
-              constrained_window) == constrained_windows_.end());
+  DCHECK(constrained_window_ == NULL);
 
-  constrained_windows_.push_back(constrained_window);
+  constrained_window_ = constrained_window;
   gtk_floating_container_add_floating(GTK_FLOATING_CONTAINER(floating_.get()),
                                       constrained_window->widget());
 }
 
 void TabContentsViewGtk::RemoveConstrainedWindow(
     ConstrainedWindowGtk* constrained_window) {
-  std::vector<ConstrainedWindowGtk*>::iterator item =
-      find(constrained_windows_.begin(), constrained_windows_.end(),
-           constrained_window);
-  DCHECK(item != constrained_windows_.end());
+  DCHECK(constrained_window == constrained_window_);
 
+  constrained_window_ = NULL;
   gtk_container_remove(GTK_CONTAINER(floating_.get()),
                        constrained_window->widget());
-  constrained_windows_.erase(item);
 }
 
 void TabContentsViewGtk::CreateView(const gfx::Size& initial_size) {
   requested_size_ = initial_size;
-  gtk_widget_set_size_request(fixed_, requested_size_.width(),
-                              requested_size_.height());
 }
 
 RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
@@ -208,7 +181,7 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
   gtk_widget_add_events(content_view, GDK_LEAVE_NOTIFY_MASK |
                         GDK_POINTER_MOTION_MASK);
   g_signal_connect(content_view, "button-press-event",
-                   G_CALLBACK(OnMouseDown), this);
+                   G_CALLBACK(OnMouseDownThunk), this);
   InsertIntoContentArea(content_view);
 
   // Renderer target DnD.
@@ -222,18 +195,15 @@ gfx::NativeView TabContentsViewGtk::GetNativeView() const {
 }
 
 gfx::NativeView TabContentsViewGtk::GetContentNativeView() const {
-  if (!tab_contents()->render_widget_host_view())
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  if (!rwhv)
     return NULL;
-  return tab_contents()->render_widget_host_view()->GetNativeView();
+  return rwhv->GetNativeView();
 }
 
 gfx::NativeWindow TabContentsViewGtk::GetTopLevelNativeWindow() const {
   GtkWidget* window = gtk_widget_get_ancestor(GetNativeView(), GTK_TYPE_WINDOW);
   return window ? GTK_WINDOW(window) : NULL;
-}
-
-void TabContentsViewGtk::InitRendererPrefs(RendererPreferences* prefs) {
-  gtk_util::InitRendererPrefsFromGtkSettings(prefs);
 }
 
 void TabContentsViewGtk::GetContainerBounds(gfx::Rect* out) const {
@@ -243,9 +213,9 @@ void TabContentsViewGtk::GetContainerBounds(gfx::Rect* out) const {
   // animation.
   int x = 0;
   int y = 0;
-  if (fixed_->window)
-    gdk_window_get_origin(fixed_->window, &x, &y);
-  out->SetRect(x + fixed_->allocation.x, y + fixed_->allocation.y,
+  if (expanded_->window)
+    gdk_window_get_origin(expanded_->window, &x, &y);
+  out->SetRect(x + expanded_->allocation.x, y + expanded_->allocation.y,
                requested_size_.width(), requested_size_.height());
 }
 
@@ -258,8 +228,8 @@ void TabContentsViewGtk::SetPageTitle(const std::wstring& title) {
 }
 
 void TabContentsViewGtk::OnTabCrashed() {
-  if (!sad_tab_.get()) {
-    sad_tab_.reset(new SadTabGtk);
+  if (tab_contents() != NULL && !sad_tab_.get()) {
+    sad_tab_.reset(new SadTabGtk(tab_contents()));
     InsertIntoContentArea(sad_tab_->widget());
     gtk_widget_show(sad_tab_->widget());
   }
@@ -270,8 +240,9 @@ void TabContentsViewGtk::SizeContents(const gfx::Size& size) {
   // need to pass the sizing information on to the RWHV which will pass the
   // sizing information on to the renderer.
   requested_size_ = size;
-  if (tab_contents()->render_widget_host_view())
-    tab_contents()->render_widget_host_view()->SetSize(size);
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetSize(size);
 }
 
 void TabContentsViewGtk::Focus() {
@@ -286,7 +257,7 @@ void TabContentsViewGtk::Focus() {
 
 void TabContentsViewGtk::SetInitialFocus() {
   if (tab_contents()->FocusLocationBarByDefault())
-    tab_contents()->delegate()->SetFocusToLocationBar();
+    tab_contents()->SetFocusToLocationBar(false);
   else
     Focus();
 }
@@ -320,33 +291,6 @@ void TabContentsViewGtk::TakeFocus(bool reverse) {
   }
 }
 
-void TabContentsViewGtk::HandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event) {
-  // This may be an accelerator. Try to pass it on to our browser window
-  // to handle.
-  GtkWindow* window = GetTopLevelNativeWindow();
-  if (!window) {
-    NOTREACHED();
-    return;
-  }
-
-  // Filter out pseudo key events created by GtkIMContext signal handlers.
-  // Since GtkIMContext signal handlers don't use GdkEventKey objects, its
-  // |event.os_event| values are dummy values (or NULL.)
-  // We should filter out these pseudo key events to prevent unexpected
-  // behaviors caused by them.
-  // We should also filter out the KeyUp event as it should not be processed
-  // as an accelerator.
-  if (event.type == WebKit::WebInputEvent::Char ||
-      event.type == WebKit::WebInputEvent::KeyUp)
-    return;
-
-  BrowserWindowGtk* browser_window =
-      BrowserWindowGtk::GetBrowserWindowForNativeWindow(window);
-  DCHECK(browser_window);
-  browser_window->HandleKeyboardEvent(event.os_event);
-}
-
 void TabContentsViewGtk::Observe(NotificationType type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
@@ -368,88 +312,73 @@ void TabContentsViewGtk::ShowContextMenu(const ContextMenuParams& params) {
   context_menu_.reset(new RenderViewContextMenuGtk(tab_contents(), params,
                                                    last_mouse_down_.time));
   context_menu_->Init();
-  context_menu_->Popup();
+
+  gfx::Rect bounds;
+  GetContainerBounds(&bounds);
+  gfx::Point point = bounds.origin();
+  point.Offset(params.x, params.y);
+  context_menu_->Popup(point);
 }
 
 // Render view DnD -------------------------------------------------------------
 
 void TabContentsViewGtk::StartDragging(const WebDropData& drop_data,
-                                       WebDragOperationsMask ops) {
+                                       WebDragOperationsMask ops,
+                                       const SkBitmap& image,
+                                       const gfx::Point& image_offset) {
   DCHECK(GetContentNativeView());
-
-  drag_source_->StartDragging(drop_data, &last_mouse_down_);
-  // TODO(snej): Make use of the WebDragOperationsMask somehow
+  drag_source_->StartDragging(drop_data, ops, &last_mouse_down_, image,
+                              image_offset);
 }
 
 // -----------------------------------------------------------------------------
 
 void TabContentsViewGtk::InsertIntoContentArea(GtkWidget* widget) {
-  gtk_fixed_put(GTK_FIXED(fixed_), widget, 0, 0);
+  gtk_container_add(GTK_CONTAINER(expanded_), widget);
 }
 
 gboolean TabContentsViewGtk::OnMouseDown(GtkWidget* widget,
-    GdkEventButton* event, TabContentsViewGtk* view) {
-  view->last_mouse_down_ = *event;
+                                         GdkEventButton* event) {
+  last_mouse_down_ = *event;
   return FALSE;
 }
 
-gboolean TabContentsViewGtk::OnSizeAllocate(GtkWidget* widget,
-                                            GtkAllocation* allocation,
-                                            TabContentsViewGtk* view) {
+void TabContentsViewGtk::OnChildSizeRequest(GtkWidget* widget,
+                                            GtkWidget* child,
+                                            GtkRequisition* requisition) {
+  if (tab_contents()->delegate()) {
+    requisition->height +=
+        tab_contents()->delegate()->GetExtraRenderViewHeight();
+  }
+}
+
+void TabContentsViewGtk::OnSizeAllocate(GtkWidget* widget,
+                                        GtkAllocation* allocation) {
   int width = allocation->width;
   int height = allocation->height;
-  view->requested_size_.set_width(width);
-  view->requested_size_.set_height(height);
   // |delegate()| can be NULL here during browser teardown.
-  if (view->tab_contents()->delegate())
-    height += view->tab_contents()->delegate()->GetExtraRenderViewHeight();
+  if (tab_contents()->delegate())
+    height += tab_contents()->delegate()->GetExtraRenderViewHeight();
   gfx::Size size(width, height);
-  view->requested_size_ = size;
-  gtk_container_foreach(GTK_CONTAINER(widget), SetSizeRequest, &size);
+  requested_size_ = size;
 
-  return FALSE;
+  // We manually tell our RWHV to resize the renderer content.  This avoids
+  // spurious resizes from GTK+.
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetSize(size);
+  if (tab_contents()->interstitial_page())
+    tab_contents()->interstitial_page()->SetSize(size);
 }
 
-// static
 void TabContentsViewGtk::OnSetFloatingPosition(
-    GtkFloatingContainer* floating_container, GtkAllocation* allocation,
-    TabContentsViewGtk* tab_contents_view) {
-  if (tab_contents_view->popup_view_) {
-    GtkWidget* widget = tab_contents_view->popup_view_->widget();
-
-    // Look at the size request of the status bubble and tell the
-    // GtkFloatingContainer where we want it positioned.
-    GtkRequisition requisition;
-    gtk_widget_size_request(widget, &requisition);
-
-    GValue value = { 0, };
-    g_value_init(&value, G_TYPE_INT);
-
-    int child_x = std::max(
-        allocation->x + allocation->width - requisition.width -
-        kScrollbarWidthHack, 0);
-    g_value_set_int(&value, child_x);
-    gtk_container_child_set_property(GTK_CONTAINER(floating_container),
-                                     widget, "x", &value);
-
-    int child_y = std::max(
-        allocation->y + allocation->height - requisition.height, 0);
-    g_value_set_int(&value, child_y);
-    gtk_container_child_set_property(GTK_CONTAINER(floating_container),
-                                     widget, "y", &value);
-    g_value_unset(&value);
-  }
-
+    GtkWidget* floating_container, GtkAllocation* allocation) {
   // Place each ConstrainedWindow in the center of the view.
   int half_view_width = std::max((allocation->x + allocation->width) / 2, 0);
   int half_view_height = std::max((allocation->y + allocation->height) / 2, 0);
-  std::vector<ConstrainedWindowGtk*>::iterator it =
-      tab_contents_view->constrained_windows_.begin();
-  std::vector<ConstrainedWindowGtk*>::iterator end =
-      tab_contents_view->constrained_windows_.end();
-  for (; it != end; ++it) {
-    GtkWidget* widget = (*it)->widget();
-    DCHECK(widget->parent == tab_contents_view->floating_.get());
+  if (constrained_window_) {
+    GtkWidget* widget = constrained_window_->widget();
+    DCHECK(widget->parent == floating_.get());
 
     GtkRequisition requisition;
     gtk_widget_size_request(widget, &requisition);

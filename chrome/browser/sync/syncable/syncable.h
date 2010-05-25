@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <bitset>
 #include <iosfwd>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -15,19 +16,21 @@
 
 #include "base/atomicops.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/lock.h"
 #include "base/time.h"
+#include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/dir_open_result.h"
 #include "chrome/browser/sync/syncable/directory_event.h"
 #include "chrome/browser/sync/syncable/path_name_cmp.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
-#include "chrome/browser/sync/util/compat_file.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/dbgq.h"
 #include "chrome/browser/sync/util/event_sys.h"
-#include "chrome/browser/sync/util/path_helpers.h"
 #include "chrome/browser/sync/util/row_iterator.h"
 #include "chrome/browser/sync/util/sync_types.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
 struct PurgeInfo;
 
@@ -116,12 +119,8 @@ enum IsDelField {
 
 enum BitField {
   IS_DIR = IS_DEL + 1,
-  IS_BOOKMARK_OBJECT,
-
   SERVER_IS_DIR,
   SERVER_IS_DEL,
-  SERVER_IS_BOOKMARK_OBJECT,
-
   BIT_FIELDS_END
 };
 
@@ -131,64 +130,45 @@ enum {
 };
 
 enum StringField {
-  // The name, transformed so as to be suitable for use as a path-element.  It
-  // is unique, and legal for this client.
-  NAME = STRING_FIELDS_BEGIN,
-  // The local name, pre-sanitization.  It is not necessarily unique.  If this
-  // is empty, it means |NAME| did not require sanitization.
-  UNSANITIZED_NAME,
-  // If NAME/UNSANITIZED_NAME are "Foo (2)", then NON_UNIQUE_NAME may be "Foo".
-  NON_UNIQUE_NAME,
-  // The server version of |NAME|.  It is uniquified, but not necessarily
-  // OS-legal.
-  SERVER_NAME,
-  // The server version of |NON_UNIQUE_NAME|.  Again, if SERVER_NAME is
-  // like "Foo (2)" due to a commit-time name aside, SERVER_NON_UNIQUE_NAME
-  // may hold the value "Foo".
+  // Name, will be truncated by server. Can be duplicated in a folder.
+  NON_UNIQUE_NAME = STRING_FIELDS_BEGIN,
+  // The server version of |NON_UNIQUE_NAME|.
   SERVER_NON_UNIQUE_NAME,
-  // For bookmark entries, the URL of the bookmark.
-  BOOKMARK_URL,
-  SERVER_BOOKMARK_URL,
 
   // A tag string which identifies this node as a particular top-level
   // permanent object.  The tag can be thought of as a unique key that
   // identifies a singleton instance.
-  SINGLETON_TAG,
+  UNIQUE_SERVER_TAG,  // Tagged by the server
+  UNIQUE_CLIENT_TAG,  // Tagged by the client
   STRING_FIELDS_END,
 };
 
 enum {
   STRING_FIELDS_COUNT = STRING_FIELDS_END - STRING_FIELDS_BEGIN,
-  BLOB_FIELDS_BEGIN = STRING_FIELDS_END
+  PROTO_FIELDS_BEGIN = STRING_FIELDS_END
 };
 
 // From looking at the sqlite3 docs, it's not directly stated, but it
 // seems the overhead for storing a NULL blob is very small.
-enum BlobField {
-  // For bookmark entries, the favicon data.  These will be NULL for
-  // non-bookmark items.
-  BOOKMARK_FAVICON = BLOB_FIELDS_BEGIN,
-  SERVER_BOOKMARK_FAVICON,
-  BLOB_FIELDS_END,
+enum ProtoField {
+  SPECIFICS = PROTO_FIELDS_BEGIN,
+  SERVER_SPECIFICS,
+  PROTO_FIELDS_END,
 };
 
 enum {
-  BLOB_FIELDS_COUNT = BLOB_FIELDS_END - BLOB_FIELDS_BEGIN
+  PROTO_FIELDS_COUNT = PROTO_FIELDS_END - PROTO_FIELDS_BEGIN
 };
 
 enum {
-  FIELD_COUNT = BLOB_FIELDS_END,
+  FIELD_COUNT = PROTO_FIELDS_END,
   // Past this point we have temporaries, stored in memory only.
-  BEGIN_TEMPS = BLOB_FIELDS_END,
+  BEGIN_TEMPS = PROTO_FIELDS_END,
   BIT_TEMPS_BEGIN = BEGIN_TEMPS,
 };
 
 enum BitTemp {
   SYNCING = BIT_TEMPS_BEGIN,
-  IS_NEW,  // Means use INSERT instead of UPDATE to save to db.
-  DEPRECATED_DELETE_ON_CLOSE,  // Set by redirector, IS_OPEN must also be set.
-  DEPRECATED_CHANGED_SINCE_LAST_OPEN,  // Have we been written to since we've
-                                       // been opened.
   BIT_TEMPS_END,
 };
 
@@ -215,25 +195,16 @@ enum GetById {
   GET_BY_ID
 };
 
-enum GetByTag {
-  GET_BY_TAG
+enum GetByClientTag {
+  GET_BY_CLIENT_TAG
+};
+
+enum GetByServerTag {
+  GET_BY_SERVER_TAG
 };
 
 enum GetByHandle {
   GET_BY_HANDLE
-};
-
-enum GetByPath {
-  GET_BY_PATH
-};
-
-enum GetByParentIdAndName {
-  GET_BY_PARENTID_AND_NAME
-};
-
-// DBName is the name stored in the database.
-enum GetByParentIdAndDBName {
-  GET_BY_PARENTID_AND_DBNAME
 };
 
 enum Create {
@@ -244,231 +215,67 @@ enum CreateNewUpdateItem {
   CREATE_NEW_UPDATE_ITEM
 };
 
-typedef std::set<PathString> AttributeKeySet;
-
-// DBName is a PathString with additional transformation methods that are
-// useful when trying to derive a unique and legal database name from an
-// unsanitized sync name.
-class DBName : public PathString {
- public:
-  explicit DBName(const PathString& database_name)
-      : PathString(database_name) { }
-
-  // TODO(ncarter): Remove these codepaths to maintain alternate titles which
-  // are OS legal filenames, Chrome doesn't depend on this like some other
-  // browsers do.
-  void MakeOSLegal() {
-    PathString new_value = MakePathComponentOSLegal(*this);
-    if (!new_value.empty())
-      swap(new_value);
-  }
-
-  // Modify the value of this DBName so that it is not in use by any entry
-  // inside |parent_id|, except maybe |e|.  |e| may be NULL if you are trying
-  // to compute a name for an entry which has yet to be created.
-  void MakeNoncollidingForEntry(BaseTransaction* trans,
-                                const Id& parent_id,
-                                Entry* e);
-};
-
-// SyncName encapsulates a canonical server name.  In general, when we need to
-// muck around with a name that the server sends us (e.g. to make it OS legal),
-// we try to preserve the original value in a SyncName,
-// and distill the new local value into a DBName.
-// At other times, we need to apply transforms in the
-// other direction -- that is, to create a server-appropriate SyncName from a
-// user-updated DBName (which is an OS legal name, but not necessarily in the
-// format that the server wants it to be).  For that sort of thing, you should
-// initialize a SyncName from the DB name value, and use the methods of
-// SyncName to canonicalize it.  At other times, you have a pair of canonical
-// server values -- one (the "value") which is unique in the parent, and another
-// (the "non unique value") which is not unique in the parent -- and you
-// simply want to create a SyncName to hold them as a pair.
-class SyncName {
- public:
-  // Create a SyncName with the initially specified value.
-  explicit SyncName(const PathString& sync_name)
-      : value_(sync_name), non_unique_value_(sync_name) { }
-
-  // Create a SyncName by specifying a value and a non-unique value.  If
-  // you use this constructor, the values you provide should already be
-  // acceptable server names.  Don't use the mutation/sanitization methods
-  // on the resulting instance -- mutation won't work if you have distinct
-  // values for the unique and non-unique fields.
-  SyncName(const PathString& unique_sync_name,
-           const PathString& non_unique_sync_name)
-      : value_(unique_sync_name), non_unique_value_(non_unique_sync_name) { }
-
-  // Transform |value_| so that it's a legal server name.
-  void MakeServerLegal() {
-    DCHECK_EQ(value_, non_unique_value_)
-        << "Deriving value_ will overwrite non_unique_value_.";
-    // Append a trailing space if the value is one of the server's three
-    // forbidden special cases.
-    if (value_.empty() ||
-        value_ == PSTR(".") ||
-        value_ == PSTR("..")) {
-      value_.append(PSTR(" "));
-      non_unique_value_ = value_;
-    }
-    // TODO(ncarter): Handle server's other requirement: truncation to 256
-    // bytes in Unicode NFC.
-  }
-
-  const PathString& value() const { return value_; }
-  PathString& value() { return value_; }
-  const PathString& non_unique_value() const { return non_unique_value_; }
-  PathString& non_unique_value() { return non_unique_value_; }
-
-  inline bool operator==(const SyncName& right_hand_side) const {
-    return value_ == right_hand_side.value_ &&
-        non_unique_value_ == right_hand_side.non_unique_value_;
-  }
-  inline bool operator!=(const SyncName& right_hand_side) const {
-    return !(*this == right_hand_side);
-  }
- private:
-  PathString value_;
-  PathString non_unique_value_;
-};
-
-// Name is a SyncName which has an additional DBName that provides a way to
-// interpolate the "unsanitized name" according to the syncable convention.
-//
-// A method might accept a Name as an parameter when the sync and database
-// names need to be set simultaneously:
-//
-//    void PutName(const Name& new_name) {
-//       Put(NAME, new_name.db_value());
-//       Put(UNSANITIZED_NAME, new_name.GetUnsanitizedName());
-//    }
-//
-// A code point that is trying to convert between local database names and
-// server sync names can use Name to help with the conversion:
-//
-//    SyncName server_name = entry->GetServerName();
-//    Name name = Name::FromSyncName(server_name);  // Initially, name.value()
-//                                                  // and name.db_value() are
-//                                                  // equal to
-//                                                  // server_name.value().
-//    name.db_value().MakeOSLegal();  // Updates name.db_value in-place,
-//                                    // leaving name.value() unchanged.
-//    foo->PutName(name);
-//
-class Name : public SyncName {
- public:
-  // Create a Name with an initially specified db_value and value.
-  Name(const PathString& db_name, const PathString& sync_name)
-      : SyncName(sync_name), db_value_(db_name) { }
-
-  // Create a Name by specifying the db name, sync name, and non-unique
-  // sync name values.
-  Name(const PathString& db_name, const PathString& sync_name,
-       const PathString& non_unique_sync_name)
-      : SyncName(sync_name, non_unique_sync_name), db_value_(db_name) { }
-
-  // Create a Name with all name values initially equal to the the single
-  // specified argument.
-  explicit Name(const PathString& sync_and_db_name)
-      : SyncName(sync_and_db_name), db_value_(sync_and_db_name) { }
-
-  // Create a Name using the local (non-SERVER) fields of an EntryKernel.
-  static Name FromEntryKernel(struct EntryKernel*);
-
-  // Create a Name from a SyncName.  db_value is initially sync_name.value().
-  // non_unique_value() and value() are copied from |sync_name|.
-  static Name FromSyncName(const SyncName& sync_name) {
-    return Name(sync_name.value(), sync_name.value(),
-                sync_name.non_unique_value());
-  }
-
-  static Name FromDBNameAndSyncName(const PathString& db_name,
-                                    const SyncName& sync_name) {
-    return Name(db_name, sync_name.value(), sync_name.non_unique_value());
-  }
-
-  // Get the database name.  The non-const version is useful for in-place
-  // mutation.
-  const DBName& db_value() const { return db_value_; }
-  DBName& db_value() { return db_value_; }
-
-  // Do the sync names and database names differ?  This indicates that
-  // the sync name has been sanitized, and that GetUnsanitizedName() will
-  // be non-empty.
-  bool HasBeenSanitized() const { return db_value_ != value(); }
-
-  // Compute the value of the unsanitized name from the current sync and db
-  // name values.  The unsanitized name is the sync name value, unless the sync
-  // name is the same as the db name value, in which case the unsanitized name
-  // is empty.
-  PathString GetUnsanitizedName() const {
-    return HasBeenSanitized() ? value() : PathString();
-  }
-
-  inline bool operator==(const Name& right_hand_side) const {
-    return this->SyncName::operator==(right_hand_side) &&
-        db_value_ == right_hand_side.db_value_;
-  }
-  inline bool operator!=(const Name& right_hand_side) const {
-    return !(*this == right_hand_side);
-  }
-
- private:
-  // The database name, which is maintained to be a legal and unique-in-parent
-  // name.
-  DBName db_value_;
-};
+typedef std::set<std::string> AttributeKeySet;
 
 // Why the singular enums?  So the code compile-time dispatches instead of
 // runtime dispatches as it would with a single enum and an if() statement.
 
-// The EntryKernel class contains the actual data for an entry.  It
-// would be a private class, except the number of required friend
-// declarations would bloat the code.
+// The EntryKernel class contains the actual data for an entry.
 struct EntryKernel {
- protected:
-  PathString string_fields[STRING_FIELDS_COUNT];
-  Blob blob_fields[BLOB_FIELDS_COUNT];
+ private:
+  std::string string_fields[STRING_FIELDS_COUNT];
+  sync_pb::EntitySpecifics specifics_fields[PROTO_FIELDS_COUNT];
   int64 int64_fields[INT64_FIELDS_COUNT];
   Id id_fields[ID_FIELDS_COUNT];
   std::bitset<BIT_FIELDS_COUNT> bit_fields;
   std::bitset<BIT_TEMPS_COUNT> bit_temps;
 
  public:
-  std::bitset<FIELD_COUNT> dirty;
-
-  // Contain all this error-prone arithmetic in one place.
-  inline int64& ref(MetahandleField field) {
-    return int64_fields[field - INT64_FIELDS_BEGIN];
-  }
-  inline int64& ref(Int64Field field) {
-    return int64_fields[field - INT64_FIELDS_BEGIN];
-  }
-  inline Id& ref(IdField field) {
-    return id_fields[field - ID_FIELDS_BEGIN];
-  }
-  inline int64& ref(BaseVersion field) {
-    return int64_fields[field - INT64_FIELDS_BEGIN];
-  }
-  inline std::bitset<BIT_FIELDS_COUNT>::reference ref(IndexedBitField field) {
-    return bit_fields[field - BIT_FIELDS_BEGIN];
-  }
-  inline std::bitset<BIT_FIELDS_COUNT>::reference ref(IsDelField field) {
-    return bit_fields[field - BIT_FIELDS_BEGIN];
-  }
-  inline std::bitset<BIT_FIELDS_COUNT>::reference ref(BitField field) {
-    return bit_fields[field - BIT_FIELDS_BEGIN];
-  }
-  inline PathString& ref(StringField field) {
-    return string_fields[field - STRING_FIELDS_BEGIN];
-  }
-  inline Blob& ref(BlobField field) {
-    return blob_fields[field - BLOB_FIELDS_BEGIN];
-  }
-  inline std::bitset<BIT_TEMPS_COUNT>::reference ref(BitTemp field) {
-    return bit_temps[field - BIT_TEMPS_BEGIN];
+  inline void mark_dirty() {
+    dirty_ = true;
   }
 
+  inline void clear_dirty() {
+    dirty_ = false;
+  }
+
+  inline bool is_dirty() const {
+    return dirty_;
+  }
+
+  // Setters.
+  inline void put(MetahandleField field, int64 value) {
+    int64_fields[field - INT64_FIELDS_BEGIN] = value;
+  }
+  inline void put(Int64Field field, int64 value) {
+    int64_fields[field - INT64_FIELDS_BEGIN] = value;
+  }
+  inline void put(IdField field, const Id& value) {
+    id_fields[field - ID_FIELDS_BEGIN] = value;
+  }
+  inline void put(BaseVersion field, int64 value) {
+    int64_fields[field - INT64_FIELDS_BEGIN] = value;
+  }
+  inline void put(IndexedBitField field, bool value) {
+    bit_fields[field - BIT_FIELDS_BEGIN] = value;
+  }
+  inline void put(IsDelField field, bool value) {
+    bit_fields[field - BIT_FIELDS_BEGIN] = value;
+  }
+  inline void put(BitField field, bool value) {
+    bit_fields[field - BIT_FIELDS_BEGIN] = value;
+  }
+  inline void put(StringField field, const std::string& value) {
+    string_fields[field - STRING_FIELDS_BEGIN] = value;
+  }
+  inline void put(ProtoField field, const sync_pb::EntitySpecifics& value) {
+    specifics_fields[field - PROTO_FIELDS_BEGIN].CopyFrom(value);
+  }
+  inline void put(BitTemp field, bool value) {
+    bit_temps[field - BIT_TEMPS_BEGIN] = value;
+  }
+
+  // Const ref getters.
   inline int64 ref(MetahandleField field) const {
     return int64_fields[field - INT64_FIELDS_BEGIN];
   }
@@ -490,15 +297,29 @@ struct EntryKernel {
   inline bool ref(BitField field) const {
     return bit_fields[field - BIT_FIELDS_BEGIN];
   }
-  inline PathString ref(StringField field) const {
+  inline const std::string& ref(StringField field) const {
     return string_fields[field - STRING_FIELDS_BEGIN];
   }
-  inline Blob ref(BlobField field) const {
-    return blob_fields[field - BLOB_FIELDS_BEGIN];
+  inline const sync_pb::EntitySpecifics& ref(ProtoField field) const {
+    return specifics_fields[field - PROTO_FIELDS_BEGIN];
   }
   inline bool ref(BitTemp field) const {
     return bit_temps[field - BIT_TEMPS_BEGIN];
   }
+
+  // Non-const, mutable ref getters for object types only.
+  inline std::string& mutable_ref(StringField field) {
+    return string_fields[field - STRING_FIELDS_BEGIN];
+  }
+  inline sync_pb::EntitySpecifics& mutable_ref(ProtoField field) {
+    return specifics_fields[field - PROTO_FIELDS_BEGIN];
+  }
+  inline Id& mutable_ref(IdField field) {
+    return id_fields[field - ID_FIELDS_BEGIN];
+  }
+ private:
+  // Tracks whether this entry needs to be saved to the database.
+  bool dirty_;
 };
 
 // A read-only meta entry.
@@ -511,12 +332,8 @@ class Entry {
   // succeeded.
   Entry(BaseTransaction* trans, GetByHandle, int64 handle);
   Entry(BaseTransaction* trans, GetById, const Id& id);
-  Entry(BaseTransaction* trans, GetByTag, const PathString& tag);
-  Entry(BaseTransaction* trans, GetByPath, const PathString& path);
-  Entry(BaseTransaction* trans, GetByParentIdAndName, const Id& id,
-      const PathString& name);
-  Entry(BaseTransaction* trans, GetByParentIdAndDBName, const Id& id,
-      const PathString& name);
+  Entry(BaseTransaction* trans, GetByServerTag, const std::string& tag);
+  Entry(BaseTransaction* trans, GetByClientTag, const std::string& tag);
 
   bool good() const { return 0 != kernel_; }
 
@@ -551,8 +368,8 @@ class Entry {
     DCHECK(kernel_);
     return kernel_->ref(field);
   }
-  PathString Get(StringField field) const;
-  inline Blob Get(BlobField field) const {
+  const std::string& Get(StringField field) const;
+  inline const sync_pb::EntitySpecifics& Get(ProtoField field) const {
     DCHECK(kernel_);
     return kernel_->ref(field);
   }
@@ -560,31 +377,21 @@ class Entry {
     DCHECK(kernel_);
     return kernel_->ref(field);
   }
-  inline Name GetName() const {
-    DCHECK(kernel_);
-    return Name::FromEntryKernel(kernel_);
+
+  ModelType GetServerModelType() const;
+  ModelType GetModelType() const;
+
+  // If this returns false, we shouldn't bother maintaining
+  // a position value (sibling ordering) for this item.
+  bool ShouldMaintainPosition() const {
+    return GetModelType() == BOOKMARKS;
   }
-  inline SyncName GetServerName() const {
+
+  inline bool ExistsOnClientBecauseNameIsNonEmpty() const {
     DCHECK(kernel_);
-    return SyncName(kernel_->ref(SERVER_NAME),
-                    kernel_->ref(SERVER_NON_UNIQUE_NAME));
+    return !kernel_->ref(NON_UNIQUE_NAME).empty();
   }
-  inline bool SyncNameMatchesServerName() const {
-    DCHECK(kernel_);
-    SyncName sync_name(GetName());
-    return sync_name == GetServerName();
-  }
-  inline PathString GetSyncNameValue() const {
-    DCHECK(kernel_);
-    // This should always be equal to GetName().sync_name().value(), but may be
-    // faster.
-    return kernel_->ref(UNSANITIZED_NAME).empty() ? kernel_->ref(NAME) :
-        kernel_->ref(UNSANITIZED_NAME);
-  }
-  inline bool ExistsOnClientBecauseDatabaseNameIsNonEmpty() const {
-    DCHECK(kernel_);
-    return !kernel_->ref(NAME).empty();
-  }
+
   inline bool IsRoot() const {
     DCHECK(kernel_);
     return kernel_->ref(ID).IsRoot();
@@ -625,18 +432,14 @@ class MutableEntry : public Entry {
   friend class WriteTransaction;
   friend class Directory;
   void Init(WriteTransaction* trans, const Id& parent_id,
-      const PathString& name);
+      const std::string& name);
  public:
   MutableEntry(WriteTransaction* trans, Create, const Id& parent_id,
-               const PathString& name);
+               const std::string& name);
   MutableEntry(WriteTransaction* trans, CreateNewUpdateItem, const Id& id);
   MutableEntry(WriteTransaction* trans, GetByHandle, int64);
   MutableEntry(WriteTransaction* trans, GetById, const Id&);
-  MutableEntry(WriteTransaction* trans, GetByPath, const PathString& path);
-  MutableEntry(WriteTransaction* trans, GetByParentIdAndName, const Id&,
-    const PathString& name);
-  MutableEntry(WriteTransaction* trans, GetByParentIdAndDBName,
-    const Id& parentid, const PathString& name);
+  MutableEntry(WriteTransaction* trans, GetByClientTag, const std::string& tag);
 
   inline WriteTransaction* write_transaction() const {
     return write_transaction_;
@@ -645,21 +448,33 @@ class MutableEntry : public Entry {
   // Field Accessors.  Some of them trigger the re-indexing of the entry.
   // Return true on success, return false on failure, which means
   // that putting the value would have caused a duplicate in the index.
+  // TODO(chron): Remove some of these unecessary return values.
   bool Put(Int64Field field, const int64& value);
   bool Put(IdField field, const Id& value);
-  bool Put(StringField field, const PathString& value);
+
+  // Do a simple property-only update if the PARENT_ID field.  Use with caution.
+  //
+  // The normal Put(IS_PARENT) call will move the item to the front of the
+  // sibling order to maintain the linked list invariants when the parent
+  // changes.  That's usually what you want to do, but it's inappropriate
+  // when the caller is trying to change the parent ID of a the whole set
+  // of children (e.g. because the ID changed during a commit).  For those
+  // cases, there's this function.  It will corrupt the sibling ordering
+  // if you're not careful.
+  void PutParentIdPropertyOnly(const Id& parent_id);
+
+  bool Put(StringField field, const std::string& value);
   bool Put(BaseVersion field, int64 value);
-  inline bool PutName(const Name& name) {
-    return (Put(NAME, name.db_value()) &&
-            Put(UNSANITIZED_NAME, name.GetUnsanitizedName()) &&
-            Put(NON_UNIQUE_NAME, name.non_unique_value()));
-  }
-  inline bool PutServerName(const SyncName& server_name) {
-    return (Put(SERVER_NAME, server_name.value()) &&
-            Put(SERVER_NON_UNIQUE_NAME, server_name.non_unique_value()));
-  }
-  inline bool Put(BlobField field, const Blob& value) {
-    return PutField(field, value);
+
+  inline bool Put(ProtoField field, const sync_pb::EntitySpecifics& value) {
+    DCHECK(kernel_);
+    // TODO(ncarter): This is unfortunately heavyweight.  Can we do
+    // better?
+    if (kernel_->ref(field).SerializeAsString() != value.SerializeAsString()) {
+      kernel_->put(field, value);
+      kernel_->mark_dirty();
+    }
+    return true;
   }
   inline bool Put(BitField field, bool value) {
     return PutField(field, value);
@@ -668,10 +483,6 @@ class MutableEntry : public Entry {
     return PutIsDel(value);
   }
   bool Put(IndexedBitField field, bool value);
-
-  // Avoids temporary collision in index when renaming a bookmark into another
-  // folder.
-  bool PutParentIdAndName(const Id& parent_id, const Name& name);
 
   // Sets the position of this item, and updates the entry kernels of the
   // adjacent siblings so that list invariants are maintained.  Returns false
@@ -684,13 +495,12 @@ class MutableEntry : public Entry {
   }
 
  protected:
-
   template <typename FieldType, typename ValueType>
   inline bool PutField(FieldType field, const ValueType& value) {
     DCHECK(kernel_);
     if (kernel_->ref(field) != value) {
-      kernel_->ref(field) = value;
-      kernel_->dirty[static_cast<int>(field)] = true;
+      kernel_->put(field, value);
+      kernel_->mark_dirty();
     }
     return true;
   }
@@ -698,7 +508,7 @@ class MutableEntry : public Entry {
   template <typename TempType, typename ValueType>
   inline bool PutTemp(TempType field, const ValueType& value) {
     DCHECK(kernel_);
-    kernel_->ref(field) = value;
+    kernel_->put(field, value);
     return true;
   }
 
@@ -708,7 +518,8 @@ class MutableEntry : public Entry {
   friend class sync_api::WriteNode;
   void* operator new(size_t size) { return (::operator new)(size); }
 
-  bool PutImpl(StringField field, const PathString& value);
+  bool PutImpl(StringField field, const std::string& value);
+  bool PutUniqueClientTag(const std::string& value);
 
   // Adjusts the successor and predecessor entries so that they no longer
   // refer to this entry.
@@ -729,7 +540,7 @@ template <Int64Field field_index>
 class SameField;
 template <Int64Field field_index>
 class HashField;
-class LessParentIdAndNames;
+class LessParentIdAndHandle;
 class LessMultiIncusionTargetAndMetahandle;
 template <typename FieldType, FieldType field_index>
 class LessField;
@@ -741,6 +552,13 @@ class LessEntryMetaHandles {
   }
 };
 typedef std::set<EntryKernel, LessEntryMetaHandles> OriginalEntries;
+
+// Represents one or more model types sharing an update timestamp, as is
+// the case with a GetUpdates request.
+struct MultiTypeTimeStamp {
+  syncable::ModelTypeBitSet data_types;
+  int64 timestamp;
+};
 
 // a WriteTransaction has a writer tag describing which body of code is doing
 // the write. This is defined up here since DirectoryChangeEvent also contains
@@ -776,14 +594,14 @@ struct DirectoryChangeEvent {
 
 struct ExtendedAttributeKey {
   int64 metahandle;
-  PathString key;
+  std::string key;
   inline bool operator < (const ExtendedAttributeKey& x) const {
     if (metahandle != x.metahandle)
       return metahandle < x.metahandle;
     return key.compare(x.key) < 0;
   }
-  ExtendedAttributeKey(int64 metahandle, PathString key) :
-      metahandle(metahandle), key(key) {  }
+  ExtendedAttributeKey(int64 metahandle, const std::string& key)
+      : metahandle(metahandle), key(key) {  }
 };
 
 struct ExtendedAttributeValue {
@@ -839,17 +657,27 @@ class Directory {
   friend class ScopedKernelLock;
   friend class ScopedKernelUnlock;
   friend class WriteTransaction;
+  friend class SyncableDirectoryTest;
+  FRIEND_TEST(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest);
+  FRIEND_TEST(SyncableDirectoryTest, TakeSnapshotGetsOnlyDirtyHandlesTest);
+
  public:
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
   struct PersistedKernelInfo {
-    int64 last_sync_timestamp;
-    bool initial_sync_ended;
+    // Last sync timestamp fetched from the server.
+    int64 last_download_timestamp[MODEL_TYPE_COUNT];
+    // true iff we ever reached the end of the changelog.
+    ModelTypeBitSet initial_sync_ended;
+    // The store birthday we were given by the server. Contents are opaque to
+    // the client.
     std::string store_birthday;
+    // The next local ID that has not been used with this cache-GUID.
     int64 next_id;
-    PersistedKernelInfo() : last_sync_timestamp(0),
-        initial_sync_ended(false),
-        next_id(0) {
+    PersistedKernelInfo() : next_id(0) {
+      for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
+        last_download_timestamp[i] = 0;
+      }
     }
   };
 
@@ -886,7 +714,7 @@ class Directory {
   Directory();
   virtual ~Directory();
 
-  DirOpenResult Open(const PathString& file_path, const PathString& name);
+  DirOpenResult Open(const FilePath& file_path, const std::string& name);
 
   void Close();
 
@@ -895,19 +723,43 @@ class Directory {
   // by the server only.
   Id NextId();
 
-  PathString file_path() const { return kernel_->db_path; }
+  const FilePath& file_path() const { return kernel_->db_path; }
   bool good() const { return NULL != store_; }
 
-  // The sync timestamp is an index into the list of changes for an account.
-  // It doesn't actually map to any time scale, it's name is an historical
-  // anomaly.
-  int64 last_sync_timestamp() const;
-  void set_last_sync_timestamp(int64 timestamp);
+  // The download timestamp is an index into the server's list of changes for
+  // an account.  We keep this for each datatype.  It doesn't actually map
+  // to any time scale; its name is an historical artifact.
+  int64 last_download_timestamp(ModelType type) const;
+  void set_last_download_timestamp(ModelType type, int64 value);
 
-  bool initial_sync_ended() const;
-  void set_initial_sync_ended(bool value);
+  // Find the model type or model types which have the least timestamp, and
+  // return them along with the types having that timestamp.  This is done
+  // with the intent of sequencing GetUpdates requests in an efficient way:
+  // bundling together requests that have the same timestamp, and requesting
+  // the oldest such bundles first in hopes that they might catch up to
+  // (and thus be merged with) the newer bundles.
+  MultiTypeTimeStamp GetTypesWithOldestLastDownloadTimestamp(
+      ModelTypeBitSet enabled_types) {
+    MultiTypeTimeStamp result;
+    result.timestamp = std::numeric_limits<int64>::max();
+    for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
+      if (!enabled_types[i])
+        continue;
+      int64 stamp = last_download_timestamp(ModelTypeFromInt(i));
+      if (stamp < result.timestamp) {
+        result.data_types.reset();
+        result.timestamp = stamp;
+      }
+      if (stamp == result.timestamp)
+        result.data_types.set(i);
+    }
+    return result;
+  }
 
-  PathString name() const { return kernel_->name_; }
+  bool initial_sync_ended_for_type(ModelType type) const;
+  void set_initial_sync_ended_for_type(ModelType type, bool value);
+
+  const std::string& name() const { return kernel_->name; }
 
   // (Account) Store birthday is opaque to the client,
   // so we keep it in the format it is in the proto buffer
@@ -919,39 +771,33 @@ class Directory {
   std::string cache_guid() const;
 
  protected:  // for friends, mainly used by Entry constructors
-  EntryKernel* GetChildWithName(const Id& parent_id, const PathString& name);
-  EntryKernel* GetChildWithDBName(const Id& parent_id, const PathString& name);
   EntryKernel* GetEntryByHandle(const int64 handle);
   EntryKernel* GetEntryByHandle(const int64 metahandle, ScopedKernelLock* lock);
   EntryKernel* GetEntryById(const Id& id);
-  EntryKernel* GetEntryByTag(const PathString& tag);
+  EntryKernel* GetEntryByServerTag(const std::string& tag);
+  EntryKernel* GetEntryByClientTag(const std::string& tag);
   EntryKernel* GetRootEntry();
-  EntryKernel* GetEntryByPath(const PathString& path);
   bool ReindexId(EntryKernel* const entry, const Id& new_id);
-  bool ReindexParentIdAndName(EntryKernel* const entry, const Id& new_parent_id,
-                              const PathString& new_name);
-  // These don't do the semantic checking that the redirector needs.
+  void ReindexParentId(EntryKernel* const entry, const Id& new_parent_id);
+  void AddToDirtyMetahandles(int64 handle);
+  void ClearDirtyMetahandles();
+
+  // These don't do semantic checking.
   // The semantic checking is implemented higher up.
-  bool Undelete(EntryKernel* const entry);
-  bool Delete(EntryKernel* const entry);
+  void Undelete(EntryKernel* const entry);
+  void Delete(EntryKernel* const entry);
 
   // Overridden by tests.
   virtual DirectoryBackingStore* CreateBackingStore(
-      const PathString& dir_name,
-      const PathString& backing_filepath);
+      const std::string& dir_name,
+      const FilePath& backing_filepath);
 
  private:
   // These private versions expect the kernel lock to already be held
   // before calling.
   EntryKernel* GetEntryById(const Id& id, ScopedKernelLock* const lock);
-  EntryKernel* GetChildWithName(const Id& parent_id,
-                                const PathString& name,
-                                ScopedKernelLock* const lock);
-  EntryKernel* GetChildWithNameImpl(const Id& parent_id,
-                                    const PathString& name,
-                                    ScopedKernelLock* const lock);
 
-  DirOpenResult OpenImpl(const PathString& file_path, const PathString& name);
+  DirOpenResult OpenImpl(const FilePath& file_path, const std::string& name);
 
   struct DirectoryEventTraits {
     typedef DirectoryEvent EventType;
@@ -966,7 +812,7 @@ class Directory {
 
   // Returns the child meta handles for given parent id.
   void GetChildHandles(BaseTransaction*, const Id& parent_id,
-      const PathString& path_spec, ChildHandles* result);
+      const std::string& path_spec, ChildHandles* result);
   void GetChildHandles(BaseTransaction*, const Id& parent_id,
       ChildHandles* result);
   void GetChildHandlesImpl(BaseTransaction* trans, const Id& parent_id,
@@ -981,7 +827,7 @@ class Directory {
   // state and indices (by deep copy) under a ReadTransaction, passing this
   // snapshot to the backing store under no transaction, and finally cleaning
   // up by either purging entries no longer needed (this part done under a
-  // WriteTransaction) or rolling back dirty and IS_NEW bits.  It also uses
+  // WriteTransaction) or rolling back the dirty bits.  It also uses
   // internal locking to enforce SaveChanges operations are mutually exclusive.
   //
   // WARNING: THIS METHOD PERFORMS SYNCHRONOUS I/O VIA SQLITE.
@@ -1049,10 +895,11 @@ class Directory {
   // |snapshot|.  See SaveChanges() for more information.
   void VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot);
 
-  // Rolls back dirty and IS_NEW bits in the event that the SaveChanges that
-  // processed |snapshot| failed, for ex. due to no disk space.
+  // Rolls back dirty bits in the event that the SaveChanges that
+  // processed |snapshot| failed, for example, due to no disk space.
   void HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot);
 
+  // For new entry creation only
   void InsertEntry(EntryKernel* entry, ScopedKernelLock* lock);
   void InsertEntry(EntryKernel* entry);
 
@@ -1078,30 +925,39 @@ class Directory {
   typedef std::set<EntryKernel*, LessField<IdField, ID> > IdsIndex;
   // All entries in memory must be in both the MetahandlesIndex and
   // the IdsIndex, but only non-deleted entries will be the
-  // ParentIdAndNamesIndex, because there can be multiple deleted
-  // entries with the same parent id and name.
-  typedef std::set<EntryKernel*, LessParentIdAndNames> ParentIdAndNamesIndex;
+  // ParentIdChildIndex.
+  // This index contains EntryKernels ordered by parent ID and metahandle.
+  // It allows efficient lookup of the children of a given parent.
+  typedef std::set<EntryKernel*, LessParentIdAndHandle> ParentIdChildIndex;
+
+  // Contains both deleted and existing entries with tags.
+  // We can't store only existing tags because the client would create
+  // items that had a duplicated ID in the end, resulting in a DB key
+  // violation. ID reassociation would fail after an attempted commit.
+  typedef std::set<EntryKernel*,
+                   LessField<StringField, UNIQUE_CLIENT_TAG> > ClientTagIndex;
   typedef std::vector<int64> MetahandlesToPurge;
 
  private:
 
   struct Kernel {
-    Kernel(const PathString& db_path, const PathString& name,
+    Kernel(const FilePath& db_path, const std::string& name,
            const KernelLoadInfo& info);
 
     ~Kernel();
 
-    PathString const db_path;
-    // TODO(timsteele): audit use of the member and remove if possible
-    volatile base::subtle::AtomicWord refcount;
     void AddRef();  // For convenience.
     void Release();
+
+    FilePath const db_path;
+    // TODO(timsteele): audit use of the member and remove if possible
+    volatile base::subtle::AtomicWord refcount;
 
     // Implements ReadTransaction / WriteTransaction using a simple lock.
     Lock transaction_mutex;
 
-    // The name of this directory, used as a key into open_files_;
-    PathString const name_;
+    // The name of this directory.
+    std::string const name;
 
     // Protects all members below.
     // The mutex effectively protects all the indices, but not the
@@ -1113,18 +969,19 @@ class Directory {
     Lock mutex;
     MetahandlesIndex* metahandles_index;  // Entries indexed by metahandle
     IdsIndex* ids_index;  // Entries indexed by id
-    ParentIdAndNamesIndex* parent_id_and_names_index;
+    ParentIdChildIndex* parent_id_child_index;
+    ClientTagIndex* client_tag_index;
     // So we don't have to create an EntryKernel every time we want to
-    // look something up in an index.  Needle in haystack metaphore.
+    // look something up in an index.  Needle in haystack metaphor.
     EntryKernel needle;
     ExtendedAttributes* const extended_attributes;
 
-    // 2 in-memory indices on bits used extremely frequently by the syncer.
+    // 3 in-memory indices on bits used extremely frequently by the syncer.
     MetahandleSet* const unapplied_update_metahandles;
     MetahandleSet* const unsynced_metahandles;
-    // TODO(timsteele): Add a dirty_metahandles index as we now may want to
-    // optimize the SaveChanges work of scanning all entries to find dirty ones
-    // due to the entire entry domain now being in-memory.
+    // Contains metahandles that are most likely dirty (though not
+    // necessarily).  Dirtyness is confirmed in TakeSnapshotForSaveChanges().
+    MetahandleSet* const dirty_metahandles;
 
     // TODO(ncarter): Figure out what the hell this is, and comment it.
     Channel* const channel;
@@ -1134,31 +991,29 @@ class Directory {
     // releasing the transaction mutex.
     ChangesChannel* const changes_channel;
     Lock changes_channel_mutex;
-    KernelShareInfoStatus info_status_;
-    // These 5 members are backed in the share_info table, and
+    KernelShareInfoStatus info_status;
+
+    // These 3 members are backed in the share_info table, and
     // their state is marked by the flag above.
-    // Last sync timestamp fetched from the server.
-    int64 last_sync_timestamp_;
-    // true iff we ever reached the end of the changelog.
-    bool initial_sync_ended_;
-    // The store birthday we were given by the server. Contents are opaque to
-    // the client.
-    std::string store_birthday_;
+
+    // A structure containing the Directory state that is written back into the
+    // database on SaveChanges.
+    PersistedKernelInfo persisted_info;
+
     // A unique identifier for this account's cache db, used to generate
     // unique server IDs. No need to lock, only written at init time.
-    std::string cache_guid_;
+    std::string cache_guid;
 
     // It doesn't make sense for two threads to run SaveChanges at the same
     // time; this mutex protects that activity.
     Lock save_changes_mutex;
 
-    // The next metahandle and id are protected by kernel mutex.
+    // The next metahandle is protected by kernel mutex.
     int64 next_metahandle;
-    int64 next_id;
 
     // Keep a history of recently flushed metahandles for debugging
     // purposes.  Protected by the save_changes_mutex.
-    DebugQueue<int64, 1000> flushed_metahandles_;
+    DebugQueue<int64, 1000> flushed_metahandles;
   };
 
   Kernel* kernel_;
@@ -1176,7 +1031,7 @@ class ScopedKernelLock {
   DISALLOW_COPY_AND_ASSIGN(ScopedKernelLock);
 };
 
-// Transactions are now processed FIFO (+overlapping reads).
+// Transactions are now processed FIFO with a straight lock
 class BaseTransaction {
   friend class Entry;
  public:
@@ -1243,7 +1098,7 @@ class WriteTransaction : public BaseTransaction {
 };
 
 bool IsLegalNewParent(BaseTransaction* trans, const Id& id, const Id& parentid);
-int ComparePathNames(const PathString& a, const PathString& b);
+int ComparePathNames(const std::string& a, const std::string& b);
 
 // Exposed in header as this is used as a sqlite3 callback.
 int ComparePathNames16(void*, int a_bytes, const void* a, int b_bytes,
@@ -1251,21 +1106,12 @@ int ComparePathNames16(void*, int a_bytes, const void* a, int b_bytes,
 
 int64 Now();
 
-// Does wildcard processing.
-BOOL PathNameMatch(const PathString& pathname, const PathString& pathspec);
-
-PathString GetFullPath(BaseTransaction* trans, const Entry& e);
-
-inline void ReverseAppend(const PathString& s, PathString* target) {
-  target->append(s.rbegin(), s.rend());
-}
-
 class ExtendedAttribute {
  public:
   ExtendedAttribute(BaseTransaction* trans, GetByHandle,
                     const ExtendedAttributeKey& key);
   int64 metahandle() const { return i_->first.metahandle; }
-  const PathString& key() const { return i_->first.key; }
+  const std::string& key() const { return i_->first.key; }
   const Blob& value() const { return i_->second.value; }
   bool is_deleted() const { return i_->second.is_deleted; }
   bool good() const { return good_; }
@@ -1306,7 +1152,7 @@ class MutableExtendedAttribute : public ExtendedAttribute {
 // no attribute with the given name. The pointer is valid for the
 // duration of the Entry's transaction.
 const Blob* GetExtendedAttributeValue(const Entry& e,
-                                      const PathString& attribute_name);
+                                      const std::string& attribute_name);
 
 // This function sets only the flags needed to get this entry to sync.
 void MarkForSyncing(syncable::MutableEntry* e);

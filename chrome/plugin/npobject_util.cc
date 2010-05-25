@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/npobject_proxy.h"
 #include "chrome/plugin/plugin_channel_base.h"
-#include "webkit/api/public/WebBindings.h"
-#include "webkit/glue/plugins/nphostapi.h"
+#include "third_party/npapi/bindings/nphostapi.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -84,9 +84,16 @@ static bool NPN_EvaluatePatch(NPP npp,
 }
 
 
-static void NPN_SetExceptionPatch(NPObject *obj,
-                                  const NPUTF8 *message) {
-  return NPObjectProxy::NPNSetException(obj, message);
+static void NPN_SetExceptionPatch(NPObject *obj, const NPUTF8 *message) {
+  std::string message_str(message);
+  if (IsPluginProcess()) {
+    PluginChannelBase* renderer_channel =
+        PluginChannelBase::GetCurrentChannel();
+    if (renderer_channel)
+      renderer_channel->Send(new PluginHostMsg_SetException(message_str));
+  } else {
+    WebBindings::setException(obj, message_str.c_str());
+  }
 }
 
 static bool NPN_EnumeratePatch(NPP npp, NPObject *obj,
@@ -169,12 +176,12 @@ void CreateNPVariantParam(const NPVariant& variant,
                                    variant.value.stringValue.UTF8Length);
       }
       break;
-    case NPVariantType_Object:
-    {
+    case NPVariantType_Object: {
       if (variant.value.objectValue->_class == NPObjectProxy::npclass()) {
-        param->type = NPVARIANT_PARAM_OBJECT_POINTER;
-        param->npobject_pointer =
-            NPObjectProxy::GetProxy(variant.value.objectValue)->npobject_ptr();
+        param->type = NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID;
+        NPObjectProxy* proxy =
+            NPObjectProxy::GetProxy(variant.value.objectValue);
+        param->npobject_routing_id = proxy->route_id();
         // Don't release, because our original variant is the same as our proxy.
         release = false;
       } else {
@@ -184,14 +191,12 @@ void CreateNPVariantParam(const NPVariant& variant,
           // NPObjectStub adds its own reference to the NPObject it owns, so if
           // we were supposed to release the corresponding variant
           // (release==true), we should still do that.
-          param->type = NPVARIANT_PARAM_OBJECT_ROUTING_ID;
+          param->type = NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID;
           int route_id = channel->GenerateRouteID();
           new NPObjectStub(
               variant.value.objectValue, channel, route_id, containing_window,
               page_url);
           param->npobject_routing_id = route_id;
-          param->npobject_pointer =
-              reinterpret_cast<intptr_t>(variant.value.objectValue);
         } else {
           param->type = NPVARIANT_PARAM_VOID;
         }
@@ -206,7 +211,7 @@ void CreateNPVariantParam(const NPVariant& variant,
     WebBindings::releaseVariantValue(const_cast<NPVariant*>(&variant));
 }
 
-void CreateNPVariant(const NPVariant_Param& param,
+bool CreateNPVariant(const NPVariant_Param& param,
                      PluginChannelBase* channel,
                      NPVariant* result,
                      gfx::NativeViewId containing_window,
@@ -237,22 +242,32 @@ void CreateNPVariant(const NPVariant_Param& param,
       result->value.stringValue.UTF8Length =
           static_cast<int>(param.string_value.size());
       break;
-    case NPVARIANT_PARAM_OBJECT_ROUTING_ID:
+    case NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID:
       result->type = NPVariantType_Object;
       result->value.objectValue =
           NPObjectProxy::Create(channel,
                                 param.npobject_routing_id,
-                                param.npobject_pointer,
                                 containing_window,
                                 page_url);
       break;
-    case NPVARIANT_PARAM_OBJECT_POINTER:
+    case NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID: {
+      NPObjectBase* npobject_base =
+          channel->GetNPObjectListenerForRoute(param.npobject_routing_id);
+      if (!npobject_base) {
+        DLOG(WARNING) << "Invalid routing id passed in"
+                      << param.npobject_routing_id;
+        return false;
+      }
+
+      DCHECK(npobject_base->GetUnderlyingNPObject() != NULL);
+
       result->type = NPVariantType_Object;
-      result->value.objectValue =
-          reinterpret_cast<NPObject*>(param.npobject_pointer);
+      result->value.objectValue = npobject_base->GetUnderlyingNPObject();
       WebBindings::retainObject(result->value.objectValue);
       break;
+    }
     default:
       NOTREACHED();
   }
+  return true;
 }

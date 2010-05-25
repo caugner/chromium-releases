@@ -14,10 +14,10 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/string_util.h"
-#include "webkit/api/public/WebBindings.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebString.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 using WebKit::WebBindings;

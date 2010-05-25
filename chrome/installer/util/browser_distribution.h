@@ -23,7 +23,11 @@ class BrowserDistribution {
                                          const std::wstring& local_data_path,
                                          const std::wstring& distribution_data);
 
+  virtual std::wstring GetAppGuid();
+
   virtual std::wstring GetApplicationName();
+
+  virtual std::wstring GetAppShortCutName();
 
   virtual std::wstring GetAlternateApplicationName();
 
@@ -33,8 +37,12 @@ class BrowserDistribution {
 
   virtual std::wstring GetAppDescription();
 
+  virtual std::wstring GetLongAppDescription();
+
   virtual int GetInstallReturnCode(
       installer_util::InstallStatus install_status);
+
+  virtual std::string GetSafeBrowsingName();
 
   virtual std::wstring GetStateKey();
 
@@ -50,6 +58,8 @@ class BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
+  virtual bool CanSetAsDefault();
+
   virtual void UpdateDiffInstallStatus(bool system_install,
       bool incremental_install, installer_util::InstallStatus install_status);
 
@@ -62,10 +72,12 @@ class BrowserDistribution {
 
   // The user has qualified for the inactive user toast experiment and this
   // function just performs it.
-  virtual void InactiveUserToastExperiment(int flavor);
+  virtual void InactiveUserToastExperiment(int flavor, bool system_install);
 
  protected:
   BrowserDistribution() {}
+
+  static BrowserDistribution* GetDistribution(bool chrome_frame);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserDistribution);

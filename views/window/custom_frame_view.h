@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "views/window/window.h"
 #include "views/window/window_resources.h"
 
-namespace gfx{
+namespace gfx {
 class Canvas;
 class Font;
 class Size;
@@ -38,7 +38,6 @@ class CustomFrameView : public NonClientFrameView,
   virtual gfx::Rect GetBoundsForClientView() const;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const;
-  virtual gfx::Point GetSystemMenuPoint() const;
   virtual int NonClientHitTest(const gfx::Point& point);
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask);
   virtual void EnableClose(bool enable);
@@ -65,14 +64,20 @@ class CustomFrameView : public NonClientFrameView,
   // frame, any title area, and any connected client edge.
   int NonClientTopBorderHeight() const;
 
-  // A bottom border, and, in restored mode, a client edge are drawn at the
-  // bottom of the titlebar.  This returns the total height drawn.
-  int BottomEdgeThicknessWithinNonClientHeight() const;
+  // Returns the y-coordinate of the caption buttons.
+  int CaptionButtonY() const;
 
-  // Calculates multiple values related to title layout.  Returns the height of
-  // the entire titlebar including any connected client edge.
-  int TitleCoordinates(int* title_top_spacing,
-                       int* title_thickness) const;
+  // Returns the thickness of the nonclient portion of the 3D edge along the
+  // bottom of the titlebar.
+  int TitlebarBottomThickness() const;
+
+  // Returns the size of the titlebar icon.  This is used even when the icon is
+  // not shown, e.g. to set the titlebar height.
+  int IconSize() const;
+
+  // Returns the bounds of the titlebar icon (or where the icon would be if
+  // there was one).
+  gfx::Rect IconBounds() const;
 
   // Paint various sub-components of this view.
   void PaintRestoredFrameBorder(gfx::Canvas* canvas);
@@ -96,7 +101,7 @@ class CustomFrameView : public NonClientFrameView,
   ImageButton* restore_button_;
   ImageButton* maximize_button_;
   ImageButton* minimize_button_;
-  ImageButton* system_menu_button_;  // Uses the window icon if visible.
+  ImageButton* window_icon_;
   bool should_show_minmax_buttons_;
 
   // The window that owns this view.
@@ -106,9 +111,9 @@ class CustomFrameView : public NonClientFrameView,
   static void InitClass();
   static gfx::Font* title_font_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CustomFrameView);
+  DISALLOW_COPY_AND_ASSIGN(CustomFrameView);
 };
 
 }  // namespace views
 
-#endif  // #ifndef VIEWS_WINDOW_CUSTOM_FRAME_VIEW_H_
+#endif  // VIEWS_WINDOW_CUSTOM_FRAME_VIEW_H_

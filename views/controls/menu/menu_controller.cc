@@ -1,14 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/menu_controller.h"
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
+#include "base/i18n/rtl.h"
 #include "base/keyboard_codes.h"
 #include "base/time.h"
+#include "gfx/canvas.h"
+#include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/drag_utils.h"
@@ -16,6 +18,9 @@
 #include "views/view_constants.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
+#if defined(OS_LINUX)
+#include "base/keyboard_code_conversion_gtk.h"
+#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -41,7 +46,7 @@ namespace views {
 
 // Convenience for scrolling the view such that the origin is visible.
 static void ScrollToVisible(View* view) {
-  view->ScrollRectToVisible(0, 0, view->width(), view->height());
+  view->ScrollRectToVisible(gfx::Rect(gfx::Point(), view->size()));
 }
 
 // MenuScrollTask --------------------------------------------------------------
@@ -96,14 +101,10 @@ class MenuController::MenuScrollTask {
     const int delta_y = static_cast<int>(
         (Time::Now() - start_scroll_time_).InMilliseconds() *
         pixels_per_second_ / 1000);
-    int target_y = start_y_;
-    if (is_scrolling_up_)
-      target_y = std::max(0, target_y - delta_y);
-    else
-      target_y = std::min(submenu_->height() - vis_rect.height(),
-                          target_y + delta_y);
-    submenu_->ScrollRectToVisible(vis_rect.x(), target_y, vis_rect.width(),
-                                  vis_rect.height());
+    vis_rect.set_y(is_scrolling_up_ ?
+        std::max(0, start_y_ - delta_y) :
+        std::min(submenu_->height() - vis_rect.height(), start_y_ + delta_y));
+    submenu_->ScrollRectToVisible(vis_rect);
   }
 
   // SubmenuView being scrolled.
@@ -143,11 +144,12 @@ static int nested_depth = 0;
 #endif
 
 MenuItemView* MenuController::Run(gfx::NativeWindow parent,
+                                  MenuButton* button,
                                   MenuItemView* root,
                                   const gfx::Rect& bounds,
                                   MenuItemView::AnchorPosition position,
                                   int* result_mouse_event_flags) {
-  exit_all_ = false;
+  exit_type_ = EXIT_NONE;
   possible_drag_ = false;
 
   bool nested_menu = showing_;
@@ -168,19 +170,9 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
   // Reset current state.
   pending_state_ = State();
   state_ = State();
-  pending_state_.initial_bounds = bounds;
-  if (bounds.height() > 1) {
-    // Inset the bounds slightly, otherwise drag coordinates don't line up
-    // nicely and menus close prematurely.
-    pending_state_.initial_bounds.Inset(0, 1);
-  }
-  pending_state_.anchor = position;
-  owner_ = parent;
+  UpdateInitialLocation(bounds, position);
 
-  // Calculate the bounds of the monitor we'll show menus on. Do this once to
-  // avoid repeated system queries for the info.
-  pending_state_.monitor_bounds = Screen::GetMonitorAreaNearestPoint(
-      bounds.origin());
+  owner_ = parent;
 
   // Set the selection, which opens the initial menu.
   SetSelection(root, true, true);
@@ -190,6 +182,8 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
     // notification when the drag has finished.
     StartCancelAllTimer();
     return NULL;
+  } else if (button) {
+    menu_button_ = button;
   }
 
 #ifdef DEBUG_MENU
@@ -234,15 +228,23 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
   if (result_mouse_event_flags)
     *result_mouse_event_flags = result_mouse_event_flags_;
 
-  if (nested_menu && result) {
-    // We're nested and about to return a value. The caller might enter another
-    // blocking loop. We need to make sure all menus are hidden before that
-    // happens otherwise the menus will stay on screen.
-    CloseAllNestedMenus();
+  if (exit_type_ == EXIT_OUTERMOST) {
+    exit_type_ = EXIT_NONE;
+  } else {
+    if (nested_menu && result) {
+      // We're nested and about to return a value. The caller might enter
+      // another blocking loop. We need to make sure all menus are hidden
+      // before that happens otherwise the menus will stay on screen.
+      CloseAllNestedMenus();
 
-    // Set exit_all_ to true, which makes sure all nested loops exit
-    // immediately.
-    exit_all_ = true;
+      // Set exit_all_, which makes sure all nested loops exit immediately.
+      exit_type_ = EXIT_ALL;
+    }
+  }
+
+  if (menu_button_) {
+    menu_button_->SetState(CustomButton::BS_NORMAL);
+    menu_button_->SchedulePaint();
   }
 
   return result;
@@ -292,7 +294,7 @@ void MenuController::Cancel(bool all) {
   }
 
   MenuItemView* selected = state_.item;
-  exit_all_ = all;
+  exit_type_ = all ? EXIT_ALL : EXIT_OUTERMOST;
 
   // Hide windows immediately.
   SetSelection(NULL, false, true);
@@ -316,8 +318,7 @@ void MenuController::OnMousePressed(SubmenuView* source,
   if (!blocking_run_)
     return;
 
-  MenuPart part =
-      GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
   if (part.is_scroll())
     return;  // Ignore presses on scroll buttons.
 
@@ -346,8 +347,7 @@ void MenuController::OnMousePressed(SubmenuView* source,
   } else {
     if (part.menu->GetDelegate()->CanDrag(part.menu)) {
       possible_drag_ = true;
-      press_x_ = event.x();
-      press_y_ = event.y();
+      press_pt_ = event.location();
     }
     if (part.menu->HasSubmenu())
       open_submenu = true;
@@ -362,35 +362,30 @@ void MenuController::OnMouseDragged(SubmenuView* source,
 #ifdef DEBUG_MENU
   DLOG(INFO) << "OnMouseDragged source=" << source;
 #endif
-  MenuPart part =
-      GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
   UpdateScrolling(part);
 
   if (!blocking_run_)
     return;
 
   if (possible_drag_) {
-    if (View::ExceededDragThreshold(event.x() - press_x_,
-                                    event.y() - press_y_)) {
+    if (View::ExceededDragThreshold(event.x() - press_pt_.x(),
+                                    event.y() - press_pt_.y())) {
       MenuItemView* item = state_.item;
       DCHECK(item);
       // Points are in the coordinates of the submenu, need to map to that of
       // the selected item. Additionally source may not be the parent of
       // the selected item, so need to map to screen first then to item.
-      gfx::Point press_loc(press_x_, press_y_);
+      gfx::Point press_loc(press_pt_);
       View::ConvertPointToScreen(source->GetScrollViewContainer(), &press_loc);
       View::ConvertPointToView(NULL, item, &press_loc);
-      gfx::Point drag_loc(event.location());
-      View::ConvertPointToScreen(source->GetScrollViewContainer(), &drag_loc);
-      View::ConvertPointToView(NULL, item, &drag_loc);
       gfx::Canvas canvas(item->width(), item->height(), false);
       item->Paint(&canvas, true);
 
       OSExchangeData data;
       item->GetDelegate()->WriteDragData(item, &data);
-      drag_utils::SetDragImageOnDataObject(canvas, item->width(),
-                                           item->height(), press_loc.x(),
-                                           press_loc.y(), &data);
+      drag_utils::SetDragImageOnDataObject(canvas, item->size(), press_loc,
+                                           &data);
       StopScrolling();
       int drag_ops = item->GetDelegate()->GetDragOperations(item);
       item->GetRootView()->StartDragForViewFromMouseEvent(
@@ -409,6 +404,8 @@ void MenuController::OnMouseDragged(SubmenuView* source,
     if (!part.menu)
       part.menu = source->GetMenuItem();
     SetSelection(part.menu ? part.menu : state_.item, true, false);
+  } else if (part.type == MenuPart::NONE) {
+    ShowSiblingMenu(source, event);
   }
 }
 
@@ -423,8 +420,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
   DCHECK(state_.item);
   possible_drag_ = false;
   DCHECK(blocking_run_);
-  MenuPart part =
-      GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
   if (event.IsRightMouseButton() && (part.type == MenuPart::MENU_ITEM &&
                                      part.menu)) {
     // Set the selection immediately, making sure the submenu is only open
@@ -436,12 +432,16 @@ void MenuController::OnMouseReleased(SubmenuView* source,
     View::ConvertPointToScreen(source->GetScrollViewContainer(), &loc);
 
     // If we open a context menu just return now
-    if (part.menu->GetDelegate()->ShowContextMenu(
-        part.menu, part.menu->GetCommand(), loc.x(), loc.y(), true))
+    if (part.menu->GetDelegate()->ShowContextMenu(part.menu,
+        part.menu->GetCommand(), loc, true))
       return;
   }
 
-  if (!part.is_scroll() && part.menu && !part.menu->HasSubmenu()) {
+  // We can use Ctrl+click or the middle mouse button to recursively open urls
+  // for selected folder menu items. If it's only a left click, show the
+  // contents of the folder.
+  if (!part.is_scroll() && part.menu && !(part.menu->HasSubmenu() &&
+      (event.GetFlags() == MouseEvent::EF_LEFT_BUTTON_DOWN))) {
     if (part.menu->GetDelegate()->IsTriggerableEvent(event)) {
       Accept(part.menu, event.GetFlags());
       return;
@@ -460,12 +460,14 @@ void MenuController::OnMouseMoved(SubmenuView* source,
   if (showing_submenu_)
     return;
 
-  MenuPart part =
-      GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
 
   UpdateScrolling(part);
 
   if (!blocking_run_)
+    return;
+
+  if (part.type == MenuPart::NONE && ShowSiblingMenu(source, event))
     return;
 
   if (part.type == MenuPart::MENU_ITEM && part.menu) {
@@ -514,12 +516,9 @@ int MenuController::OnDragUpdated(SubmenuView* source,
 
   gfx::Point screen_loc(event.location());
   View::ConvertPointToScreen(source, &screen_loc);
-  if (valid_drop_coordinates_ && screen_loc.x() == drop_x_ &&
-      screen_loc.y() == drop_y_) {
+  if (valid_drop_coordinates_ && screen_loc == drop_pt_)
     return last_drop_operation_;
-  }
-  drop_x_ = screen_loc.x();
-  drop_y_ = screen_loc.y();
+  drop_pt_ = screen_loc;
   valid_drop_coordinates_ = true;
 
   MenuItemView* menu_item = GetMenuItemAt(source, event.x(), event.y());
@@ -542,10 +541,9 @@ int MenuController::OnDragUpdated(SubmenuView* source,
           (menu_item_loc.y() > kDropBetweenPixels &&
            menu_item_loc.y() < (menu_item_height - kDropBetweenPixels))) {
         drop_position = MenuDelegate::DROP_ON;
-      } else if (menu_item_loc.y() < menu_item_height / 2) {
-        drop_position = MenuDelegate::DROP_BEFORE;
       } else {
-        drop_position = MenuDelegate::DROP_AFTER;
+        drop_position = (menu_item_loc.y() < menu_item_height / 2) ?
+            MenuDelegate::DROP_BEFORE : MenuDelegate::DROP_AFTER;
       }
       query_menu_item = menu_item;
     } else {
@@ -555,17 +553,12 @@ int MenuController::OnDragUpdated(SubmenuView* source,
     drop_operation = menu_item->GetDelegate()->GetDropOperation(
         query_menu_item, event, &drop_position);
 
-    if (menu_item->HasSubmenu()) {
-      // The menu has a submenu, schedule the submenu to open.
-      SetSelection(menu_item, true, false);
-    } else {
-      SetSelection(menu_item, false, false);
-    }
+    // If the menu has a submenu, schedule the submenu to open.
+    SetSelection(menu_item, menu_item->HasSubmenu(), false);
 
     if (drop_position == MenuDelegate::DROP_NONE ||
-        drop_operation == DragDropTypes::DRAG_NONE) {
+        drop_operation == DragDropTypes::DRAG_NONE)
       menu_item = NULL;
-    }
   } else {
     SetSelection(source->GetMenuItem(), true, false);
   }
@@ -601,7 +594,7 @@ int MenuController::OnPerformDrop(SubmenuView* source,
 
   // Set state such that we exit.
   showing_ = false;
-  exit_all_ = true;
+  exit_type_ = EXIT_ALL;
 
   if (!IsBlockingRun())
     item->GetRootMenuItem()->DropMenuClosed(false);
@@ -644,7 +637,7 @@ void MenuController::SetActiveInstance(MenuController* controller) {
 bool MenuController::Dispatch(const MSG& msg) {
   DCHECK(blocking_run_);
 
-  if (exit_all_) {
+  if (exit_type_ == EXIT_ALL) {
     // We must translate/dispatch the message here, otherwise we would drop
     // the message on the floor.
     TranslateMessage(&msg);
@@ -659,8 +652,8 @@ bool MenuController::Dispatch(const MSG& msg) {
       if (item && item->GetRootMenuItem() != item) {
         gfx::Point screen_loc(0, item->height());
         View::ConvertPointToScreen(item, &screen_loc);
-        item->GetDelegate()->ShowContextMenu(
-            item, item->GetCommand(), screen_loc.x(), screen_loc.y(), false);
+        item->GetDelegate()->ShowContextMenu(item, item->GetCommand(),
+                                             screen_loc, false);
       }
       return true;
     }
@@ -693,19 +686,21 @@ bool MenuController::Dispatch(const MSG& msg) {
   }
   TranslateMessage(&msg);
   DispatchMessage(&msg);
-  return !exit_all_;
+  return exit_type_ == EXIT_NONE;
 }
 
 #else
 bool MenuController::Dispatch(GdkEvent* event) {
   gtk_main_do_event(event);
 
-  if (exit_all_)
+  if (exit_type_ == EXIT_ALL)
     return false;
 
   switch (event->type) {
     case GDK_KEY_PRESS: {
-      if (!OnKeyDown(event->key.keyval))
+      base::KeyboardCode win_keycode =
+          base::WindowsKeyCodeForGdkKeyCode(event->key.keyval);
+      if (!OnKeyDown(win_keycode))
         return false;
       guint32 keycode = gdk_keyval_to_unicode(event->key.keyval);
       if (keycode)
@@ -717,7 +712,7 @@ bool MenuController::Dispatch(GdkEvent* event) {
       break;
   }
 
-  return !exit_all_;
+  return exit_type_ == EXIT_NONE;
 }
 #endif
 
@@ -741,14 +736,14 @@ bool MenuController::OnKeyDown(int key_code
     // Handling of VK_RIGHT and VK_LEFT is different depending on the UI
     // layout.
     case base::VKEY_RIGHT:
-      if (l10n_util::TextDirection() == l10n_util::RIGHT_TO_LEFT)
+      if (base::i18n::IsRTL())
         CloseSubmenu();
       else
         OpenSubmenuChangeSelectionIfCan();
       break;
 
     case base::VKEY_LEFT:
-      if (l10n_util::TextDirection() == l10n_util::RIGHT_TO_LEFT)
+      if (base::i18n::IsRTL())
         OpenSubmenuChangeSelectionIfCan();
       else
         CloseSubmenu();
@@ -795,7 +790,7 @@ bool MenuController::OnKeyDown(int key_code
 MenuController::MenuController(bool blocking)
     : blocking_run_(blocking),
       showing_(false),
-      exit_all_(false),
+      exit_type_(EXIT_NONE),
       did_capture_(false),
       result_(NULL),
       result_mouse_event_flags_(0),
@@ -803,7 +798,8 @@ MenuController::MenuController(bool blocking)
       owner_(NULL),
       possible_drag_(false),
       valid_drop_coordinates_(false),
-      showing_submenu_(false) {
+      showing_submenu_(false),
+      menu_button_(NULL) {
 #ifdef DEBUG_MENU
   instance_count++;
   DLOG(INFO) << "created MC, count=" << instance_count;
@@ -820,11 +816,90 @@ MenuController::~MenuController() {
 #endif
 }
 
+void MenuController::UpdateInitialLocation(
+    const gfx::Rect& bounds,
+    MenuItemView::AnchorPosition position) {
+  pending_state_.initial_bounds = bounds;
+  if (bounds.height() > 1) {
+    // Inset the bounds slightly, otherwise drag coordinates don't line up
+    // nicely and menus close prematurely.
+    pending_state_.initial_bounds.Inset(0, 1);
+  }
+  pending_state_.anchor = position;
+
+  // Calculate the bounds of the monitor we'll show menus on. Do this once to
+  // avoid repeated system queries for the info.
+  pending_state_.monitor_bounds = Screen::GetMonitorAreaNearestPoint(
+      bounds.origin());
+}
+
 void MenuController::Accept(MenuItemView* item, int mouse_event_flags) {
   DCHECK(IsBlockingRun());
   result_ = item;
-  exit_all_ = true;
+  if (item && !menu_stack_.empty() &&
+      !item->GetDelegate()->ShouldCloseAllMenusOnExecute(item->GetCommand())) {
+    exit_type_ = EXIT_OUTERMOST;
+  } else {
+    exit_type_ = EXIT_ALL;
+  }
   result_mouse_event_flags_ = mouse_event_flags;
+}
+
+bool MenuController::ShowSiblingMenu(SubmenuView* source, const MouseEvent& e) {
+  if (!menu_stack_.empty() || !menu_button_)
+    return false;
+
+  View* source_view = source->GetScrollViewContainer();
+  if (e.x() >= 0 && e.x() < source_view->width() && e.y() >= 0 &&
+      e.y() < source_view->height()) {
+    // The mouse is over the menu, no need to continue.
+    return false;
+  }
+
+  gfx::NativeWindow window_under_mouse = Screen::GetWindowAtCursorScreenPoint();
+  if (window_under_mouse != owner_)
+    return false;
+
+  // The user moved the mouse outside the menu and over the owning window. See
+  // if there is a sibling menu we should show.
+  gfx::Point screen_point(e.location());
+  View::ConvertPointToScreen(source_view, &screen_point);
+  MenuItemView::AnchorPosition anchor;
+  bool has_mnemonics;
+  MenuButton* button = NULL;
+  MenuItemView* alt_menu = source->GetMenuItem()->GetDelegate()->
+      GetSiblingMenu(source->GetMenuItem()->GetRootMenuItem(),
+                     screen_point, &anchor, &has_mnemonics, &button);
+  if (!alt_menu || alt_menu == state_.item)
+    return false;
+
+  if (!button) {
+    // If the delegate returns a menu, they must also return a button.
+    NOTREACHED();
+    return false;
+  }
+
+  // There is a sibling menu, update the button state, hide the current menu
+  // and show the new one.
+  menu_button_->SetState(CustomButton::BS_NORMAL);
+  menu_button_->SchedulePaint();
+  menu_button_ = button;
+  menu_button_->SetState(CustomButton::BS_PUSHED);
+  menu_button_->SchedulePaint();
+
+  // Need to reset capture when we show the menu again, otherwise we aren't
+  // going to get any events.
+  did_capture_ = false;
+  gfx::Point screen_menu_loc;
+  View::ConvertPointToScreen(button, &screen_menu_loc);
+  // Subtract 1 from the height to make the popup flush with the button border.
+  UpdateInitialLocation(gfx::Rect(screen_menu_loc.x(), screen_menu_loc.y(),
+                                  button->width(), button->height() - 1),
+                        anchor);
+  alt_menu->PrepareForRun(has_mnemonics);
+  alt_menu->controller_ = this;
+  SetSelection(alt_menu, true, true);
+  return true;
 }
 
 void MenuController::CloseAllNestedMenus() {
@@ -1035,6 +1110,11 @@ void MenuController::OpenMenu(MenuItemView* item) {
     return;
   }
 
+  OpenMenuImpl(item, true);
+  did_capture_ = true;
+}
+
+void MenuController::OpenMenuImpl(MenuItemView* item, bool show) {
   bool prefer_leading =
       state_.open_leading.empty() ? true : state_.open_leading.back();
   bool resulting_direction;
@@ -1043,9 +1123,26 @@ void MenuController::OpenMenu(MenuItemView* item) {
   state_.open_leading.push_back(resulting_direction);
   bool do_capture = (!did_capture_ && blocking_run_);
   showing_submenu_ = true;
-  item->GetSubmenu()->ShowAt(owner_, bounds, do_capture);
+  if (show)
+    item->GetSubmenu()->ShowAt(owner_, bounds, do_capture);
+  else
+    item->GetSubmenu()->Reposition(bounds);
   showing_submenu_ = false;
-  did_capture_ = true;
+}
+
+void MenuController::MenuChildrenChanged(MenuItemView* item) {
+  DCHECK(item);
+  DCHECK(item->GetSubmenu()->IsShowing());
+
+  // Currently this only supports adjusting the bounds of the last menu.
+  DCHECK(item == state_.item->GetParentMenuItem());
+
+  // Make sure the submenu isn't showing for the current item (the position may
+  // have changed or the menu removed). This also moves the selection back to
+  // the parent, which handles the case where the selected item was removed.
+  SetSelection(state_.item->GetParentMenuItem(), true, true);
+
+  OpenMenuImpl(item, false);
 }
 
 void MenuController::BuildPathsAndCalculateDiff(

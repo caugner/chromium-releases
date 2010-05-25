@@ -10,19 +10,16 @@
 
 #include "chrome/browser/sync/engine/conflict_resolver.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/engine/syncproto.h"
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
-#include "chrome/browser/sync/util/path_helpers.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
 using syncable::BASE_VERSION;
-using syncable::BOOKMARK_FAVICON;
-using syncable::BOOKMARK_URL;
 using syncable::Blob;
 using syncable::CHANGES_VERSION;
 using syncable::CREATE;
@@ -34,9 +31,7 @@ using syncable::Entry;
 using syncable::ExtendedAttributeKey;
 using syncable::GET_BY_HANDLE;
 using syncable::GET_BY_ID;
-using syncable::GET_BY_PARENTID_AND_DBNAME;
 using syncable::ID;
-using syncable::IS_BOOKMARK_OBJECT;
 using syncable::IS_DEL;
 using syncable::IS_DIR;
 using syncable::IS_UNAPPLIED_UPDATE;
@@ -47,57 +42,29 @@ using syncable::MTIME;
 using syncable::MutableEntry;
 using syncable::MutableExtendedAttribute;
 using syncable::NEXT_ID;
-using syncable::Name;
+using syncable::NON_UNIQUE_NAME;
 using syncable::PARENT_ID;
 using syncable::PREV_ID;
 using syncable::ReadTransaction;
-using syncable::SERVER_BOOKMARK_FAVICON;
-using syncable::SERVER_BOOKMARK_URL;
 using syncable::SERVER_CTIME;
-using syncable::SERVER_IS_BOOKMARK_OBJECT;
 using syncable::SERVER_IS_DEL;
 using syncable::SERVER_IS_DIR;
 using syncable::SERVER_MTIME;
-using syncable::SERVER_NAME;
+using syncable::SERVER_NON_UNIQUE_NAME;
 using syncable::SERVER_PARENT_ID;
 using syncable::SERVER_POSITION_IN_PARENT;
+using syncable::SERVER_SPECIFICS;
 using syncable::SERVER_VERSION;
-using syncable::SINGLETON_TAG;
+using syncable::UNIQUE_CLIENT_TAG;
+using syncable::UNIQUE_SERVER_TAG;
+using syncable::SPECIFICS;
 using syncable::SYNCER;
-using syncable::SyncName;
-using syncable::UNSANITIZED_NAME;
 using syncable::WriteTransaction;
 
 namespace browser_sync {
 
 using std::string;
 using std::vector;
-
-// TODO(ncarter): Remove unique-in-parent title support and name conflicts.
-// static
-syncable::Id SyncerUtil::GetNameConflictingItemId(
-    syncable::BaseTransaction* trans,
-    const syncable::Id& parent_id,
-    const PathString& server_name) {
-
-  Entry same_path(trans, GET_BY_PARENTID_AND_DBNAME, parent_id, server_name);
-  if (same_path.good() && !same_path.GetName().HasBeenSanitized())
-    return same_path.Get(ID);
-  Name doctored_name(server_name);
-  doctored_name.db_value().MakeOSLegal();
-  if (!doctored_name.HasBeenSanitized())
-    return syncable::kNullId;
-  Directory::ChildHandles children;
-  trans->directory()->GetChildHandles(trans, parent_id, &children);
-  Directory::ChildHandles::iterator i = children.begin();
-  while (i != children.end()) {
-    Entry child_entry(trans, GET_BY_HANDLE, *i++);
-    CHECK(child_entry.good());
-    if (0 == ComparePathNames(child_entry.Get(UNSANITIZED_NAME), server_name))
-      return child_entry.Get(ID);
-  }
-  return syncable::kNullId;
-}
 
 // Returns the number of unsynced entries.
 // static
@@ -130,7 +97,12 @@ void SyncerUtil::ChangeEntryIDAndUpdateChildren(
     while (i != children->end()) {
       MutableEntry child_entry(trans, GET_BY_HANDLE, *i++);
       CHECK(child_entry.good());
-      CHECK(child_entry.Put(PARENT_ID, new_id));
+      // Use the unchecked setter here to avoid touching the child's NEXT_ID
+      // and PREV_ID fields (which Put(PARENT_ID) would normally do to
+      // maintain linked-list invariants).  In this case, NEXT_ID and PREV_ID
+      // among the children will be valid after the loop, since we update all
+      // the children at once.
+      child_entry.PutParentIdPropertyOnly(new_id);
     }
   }
   // Update Id references on the previous and next nodes in the sibling
@@ -155,6 +127,61 @@ void SyncerUtil::ChangeEntryIDAndUpdateChildren(
     const syncable::Id& new_id) {
   syncable::Directory::ChildHandles children;
   ChangeEntryIDAndUpdateChildren(trans, entry, new_id, &children);
+}
+
+// static
+void SyncerUtil::AttemptReuniteClientTag(syncable::WriteTransaction* trans,
+                                         const SyncEntity& server_entry) {
+
+  // Expected entry points of this function:
+  // SyncEntity has NOT been applied to SERVER fields.
+  // SyncEntity has NOT been applied to LOCAL fields.
+  // DB has not yet been modified, no entries created for this update.
+
+  // When a server sends down a client tag, the following cases can occur:
+  // 1) Client has entry for tag already, ID is server style, matches
+  // 2) Client has entry for tag already, ID is server, doesn't match.
+  // 3) Client has entry for tag already, ID is local, (never matches)
+  // 4) Client has no entry for tag
+
+  // Case 1, we don't have to do anything since the update will
+  // work just fine. Update will end up in the proper entry, via ID lookup.
+  // Case 2 - Should never happen. We'd need to change the
+  // ID of the local entry, we refuse. We'll skip this in VERIFY.
+  // Case 3 - We need to replace the local ID with the server ID. Conflict
+  // resolution must occur, but this is prior to update application! This case
+  // should be rare. For now, clobber client changes entirely.
+  // Case 4 - Perfect. Same as case 1.
+
+  syncable::MutableEntry local_entry(trans, syncable::GET_BY_CLIENT_TAG,
+                                     server_entry.client_defined_unique_tag());
+
+  // The SyncAPI equivalent of this function will return !good if IS_DEL.
+  // The syncable version will return good even if IS_DEL.
+  // TODO(chron): Unit test the case with IS_DEL and make sure.
+  if (local_entry.good()) {
+    if (local_entry.Get(ID).ServerKnows()) {
+      // In release config, this will just continue and we'll
+      // throw VERIFY_FAIL later.
+      // This is Case 1 on success, Case 2 if it fails.
+      DCHECK(local_entry.Get(ID) == server_entry.id());
+    } else {
+      // Case 3: We have a local entry with the same client tag.
+      // We can't have two updates with the same client tag though.
+      // One of these has to go. Let's delete the client entry and move it
+      // aside. This will cause a delete + create. The client API user must
+      // handle this correctly. In this situation the client must have created
+      // this entry but not yet committed it for the first time. Usually the
+      // client probably wants the server data for this instead.
+      // Other strategies to handle this are a bit flaky.
+      DCHECK(local_entry.Get(IS_UNAPPLIED_UPDATE) == false);
+      local_entry.Put(IS_UNSYNCED, false);
+      local_entry.Put(IS_DEL, true);
+      // Needs to get out of the index before our update can be put in.
+      local_entry.Put(UNIQUE_CLIENT_TAG, "");
+    }
+  }
+  // Case 4: Client has no entry for tag, all green.
 }
 
 // static
@@ -220,34 +247,7 @@ void SyncerUtil::AttemptReuniteLostCommitResponses(
 UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
     syncable::WriteTransaction* const trans,
     syncable::MutableEntry* const entry,
-    SyncerSession* const session) {
-
-  syncable::Id conflicting_id;
-  UpdateAttemptResponse result =
-     AttemptToUpdateEntryWithoutMerge(trans, entry, session,
-                                      &conflicting_id);
-  if (result != NAME_CONFLICT) {
-    return result;
-  }
-  syncable::MutableEntry same_path(trans, syncable::GET_BY_ID, conflicting_id);
-  CHECK(same_path.good());
-
-  ConflictResolver* resolver = session->resolver();
-
-  if (resolver &&
-      resolver->AttemptItemMerge(trans, &same_path, entry)) {
-    return SUCCESS;
-  }
-  LOG(INFO) << "Not updating item, path collision. Update:\n" << *entry
-            << "\nSame Path:\n" << same_path;
-  return CONFLICT;
-}
-
-// static
-UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntryWithoutMerge(
-    syncable::WriteTransaction* const trans,
-    syncable::MutableEntry* const entry,
-    SyncerSession* const session, syncable::Id* const conflicting_id) {
+    ConflictResolver* resolver) {
 
   CHECK(entry->good());
   if (!entry->Get(IS_UNAPPLIED_UPDATE))
@@ -278,16 +278,6 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntryWithoutMerge(
         return CONFLICT;
       }
     }
-    PathString server_name = entry->Get(SERVER_NAME);
-    syncable::Id conflict_id =
-        SyncerUtil::GetNameConflictingItemId(trans,
-                                 entry->Get(SERVER_PARENT_ID),
-                                 server_name);
-    if (conflict_id != syncable::kNullId && conflict_id != id) {
-      if (conflicting_id)
-        *conflicting_id = conflict_id;
-      return NAME_CONFLICT;
-    }
   } else if (entry->Get(IS_DIR)) {
     Directory::ChildHandles handles;
     trans->directory()->GetChildHandles(trans, id, &handles);
@@ -304,12 +294,35 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntryWithoutMerge(
   return SUCCESS;
 }
 
+namespace {
+// Helper to synthesize a new-style sync_pb::EntitySpecifics for use locally,
+// when the server speaks only the old sync_pb::SyncEntity_BookmarkData-based
+// protocol.
+void UpdateBookmarkSpecifics(const string& singleton_tag,
+                             const string& url,
+                             const string& favicon_bytes,
+                             MutableEntry* local_entry) {
+  // In the new-style protocol, the server no longer sends bookmark info for
+  // the "google_chrome" folder.  Mimic that here.
+  if (singleton_tag == "google_chrome")
+    return;
+  sync_pb::EntitySpecifics pb;
+  sync_pb::BookmarkSpecifics* bookmark = pb.MutableExtension(sync_pb::bookmark);
+  if (!url.empty())
+    bookmark->set_url(url);
+  if (!favicon_bytes.empty())
+    bookmark->set_favicon(favicon_bytes);
+  local_entry->Put(SERVER_SPECIFICS, pb);
+}
+
+}  // namespace
+
 // Pass in name and checksum because of UTF8 conversion.
 // static
 void SyncerUtil::UpdateServerFieldsFromUpdate(
     MutableEntry* local_entry,
     const SyncEntity& server_entry,
-    const SyncName& name) {
+    const string& name) {
   if (server_entry.deleted()) {
     // The server returns very lightweight replies for deletions, so we don't
     // clobber a bunch of fields on delete.
@@ -324,32 +337,33 @@ void SyncerUtil::UpdateServerFieldsFromUpdate(
   CHECK(local_entry->Get(ID) == server_entry.id())
       << "ID Changing not supported here";
   local_entry->Put(SERVER_PARENT_ID, server_entry.parent_id());
-  local_entry->PutServerName(name);
+  local_entry->Put(SERVER_NON_UNIQUE_NAME, name);
   local_entry->Put(SERVER_VERSION, server_entry.version());
   local_entry->Put(SERVER_CTIME,
       ServerTimeToClientTime(server_entry.ctime()));
   local_entry->Put(SERVER_MTIME,
       ServerTimeToClientTime(server_entry.mtime()));
-  local_entry->Put(SERVER_IS_BOOKMARK_OBJECT, server_entry.has_bookmarkdata());
   local_entry->Put(SERVER_IS_DIR, server_entry.IsFolder());
-  if (server_entry.has_singleton_tag()) {
-    PathString tag;
-    AppendUTF8ToPathString(server_entry.singleton_tag(), &tag);
-    local_entry->Put(SINGLETON_TAG, tag);
+  if (server_entry.has_server_defined_unique_tag()) {
+    const string& tag = server_entry.server_defined_unique_tag();
+    local_entry->Put(UNIQUE_SERVER_TAG, tag);
   }
-  if (server_entry.has_bookmarkdata() && !server_entry.deleted()) {
+  if (server_entry.has_client_defined_unique_tag()) {
+    const string& tag = server_entry.client_defined_unique_tag();
+    local_entry->Put(UNIQUE_CLIENT_TAG, tag);
+  }
+  // Store the datatype-specific part as a protobuf.
+  if (server_entry.has_specifics()) {
+    DCHECK(server_entry.GetModelType() != syncable::UNSPECIFIED)
+        << "Storing unrecognized datatype in sync database.";
+    local_entry->Put(SERVER_SPECIFICS, server_entry.specifics());
+  } else if (server_entry.has_bookmarkdata()) {
+    // Legacy protocol response for bookmark data.
     const SyncEntity::BookmarkData& bookmark = server_entry.bookmarkdata();
-    if (bookmark.has_bookmark_url()) {
-      PathString url;
-      AppendUTF8ToPathString(bookmark.bookmark_url(), &url);
-      local_entry->Put(SERVER_BOOKMARK_URL, url);
-    }
-    if (bookmark.has_bookmark_favicon()) {
-      Blob favicon_blob;
-      SyncerProtoUtil::CopyProtoBytesIntoBlob(bookmark.bookmark_favicon(),
-                                              &favicon_blob);
-      local_entry->Put(SERVER_BOOKMARK_FAVICON, favicon_blob);
-    }
+    UpdateBookmarkSpecifics(server_entry.server_defined_unique_tag(),
+                            bookmark.bookmark_url(),
+                            bookmark.bookmark_favicon(),
+                            local_entry);
   }
   if (server_entry.has_position_in_parent()) {
     local_entry->Put(SERVER_POSITION_IN_PARENT,
@@ -375,10 +389,9 @@ void SyncerUtil::ApplyExtendedAttributes(
     const sync_pb::ExtendedAttributes & extended_attributes =
       server_entry.extended_attributes();
     for (int i = 0; i < extended_attributes.extendedattribute_size(); i++) {
-      PathString pathstring_key;
-      AppendUTF8ToPathString(
-          extended_attributes.extendedattribute(i).key(), &pathstring_key);
-      ExtendedAttributeKey key(local_entry->Get(META_HANDLE), pathstring_key);
+      const string& string_key =
+          extended_attributes.extendedattribute(i).key();
+      ExtendedAttributeKey key(local_entry->Get(META_HANDLE), string_key);
       MutableExtendedAttribute local_attribute(local_entry->write_transaction(),
           CREATE, key);
       SyncerProtoUtil::CopyProtoBytesIntoBlob(
@@ -429,7 +442,7 @@ bool SyncerUtil::ServerAndLocalEntriesMatch(syncable::Entry* entry) {
   if (entry->Get(IS_DEL) && entry->Get(SERVER_IS_DEL))
     return true;
   // Name should exactly match here.
-  if (!entry->SyncNameMatchesServerName()) {
+  if (!(entry->Get(NON_UNIQUE_NAME) == entry->Get(SERVER_NON_UNIQUE_NAME))) {
     LOG(WARNING) << "Unsanitized name mismatch";
     return false;
   }
@@ -446,13 +459,11 @@ bool SyncerUtil::ServerAndLocalEntriesMatch(syncable::Entry* entry) {
     return false;
   }
 
-  if (entry->Get(IS_BOOKMARK_OBJECT)) {
-    if (!entry->Get(IS_DIR)) {
-      if (entry->Get(BOOKMARK_URL) != entry->Get(SERVER_BOOKMARK_URL)) {
-        LOG(WARNING) << "Bookmark URL mismatch";
-        return false;
-      }
-    }
+  // TODO(ncarter): This is unfortunately heavyweight.  Can we do better?
+  if (entry->Get(SPECIFICS).SerializeAsString() !=
+      entry->Get(SERVER_SPECIFICS).SerializeAsString()) {
+    LOG(WARNING) << "Specifics mismatch";
+    return false;
   }
   if (entry->Get(IS_DIR))
     return true;
@@ -490,35 +501,19 @@ void SyncerUtil::UpdateLocalDataFromServerData(
     syncable::MutableEntry* entry) {
   CHECK(!entry->Get(IS_UNSYNCED));
   CHECK(entry->Get(IS_UNAPPLIED_UPDATE));
+
   LOG(INFO) << "Updating entry : " << *entry;
-  entry->Put(IS_BOOKMARK_OBJECT, entry->Get(SERVER_IS_BOOKMARK_OBJECT));
+  // Start by setting the properties that determine the model_type.
+  entry->Put(SPECIFICS, entry->Get(SERVER_SPECIFICS));
+  entry->Put(IS_DIR, entry->Get(SERVER_IS_DIR));
   // This strange dance around the IS_DEL flag avoids problems when setting
   // the name.
+  // TODO(chron): Is this still an issue? Unit test this codepath.
   if (entry->Get(SERVER_IS_DEL)) {
     entry->Put(IS_DEL, true);
   } else {
-    Name name = Name::FromSyncName(entry->GetServerName());
-    name.db_value().MakeOSLegal();
-    bool was_doctored_before_made_noncolliding = name.HasBeenSanitized();
-    name.db_value().MakeNoncollidingForEntry(trans,
-                                             entry->Get(SERVER_PARENT_ID),
-                                             entry);
-    bool was_doctored = name.HasBeenSanitized();
-    if (was_doctored) {
-      // If we're changing the name of entry, either its name should be
-      // illegal, or some other entry should have an unsanitized name.
-      // There's should be a CHECK in every code path.
-      Entry blocking_entry(trans, GET_BY_PARENTID_AND_DBNAME,
-                           entry->Get(SERVER_PARENT_ID),
-                           name.value());
-      if (blocking_entry.good())
-        CHECK(blocking_entry.GetName().HasBeenSanitized());
-      else
-        CHECK(was_doctored_before_made_noncolliding);
-    }
-    CHECK(entry->PutParentIdAndName(entry->Get(SERVER_PARENT_ID), name))
-      << "Name Clash in UpdateLocalDataFromServerData: "
-      << *entry;
+    entry->Put(NON_UNIQUE_NAME, entry->Get(SERVER_NON_UNIQUE_NAME));
+    entry->Put(PARENT_ID, entry->Get(SERVER_PARENT_ID));
     CHECK(entry->Put(IS_DEL, false));
     Id new_predecessor = ComputePrevIdFromServerPosition(trans, entry,
         entry->Get(SERVER_PARENT_ID));
@@ -529,10 +524,7 @@ void SyncerUtil::UpdateLocalDataFromServerData(
   entry->Put(CTIME, entry->Get(SERVER_CTIME));
   entry->Put(MTIME, entry->Get(SERVER_MTIME));
   entry->Put(BASE_VERSION, entry->Get(SERVER_VERSION));
-  entry->Put(IS_DIR, entry->Get(SERVER_IS_DIR));
   entry->Put(IS_DEL, entry->Get(SERVER_IS_DEL));
-  entry->Put(BOOKMARK_URL, entry->Get(SERVER_BOOKMARK_URL));
-  entry->Put(BOOKMARK_FAVICON, entry->Get(SERVER_BOOKMARK_FAVICON));
   entry->Put(IS_UNAPPLIED_UPDATE, false);
 }
 
@@ -690,7 +682,7 @@ VerifyResult SyncerUtil::VerifyUpdateConsistency(
     syncable::MutableEntry* same_id,
     const bool deleted,
     const bool is_directory,
-    const bool has_bookmark_data) {
+    syncable::ModelType model_type) {
 
   CHECK(same_id->good());
 
@@ -698,16 +690,22 @@ VerifyResult SyncerUtil::VerifyUpdateConsistency(
   if (deleted)
     return VERIFY_SUCCESS;
 
+  if (model_type == syncable::UNSPECIFIED) {
+    // This update is to an item of a datatype we don't recognize. The server
+    // shouldn't have sent it to us.  Throw it on the ground.
+    return VERIFY_SKIP;
+  }
+
   if (same_id->Get(SERVER_VERSION) > 0) {
     // Then we've had an update for this entry before.
     if (is_directory != same_id->Get(SERVER_IS_DIR) ||
-        has_bookmark_data != same_id->Get(SERVER_IS_BOOKMARK_OBJECT)) {
+        model_type != same_id->GetServerModelType()) {
       if (same_id->Get(IS_DEL)) {  // If we've deleted the item, we don't care.
         return VERIFY_SKIP;
       } else {
         LOG(ERROR) << "Server update doesn't agree with previous updates. ";
         LOG(ERROR) << " Entry: " << *same_id;
-        LOG(ERROR) << " Update: " << SyncEntityDebugString(entry);
+        LOG(ERROR) << " Update: " << SyncerProtoUtil::SyncEntityDebugString(entry);
         return VERIFY_FAIL;
       }
     }
@@ -730,10 +728,10 @@ VerifyResult SyncerUtil::VerifyUpdateConsistency(
   if (same_id->Get(BASE_VERSION) > 0) {
     // We've committed this entry in the past.
     if (is_directory != same_id->Get(IS_DIR) ||
-        has_bookmark_data != same_id->Get(IS_BOOKMARK_OBJECT)) {
+        model_type != same_id->GetModelType()) {
       LOG(ERROR) << "Server update doesn't agree with committed item. ";
       LOG(ERROR) << " Entry: " << *same_id;
-      LOG(ERROR) << " Update: " << SyncEntityDebugString(entry);
+      LOG(ERROR) << " Update: " << SyncerProtoUtil::SyncEntityDebugString(entry);
       return VERIFY_FAIL;
     }
     if (same_id->Get(BASE_VERSION) == entry.version() &&
@@ -743,13 +741,13 @@ VerifyResult SyncerUtil::VerifyUpdateConsistency(
       // fail the verification and deal with it when we ApplyUpdates.
       LOG(ERROR) << "Server update doesn't match local data with same "
           "version. A bug should be filed. Entry: " << *same_id <<
-          "Update: " << SyncEntityDebugString(entry);
+          "Update: " << SyncerProtoUtil::SyncEntityDebugString(entry);
       return VERIFY_FAIL;
     }
     if (same_id->Get(SERVER_VERSION) > entry.version()) {
       LOG(WARNING) << "We've already seen a more recent update from the server";
       LOG(WARNING) << " Entry: " << *same_id;
-      LOG(WARNING) << " Update: " << SyncEntityDebugString(entry);
+      LOG(WARNING) << " Update: " << SyncerProtoUtil::SyncEntityDebugString(entry);
       return VERIFY_SKIP;
     }
   }
@@ -764,18 +762,19 @@ VerifyResult SyncerUtil::VerifyUndelete(syncable::WriteTransaction* trans,
                                         syncable::MutableEntry* same_id) {
   CHECK(same_id->good());
   LOG(INFO) << "Server update is attempting undelete. " << *same_id
-            << "Update:" << SyncEntityDebugString(entry);
+            << "Update:" << SyncerProtoUtil::SyncEntityDebugString(entry);
   // Move the old one aside and start over.  It's too tricky to get the old one
   // back into a state that would pass CheckTreeInvariants().
   if (same_id->Get(IS_DEL)) {
     same_id->Put(ID, trans->directory()->NextId());
+    same_id->Put(UNIQUE_CLIENT_TAG, "");
     same_id->Put(BASE_VERSION, CHANGES_VERSION);
     same_id->Put(SERVER_VERSION, 0);
     return VERIFY_SUCCESS;
   }
   if (entry.version() < same_id->Get(SERVER_VERSION)) {
     LOG(WARNING) << "Update older than current server version for" <<
-        *same_id << "Update:" << SyncEntityDebugString(entry);
+        *same_id << "Update:" << SyncerProtoUtil::SyncEntityDebugString(entry);
     return VERIFY_SUCCESS;  // Expected in new sync protocol.
   }
   return VERIFY_UNDECIDED;
@@ -815,8 +814,8 @@ syncable::Id SyncerUtil::ComputePrevIdFromServerPosition(
       // If |candidate| is after |update_entry| according to the server
       // ordering, then we're done.  ID is the tiebreaker.
       if ((candidate.Get(SERVER_POSITION_IN_PARENT) > position_in_parent) ||
-          (candidate.Get(SERVER_POSITION_IN_PARENT) == position_in_parent) &&
-           (candidate.Get(ID) > update_item->Get(ID))) {
+          ((candidate.Get(SERVER_POSITION_IN_PARENT) == position_in_parent) &&
+           (candidate.Get(ID) > update_item->Get(ID)))) {
           return closest_sibling;
       }
     }

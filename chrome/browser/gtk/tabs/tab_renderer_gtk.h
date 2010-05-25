@@ -9,15 +9,15 @@
 #include <map>
 
 #include "app/animation.h"
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
 #include "app/slide_animation.h"
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/string16.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/rect.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace gfx {
@@ -28,8 +28,10 @@ class CustomDrawButton;
 class GtkThemeProvider;
 class TabContents;
 class ThemeProvider;
+class ThrobAnimation;
 
-class TabRendererGtk : public AnimationDelegate {
+class TabRendererGtk : public AnimationDelegate,
+                       public NotificationObserver {
  public:
   // Possible animation states.
   enum AnimationState {
@@ -100,14 +102,26 @@ class TabRendererGtk : public AnimationDelegate {
   // TabContents. If only the loading state was updated, the loading_only flag
   // should be specified. If other things change, set this flag to false to
   // update everything.
-  virtual void UpdateData(TabContents* contents, bool loading_only);
+  virtual void UpdateData(TabContents* contents,
+                          bool phantom,
+                          bool loading_only);
 
-  // Sets the pinned state of the tab.
-  void set_pinned(bool pinned);
-  bool is_pinned() const;
+  // Sets the blocked state of the tab.
+  void SetBlocked(bool pinned);
+  bool is_blocked() const;
 
-  // Are we in the process of animating a pinned state change on this tab?
-  void set_animating_pinned_change(bool value);
+  // Sets the mini-state of the tab.
+  void set_mini(bool mini) { data_.mini = mini; }
+  bool mini() const { return data_.mini; }
+
+  // Sets the phantom state of the tab.
+  void set_phantom(bool phantom) { data_.phantom = phantom; }
+  bool phantom() const { return data_.phantom; }
+
+  // Are we in the process of animating a mini tab state change on this tab?
+  void set_animating_mini_change(bool value) {
+    data_.animating_mini_change = value;
+  }
 
   // Updates the display to reflect the contents of this TabRenderer's model.
   void UpdateFromModel();
@@ -127,6 +141,10 @@ class TabRendererGtk : public AnimationDelegate {
   // Paints the tab into a SkBitmap.
   virtual SkBitmap PaintBitmap();
 
+  // Paints the tab, and keeps the result server-side. The returned surface must
+  // be freed with cairo_surface_destroy().
+  virtual cairo_surface_t* PaintToSurface();
+
   // There is no PaintNow available, so the fastest we can do is schedule a
   // paint with the windowing system.
   virtual void SchedulePaint();
@@ -136,6 +154,11 @@ class TabRendererGtk : public AnimationDelegate {
 
   // Sets the bounds of the tab.
   virtual void SetBounds(const gfx::Rect& bounds);
+
+  // Provide NotificationObserver implementation.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
   // Advance the loading animation to the next frame, or hide the animation if
   // the tab isn't loading.  Returns |true| if the icon area needs to be
@@ -155,8 +178,8 @@ class TabRendererGtk : public AnimationDelegate {
   // available.
   static gfx::Size GetStandardSize();
 
-  // Returns the width for pinned tabs. Pinned tabs always have this width.
-  static int GetPinnedWidth();
+  // Returns the width for mini-tabs. Mini-tabs always have this width.
+  static int GetMiniWidth();
 
   // Loads the images to be used for the tab background.
   static void LoadTabImages();
@@ -184,6 +207,12 @@ class TabRendererGtk : public AnimationDelegate {
   gfx::Rect GetRequisition() const;
 
   GtkWidget* widget() const { return tab_.get(); }
+
+  // Start/stop the mini-tab title animation.
+  void StartMiniTabTitleAnimation();
+  void StopMiniTabTitleAnimation();
+
+  void set_vertical_offset(int offset) { background_offset_y_ = offset; }
 
  protected:
   const gfx::Rect& title_bounds() const { return title_bounds_; }
@@ -218,6 +247,18 @@ class TabRendererGtk : public AnimationDelegate {
   // model, which is tricky since instances of this object can outlive the
   // corresponding objects in the underlying model.
   struct TabData {
+    TabData()
+        : is_default_favicon(false),
+          loading(false),
+          crashed(false),
+          off_the_record(false),
+          show_icon(true),
+          mini(false),
+          blocked(false),
+          animating_mini_change(false),
+          phantom(false) {
+    }
+
     SkBitmap favicon;
     bool is_default_favicon;
     string16 title;
@@ -225,8 +266,10 @@ class TabRendererGtk : public AnimationDelegate {
     bool crashed;
     bool off_the_record;
     bool show_icon;
-    bool pinned;
-    bool animating_pinned_change;
+    bool mini;
+    bool blocked;
+    bool animating_mini_change;
+    bool phantom;
   };
 
   // TODO(jhawkins): Move into TabResources class.
@@ -301,6 +344,11 @@ class TabRendererGtk : public AnimationDelegate {
 
   CustomDrawButton* MakeCloseButton();
 
+  // Gets the throb value for the tab. When a tab is not selected the
+  // active background is drawn at |GetThrobValue()|%. This is used for hover
+  // and mini-tab title change effects.
+  double GetThrobValue();
+
   // Handles the clicked signal for the close button.
   static void OnCloseButtonClicked(GtkWidget* widget, TabRendererGtk* tab);
 
@@ -371,11 +419,19 @@ class TabRendererGtk : public AnimationDelegate {
   // Hover animation.
   scoped_ptr<SlideAnimation> hover_animation_;
 
+  // Animation used when the title of an inactive mini-tab changes.
+  scoped_ptr<ThrobAnimation> mini_title_animation_;
+
   // Contains the loading animation state.
   LoadingAnimation loading_animation_;
 
   // The offset used to paint the tab theme images.
   int background_offset_x_;
+
+  // The vertical offset used to paint the tab theme images. Controlled by the
+  // tabstrip and plumbed here to offset the theme image by the size of the
+  // alignment in the BrowserTitlebar.
+  int background_offset_y_;
 
   GtkThemeProvider* theme_provider_;
 
@@ -384,6 +440,9 @@ class TabRendererGtk : public AnimationDelegate {
 
   // The current color of the close button.
   SkColor close_button_color_;
+
+  // Used to listen for theme change notifications.
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TabRendererGtk);
 };

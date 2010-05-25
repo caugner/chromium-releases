@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,19 @@
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#import "third_party/ocmock/OCMock/OCMock.h"
 
 namespace {
 
-class ClearBrowsingDataControllerTest : public PlatformTest {
+class ClearBrowsingDataControllerTest : public CocoaTest {
  public:
-  ClearBrowsingDataControllerTest() {
+  virtual void SetUp() {
+    CocoaTest::SetUp();
     // Set up some interesting prefs:
     PrefService* prefs = helper_.profile()->GetPrefs();
     prefs->SetBoolean(prefs::kDeleteBrowsingHistory, true);
@@ -30,14 +32,17 @@ class ClearBrowsingDataControllerTest : public PlatformTest {
     prefs->SetBoolean(prefs::kDeleteFormData, false);
     prefs->SetInteger(prefs::kDeleteTimePeriod,
                       BrowsingDataRemover::FOUR_WEEKS);
-
-    controller_.reset(
-      [[ClearBrowsingDataController alloc] initWithProfile:helper_.profile()]);
+    controller_ =
+        [ClearBrowsingDataController controllerForProfile:helper_.profile()];
   }
 
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
+  virtual void TearDown() {
+    [controller_ closeDialog];
+    CocoaTest::TearDown();
+  }
+
   BrowserTestHelper helper_;
-  scoped_nsobject<ClearBrowsingDataController> controller_;
+  ClearBrowsingDataController* controller_;
 };
 
 TEST_F(ClearBrowsingDataControllerTest, InitialState) {
@@ -106,6 +111,39 @@ TEST_F(ClearBrowsingDataControllerTest, PersistToPrefs) {
   EXPECT_FALSE(prefs->GetBoolean(prefs::kDeleteFormData));
   EXPECT_EQ(BrowsingDataRemover::FOUR_WEEKS,
             prefs->GetInteger(prefs::kDeleteTimePeriod));
+}
+
+TEST_F(ClearBrowsingDataControllerTest, SameControllerForProfile) {
+  ClearBrowsingDataController* controller =
+      [ClearBrowsingDataController controllerForProfile:helper_.profile()];
+  EXPECT_EQ(controller_, controller);
+}
+
+TEST_F(ClearBrowsingDataControllerTest, DataRemoverDidFinish) {
+  id observer = [OCMockObject observerMock];
+  // Don't use |controller_| as the object because it will free itself twice
+  // because both |-dataRemoverDidFinish| and TearDown() call |-closeDialog|.
+  ClearBrowsingDataController* controller =
+      [[ClearBrowsingDataController alloc] initWithProfile:helper_.profile()];
+
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center addMockObserver:observer
+                     name:kClearBrowsingDataControllerDidDelete
+                   object:controller];
+
+  int mask = [controller removeMask];
+  NSDictionary* expectedInfo =
+      [NSDictionary dictionaryWithObject:[NSNumber numberWithInt:mask]
+                                forKey:kClearBrowsingDataControllerRemoveMask];
+  [[observer expect]
+      notificationWithName:kClearBrowsingDataControllerDidDelete
+                    object:controller
+                  userInfo:expectedInfo];
+
+  // This calls |-closeDialog| and cleans the controller up.
+  [controller dataRemoverDidFinish];
+
+  [observer verify];
 }
 
 }  // namespace

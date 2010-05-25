@@ -14,54 +14,27 @@
 
 #include <string>
 
-#include "chrome/common/filter_policy.h"
-#include "net/url_request/url_request_status.h"
-#include "webkit/glue/resource_loader_bridge.h"
+#include "chrome/browser/chrome_thread.h"
 
 namespace net {
 class IOBuffer;
 }
 
-// Parameters for a resource response header.
-struct ResourceResponseHead
-    : webkit_glue::ResourceLoaderBridge::ResponseInfo {
-  ResourceResponseHead() : filter_policy(FilterPolicy::DONT_FILTER) {}
-
-  // The response status.
-  URLRequestStatus status;
-
-  // Specifies if the resource should be filtered before being displayed
-  // (insecure resources can be filtered to keep the page secure).
-  FilterPolicy::Type filter_policy;
-};
-
-// Parameters for a synchronous resource response.
-struct SyncLoadResult : ResourceResponseHead {
-  // The final URL after any redirects.
-  GURL final_url;
-
-  // The response data.
-  std::string data;
-};
-
-// Simple wrapper that refcounts ResourceResponseHead.
-struct ResourceResponse : public base::RefCounted<ResourceResponse> {
-  ResourceResponseHead response_head;
-};
+struct ResourceResponse;
+class GURL;
+class URLRequestStatus;
 
 // The resource dispatcher host uses this interface to push load events to the
 // renderer, allowing for differences in the types of IPC messages generated.
 // See the implementations of this interface defined below.
-class ResourceHandler : public base::RefCountedThreadSafe<ResourceHandler> {
+class ResourceHandler
+    : public base::RefCountedThreadSafe<
+          ResourceHandler, ChromeThread::DeleteOnIOThread> {
  public:
-  virtual ~ResourceHandler() {}
-
   // Called as upload progress is made.
   virtual bool OnUploadProgress(int request_id,
                                 uint64 position,
-                                uint64 size) {
-    return true;
-  }
+                                uint64 size) = 0;
 
   // The request was redirected to a new URL.  |*defer| has an initial value of
   // false.  Set |*defer| to true to defer the redirect.  The redirect may be
@@ -73,6 +46,14 @@ class ResourceHandler : public base::RefCountedThreadSafe<ResourceHandler> {
   // Response headers and meta data are available.
   virtual bool OnResponseStarted(int request_id,
                                  ResourceResponse* response) = 0;
+
+  // Called before the URLRequest for |request_id| (whose url is |url|) is to be
+  // started. If the handler returns false, then the request is cancelled.
+  // Otherwise if the return value is true, the ResourceHandler can delay the
+  // request from starting by setting |*defer = true|. A deferred request will
+  // not have called URLRequest::Start(), and will not resume until someone
+  // calls ResourceDispatcherHost::StartDeferredRequest().
+  virtual bool OnWillStart(int request_id, const GURL& url, bool* defer) = 0;
 
   // Data will be read for the response.  Upon success, this method places the
   // size and address of the buffer where the data is to be written in its
@@ -96,7 +77,13 @@ class ResourceHandler : public base::RefCountedThreadSafe<ResourceHandler> {
 
   // Signals that the request is closed (i.e. finished successfully, cancelled).
   // This is a signal that the associated URLRequest isn't valid anymore.
-  virtual void OnRequestClosed() { }
+  virtual void OnRequestClosed() = 0;
+
+ protected:
+  friend class ChromeThread;
+  friend class DeleteTask<ResourceHandler>;
+
+  virtual ~ResourceHandler() {}
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RESOURCE_HANDLER_H_

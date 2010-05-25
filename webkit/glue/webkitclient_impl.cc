@@ -1,82 +1,111 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
-
-#include <math.h>
-#include "config.h"
-
-#include "FrameView.h"
-#include "ScrollView.h"
-#include <wtf/Assertions.h>
-#undef LOG
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "webkit/glue/webkitclient_impl.h"
 
+#if defined(OS_LINUX)
+#include <malloc.h>
+#endif
+
+#include <math.h>
+
+#include <vector>
+
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/lock.h"
 #include "base/message_loop.h"
+#include "base/process_util.h"
 #include "base/platform_file.h"
+#include "base/singleton.h"
 #include "base/stats_counters.h"
-#include "base/string_util.h"
+#include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/trace_event.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
 #include "net/base/net_util.h"
-#include "webkit/api/public/WebCursorInfo.h"
-#include "webkit/api/public/WebData.h"
-#include "webkit/api/public/WebFrameClient.h"
-#include "webkit/api/public/WebPluginListBuilder.h"
-#include "webkit/api/public/WebScreenInfo.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebViewClient.h"
-#include "webkit/glue/chrome_client_impl.h"
-#include "webkit/glue/glue_util.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCookie.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrameClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPluginListBuilder.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "webkit/glue/plugins/plugin_instance.h"
+#include "webkit/glue/plugins/webplugininfo.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webplugininfo.h"
+#include "webkit/glue/websocketstreamhandle_impl.h"
 #include "webkit/glue/weburlloader_impl.h"
-#include "webkit/glue/webview_impl.h"
-#include "webkit/glue/webworkerclient_impl.h"
 
-using WebKit::WebApplicationCacheHost;
-using WebKit::WebApplicationCacheHostClient;
-using WebKit::WebCursorInfo;
+#if defined(OS_LINUX)
+#include "v8/include/v8.h"
+#endif
+
+using WebKit::WebCookie;
 using WebKit::WebData;
 using WebKit::WebLocalizedString;
 using WebKit::WebPluginListBuilder;
-using WebKit::WebStorageNamespace;
 using WebKit::WebString;
+using WebKit::WebSocketStreamHandle;
 using WebKit::WebThemeEngine;
+using WebKit::WebURL;
 using WebKit::WebURLLoader;
-using WebKit::WebWidgetClient;
+using WebKit::WebVector;
 
 namespace {
 
-ChromeClientImpl* ToChromeClient(WebCore::Widget* widget) {
-  WebCore::FrameView* view;
-  if (widget->isFrameView()) {
-    view = static_cast<WebCore::FrameView*>(widget);
-  } else if (widget->parent() && widget->parent()->isFrameView()) {
-    view = static_cast<WebCore::FrameView*>(widget->parent());
-  } else {
-    return NULL;
+// A simple class to cache the memory usage for a given amount of time.
+class MemoryUsageCache {
+ public:
+  // Retrieves the Singleton.
+  static MemoryUsageCache* Get() {
+    return Singleton<MemoryUsageCache>::get();
   }
 
-  WebCore::Page* page = view->frame() ? view->frame()->page() : NULL;
-  if (!page)
-    return NULL;
+  MemoryUsageCache() : memory_value_(0) { Init(); }
+  ~MemoryUsageCache() {}
 
-  return static_cast<ChromeClientImpl*>(page->chrome()->client());
-}
+  void Init() {
+    const unsigned int kCacheSeconds = 1;
+    cache_valid_time_ = base::TimeDelta::FromSeconds(kCacheSeconds);
+  }
 
-WebWidgetClient* ToWebWidgetClient(WebCore::Widget* widget) {
-  ChromeClientImpl* chrome_client = ToChromeClient(widget);
-  if (!chrome_client || !chrome_client->webview())
-    return NULL;
-  return chrome_client->webview()->client();
-}
+  // Returns true if the cached value is fresh.
+  // Returns false if the cached value is stale, or if |cached_value| is NULL.
+  bool IsCachedValueValid(size_t* cached_value) {
+    AutoLock scoped_lock(lock_);
+    if (!cached_value)
+      return false;
+    if (base::Time::Now() - last_updated_time_ > cache_valid_time_)
+      return false;
+    *cached_value = memory_value_;
+    return true;
+  };
 
-}
+  // Setter for |memory_value_|, refreshes |last_updated_time_|.
+  void SetMemoryValue(const size_t value) {
+    AutoLock scoped_lock(lock_);
+    memory_value_ = value;
+    last_updated_time_ = base::Time::Now();
+  }
+
+ private:
+  // The cached memory value.
+  size_t memory_value_;
+
+  // How long the cached value should remain valid.
+  base::TimeDelta cache_valid_time_;
+
+  // The last time the cached value was updated.
+  base::Time last_updated_time_;
+
+  Lock lock_;
+};
+
+}  // anonymous namespace
 
 namespace webkit_glue {
 
@@ -134,12 +163,9 @@ static int ToMessageID(WebLocalizedString::Name name) {
 
 WebKitClientImpl::WebKitClientImpl()
     : main_loop_(MessageLoop::current()),
-      shared_timer_func_(NULL) {
-}
-
-WebApplicationCacheHost* WebKitClientImpl::createApplicationCacheHost(
-    WebApplicationCacheHostClient*) {
-  return NULL;
+      shared_timer_func_(NULL),
+      shared_timer_fire_time_(0.0),
+      shared_timer_suspended_(0) {
 }
 
 WebThemeEngine* WebKitClientImpl::themeEngine() {
@@ -152,6 +178,14 @@ WebThemeEngine* WebKitClientImpl::themeEngine() {
 
 WebURLLoader* WebKitClientImpl::createURLLoader() {
   return new WebURLLoaderImpl();
+}
+
+WebSocketStreamHandle* WebKitClientImpl::createSocketStreamHandle() {
+  return new WebSocketStreamHandleImpl();
+}
+
+WebString WebKitClientImpl::userAgent(const WebURL& url) {
+  return WebString::fromUTF8(webkit_glue::GetUserAgent(url));
 }
 
 void WebKitClientImpl::getPluginList(bool refresh,
@@ -167,7 +201,7 @@ void WebKitClientImpl::getPluginList(bool refresh,
         WideToUTF16Hack(plugin.desc),
         FilePathStringToWebString(plugin.path.BaseName().value()));
 
-    for (size_t j = 0; j < plugin.mime_types.size(); ++ j) {
+    for (size_t j = 0; j < plugin.mime_types.size(); ++j) {
       const WebPluginMimeType& mime_type = plugin.mime_types[j];
 
       builder->addMediaTypeToLastPlugin(
@@ -221,7 +255,8 @@ WebData WebKitClientImpl::loadResource(const char* name) {
     { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED },
     { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB },
     { "mediaVolumeSliderThumb", IDR_MEDIA_VOLUME_SLIDER_THUMB },
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    // TODO(port): rename these to "skia" instead of "Linux".
     { "linuxCheckboxOff", IDR_LINUX_CHECKBOX_OFF },
     { "linuxCheckboxOn", IDR_LINUX_CHECKBOX_ON },
     { "linuxCheckboxDisabledOff", IDR_LINUX_CHECKBOX_DISABLED_OFF },
@@ -269,6 +304,10 @@ void WebKitClientImpl::setSharedTimerFiredFunction(void (*func)()) {
 }
 
 void WebKitClientImpl::setSharedTimerFireTime(double fire_time) {
+  shared_timer_fire_time_ = fire_time;
+  if (shared_timer_suspended_)
+    return;
+
   // By converting between double and int64 representation, we run the risk
   // of losing precision due to rounding errors. Performing computations in
   // microseconds reduces this risk somewhat. But there still is the potential
@@ -297,14 +336,8 @@ void WebKitClientImpl::callOnMainThread(void (*func)()) {
   main_loop_->PostTask(FROM_HERE, NewRunnableFunction(func));
 }
 
-void WebKitClientImpl::dispatchStorageEvent(const WebString& key,
-    const WebString& oldValue, const WebString& newValue,
-    const WebString& origin, bool isLocalStorage) {
-  NOTREACHED();
-}
-
 base::PlatformFile WebKitClientImpl::databaseOpenFile(
-    const WebKit::WebString& file_name, int desired_flags,
+    const WebKit::WebString& vfs_file_name, int desired_flags,
     base::PlatformFile* dir_handle) {
   if (dir_handle)
     *dir_handle = base::kInvalidPlatformFileValue;
@@ -312,18 +345,84 @@ base::PlatformFile WebKitClientImpl::databaseOpenFile(
 }
 
 int WebKitClientImpl::databaseDeleteFile(
-    const WebKit::WebString& file_name, bool sync_dir) {
+    const WebKit::WebString& vfs_file_name, bool sync_dir) {
   return -1;
 }
 
 long WebKitClientImpl::databaseGetFileAttributes(
-    const WebKit::WebString& file_name) {
+    const WebKit::WebString& vfs_file_name) {
   return 0;
 }
 
 long long WebKitClientImpl::databaseGetFileSize(
-    const WebKit::WebString& file_name) {
+    const WebKit::WebString& vfs_file_name) {
   return 0;
+}
+
+WebKit::WebString WebKitClientImpl::signedPublicKeyAndChallengeString(
+    unsigned key_size_index,
+    const WebKit::WebString& challenge,
+    const WebKit::WebURL& url) {
+  NOTREACHED();
+  return WebKit::WebString();
+}
+
+#if defined(OS_LINUX)
+static size_t memoryUsageMBLinux() {
+  struct mallinfo minfo = mallinfo();
+  uint64_t mem_usage =
+#if defined(USE_TCMALLOC)
+      minfo.uordblks
+#else
+      (minfo.hblkhd + minfo.arena)
+#endif
+      >> 20;
+
+  v8::HeapStatistics stat;
+  v8::V8::GetHeapStatistics(&stat);
+  return mem_usage + (static_cast<uint64_t>(stat.total_heap_size()) >> 20);
+}
+#endif
+
+#if defined(OS_MACOSX)
+static size_t memoryUsageMBMac() {
+  using base::ProcessMetrics;
+  static ProcessMetrics* process_metrics =
+      // The default port provider is sufficient to get data for the current
+      // process.
+      ProcessMetrics::CreateProcessMetrics(base::GetCurrentProcessHandle(),
+                                           NULL);
+  DCHECK(process_metrics);
+  return process_metrics->GetPagefileUsage() >> 20;
+}
+#endif
+
+#if !defined(OS_LINUX) && !defined(OS_MACOSX)
+static size_t memoryUsageMBGeneric() {
+  using base::ProcessMetrics;
+  static ProcessMetrics* process_metrics =
+      ProcessMetrics::CreateProcessMetrics(base::GetCurrentProcessHandle());
+  DCHECK(process_metrics);
+  return process_metrics->GetPagefileUsage() >> 20;
+}
+#endif
+
+size_t WebKitClientImpl::memoryUsageMB() {
+  size_t current_mem_usage;
+  MemoryUsageCache* mem_usage_cache_singleton = MemoryUsageCache::Get();
+  if (mem_usage_cache_singleton->IsCachedValueValid(&current_mem_usage))
+    return current_mem_usage;
+
+  current_mem_usage =
+#if defined(OS_LINUX)
+      memoryUsageMBLinux();
+#elif defined(OS_MACOSX)
+      memoryUsageMBMac();
+#else
+      memoryUsageMBGeneric();
+#endif
+  mem_usage_cache_singleton->SetMemoryValue(current_mem_usage);
+  return current_mem_usage;
 }
 
 bool WebKitClientImpl::fileExists(const WebKit::WebString& path) {
@@ -348,7 +447,7 @@ bool WebKitClientImpl::getFileSize(const WebKit::WebString& path,
 }
 
 bool WebKitClientImpl::getFileModificationTime(const WebKit::WebString& path,
-                                               time_t& result) {
+                                               double& result) {
   NOTREACHED();
   return false;
 }
@@ -368,131 +467,10 @@ WebKit::WebString WebKitClientImpl::pathByAppendingComponent(
   return webkit_glue::FilePathStringToWebString(combined_path.value());
 }
 
-bool WebKitClientImpl::makeAllDirectories(
-    const WebKit::WebString& path) {
+bool WebKitClientImpl::makeAllDirectories(const WebKit::WebString& path) {
   DCHECK(!sandboxEnabled());
   FilePath::StringType file_path = webkit_glue::WebStringToFilePathString(path);
   return file_util::CreateDirectory(FilePath(file_path));
-}
-
-//--------------------------------------------------------------------------
-
-// These are temporary methods that the WebKit layer can use to call to the
-// Glue layer.  Once the Glue layer moves entirely into the WebKit layer, these
-// methods will be deleted.
-
-WebKit::WebMediaPlayer* WebKitClientImpl::createWebMediaPlayer(
-  WebKit::WebMediaPlayerClient* client, WebCore::Frame* frame) {
-  WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
-  if (!webframe->client())
-    return NULL;
-
-  return webframe->client()->createMediaPlayer(webframe, client);
-}
-
-void WebKitClientImpl::setCursorForPlugin(
-    const WebKit::WebCursorInfo& cursor_info, WebCore::Frame* frame) {
-  WebCore::Page* page = frame->page();
-  if (!page)
-      return;
-
-  ChromeClientImpl* chrome_client =
-      static_cast<ChromeClientImpl*>(page->chrome()->client());
-
-  // A windowless plugin can change the cursor in response to the WM_MOUSEMOVE
-  // event. We need to reflect the changed cursor in the frame view as the
-  // mouse is moved in the boundaries of the windowless plugin.
-  chrome_client->SetCursorForPlugin(cursor_info);
-}
-
-void WebKitClientImpl::notifyJSOutOfMemory(WebCore::Frame* frame) {
-  if (!frame)
-    return;
-
-  WebFrameImpl* webframe = WebFrameImpl::FromFrame(frame);
-  if (!webframe->client())
-    return;
-  webframe->client()->didExhaustMemoryAvailableForScript(webframe);
-}
-
-bool WebKitClientImpl::popupsAllowed(NPP npp) {
-  bool popups_allowed = false;
-  if (npp) {
-    NPAPI::PluginInstance* plugin_instance =
-        reinterpret_cast<NPAPI::PluginInstance*>(npp->ndata);
-    if (plugin_instance)
-      popups_allowed = plugin_instance->popups_allowed();
-  }
-  return popups_allowed;
-}
-
-WebCore::String WebKitClientImpl::uiResourceProtocol() {
-  return StdStringToString(webkit_glue::GetUIResourceProtocol());
-}
-
-int WebKitClientImpl::screenDepth(WebCore::Widget* widget) {
-  WebKit::WebWidgetClient* client = ToWebWidgetClient(widget);
-  if (!client)
-    return 0;
-  return client->screenInfo().depth;
-}
-
-int WebKitClientImpl::screenDepthPerComponent(WebCore::Widget* widget) {
-  WebKit::WebWidgetClient* client = ToWebWidgetClient(widget);
-  if (!client)
-    return 0;
-  return client->screenInfo().depthPerComponent;
-}
-
-bool WebKitClientImpl::screenIsMonochrome(WebCore::Widget* widget) {
-  WebKit::WebWidgetClient* client = ToWebWidgetClient(widget);
-  if (!client)
-    return false;
-  return client->screenInfo().isMonochrome;
-}
-
-WebCore::IntRect WebKitClientImpl::screenRect(WebCore::Widget* widget) {
-  WebKit::WebWidgetClient* client = ToWebWidgetClient(widget);
-  if (!client)
-    return WebCore::IntRect();
-  return ToIntRect(client->screenInfo().rect);
-}
-
-WebCore::IntRect WebKitClientImpl::screenAvailableRect(
-    WebCore::Widget* widget) {
-  WebKit::WebWidgetClient* client = ToWebWidgetClient(widget);
-  if (!client)
-    return WebCore::IntRect();
-  return ToIntRect(client->screenInfo().availableRect);
-}
-
-void WebKitClientImpl::widgetSetCursor(WebCore::Widget* widget,
-                                       const WebCore::Cursor& cursor) {
-  ChromeClientImpl* chrome_client = ToChromeClient(widget);
-  if (chrome_client)
-    chrome_client->SetCursor(CursorToWebCursorInfo(cursor));
-}
-
-void WebKitClientImpl::widgetSetFocus(WebCore::Widget* widget) {
-  ChromeClientImpl* chrome_client = ToChromeClient(widget);
-  if (chrome_client)
-    chrome_client->focus();
-}
-
-WebCore::WorkerContextProxy* WebKitClientImpl::createWorkerContextProxy(
-    WebCore::Worker* worker) {
-  return WebWorkerClientImpl::createWorkerContextProxy(worker);
-}
-
-WebStorageNamespace* WebKitClientImpl::createLocalStorageNamespace(
-    const WebString& path, unsigned quota) {
-  NOTREACHED();
-  return 0;
-}
-
-WebStorageNamespace* WebKitClientImpl::createSessionStorageNamespace() {
-  NOTREACHED();
-  return 0;
 }
 
 WebKit::WebString WebKitClientImpl::getAbsolutePath(
@@ -508,9 +486,17 @@ bool WebKitClientImpl::isDirectory(const WebKit::WebString& path) {
 }
 
 WebKit::WebURL WebKitClientImpl::filePathToURL(const WebKit::WebString& path) {
-  FilePath file_path(webkit_glue::WebStringToFilePathString(path));
-  GURL file_url = net::FilePathToFileURL(file_path);
-  return webkit_glue::KURLToWebURL(webkit_glue::GURLToKURL(file_url));
+  return net::FilePathToFileURL(webkit_glue::WebStringToFilePath(path));
+}
+
+void WebKitClientImpl::SuspendSharedTimer() {
+  ++shared_timer_suspended_;
+}
+
+void WebKitClientImpl::ResumeSharedTimer() {
+  // The shared timer may have fired or been adjusted while we were suspended.
+  if (--shared_timer_suspended_ == 0 && !shared_timer_.IsRunning())
+    setSharedTimerFireTime(shared_timer_fire_time_);
 }
 
 }  // namespace webkit_glue

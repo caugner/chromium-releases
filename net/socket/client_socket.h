@@ -5,15 +5,12 @@
 #ifndef NET_SOCKET_CLIENT_SOCKET_H_
 #define NET_SOCKET_CLIENT_SOCKET_H_
 
-#include "build/build_config.h"
-
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#include <sys/socket.h>
-#endif
-
 #include "net/socket/socket.h"
 
 namespace net {
+
+class AddressList;
+class BoundNetLog;
 
 class ClientSocket : public Socket {
  public:
@@ -31,7 +28,8 @@ class ClientSocket : public Socket {
   //
   // Connect may also be called again after a call to the Disconnect method.
   //
-  virtual int Connect(CompletionCallback* callback) = 0;
+  virtual int Connect(CompletionCallback* callback,
+                      const BoundNetLog& net_log) = 0;
 
   // Called to disconnect a socket.  Does nothing if the socket is already
   // disconnected.  After calling Disconnect it is possible to call Connect
@@ -51,11 +49,8 @@ class ClientSocket : public Socket {
   // have been received.
   virtual bool IsConnectedAndIdle() const = 0;
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-  // Identical to posix system call getpeername().
-  // Needed by ssl_client_socket_nss and ssl_client_socket_mac.
-  virtual int GetPeerName(struct sockaddr *name, socklen_t *namelen);
-#endif
+  // Copies the peer address to |address| and returns a network error code.
+  virtual int GetPeerAddress(AddressList* address) const = 0;
 };
 
 }  // namespace net

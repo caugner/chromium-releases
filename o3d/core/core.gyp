@@ -5,9 +5,14 @@
 {
   'variables': {
     'chromium_code': 1,
+    # Whether to enable the English-only, Win/Mac-only fullscreen message.
+    'plugin_enable_fullscreen_msg%': '1',
   },
   'target_defaults': {
     'include_dirs': [
+      # The internal dir is first so that headers in internal can replace those
+      # in external
+      '../../<(internaldir)',
       '..',
       '../..',
       '../../<(gtestdir)',
@@ -17,6 +22,13 @@
       'O3D_PLUGIN_VERSION="<!(python ../plugin/version_info.py --version)"',
     ],
     'conditions': [
+      ['<(plugin_enable_fullscreen_msg) != 0',
+        {
+          'defines': [
+            'O3D_PLUGIN_ENABLE_FULLSCREEN_MSG=1',
+          ],
+        },
+      ],
       ['OS == "win"',
         {
           'msvs_settings': {
@@ -29,7 +41,7 @@
       ],
       ['renderer == "d3d9" and OS == "win"',
         {
-          'include_dirs': [
+          'msvs_system_include_dirs': [
             '$(DXSDK_DIR)/Include',
           ],
         }
@@ -50,6 +62,18 @@
           ],
         },
       ],
+      ['renderer == "gles2"',
+        {
+          'include_dirs': [
+            '../../<(glewdir)/include',
+          ],
+        },
+      ],
+      ['disable_fbo == 1', {
+        'defines': [
+          'DISABLE_FBO',
+        ],
+      }],
     ],
   },
   'includes': [
@@ -64,6 +88,7 @@
         '../../<(pngdir)/libpng.gyp:libpng',
         '../../<(zlibdir)/zlib.gyp:zlib',
         '../../skia/skia.gyp:skia',
+        '../third_party/glu/libtess.gyp:libtess',
       ],
       'sources': [
         'cross/bitmap.cc',
@@ -192,6 +217,8 @@
         'cross/precompile.h',
         'cross/primitive.cc',
         'cross/primitive.h',
+        'cross/processed_path.cc',
+        'cross/processed_path.h',
         'cross/profiler.cc',
         'cross/profiler.h',
         'cross/ray_intersection_info.cc',
@@ -254,6 +281,21 @@
         'cross/viewport.h',
         'cross/visitor_base.h',
         'cross/weak_ptr.h',
+        'cross/gpu2d/arena.h',
+        'cross/gpu2d/cubic_classifier.cc',
+        'cross/gpu2d/cubic_classifier.h',
+        'cross/gpu2d/cubic_math_utils.cc',
+        'cross/gpu2d/cubic_math_utils.h',
+        'cross/gpu2d/cubic_texture_coords.cc',
+        'cross/gpu2d/cubic_texture_coords.h',
+        'cross/gpu2d/interval_tree.h',
+        'cross/gpu2d/local_triangulator.cc',
+        'cross/gpu2d/local_triangulator.h',
+        'cross/gpu2d/path_cache.cc',
+        'cross/gpu2d/path_cache.h',
+        'cross/gpu2d/path_processor.cc',
+        'cross/gpu2d/path_processor.h',
+        'cross/gpu2d/red_black_tree.h',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -279,6 +321,13 @@
             'dependencies': [
               '../build/libs.gyp:cg_libs',
               '../build/libs.gyp:gl_libs',
+            ],
+          },
+        ],
+        ['renderer == "gles2"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:gles2_libs',
             ],
           },
         ],
@@ -308,6 +357,7 @@
             },
             'xcode_settings': {
               'GCC_PREFIX_HEADER': 'cross/precompile.h',
+              'GCC_PFE_FILE_C_DIALECTS': 'c++',
             },
           },
         ],
@@ -326,6 +376,7 @@
           {
             'xcode_settings': {
               'GCC_PREFIX_HEADER': 'cross/precompile.h',
+              'GCC_PFE_FILE_C_DIALECTS': 'c++',
             },
           },
         ],
@@ -362,6 +413,39 @@
             ],
           },
         ],
+        ['renderer == "gles2"',
+          {
+            'sources': [
+              'cross/gles2/buffer_gles2.cc',
+              'cross/gles2/buffer_gles2.h',
+              'cross/gles2/draw_element_gles2.cc',
+              'cross/gles2/draw_element_gles2.h',
+              'cross/gles2/effect_gles2.cc',
+              'cross/gles2/effect_gles2.h',
+              'cross/gles2/install_check.cc',
+              'cross/gles2/param_cache_gles2.cc',
+              'cross/gles2/param_cache_gles2.h',
+              'cross/gles2/primitive_gles2.cc',
+              'cross/gles2/primitive_gles2.h',
+              'cross/gles2/render_surface_gles2.cc',
+              'cross/gles2/render_surface_gles2.h',
+              'cross/gles2/renderer_gles2.cc',
+              'cross/gles2/renderer_gles2.h',
+              'cross/gles2/sampler_gles2.cc',
+              'cross/gles2/sampler_gles2.h',
+              'cross/gles2/stream_bank_gles2.cc',
+              'cross/gles2/stream_bank_gles2.h',
+              'cross/gles2/texture_gles2.cc',
+              'cross/gles2/texture_gles2.h',
+              'cross/gles2/utils_gles2-inl.h',
+              'cross/gles2/utils_gles2.cc',
+              'cross/gles2/utils_gles2.h',
+            ],
+            'dependencies': [
+              '../build/libs.gyp:gles2_libs',
+            ],
+          },
+        ],
         ['renderer == "d3d9" and OS == "win"',
           {
             'sources': [
@@ -389,44 +473,6 @@
               'win/d3d9/texture_d3d9.h',
               'win/d3d9/utils_d3d9.cc',
               'win/d3d9/utils_d3d9.h',
-            ],
-          },
-        ],
-        ['renderer == "cb"',
-          {
-            'dependencies': [
-              '../command_buffer/command_buffer.gyp:command_buffer_client',
-              '../command_buffer/command_buffer.gyp:command_buffer_service',
-              '../gpu_plugin/gpu_plugin.gyp:np_utils',
-
-              # These dependencies is only needed for RendererCBLocal. They can
-              # be removed when RendererCBLocal is not needed.
-              '../gpu_plugin/gpu_plugin.gyp:command_buffer',
-              '../gpu_plugin/gpu_plugin.gyp:np_utils',
-            ],
-            'sources': [
-              'cross/command_buffer/buffer_cb.cc',
-              'cross/command_buffer/buffer_cb.h',
-              'cross/command_buffer/effect_cb.cc',
-              'cross/command_buffer/effect_cb.h',
-              'cross/command_buffer/install_check.cc',
-              'cross/command_buffer/install_check.h',
-              'cross/command_buffer/param_cache_cb.cc',
-              'cross/command_buffer/param_cache_cb.h',
-              'cross/command_buffer/primitive_cb.cc',
-              'cross/command_buffer/primitive_cb.h',
-              'cross/command_buffer/renderer_cb.cc',
-              'cross/command_buffer/renderer_cb.h',
-              'cross/command_buffer/render_surface_cb.cc',
-              'cross/command_buffer/render_surface_cb.h',
-              'cross/command_buffer/sampler_cb.cc',
-              'cross/command_buffer/sampler_cb.h',
-              'cross/command_buffer/states_cb.cc',
-              'cross/command_buffer/states_cb.h',
-              'cross/command_buffer/stream_bank_cb.cc',
-              'cross/command_buffer/stream_bank_cb.h',
-              'cross/command_buffer/texture_cb.cc',
-              'cross/command_buffer/texture_cb.h',
             ],
           },
         ],
@@ -490,6 +536,13 @@
           'cross/vertex_source_test.cc',
           'cross/visitor_base_test.cc',
           'cross/weak_ptr_test.cc',
+          'cross/gpu2d/arena_test.cc',
+          'cross/gpu2d/cubic_classifier_test.cc',
+          'cross/gpu2d/interval_tree_test.cc',
+          'cross/gpu2d/local_triangulator_test.cc',
+          'cross/gpu2d/red_black_tree_test.cc',
+          'cross/gpu2d/tree_test_helpers.cc',
+          'cross/gpu2d/tree_test_helpers.h',
         ],
       },
     },

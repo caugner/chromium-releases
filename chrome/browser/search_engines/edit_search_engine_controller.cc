@@ -5,6 +5,7 @@
 #include "chrome/browser/search_engines/edit_search_engine_controller.h"
 
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
@@ -24,7 +25,7 @@ EditSearchEngineController::EditSearchEngineController(
 
 bool EditSearchEngineController::IsTitleValid(
     const std::wstring& title_input) const {
-  return !title_input.empty();
+  return !CollapseWhitespace(title_input, true).empty();
 }
 
 bool EditSearchEngineController::IsURLValid(
@@ -38,8 +39,14 @@ bool EditSearchEngineController::IsURLValid(
   if (!template_ref.IsValid())
     return false;
 
-  if (!template_ref.SupportsReplacement())
+  if (!template_ref.SupportsReplacement()) {
+    // If this is the default search engine, there must be a search term
+    // placeholder.
+    if (template_url_ ==
+        profile_->GetTemplateURLModel()->GetDefaultSearchProvider())
+      return false;
     return GURL(WideToUTF16Hack(url)).is_valid();
+  }
 
   // If the url has a search term, replace it with a random string and make
   // sure the resulting URL is valid. We don't check the validity of the url
@@ -50,10 +57,12 @@ bool EditSearchEngineController::IsURLValid(
 
 bool EditSearchEngineController::IsKeywordValid(
     const std::wstring& keyword_input) const {
-  if (keyword_input.empty())
-    return true;  // Always allow no keyword.
+  std::wstring keyword_input_trimmed(CollapseWhitespace(keyword_input, true));
+  if (keyword_input_trimmed.empty())
+    return false;  // Do not allow empty keyword.
   const TemplateURL* turl_with_keyword =
-      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword_input);
+      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(
+          keyword_input_trimmed);
   return (turl_with_keyword == NULL || turl_with_keyword == template_url_);
 }
 
@@ -91,7 +100,8 @@ void EditSearchEngineController::AcceptAddOrEdit(
     modifiable_url->SetURL(url_string, 0, 0);
     // TemplateURLModel takes ownership of template_url_.
     profile_->GetTemplateURLModel()->Add(modifiable_url);
-    UserMetrics::RecordAction(L"KeywordEditor_AddKeywordJS", profile_);
+    UserMetrics::RecordAction(UserMetricsAction("KeywordEditor_AddKeywordJS"),
+                              profile_);
   } else {
     // Adding or modifying an entry via the Delegate.
     edit_keyword_delegate_->OnEditedKeyword(template_url_,
@@ -128,7 +138,7 @@ std::wstring EditSearchEngineController::GetFixedUpURL(
   url_parse::Parsed parts;
   std::string scheme(
       URLFixerUpper::SegmentURL(WideToUTF8(expanded_url), &parts));
-  if(!parts.scheme.is_valid()) {
+  if (!parts.scheme.is_valid()) {
     scheme.append("://");
     url.insert(0, UTF8ToWide(scheme));
   }

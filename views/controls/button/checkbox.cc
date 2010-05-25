@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "views/controls/button/checkbox.h"
 
-#include "app/gfx/canvas.h"
+#include "base/logging.h"
+#include "gfx/canvas.h"
 #include "views/controls/label.h"
 
 namespace views {
@@ -88,12 +89,18 @@ void Checkbox::Layout() {
         label_x, 0, std::max(0, width() - label_x -
             kLabelFocusPaddingHorizontal),
         height());
-    int first_line_height = label_->GetFont().height();
+    int first_line_height = label_->font().height();
     native_wrapper_->GetView()->SetBounds(
         0, ((first_line_height - checkmark_prefsize.height()) / 2),
         checkmark_prefsize.width(), checkmark_prefsize.height());
   }
   native_wrapper_->GetView()->Layout();
+}
+
+void Checkbox::SetEnabled(bool enabled) {
+  NativeButton::SetEnabled(enabled);
+  if (label_)
+    label_->SetEnabled(enabled);
 }
 
 void Checkbox::PaintFocusBorder(gfx::Canvas* canvas) {
@@ -146,6 +153,20 @@ void Checkbox::WillLoseFocus() {
   label_->set_paint_as_focused(false);
 }
 
+bool Checkbox::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_CHECKBUTTON;
+  return true;
+}
+
+bool Checkbox::GetAccessibleState(AccessibilityTypes::State* state) {
+  DCHECK(state);
+ 
+  *state = checked() ? AccessibilityTypes::STATE_CHECKED : 0;
+  return true;
+}
+
 std::string Checkbox::GetClassName() const {
   return kViewClassName;
 }
@@ -187,7 +208,7 @@ void Checkbox::Init(const std::wstring& label_text) {
   // Checkboxs don't need to enforce a minimum size.
   set_ignore_minimum_size(true);
   label_ = new Label(label_text);
-  label_->set_has_focus_border(true);
+  label_->SetHasFocusBorder(true);
   label_->SetHorizontalAlignment(Label::ALIGN_LEFT);
   AddChildView(label_);
 }

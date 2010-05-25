@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,16 @@
 
 #include <vector>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/scoped_ptr.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
@@ -22,6 +25,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
+
+// Are we in the process of restoring?
+static bool restoring = false;
 
 namespace {
 
@@ -179,18 +185,23 @@ class SessionRestoreImpl : public NotificationObserver {
         synchronous_(synchronous),
         clobber_existing_window_(clobber_existing_window),
         always_create_tabbed_browser_(always_create_tabbed_browser),
-        urls_to_open_(urls_to_open) {
+        urls_to_open_(urls_to_open),
+        waiting_for_extension_service_(false) {
   }
 
   void Restore() {
     SessionService* session_service = profile_->GetSessionService();
     DCHECK(session_service);
-    SessionService::LastSessionCallback* callback =
+    SessionService::SessionCallback* callback =
         NewCallback(this, &SessionRestoreImpl::OnGotSession);
     session_service->GetLastSession(&request_consumer_, callback);
 
     if (synchronous_) {
+      bool old_state = MessageLoop::current()->NestableTasksAllowed();
+      MessageLoop::current()->SetNestableTasksAllowed(true);
       MessageLoop::current()->Run();
+      MessageLoop::current()->SetNestableTasksAllowed(old_state);
+      ProcessSessionWindows(&windows_);
       delete this;
       return;
     }
@@ -202,16 +213,35 @@ class SessionRestoreImpl : public NotificationObserver {
   }
 
   ~SessionRestoreImpl() {
+    STLDeleteElements(&windows_);
+    restoring = false;
   }
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    if (type != NotificationType::BROWSER_CLOSED) {
-      NOTREACHED();
-      return;
+    switch (type.value) {
+      case NotificationType::BROWSER_CLOSED:
+        delete this;
+        return;
+
+      case NotificationType::EXTENSIONS_READY: {
+        if (!waiting_for_extension_service_)
+          return;
+
+        waiting_for_extension_service_ = false;
+        if (synchronous_) {
+          MessageLoop::current()->Quit();
+          return;
+        }
+        ProcessSessionWindows(&windows_);
+        return;
+      }
+
+      default:
+        NOTREACHED();
+        break;
     }
-    delete this;
   }
 
  private:
@@ -225,21 +255,15 @@ class SessionRestoreImpl : public NotificationObserver {
   void FinishedTabCreation(bool succeeded, bool created_tabbed_browser) {
     if (!created_tabbed_browser && always_create_tabbed_browser_) {
       Browser* browser = Browser::Create(profile_);
-      // Honor --pinned-tab-count if we're synchronous (which means we're run
-      // during startup) and the user specified urls on the command line.
-      bool honor_pin_tabs = synchronous_ && !urls_to_open_.empty();
       if (urls_to_open_.empty()) {
         // No tab browsers were created and no URLs were supplied on the command
         // line. Add an empty URL, which is treated as opening the users home
         // page.
         urls_to_open_.push_back(GURL());
       }
-      AppendURLsToBrowser(browser, urls_to_open_, honor_pin_tabs);
+      AppendURLsToBrowser(browser, urls_to_open_);
       browser->window()->Show();
     }
-
-    if (synchronous_)
-      MessageLoop::current()->Quit();
 
     if (succeeded) {
       DCHECK(tab_loader_.get());
@@ -258,6 +282,51 @@ class SessionRestoreImpl : public NotificationObserver {
 
   void OnGotSession(SessionService::Handle handle,
                     std::vector<SessionWindow*>* windows) {
+    if (HasAppExtensions(*windows) && profile_->GetExtensionsService() &&
+        !profile_->GetExtensionsService()->is_ready()) {
+      // At least one tab is an app tab and the extension service hasn't
+      // finished loading. Wait to continue processing until the extensions
+      // service finishes loading.
+      registrar_.Add(this, NotificationType::EXTENSIONS_READY,
+                     Source<Profile>(profile_));
+      windows_.swap(*windows);
+      waiting_for_extension_service_ = true;
+      return;
+    }
+
+    if (synchronous_) {
+      // See comment above windows_ as to why we don't process immediately.
+      windows_.swap(*windows);
+      MessageLoop::current()->Quit();
+      return;
+    }
+
+    ProcessSessionWindows(windows);
+  }
+
+  // Returns true if any tab in |windows| has an application extension id.
+  bool HasAppExtensions(const std::vector<SessionWindow*>& windows) {
+    for (std::vector<SessionWindow*>::const_iterator i = windows.begin();
+         i != windows.end(); ++i) {
+      if (HasAppExtensions((*i)->tabs))
+        return true;
+    }
+
+    return false;
+  }
+
+  // Returns true if any tab in |tabs| has an application extension id.
+  bool HasAppExtensions(const std::vector<SessionTab*>& tabs) {
+    for (std::vector<SessionTab*>::const_iterator i = tabs.begin();
+         i != tabs.end(); ++i) {
+      if (!(*i)->app_extension_id.empty())
+        return true;
+    }
+
+    return false;
+  }
+
+  void ProcessSessionWindows(std::vector<SessionWindow*>* windows) {
     if (windows->empty()) {
       // Restore was unsuccessful.
       FinishedTabCreation(false, false);
@@ -311,7 +380,7 @@ class SessionRestoreImpl : public NotificationObserver {
       current_browser->CloseAllTabs();
     }
     if (last_browser && !urls_to_open_.empty())
-      AppendURLsToBrowser(last_browser, urls_to_open_, false);
+      AppendURLsToBrowser(last_browser, urls_to_open_);
     // If last_browser is NULL and urls_to_open_ is non-empty,
     // FinishedTabCreation will create a new TabbedBrowser and add the urls to
     // it.
@@ -333,8 +402,10 @@ class SessionRestoreImpl : public NotificationObserver {
           &browser->AddRestoredTab(tab.navigations,
                                    static_cast<int>(i - window.tabs.begin()),
                                    selected_index,
+                                   tab.app_extension_id,
                                    false,
-                                   tab.pinned)->controller());
+                                   tab.pinned,
+                                   true)->controller());
     }
   }
 
@@ -357,27 +428,12 @@ class SessionRestoreImpl : public NotificationObserver {
     browser->GetSelectedTabContents()->view()->SetInitialFocus();
   }
 
-  // Appends the urls in |urls| to |browser|. If |pin_tabs| is true the first n
-  // tabs are pinned, where n is the command line value for --pinned-tab-count.
+  // Appends the urls in |urls| to |browser|.
   void AppendURLsToBrowser(Browser* browser,
-                           const std::vector<GURL>& urls,
-                           bool pin_tabs) {
-    int pin_count = 0;
-    if (pin_tabs) {
-      std::wstring pin_count_string =
-          CommandLine::ForCurrentProcess()->GetSwitchValue(
-              switches::kPinnedTabCount);
-      if (!pin_count_string.empty())
-        pin_count = StringToInt(WideToUTF16Hack(pin_count_string));
-    }
-
+                           const std::vector<GURL>& urls) {
     for (size_t i = 0; i < urls.size(); ++i) {
       browser->AddTabWithURL(urls[i], GURL(), PageTransition::START_PAGE,
                             (i == 0), -1, false, NULL);
-      if (i < static_cast<size_t>(pin_count)) {
-        browser->tabstrip_model()->SetTabPinned(browser->tab_count() - 1,
-                                                true);
-      }
     }
   }
 
@@ -416,6 +472,16 @@ class SessionRestoreImpl : public NotificationObserver {
   // Responsible for loading the tabs.
   scoped_ptr<TabLoader> tab_loader_;
 
+  // When synchronous we run a nested message loop. To avoid creating windows
+  // from the nested message loop (which can make exiting the nested message
+  // loop take a while) we cache the SessionWindows here and create the actual
+  // windows when the nested message loop exits.
+  std::vector<SessionWindow*> windows_;
+
+  // If true, indicates at least one tab has an application extension id and
+  // we're waiting for the extension service to finish loading.
+  bool waiting_for_extension_service_;
+
   NotificationRegistrar registrar_;
 };
 
@@ -440,6 +506,7 @@ static void Restore(Profile* profile,
     NOTREACHED();
     return;
   }
+  restoring = true;
   profile->set_restored_last_session(true);
   // SessionRestoreImpl takes care of deleting itself when done.
   SessionRestoreImpl* restorer =
@@ -464,4 +531,9 @@ void SessionRestore::RestoreSessionSynchronously(
     Profile* profile,
     const std::vector<GURL>& urls_to_open) {
   Restore(profile, NULL, true, false, true, urls_to_open);
+}
+
+// static
+bool SessionRestore::IsRestoring() {
+  return restoring;
 }

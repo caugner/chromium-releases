@@ -4,10 +4,12 @@
 
 #include "chrome/renderer/dom_ui_bindings.h"
 
-#include "base/json_writer.h"
+#include "base/json/json_writer.h"
 #include "base/stl_util-inl.h"
 #include "base/values.h"
 #include "chrome/common/render_messages.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 
 DOMBoundBrowserObject::~DOMBoundBrowserObject() {
   STLDeleteContainerPointers(properties_.begin(), properties_.end());
@@ -40,12 +42,18 @@ void DOMUIBindings::send(const CppArgumentList& args, CppVariant* result) {
     for (size_t i = 0; i < strings.size(); ++i) {
       value.Append(Value::CreateStringValue(strings[i]));
     }
-    JSONWriter::Write(&value, /* pretty_print= */ false, &content);
+    base::JSONWriter::Write(&value, /* pretty_print= */ false, &content);
   }
+
+  // Retrieve the source frame's url
+  GURL source_url;
+  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForCurrentContext();
+  if (webframe)
+    source_url = webframe->url();
 
   // Send the message up to the browser.
   sender()->Send(
-      new ViewHostMsg_DOMUISend(routing_id(), message, content));
+      new ViewHostMsg_DOMUISend(routing_id(), source_url, message, content));
 }
 
 void DOMBoundBrowserObject::SetProperty(const std::string& name,

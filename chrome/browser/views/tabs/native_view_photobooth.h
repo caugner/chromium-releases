@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_VIEWS_TABS_NATIVE_VIEW_PHOTOBOOTH_H_
 #define CHROME_BROWSER_VIEWS_TABS_NATIVE_VIEW_PHOTOBOOTH_H_
 
-#include "app/gfx/native_widget_types.h"
+#include "gfx/native_widget_types.h"
 
 namespace gfx {
 class Canvas;
@@ -40,4 +40,4 @@ class NativeViewPhotobooth {
                                          const gfx::Rect& target_bounds) = 0;
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_TABS_NATIVE_VIEW_PHOTOBOOTH_H_
+#endif  // CHROME_BROWSER_VIEWS_TABS_NATIVE_VIEW_PHOTOBOOTH_H_

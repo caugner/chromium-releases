@@ -5,13 +5,11 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_TEST_WEB_WORKER_H_
 #define WEBKIT_TOOLS_TEST_SHELL_TEST_WEB_WORKER_H_
 
-#if ENABLE(WORKERS)
-
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "webkit/api/public/WebMessagePortChannel.h"
-#include "webkit/api/public/WebWorker.h"
-#include "webkit/api/public/WebWorkerClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebMessagePortChannel.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebWorker.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebWorkerClient.h"
 
 namespace WebKit {
 class WebNotificationPresenter;
@@ -66,6 +64,7 @@ class TestWebWorker : public WebKit::WebWorker,
   }
   virtual void confirmMessageFromWorkerObject(bool has_pending_activity) { }
   virtual void reportPendingActivity(bool has_pending_activity) { }
+  virtual void workerContextClosed() { }
   virtual void workerContextDestroyed() {
     Release();    // Releases the reference held for worker context object.
   }
@@ -77,9 +76,11 @@ class TestWebWorker : public WebKit::WebWorker,
   }
 
  private:
+  friend class base::RefCounted<TestWebWorker>;
+
+  ~TestWebWorker() {}
+
   DISALLOW_COPY_AND_ASSIGN(TestWebWorker);
 };
-
-#endif
 
 #endif  // WEBKIT_TOOLS_TEST_SHELL_TEST_WEB_WORKER_H_

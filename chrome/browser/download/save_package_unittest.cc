@@ -8,6 +8,9 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/download/save_package.h"
+#include "chrome/browser/net/url_request_mock_http_job.h"
+#include "chrome/browser/renderer_host/test/test_render_view_host.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #define FPL FILE_PATH_LITERAL
@@ -53,25 +56,9 @@ bool HasOrdinalNumber(const FilePath::StringType& filename) {
 
 }  // namespace
 
-class SavePackageTest : public testing::Test {
+class SavePackageTest : public RenderViewHostTestHarness {
  public:
   SavePackageTest() {
-    FilePath test_dir;
-    PathService::Get(base::DIR_TEMP, &test_dir);
-
-    save_package_success_ = new SavePackage(
-        test_dir.AppendASCII("testfile" HTML_EXTENSION),
-        test_dir.AppendASCII("testfile_files"));
-
-    // We need to construct a path that is *almost* kMaxFilePathLength long
-    long_file_name.resize(kMaxFilePathLength + long_file_name.length());
-    while (long_file_name.length() < kMaxFilePathLength)
-      long_file_name += long_file_name;
-    long_file_name.resize(kMaxFilePathLength - 9 - test_dir.value().length());
-
-    save_package_fail_ = new SavePackage(
-        test_dir.AppendASCII(long_file_name + HTML_EXTENSION),
-        test_dir.AppendASCII(long_file_name + "_files"));
   }
 
   bool GetGeneratedFilename(bool need_success_generate_filename,
@@ -84,7 +71,7 @@ class SavePackageTest : public testing::Test {
       save_package = save_package_success_.get();
     else
       save_package = save_package_fail_.get();
-    return save_package->GenerateFilename(disposition, GURL(url), need_htm_ext,
+    return save_package->GenerateFileName(disposition, GURL(url), need_htm_ext,
                                           generated_name);
   }
 
@@ -92,9 +79,44 @@ class SavePackageTest : public testing::Test {
     return SavePackage::EnsureHtmlExtension(name);
   }
 
+  FilePath EnsureMimeExtension(const FilePath& name,
+                               const FilePath::StringType& content_mime_type) {
+    return SavePackage::EnsureMimeExtension(name, content_mime_type);
+  }
+
   FilePath GetSuggestedNameForSaveAs(const FilePath& title,
-                                     bool ensure_html_extension) {
-    return SavePackage::GetSuggestedNameForSaveAs(title, ensure_html_extension);
+      bool ensure_html_extension,
+      const FilePath::StringType& contents_mime_type) {
+    return SavePackage::GetSuggestedNameForSaveAs(title, ensure_html_extension,
+                                                  contents_mime_type);
+  }
+
+  GURL GetUrlToBeSaved() {
+    return save_package_success_->GetUrlToBeSaved();
+  }
+
+ protected:
+  virtual void SetUp() {
+    RenderViewHostTestHarness::SetUp();
+
+    // Do the initialization in SetUp so contents() is initialized by
+    // RenderViewHostTestHarness::SetUp.
+    FilePath test_dir;
+    PathService::Get(base::DIR_TEMP, &test_dir);
+
+    save_package_success_ = new SavePackage(contents(),
+        test_dir.AppendASCII("testfile" HTML_EXTENSION),
+        test_dir.AppendASCII("testfile_files"));
+
+    // We need to construct a path that is *almost* kMaxFilePathLength long
+    long_file_name.resize(kMaxFilePathLength + long_file_name.length());
+    while (long_file_name.length() < kMaxFilePathLength)
+      long_file_name += long_file_name;
+    long_file_name.resize(kMaxFilePathLength - 9 - test_dir.value().length());
+
+    save_package_fail_ = new SavePackage(contents(),
+        test_dir.AppendASCII(long_file_name + HTML_EXTENSION),
+        test_dir.AppendASCII(long_file_name + "_files"));
   }
 
  private:
@@ -199,6 +221,8 @@ static const struct {
   // Extension is preserved if it is already proper for HTML.
   {FPL("filename.html"), FPL("filename.html")},
   {FPL("filename.HTML"), FPL("filename.HTML")},
+  {FPL("filename.XHTML"), FPL("filename.XHTML")},
+  {FPL("filename.xhtml"), FPL("filename.xhtml")},
   {FPL("filename.htm"), FPL("filename.htm")},
   // ".htm" is added if the extension is improper for HTML.
   {FPL("hello.world"), FPL("hello.world") FPL_HTML_EXTENSION},
@@ -216,6 +240,45 @@ TEST_F(SavePackageTest, TestEnsureHtmlExtension) {
     FilePath actual = EnsureHtmlExtension(original);
     EXPECT_EQ(expected.value(), actual.value()) << "Failed for page title: " <<
         kExtensionTestCases[i].page_title;
+  }
+}
+
+TEST_F(SavePackageTest, TestEnsureMimeExtension) {
+  static const struct {
+    const FilePath::CharType* page_title;
+    const FilePath::CharType* expected_name;
+    const FilePath::CharType* contents_mime_type;
+  } kExtensionTests[] = {
+    { FPL("filename.html"), FPL("filename.html"), FPL("text/html") },
+    { FPL("filename.htm"), FPL("filename.htm"), FPL("text/html") },
+    { FPL("filename.xhtml"), FPL("filename.xhtml"), FPL("text/html") },
+#if defined(OS_WIN)
+    { FPL("filename"), FPL("filename.htm"), FPL("text/html") },
+#else  // defined(OS_WIN)
+    { FPL("filename"), FPL("filename.html"), FPL("text/html") },
+#endif  // defined(OS_WIN)
+    { FPL("filename.html"), FPL("filename.html"), FPL("text/xml") },
+    { FPL("filename.xml"), FPL("filename.xml"), FPL("text/xml") },
+    { FPL("filename"), FPL("filename.xml"), FPL("text/xml") },
+    { FPL("filename.xhtml"), FPL("filename.xhtml"),
+      FPL("application/xhtml+xml") },
+    { FPL("filename.html"), FPL("filename.html"),
+      FPL("application/xhtml+xml") },
+    { FPL("filename"), FPL("filename.xhtml"), FPL("application/xhtml+xml") },
+    { FPL("filename.txt"), FPL("filename.txt"), FPL("text/plain") },
+    { FPL("filename"), FPL("filename.txt"), FPL("text/plain") },
+    { FPL("filename.css"), FPL("filename.css"), FPL("text/css") },
+    { FPL("filename"), FPL("filename.css"), FPL("text/css") },
+    { FPL("filename.abc"), FPL("filename.abc"), FPL("unknown/unknown") },
+    { FPL("filename"), FPL("filename"), FPL("unknown/unknown") },
+  };
+  for (uint32 i = 0; i < ARRAYSIZE_UNSAFE(kExtensionTests); ++i) {
+    FilePath original = FilePath(kExtensionTests[i].page_title);
+    FilePath expected = FilePath(kExtensionTests[i].expected_name);
+    FilePath::StringType mime_type(kExtensionTests[i].contents_mime_type);
+    FilePath actual = EnsureMimeExtension(original, mime_type);
+    EXPECT_EQ(expected.value(), actual.value()) << "Failed for page title: " <<
+        kExtensionTests[i].page_title << " MIME:" << mime_type;
   }
 }
 
@@ -243,8 +306,35 @@ TEST_F(SavePackageTest, TestSuggestedSaveNames) {
     FilePath title = FilePath(kSuggestedSaveNames[i].page_title);
     FilePath save_name =
         GetSuggestedNameForSaveAs(title,
-                                  kSuggestedSaveNames[i].ensure_html_extension);
+                                  kSuggestedSaveNames[i].ensure_html_extension,
+                                  FilePath::StringType());
     EXPECT_EQ(save_name.value(), kSuggestedSaveNames[i].expected_name);
   }
+}
+
+static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("save_page");
+
+// GetUrlToBeSaved method should return correct url to be saved.
+TEST_F(SavePackageTest, TestGetUrlToBeSaved) {
+  FilePath file_name(FILE_PATH_LITERAL("a.htm"));
+  GURL url = URLRequestMockHTTPJob::GetMockUrl(
+                 FilePath(kTestDir).Append(file_name));
+  NavigateAndCommit(url);
+  EXPECT_EQ(url, GetUrlToBeSaved());
+}
+
+// GetUrlToBeSaved method sould return actual url to be saved,
+// instead of the displayed url used to view source of a page.
+// Ex:GetUrlToBeSaved method should return http://www.google.com
+// when user types view-source:http://www.google.com
+TEST_F(SavePackageTest, TestGetUrlToBeSavedViewSource) {
+  FilePath file_name(FILE_PATH_LITERAL("a.htm"));
+  GURL view_source_url = URLRequestMockHTTPJob::GetMockViewSourceUrl(
+                             FilePath(kTestDir).Append(file_name));
+  GURL actual_url = URLRequestMockHTTPJob::GetMockUrl(
+                        FilePath(kTestDir).Append(file_name));
+  NavigateAndCommit(view_source_url);
+  EXPECT_EQ(actual_url, GetUrlToBeSaved());
+  EXPECT_EQ(view_source_url, contents()->GetURL());
 }
 

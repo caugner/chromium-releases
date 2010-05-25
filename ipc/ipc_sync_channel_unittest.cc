@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/dynamic_annotations.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/platform_thread.h"
@@ -17,6 +18,7 @@
 #include "base/waitable_event.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
+#include "ipc/ipc_sync_message_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 
@@ -39,7 +41,13 @@ class Worker : public Channel::Listener, public Message::Sender {
         ipc_thread_((thread_name + "_ipc").c_str()),
         listener_thread_((thread_name + "_listener").c_str()),
         overrided_thread_(NULL),
-        shutdown_event_(true, false) { }
+        shutdown_event_(true, false) {
+    // The data race on vfptr is real but is very hard
+    // to suppress using standard Valgrind mechanism (suppressions).
+    // We have to use ANNOTATE_BENIGN_RACE to hide the reports and
+    // make ThreadSanitizer bots green.
+    ANNOTATE_BENIGN_RACE(this, "Race on vfptr, http://crbug.com/25841");
+  }
 
   // Will create a named channel and use this name for the threads' name.
   Worker(const std::string& channel_name, Channel::Mode mode)
@@ -50,7 +58,13 @@ class Worker : public Channel::Listener, public Message::Sender {
         ipc_thread_((channel_name + "_ipc").c_str()),
         listener_thread_((channel_name + "_listener").c_str()),
         overrided_thread_(NULL),
-        shutdown_event_(true, false) { }
+        shutdown_event_(true, false) {
+    // The data race on vfptr is real but is very hard
+    // to suppress using standard Valgrind mechanism (suppressions).
+    // We have to use ANNOTATE_BENIGN_RACE to hide the reports and
+    // make ThreadSanitizer bots green.
+    ANNOTATE_BENIGN_RACE(this, "Race on vfptr, http://crbug.com/25841");
+  }
 
   // The IPC thread needs to outlive SyncChannel, so force the correct order of
   // destruction.
@@ -91,8 +105,8 @@ class Worker : public Channel::Listener, public Message::Sender {
     if (pump)
       msg->EnableMessagePumping();
     bool result = SendWithTimeout(msg, timeout);
-    DCHECK(result == succeed);
-    DCHECK(answer == (succeed ? 42 : 0));
+    DCHECK_EQ(result, succeed);
+    DCHECK_EQ(answer, (succeed ? 42 : 0));
     return result;
   }
   bool SendDouble(bool pump, bool succeed) {
@@ -101,17 +115,20 @@ class Worker : public Channel::Listener, public Message::Sender {
     if (pump)
       msg->EnableMessagePumping();
     bool result = Send(msg);
-    DCHECK(result == succeed);
-    DCHECK(answer == (succeed ? 10 : 0));
+    DCHECK_EQ(result, succeed);
+    DCHECK_EQ(answer, (succeed ? 10 : 0));
     return result;
   }
   Channel::Mode mode() { return mode_; }
   WaitableEvent* done_event() { return done_.get(); }
-
- protected:
+  WaitableEvent* shutdown_event() { return &shutdown_event_; }
+  void ResetChannel() { channel_.reset(); }
   // Derived classes need to call this when they've completed their part of
   // the test.
   void Done() { done_->Signal(); }
+
+ protected:
+  IPC::SyncChannel* channel() { return channel_.get(); }
   // Functions for dervied classes to implement if they wish.
   virtual void Run() { }
   virtual void OnAnswer(int* answer) { NOTREACHED(); }
@@ -376,19 +393,34 @@ namespace {
 
 class UnblockServer : public Worker {
  public:
-  UnblockServer(bool pump_during_send)
+  UnblockServer(bool pump_during_send, bool delete_during_send)
     : Worker(Channel::MODE_SERVER, "unblock_server"),
-      pump_during_send_(pump_during_send) { }
+      pump_during_send_(pump_during_send),
+      delete_during_send_(delete_during_send) { }
   void Run() {
-    SendAnswerToLife(pump_during_send_, base::kNoTimeout, true);
+    if (delete_during_send_) {
+      // Use custom code since race conditions mean the answer may or may not be
+      // available.
+      int answer = 0;
+      SyncMessage* msg = new SyncChannelTestMsg_AnswerToLife(&answer);
+      if (pump_during_send_)
+        msg->EnableMessagePumping();
+      Send(msg);
+    } else {
+      SendAnswerToLife(pump_during_send_, base::kNoTimeout, true);
+    }
     Done();
   }
 
-  void OnDouble(int in, int* out) {
-    *out = in * 2;
+  void OnDoubleDelay(int in, Message* reply_msg) {
+    SyncChannelTestMsg_Double::WriteReplyParams(reply_msg, in * 2);
+    Send(reply_msg);
+    if (delete_during_send_)
+      ResetChannel();
   }
 
   bool pump_during_send_;
+  bool delete_during_send_;
 };
 
 class UnblockClient : public Worker {
@@ -406,9 +438,9 @@ class UnblockClient : public Worker {
   bool pump_during_send_;
 };
 
-void Unblock(bool server_pump, bool client_pump) {
+void Unblock(bool server_pump, bool client_pump, bool delete_during_send) {
   std::vector<Worker*> workers;
-  workers.push_back(new UnblockServer(server_pump));
+  workers.push_back(new UnblockServer(server_pump, delete_during_send));
   workers.push_back(new UnblockClient(client_pump));
   RunTest(workers);
 }
@@ -417,10 +449,20 @@ void Unblock(bool server_pump, bool client_pump) {
 
 // Tests that the caller unblocks to answer a sync message from the receiver.
 TEST_F(IPCSyncChannelTest, Unblock) {
-  Unblock(false, false);
-  Unblock(false, true);
-  Unblock(true, false);
-  Unblock(true, true);
+  Unblock(false, false, false);
+  Unblock(false, true, false);
+  Unblock(true, false, false);
+  Unblock(true, true, false);
+}
+
+//-----------------------------------------------------------------------------
+
+// Tests that the the IPC::SyncChannel object can be deleted during a Send.
+TEST_F(IPCSyncChannelTest, ChannelDeleteDuringSend) {
+  Unblock(false, false, true);
+  Unblock(false, true, true);
+  Unblock(true, false, true);
+  Unblock(true, true, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -697,7 +739,7 @@ class QueuedReplyClient : public Worker {
       msg->EnableMessagePumping();
     bool result = Send(msg);
     DCHECK(result);
-    DCHECK(response == expected_text_);
+    DCHECK_EQ(response, expected_text_);
 
     LOG(INFO) << __FUNCTION__ << " Received reply: "
               << response.c_str();
@@ -788,7 +830,7 @@ class BadServer : public Worker {
     // Need to send another message to get the client to call Done().
     result = Send(new SyncChannelTestMsg_AnswerToLife(&answer));
     DCHECK(result);
-    DCHECK(answer == 42);
+    DCHECK_EQ(answer, 42);
 
     Done();
   }
@@ -835,7 +877,7 @@ class ChattyClient : public Worker {
 
 void ChattyServer(bool pump_during_send) {
   std::vector<Worker*> workers;
-  workers.push_back(new UnblockServer(pump_during_send));
+  workers.push_back(new UnblockServer(pump_during_send, false));
   workers.push_back(new ChattyClient());
   RunTest(workers);
 }
@@ -1012,6 +1054,64 @@ class DoneEventRaceServer : public Worker {
 TEST_F(IPCSyncChannelTest, DoneEventRace) {
   std::vector<Worker*> workers;
   workers.push_back(new DoneEventRaceServer());
+  workers.push_back(new SimpleClient());
+  RunTest(workers);
+}
+
+//-----------------------------------------------------------------------------
+
+namespace {
+
+class TestSyncMessageFilter : public IPC::SyncMessageFilter {
+ public:
+  TestSyncMessageFilter(base::WaitableEvent* shutdown_event, Worker* worker)
+      : SyncMessageFilter(shutdown_event),
+        worker_(worker),
+        thread_("helper_thread") {
+    base::Thread::Options options;
+    options.message_loop_type = MessageLoop::TYPE_DEFAULT;
+    thread_.StartWithOptions(options);
+  }
+
+  virtual void OnFilterAdded(Channel* channel) {
+    SyncMessageFilter::OnFilterAdded(channel);
+    thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &TestSyncMessageFilter::SendMessageOnHelperThread));
+  }
+
+  void SendMessageOnHelperThread() {
+    int answer = 0;
+    bool result = Send(new SyncChannelTestMsg_AnswerToLife(&answer));
+    DCHECK(result);
+    DCHECK_EQ(answer, 42);
+
+    worker_->Done();
+  }
+
+  Worker* worker_;
+  base::Thread thread_;
+};
+
+class SyncMessageFilterServer : public Worker {
+ public:
+  SyncMessageFilterServer()
+      : Worker(Channel::MODE_SERVER, "sync_message_filter_server") {
+    filter_ = new TestSyncMessageFilter(shutdown_event(), this);
+  }
+
+  void Run() {
+    channel()->AddFilter(filter_.get());
+  }
+
+  scoped_refptr<TestSyncMessageFilter> filter_;
+};
+
+}  // namespace
+
+// Tests basic synchronous call
+TEST_F(IPCSyncChannelTest, SyncMessageFilter) {
+  std::vector<Worker*> workers;
+  workers.push_back(new SyncMessageFilterServer());
   workers.push_back(new SimpleClient());
   RunTest(workers);
 }

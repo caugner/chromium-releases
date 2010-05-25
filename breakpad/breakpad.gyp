@@ -3,6 +3,10 @@
 # found in the LICENSE file.
 
 {
+  'includes': [
+    'breakpad_sender.gypi',
+    'breakpad_handler.gypi',
+  ],
   'conditions': [
     [ 'OS=="mac"', {
       'target_defaults': {
@@ -10,7 +14,7 @@
           'src',
         ],
         'configurations': {
-          'Debug': {
+          'Debug_Base': {
             'defines': [
               # This is needed for GTMLogger to work correctly.
               'DEBUG',
@@ -95,15 +99,17 @@
             'breakpad_utilities',
           ],
           'sources': [
-            'src/common/mac/dwarf/bytereader.cc',
-            'src/common/mac/dwarf/dwarf2reader.cc',
-            'src/common/mac/dwarf/functioninfo.cc',
+            'src/common/dwarf/bytereader.cc',
+            'src/common/dwarf/dwarf2reader.cc',
+            'src/common/dwarf/functioninfo.cc',
             'src/common/mac/dump_syms.mm',
             'src/tools/mac/dump_syms/dump_syms_tool.mm',
           ],
           'xcode_settings': {
             # The DWARF utilities require -funsigned-char.
             'GCC_CHAR_IS_UNSIGNED_CHAR': 'YES',
+            # dwarf2reader.cc uses dynamic_cast.
+            'GCC_ENABLE_CPP_RTTI': 'YES',
           },
           'link_settings': {
             'libraries': [
@@ -111,7 +117,7 @@
             ],
           },
           'configurations': {
-            'Release': {
+            'Release_Base': {
               'xcode_settings': {
                 # dump_syms crashes when built at -O1, -O2, and -O3.  It does
                 # not crash at -Os.  To play it safe, dump_syms is always built
@@ -155,72 +161,6 @@
         },
       ],
     }],
-    [ 'OS=="win"', {
-      'targets': [
-        {
-          'target_name': 'breakpad_handler',
-          'type': '<(library)',
-          'msvs_guid': 'B55CA863-B374-4BAF-95AC-539E4FA4C90C',
-          'sources': [
-            'src/client/windows/crash_generation/client_info.cc',
-            'src/client/windows/crash_generation/client_info.h',
-            'src/client/windows/crash_generation/crash_generation_client.cc',
-            'src/client/windows/crash_generation/crash_generation_client.h',
-            'src/client/windows/crash_generation/crash_generation_server.cc',
-            'src/client/windows/crash_generation/crash_generation_server.h',
-            'src/client/windows/handler/exception_handler.cc',
-            'src/client/windows/handler/exception_handler.h',
-            'src/common/windows/guid_string.cc',
-            'src/common/windows/guid_string.h',
-            'src/google_breakpad/common/minidump_format.h',
-            'src/client/windows/crash_generation/minidump_generator.cc',
-            'src/client/windows/crash_generation/minidump_generator.h',
-            'src/common/windows/string_utils-inl.h',
-          ],
-          'include_dirs': [
-            'src',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-lurlmon.lib',
-            ],
-          },
-          'defines': [
-            # Avoid the TerminateThread Application Verifier Failure.
-            'BREAKPAD_NO_TERMINATE_THREAD',
-          ],
-          'direct_dependent_settings': {
-            'include_dirs': [
-              'src',
-            ],
-          },
-        },
-        {
-          'target_name': 'breakpad_sender',
-          'type': '<(library)',
-          'msvs_guid': '9946A048-043B-4F8F-9E07-9297B204714C',
-          'sources': [
-            'src/client/windows/sender/crash_report_sender.cc',
-            'src/common/windows/http_upload.cc',
-            'src/client/windows/sender/crash_report_sender.h',
-            'src/common/windows/http_upload.h',
-          ],
-          'include_dirs': [
-            'src',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-lurlmon.lib',
-            ],
-          },
-          'direct_dependent_settings': {
-            'include_dirs': [
-              'src',
-            ],
-          },
-        },
-      ],
-    }],
     [ 'OS=="linux"', {
       'conditions': [
         # Tools needed for archiving build symbols.
@@ -247,6 +187,7 @@
               'sources': [
                 'src/tools/linux/symupload/sym_upload.cc',
                 'src/common/linux/http_upload.cc',
+                'src/common/linux/http_upload.h',
               ],
               'include_dirs': [
                 'src',
@@ -261,12 +202,38 @@
               'target_name': 'dump_syms',
               'type': 'executable',
 
+              # dwarf2reader.cc uses dynamic_cast. Because we don't typically
+              # don't support RTTI, we enable it for this single target. Since
+              # dump_syms doesn't share any object files with anything else,
+              # this doesn't end up polluting Chrome itself.
+              'cflags_cc!': ['-fno-rtti'],
+
               'sources': [
-                'linux/dump_syms.cc',
-                'linux/dump_symbols.cc',
-                'linux/dump_symbols.h',
-                'linux/file_id.cc',
-                'linux/file_id.h',
+                'src/common/dump_stabs.cc',
+                'src/common/dump_stabs.h',
+                'src/common/dwarf/bytereader.cc',
+                'src/common/dwarf/cfi_assembler.cc',
+                'src/common/dwarf_cfi_to_module.cc',
+                'src/common/dwarf_cfi_to_module.h',
+                'src/common/dwarf_cu_to_module.cc',
+                'src/common/dwarf_cu_to_module.h',
+                'src/common/dwarf/dwarf2diehandler.cc',
+                'src/common/dwarf/dwarf2reader.cc',
+                'src/common/dwarf/functioninfo.cc',
+                'src/common/dwarf_line_to_module.cc',
+                'src/common/dwarf_line_to_module.h',
+                'src/common/language.cc',
+                'src/common/language.h',
+                'src/common/linux/dump_symbols.cc',
+                'src/common/linux/dump_symbols.h',
+                'src/common/linux/file_id.cc',
+                'src/common/linux/file_id.h',
+                'src/common/linux/guid_creator.h',
+                'src/common/module.cc',
+                'src/common/module.h',
+                'src/common/stabs_reader.cc',
+                'src/common/stabs_reader.h',
+                'src/tools/linux/dump_syms/dump_syms.cc',
               ],
 
               'include_dirs': [
@@ -283,15 +250,29 @@
           'type': '<(library)',
 
           'sources': [
-            'linux/exception_handler.cc',
-            'linux/linux_dumper.cc',
-            'linux/minidump_writer.cc',
-            'src/common/linux/guid_creator.cc',
-            'src/common/string_conversion.cc',
+            'src/client/linux/crash_generation/crash_generation_client.cc',
+            'src/client/linux/crash_generation/crash_generation_client.h',
+            'src/client/linux/handler/exception_handler.cc',
+            'src/client/linux/minidump_writer/directory_reader.h',
+            'src/client/linux/minidump_writer/line_reader.h',
+            'src/client/linux/minidump_writer/linux_dumper.cc',
+            'src/client/linux/minidump_writer/linux_dumper.h',
+            'src/client/linux/minidump_writer/minidump_writer.cc',
+            'src/client/linux/minidump_writer/minidump_writer.h',
+            'src/client/minidump_file_writer-inl.h',
+            'src/client/minidump_file_writer.cc',
+            'src/client/minidump_file_writer.h',
             'src/common/convert_UTF.c',
-
-            # TODO(agl): unfork this file
-            'linux/minidump_file_writer.cc',
+            'src/common/convert_UTF.h',
+            'src/common/linux/file_id.h',
+            'src/common/linux/file_id.cc',
+            'src/common/linux/guid_creator.cc',
+            'src/common/linux/guid_creator.h',
+            'src/common/linux/linux_libc_support.h',
+            'src/common/linux/linux_syscall_support.h',
+            'src/common/linux/memory.h',
+            'src/common/string_conversion.cc',
+            'src/common/string_conversion.h',
           ],
 
           'include_dirs': [
@@ -306,20 +287,24 @@
           'dependencies': [
             '../testing/gtest.gyp:gtest',
             '../testing/gtest.gyp:gtestmain',
+            '../testing/gmock.gyp:gmock',
             'breakpad_client',
           ],
 
           'sources': [
-            'linux/directory_reader_unittest.cc',
-            'linux/exception_handler_unittest.cc',
-            'linux/line_reader_unittest.cc',
-            'linux/linux_dumper_unittest.cc',
-            'linux/linux_libc_support_unittest.cc',
-            'linux/memory_unittest.cc',
-            'linux/minidump_writer_unittest.cc',
+            'linux/breakpad_googletest_includes.h',
+            'src/client/linux/handler/exception_handler_unittest.cc',
+            'src/client/linux/minidump_writer/directory_reader_unittest.cc',
+            'src/client/linux/minidump_writer/line_reader_unittest.cc',
+            'src/client/linux/minidump_writer/linux_dumper_unittest.cc',
+            'src/client/linux/minidump_writer/minidump_writer_unittest.cc',
+            'src/common/linux/file_id_unittest.cc',
+            'src/common/linux/linux_libc_support_unittest.cc',
+            'src/common/linux/memory_unittest.cc',
           ],
 
           'include_dirs': [
+            'linux', # Use our copy of breakpad_googletest_includes.h
             'src',
             '..',
             '.',
@@ -339,6 +324,7 @@
 
           'include_dirs': [
             '..',
+            'src',
           ],
         },
       ],

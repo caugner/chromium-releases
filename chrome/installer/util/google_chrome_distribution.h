@@ -30,6 +30,8 @@ class GoogleChromeDistribution : public BrowserDistribution {
                                          const std::wstring& local_data_path,
                                          const std::wstring& distribution_data);
 
+  virtual std::wstring GetAppGuid();
+
   virtual std::wstring GetApplicationName();
 
   virtual std::wstring GetAlternateApplicationName();
@@ -55,8 +57,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   virtual std::wstring GetAppDescription();
 
-  virtual int GetInstallReturnCode(
-      installer_util::InstallStatus install_status);
+  virtual std::string GetSafeBrowsingName();
 
   virtual std::wstring GetStateKey();
 
@@ -84,12 +85,20 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   // Assuming that the user qualifies, this function performs the inactive user
   // toast experiment. It will use chrome to show the UI and it will record the
-  // outcome in the registry. |flavor| is an extra parameter that controls the
-  // specific wording on the experiment.
-  virtual void InactiveUserToastExperiment(int flavor);
+  // outcome in the registry.
+  virtual void InactiveUserToastExperiment(int flavor, bool system_install);
+
+  std::wstring product_guid() { return product_guid_; }
+
+ protected:
+  void set_product_guid(std::wstring guid) { product_guid_ = guid; }
+
+  // Disallow construction from others.
+  GoogleChromeDistribution();
 
  private:
   friend class BrowserDistribution;
+
   FRIEND_TEST(GoogleChromeDistributionTest, TestExtractUninstallMetrics);
 
   // Extracts uninstall metrics from the JSON file located at file_path.
@@ -111,8 +120,8 @@ class GoogleChromeDistribution : public BrowserDistribution {
   virtual bool BuildUninstallMetricsString(
       DictionaryValue* uninstall_metrics_dict, std::wstring* metrics);
 
-  // Disallow construction from non-friends.
-  GoogleChromeDistribution() {}
+  // The product ID for Google Update.
+  std::wstring product_guid_;
 };
 
 #endif  // CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_

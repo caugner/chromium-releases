@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <gdk/gdk.h>
 #endif
 
-#include "app/gfx/color_utils.h"
-#include "app/gfx/font.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
+#include "gfx/color_utils.h"
+#include "gfx/font.h"
 #include "views/event.h"
 
 namespace {
@@ -51,7 +51,6 @@ void GetColors(const SkColor* background_color,  // NULL means "use default"
     *normal_color = kNormalColor;
   }
 }
-
 }
 
 namespace views {
@@ -145,6 +144,13 @@ bool Link::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
       (e.GetKeyCode() == base::VKEY_RETURN);
 }
 
+bool Link::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_LINK;
+  return true;
+}
+
 void Link::SetFont(const gfx::Font& font) {
   Label::SetFont(font);
   ValidateStyle();
@@ -158,8 +164,8 @@ void Link::SetEnabled(bool f) {
   }
 }
 
-gfx::NativeCursor Link::GetCursorForPoint(Event::EventType event_type, int x,
-                                          int y) {
+gfx::NativeCursor Link::GetCursorForPoint(Event::EventType event_type,
+                                          const gfx::Point& p) {
   if (!enabled_)
     return NULL;
 #if defined(OS_WIN)
@@ -204,15 +210,17 @@ void Link::SetHighlighted(bool f) {
 }
 
 void Link::ValidateStyle() {
-  gfx::Font font = GetFont();
-
   if (enabled_) {
-    if ((font.style() & gfx::Font::UNDERLINED) == 0)
-      Label::SetFont(font.DeriveFont(0, font.style() | gfx::Font::UNDERLINED));
+    if (!(font().style() & gfx::Font::UNDERLINED)) {
+      Label::SetFont(
+          font().DeriveFont(0, font().style() | gfx::Font::UNDERLINED));
+    }
     Label::SetColor(highlighted_ ? highlighted_color_ : normal_color_);
   } else {
-    if ((font.style() & gfx::Font::UNDERLINED) != 0)
-      Label::SetFont(font.DeriveFont(0, font.style() & ~gfx::Font::UNDERLINED));
+    if (font().style() & gfx::Font::UNDERLINED) {
+      Label::SetFont(
+          font().DeriveFont(0, font().style() & ~gfx::Font::UNDERLINED));
+    }
     Label::SetColor(disabled_color_);
   }
 }

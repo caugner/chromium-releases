@@ -31,18 +31,16 @@
 // NPAPI interactive UI tests.
 //
 
-#include "base/file_util.h"
+#include "base/file_path.h"
 #include "base/keyboard_codes.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/npapi_test_helper.h"
-#include "net/base/net_util.h"
+#include "chrome/test/ui_test_utils.h"
 
 const char kTestCompleteCookie[] = "status";
 const char kTestCompleteSuccess[] = "OK";
-const int kShortWaitTimeout = 5 * 1000;
 
 // Tests if a plugin executing a self deleting script in the context of
 // a synchronous mousemove works correctly
@@ -55,15 +53,17 @@ TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInvokeInSynchronousMouseMove) {
     EXPECT_TRUE(IsWindow(tab_window));
 
     show_window_ = true;
-    std::wstring test_case = L"execute_script_delete_in_mouse_move.html";
-    GURL url = GetTestUrl(L"npapi", test_case);
+    const FilePath kTestDir(FILE_PATH_LITERAL("npapi"));
+    const FilePath test_case(
+        FILE_PATH_LITERAL("execute_script_delete_in_mouse_move.html"));
+    GURL url = ui_test_utils::GetTestUrl(kTestDir, test_case);
     NavigateToURL(url);
 
     POINT cursor_position = {130, 130};
     ClientToScreen(tab_window, &cursor_position);
 
-    double screen_width = ::GetSystemMetrics( SM_CXSCREEN ) - 1;
-    double screen_height = ::GetSystemMetrics( SM_CYSCREEN ) - 1;
+    double screen_width = ::GetSystemMetrics(SM_CXSCREEN) - 1;
+    double screen_height = ::GetSystemMetrics(SM_CYSCREEN) - 1;
     double location_x =  cursor_position.x * (65535.0f / screen_width);
     double location_y =  cursor_position.y * (65535.0f / screen_height);
 
@@ -76,7 +76,7 @@ TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInvokeInSynchronousMouseMove) {
 
     WaitForFinish("execute_script_delete_in_mouse_move", "1", url,
                   kTestCompleteCookie, kTestCompleteSuccess,
-                  kShortWaitTimeout);
+                  action_max_timeout_ms());
   }
 }
 
@@ -91,11 +91,11 @@ TEST_F(NPAPIVisiblePluginTester, GetURLRequest404Response) {
   NavigateToURL(url);
 
   // Wait for the alert dialog and then close it.
-  automation()->WaitForAppModalDialog(action_max_timeout_ms());
+  automation()->WaitForAppModalDialog();
   scoped_refptr<WindowProxy> window(automation()->GetActiveWindow());
   ASSERT_TRUE(window.get());
   ASSERT_TRUE(window->SimulateOSKeyPress(base::VKEY_ESCAPE, 0));
 
   WaitForFinish("geturl_404_response", "1", url, kTestCompleteCookie,
-                kTestCompleteSuccess, kShortWaitTimeout);
+                kTestCompleteSuccess, action_max_timeout_ms());
 }

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/dom_ui_theme_source.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
@@ -26,10 +27,15 @@ class MockThemeSource : public DOMUIThemeSource {
 
   int result_request_id_;
   size_t result_data_size_;
+
+ private:
+  ~MockThemeSource() {}
 };
 
 class DOMUISourcesTest : public testing::Test {
  public:
+  DOMUISourcesTest() : ui_thread_(ChromeThread::UI, MessageLoop::current()) {}
+
   TestingProfile* profile() const { return profile_.get(); }
   MockThemeSource* theme_source() const { return theme_source_.get(); }
  private:
@@ -44,6 +50,9 @@ class DOMUISourcesTest : public testing::Test {
     profile_.reset(NULL);
   }
 
+  MessageLoop loop_;
+  ChromeThread ui_thread_;
+
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<MockThemeSource> theme_source_;
 };
@@ -57,33 +66,34 @@ TEST_F(DOMUISourcesTest, ThemeSourceMimeTypes) {
 TEST_F(DOMUISourcesTest, ThemeSourceImages) {
   // We used to PNGEncode the images ourselves, but encoder differences
   // invalidated that. We now just check that the image exists.
-  theme_source()->StartDataRequest("theme_frame_incognito", 1);
+  theme_source()->StartDataRequest("theme_frame_incognito", true, 1);
   size_t min = 0;
   EXPECT_EQ(theme_source()->result_request_id_, 1);
   EXPECT_GT(theme_source()->result_data_size_, min);
 
-  theme_source()->StartDataRequest("theme_toolbar", 2);
+  theme_source()->StartDataRequest("theme_toolbar", true, 2);
   EXPECT_EQ(theme_source()->result_request_id_, 2);
   EXPECT_GT(theme_source()->result_data_size_, min);
 }
 
 TEST_F(DOMUISourcesTest, ThemeSourceCSS) {
+  ChromeThread io_thread(ChromeThread::IO, MessageLoop::current());
   // Generating the test data for the NTP CSS would just involve copying the
   // method, or being super brittle and hard-coding the result (requiring
   // an update to the unittest every time the CSS template changes), so we
   // just check for a successful request and data that is non-null.
   size_t empty_size = 0;
 
-  theme_source()->StartDataRequest("css/newtab.css", 1);
+  theme_source()->StartDataRequest("css/newtab.css", false, 1);
   EXPECT_EQ(theme_source()->result_request_id_, 1);
   EXPECT_NE(theme_source()->result_data_size_, empty_size);
 
-  theme_source()->StartDataRequest("css/newtab.css?pie", 3);
+  theme_source()->StartDataRequest("css/newtab.css?pie", false, 3);
   EXPECT_EQ(theme_source()->result_request_id_, 3);
   EXPECT_NE(theme_source()->result_data_size_, empty_size);
 
   // Check that we send NULL back when we can't find what we're looking for.
-  theme_source()->StartDataRequest("css/WRONGURL", 7);
+  theme_source()->StartDataRequest("css/WRONGURL", false, 7);
   EXPECT_EQ(theme_source()->result_request_id_, 7);
   EXPECT_EQ(theme_source()->result_data_size_, empty_size);
 }

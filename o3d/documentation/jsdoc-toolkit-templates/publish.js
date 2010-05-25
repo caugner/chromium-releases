@@ -66,6 +66,9 @@ var g_templates = [];
 var g_o3dPropertyRE = /^(\w+)\s+(\w+)\s+/;
 var g_startContainerRE = /^(?:function\(|!function\(|[\(<{[])/;
 var g_containerRE = /function\(|!function\(|[\(<{[]/;
+var g_overloadRE = /xxxOVERLOADED\d+xxx/;
+var g_overloadStr = 'xxxOVERLOADED';
+var g_firstOverloadStr = 'xxxOVERLOADED0xxx';
 var g_openCloseMap = {
   'function(': ')',
   '!function(': ')',
@@ -78,6 +81,7 @@ var g_closeMap = {
   '>': true,
   ']': true,
   '}': true};
+var g_symbolsWithoutOverload = {};
 
 /**
  * Called automatically by JsDoc Toolkit.
@@ -560,6 +564,73 @@ function getParameters(symbol) {
 }
 
 /**
+ * Generates an HTML class hierarchy.
+ * @param {!Array.<!Symbol>} classes Class to make hierarchy from.
+ * @return {string} HTML hierarchical list of classes.
+ */
+function getClassHierarchyHTML(classes) {
+  var classTree = {};
+
+  for (var cc = 0; cc < classes.length; ++cc) {
+    var thisClass = classes[cc];
+    var stack = [thisClass];
+    while (thisClass.inheritsFrom !== undefined &&
+           thisClass.inheritsFrom.length > 0) {
+      var parentName = thisClass.inheritsFrom[0];
+      thisClass = getSymbol(parentName);
+      stack.push(thisClass);
+    }
+
+    var node = classTree;
+    for (var ii = stack.length - 1; ii >= 0; --ii) {
+      var thisClass = stack[ii];
+      var className = thisClass.alias;
+      if (!node[className]) {
+        node[className] = { };
+      }
+      node = node[className];
+    }
+  }
+
+  return addParts(classTree, '');
+
+  /**
+   * Recursively creates hierarchical list of classes.
+   * @param {!Object} node A hash of class names to derived classes.
+   * @param {string} prefix Prefix to put in front of each line.
+   */
+  function addParts(node, prefix) {
+    var output = '';
+    var names = [];
+    for (var name in node) {
+      names.push(name);
+    }
+    if (names.length > 0) {
+      output += prefix + '<ul>\n';
+      names = names.sort();
+      for (var kk = 0; kk < names.length; ++kk) {
+        var name = names[kk];
+        var shortName = name;
+        var period = name.lastIndexOf('.');
+        if (period >= 0) {
+          shortName = name.substr(period + 1);
+        }
+        output += prefix + '<li><a href="/apis/o3d/docs/reference/' +
+                  getBaseURL() +
+                  getLinkToClassByAlias(name) +
+                  '">' +
+                  hyphenateWord(shortName, 16, '-<br/>') +
+                  '</a>';
+        output += addParts(node[name], prefix + '  ') + '\n';
+        output += prefix + '</li>\n';
+      }
+      output += prefix + '</ul>\n';
+    }
+    return output;
+  }
+}
+
+/**
  * Returns whether or not the symbol is deprecated.  Apparently jsdoctoolkit is
  * supposed to extract this info for us but it's not so we have to do it
  * manually.
@@ -742,19 +813,19 @@ function linkifySingleType(place, type) {
         linkifySingleType(place, type.substring(7, closingAngle)) + '>';
     }
   } else if (startsWith(type, 'Object.<')) {
-      var closingAngle = getIndexOfClosingCharacter(type, 6);
-      if (closingAngle < 0) {
-        generatePlaceError(place, 'Unmatched "<" in Object type : ' + type);
-      } else {
-        var objectSpec = type.substring(8, closingAngle);
-        var elements = objectSpec.split(/\s*,\s*/);
-        if (elements.length != 2) {
-          generatePlaceError(place, 'An Object spec must have exactly 2 types');
-        }
-        link = 'Object.&lt;' +
-            linkifySingleType(place, elements[0]) + ', ' +
-            linkifySingleType(place, elements[1]) + '>';
+    var closingAngle = getIndexOfClosingCharacter(type, 7);
+    if (closingAngle < 0) {
+      generatePlaceError(place, 'Unmatched "<" in Object type : ' + type);
+    } else {
+      var objectSpec = type.substring(8, closingAngle);
+      var elements = objectSpec.split(/\s*,\s*/);
+      if (elements.length != 2) {
+        generatePlaceError(place, 'An Object spec must have exactly 2 types');
       }
+      link = 'Object.&lt;' +
+          linkifySingleType(place, elements[0]) + ', ' +
+          linkifySingleType(place, elements[1]) + '>';
+    }
   } else if (startsWith(type, 'function(')) {
     var closingParen = getIndexOfClosingCharacter(type, 8);
     if (closingParen < 0) {
@@ -818,11 +889,14 @@ function linkifySingleType(place, type) {
         var subType = type.substring(0, period);
         var member = type.substring(period + 1);
         symbol = getSymbol(subType);
-        if (symbol && symbol.hasMember(member)) {
-          var field = type.substring(period + 1);
-          link = '<a class="el" href="' + getLinkToSymbol(symbol) + '#' +
-              field + '">' +  type + '</a>';
-          found = true;
+        if (symbol) {
+          if (symbol.hasMember(member) ||
+              symbol.hasMember(member + g_firstOverloadStr)) {
+            var field = type.substring(period + 1);
+            link = '<a class="el" href="' + getLinkToSymbol(symbol) + '#' +
+                field + '">' +  type + '</a>';
+            found = true;
+          }
         }
       }
 
@@ -1069,6 +1143,19 @@ function getQualifiedName(method) {
 }
 
 /**
+ * Removes the "xxxOVERLOADEDxxx" part of a name
+ * @param {string} name Name that may have a overloaded suffux.
+ * @return {string} The name without the overloaded suffix.
+ */
+function getNonOverloadedName(name) {
+  var index = name.indexOf(g_overloadStr);
+  if (index >= 0) {
+    return name.substring(0, index);
+  }
+  return name;
+}
+
+/**
  * Gets a Documentation name. For members of a namespace returns the fully
  * qualified name. For members of a class returns ClassName.name
  * @param {!Symbol} parent Symbol that we are making docs for.
@@ -1077,9 +1164,9 @@ function getQualifiedName(method) {
  */
 function getDocName(parent, child) {
   if (parent.isNamespace) {
-    return child.memberOf + "." + child.name;
+    return child.memberOf + "." + getNonOverloadedName(child.name);
   }
-  return parent.name + "." + child.name;
+  return parent.name + "." + getNonOverloadedName(child.name);
 }
 
 /**

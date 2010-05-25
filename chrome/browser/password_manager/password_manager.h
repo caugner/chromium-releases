@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PASSWORD_MANAGER_H__
-#define CHROME_BROWSER_PASSWORD_MANAGER_H__
+#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_
+#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_
 
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/login_model.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/common/pref_member.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
@@ -101,4 +101,4 @@ class PasswordManager : public LoginModel {
   DISALLOW_EVIL_CONSTRUCTORS(PasswordManager);
 };
 
-#endif
+#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_

@@ -14,8 +14,8 @@
 // In turn, the bridge's owner on the WebKit end will implement the Peer
 // interface, which we will use to communicate notifications back.
 
-#ifndef RESOURCE_LOADER_BRIDGE_H_
-#define RESOURCE_LOADER_BRIDGE_H_
+#ifndef WEBKIT_GLUE_RESOURCE_LOADER_BRIDGE_H_
+#define WEBKIT_GLUE_RESOURCE_LOADER_BRIDGE_H_
 
 #include "build/build_config.h"
 #if defined(OS_POSIX)
@@ -38,6 +38,54 @@ namespace webkit_glue {
 
 class ResourceLoaderBridge {
  public:
+  // Structure used when calling ResourceLoaderBridge::Create().
+  struct RequestInfo {
+    RequestInfo();
+    ~RequestInfo();
+
+    // HTTP-style method name (e.g., "GET" or "POST").
+    std::string method;
+
+    // Absolute URL encoded in ASCII per the rules of RFC-2396.
+    GURL url;
+
+    // URL of the document in the top-level window, which may be checked by the
+    // third-party cookie blocking policy.
+    GURL first_party_for_cookies;
+
+    // Optional parameter, a URL with similar constraints in how it must be
+    // encoded as the url member.
+    GURL referrer;
+
+    std::string frame_origin;
+    std::string main_frame_origin;
+
+    // For HTTP(S) requests, the headers parameter can be a \r\n-delimited and
+    // \r\n-terminated list of MIME headers.  They should be ASCII-encoded using
+    // the standard MIME header encoding rules.  The headers parameter can also
+    // be null if no extra request headers need to be set.
+    std::string headers;
+
+    // Composed of the values defined in url_request_load_flags.h.
+    int load_flags;
+
+    // Process id of the process making the request.
+    int requestor_pid;
+
+    // Indicates if the current request is the main frame load, a sub-frame
+    // load, or a sub objects load.
+    ResourceType::Type request_type;
+
+    // Used for plugin to browser requests.
+    uint32 request_context;
+
+    // Identifies that appcache host this request is associated with.
+    int appcache_host_id;
+
+    // Used to associated the bridge with a frame's network context.
+    int routing_id;
+  };
+
   struct ResponseInfo {
     ResponseInfo();
     ~ResponseInfo();
@@ -73,6 +121,9 @@ class ResourceLoaderBridge {
     // The manifest url of the appcache this response was loaded from.
     // Note: this value is only populated for main resource requests.
     GURL appcache_manifest_url;
+
+    // True if the response was delivered using SPDY.
+    bool was_fetched_via_spdy;
   };
 
   // See the SyncLoad method declared below.  (The name of this struct is not
@@ -110,9 +161,14 @@ class ResourceLoaderBridge {
     // Called when a redirect occurs.  The implementation may return false to
     // suppress the redirect.  The given ResponseInfo provides complete
     // information about the redirect, and new_url is the URL that will be
-    // loaded if this method returns true.
+    // loaded if this method returns true.  If this method returns true, the
+    // output parameter *has_new_first_party_for_cookies indicates whether the
+    // output parameter *new_first_party_for_cookies contains the new URL that
+    // should be consulted for the third-party cookie blocking policy.
     virtual bool OnReceivedRedirect(const GURL& new_url,
-                                    const ResponseInfo& info) = 0;
+                                    const ResponseInfo& info,
+                                    bool* has_new_first_party_for_cookies,
+                                    GURL* new_first_party_for_cookies) = 0;
 
     // Called when response headers are available (after all redirects have
     // been followed).  |content_filtered| is set to true if the contents is
@@ -132,52 +188,18 @@ class ResourceLoaderBridge {
 
     // Returns the URL of the request, which allows us to display it in
     // debugging situations.
-    virtual std::string GetURLForDebugging() = 0;
+    virtual GURL GetURLForDebugging() const = 0;
   };
 
   // use Create() for construction, but anybody can delete at any time,
   // INCLUDING during processing of callbacks.
   virtual ~ResourceLoaderBridge();
 
-  // Call this method to make a new instance.  The method name is a HTTP-style
-  // method name (e.g., "GET" or "POST").  The URL should be an absolute URL
-  // encoded in ASCII per the rules of RFC-2396.  The referrer parameter is
-  // optional (may be NULL) and is a URL with similar constraints in how it
-  // must be encoded.
+  // Call this method to make a new instance.
   //
   // For HTTP(S) POST requests, the AppendDataToUpload and AppendFileToUpload
   // methods may be called to construct the body of the request.
-  //
-  // For HTTP(S) requests, the headers parameter can be a \r\n-delimited and
-  // \r\n-terminated list of MIME headers.  They should be ASCII-encoded using
-  // the standard MIME header encoding rules.  The headers parameter can also
-  // be null if no extra request headers need to be set.
-  //
-  // policy_url is the URL of the document in the top-level window, which may be
-  // checked by the third-party cookie blocking policy.
-  //
-  // load_flags is composed of the values defined in url_request_load_flags.h
-  //
-  // request_type indicates if the current request is the main frame load, a
-  // sub-frame load, or a sub objects load.
-  //
-  // appcache_host_id identifies that appcache host this request is
-  // associated with.
-  //
-  // routing_id passed to this function allows it to be associated with a
-  // frame's network context.
-  static ResourceLoaderBridge* Create(const std::string& method,
-                                      const GURL& url,
-                                      const GURL& policy_url,
-                                      const GURL& referrer,
-                                      const std::string& frame_origin,
-                                      const std::string& main_frame_origin,
-                                      const std::string& headers,
-                                      int load_flags,
-                                      int requestor_pid,
-                                      ResourceType::Type request_type,
-                                      int appcache_host_id,
-                                      int routing_id);
+  static ResourceLoaderBridge* Create(const RequestInfo& request_info);
 
   // Call this method before calling Start() to append a chunk of binary data
   // to the request body.  May only be used with HTTP(S) POST requests.
@@ -186,13 +208,16 @@ class ResourceLoaderBridge {
   // Call this method before calling Start() to append the contents of a file
   // to the request body.  May only be used with HTTP(S) POST requests.
   void AppendFileToUpload(const FilePath& file_path) {
-    AppendFileRangeToUpload(file_path, 0, kuint64max);
+    AppendFileRangeToUpload(file_path, 0, kuint64max, base::Time());
   }
 
   // Call this method before calling Start() to append the contents of a file
   // to the request body.  May only be used with HTTP(S) POST requests.
-  virtual void AppendFileRangeToUpload(const FilePath& file_path,
-                                       uint64 offset, uint64 length) = 0;
+  virtual void AppendFileRangeToUpload(
+      const FilePath& file_path,
+      uint64 offset,
+      uint64 length,
+      const base::Time& expected_modification_time) = 0;
 
   // Call this method before calling Start() to assign an upload identifier to
   // this request.  This is used to enable caching of POST responses.  A value
@@ -227,9 +252,9 @@ class ResourceLoaderBridge {
   ResourceLoaderBridge();
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(ResourceLoaderBridge);
+  DISALLOW_COPY_AND_ASSIGN(ResourceLoaderBridge);
 };
 
 }  // namespace webkit_glue
 
-#endif  // RESOURCE_LOADER_BRIDGE_
+#endif  // WEBKIT_GLUE_RESOURCE_LOADER_BRIDGE_H_

@@ -59,19 +59,40 @@ class Request {
     return path_;
   }
 
+  // Returns the argument section of a GET path.
+  // Note: does currently not work for POST request.
+  std::string arguments() const {
+    std::string ret;
+    std::string::size_type pos = path_.find('?');
+    if (pos != std::string::npos)
+      ret = path_.substr(pos + 1);
+    return ret;
+  }
+
   const std::string& headers() const {
     return headers_;
+  }
+
+  const std::string& content() const {
+    return content_;
   }
 
   size_t content_length() const {
     return content_length_;
   }
 
+  bool AllContentReceived() const {
+    return method_.length() && content_.size() >= content_length_;
+  }
+
+  void OnDataReceived(const std::string& data);
+
  protected:
   std::string method_;
   std::string path_;
   std::string version_;
   std::string headers_;
+  std::string content_;
   size_t content_length_;
 
  private:
@@ -94,19 +115,16 @@ class Connection {
     return socket_ == socket;
   }
 
-  void AddData(const std::string& data) {
-    data_ += data;
+  const Request& request() const {
+    return request_;
   }
 
-  bool CheckRequestReceived();
-
-  const Request& request() const {
+  Request& request() {
     return request_;
   }
 
  protected:
   scoped_refptr<ListenSocket> socket_;
-  std::string data_;
   Request request_;
 
  private:
@@ -145,7 +163,7 @@ class Response {
   virtual void WriteContents(ListenSocket* socket) const {
   }
 
-  void IncrementAccessCounter() {
+  virtual void IncrementAccessCounter() {
     accessed_++;
   }
 
@@ -170,7 +188,11 @@ class ResponseForPath : public Response {
   }
 
   virtual bool Matches(const Request& r) const {
-    return r.path().compare(request_path_) == 0;
+    std::string path = r.path();
+    std::string::size_type pos = path.find('?');
+    if (pos != std::string::npos)
+      path = path.substr(0, pos);
+    return path.compare(request_path_) == 0;
   }
 
  protected:
@@ -256,12 +278,20 @@ class SimpleWebServer : public ListenSocket::ListenSocketDelegate {
 
   void AddResponse(Response* response);
 
+  // Ownership of response objects is by default assumed to be outside
+  // of the SimpleWebServer class.
+  // However, if the caller doesn't wish to maintain a list of response objects
+  // but rather let this class hold the only references to those objects,
+  // the caller can call this method to delete the objects as part of
+  // the cleanup process.
+  void DeleteAllResponses();
+
   // ListenSocketDelegate overrides.
   virtual void DidAccept(ListenSocket* server, ListenSocket* connection);
   virtual void DidRead(ListenSocket* connection, const std::string& data);
   virtual void DidClose(ListenSocket* sock);
 
-  const ConnectionList& connections() {
+  const ConnectionList& connections() const {
     return connections_;
   }
 

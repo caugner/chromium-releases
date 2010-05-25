@@ -80,7 +80,7 @@ bool NativeScrollBarGtk::OnKeyPressed(const KeyEvent& event) {
 }
 
 bool NativeScrollBarGtk::OnMouseWheel(const MouseWheelEvent& e) {
-  if (!native_view() || native_scroll_bar_->IsHorizontal())
+  if (!native_view())
     return false;
   MoveBy(e.GetOffset());
   return true;
@@ -104,7 +104,7 @@ void NativeScrollBarGtk::CreateNativeControl() {
 
   gtk_range_set_update_policy(GTK_RANGE(widget), GTK_UPDATE_CONTINUOUS);
 
-  g_signal_connect(G_OBJECT(adj), "value-changed",
+  g_signal_connect(adj, "value-changed",
                    G_CALLBACK(CallValueChanged), this);
 
   NativeControlCreated(widget);
@@ -148,8 +148,7 @@ void NativeScrollBarGtk::Update(int viewport_size,
                                       step, page,
                                       viewport_size);
   gtk_range_set_adjustment(GTK_RANGE(native_view()), GTK_ADJUSTMENT(adj));
-  g_signal_connect(G_OBJECT(adj), "value-changed",
-                   G_CALLBACK(CallValueChanged), this);
+  g_signal_connect(adj, "value-changed", G_CALLBACK(CallValueChanged), this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -181,6 +180,10 @@ void NativeScrollBarGtk::MoveStep(bool positive) {
 }
 
 void NativeScrollBarGtk::MoveTo(int p) {
+  if (p < native_scroll_bar_->GetMinPosition())
+    p = native_scroll_bar_->GetMinPosition();
+  if (p > native_scroll_bar_->GetMaxPosition())
+    p = native_scroll_bar_->GetMaxPosition();
   GtkAdjustment* adj = gtk_range_get_adjustment(GTK_RANGE(native_view()));
   gtk_adjustment_set_value(adj, p);
 }

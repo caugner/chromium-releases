@@ -17,22 +17,14 @@
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
-#include "chrome/browser/sync/util/path_helpers.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
 namespace browser_sync {
 
-class SyncerSession;
 class SyncEntity;
 
 class SyncerUtil {
  public:
-  // TODO(ncarter): Remove unique-in-parent title support and name conflicts.
-  static syncable::Id GetNameConflictingItemId(
-      syncable::BaseTransaction* trans,
-      const syncable::Id& parent_id,
-      const PathString& server_name);
-
   static void ChangeEntryIDAndUpdateChildren(
       syncable::WriteTransaction* trans,
       syncable::MutableEntry* entry,
@@ -47,6 +39,12 @@ class SyncerUtil {
                                              syncable::MutableEntry* entry,
                                              const syncable::Id& new_id);
 
+  // If the server sent down a client tagged entry, we have to affix it to
+  // the correct local entry.
+  static void AttemptReuniteClientTag(
+      syncable::WriteTransaction* trans,
+      const SyncEntity& server_entry);
+
   static void AttemptReuniteLostCommitResponses(
       syncable::WriteTransaction* trans,
       const SyncEntity& server_entry,
@@ -55,18 +53,14 @@ class SyncerUtil {
   static UpdateAttemptResponse AttemptToUpdateEntry(
       syncable::WriteTransaction* const trans,
       syncable::MutableEntry* const entry,
-      SyncerSession* const session);
+      ConflictResolver* resolver);
 
-  static UpdateAttemptResponse AttemptToUpdateEntryWithoutMerge(
-      syncable::WriteTransaction* const trans,
-      syncable::MutableEntry* const entry,
-      SyncerSession* const session, syncable::Id* const conflicting_id);
 
   // Pass in name to avoid redundant UTF8 conversion.
   static void UpdateServerFieldsFromUpdate(
       syncable::MutableEntry* local_entry,
       const SyncEntity& server_entry,
-      const syncable::SyncName& name);
+      const std::string& name);
 
   static void ApplyExtendedAttributes(
       syncable::MutableEntry* local_entry,
@@ -100,7 +94,7 @@ class SyncerUtil {
                                               syncable::MutableEntry* same_id,
                                               const bool deleted,
                                               const bool is_directory,
-                                              const bool is_bookmark);
+                                              syncable::ModelType model_type);
 
   // Assumes we have an existing entry; verify an update that seems to be
   // expressing an 'undelete'
@@ -159,10 +153,7 @@ class SyncerUtil {
   static bool ServerAndLocalOrdersMatch(syncable::Entry* entry);
 
  private:
-  // Private ctor/dtor since this class shouldn't be instantiated.
-  SyncerUtil() {}
-  virtual ~SyncerUtil() {}
-  DISALLOW_COPY_AND_ASSIGN(SyncerUtil);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(SyncerUtil);
 };
 
 #ifndef OS_WIN
@@ -187,6 +178,7 @@ inline bool ClientAndServerTimeMatch(int64 client_time, int64 server_time) {
 // The sync server uses Java Times (ms since 1970)
 // and the client uses FILETIMEs (ns since 1601) so we need to convert
 // between the timescales.
+// TODO(sync): Fix this. No need to use two timescales.
 inline int64 ServerTimeToClientTime(int64 server_time) {
   return server_time * GG_LONGLONG(10000) + GG_LONGLONG(116444736000000000);
 }

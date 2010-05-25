@@ -1,9 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_LINK_H_
 #define VIEWS_CONTROLS_LINK_H_
+
+#include <string>
 
 #include "views/controls/label.h"
 
@@ -33,7 +35,7 @@ class LinkController {
 class Link : public Label {
  public:
   Link();
-  Link(const std::wstring& title);
+  explicit Link(const std::wstring& title);
   virtual ~Link();
 
   void SetController(LinkController* controller);
@@ -47,13 +49,16 @@ class Link : public Label {
   virtual bool OnKeyPressed(const KeyEvent& e);
   virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
 
+  // Accessibility accessors, overridden from View:
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+
   virtual void SetFont(const gfx::Font& font);
 
   // Set whether the link is enabled.
   virtual void SetEnabled(bool f);
 
   virtual gfx::NativeCursor GetCursorForPoint(Event::EventType event_type,
-                                              int x, int y);
+                                              const gfx::Point& p);
 
   virtual std::string GetClassName() const;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,15 +17,19 @@ void Button::SetTooltipText(const std::wstring& tooltip_text) {
   TooltipTextChanged();
 }
 
+void Button::SetAccessibleKeyboardShortcut(const std::wstring& shortcut) {
+  accessible_shortcut_.assign(shortcut);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Button, View overrides:
 
-bool Button::GetTooltipText(int x, int y, std::wstring* tooltip) {
-  if (!tooltip_text_.empty()) {
-    *tooltip = tooltip_text_;
-    return true;
-  }
-  return false;
+bool Button::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+  if (tooltip_text_.empty())
+    return false;
+
+  *tooltip = tooltip_text_;
+  return true;
 }
 
 bool Button::GetAccessibleKeyboardShortcut(std::wstring* shortcut) {
@@ -36,25 +40,9 @@ bool Button::GetAccessibleKeyboardShortcut(std::wstring* shortcut) {
   return false;
 }
 
-bool Button::GetAccessibleName(std::wstring* name) {
-  if (!accessible_name_.empty()) {
-    *name = accessible_name_;
-    return true;
-  }
-  return false;
-}
-
 bool Button::GetAccessibleRole(AccessibilityTypes::Role* role) {
   *role = AccessibilityTypes::ROLE_PUSHBUTTON;
   return true;
-}
-
-void Button::SetAccessibleKeyboardShortcut(const std::wstring& shortcut) {
-  accessible_shortcut_.assign(shortcut);
-}
-
-void Button::SetAccessibleName(const std::wstring& name) {
-  accessible_name_.assign(name);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

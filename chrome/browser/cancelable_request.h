@@ -18,8 +18,11 @@
 //
 //   class MyClass {
 //     void MakeRequest() {
-//       frontend_service->StartRequest(some_input1, some_input2, this,
+//       frontend_service->StartRequest(some_input1, some_input2,
+//           &callback_consumer_,
 //           NewCallback(this, &MyClass:RequestComplete));
+//       // StartRequest() returns a Handle which may be retained for use with
+//       // CancelRequest() if required, e.g. in MyClass's destructor.
 //     }
 //
 //     void RequestComplete(int status) {
@@ -27,7 +30,7 @@
 //     }
 //
 //    private:
-//     CallbackConsumer callback_consumer_;
+//     CancelableRequestConsumer callback_consumer_;
 //   };
 //
 //
@@ -38,7 +41,7 @@
 //     typedef Callback1<int>::Type RequestCallbackType;
 //
 //     Handle StartRequest(int some_input1, int some_input2,
-//                         CallbackConsumer* consumer,
+//                         CancelableRequestConsumerBase* consumer,
 //                         RequestCallbackType* callback) {
 //       scoped_refptr<CancelableRequest<RequestCallbackType> > request(
 //           new CancelableRequest<RequestCallbackType>(callback));
@@ -87,6 +90,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/cancellation_flag.h"
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -116,6 +121,7 @@ class CancelableRequestProvider {
   // Called by the enduser of the request to cancel it. This MUST be called on
   // the same thread that originally issued the request (which is also the same
   // thread that would have received the callback if it was not canceled).
+  // handle must be for a valid pending (not yet complete or cancelled) request.
   void CancelRequest(Handle handle);
 
  protected:
@@ -131,13 +137,13 @@ class CancelableRequestProvider {
   void RequestCompleted(Handle handle);
 
  private:
-  // Only call this when you already have acquired pending_request_lock_.
-  void CancelRequestLocked(Handle handle);
-
-  friend class CancelableRequestBase;
-
   typedef std::map<Handle, scoped_refptr<CancelableRequestBase> >
       CancelableRequestMap;
+
+  // Only call this when you already have acquired pending_request_lock_.
+  void CancelRequestLocked(const CancelableRequestMap::iterator& item);
+
+  friend class CancelableRequestBase;
 
   Lock pending_request_lock_;
 
@@ -342,8 +348,8 @@ typedef CancelableRequestConsumerT<int, 0> CancelableRequestConsumer;
 // other thread for the callback, but will still be destroyed properly.
 
 // Non-templatized base class that provides cancellation
-class CancelableRequestBase :
-    public base::RefCountedThreadSafe<CancelableRequestBase> {
+class CancelableRequestBase
+    : public base::RefCountedThreadSafe<CancelableRequestBase> {
  public:
   friend class CancelableRequestProvider;
 
@@ -365,11 +371,8 @@ class CancelableRequestBase :
   CancelableRequestBase()
       : provider_(NULL),
         consumer_(NULL),
-        handle_(0),
-        canceled_(false) {
+        handle_(0) {
     callback_thread_ = MessageLoop::current();
-  }
-  virtual ~CancelableRequestBase() {
   }
 
   CancelableRequestConsumerBase* consumer() const {
@@ -382,14 +385,18 @@ class CancelableRequestBase :
 
   // The canceled flag indicates that the request should not be executed.
   // A request can never be uncanceled, so only a setter for true is provided.
+  // This can be called multiple times, but only from one thread.
   void set_canceled() {
-    canceled_ = true;
+    canceled_.Set();
   }
   bool canceled() {
-    return canceled_;
+    return canceled_.IsSet();
   }
 
  protected:
+  friend class base::RefCountedThreadSafe<CancelableRequestBase>;
+  virtual ~CancelableRequestBase() {}
+
   // Initializes the object with the particulars from the provider. It may only
   // be called once (it is called by the provider, which is a friend).
   void Init(CancelableRequestProvider* provider,
@@ -416,7 +423,7 @@ class CancelableRequestBase :
   CancelableRequestProvider* provider_;
 
   // Notified after we execute that the request is complete.  This should only
-  // be accessed if !canceled_, otherwise the pointer is invalid.
+  // be accessed if !canceled_.IsSet(), otherwise the pointer is invalid.
   CancelableRequestConsumerBase* consumer_;
 
   // The handle to this request inside the provider. This will be initialized
@@ -426,7 +433,7 @@ class CancelableRequestBase :
 
   // Set if the caller cancels this request. No callbacks should be made when
   // this is set.
-  bool canceled_;
+  base::CancellationFlag canceled_;
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(CancelableRequestBase);
@@ -452,6 +459,9 @@ class CancelableRequestBase :
 //     DoodieRequest(CallbackType* callback) : CancelableRequest(callback) {
 //     }
 //
+//    private:
+//     ~DoodieRequest() {}
+//
 //     int input_arg1;
 //     std::wstring input_arg2;
 //   };
@@ -468,8 +478,6 @@ class CancelableRequest : public CancelableRequestBase {
       : CancelableRequestBase(),
         callback_(callback) {
     DCHECK(callback) << "We should always have a callback";
-  }
-  virtual ~CancelableRequest() {
   }
 
   // Dispatches the parameters to the correct thread so the callback can be
@@ -503,11 +511,14 @@ class CancelableRequest : public CancelableRequestBase {
     }
   }
 
+ protected:
+  virtual ~CancelableRequest() {}
+
  private:
   // Executes the callback and notifies the provider and the consumer that this
   // request has been completed. This must be called on the callback_thread_.
   void ExecuteCallback(const TupleType& param) {
-    if (!canceled_) {
+    if (!canceled_.IsSet()) {
       // Execute the callback.
       callback_->RunWithParams(param);
 
@@ -517,8 +528,8 @@ class CancelableRequest : public CancelableRequestBase {
     }
   }
 
-  // This should only be executed if !canceled_, otherwise the pointers may be
-  // invalid.
+  // This should only be executed if !canceled_.IsSet(),
+  // otherwise the pointers may be invalid.
   scoped_ptr<CallbackType> callback_;
 };
 
@@ -545,11 +556,11 @@ class CancelableRequest1 : public CancelableRequest<CB> {
       : CancelableRequest<CB>(callback) {
   }
 
-  virtual ~CancelableRequest1() {
-  }
-
   // The value.
   Type value;
+
+ protected:
+  virtual ~CancelableRequest1() {}
 };
 
 #endif  // CHROME_BROWSER_CANCELABLE_REQUEST_H__

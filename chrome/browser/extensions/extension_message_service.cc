@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/extension_message_service.h"
 
-#include "base/json_writer.h"
+#include "base/json/json_writer.h"
 #include "base/singleton.h"
 #include "base/stl_util-inl.h"
 #include "base/values.h"
@@ -69,16 +69,16 @@ static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
   args.Set(3, Value::CreateStringValue(source_extension_id));
   args.Set(4, Value::CreateStringValue(target_extension_id));
   CHECK(port.sender);
-  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(
-      port.routing_id, ExtensionMessageService::kDispatchOnConnect, args));
+  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
+       ExtensionMessageService::kDispatchOnConnect, args, false));
 }
 
 static void DispatchOnDisconnect(
     const ExtensionMessageService::MessagePort& port, int source_port_id) {
   ListValue args;
   args.Set(0, Value::CreateIntegerValue(source_port_id));
-  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(
-      port.routing_id, ExtensionMessageService::kDispatchOnDisconnect, args));
+  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
+      ExtensionMessageService::kDispatchOnDisconnect, args, false));
 }
 
 static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
@@ -86,18 +86,19 @@ static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
   ListValue args;
   args.Set(0, Value::CreateStringValue(message));
   args.Set(1, Value::CreateIntegerValue(source_port_id));
-  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(
-      port.routing_id, ExtensionMessageService::kDispatchOnMessage, args));
+  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
+      ExtensionMessageService::kDispatchOnMessage, args, false));
 }
 
 static void DispatchEvent(const ExtensionMessageService::MessagePort& port,
                           const std::string& event_name,
-                          const std::string& event_args) {
+                          const std::string& event_args,
+                          bool has_incognito_data) {
   ListValue args;
   args.Set(0, Value::CreateStringValue(event_name));
   args.Set(1, Value::CreateStringValue(event_args));
-  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(
-      port.routing_id, ExtensionMessageService::kDispatchEvent, args));
+  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
+      ExtensionMessageService::kDispatchEvent, args, has_incognito_data));
 }
 
 }  // namespace
@@ -112,12 +113,9 @@ const char ExtensionMessageService::kDispatchEvent[] =
     "Event.dispatchJSON";
 
 ExtensionMessageService::ExtensionMessageService(Profile* profile)
-    : ui_loop_(MessageLoop::current()),
-      profile_(profile),
+    : profile_(profile),
       extension_devtools_manager_(NULL),
       next_port_id_(0) {
-  DCHECK_EQ(ui_loop_->type(), MessageLoop::TYPE_UI);
-
   registrar_.Add(this, NotificationType::RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
@@ -129,22 +127,26 @@ ExtensionMessageService::ExtensionMessageService(Profile* profile)
 }
 
 ExtensionMessageService::~ExtensionMessageService() {
+  STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
+  channels_.clear();
 }
 
 void ExtensionMessageService::ProfileDestroyed() {
-  DCHECK_EQ(ui_loop_->type(), MessageLoop::TYPE_UI);
-
   profile_ = NULL;
-
-  // We remove notifications here because our destructor might be called on
-  // a non-UI thread.
-  registrar_.RemoveAll();
+  if (!registrar_.IsEmpty()) {
+    CHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    registrar_.RemoveAll();
+  }
 }
 
 void ExtensionMessageService::AddEventListener(const std::string& event_name,
                                                int render_process_id) {
-  DCHECK(RenderProcessHost::FromID(render_process_id)) <<
-      "Adding event listener to a non-existant RenderProcessHost.";
+  // It is possible that this RenderProcessHost is being destroyed. If that is
+  // the case, we'll have already removed his listeners, so do nothing here.
+  RenderProcessHost* rph = RenderProcessHost::FromID(render_process_id);
+  if (!rph || rph->ListenersIterator().IsAtEnd())
+    return;
+
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
   DCHECK_EQ(listeners_[event_name].count(render_process_id), 0u) << event_name;
   listeners_[event_name].insert(render_process_id);
@@ -157,8 +159,7 @@ void ExtensionMessageService::AddEventListener(const std::string& event_name,
 
 void ExtensionMessageService::RemoveEventListener(const std::string& event_name,
                                                   int render_process_id) {
-  // It is possible that this RenderProcessHost is being destroyed.  If that is
-  // the case, we'll have already removed his listeners, so do nothing here.
+  // The RenderProcessHost may be destroyed. See AddEventListener.
   RenderProcessHost* rph = RenderProcessHost::FromID(render_process_id);
   if (!rph || rph->ListenersIterator().IsAtEnd())
     return;
@@ -198,8 +199,7 @@ int ExtensionMessageService::OpenChannelToExtension(
     int routing_id, const std::string& source_extension_id,
     const std::string& target_extension_id,
     const std::string& channel_name, ResourceMessageFilter* source) {
-  DCHECK_EQ(MessageLoop::current(),
-            ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   // Create a channel ID for both sides of the channel.
   int port1_id = -1;
@@ -208,9 +208,10 @@ int ExtensionMessageService::OpenChannelToExtension(
 
   // Each side of the port is given his own port ID.  When they send messages,
   // we convert to the opposite port ID.  See PostMessageFromRenderer.
-  ui_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this,
-          &ExtensionMessageService::OpenChannelToExtensionOnUIThread,
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &ExtensionMessageService::OpenChannelToExtensionOnUIThread,
           source->id(), routing_id, port2_id, source_extension_id,
           target_extension_id, channel_name));
 
@@ -222,8 +223,7 @@ int ExtensionMessageService::OpenChannelToTab(int routing_id,
                                               const std::string& extension_id,
                                               const std::string& channel_name,
                                               ResourceMessageFilter* source) {
-  DCHECK_EQ(MessageLoop::current(),
-            ChromeThread::GetMessageLoop(ChromeThread::IO));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   // Create a channel ID for both sides of the channel.
   int port1_id = -1;
@@ -232,9 +232,10 @@ int ExtensionMessageService::OpenChannelToTab(int routing_id,
 
   // Each side of the port is given his own port ID.  When they send messages,
   // we convert to the opposite port ID.  See PostMessageFromRenderer.
-  ui_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this,
-          &ExtensionMessageService::OpenChannelToTabOnUIThread,
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this, &ExtensionMessageService::OpenChannelToTabOnUIThread,
           source->id(), routing_id, port2_id, tab_id, extension_id,
           channel_name));
 
@@ -250,6 +251,9 @@ void ExtensionMessageService::OpenChannelToExtensionOnUIThread(
     return;
 
   RenderProcessHost* source = RenderProcessHost::FromID(source_process_id);
+  if (!source)
+    return;
+
   MessagePort receiver(
       profile_->GetExtensionProcessManager()->GetExtensionProcess(
           target_extension_id),
@@ -257,7 +261,16 @@ void ExtensionMessageService::OpenChannelToExtensionOnUIThread(
   receiver.debug_info = 1;
   TabContents* source_contents = tab_util::GetTabContentsByID(
       source_process_id, source_routing_id);
-  OpenChannelOnUIThreadImpl(source, source_contents,
+
+  // Include info about the opener's tab (if it was a tab).
+  std::string tab_json = "null";
+  if (source_contents) {
+    scoped_ptr<DictionaryValue> tab_value(
+        ExtensionTabUtil::CreateTabValue(source_contents));
+    base::JSONWriter::Write(tab_value.get(), false, &tab_json);
+  }
+
+  OpenChannelOnUIThreadImpl(source, tab_json,
                             receiver, receiver_port_id,
                             source_extension_id, target_extension_id,
                             channel_name);
@@ -268,31 +281,53 @@ void ExtensionMessageService::OpenChannelToTabOnUIThread(
     int tab_id, const std::string& extension_id,
     const std::string& channel_name) {
   RenderProcessHost* source = RenderProcessHost::FromID(source_process_id);
-  TabContents* contents;
+  if (!source)
+    return;
+
+  TabContents* contents = NULL;
   MessagePort receiver;
   receiver.debug_info = 2;
-  if (ExtensionTabUtil::GetTabById(tab_id, source->profile(),
+  if (ExtensionTabUtil::GetTabById(tab_id, source->profile(), true,
                                    NULL, NULL, &contents, NULL)) {
     receiver.sender = contents->render_view_host();
     receiver.routing_id = contents->render_view_host()->routing_id();
     receiver.debug_info = 3;
   }
+
+  if (contents && contents->controller().needs_reload()) {
+    // The tab isn't loaded yet (it may be phantom). Don't attempt to connect.
+    // Treat this as a disconnect.
+    DispatchOnDisconnect(MessagePort(source, MSG_ROUTING_CONTROL),
+                         GET_OPPOSITE_PORT_ID(receiver_port_id));
+    return;
+  }
+
   TabContents* source_contents = tab_util::GetTabContentsByID(
       source_process_id, source_routing_id);
-  OpenChannelOnUIThreadImpl(source, source_contents,
+
+  // Include info about the opener's tab (if it was a tab).
+  std::string tab_json = "null";
+  if (source_contents) {
+    scoped_ptr<DictionaryValue> tab_value(
+        ExtensionTabUtil::CreateTabValue(source_contents));
+    base::JSONWriter::Write(tab_value.get(), false, &tab_json);
+  }
+
+  OpenChannelOnUIThreadImpl(source, tab_json,
                             receiver, receiver_port_id,
                             extension_id, extension_id, channel_name);
 }
 
 bool ExtensionMessageService::OpenChannelOnUIThreadImpl(
-    IPC::Message::Sender* source, TabContents* source_contents,
+    IPC::Message::Sender* source,
+    const std::string& tab_json,
     const MessagePort& receiver, int receiver_port_id,
     const std::string& source_extension_id,
     const std::string& target_extension_id,
     const std::string& channel_name) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
-  // TODO(mpcomplete): notify source if reciever doesn't exist
+  // TODO(mpcomplete): notify source if receiver doesn't exist
   if (!source)
     return false;  // Closed while in flight.
 
@@ -307,23 +342,14 @@ bool ExtensionMessageService::OpenChannelOnUIThreadImpl(
   // http://code.google.com/p/chromium/issues/detail?id=19067
   CHECK(receiver.sender);
 
-  linked_ptr<MessageChannel> channel(new MessageChannel);
+  MessageChannel* channel(new MessageChannel);
   channel->opener = MessagePort(source, MSG_ROUTING_CONTROL);
   channel->receiver = receiver;
 
   CHECK(receiver.sender);
 
+  CHECK(channels_.find(GET_CHANNEL_ID(receiver_port_id)) == channels_.end());
   channels_[GET_CHANNEL_ID(receiver_port_id)] = channel;
-
-  CHECK(receiver.sender);
-
-  // Include info about the opener's tab (if it was a tab).
-  std::string tab_json = "null";
-  if (source_contents) {
-    DictionaryValue* tab_value =
-        ExtensionTabUtil::CreateTabValue(source_contents);
-    JSONWriter::Write(tab_value, false, &tab_json);
-  }
 
   CHECK(receiver.sender);
 
@@ -337,7 +363,7 @@ bool ExtensionMessageService::OpenChannelOnUIThreadImpl(
 
 int ExtensionMessageService::OpenSpecialChannelToExtension(
     const std::string& extension_id, const std::string& channel_name,
-    IPC::Message::Sender* source) {
+    const std::string& tab_json, IPC::Message::Sender* source) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
   DCHECK(profile_);
 
@@ -348,11 +374,11 @@ int ExtensionMessageService::OpenSpecialChannelToExtension(
 
   MessagePort receiver(
       profile_->GetExtensionProcessManager()->
-      GetExtensionProcess(extension_id),
+          GetExtensionProcess(extension_id),
       MSG_ROUTING_CONTROL);
   receiver.debug_info = 4;
   if (!OpenChannelOnUIThreadImpl(
-      source, NULL, receiver, port2_id, extension_id, extension_id,
+      source, tab_json, receiver, port2_id, extension_id, extension_id,
       channel_name))
     return -1;
 
@@ -365,6 +391,11 @@ int ExtensionMessageService::OpenSpecialChannelToTab(
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
   DCHECK(target_tab_contents);
 
+  if (target_tab_contents->controller().needs_reload()) {
+    // The tab isn't loaded yet (it may be phantom). Don't attempt to connect.
+    return -1;
+  }
+
   int port1_id = -1;
   int port2_id = -1;
   // Create a channel ID for both sides of the channel.
@@ -374,7 +405,7 @@ int ExtensionMessageService::OpenSpecialChannelToTab(
       target_tab_contents->render_view_host(),
       target_tab_contents->render_view_host()->routing_id());
   receiver.debug_info = 5;
-  if (!OpenChannelOnUIThreadImpl(source, NULL,
+  if (!OpenChannelOnUIThreadImpl(source, "null",
                                  receiver, port2_id,
                                  extension_id, extension_id, channel_name))
     return -1;
@@ -402,6 +433,7 @@ void ExtensionMessageService::CloseChannelImpl(
 
   if (notify_other_port)
     DispatchOnDisconnect(port, GET_OPPOSITE_PORT_ID(closing_port_id));
+  delete channel_iter->second;
   channels_.erase(channel_iter);
 }
 
@@ -423,7 +455,8 @@ void ExtensionMessageService::PostMessageFromRenderer(
 }
 
 void ExtensionMessageService::DispatchEventToRenderers(
-    const std::string& event_name, const std::string& event_args) {
+    const std::string& event_name, const std::string& event_args,
+    bool has_incognito_data) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
   std::set<int>& pids = listeners_[event_name];
@@ -439,7 +472,7 @@ void ExtensionMessageService::DispatchEventToRenderers(
       continue;
     }
 
-    DispatchEvent(renderer, event_name, event_args);
+    DispatchEvent(renderer, event_name, event_args, has_incognito_data);
   }
 }
 

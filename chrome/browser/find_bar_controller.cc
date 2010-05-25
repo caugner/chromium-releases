@@ -1,12 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/find_bar_controller.h"
 
-#include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
 #include "build/build_config.h"
 #include "chrome/browser/find_bar.h"
+#include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -28,13 +29,15 @@ void FindBarController::Show() {
   // Only show the animation if we're not already showing a find bar for the
   // selected TabContents.
   if (!tab_contents_->find_ui_active()) {
+    MaybeSetPrepopulateText();
+
     tab_contents_->set_find_ui_active(true);
-    find_bar_->Show();
+    find_bar_->Show(true);
   }
   find_bar_->SetFocusAndSelection();
 }
 
-void FindBarController::EndFindSession() {
+void FindBarController::EndFindSession(SelectionAction action) {
   find_bar_->Hide(true);
 
   // |tab_contents_| can be NULL for a number of reasons, for example when the
@@ -43,8 +46,7 @@ void FindBarController::EndFindSession() {
     // When we hide the window, we need to notify the renderer that we are done
     // for now, so that we can abort the scoping effort and clear all the
     // tickmarks and highlighting.
-    tab_contents_->StopFinding(false);  // false = don't clear selection on
-                                        // page.
+    tab_contents_->StopFinding(action);
     find_bar_->ClearResults(tab_contents_->find_result());
 
     // When we get dismissed we restore the focus to where it belongs.
@@ -75,25 +77,7 @@ void FindBarController::ChangeTabContents(TabContents* contents) {
   registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
                  Source<NavigationController>(&tab_contents_->controller()));
 
-#if !defined(OS_MACOSX)
-  // Find out what we should show in the find text box. Usually, this will be
-  // the last search in this tab, but if no search has been issued in this tab
-  // we use the last search string (from any tab).
-  string16 find_string = tab_contents_->find_text();
-  if (find_string.empty())
-    find_string = tab_contents_->find_prepopulate_text();
-
-  // Update the find bar with existing results and search text, regardless of
-  // whether or not the find bar is visible, so that if it's subsequently
-  // shown it is showing the right state for this tab. We update the find text
-  // _first_ since the FindBarView checks its emptiness to see if it should
-  // clear the result count display when there's nothing in the box.
-  find_bar_->SetFindText(find_string);
-#else
-  // Having a per-tab find_string is not compatible with OS X's find pasteboard,
-  // so we always have the same find text in all find bars. This is done through
-  // the find pasteboard mechanism, so don't set the text here.
-#endif
+  MaybeSetPrepopulateText();
 
   if (tab_contents_->find_ui_active()) {
     // A tab with a visible find bar just got selected and we need to show the
@@ -101,8 +85,7 @@ void FindBarController::ChangeTabContents(TabContents* contents) {
     // visible state. We also want to reset the window location so that
     // we don't surprise the user by popping up to the left for no apparent
     // reason.
-    gfx::Rect new_pos = find_bar_->GetDialogPosition(gfx::Rect());
-    find_bar_->SetDialogPosition(new_pos, false);
+    find_bar_->Show(false);
   }
 
   UpdateFindBarForCurrentResult();
@@ -121,7 +104,10 @@ void FindBarController::Observe(NotificationType type,
       UpdateFindBarForCurrentResult();
       if (tab_contents_->find_result().final_update() &&
           tab_contents_->find_result().number_of_matches() == 0) {
-        find_bar_->AudibleAlert();
+        const string16& last_search = tab_contents_->previous_find_text();
+        const string16& current_search = tab_contents_->find_text();
+        if (last_search.find(current_search) != 0)
+          find_bar_->AudibleAlert();
       }
     }
   } else if (type == NotificationType::NAV_ENTRY_COMMITTED) {
@@ -137,7 +123,7 @@ void FindBarController::Observe(NotificationType type,
       if (find_bar_->IsFindBarVisible()) {
         if (PageTransition::StripQualifier(transition_type) !=
             PageTransition::RELOAD) {
-          EndFindSession();
+          EndFindSession(kKeepSelection);
         } else {
           // On Reload we want to make sure FindNext is converted to a full Find
           // to make sure highlights for inactive matches are repainted.
@@ -153,7 +139,7 @@ gfx::Rect FindBarController::GetLocationForFindbarView(
     gfx::Rect view_location,
     const gfx::Rect& dialog_bounds,
     const gfx::Rect& avoid_overlapping_rect) {
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+  if (base::i18n::IsRTL()) {
     int boundary = dialog_bounds.width() - view_location.width();
     view_location.set_x(std::min(view_location.x(), boundary));
   } else {
@@ -167,7 +153,7 @@ gfx::Rect FindBarController::GetLocationForFindbarView(
   // rectangle.
   if (!avoid_overlapping_rect.IsEmpty() &&
       avoid_overlapping_rect.Intersects(new_pos)) {
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+    if (base::i18n::IsRTL()) {
       new_pos.set_x(avoid_overlapping_rect.x() +
                     avoid_overlapping_rect.width() +
                     (2 * kMinFindWndDistanceFromSelection));
@@ -207,4 +193,30 @@ void FindBarController::UpdateFindBarForCurrentResult() {
   }
 
   find_bar_->UpdateUIForFindResult(find_result, tab_contents_->find_text());
+}
+
+void FindBarController::MaybeSetPrepopulateText() {
+#if !defined(OS_MACOSX)
+  // Find out what we should show in the find text box. Usually, this will be
+  // the last search in this tab, but if no search has been issued in this tab
+  // we use the last search string (from any tab).
+  string16 find_string = tab_contents_->find_text();
+  if (find_string.empty())
+    find_string = tab_contents_->previous_find_text();
+  if (find_string.empty()) {
+    find_string =
+        FindBarState::GetLastPrepopulateText(tab_contents_->profile());
+  }
+
+  // Update the find bar with existing results and search text, regardless of
+  // whether or not the find bar is visible, so that if it's subsequently
+  // shown it is showing the right state for this tab. We update the find text
+  // _first_ since the FindBarView checks its emptiness to see if it should
+  // clear the result count display when there's nothing in the box.
+  find_bar_->SetFindText(find_string);
+#else
+  // Having a per-tab find_string is not compatible with OS X's find pasteboard,
+  // so we always have the same find text in all find bars. This is done through
+  // the find pasteboard mechanism, so don't set the text here.
+#endif
 }

@@ -6,17 +6,29 @@
 
 #include "chrome/browser/download/download_util.h"
 
+#if defined(OS_WIN)
+#include <shobjidl.h>
+#endif
 #include <string>
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
-#include "base/gfx/rect.h"
+#include "base/i18n/rtl.h"
+#include "base/i18n/time_formatting.h"
+#include "base/path_service.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/time_format.h"
+#include "gfx/canvas.h"
+#include "gfx/rect.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -30,14 +42,22 @@
 #include "views/drag_utils.h"
 #endif
 
-#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
+#if defined(OS_LINUX)
+#if defined(TOOLKIT_VIEWS)
 #include "app/drag_drop_types.h"
 #include "views/widget/widget_gtk.h"
-#endif
+#elif defined(TOOLKIT_GTK)
+#include "chrome/browser/gtk/custom_drag.h"
+#endif  // defined(TOOLKIT_GTK)
+#endif  // defined(OS_LINUX)
 
 #if defined(OS_WIN)
 #include "app/os_exchange_data_provider_win.h"
 #include "base/base_drag_source.h"
+#include "base/scoped_comptr_win.h"
+#include "base/win_util.h"
+#include "chrome/browser/browser_list.h"
+#include "chrome/browser/views/frame/browser_view.h"
 #endif
 
 namespace download_util {
@@ -53,9 +73,8 @@ bool CanOpenDownload(DownloadItem* download) {
   if (!download->original_name().value().empty())
     file_to_use = download->original_name();
 
-  const FilePath::StringType extension =
-      file_util::GetFileExtensionFromPath(file_to_use);
-  return !download->manager()->IsExecutable(extension);
+  return !Extension::IsExtension(file_to_use) &&
+         !download->manager()->IsExecutableFile(file_to_use);
 }
 
 void OpenDownload(DownloadItem* download) {
@@ -65,6 +84,46 @@ void OpenDownload(DownloadItem* download) {
     download->NotifyObserversDownloadOpened();
     download->manager()->OpenDownload(download, NULL);
   }
+}
+
+// Download temporary file creation --------------------------------------------
+
+class DefaultDownloadDirectory {
+ public:
+  const FilePath& path() const { return path_; }
+ private:
+  DefaultDownloadDirectory() {
+    if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
+      NOTREACHED();
+    }
+    if (DownloadPathIsDangerous(path_)) {
+      if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_)) {
+        NOTREACHED();
+      }
+    }
+  }
+  friend struct DefaultSingletonTraits<DefaultDownloadDirectory>;
+  FilePath path_;
+};
+
+const FilePath& GetDefaultDownloadDirectory() {
+  return Singleton<DefaultDownloadDirectory>::get()->path();
+}
+
+bool CreateTemporaryFileForDownload(FilePath* temp_file) {
+  if (file_util::CreateTemporaryFileInDir(GetDefaultDownloadDirectory(),
+                                          temp_file))
+    return true;
+  return file_util::CreateTemporaryFile(temp_file);
+}
+
+bool DownloadPathIsDangerous(const FilePath& download_path) {
+  FilePath desktop_dir;
+  if (!PathService::Get(chrome::DIR_USER_DESKTOP, &desktop_dir)) {
+    NOTREACHED();
+    return false;
+  }
+  return (download_path == desktop_dir);
 }
 
 // Download progress painting --------------------------------------------------
@@ -291,8 +350,177 @@ void DragDownload(const DownloadItem* download,
 void DragDownload(const DownloadItem* download,
                   SkBitmap* icon,
                   gfx::NativeView view) {
-  NOTIMPLEMENTED();
+  DownloadItemDrag::BeginDrag(download, icon);
 }
 #endif  // OS_LINUX
+
+DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
+  DictionaryValue* file_value = new DictionaryValue();
+
+  file_value->SetInteger(L"started",
+    static_cast<int>(download->start_time().ToTimeT()));
+  file_value->SetString(L"since_string",
+    TimeFormat::RelativeDate(download->start_time(), NULL));
+  file_value->SetString(L"date_string",
+    base::TimeFormatShortDate(download->start_time()));
+  file_value->SetInteger(L"id", id);
+  file_value->SetString(L"file_path", download->full_path().ToWStringHack());
+  // Keep file names as LTR.
+  std::wstring file_name = download->GetFileName().ToWStringHack();
+  if (base::i18n::IsRTL())
+    base::i18n::WrapStringWithLTRFormatting(&file_name);
+  file_value->SetString(L"file_name", file_name);
+  file_value->SetString(L"url", download->url().spec());
+  file_value->SetBoolean(L"otr", download->is_otr());
+
+  if (download->state() == DownloadItem::IN_PROGRESS) {
+    if (download->safety_state() == DownloadItem::DANGEROUS) {
+      file_value->SetString(L"state", L"DANGEROUS");
+    } else if (download->is_paused()) {
+      file_value->SetString(L"state", L"PAUSED");
+    } else {
+      file_value->SetString(L"state", L"IN_PROGRESS");
+    }
+
+    file_value->SetString(L"progress_status_text",
+       GetProgressStatusText(download));
+
+    file_value->SetInteger(L"percent",
+        static_cast<int>(download->PercentComplete()));
+    file_value->SetInteger(L"received",
+        static_cast<int>(download->received_bytes()));
+  } else if (download->state() == DownloadItem::CANCELLED) {
+    file_value->SetString(L"state", L"CANCELLED");
+  } else if (download->state() == DownloadItem::COMPLETE) {
+    if (download->safety_state() == DownloadItem::DANGEROUS) {
+      file_value->SetString(L"state", L"DANGEROUS");
+    } else {
+      file_value->SetString(L"state", L"COMPLETE");
+    }
+  }
+
+  file_value->SetInteger(L"total",
+      static_cast<int>(download->total_bytes()));
+
+  return file_value;
+}
+
+std::wstring GetProgressStatusText(DownloadItem* download) {
+  int64 total = download->total_bytes();
+  int64 size = download->received_bytes();
+  DataUnits amount_units = GetByteDisplayUnits(size);
+  std::wstring received_size = FormatBytes(size, amount_units, true);
+  std::wstring amount = received_size;
+
+  // Adjust both strings for the locale direction since we don't yet know which
+  // string we'll end up using for constructing the final progress string.
+  std::wstring amount_localized;
+  if (base::i18n::AdjustStringForLocaleDirection(amount, &amount_localized)) {
+    amount.assign(amount_localized);
+    received_size.assign(amount_localized);
+  }
+
+  if (total) {
+    amount_units = GetByteDisplayUnits(total);
+    std::wstring total_text = FormatBytes(total, amount_units, true);
+    std::wstring total_text_localized;
+    if (base::i18n::AdjustStringForLocaleDirection(total_text,
+                                                   &total_text_localized))
+      total_text.assign(total_text_localized);
+
+    amount = l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_SIZE,
+                                   received_size,
+                                   total_text);
+  } else {
+    amount.assign(received_size);
+  }
+  amount_units = GetByteDisplayUnits(download->CurrentSpeed());
+  std::wstring speed_text = FormatSpeed(download->CurrentSpeed(),
+                                        amount_units, true);
+  std::wstring speed_text_localized;
+  if (base::i18n::AdjustStringForLocaleDirection(speed_text,
+                                                 &speed_text_localized))
+    speed_text.assign(speed_text_localized);
+
+  base::TimeDelta remaining;
+  std::wstring time_remaining;
+  if (download->is_paused())
+    time_remaining = l10n_util::GetString(IDS_DOWNLOAD_PROGRESS_PAUSED);
+  else if (download->TimeRemaining(&remaining))
+    time_remaining = TimeFormat::TimeRemaining(remaining);
+
+  if (time_remaining.empty()) {
+    return l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN,
+                                 speed_text, amount);
+  }
+  return l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_STATUS, speed_text,
+                               amount, time_remaining);
+}
+
+#if !defined(OS_MACOSX)
+void UpdateAppIconDownloadProgress(int download_count,
+                                   bool progress_known,
+                                   float progress) {
+#if defined(OS_WIN)
+  // Taskbar progress bar is only supported on Win7.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+    return;
+
+  ScopedComPtr<ITaskbarList3> taskbar;
+  HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
+                                          CLSCTX_INPROC_SERVER);
+  if (FAILED(result)) {
+    LOG(INFO) << "failed creating a TaskbarList object: " << result;
+    return;
+  }
+
+  result = taskbar->HrInit();
+  if (FAILED(result)) {
+    LOG(ERROR) << "failed initializing an ITaskbarList3 interface.";
+    return;
+  }
+
+  // Iterate through all the browser windows, and draw the progress bar.
+  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
+      browser_iterator != BrowserList::end(); browser_iterator++) {
+    HWND frame = (*browser_iterator)->window()->GetNativeHandle();
+    if (download_count == 0 || progress == 1.0f)
+      taskbar->SetProgressState(frame, TBPF_NOPROGRESS);
+    else if (!progress_known)
+      taskbar->SetProgressState(frame, TBPF_INDETERMINATE);
+    else
+      taskbar->SetProgressValue(frame, (int)(progress * 100), 100);
+  }
+#endif
+}
+#endif
+
+// Appends the passed the number between parenthesis the path before the
+// extension.
+void AppendNumberToPath(FilePath* path, int number) {
+  file_util::InsertBeforeExtension(path,
+      StringPrintf(FILE_PATH_LITERAL(" (%d)"), number));
+}
+
+// Attempts to find a number that can be appended to that path to make it
+// unique. If |path| does not exist, 0 is returned.  If it fails to find such
+// a number, -1 is returned.
+int GetUniquePathNumber(const FilePath& path) {
+  const int kMaxAttempts = 100;
+
+  if (!file_util::PathExists(path))
+    return 0;
+
+  FilePath new_path;
+  for (int count = 1; count <= kMaxAttempts; ++count) {
+    new_path = FilePath(path);
+    AppendNumberToPath(&new_path, count);
+
+    if (!file_util::PathExists(new_path))
+      return count;
+  }
+
+  return -1;
+}
 
 }  // namespace download_util

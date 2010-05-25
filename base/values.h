@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
+#include "build/build_config.h"
 
 class Value;
 class FundamentalValue;
@@ -54,6 +56,7 @@ class Value {
   static Value* CreateRealValue(double in_value);
   static Value* CreateStringValue(const std::string& in_value);
   static Value* CreateStringValue(const std::wstring& in_value);
+  static Value* CreateStringValueFromUTF16(const string16& in_value);
 
   // This one can return NULL if the input isn't valid.  If the return value
   // is non-null, the new object has taken ownership of the buffer pointer.
@@ -82,13 +85,14 @@ class Value {
 
   // These methods allow the convenient retrieval of settings.
   // If the current setting object can be converted into the given type,
-  // the value is returned through the "value" parameter and true is returned;
-  // otherwise, false is returned and "value" is unchanged.
+  // the value is returned through the |out_value| parameter and true is
+  // returned;  otherwise, false is returned and |out_value| is unchanged.
   virtual bool GetAsBoolean(bool* out_value) const;
   virtual bool GetAsInteger(int* out_value) const;
   virtual bool GetAsReal(double* out_value) const;
   virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(std::wstring* out_value) const;
+  virtual bool GetAsUTF16(string16* out_value) const;
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
   // to the copy.  The caller gets ownership of the copy, of course.
@@ -146,11 +150,17 @@ class StringValue : public Value {
   // Initializes a StringValue with a wide character string.
   explicit StringValue(const std::wstring& in_value);
 
+#if !defined(WCHAR_T_IS_UTF16)
+  // Initializes a StringValue with a string16.
+  explicit StringValue(const string16& in_value);
+#endif
+
   ~StringValue();
 
   // Subclassed methods
   bool GetAsString(std::string* out_value) const;
   bool GetAsString(std::wstring* out_value) const;
+  bool GetAsUTF16(string16* out_value) const;
   Value* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
 
@@ -204,10 +214,16 @@ class DictionaryValue : public Value {
   virtual bool Equals(const Value* other) const;
 
   // Returns true if the current dictionary has a value for the given key.
+  bool HasKeyASCII(const std::string& key) const;
+  // Deprecated version of the above.  TODO: add a string16 version for Unicode.
+  // http://code.google.com/p/chromium/issues/detail?id=23581
   bool HasKey(const std::wstring& key) const;
 
   // Returns the number of Values in this dictionary.
-  size_t GetSize() const { return dictionary_.size(); }
+  size_t size() const { return dictionary_.size(); }
+
+  // Returns whether the dictionary is empty.
+  bool empty() const { return dictionary_.empty(); }
 
   // Clears any current contents of this dictionary.
   void Clear();
@@ -220,23 +236,28 @@ class DictionaryValue : public Value {
   // a DictionaryValue, a new DictionaryValue will be created and attached
   // to the path in that location.
   // Note that the dictionary takes ownership of the value referenced by
-  // |in_value|.
-  bool Set(const std::wstring& path, Value* in_value);
+  // |in_value|, and therefore |in_value| must be non-NULL.
+  void Set(const std::wstring& path, Value* in_value);
 
   // Convenience forms of Set().  These methods will replace any existing
   // value at that path, even if it has a different type.
-  bool SetBoolean(const std::wstring& path, bool in_value);
-  bool SetInteger(const std::wstring& path, int in_value);
-  bool SetReal(const std::wstring& path, double in_value);
-  bool SetString(const std::wstring& path, const std::string& in_value);
-  bool SetString(const std::wstring& path, const std::wstring& in_value);
+  void SetBoolean(const std::wstring& path, bool in_value);
+  void SetInteger(const std::wstring& path, int in_value);
+  void SetReal(const std::wstring& path, double in_value);
+  void SetString(const std::wstring& path, const std::string& in_value);
+  void SetString(const std::wstring& path, const std::wstring& in_value);
+  void SetStringFromUTF16(const std::wstring& path, const string16& in_value);
+
+  // Like Set(), but without special treatment of '.'.  This allows e.g. URLs to
+  // be used as paths.
+  void SetWithoutPathExpansion(const std::wstring& key, Value* in_value);
 
   // Gets the Value associated with the given path starting from this object.
   // A path has the form "<key>" or "<key>.<key>.[...]", where "." indexes
   // into the next DictionaryValue down.  If the path can be resolved
   // successfully, the value for the last key in the path will be returned
-  // through the "value" parameter, and the function will return true.
-  // Otherwise, it will return false and "value" will be untouched.
+  // through the |out_value| parameter, and the function will return true.
+  // Otherwise, it will return false and |out_value| will be untouched.
   // Note that the dictionary always owns the value that's returned.
   bool Get(const std::wstring& path, Value** out_value) const;
 
@@ -246,12 +267,34 @@ class DictionaryValue : public Value {
   bool GetBoolean(const std::wstring& path, bool* out_value) const;
   bool GetInteger(const std::wstring& path, int* out_value) const;
   bool GetReal(const std::wstring& path, double* out_value) const;
+  bool GetString(const std::string& path, string16* out_value) const;
+  bool GetStringASCII(const std::string& path, std::string* out_value) const;
+  // TODO: deprecate wstring accessors.
+  // http://code.google.com/p/chromium/issues/detail?id=23581
   bool GetString(const std::wstring& path, std::string* out_value) const;
   bool GetString(const std::wstring& path, std::wstring* out_value) const;
+  bool GetStringAsUTF16(const std::wstring& path, string16* out_value) const;
   bool GetBinary(const std::wstring& path, BinaryValue** out_value) const;
   bool GetDictionary(const std::wstring& path,
                      DictionaryValue** out_value) const;
   bool GetList(const std::wstring& path, ListValue** out_value) const;
+
+  // Like Get(), but without special treatment of '.'.  This allows e.g. URLs to
+  // be used as paths.
+  bool GetWithoutPathExpansion(const std::wstring& key,
+                               Value** out_value) const;
+  bool GetIntegerWithoutPathExpansion(const std::wstring& path,
+                                      int* out_value) const;
+  bool GetStringWithoutPathExpansion(const std::wstring& path,
+                                     std::string* out_value) const;
+  bool GetStringWithoutPathExpansion(const std::wstring& path,
+                                     std::wstring* out_value) const;
+  bool GetStringAsUTF16WithoutPathExpansion(const std::wstring& path,
+                                            string16* out_value) const;
+  bool GetDictionaryWithoutPathExpansion(const std::wstring& path,
+                                         DictionaryValue** out_value) const;
+  bool GetListWithoutPathExpansion(const std::wstring& path,
+                                   ListValue** out_value) const;
 
   // Removes the Value with the specified path from this dictionary (or one
   // of its child dictionaries, if the path is more than just a local key).
@@ -261,13 +304,28 @@ class DictionaryValue : public Value {
   // it will return false and the DictionaryValue object will be unchanged.
   bool Remove(const std::wstring& path, Value** out_value);
 
+  // Like Remove(), but without special treatment of '.'.  This allows e.g. URLs
+  // to be used as paths.
+  bool RemoveWithoutPathExpansion(const std::wstring& key, Value** out_value);
+
+  // Makes a copy of |this| but doesn't include empty dictionaries and lists in
+  // the copy.  This never returns NULL, even if |this| itself is empty.
+  DictionaryValue* DeepCopyWithoutEmptyChildren();
+
   // This class provides an iterator for the keys in the dictionary.
   // It can't be used to modify the dictionary.
+  //
+  // YOU SHOULD ALWAYS USE THE XXXWithoutPathExpansion() APIs WITH THESE, NOT
+  // THE NORMAL XXX() APIs.  This makes sure things will work correctly if any
+  // keys have '.'s in them.
   class key_iterator
     : private std::iterator<std::input_iterator_tag, const std::wstring> {
    public:
     explicit key_iterator(ValueMap::const_iterator itr) { itr_ = itr; }
-    key_iterator operator++() { ++itr_; return *this; }
+    key_iterator operator++() {
+      ++itr_;
+      return *this;
+    }
     const std::wstring& operator*() { return itr_->first; }
     bool operator!=(const key_iterator& other) { return itr_ != other.itr_; }
     bool operator==(const key_iterator& other) { return itr_ == other.itr_; }
@@ -280,11 +338,6 @@ class DictionaryValue : public Value {
   key_iterator end_keys() const { return key_iterator(dictionary_.end()); }
 
  private:
-  // Associates the value |in_value| with the |key|.  This method should be
-  // used instead of "dictionary_[key] = foo" so that any previous value can
-  // be properly deleted.
-  void SetInCurrentNode(const std::wstring& key, Value* in_value);
-
   ValueMap dictionary_;
 
   DISALLOW_COPY_AND_ASSIGN(DictionaryValue);
@@ -306,6 +359,9 @@ class ListValue : public Value {
   // Returns the number of Values in this list.
   size_t GetSize() const { return list_.size(); }
 
+  // Returns whether the list is empty.
+  bool empty() const { return list_.empty(); }
+
   // Sets the list item at the given index to be the Value specified by
   // the value given.  If the index beyond the current end of the list, null
   // Values will be used to pad out the list.
@@ -313,18 +369,20 @@ class ListValue : public Value {
   // the value is a null pointer.
   bool Set(size_t index, Value* in_value);
 
-  // Gets the Value at the given index.  Modifies value (and returns true)
+  // Gets the Value at the given index.  Modifies |out_value| (and returns true)
   // only if the index falls within the current list range.
-  // Note that the list always owns the Value passed out via out_value.
+  // Note that the list always owns the Value passed out via |out_value|.
   bool Get(size_t index, Value** out_value) const;
 
-  // Convenience forms of Get().  Modifies value (and returns true) only if
-  // the index is valid and the Value at that index can be returned in
-  // the specified form.
+  // Convenience forms of Get().  Modifies |out_value| (and returns true)
+  // only if the index is valid and the Value at that index can be returned
+  // in the specified form.
   bool GetBoolean(size_t index, bool* out_value) const;
   bool GetInteger(size_t index, int* out_value) const;
   bool GetReal(size_t index, double* out_value) const;
   bool GetString(size_t index, std::string* out_value) const;
+  bool GetString(size_t index, std::wstring* out_value) const;
+  bool GetStringAsUTF16(size_t index, string16* out_value) const;
   bool GetBinary(size_t index, BinaryValue** out_value) const;
   bool GetDictionary(size_t index, DictionaryValue** out_value) const;
   bool GetList(size_t index, ListValue** out_value) const;
@@ -336,8 +394,8 @@ class ListValue : public Value {
   // it will return false and the ListValue object will be unchanged.
   bool Remove(size_t index, Value** out_value);
 
-  // Removes the first instance of |value| found in the list, if any, returning
-  // the index that it was located at (-1 for not present).
+  // Removes the first instance of |value| found in the list, if any, and
+  // deletes it.  Returns the index that it was located at (-1 for not present).
   int Remove(const Value& value);
 
   // Appends a Value to the end of the list.
@@ -373,9 +431,11 @@ class ValueSerializer {
 
   // This method deserializes the subclass-specific format into a Value object.
   // If the return value is non-NULL, the caller takes ownership of returned
-  // Value. If the return value is NULL, and if error_message is non-NULL,
-  // error_message should be filled with a message describing the error.
-  virtual Value* Deserialize(std::string* error_message) = 0;
+  // Value. If the return value is NULL, and if error_code is non-NULL,
+  // error_code will be set with the underlying error.
+  // If |error_message| is non-null, it will be filled in with a formatted
+  // error message including the location of the error if appropriate.
+  virtual Value* Deserialize(int* error_code, std::string* error_str) = 0;
 };
 
 #endif  // BASE_VALUES_H_

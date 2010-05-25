@@ -5,8 +5,10 @@
 #include <string>
 
 #include "base/base_paths.h"
+#include "base/callback.h"
 #include "base/file_path.h"
-#include "base/string_util.h"
+#include "base/path_service.h"
+#include "base/utf_string_conversions.h"
 #include "media/base/mock_filter_host.h"
 #include "media/base/mock_filters.h"
 #include "media/filters/file_data_source.h"

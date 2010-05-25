@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "base/callback.h"
+#include "base/format_macros.h"
 #include "base/string_util.h"
 #include "media/base/filters.h"
 #include "media/base/mock_filter_host.h"
@@ -74,7 +76,7 @@ class BufferedResourceLoaderTest : public testing::Test {
 
     loader_ = new BufferedResourceLoader(&bridge_factory_, gurl_,
                                          first_position_, last_position_);
-    EXPECT_EQ(gurl_.spec(), loader_->GetURLForDebugging());
+    EXPECT_EQ(gurl_.spec(), loader_->GetURLForDebugging().spec());
   }
 
   void Start() {
@@ -92,7 +94,8 @@ class BufferedResourceLoaderTest : public testing::Test {
     EXPECT_CALL(*this, StartCallback(net::OK));
     ResourceLoaderBridge::ResponseInfo info;
     std::string header = StringPrintf("HTTP/1.1 200 OK\n"
-                                      "Content-Length: %lld", instance_size);
+                                      "Content-Length: %" PRId64,
+                                      instance_size);
     replace(header.begin(), header.end(), '\n', '\0');
     info.headers = new net::HttpResponseHeaders(header);
     info.content_length = instance_size;
@@ -108,7 +111,8 @@ class BufferedResourceLoaderTest : public testing::Test {
     int64 content_length = last_position - first_position + 1;
     ResourceLoaderBridge::ResponseInfo info;
     std::string header = StringPrintf("HTTP/1.1 206 Partial Content\n"
-                                      "Content-Range: bytes %lld-%lld/%lld",
+                                      "Content-Range: bytes "
+                                      "%" PRId64 "-%" PRId64 "/%" PRId64,
                                       first_position,
                                       last_position,
                                       instance_size);
@@ -377,7 +381,9 @@ class MockBufferedResourceLoader : public BufferedResourceLoader {
   MOCK_METHOD0(GetBufferedFirstBytePosition, int64());
   MOCK_METHOD0(GetBufferedLastBytePosition, int64());
 
- private:
+ protected:
+  ~MockBufferedResourceLoader() {}
+
   DISALLOW_COPY_AND_ASSIGN(MockBufferedResourceLoader);
 };
 

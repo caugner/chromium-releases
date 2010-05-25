@@ -1,18 +1,72 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "app/gtk_dnd_util.h"
 
-#include "base/string_util.h"
+#include <string>
+
 #include "base/logging.h"
 #include "base/pickle.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 
 static const int kBitsPerByte = 8;
 
-// static
-GdkAtom GtkDndUtil::GetAtomForTarget(int target) {
+using WebKit::WebDragOperationsMask;
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationNone;
+using WebKit::WebDragOperationCopy;
+using WebKit::WebDragOperationLink;
+using WebKit::WebDragOperationMove;
+
+namespace {
+
+void AddTargetToList(GtkTargetList* targets, int target_code) {
+  switch (target_code) {
+    case gtk_dnd_util::TEXT_PLAIN:
+      gtk_target_list_add_text_targets(targets, gtk_dnd_util::TEXT_PLAIN);
+      break;
+
+    case gtk_dnd_util::TEXT_URI_LIST:
+      gtk_target_list_add_uri_targets(targets, gtk_dnd_util::TEXT_URI_LIST);
+      break;
+
+    case gtk_dnd_util::TEXT_HTML:
+      gtk_target_list_add(
+          targets, gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::TEXT_HTML),
+          0, gtk_dnd_util::TEXT_HTML);
+      break;
+
+    case gtk_dnd_util::NETSCAPE_URL:
+      gtk_target_list_add(targets,
+          gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::NETSCAPE_URL),
+          0, gtk_dnd_util::NETSCAPE_URL);
+      break;
+
+    case gtk_dnd_util::CHROME_TAB:
+    case gtk_dnd_util::CHROME_BOOKMARK_ITEM:
+    case gtk_dnd_util::CHROME_NAMED_URL:
+      gtk_target_list_add(targets, gtk_dnd_util::GetAtomForTarget(target_code),
+                          GTK_TARGET_SAME_APP, target_code);
+      break;
+
+    case gtk_dnd_util::DIRECT_SAVE_FILE:
+      gtk_target_list_add(targets,
+          gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::DIRECT_SAVE_FILE),
+          0, gtk_dnd_util::DIRECT_SAVE_FILE);
+      break;
+
+    default:
+      NOTREACHED() << " Unexpected target code: " << target_code;
+  }
+}
+
+}  // namespace
+
+namespace gtk_dnd_util {
+
+GdkAtom GetAtomForTarget(int target) {
   switch (target) {
     case CHROME_TAB:
       static GdkAtom tab_atom = gdk_atom_intern(
@@ -44,6 +98,21 @@ GdkAtom GtkDndUtil::GetAtomForTarget(int target) {
           const_cast<char*>("application/x-chrome-named-url"), false);
       return named_url;
 
+    case NETSCAPE_URL:
+      static GdkAtom netscape_url = gdk_atom_intern(
+          const_cast<char*>("_NETSCAPE_URL"), false);
+      return netscape_url;
+
+    case TEXT_PLAIN_NO_CHARSET:
+      static GdkAtom text_no_charset_atom = gdk_atom_intern(
+          const_cast<char*>("text/plain"), false);
+      return text_no_charset_atom;
+
+    case DIRECT_SAVE_FILE:
+      static GdkAtom xds_atom = gdk_atom_intern(
+          const_cast<char*>("XdndDirectSave0"), false);
+      return xds_atom;
+
     default:
       NOTREACHED();
   }
@@ -51,8 +120,7 @@ GdkAtom GtkDndUtil::GetAtomForTarget(int target) {
   return NULL;
 }
 
-// static
-GtkTargetList* GtkDndUtil::GetTargetListFromCodeMask(int code_mask) {
+GtkTargetList* GetTargetListFromCodeMask(int code_mask) {
   GtkTargetList* targets = gtk_target_list_new(NULL, 0);
 
   for (size_t i = 1; i < INVALID_TARGET; i = i << 1) {
@@ -66,16 +134,13 @@ GtkTargetList* GtkDndUtil::GetTargetListFromCodeMask(int code_mask) {
   return targets;
 }
 
-// static
-void GtkDndUtil::SetSourceTargetListFromCodeMask(GtkWidget* source,
-                                                 int code_mask) {
+void SetSourceTargetListFromCodeMask(GtkWidget* source, int code_mask) {
   GtkTargetList* targets = GetTargetListFromCodeMask(code_mask);
   gtk_drag_source_set_target_list(source, targets);
   gtk_target_list_unref(targets);
 }
 
-// static
-void GtkDndUtil::SetDestTargetList(GtkWidget* dest, const int* target_codes) {
+void SetDestTargetList(GtkWidget* dest, const int* target_codes) {
   GtkTargetList* targets = gtk_target_list_new(NULL, 0);
 
   for (size_t i = 0; target_codes[i] != -1; ++i) {
@@ -86,38 +151,10 @@ void GtkDndUtil::SetDestTargetList(GtkWidget* dest, const int* target_codes) {
   gtk_target_list_unref(targets);
 }
 
-// static
-void GtkDndUtil::AddTargetToList(GtkTargetList* targets, int target_code) {
-  switch (target_code) {
-    case TEXT_PLAIN:
-      gtk_target_list_add_text_targets(targets, TEXT_PLAIN);
-      break;
-
-    case TEXT_URI_LIST:
-      gtk_target_list_add_uri_targets(targets, TEXT_URI_LIST);
-      break;
-
-    case TEXT_HTML:
-      gtk_target_list_add(targets, GetAtomForTarget(TEXT_PLAIN), 0, TEXT_HTML);
-      break;
-
-    case CHROME_TAB:
-    case CHROME_BOOKMARK_ITEM:
-    case CHROME_NAMED_URL:
-      gtk_target_list_add(targets, GtkDndUtil::GetAtomForTarget(target_code),
-                          GTK_TARGET_SAME_APP, target_code);
-      break;
-
-    default:
-      NOTREACHED() << " Unexpected target code: " << target_code;
-  }
-}
-
-// static
-void GtkDndUtil::WriteURLWithName(GtkSelectionData* selection_data,
-                                  const GURL& url,
-                                  const string16& title,
-                                  int type) {
+void WriteURLWithName(GtkSelectionData* selection_data,
+                      const GURL& url,
+                      const string16& title,
+                      int type) {
   switch (type) {
     case TEXT_PLAIN: {
       gtk_selection_data_set_text(selection_data, url.spec().c_str(),
@@ -138,12 +175,23 @@ void GtkDndUtil::WriteURLWithName(GtkSelectionData* selection_data,
       pickle.WriteString(url.spec());
       gtk_selection_data_set(
           selection_data,
-          GetAtomForTarget(GtkDndUtil::CHROME_NAMED_URL),
+          GetAtomForTarget(gtk_dnd_util::CHROME_NAMED_URL),
           kBitsPerByte,
           reinterpret_cast<const guchar*>(pickle.data()),
           pickle.size());
       break;
     }
+    case NETSCAPE_URL: {
+      // _NETSCAPE_URL format is URL + \n + title.
+      std::string utf8_text = url.spec() + "\n" + UTF16ToUTF8(title);
+      gtk_selection_data_set(selection_data,
+                             selection_data->target,
+                             kBitsPerByte,
+                             reinterpret_cast<const guchar*>(utf8_text.c_str()),
+                             utf8_text.length());
+      break;
+    }
+
     default: {
       NOTREACHED();
       break;
@@ -151,10 +199,12 @@ void GtkDndUtil::WriteURLWithName(GtkSelectionData* selection_data,
   }
 }
 
-// static
-bool GtkDndUtil::ExtractNamedURL(GtkSelectionData* selection_data,
-                                 GURL* url,
-                                 string16* title) {
+bool ExtractNamedURL(GtkSelectionData* selection_data,
+                     GURL* url,
+                     string16* title) {
+  if (!selection_data || selection_data->length <= 0)
+    return false;
+
   Pickle data(reinterpret_cast<char*>(selection_data->data),
               selection_data->length);
   void* iter = NULL;
@@ -173,9 +223,7 @@ bool GtkDndUtil::ExtractNamedURL(GtkSelectionData* selection_data,
   return true;
 }
 
-// static
-bool GtkDndUtil::ExtractURIList(GtkSelectionData* selection_data,
-                                std::vector<GURL>* urls) {
+bool ExtractURIList(GtkSelectionData* selection_data, std::vector<GURL>* urls) {
   gchar** uris = gtk_selection_data_get_uris(selection_data);
   if (!uris)
     return false;
@@ -189,3 +237,27 @@ bool GtkDndUtil::ExtractURIList(GtkSelectionData* selection_data,
   g_strfreev(uris);
   return true;
 }
+
+GdkDragAction WebDragOpToGdkDragAction(WebDragOperationsMask op) {
+  GdkDragAction action = static_cast<GdkDragAction>(0);
+  if (op & WebDragOperationCopy)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_COPY);
+  if (op & WebDragOperationLink)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_LINK);
+  if (op & WebDragOperationMove)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_MOVE);
+  return action;
+}
+
+WebDragOperationsMask GdkDragActionToWebDragOp(GdkDragAction action) {
+  WebDragOperationsMask op = WebDragOperationNone;
+  if (action & GDK_ACTION_COPY)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationCopy);
+  if (action & GDK_ACTION_LINK)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationLink);
+  if (action & GDK_ACTION_MOVE)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationMove);
+  return op;
+}
+
+}  // namespace gtk_dnd_util

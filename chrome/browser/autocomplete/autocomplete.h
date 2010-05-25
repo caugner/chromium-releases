@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -233,19 +233,19 @@ class AutocompleteInput {
   const GURL& canonicalized_url() const { return canonicalized_url_; }
 
   // Returns whether inline autocompletion should be prevented.
-  const bool prevent_inline_autocomplete() const {
+  bool prevent_inline_autocomplete() const {
     return prevent_inline_autocomplete_;
   }
 
   // Returns whether, given an input string consisting solely of a substituting
   // keyword, we should score it like a non-substituting keyword.
-  const bool prefer_keyword() const { return prefer_keyword_; }
+  bool prefer_keyword() const { return prefer_keyword_; }
 
   // Returns whether providers should avoid scheduling asynchronous work.  If
   // this is true, providers should stop after returning all the
   // synchronously-available matches.  This also means any in-progress
   // asynchronous work should be canceled, so no later callbacks are fired.
-  const bool synchronous_only() const { return synchronous_only_; }
+  bool synchronous_only() const { return synchronous_only_; }
 
   // operator==() by another name.
   bool Equals(const AutocompleteInput& other) const;
@@ -287,7 +287,7 @@ struct AutocompleteMatch {
   //   0,         |   15,            |   4,
   //              11,match           0,match
   //
-  // This structure holds the classifiction information for each span.
+  // This structure holds the classification information for each span.
   struct ACMatchClassification {
     // The values in here are not mutually exclusive -- use them like a
     // bitfield.  This also means we use "int" instead of this enum type when
@@ -472,6 +472,9 @@ class AutocompleteProvider
     // them all again when this is called anyway, so such a parameter wouldn't
     // actually be useful.
     virtual void OnProviderUpdate(bool updated_matches) = 0;
+
+   protected:
+    virtual ~ACProviderListener() {}
   };
 
   AutocompleteProvider(ACProviderListener* listener,
@@ -482,8 +485,6 @@ class AutocompleteProvider
         done_(true),
         name_(name) {
   }
-
-  virtual ~AutocompleteProvider();
 
   // Invoked when the profile changes.
   // NOTE: Do not access any previous Profile* at this point as it may have
@@ -538,6 +539,10 @@ class AutocompleteProvider
   static size_t max_matches() { return max_matches_; }
 
  protected:
+  friend class base::RefCountedThreadSafe<AutocompleteProvider>;
+
+  virtual ~AutocompleteProvider();
+
   // Trims "http:" and up to two subsequent slashes from |url|.  Returns the
   // number of characters that were trimmed.
   static size_t TrimHttpPrefix(std::wstring* url);
@@ -546,9 +551,9 @@ class AutocompleteProvider
   // profile's bookmark bar model.
   void UpdateStarredStateOfMatches();
 
-  // A convenience function to call gfx::GetCleanStringFromUrl() with the
-  // current set of "Accept Languages" when check_accept_lang is true.
-  // Otherwise, it's called with an empty list.
+  // A convenience function to call net::FormatUrl() with the current set of
+  // "Accept Languages" when check_accept_lang is true.  Otherwise, it's called
+  // with an empty list.
   std::wstring StringForURLDisplay(const GURL& url,
                                    bool check_accept_lang) const;
 
@@ -773,7 +778,7 @@ class AutocompleteController : public ACProviderListener {
   // This next is temporary and should go away when
   // AutocompletePopup::URLsForCurrentSelection() moves to the controller.
   const AutocompleteResult& latest_result() const { return latest_result_; }
-  const bool done() const { return done_ && !update_delay_timer_.IsRunning(); }
+  bool done() const { return done_ && !update_delay_timer_.IsRunning(); }
 
   // From AutocompleteProvider::Listener
   virtual void OnProviderUpdate(bool updated_matches);

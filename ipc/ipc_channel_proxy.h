@@ -46,9 +46,13 @@ class SendTask;
 //
 class ChannelProxy : public Message::Sender {
  public:
+
+  struct MessageFilterTraits;
+
   // A class that receives messages on the thread where the IPC channel is
   // running.  It can choose to prevent the default action for an IPC message.
-  class MessageFilter : public base::RefCountedThreadSafe<MessageFilter> {
+  class MessageFilter
+      : public base::RefCountedThreadSafe<MessageFilter, MessageFilterTraits> {
    public:
     virtual ~MessageFilter() {}
 
@@ -78,6 +82,19 @@ class ChannelProxy : public Message::Sender {
     // the message be handled in the default way.
     virtual bool OnMessageReceived(const Message& message) {
       return false;
+    }
+
+    // Called when the message filter is about to be deleted.  This gives
+    // derived classes the option of controlling which thread they're deleted
+    // on etc.
+    virtual void OnDestruct() {
+      delete this;
+    }
+  };
+
+  struct MessageFilterTraits {
+    static void Destruct(MessageFilter* filter) {
+      filter->OnDestruct();
     }
   };
 
@@ -144,7 +161,6 @@ class ChannelProxy : public Message::Sender {
    public:
     Context(Channel::Listener* listener, MessageFilter* filter,
             MessageLoop* ipc_thread);
-    virtual ~Context() { }
     void ClearIPCMessageLoop() { ipc_message_loop_ = NULL; }
     MessageLoop* ipc_message_loop() const { return ipc_message_loop_; }
     const std::string& channel_id() const { return channel_id_; }
@@ -153,6 +169,9 @@ class ChannelProxy : public Message::Sender {
     void OnDispatchMessage(const Message& message);
 
    protected:
+    friend class base::RefCountedThreadSafe<Context>;
+    virtual ~Context() { }
+
     // IPC::Channel::Listener methods:
     virtual void OnMessageReceived(const Message& message);
     virtual void OnChannelConnected(int32 peer_pid);
@@ -177,6 +196,7 @@ class ChannelProxy : public Message::Sender {
    private:
     friend class ChannelProxy;
     friend class SendTask;
+
     // Create the Channel
     void CreateChannel(const std::string& id, const Channel::Mode& mode);
 

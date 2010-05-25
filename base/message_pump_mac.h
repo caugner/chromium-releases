@@ -33,12 +33,21 @@
 #include "base/message_pump.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
+
+#if defined(__OBJC__)
+@class NSAutoreleasePool;
+#else  // defined(__OBJC__)
+class NSAutoreleasePool;
+#endif  // defined(__OBJC__)
 
 namespace base {
 
 class Time;
 
 class MessagePumpCFRunLoopBase : public MessagePump {
+  // Needs access to CreateAutoreleasePool.
+  friend class MessagePumpScopedAutoreleasePool;
  public:
   MessagePumpCFRunLoopBase();
   virtual ~MessagePumpCFRunLoopBase();
@@ -54,17 +63,16 @@ class MessagePumpCFRunLoopBase : public MessagePump {
   virtual void ScheduleDelayedWork(const Time& delayed_work_time);
 
  protected:
-  // The thread's run loop.
-  CFRunLoopRef run_loop_;
+  // Accessors for private data members to be used by subclasses.
+  CFRunLoopRef run_loop() const { return run_loop_; }
+  int nesting_level() const { return nesting_level_; }
+  int run_nesting_level() const { return run_nesting_level_; }
 
-  // The recursion depth of the currently-executing CFRunLoopRun loop on the
-  // run loop's thread.  0 if no run loops are running inside of whatever scope
-  // the object was created in.
-  int nesting_level_;
-
-  // The recursion depth (calculated in the same way as nesting_level_) of the
-  // innermost executing CFRunLoopRun loop started by a call to Run.
-  int run_nesting_level_;
+  // Return an autorelease pool to wrap around any work being performed.
+  // In some cases, CreateAutoreleasePool may return nil intentionally to
+  // preventing an autorelease pool from being created, allowing any
+  // objects autoreleased by work to fall into the current autorelease pool.
+  virtual NSAutoreleasePool* CreateAutoreleasePool();
 
  private:
   // Timer callback scheduled by ScheduleDelayedWork.  This does not do any
@@ -96,17 +104,29 @@ class MessagePumpCFRunLoopBase : public MessagePump {
 
   // Perform work that may have been deferred because it was not runnable
   // within a nested run loop.  This is associated with
-  // nesting_deferred_work_source_ and is signalled by EnterExitObserver when
-  // a run loop exits, so that an outer loop will be able to perform the
-  // necessary tasks.  The static method calls the instance method; the
-  // instance method returns true if anything was done.
+  // nesting_deferred_work_source_ and is signalled by
+  // MaybeScheduleNestingDeferredWork when returning from a nested loop,
+  // so that an outer loop will be able to perform the necessary tasks if it
+  // permits nestable tasks.
   static void RunNestingDeferredWorkSource(void* info);
   bool RunNestingDeferredWork();
+
+  // Schedules possible nesting-deferred work to be processed before the run
+  // loop goes to sleep, exits, or begins processing sources at the top of its
+  // loop.  If this function detects that a nested loop had run since the
+  // previous attempt to schedule nesting-deferred work, it will schedule a
+  // call to RunNestingDeferredWorkSource.
+  void MaybeScheduleNestingDeferredWork();
 
   // Observer callback responsible for performing idle-priority work, before
   // the run loop goes to sleep.  Associated with idle_work_observer_.
   static void PreWaitObserver(CFRunLoopObserverRef observer,
                               CFRunLoopActivity activity, void* info);
+
+  // Observer callback called before the run loop processes any sources.
+  // Associated with pre_source_observer_.
+  static void PreSourceObserver(CFRunLoopObserverRef observer,
+                                CFRunLoopActivity activity, void* info);
 
   // Observer callback called when the run loop starts and stops, at the
   // beginning and end of calls to CFRunLoopRun.  This is used to maintain
@@ -119,6 +139,15 @@ class MessagePumpCFRunLoopBase : public MessagePump {
   // the basis of run loops starting and stopping.
   virtual void EnterExitRunLoop(CFRunLoopActivity activity);
 
+  // IOKit power state change notification callback, called when the system
+  // enters and leaves the sleep state.
+  static void PowerStateNotification(void* info, io_service_t service,
+                                     uint32_t message_type,
+                                     void* message_argument);
+
+  // The thread's run loop.
+  CFRunLoopRef run_loop_;
+
   // The timer, sources, and observers are described above alongside their
   // callbacks.
   CFRunLoopTimerRef delayed_work_timer_;
@@ -127,10 +156,35 @@ class MessagePumpCFRunLoopBase : public MessagePump {
   CFRunLoopSourceRef idle_work_source_;
   CFRunLoopSourceRef nesting_deferred_work_source_;
   CFRunLoopObserverRef pre_wait_observer_;
+  CFRunLoopObserverRef pre_source_observer_;
   CFRunLoopObserverRef enter_exit_observer_;
+
+  // Objects used for power state notification.  See PowerStateNotification.
+  io_connect_t root_power_domain_;
+  IONotificationPortRef power_notification_port_;
+  io_object_t power_notification_object_;
 
   // (weak) Delegate passed as an argument to the innermost Run call.
   Delegate* delegate_;
+
+  // The time that delayed_work_timer_ is scheduled to fire.  This is tracked
+  // independently of CFRunLoopTimerGetNextFireDate(delayed_work_timer_)
+  // to be able to reset the timer properly after waking from system sleep.
+  // See PowerStateNotification.
+  CFAbsoluteTime delayed_work_fire_time_;
+
+  // The recursion depth of the currently-executing CFRunLoopRun loop on the
+  // run loop's thread.  0 if no run loops are running inside of whatever scope
+  // the object was created in.
+  int nesting_level_;
+
+  // The recursion depth (calculated in the same way as nesting_level_) of the
+  // innermost executing CFRunLoopRun loop started by a call to Run.
+  int run_nesting_level_;
+
+  // The deepest (numerically highest) recursion depth encountered since the
+  // most recent attempt to run nesting-deferred work.
+  int deepest_nesting_level_;
 
   // "Delegateless" work flags are set when work is ready to be performed but
   // must wait until a delegate is available to process it.  This can happen
@@ -188,6 +242,10 @@ class MessagePumpNSApplication : public MessagePumpCFRunLoopBase {
 
   virtual void DoRun(Delegate* delegate);
   virtual void Quit();
+
+ protected:
+  // Returns nil if NSApp is currently in the middle of calling -sendEvent.
+  virtual NSAutoreleasePool* CreateAutoreleasePool();
 
  private:
   // False after Quit is called.

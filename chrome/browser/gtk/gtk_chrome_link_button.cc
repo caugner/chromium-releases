@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 #include "base/logging.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/gtk_util.h"
 
 static const gchar* kLinkMarkup = "<u><span color=\"%s\">%s</span></u>";
 
@@ -33,6 +33,19 @@ void SetLinkButtonStyle() {
       "widget_class \"*.<GtkChromeLinkButton>\" style \"chrome-link-button\"");
 }
 
+static void gtk_chrome_link_button_destroy_text_resources(
+    GtkChromeLinkButton* button) {
+  g_free(button->native_markup);
+  button->native_markup = NULL;
+  g_free(button->normal_markup);
+  button->normal_markup = NULL;
+  g_free(button->pressed_markup);
+  button->pressed_markup = NULL;
+
+  g_free(button->text);
+  button->text = NULL;
+}
+
 }  // namespace
 
 G_BEGIN_DECLS
@@ -42,23 +55,22 @@ G_DEFINE_TYPE(GtkChromeLinkButton, gtk_chrome_link_button, GTK_TYPE_BUTTON)
 // can be read.
 static void gtk_chrome_link_button_set_text(GtkChromeLinkButton* button) {
   // We only set the markup once.
-  if (button->blue_markup)
+  if (button->normal_markup)
     return;
 
   gchar* text = button->text;
   gboolean uses_markup = button->uses_markup;
 
   if (!uses_markup) {
-    button->blue_markup = g_markup_printf_escaped(kLinkMarkup, "blue", text);
-    button->red_markup = g_markup_printf_escaped(kLinkMarkup, "red", text);
+    button->normal_markup = g_markup_printf_escaped(kLinkMarkup,
+                                                    button->normal_color,
+                                                    text);
+    button->pressed_markup = g_markup_printf_escaped(kLinkMarkup, "red", text);
   } else {
-    button->blue_markup = static_cast<gchar*>(
-        g_malloc(strlen(kLinkMarkup) + strlen("blue") + strlen(text) + 1));
-    sprintf(button->blue_markup, kLinkMarkup, "blue", text);
+    button->normal_markup = g_strdup_printf(kLinkMarkup, button->normal_color,
+                                            text);
 
-    button->red_markup = static_cast<gchar*>(
-        g_malloc(strlen(kLinkMarkup) + strlen("red") + strlen(text) + 1));
-    sprintf(button->red_markup, kLinkMarkup, "red", text);
+    button->pressed_markup = g_strdup_printf(kLinkMarkup, "red", text);
   }
 
   // Get the current GTK theme's link button text color.
@@ -67,27 +79,25 @@ static void gtk_chrome_link_button_set_text(GtkChromeLinkButton* button) {
 
   if (native_color) {
     gchar color_spec[9];
-    sprintf(color_spec, "#%02X%02X%02X", native_color->red / 257,
-            native_color->green / 257, native_color->blue / 257);
+    snprintf(color_spec, 9, "#%02X%02X%02X", native_color->red / 257,
+             native_color->green / 257, native_color->blue / 257);
     gdk_color_free(native_color);
 
     if (!uses_markup) {
       button->native_markup = g_markup_printf_escaped(kLinkMarkup,
           color_spec, text);
     } else {
-      button->native_markup = static_cast<gchar*>(
-          g_malloc(strlen(kLinkMarkup) + strlen(color_spec) + strlen(text) +
-                   1));
-      sprintf(button->native_markup, kLinkMarkup, color_spec, text);
+      button->native_markup = g_strdup_printf(kLinkMarkup, color_spec, text);
     }
   } else {
     // If the theme doesn't have a link color, just use blue. This matches the
     // default for GtkLinkButton.
-    button->native_markup = button->blue_markup;
+    button->native_markup = g_strdup(button->normal_markup);
   }
 
   gtk_label_set_markup(GTK_LABEL(button->label),
-      button->using_native_theme ? button->native_markup : button->blue_markup);
+      button->using_native_theme ? button->native_markup :
+      button->normal_markup);
 }
 
 static gboolean gtk_chrome_link_button_expose(GtkWidget* widget,
@@ -95,16 +105,15 @@ static gboolean gtk_chrome_link_button_expose(GtkWidget* widget,
   GtkChromeLinkButton* button = GTK_CHROME_LINK_BUTTON(widget);
   GtkWidget* label = button->label;
 
-  gtk_chrome_link_button_set_text(button);
-
-  if (GTK_WIDGET_STATE(widget) == GTK_STATE_ACTIVE && button->is_blue) {
-    gtk_label_set_markup(GTK_LABEL(label), button->red_markup);
-    button->is_blue = FALSE;
-  } else if (GTK_WIDGET_STATE(widget) != GTK_STATE_ACTIVE && !button->is_blue) {
+  if (GTK_WIDGET_STATE(widget) == GTK_STATE_ACTIVE && button->is_normal) {
+    gtk_label_set_markup(GTK_LABEL(label), button->pressed_markup);
+    button->is_normal = FALSE;
+  } else if (GTK_WIDGET_STATE(widget) != GTK_STATE_ACTIVE &&
+             !button->is_normal) {
     gtk_label_set_markup(GTK_LABEL(label),
         button->using_native_theme ? button->native_markup :
-                                     button->blue_markup);
-    button->is_blue = TRUE;
+                                     button->normal_markup);
+    button->is_normal = TRUE;
   }
 
   // Draw the link inside the button.
@@ -135,24 +144,13 @@ static void gtk_chrome_link_button_leave(GtkButton* button) {
 
 static void gtk_chrome_link_button_destroy(GtkObject* object) {
   GtkChromeLinkButton* button = GTK_CHROME_LINK_BUTTON(object);
-  if (button->native_markup && (button->native_markup != button->blue_markup))
-    g_free(button->native_markup);
-  button->native_markup = NULL;
-  if (button->blue_markup) {
-    g_free(button->blue_markup);
-    button->blue_markup = NULL;
-  }
-  if (button->red_markup) {
-    g_free(button->red_markup);
-    button->red_markup = NULL;
-  }
+
+  gtk_chrome_link_button_destroy_text_resources(button);
+
   if (button->hand_cursor) {
     gdk_cursor_unref(button->hand_cursor);
     button->hand_cursor = NULL;
   }
-
-  free(button->text);
-  button->text = NULL;
 
   GTK_OBJECT_CLASS(gtk_chrome_link_button_parent_class)->destroy(object);
 }
@@ -178,9 +176,10 @@ static void gtk_chrome_link_button_init(GtkChromeLinkButton* button) {
   // let the button draw itself; catch all expose events to the button and pass
   // them through to the label.
   button->label = gtk_label_new(NULL);
-  button->blue_markup = NULL;
-  button->red_markup = NULL;
-  button->is_blue = TRUE;
+  button->normal_markup = NULL;
+  button->pressed_markup = NULL;
+  button->is_normal = TRUE;
+  strncpy(button->normal_color, "blue", 9);
   button->native_markup = NULL;
   button->using_native_theme = TRUE;
   button->hand_cursor = gtk_util::GetCursor(GDK_HAND2);
@@ -192,15 +191,21 @@ static void gtk_chrome_link_button_init(GtkChromeLinkButton* button) {
 
 GtkWidget* gtk_chrome_link_button_new(const char* text) {
   GtkWidget* lb = GTK_WIDGET(g_object_new(GTK_TYPE_CHROME_LINK_BUTTON, NULL));
-  GTK_CHROME_LINK_BUTTON(lb)->text = strdup(text);
+  GTK_CHROME_LINK_BUTTON(lb)->text = g_strdup(text);
   GTK_CHROME_LINK_BUTTON(lb)->uses_markup = FALSE;
+
+  gtk_chrome_link_button_set_text(GTK_CHROME_LINK_BUTTON(lb));
+
   return lb;
 }
 
 GtkWidget* gtk_chrome_link_button_new_with_markup(const char* markup) {
   GtkWidget* lb = GTK_WIDGET(g_object_new(GTK_TYPE_CHROME_LINK_BUTTON, NULL));
-  GTK_CHROME_LINK_BUTTON(lb)->text = strdup(markup);
+  GTK_CHROME_LINK_BUTTON(lb)->text = g_strdup(markup);
   GTK_CHROME_LINK_BUTTON(lb)->uses_markup = TRUE;
+
+  gtk_chrome_link_button_set_text(GTK_CHROME_LINK_BUTTON(lb));
+
   return lb;
 }
 
@@ -211,6 +216,40 @@ void gtk_chrome_link_button_set_use_gtk_theme(GtkChromeLinkButton* button,
     if (GTK_WIDGET_VISIBLE(button))
       gtk_widget_queue_draw(GTK_WIDGET(button));
   }
+}
+
+void gtk_chrome_link_button_set_label(GtkChromeLinkButton* button,
+                                      const char* text) {
+  // Clear the markup so we can redraw.
+  gtk_chrome_link_button_destroy_text_resources(button);
+  button->text = g_strdup(text);
+
+  gtk_chrome_link_button_set_text(button);
+
+  if (GTK_WIDGET_VISIBLE(button))
+    gtk_widget_queue_draw(GTK_WIDGET(button));
+}
+
+void gtk_chrome_link_button_set_normal_color(GtkChromeLinkButton* button,
+                                             const GdkColor* color) {
+  g_free(button->native_markup);
+  button->native_markup = NULL;
+  g_free(button->normal_markup);
+  button->normal_markup = NULL;
+  g_free(button->pressed_markup);
+  button->pressed_markup = NULL;
+
+  if (color) {
+    snprintf(button->normal_color, 9, "#%02X%02X%02X", color->red / 257,
+             color->green / 257, color->blue / 257);
+  } else {
+    strncpy(button->normal_color, "blue", 9);
+  }
+
+  gtk_chrome_link_button_set_text(button);
+
+  if (GTK_WIDGET_VISIBLE(button))
+    gtk_widget_queue_draw(GTK_WIDGET(button));
 }
 
 G_END_DECLS

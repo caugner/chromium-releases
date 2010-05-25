@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,14 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/views/extensions/extension_popup.h"
+#include "views/widget/widget.h"
+
 #if defined(OS_WIN)
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #endif
-#include "views/widget/widget.h"
 
 ExtensionView::ExtensionView(ExtensionHost* host, Browser* browser)
     : host_(host),
@@ -19,6 +23,11 @@ ExtensionView::ExtensionView(ExtensionHost* host, Browser* browser)
       container_(NULL),
       is_clipped_(false) {
   host_->set_view(this);
+
+  // This view needs to be focusable so it can act as the focused view for the
+  // focus manager. This is required to have SkipDefaultKeyEventProcessing
+  // called so the tab key events are forwarded to the renderer.
+  SetFocusable(true);
 }
 
 ExtensionView::~ExtensionView() {
@@ -53,7 +62,7 @@ void ExtensionView::SetVisible(bool is_visible) {
     NativeViewHost::SetVisible(is_visible);
 
     // Also tell RenderWidgetHostView the new visibility. Despite its name, it
-    // is not part of the View heirarchy and does not know about the change
+    // is not part of the View hierarchy and does not know about the change
     // unless we tell it.
     if (render_view_host()->view()) {
       if (is_visible)
@@ -91,6 +100,11 @@ void ExtensionView::CreateWidgetHostView() {
   HWND hwnd = view_win->Create(GetWidget()->GetNativeView());
   view_win->ShowWindow(SW_SHOW);
   Attach(hwnd);
+#elif defined(OS_LINUX)
+  RenderWidgetHostViewGtk* view_gtk =
+      static_cast<RenderWidgetHostViewGtk*>(view);
+  view_gtk->InitAsChild();
+  Attach(view_gtk->GetNativeView());
 #else
   NOTIMPLEMENTED();
 #endif
@@ -155,6 +169,19 @@ void ExtensionView::ViewHierarchyChanged(bool is_add,
     CreateWidgetHostView();
 }
 
+void ExtensionView::PreferredSizeChanged() {
+  View::PreferredSizeChanged();
+  if (container_) {
+    container_->OnExtensionPreferredSizeChanged(this);
+  }
+}
+
+bool ExtensionView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
+  // Let the tab key event be processed by the renderer (instead of moving the
+  // focus to the next focusable view).
+  return (e.GetKeyCode() == base::VKEY_TAB);
+}
+
 void ExtensionView::HandleMouseEvent() {
   if (container_)
     container_->OnExtensionMouseEvent(this);
@@ -170,10 +197,10 @@ void ExtensionView::RenderViewCreated() {
     render_view_host()->view()->SetBackground(pending_background_);
     pending_background_.reset();
   }
-}
 
-void ExtensionView::SetPreferredSize(const gfx::Size& size) {
-  views::NativeViewHost::SetPreferredSize(size);
-  if (container_)
-    container_->OnExtensionPreferredSizeChanged(this);
+  // Tell the renderer not to draw scroll bars in popups unless the
+  // popups are at the maximum allowed size.
+  gfx::Size largest_popup_size(ExtensionPopup::kMaxWidth,
+                               ExtensionPopup::kMaxHeight);
+  host_->DisableScrollbarsForSmallWindows(largest_popup_size);
 }

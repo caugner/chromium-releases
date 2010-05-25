@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_RENDERER_LOCALIZED_ERROR_VALUES_H__
-#define CHROME_RENDERER_LOCALIZED_ERROR_VALUES_H__
+#ifndef CHROME_RENDERER_LOCALIZED_ERROR_H_
+#define CHROME_RENDERER_LOCALIZED_ERROR_H_
 
 class DictionaryValue;
 class GURL;
@@ -12,6 +12,8 @@ namespace WebKit {
 struct WebURLError;
 }
 
+// Fills |error_strings| with values to be used to build an error page used
+// on HTTP errors, like 404 or connection reset.
 void GetLocalizedErrorValues(const WebKit::WebURLError& error,
                              DictionaryValue* error_strings);
 
@@ -22,4 +24,4 @@ void GetLocalizedErrorValues(const WebKit::WebURLError& error,
 void GetFormRepostErrorValues(const GURL& display_url,
                               DictionaryValue* error_strings);
 
-#endif  // CHROME_RENDERER_LOCALIZED_ERROR_VALUES_H__
+#endif  // CHROME_RENDERER_LOCALIZED_ERROR_H_

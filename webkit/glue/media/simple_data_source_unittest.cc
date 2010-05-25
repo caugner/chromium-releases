@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/callback.h"
 #include "media/base/filters.h"
 #include "media/base/mock_filter_host.h"
 #include "media/base/mock_filters.h"
@@ -13,6 +14,7 @@ using ::testing::_;
 using ::testing::DoAll;
 using ::testing::InSequence;
 using ::testing::Invoke;
+using ::testing::NiceMock;
 using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SetArgumentPointee;
@@ -23,9 +25,11 @@ namespace {
 
 const int kDataSize = 1024;
 const char kHttpUrl[] = "http://test";
-const char kFtpUrl[] = "ftp://test";
 const char kHttpsUrl[] = "https://test";
 const char kFileUrl[] = "file://test";
+const char kDataUrl[] =
+    "data:text/plain;base64,YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoK";
+const char kDataUrlDecoded[] = "abcdefghijklmnopqrstuvwxyz";
 const char kInvalidUrl[] = "whatever://test";
 
 }  // namespace
@@ -36,8 +40,8 @@ class SimpleDataSourceTest : public testing::Test {
  public:
   SimpleDataSourceTest() {
     bridge_factory_.reset(
-        new StrictMock<MockMediaResourceLoaderBridgeFactory>());
-    bridge_.reset(new StrictMock<MockResourceLoaderBridge>());
+        new NiceMock<MockMediaResourceLoaderBridgeFactory>());
+    bridge_.reset(new NiceMock<MockResourceLoaderBridge>());
     factory_ = SimpleDataSource::CreateFactory(MessageLoop::current(),
                                                bridge_factory_.get());
 
@@ -47,12 +51,13 @@ class SimpleDataSourceTest : public testing::Test {
   }
 
   virtual ~SimpleDataSourceTest() {
-    if (bridge_.get()) {
+    if (bridge_.get())
       EXPECT_CALL(*bridge_, OnDestroy());
-    }
+    if (bridge_factory_.get())
+      EXPECT_CALL(*bridge_factory_, OnDestroy());
   }
 
-  void InitializeDataSource(const char* url, bool is_loaded) {
+  void InitializeDataSource(const char* url) {
     media::MediaFormat url_format;
     url_format.SetAsString(media::MediaFormat::kMimeType,
                            media::mime_type::kURL);
@@ -63,8 +68,6 @@ class SimpleDataSourceTest : public testing::Test {
     // There is no need to provide a message loop to data source.
     data_source_->set_host(&host_);
 
-    EXPECT_CALL(host_, SetLoaded(is_loaded));
-
     // First a bridge is created.
     InSequence s;
     EXPECT_CALL(*bridge_factory_, CreateBridge(GURL(url), _, -1, -1))
@@ -72,13 +75,12 @@ class SimpleDataSourceTest : public testing::Test {
     EXPECT_CALL(*bridge_, Start(data_source_.get()))
         .WillOnce(Return(true));
 
-    // TODO(hclam): need to add expectations to initialization callback.
     data_source_->Initialize(url, callback_.NewCallback());
 
     MessageLoop::current()->RunAllPending();
   }
 
-  void RequestSucceeded() {
+  void RequestSucceeded(bool is_loaded) {
     ResourceLoaderBridge::ResponseInfo info;
     info.content_length = kDataSize;
 
@@ -89,6 +91,8 @@ class SimpleDataSourceTest : public testing::Test {
 
     for (int i = 0; i < kDataSize; ++i)
       data_source_->OnReceivedData(data_ + i, 1);
+
+    EXPECT_CALL(host_, SetLoaded(is_loaded));
 
     InSequence s;
     EXPECT_CALL(*bridge_, OnDestroy())
@@ -158,8 +162,8 @@ class SimpleDataSourceTest : public testing::Test {
 
  protected:
   scoped_ptr<MessageLoop> message_loop_;
-  scoped_ptr<StrictMock<MockMediaResourceLoaderBridgeFactory> > bridge_factory_;
-  scoped_ptr<StrictMock<MockResourceLoaderBridge> > bridge_;
+  scoped_ptr<NiceMock<MockMediaResourceLoaderBridgeFactory> > bridge_factory_;
+  scoped_ptr<NiceMock<MockResourceLoaderBridge> > bridge_;
   scoped_refptr<media::FilterFactory> factory_;
   scoped_refptr<SimpleDataSource> data_source_;
   StrictMock<media::MockFilterHost> host_;
@@ -170,62 +174,63 @@ class SimpleDataSourceTest : public testing::Test {
 };
 
 TEST_F(SimpleDataSourceTest, InitializeHTTP) {
-  InitializeDataSource(kHttpUrl, false);
-  RequestSucceeded();
+  InitializeDataSource(kHttpUrl);
+  RequestSucceeded(false);
   DestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, InitializeHTTPS) {
-  InitializeDataSource(kHttpsUrl, false);
-  RequestSucceeded();
-  DestroyDataSource();
-}
-
-TEST_F(SimpleDataSourceTest, InitializeFTP) {
-  InitializeDataSource(kFtpUrl, false);
-  RequestSucceeded();
+  InitializeDataSource(kHttpsUrl);
+  RequestSucceeded(false);
   DestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, InitializeFile) {
-  InitializeDataSource(kFileUrl, true);
-  RequestSucceeded();
+  InitializeDataSource(kFileUrl);
+  RequestSucceeded(true);
   DestroyDataSource();
 }
 
-TEST_F(SimpleDataSourceTest, InitializeInvalid) {
-  StrictMock<media::MockFilterCallback> callback;
+TEST_F(SimpleDataSourceTest, InitializeData) {
   media::MediaFormat url_format;
   url_format.SetAsString(media::MediaFormat::kMimeType,
                          media::mime_type::kURL);
-  url_format.SetAsString(media::MediaFormat::kURL, kInvalidUrl);
+  url_format.SetAsString(media::MediaFormat::kURL, kDataUrl);
   data_source_ = factory_->Create<SimpleDataSource>(url_format);
   CHECK(data_source_);
 
   // There is no need to provide a message loop to data source.
   data_source_->set_host(&host_);
 
-  EXPECT_CALL(host_, SetError(media::PIPELINE_ERROR_NETWORK));
-  EXPECT_CALL(callback, OnFilterCallback());
-  EXPECT_CALL(callback, OnCallbackDestroyed());
+  EXPECT_CALL(host_, SetLoaded(true));
+  EXPECT_CALL(host_, SetTotalBytes(sizeof(kDataUrlDecoded)));
+  EXPECT_CALL(host_, SetBufferedBytes(sizeof(kDataUrlDecoded)));
+  EXPECT_CALL(callback_, OnFilterCallback());
+  EXPECT_CALL(callback_, OnCallbackDestroyed());
 
-  data_source_->Initialize(kInvalidUrl, callback.NewCallback());
-  data_source_->Stop();
+  data_source_->Initialize(kDataUrl, callback_.NewCallback());
   MessageLoop::current()->RunAllPending();
 
-  EXPECT_CALL(*bridge_factory_, OnDestroy())
-      .WillOnce(Invoke(this, &SimpleDataSourceTest::ReleaseBridgeFactory));
-  data_source_ = NULL;
+  DestroyDataSource();
+}
+
+TEST_F(SimpleDataSourceTest, InitializeInvalid) {
+  media::MediaFormat url_format;
+  url_format.SetAsString(media::MediaFormat::kMimeType,
+                         media::mime_type::kURL);
+  url_format.SetAsString(media::MediaFormat::kURL, kInvalidUrl);
+  data_source_ = factory_->Create<SimpleDataSource>(url_format);
+  EXPECT_FALSE(data_source_);
 }
 
 TEST_F(SimpleDataSourceTest, RequestFailed) {
-  InitializeDataSource(kHttpUrl, false);
+  InitializeDataSource(kHttpUrl);
   RequestFailed();
   DestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, StopWhenDownloading) {
-  InitializeDataSource(kHttpUrl, false);
+  InitializeDataSource(kHttpUrl);
 
   EXPECT_CALL(*bridge_, Cancel());
   EXPECT_CALL(*bridge_, OnDestroy())
@@ -235,8 +240,8 @@ TEST_F(SimpleDataSourceTest, StopWhenDownloading) {
 }
 
 TEST_F(SimpleDataSourceTest, AsyncRead) {
-  InitializeDataSource(kFileUrl, true);
-  RequestSucceeded();
+  InitializeDataSource(kFileUrl);
+  RequestSucceeded(true);
   AsyncRead();
   DestroyDataSource();
 }

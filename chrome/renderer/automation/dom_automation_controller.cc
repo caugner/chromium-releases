@@ -14,6 +14,7 @@ DomAutomationController::DomAutomationController()
       automation_id_(MSG_ROUTING_NONE) {
   BindMethod("send", &DomAutomationController::Send);
   BindMethod("setAutomationId", &DomAutomationController::SetAutomationId);
+  BindMethod("sendJSON", &DomAutomationController::SendJSON);
 }
 
 void DomAutomationController::Send(const CppArgumentList& args,
@@ -44,7 +45,7 @@ void DomAutomationController::Send(const CppArgumentList& args,
   // writer is lenient, and (b) on the receiving side we wrap the JSON string
   // in square brackets, converting it to an array, then parsing it and
   // grabbing the 0th element to get the value out.
-  switch(args[0].type) {
+  switch (args[0].type) {
     case NPVariantType_String: {
       value.reset(Value::CreateStringValue(args[0].ToString()));
       break;
@@ -84,6 +85,36 @@ void DomAutomationController::Send(const CppArgumentList& args,
 
   result->Set(succeeded);
   return;
+}
+
+void DomAutomationController::SendJSON(const CppArgumentList& args,
+                                       CppVariant* result) {
+  if (args.size() != 1) {
+    result->SetNull();
+    return;
+  }
+
+  if (automation_id_ == MSG_ROUTING_NONE) {
+    result->SetNull();
+    return;
+  }
+
+  if (!sender_) {
+    NOTREACHED();
+    result->SetNull();
+    return;
+  }
+
+  if (args[0].type != NPVariantType_String) {
+    result->SetNull();
+    return;
+  }
+
+  std::string json = args[0].ToString();
+  result->Set(sender_->Send(
+      new ViewHostMsg_DomOperationResponse(routing_id_, json, automation_id_)));
+
+  automation_id_ = MSG_ROUTING_NONE;
 }
 
 void DomAutomationController::SetAutomationId(

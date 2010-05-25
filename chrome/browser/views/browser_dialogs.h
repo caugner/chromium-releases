@@ -1,11 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_VIEWS_BROWSER_DIALOGS_H_
 
-#include "app/gfx/native_widget_types.h"
+#include <string>
+
+#include "chrome/common/content_settings_types.h"
+#include "gfx/native_widget_types.h"
 
 // This file contains functions for running a variety of browser dialogs and
 // popups. The dialogs here are the ones that the caller does not need to
@@ -15,6 +18,7 @@
 class Browser;
 class BrowserView;
 class EditSearchEngineControllerDelegate;
+class FilePath;
 class FindBar;
 class GURL;
 class HtmlDialogUIDelegate;
@@ -35,7 +39,7 @@ class Window;
 namespace browser {
 
 // Shows the "Report a problem with this page" dialog box. See BugReportView.
-void ShowBugReportView(views::Widget* parent,
+void ShowBugReportView(views::Window* parent,
                        Profile* profile,
                        TabContents* tab);
 
@@ -87,6 +91,11 @@ void ShowNewProfileDialog();
 // Shows the Task Manager.
 void ShowTaskManager();
 
+#if defined(OS_CHROMEOS)
+// Shows the Login Wizard.
+void ShowLoginWizard(const std::string& start_screen, const gfx::Size& size);
+#endif
+
 // Shows a dialog box that allows a search engine to be edited. |template_url|
 // is the search engine being edited. If it is NULL, then the dialog will add a
 // new search engine with the data the user supplies. |delegate| is an object
@@ -100,6 +109,15 @@ void EditSearchEngine(gfx::NativeWindow parent,
 // Shows the repost form confirmation dialog box.
 void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
                                  TabContents* tab_contents);
+
+// Shows the content settings dialog box.
+void ShowContentSettingsWindow(gfx::NativeWindow parent_window,
+                               ContentSettingsType content_type,
+                               Profile* profile);
+
+// Shows the create web app shortcut dialog box.
+void ShowCreateShortcutsDialog(gfx::NativeWindow parent_window,
+                               TabContents* tab_contents);
 
 }  // namespace browser
 

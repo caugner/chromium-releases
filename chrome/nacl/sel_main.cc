@@ -8,6 +8,10 @@
 #include <crt_externs.h>
 #endif
 
+#ifdef _WIN64  /* TODO(gregoryd): remove this when win64 issues are fixed */
+#define NACL_NO_INLINE
+#endif
+
 EXTERN_C_BEGIN
 #include "native_client/src/shared/platform/nacl_sync.h"
 #include "native_client/src/shared/platform/nacl_sync_checked.h"
@@ -26,9 +30,10 @@ int verbosity = 0;
 /*
  * GDB's canonical overlay managment routine.
  * We need its symbol in the symbol table so don't inline it.
+ * Note: _ovly_debug_event has to be an unmangled 'C' style symbol.
  * TODO(dje): add some explanation for the non-GDB person.
  */
-
+EXTERN_C_BEGIN
 static void __attribute__ ((noinline)) _ovly_debug_event (void) {
   /*
    * The asm volatile is here as instructed by the GCC docs.
@@ -37,15 +42,16 @@ static void __attribute__ ((noinline)) _ovly_debug_event (void) {
    */
   asm volatile ("");
 }
+EXTERN_C_END
 
 #endif
 
-static void StopForDebuggerInit (const struct NaClApp *state) {
+static void StopForDebuggerInit(const struct NaClApp *state) {
   /* Put xlate_base in a place where gdb can find it.  */
-  nacl_global_xlate_base = state->xlate_base;
+  nacl_global_xlate_base = state->mem_start;
 
 #ifdef __GNUC__
-  _ovly_debug_event ();
+  _ovly_debug_event();
 #endif
 }
 
@@ -71,14 +77,6 @@ int SelMain(const int desc, const NaClHandle handle) {
   extern char                   **environ;
   envp = environ;
 #endif
-
-
-  if (NaClHasExpired()) {
-    // TODO(gregoryd): report error to browser?
-    fprintf(stderr, "This version of Native Client has expired.\n");
-    fprintf(stderr, "Please visit: http://code.google.com/p/nativeclient/\n");
-    exit(-1);
-  }
 
   NaClAllModulesInit();
 

@@ -21,10 +21,12 @@
 #define CHROME_BROWSER_COCOA_BOOKMARK_MENU_BRIDGE_H_
 
 #include <map>
+#include "base/scoped_nsobject.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 
 class BookmarkNode;
 class Profile;
+@class NSImage;
 @class NSMenu;
 @class NSMenuItem;
 @class BookmarkMenuCocoaController;
@@ -56,13 +58,19 @@ class BookmarkMenuBridge : public BookmarkModelObserver {
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node);
 
-  // I wish I has a "friend @class" construct.
+  // Rebuilds the bookmark menu, if it has been marked invalid.
+  void UpdateMenu(NSMenu* bookmark_menu);
+
+  // I wish I had a "friend @class" construct.
   BookmarkModel* GetBookmarkModel();
   Profile* GetProfile();
 
  protected:
   // Clear all bookmarks from the given bookmark menu.
   void ClearBookmarkMenu(NSMenu* menu);
+
+  // Mark the bookmark menu as being invalid.
+  void InvalidateMenu()  { menuIsValid_ = false; }
 
   // Helper for adding the node as a submenu to the menu with the
   // given title.
@@ -96,8 +104,14 @@ class BookmarkMenuBridge : public BookmarkModelObserver {
  private:
   friend class BookmarkMenuBridgeTest;
 
+  // True iff the menu is up-to-date with the actual BookmarkModel.
+  bool menuIsValid_;
+
   Profile* profile_;  // weak
   BookmarkMenuCocoaController* controller_;  // strong
+
+  // The folder image so we can use one copy for all.
+  scoped_nsobject<NSImage> folder_image_;
 
   // In order to appropriately update items in the bookmark menu, without
   // forcing a rebuild, map the model's nodes to menu items.

@@ -8,6 +8,7 @@
 #include "chrome/browser/download/download_util.h"
 
 #include "base/logging.h"
+#include "base/string_util.h"
 
 namespace download_util {
 
@@ -110,6 +111,7 @@ static const char* const g_executables[] = {
   "msi",
   "msp",
   "mst",
+  "ocx",
   "ops",
   "pcd",
   "pif",
@@ -145,23 +147,27 @@ static const char* const g_executables[] = {
   "xml",
   "xsl",
   "xslt",
-#elif defined(OS_LINUX)
+#elif defined(OS_MACOSX)
+  // TODO(thakis): Figure out what makes sense here -- crbug.com/19096
+  "dmg",
+#elif defined(OS_POSIX)
   // TODO(estade): lengthen this list.
   "exe",
   "pl",
   "py",
   "rb",
   "sh",
-#elif defined(OS_MACOSX)
-  // TODO(thakis): Figure out what makes sense here -- crbug.com/19096
-  "dmg",
+  "deb",
+  "rpm",
 #endif
 };
 
-void InitializeExeTypes(std::set<std::string>* exe_extensions) {
-  DCHECK(exe_extensions);
-  for (size_t i = 0; i < arraysize(g_executables); ++i)
-    exe_extensions->insert(g_executables[i]);
+bool IsExecutableExtension(const std::string& extension) {
+  for (size_t i = 0; i < arraysize(g_executables); ++i) {
+    if (LowerCaseEqualsASCII(extension, g_executables[i]))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace download_util

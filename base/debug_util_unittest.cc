@@ -9,13 +9,23 @@
 #include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-TEST(StackTrace, OutputToStream) {
+// Note: On Linux, this test currently only fully works on Debug builds.
+// See comments in the #ifdef soup if you intend to change this.
+// TODO(jar): BUG: 32070: Test is disabled... should be enabled.
+TEST(StackTrace, DISABLED_OutputToStream) {
   StackTrace trace;
 
   // Dump the trace into a string.
   std::ostringstream os;
   trace.OutputToStream(&os);
   std::string backtrace_message = os.str();
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && NDEBUG
+  // Stack traces require an extra data table that bloats our binaries,
+  // so they're turned off for release builds.  We stop the test here,
+  // at least letting us verify that the calls don't crash.
+  return;
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && NDEBUG
 
   size_t frames_found = 0;
   trace.Addresses(&frames_found);
@@ -27,14 +37,12 @@ TEST(StackTrace, OutputToStream) {
             std::string::npos) <<
       "Unable to resolve symbols.  Skipping rest of test.";
 
-#if 0
-// TODO(ajwong): Disabling checking of symbol resolution since it depends
-//  on whether or not symbols are present, and there are too many
-//  configurations to reliably ensure that symbols are findable.
 #if defined(OS_MACOSX)
+#if 0
+  // Disabled due to -fvisibility=hidden in build config.
 
-  // Symbol resolution via the backtrace_symbol funciton does not work well
-  // in OsX.
+  // Symbol resolution via the backtrace_symbol function does not work well
+  // in OS X.
   // See this thread:
   //
   //    http://lists.apple.com/archives/darwin-dev/2009/Mar/msg00111.html
@@ -49,14 +57,20 @@ TEST(StackTrace, OutputToStream) {
       << "Expected to find start in backtrace:\n"
       << backtrace_message;
 
+#endif
 #elif defined(__GLIBCXX__)
-
+  // This branch is for gcc-compiled code, but not Mac due to the
+  // above #if.
   // Expect a demangled symbol.
   EXPECT_TRUE(backtrace_message.find("testing::Test::Run()") !=
               std::string::npos)
       << "Expected a demangled symbol in backtrace:\n"
       << backtrace_message;
-#else  // defined(__GLIBCXX__)
+
+#elif 0
+  // This is the fall-through case; it used to cover Windows.
+  // But it's disabled because of varying buildbot configs;
+  // some lack symbols.
 
   // Expect to at least find main.
   EXPECT_TRUE(backtrace_message.find("main") != std::string::npos)
@@ -76,5 +90,19 @@ TEST(StackTrace, OutputToStream) {
       << backtrace_message;
 
 #endif  // define(OS_MACOSX)
-#endif
+}
+
+// The test is used for manual testing (i.e. see the raw output).
+// To run the test use the flags:
+// --gtest_filter='*DebugOutputToStream' --gtest_also_run_disabled_tests
+TEST(StackTrace, DISABLED_DebugOutputToStream) {
+  StackTrace trace;
+  std::ostringstream os;
+  trace.OutputToStream(&os);
+  LOG(INFO) << os.str();
+}
+
+// The test is used for manual testing. See the comment above.
+TEST(StackTrace, DISABLED_DebugPrintBacktrace) {
+  StackTrace().PrintBacktrace();
 }

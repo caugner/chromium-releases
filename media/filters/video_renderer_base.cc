@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
+#include "base/callback.h"
 #include "media/base/buffers.h"
 #include "media/base/filter_host.h"
-#include "media/base/video_frame_impl.h"
+#include "media/base/video_frame.h"
 #include "media/filters/video_renderer_base.h"
 
 namespace media {
@@ -156,7 +157,7 @@ void VideoRendererBase::Initialize(VideoDecoder* decoder,
 
   // Create a black frame so clients have something to render before we finish
   // prerolling.
-  VideoFrameImpl::CreateBlackFrame(width_, height_, &current_frame_);
+  VideoFrame::CreateBlackFrame(width_, height_, &current_frame_);
 
   // We're all good!  Consider ourselves paused (ThreadMain() should never
   // see us in the kUninitialized state).
@@ -198,10 +199,18 @@ void VideoRendererBase::ThreadMain() {
       state = state_;
       playback_rate = playback_rate_;
 
-      // Calculate how long until we should advance the frame, which is
-      // typically negative but for playback rates < 1.0f may be long enough
-      // that it makes more sense to idle and check again.
-      remaining_time = current_frame_->GetTimestamp() - host()->GetTime();
+      if (current_frame_->GetTimestamp() > host()->GetDuration()) {
+        // This is a special case when the stream is badly formatted that
+        // we get video frame with timestamp greater than the duration.
+        // In this case we should proceed anyway and try to obtain the
+        // end-of-stream packet.
+        remaining_time = base::TimeDelta();
+      } else {
+        // Calculate how long until we should advance the frame, which is
+        // typically negative but for playback rates < 1.0f may be long enough
+        // that it makes more sense to idle and check again.
+        remaining_time = current_frame_->GetTimestamp() - host()->GetTime();
+      }
     }
     if (state == kStopped) {
       return;
@@ -321,7 +330,7 @@ void VideoRendererBase::OnReadComplete(VideoFrame* frame) {
       // our new location.
       state_ = kPaused;
       if (frames_.front()->IsEndOfStream()) {
-        VideoFrameImpl::CreateBlackFrame(width_, height_, &current_frame_);
+        VideoFrame::CreateBlackFrame(width_, height_, &current_frame_);
       } else {
         current_frame_ = frames_.front();
       }

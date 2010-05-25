@@ -8,6 +8,7 @@
 #include <iterator>
 #include <map>
 
+#include "base/callback.h"
 #include "base/scoped_vector.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/browser_list.h"
@@ -15,9 +16,11 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_command.h"
+#include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/extensions/extension.h"
 
 using base::Time;
 
@@ -26,9 +29,15 @@ using base::Time;
 // ID of the next Entry.
 static SessionID::id_type next_entry_id = 1;
 
-TabRestoreService::Entry::Entry() : id(next_entry_id++), type(TAB) {}
+TabRestoreService::Entry::Entry()
+    : id(next_entry_id++),
+      type(TAB),
+      from_last_session(false) {}
 
-TabRestoreService::Entry::Entry(Type type) : id(next_entry_id++), type(type) {}
+TabRestoreService::Entry::Entry(Type type)
+    : id(next_entry_id++),
+      type(type),
+      from_last_session(false) {}
 
 // TabRestoreService ----------------------------------------------------------
 
@@ -40,8 +49,9 @@ const size_t TabRestoreService::kMaxEntries = 10;
 // . When the user closes a tab a command of type
 //   kCommandSelectedNavigationInTab is written identifying the tab and
 //   the selected index, then a kCommandPinnedState command if the tab was
-//   pinned. This is followed by any number of kCommandUpdateTabNavigation
-//   commands (1 per navigation entry).
+//   pinned and kCommandSetAppExtensionID if the tab has an app id. This is
+//   followed by any number of kCommandUpdateTabNavigation commands (1 per
+//   navigation entry).
 // . When the user closes a window a kCommandSelectedNavigationInTab command
 //   is written out and followed by n tab closed sequences (as previoulsy
 //   described).
@@ -52,6 +62,7 @@ static const SessionCommand::id_type kCommandRestoredEntry = 2;
 static const SessionCommand::id_type kCommandWindow = 3;
 static const SessionCommand::id_type kCommandSelectedNavigationInTab = 4;
 static const SessionCommand::id_type kCommandPinnedState = 5;
+static const SessionCommand::id_type kCommandSetAppExtensionID = 6;
 
 // Number of entries (not commands) before we clobber the file and write
 // everything.
@@ -111,6 +122,17 @@ void RemoveEntryByID(SessionID::id_type id,
 }
 
 }  // namespace
+
+TabRestoreService::Tab::Tab()
+    : Entry(TAB),
+      current_navigation_index(-1),
+      browser_id(0),
+      tabstrip_index(-1),
+      pinned(false) {
+}
+
+TabRestoreService::Window::Window() : Entry(WINDOW), selected_tab_index(-1) {
+}
 
 TabRestoreService::TabRestoreService(Profile* profile,
     TabRestoreService::TimeFactory* time_factory)
@@ -250,7 +272,9 @@ void TabRestoreService::RestoreEntryById(Browser* browser,
     Tab* tab = static_cast<Tab*>(entry);
     if (replace_existing_tab && browser) {
       browser->ReplaceRestoredTab(tab->navigations,
-                                  tab->current_navigation_index);
+                                  tab->current_navigation_index,
+                                  tab->from_last_session,
+                                  tab->app_extension_id);
     } else {
       // Use the tab's former browser and index, if available.
       Browser* tab_browser = NULL;
@@ -272,10 +296,12 @@ void TabRestoreService::RestoreEntryById(Browser* browser,
       if (tab_index < 0 || tab_index > tab_browser->tab_count())
         tab_index = tab_browser->tab_count();
       tab_browser->AddRestoredTab(tab->navigations, tab_index,
-                                  tab->current_navigation_index, true,
-                                  tab->pinned);
+                                  tab->current_navigation_index,
+                                  tab->app_extension_id, true, tab->pinned,
+                                  tab->from_last_session);
     }
   } else if (entry->type == WINDOW) {
+    Browser* current_browser = browser;
     const Window* window = static_cast<Window*>(entry);
     browser = Browser::Create(profile());
     for (size_t tab_i = 0; tab_i < window->tabs.size(); ++tab_i) {
@@ -283,9 +309,10 @@ void TabRestoreService::RestoreEntryById(Browser* browser,
       TabContents* restored_tab =
           browser->AddRestoredTab(tab.navigations, browser->tab_count(),
                                   tab.current_navigation_index,
+                                  tab.app_extension_id,
                                   (static_cast<int>(tab_i) ==
                                    window->selected_tab_index),
-                                  tab.pinned);
+                                  tab.pinned, tab.from_last_session);
       if (restored_tab)
         restored_tab->controller().LoadIfNecessary();
     }
@@ -295,6 +322,11 @@ void TabRestoreService::RestoreEntryById(Browser* browser,
                           browser->session_id().id());
     }
     browser->window()->Show();
+
+    if (replace_existing_tab && current_browser &&
+        current_browser->GetSelectedTabContents()) {
+      current_browser->CloseTab();
+    }
   } else {
     NOTREACHED();
   }
@@ -381,6 +413,10 @@ void TabRestoreService::PopulateTab(Tab* tab,
   tab->current_navigation_index = controller->GetCurrentEntryIndex();
   if (tab->current_navigation_index == -1 && entry_count > 0)
     tab->current_navigation_index = 0;
+
+  Extension* extension = controller->tab_contents()->app_extension();
+  if (extension)
+    tab->app_extension_id = extension->id();
 
   // Browser may be NULL during unit tests.
   if (browser) {
@@ -482,6 +518,12 @@ void TabRestoreService::ScheduleCommandsForTab(const Tab& tab,
         new SessionCommand(kCommandPinnedState, sizeof(payload));
     memcpy(command->contents(), &payload, sizeof(payload));
     ScheduleCommand(command);
+  }
+
+  if (!tab.app_extension_id.empty()) {
+    ScheduleCommand(
+        CreateSetTabAppExtensionIDCommand(kCommandSetAppExtensionID, tab.id,
+                                          tab.app_extension_id));
   }
 
   // Then write the navigations.
@@ -715,6 +757,21 @@ void TabRestoreService::CreateEntriesFromCommands(
         break;
       }
 
+      case kCommandSetAppExtensionID: {
+        if (!current_tab) {
+          // Should be in a tab when we get this.
+          return;
+        }
+        SessionID::id_type tab_id;
+        std::string app_extension_id;
+        if (!RestoreSetTabAppExtensionIDCommand(command, &tab_id,
+                                                &app_extension_id)) {
+          return;
+        }
+        current_tab->app_extension_id.swap(app_extension_id);
+        break;
+      }
+
       default:
         // Unknown type, usually indicates corruption of file. Ignore it.
         return;
@@ -827,6 +884,7 @@ bool TabRestoreService::ConvertSessionWindowToWindow(
       tab.navigations.swap(session_window->tabs[i]->navigations);
       tab.current_navigation_index =
           session_window->tabs[i]->current_navigation_index;
+      tab.app_extension_id = session_window->tabs[i]->app_extension_id;
       tab.timestamp = Time();
     }
   }
@@ -869,8 +927,10 @@ void TabRestoreService::LoadStateChanged() {
   }
 
   // And add them.
-  for (size_t i = 0; i < staging_entries_.size(); ++i)
+  for (size_t i = 0; i < staging_entries_.size(); ++i) {
+    staging_entries_[i]->from_last_session = true;
     AddEntry(staging_entries_[i], false, false);
+  }
 
   // AddEntry takes ownership of the entry, need to clear out entries so that
   // it doesn't delete them.

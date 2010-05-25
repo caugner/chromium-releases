@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,34 +10,134 @@
 #include "sandbox/src/sandbox.h"
 #endif
 
+#include "app/hi_res_timer_manager.h"
+#include "app/system_monitor.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/system_monitor.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/result_codes.h"
+#include "chrome/common/sandbox_policy.h"
+#if defined(OS_WIN)
+#include "chrome/nacl/broker_thread.h"
+#endif
 #include "chrome/nacl/nacl_thread.h"
 
-// main() routine for running as the sel_ldr process.
-int NaClMain(const MainFunctionParams& parameters) {
-  // The main thread of the plugin services IO.
+#ifdef _WIN64
+
+// main() routine for the NaCl broker process.
+// This is necessary for supporting NaCl in Chrome on Win64.
+int NaClBrokerMain(const MainFunctionParams& parameters) {
+  // The main thread of the broker.
   MessageLoopForIO main_message_loop;
-  std::wstring app_name = chrome::kBrowserAppName;
-  PlatformThread::SetName(WideToASCII(app_name + L"_NaClMain").c_str());
+  std::wstring app_name = chrome::kNaClAppName;
+  PlatformThread::SetName(WideToASCII(app_name + L"_NaClBrokerMain").c_str());
 
-  // Initialize the SystemMonitor
-  base::SystemMonitor::Start();
+  SystemMonitor system_monitor;
+  HighResolutionTimerManager hi_res_timer_manager;
 
-#if defined(OS_WIN)
   const CommandLine& parsed_command_line = parameters.command_line_;
 
+  DLOG(INFO) << "Started NaCL broker with " <<
+      parsed_command_line.command_line_string();
+
+  // NOTE: this code is duplicated from browser_main.cc
+  // IMPORTANT: This piece of code needs to run as early as possible in the
+  // process because it will initialize the sandbox broker, which requires the
+  // process to swap its window station. During this time all the UI will be
+  // broken. This has to run before threads and windows are created.
+  sandbox::BrokerServices* broker_services =
+      parameters.sandbox_info_.BrokerServices();
+  if (broker_services) {
+    sandbox::InitBrokerServices(broker_services);
+    if (!parsed_command_line.HasSwitch(switches::kNoSandbox)) {
+      bool use_winsta = !parsed_command_line.HasSwitch(
+          switches::kDisableAltWinstation);
+      // Precreate the desktop and window station used by the renderers.
+      sandbox::TargetPolicy* policy = broker_services->CreatePolicy();
+      sandbox::ResultCode result = policy->CreateAlternateDesktop(use_winsta);
+      CHECK(sandbox::SBOX_ERROR_FAILED_TO_SWITCH_BACK_WINSTATION != result);
+      policy->Release();
+    }
+  }
+
+  {
+    ChildProcess broker_process;
+    broker_process.set_main_thread(new NaClBrokerThread());
+    MessageLoop::current()->Run();
+  }
+
+  return 0;
+}
+#else
+int NaClBrokerMain(const MainFunctionParams& parameters) {
+  return ResultCodes::BAD_PROCESS_TYPE;
+}
+#endif  // _WIN64
+
+// This function provides some ways to test crash and assertion handling
+// behavior of the renderer.
+static void HandleNaClTestParameters(const CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kNaClStartupDialog)) {
+    ChildProcess::WaitForDebugger(L"NativeClient");
+  }
+}
+
+// Launch the NaCl child process in its own thread.
+#if defined (OS_WIN)
+static void LaunchNaClChildProcess(bool no_sandbox,
+                                   sandbox::TargetServices* target_services) {
+  ChildProcess nacl_process;
+  nacl_process.set_main_thread(new NaClThread());
+  if (!no_sandbox && target_services) {
+    // Cause advapi32 to load before the sandbox is turned on.
+    unsigned int dummy_rand;
+    rand_s(&dummy_rand);
+    // Turn the sanbox on.
+    target_services->LowerToken();
+  }
+  MessageLoop::current()->Run();
+}
+#elif defined(OS_MACOSX) || defined(OS_LINUX)
+static void LaunchNaClChildProcess() {
+  ChildProcess nacl_process;
+  nacl_process.set_main_thread(new NaClThread());
+  MessageLoop::current()->Run();
+}
+#endif
+
+// main() routine for the NaCl loader process.
+int NaClMain(const MainFunctionParams& parameters) {
+  const CommandLine& parsed_command_line = parameters.command_line_;
+
+  // This function allows pausing execution using the --nacl-startup-dialog
+  // flag allowing us to attach a debugger.
+  // Do not move this function down since that would mean we can't easily debug
+  // whatever occurs before it.
+  HandleNaClTestParameters(parsed_command_line);
+
+  // The main thread of the plugin services IO.
+  MessageLoopForIO main_message_loop;
+  // NaCl code runs in a different binary on Win64.
+#ifdef _WIN64
+  std::wstring app_name = chrome::kNaClAppName;
+#else
+  std::wstring app_name = chrome::kBrowserAppName;
+#endif
+  PlatformThread::SetName(WideToASCII(app_name + L"_NaClMain").c_str());
+
+  SystemMonitor system_monitor;
+  HighResolutionTimerManager hi_res_timer_manager;
+
+#if defined(OS_WIN)
   sandbox::TargetServices* target_services =
       parameters.sandbox_info_.TargetServices();
 
-  DLOG(INFO) << "Started plugin with " <<
+  DLOG(INFO) << "Started NaCl loader with " <<
       parsed_command_line.command_line_string();
 
   HMODULE sandbox_test_module = NULL;
@@ -51,21 +151,14 @@ int NaClMain(const MainFunctionParams& parameters) {
       DCHECK(sandbox_test_module);
     }
   }
+  LaunchNaClChildProcess(no_sandbox, target_services);
+
+#elif defined(OS_MACOSX) || defined(OS_LINUX)
+  LaunchNaClChildProcess();
 
 #else
-  NOTIMPLEMENTED() << " non-windows startup, plugin startup dialog etc.";
+  NOTIMPLEMENTED() << " not implemented startup, plugin startup dialog etc.";
 #endif
-
-  {
-    ChildProcess nacl_process;
-    nacl_process.set_main_thread(new NaClThread());
-#if defined(OS_WIN)
-    if (!no_sandbox && target_services)
-      target_services->LowerToken();
-#endif
-
-    MessageLoop::current()->Run();
-  }
 
   return 0;
 }

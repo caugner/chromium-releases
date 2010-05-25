@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,18 @@
 
 #include <algorithm>
 
-#include "app/gfx/canvas_paint.h"
-#include "app/gfx/gtk_util.h"
-#include "app/l10n_util.h"
+#include "app/x11_util.h"
+#include "base/i18n/rtl.h"
+#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/gtk/tabs/tab_renderer_gtk.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/backing_store_x.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/gtk/tabs/tab_renderer_gtk.h"
-#include "chrome/common/gtk_util.h"
-#include "chrome/common/x11_util.h"
+#include "gfx/canvas_paint.h"
+#include "gfx/gtk_util.h"
 #include "third_party/skia/include/core/SkShader.h"
 
 namespace {
@@ -43,21 +46,22 @@ const double kDraggedTabBorderColor[] = { 103.0 / 0xff,
 
 DraggedTabGtk::DraggedTabGtk(TabContents* datasource,
                              const gfx::Point& mouse_tab_offset,
-                             const gfx::Size& contents_size)
-    : backing_store_(NULL),
+                             const gfx::Size& contents_size,
+                             bool mini)
+    : data_source_(datasource),
       renderer_(new TabRendererGtk(datasource->profile()->GetThemeProvider())),
       attached_(false),
       mouse_tab_offset_(mouse_tab_offset),
       attached_tab_size_(TabRendererGtk::GetMinimumSelectedSize()),
       contents_size_(contents_size),
-      close_animation_(this),
-      tab_width_(0) {
-  renderer_->UpdateData(datasource, false);
+      close_animation_(this) {
+  renderer_->UpdateData(datasource, false, false);
+  renderer_->set_mini(mini);
 
   container_ = gtk_window_new(GTK_WINDOW_POPUP);
   SetContainerColorMap();
   gtk_widget_set_app_paintable(container_, TRUE);
-  g_signal_connect(G_OBJECT(container_), "expose-event",
+  g_signal_connect(container_, "expose-event",
                    G_CALLBACK(OnExposeEvent), this);
   gtk_widget_add_events(container_, GDK_STRUCTURE_MASK);
 
@@ -96,26 +100,8 @@ void DraggedTabGtk::Resize(int width) {
   ResizeContainer();
 }
 
-void DraggedTabGtk::set_pinned(bool pinned) {
-  renderer_->set_pinned(pinned);
-}
-
-bool DraggedTabGtk::is_pinned() const {
-  return renderer_->is_pinned();
-}
-
-void DraggedTabGtk::Detach(GtkWidget* contents, BackingStore* backing_store) {
-  // Detached tabs are never pinned.
-  renderer_->set_pinned(false);
-
-  if (attached_tab_size_.width() != tab_width_) {
-    // The attached tab size differs from current tab size. Resize accordingly.
-    Resize(tab_width_);
-  }
-
+void DraggedTabGtk::Detach() {
   attached_ = false;
-  contents_ = contents;
-  backing_store_ = backing_store;
   ResizeContainer();
 
   if (gtk_util::IsScreenComposited())
@@ -174,7 +160,7 @@ void DraggedTabGtk::Layout() {
     renderer_->SetBounds(gfx::Rect(0, 0, prefsize.width(), prefsize.height()));
   } else {
     int left = 0;
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+    if (base::i18n::IsRTL())
       left = GetPreferredSize().width() - attached_tab_size_.width();
 
     // The renderer_'s width should be attached_tab_size_.width() in both LTR
@@ -241,7 +227,7 @@ void DraggedTabGtk::SetContainerTransparency() {
   cairo_destroy(cairo_context);
 }
 
-void DraggedTabGtk::SetContainerShapeMask(GdkPixbuf* pixbuf) {
+void DraggedTabGtk::SetContainerShapeMask(cairo_surface_t* surface) {
   // Create a 1bpp bitmap the size of |container_|.
   gfx::Size size = bounds().size();
   GdkPixmap* pixmap = gdk_pixmap_new(NULL, size.width(), size.height(), 1);
@@ -255,7 +241,7 @@ void DraggedTabGtk::SetContainerShapeMask(GdkPixbuf* pixbuf) {
   cairo_set_operator(cairo_context, CAIRO_OPERATOR_SOURCE);
   if (!attached_)
     cairo_scale(cairo_context, kScalingFactor, kScalingFactor);
-  gdk_cairo_set_source_pixbuf(cairo_context, pixbuf, 0, 0);
+  cairo_set_source_surface(cairo_context, surface, 0, 0);
   cairo_paint(cairo_context);
 
   if (!attached_) {
@@ -264,7 +250,7 @@ void DraggedTabGtk::SetContainerShapeMask(GdkPixbuf* pixbuf) {
     cairo_identity_matrix(cairo_context);
     cairo_set_source_rgba(cairo_context, 1.0f, 1.0f, 1.0f, 1.0f);
     int tab_height = static_cast<int>(kScalingFactor *
-                                      gdk_pixbuf_get_height(pixbuf) -
+                                      renderer_->height() -
                                       kDragFrameBorderSize);
     cairo_rectangle(cairo_context,
                     0, tab_height,
@@ -279,32 +265,29 @@ void DraggedTabGtk::SetContainerShapeMask(GdkPixbuf* pixbuf) {
   g_object_unref(pixmap);
 }
 
-GdkPixbuf* DraggedTabGtk::PaintTab() {
-  SkBitmap bitmap = renderer_->PaintBitmap();
-  return gfx::GdkPixbufFromSkBitmap(&bitmap);
-}
-
 // static
 gboolean DraggedTabGtk::OnExposeEvent(GtkWidget* widget,
                                       GdkEventExpose* event,
                                       DraggedTabGtk* dragged_tab) {
-  GdkPixbuf* pixbuf = dragged_tab->PaintTab();
+  cairo_surface_t* surface = dragged_tab->renderer_->PaintToSurface();
   if (gtk_util::IsScreenComposited()) {
     dragged_tab->SetContainerTransparency();
   } else {
-    dragged_tab->SetContainerShapeMask(pixbuf);
+    dragged_tab->SetContainerShapeMask(surface);
   }
 
   // Only used when not attached.
-  int tab_height = static_cast<int>(kScalingFactor *
-                                    gdk_pixbuf_get_height(pixbuf));
   int tab_width = static_cast<int>(kScalingFactor *
-                                   gdk_pixbuf_get_width(pixbuf));
+      dragged_tab->renderer_->width());
+  int tab_height = static_cast<int>(kScalingFactor *
+      dragged_tab->renderer_->height());
 
   // Draw the render area.
-  if (dragged_tab->backing_store_ && !dragged_tab->attached_) {
+  BackingStore* backing_store =
+      dragged_tab->data_source_->render_view_host()->GetBackingStore(false);
+  if (backing_store && !dragged_tab->attached_) {
     // This leaves room for the border.
-    dragged_tab->backing_store_->PaintToRect(
+    static_cast<BackingStoreX*>(backing_store)->PaintToRect(
         gfx::Rect(kDragFrameBorderSize, tab_height,
                   widget->allocation.width - kTwiceDragFrameBorderSize,
                   widget->allocation.height - tab_height -
@@ -341,12 +324,12 @@ gboolean DraggedTabGtk::OnExposeEvent(GtkWidget* widget,
   // Draw the tab.
   if (!dragged_tab->attached_)
     cairo_scale(cr, kScalingFactor, kScalingFactor);
-  gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+  cairo_set_source_surface(cr, surface, 0, 0);
   cairo_paint(cr);
 
   cairo_destroy(cr);
 
-  g_object_unref(pixbuf);
+  cairo_surface_destroy(surface);
 
   // We've already drawn the tab, so don't propagate the expose-event signal.
   return TRUE;

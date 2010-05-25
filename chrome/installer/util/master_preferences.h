@@ -8,61 +8,24 @@
 #ifndef CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_H_
 #define CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_H_
 
+#include <vector>
+
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/values.h"
+#include "googleurl/src/gurl.h"
+#include "chrome/installer/util/master_preferences_constants.h"
 
 namespace installer_util {
 
-namespace master_preferences {
-// All the preferences below are expected to be inside the JSON "distribution"
-// block. Some of them also have equivalent command line option. If same option
-// is specified in master preference as well as command line, the commnd line
-// value takes precedence.
-
-// Boolean. Use alternate text for the shortcut. Cmd line override present.
-extern const wchar_t kAltShortcutText[];
-// Boolean. Use alternate smaller first run info bubble.
-extern const wchar_t kAltFirstRunBubble[];
-// Integer. Icon index from chrome.exe to use for shortcuts.
-extern const wchar_t kChromeShortcutIconIndex[];
-// Boolean. Create Desktop and QuickLaunch shortcuts. Cmd line override present.
-extern const wchar_t kCreateAllShortcuts[];
-// Boolean pref that triggers silent import of the default browser bookmarks.
-extern const wchar_t kDistroImportBookmarksPref[];
-// Boolean pref that triggers silent import of the default browser history.
-extern const wchar_t kDistroImportHistoryPref[];
-// Boolean pref that triggers silent import of the default browser homepage.
-extern const wchar_t kDistroImportHomePagePref[];
-// Boolean pref that triggers silent import of the default search engine.
-extern const wchar_t kDistroImportSearchPref[];
-// Integer. RLZ ping delay in seconds.
-extern const wchar_t kDistroPingDelay[];
-// Boolean pref that triggers loading the welcome page.
-extern const wchar_t kDistroShowWelcomePage[];
-// Boolean pref that triggers skipping the first run dialogs.
-extern const wchar_t kDistroSkipFirstRunPref[];
-// Boolean. Do not create Chrome desktop shortcuts. Cmd line override present.
-extern const wchar_t kDoNotCreateShortcuts[];
-// Boolean. Do not launch Chrome after first install. Cmd line override present.
-extern const wchar_t kDoNotLaunchChrome[];
-// Boolean. Do not register with Google Update to have Chrome launched after
-// install. Cmd line override present.
-extern const wchar_t kDoNotRegisterForUpdateLaunch[];
-// Boolean. Register Chrome as default browser. Cmd line override present.
-extern const wchar_t kMakeChromeDefault[];
-// Boolean. Register Chrome as default browser for the current user.
-extern const wchar_t kMakeChromeDefaultForUser[];
-// Boolean. Show EULA dialog before install.
-extern const wchar_t kRequireEula[];
-// Boolean. Install Chrome to system wise location. Cmd line override present.
-extern const wchar_t kSystemLevel[];
-// Boolean. Run installer in verbose mode. Cmd line override present.
-extern const wchar_t kVerboseLogging[];
-}
-
 // This is the default name for the master preferences file used to pre-set
 // values in the user profile at first run.
-const wchar_t kDefaultMasterPrefs[] = L"master_preferences";
+const char kDefaultMasterPrefs[] = "master_preferences";
+
+// Parse command line and read master preferences, if present, to get
+// distribution related install options. Merge them if any command line
+// options present (command line value takes precedence).
+DictionaryValue* GetInstallPreferences(const CommandLine& cmd_line);
 
 // Gets the value of given boolean preference |name| from |prefs| dictionary
 // which is assumed to contain a dictionary named "distribution". Returns
@@ -70,6 +33,12 @@ const wchar_t kDefaultMasterPrefs[] = L"master_preferences";
 bool GetDistroBooleanPreference(const DictionaryValue* prefs,
                                 const std::wstring& name,
                                 bool* value);
+
+// This function gets value of a string preference from master
+// preferences. Returns true if the value is read successfully, otherwise false.
+bool GetDistroStringPreference(const DictionaryValue* prefs,
+                               const std::wstring& name,
+                               std::wstring* value);
 
 // This function gets value of an integer preference from master
 // preferences. Returns true if the value is read successfully, otherwise false.
@@ -90,6 +59,7 @@ bool GetDistroIntegerPreference(const DictionaryValue* prefs,
 //      "chrome_shortcut_icon_index": 0,
 //      "create_all_shortcuts": true,
 //      "import_bookmarks": false,
+//      "import_bookmarks_from_file": "c:\\path",
 //      "import_history": false,
 //      "import_home_page": false,
 //      "import_search_engine": true,
@@ -136,15 +106,54 @@ DictionaryValue* ParseDistributionPreferences(
 //
 // Note that the entries are usually urls but they don't have to.
 //
-// This function retuns the list as a vector of strings. If the master
+// This function retuns the list as a vector of GURLs.  If the master
 // preferences file does not contain such list the vector is empty.
-std::vector<std::wstring> GetFirstRunTabs(const DictionaryValue* prefs);
+std::vector<GURL> GetFirstRunTabs(const DictionaryValue* prefs);
 
 // Sets the value of given boolean preference |name| in "distribution"
 // dictionary inside |prefs| dictionary.
 bool SetDistroBooleanPreference(DictionaryValue* prefs,
                                 const std::wstring& name,
                                 bool value);
-}
+
+// The master preferences can also contain a regular extensions
+// preference block. If so, the extensions referenced there will be
+// installed during the first run experience.
+// An extension can go in the master prefs needs just the basic
+// elements such as:
+//   1- An extension entry under settings, assigned by the gallery
+//   2- The "location" : 1 entry
+//   3- A minimal "manifest" block with key, name, permissions, update url
+//      and version. The version needs to be lower than the version of
+//      the extension that is hosted in the gallery.
+//   4- The "path" entry with the version as last component
+//   5- The "state" : 1 entry
+//
+// The following is an example of a master pref file that installs
+// Google XYZ:
+//
+//  {
+//     "extensions": {
+//        "settings": {
+//           "ppflmjolhbonpkbkooiamcnenbmbjcbb": {
+//              "location": 1,
+//              "manifest": {
+//                 "key": "MIGfMA0GCSqGSIb3DQEBAQUAA4<rest of key ommited>",
+//                 "name": "Google XYZ (Installing...)",
+//                 "permissions": [ "tabs", "http://xyz.google.com/" ],
+//                 "update_url": "http://fixme.com/fixme/fixme/crx",
+//                 "version": "0.0"
+//              },
+//              "path": "ppflmjolhbonpkbkooiamcnenbmbjcbb\\0.0",
+//              "state": 1
+//           }
+//        }
+//     }
+//  }
+//
+bool HasExtensionsBlock(const DictionaryValue* prefs,
+                        DictionaryValue** extensions);
+
+}  // namespace installer_util
 
 #endif  // CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_H_

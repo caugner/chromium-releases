@@ -27,13 +27,18 @@
 #define WEBKIT_TOOLS_PEPPER_TEST_PLUGIN_PLUGIN_OBJECT_H_
 
 #include "base/basictypes.h"
-#include "webkit/glue/plugins/nphostapi.h"
+#include "base/scoped_ptr.h"
+#include "third_party/npapi/bindings/nphostapi.h"
+#if !defined(INDEPENDENT_PLUGIN)
+#include "gpu/pgl/pgl.h"
+#include "webkit/tools/pepper_test_plugin/demo_3d.h"
+#endif
 
 extern NPNetscapeFuncs* browser;
 
 class PluginObject {
  public:
-  PluginObject(NPP npp);
+  explicit PluginObject(NPP npp);
   ~PluginObject();
 
   static NPClass* GetPluginClass();
@@ -41,10 +46,34 @@ class PluginObject {
   NPObject* header() { return &header_; }
   NPP npp() const { return npp_; }
 
+  void New(NPMIMEType pluginType, int16 argc, char* argn[], char* argv[]);
+  void SetWindow(const NPWindow& window);
+  void Initialize3D();
+  void Destroy3D();
+  void Draw3D();
+
  private:
   NPObject header_;
   NPP npp_;
   NPObject* test_object_;
+  int dimensions_;
+
+  NPDevice* device2d_;
+  NPDevice* device3d_;
+
+#if !defined(INDEPENDENT_PLUGIN)
+  PGLContext pgl_context_;
+  pepper::Demo3D demo_3d_;
+#endif
+
+  NPDevice* deviceaudio_;
+
+  NPDeviceContext3D context3d_;
+  NPDeviceContextAudio context_audio_;
+
+
+  int width_;
+  int height_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginObject);
 };

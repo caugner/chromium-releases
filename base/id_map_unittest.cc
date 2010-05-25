@@ -14,6 +14,14 @@ class IDMapTest : public testing::Test {
 class TestObject {
 };
 
+class DestructorCounter {
+ public:
+  explicit DestructorCounter(int* counter) : counter_(counter) {}
+  ~DestructorCounter() { ++(*counter_); }
+ private:
+  int* counter_;
+};
+
 TEST_F(IDMapTest, Basic) {
   IDMap<TestObject> map;
   EXPECT_TRUE(map.IsEmpty());
@@ -59,10 +67,21 @@ TEST_F(IDMapTest, IteratorRemainsValidWhenRemovingCurrentElement) {
   map.Add(&obj2);
   map.Add(&obj3);
 
-  for (IDMap<TestObject>::const_iterator iter(&map);
-       !iter.IsAtEnd(); iter.Advance()) {
-    map.Remove(iter.GetCurrentKey());
+  {
+    IDMap<TestObject>::const_iterator iter(&map);
+    while (!iter.IsAtEnd()) {
+      map.Remove(iter.GetCurrentKey());
+      iter.Advance();
+    }
+
+    // Test that while an iterator is still in scope, we get the map emptiness
+    // right (http://crbug.com/35571).
+    EXPECT_TRUE(map.IsEmpty());
+    EXPECT_EQ(0U, map.size());
   }
+
+  EXPECT_TRUE(map.IsEmpty());
+  EXPECT_EQ(0U, map.size());
 }
 
 TEST_F(IDMapTest, IteratorRemainsValidWhenRemovingOtherElements) {
@@ -101,6 +120,78 @@ TEST_F(IDMapTest, IteratorRemainsValidWhenRemovingOtherElements) {
 
     counter++;
   }
+}
+
+TEST_F(IDMapTest, OwningPointersDeletesThemOnRemove) {
+  const int kCount = 3;
+
+  int external_del_count = 0;
+  DestructorCounter* external_obj[kCount];
+  int map_external_ids[kCount];
+
+  int owned_del_count = 0;
+  DestructorCounter* owned_obj[kCount];
+  int map_owned_ids[kCount];
+
+  IDMap<DestructorCounter> map_external;
+  IDMap<DestructorCounter, IDMapOwnPointer> map_owned;
+
+  for (int i = 0; i < kCount; ++i) {
+    external_obj[i] = new DestructorCounter(&external_del_count);
+    map_external_ids[i] = map_external.Add(external_obj[i]);
+
+    owned_obj[i] = new DestructorCounter(&owned_del_count);
+    map_owned_ids[i] = map_owned.Add(owned_obj[i]);
+  }
+
+  for (int i = 0; i < kCount; ++i) {
+    EXPECT_EQ(external_del_count, 0);
+    EXPECT_EQ(owned_del_count, i);
+
+    map_external.Remove(map_external_ids[i]);
+    map_owned.Remove(map_owned_ids[i]);
+  }
+
+  for (int i = 0; i < kCount; ++i) {
+    delete external_obj[i];
+  }
+
+  EXPECT_EQ(external_del_count, kCount);
+  EXPECT_EQ(owned_del_count, kCount);
+}
+
+TEST_F(IDMapTest, OwningPointersDeletesThemOnDestruct) {
+  const int kCount = 3;
+
+  int external_del_count = 0;
+  DestructorCounter* external_obj[kCount];
+  int map_external_ids[kCount];
+
+  int owned_del_count = 0;
+  DestructorCounter* owned_obj[kCount];
+  int map_owned_ids[kCount];
+
+  {
+    IDMap<DestructorCounter> map_external;
+    IDMap<DestructorCounter, IDMapOwnPointer> map_owned;
+
+    for (int i = 0; i < kCount; ++i) {
+      external_obj[i] = new DestructorCounter(&external_del_count);
+      map_external_ids[i] = map_external.Add(external_obj[i]);
+
+      owned_obj[i] = new DestructorCounter(&owned_del_count);
+      map_owned_ids[i] = map_owned.Add(owned_obj[i]);
+    }
+  }
+
+  EXPECT_EQ(external_del_count, 0);
+
+  for (int i = 0; i < kCount; ++i) {
+    delete external_obj[i];
+  }
+
+  EXPECT_EQ(external_del_count, kCount);
+  EXPECT_EQ(owned_del_count, kCount);
 }
 
 }  // namespace

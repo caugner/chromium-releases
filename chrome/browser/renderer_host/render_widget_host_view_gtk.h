@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,19 @@
 #include <vector>
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "gfx/native_widget_types.h"
 #include "webkit/glue/plugins/gtk_plugin_container_manager.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderWidgetHost;
-// A conveience wrapper class for GtkIMContext;
+class GpuViewHost;
 class GtkIMContextWrapper;
-// A convenience class for handling editor key bindings defined in gtk keyboard
-// theme.
 class GtkKeyBindingsHandler;
+class MenuGtk;
 class NativeWebKeyboardEvent;
 
 typedef struct _GtkClipboard GtkClipboard;
@@ -56,21 +55,26 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   virtual bool HasFocus();
   virtual void Show();
   virtual void Hide();
+  virtual bool IsShowing();
   virtual gfx::Rect GetViewBounds() const;
   virtual void UpdateCursor(const WebCursor& cursor);
   virtual void SetIsLoading(bool is_loading);
   virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
-  virtual void DidPaintRect(const gfx::Rect& rect);
-  virtual void DidScrollRect(const gfx::Rect& rect, int dx, int dy);
+  virtual void DidPaintBackingStoreRects(const std::vector<gfx::Rect>& rects);
+  virtual void DidScrollBackingStoreRect(const gfx::Rect& rect, int dx, int dy);
   virtual void RenderViewGone();
   virtual void Destroy();
+  virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual void SelectionChanged(const std::string& text);
   virtual void ShowingContextMenu(bool showing);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
+  virtual VideoLayer* AllocVideoLayer(const gfx::Size& size);
   virtual void SetBackground(const SkBitmap& background);
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id);
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id);
+  virtual void SetVisuallyDeemphasized(bool deemphasized);
+  virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
   gfx::NativeView native_view() const { return view_.get(); }
 
@@ -83,8 +87,20 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // RenderWidgetHost::ForwardEditCommandsForNextKeyEvent().
   void ForwardKeyboardEvent(const NativeWebKeyboardEvent& event);
 
+  // Appends the input methods context menu to the specified |menu| object as a
+  // submenu.
+  void AppendInputMethodsContextMenu(MenuGtk* menu);
+
  private:
   friend class RenderWidgetHostViewGtkWidget;
+
+  // Returns whether the widget needs an input grab (GTK+ and X) to work
+  // properly.
+  bool NeedsInputGrab();
+
+  // Returns whether this render view is a popup (<select> dropdown or
+  // autocomplete window).
+  bool IsPopup();
 
   // Update the display cursor for the render view.
   void ShowCurrentCursor();
@@ -94,6 +110,12 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
 
   // The native UI widget.
   OwnedWidgetGtk view_;
+
+  // Cached value of --enable-gpu-rendering for out-of-process painting.
+  bool enable_gpu_rendering_;
+
+  // Non-NULL when we're doing out-of-process painting.
+  scoped_ptr<GpuViewHost> gpu_view_host_;
 
   // This is true when we are currently painting and thus should handle extra
   // paint requests by expanding the invalid rect rather than actually
@@ -119,6 +141,12 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // value returns true for is_null() if we are not recording whiteout times.
   base::TimeTicks whiteout_start_time_;
 
+  // The time it took after this view was selected for it to be fully painted.
+  base::TimeTicks tab_switch_paint_time_;
+
+  // If true, fade the render widget when painting it.
+  bool visually_deemphasized_;
+
   // Variables used only for popups --------------------------------------------
   // Our parent widget.
   RenderWidgetHostView* parent_host_view_;
@@ -132,6 +160,11 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // Whether or not this widget was focused before shadowed by another widget.
   // Used in OnGrabNotify() handler to track the focused state correctly.
   bool was_focused_before_grab_;
+
+  // True if we are responsible for creating an X grab. This will only be used
+  // for <select> dropdowns. It should be true for most such cases, but false
+  // for extension popups.
+  bool do_x_grab_;
 
   // A convenience wrapper object for GtkIMContext;
   scoped_ptr<GtkIMContextWrapper> im_context_;

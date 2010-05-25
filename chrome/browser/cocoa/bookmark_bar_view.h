@@ -10,12 +10,27 @@
 
 #import <Cocoa/Cocoa.h>
 
+@class BookmarkBarController;
+
 @interface BookmarkBarView : NSView {
+ @private
+  BOOL dropIndicatorShown_;
+  CGFloat dropIndicatorPosition_;  // x position
+
+  IBOutlet BookmarkBarController* controller_;
   IBOutlet NSTextField* noItemTextfield_;
+  NSView* noItemContainer_;
 }
+- (NSTextField*)noItemTextfield;
+- (BookmarkBarController*)controller;
 
--(NSTextField*)noItemTextfield;
-
+@property (assign, nonatomic) IBOutlet NSView* noItemContainer;
 @end
-  
+
+@interface BookmarkBarView()  // TestingOrInternalAPI
+@property (readonly) BOOL dropIndicatorShown;
+@property (readonly) CGFloat dropIndicatorPosition;
+- (void)setController:(id)controller;
+@end
+
 #endif  // CHROME_BROWSER_COCOA_BOOKMARK_BAR_VIEW_H_

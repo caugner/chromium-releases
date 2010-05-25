@@ -38,11 +38,11 @@
 #include "base/timer.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
-#include "net/base/cookie_policy.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/base/static_cookie_policy.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
@@ -50,10 +50,11 @@
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
+#include "webkit/tools/test_shell/simple_socket_stream_bridge.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
 
 using webkit_glue::ResourceLoaderBridge;
-using net::CookiePolicy;
+using net::StaticCookiePolicy;
 using net::HttpResponseHeaders;
 
 namespace {
@@ -76,9 +77,11 @@ class IOThread : public base::Thread {
 
   virtual void Init() {
     SimpleAppCacheSystem::InitializeOnIOThread(request_context);
+    SimpleSocketStreamBridge::InitializeOnIOThread(request_context);
   }
 
   virtual void CleanUp() {
+    SimpleSocketStreamBridge::Cleanup();
     if (request_context) {
       request_context->Release();
       request_context = NULL;
@@ -115,12 +118,6 @@ class RequestProxy : public URLRequest::Delegate,
         last_upload_position_(0) {
   }
 
-  virtual ~RequestProxy() {
-    // If we have a request, then we'd better be on the io thread!
-    DCHECK(!request_.get() ||
-           MessageLoop::current() == io_thread->message_loop());
-  }
-
   void DropPeer() {
     peer_ = NULL;
   }
@@ -141,6 +138,14 @@ class RequestProxy : public URLRequest::Delegate,
   }
 
  protected:
+  friend class base::RefCountedThreadSafe<RequestProxy>;
+
+  virtual ~RequestProxy() {
+    // If we have a request, then we'd better be on the io thread!
+    DCHECK(!request_.get() ||
+           MessageLoop::current() == io_thread->message_loop());
+  }
+
   // --------------------------------------------------------------------------
   // The following methods are called on the owner's thread in response to
   // various URLRequest callbacks.  The event hooks, defined below, trigger
@@ -148,9 +153,14 @@ class RequestProxy : public URLRequest::Delegate,
 
   void NotifyReceivedRedirect(const GURL& new_url,
                               const ResourceLoaderBridge::ResponseInfo& info) {
-    if (peer_ && peer_->OnReceivedRedirect(new_url, info)) {
+    bool has_new_first_party_for_cookies = false;
+    GURL new_first_party_for_cookies;
+    if (peer_ && peer_->OnReceivedRedirect(new_url, info,
+                                           &has_new_first_party_for_cookies,
+                                           &new_first_party_for_cookies)) {
       io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-          this, &RequestProxy::AsyncFollowDeferredRedirect));
+          this, &RequestProxy::AsyncFollowDeferredRedirect,
+          has_new_first_party_for_cookies, new_first_party_for_cookies));
     } else {
       Cancel();
     }
@@ -233,11 +243,14 @@ class RequestProxy : public URLRequest::Delegate,
     Done();
   }
 
-  void AsyncFollowDeferredRedirect() {
+  void AsyncFollowDeferredRedirect(bool has_new_first_party_for_cookies,
+                                   const GURL& new_first_party_for_cookies) {
     // This can be null in cases where the request is already done.
     if (!request_.get())
       return;
 
+    if (has_new_first_party_for_cookies)
+      request_->set_first_party_for_cookies(new_first_party_for_cookies);
     request_->FollowDeferredRedirect();
   }
 
@@ -470,24 +483,18 @@ class SyncRequestProxy : public RequestProxy {
 
 class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
  public:
-  ResourceLoaderBridgeImpl(const std::string& method,
-                           const GURL& url,
-                           const GURL& first_party_for_cookies,
-                           const GURL& referrer,
-                           const std::string& headers,
-                           int load_flags,
-                           ResourceType::Type request_type,
-                           int appcache_host_id)
+  ResourceLoaderBridgeImpl(
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info)
       : params_(new RequestParams),
         proxy_(NULL) {
-    params_->method = method;
-    params_->url = url;
-    params_->first_party_for_cookies = first_party_for_cookies;
-    params_->referrer = referrer;
-    params_->headers = headers;
-    params_->load_flags = load_flags;
-    params_->request_type = request_type;
-    params_->appcache_host_id = appcache_host_id;
+    params_->method = request_info.method;
+    params_->url = request_info.url;
+    params_->first_party_for_cookies = request_info.first_party_for_cookies;
+    params_->referrer = request_info.referrer;
+    params_->headers = request_info.headers;
+    params_->load_flags = request_info.load_flags;
+    params_->request_type = request_info.request_type;
+    params_->appcache_host_id = request_info.appcache_host_id;
   }
 
   virtual ~ResourceLoaderBridgeImpl() {
@@ -508,12 +515,16 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     params_->upload->AppendBytes(data, data_len);
   }
 
-  virtual void AppendFileRangeToUpload(const FilePath& file_path,
-                                       uint64 offset, uint64 length) {
+  virtual void AppendFileRangeToUpload(
+      const FilePath& file_path,
+      uint64 offset,
+      uint64 length,
+      const base::Time& expected_modification_time) {
     DCHECK(params_.get());
     if (!params_->upload)
       params_->upload = new net::UploadData();
-    params_->upload->AppendFileRange(file_path, offset, length);
+    params_->upload->AppendFileRange(file_path, offset, length,
+                                     expected_modification_time);
   }
 
   virtual void SetUploadIdentifier(int64 identifier) {
@@ -580,6 +591,11 @@ class CookieSetter : public base::RefCountedThreadSafe<CookieSetter> {
     DCHECK(MessageLoop::current() == io_thread->message_loop());
     request_context->cookie_store()->SetCookie(url, cookie);
   }
+
+ private:
+  friend class base::RefCountedThreadSafe<CookieSetter>;
+
+  ~CookieSetter() {}
 };
 
 class CookieGetter : public base::RefCountedThreadSafe<CookieGetter> {
@@ -599,6 +615,10 @@ class CookieGetter : public base::RefCountedThreadSafe<CookieGetter> {
   }
 
  private:
+  friend class base::RefCountedThreadSafe<CookieGetter>;
+
+  ~CookieGetter() {}
+
   base::WaitableEvent event_;
   std::string result_;
 };
@@ -609,23 +629,10 @@ class CookieGetter : public base::RefCountedThreadSafe<CookieGetter> {
 
 namespace webkit_glue {
 
-// factory function
+// Factory function.
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
-    const std::string& method,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const GURL& referrer,
-    const std::string& frame_origin,
-    const std::string& main_frame_origin,
-    const std::string& headers,
-    int load_flags,
-    int requestor_pid,
-    ResourceType::Type request_type,
-    int appcache_host_id,
-    int routing_id) {
-  return new ResourceLoaderBridgeImpl(method, url, first_party_for_cookies,
-                                      referrer, headers, load_flags,
-                                      request_type, appcache_host_id);
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
+  return new ResourceLoaderBridgeImpl(request_info);
 }
 
 // Issue the proxy resolve request on the io thread, and wait
@@ -651,7 +658,7 @@ bool FindProxyForUrl(const GURL& url, std::string* proxy_list) {
 //-----------------------------------------------------------------------------
 
 // static
-void SimpleResourceLoaderBridge::Init(URLRequestContext* context) {
+void SimpleResourceLoaderBridge::Init(TestShellRequestContext* context) {
   // Make sure to stop any existing IO thread since it may be using the
   // current request context.
   Shutdown();
@@ -725,7 +732,9 @@ bool SimpleResourceLoaderBridge::EnsureIOThread() {
 
 // static
 void SimpleResourceLoaderBridge::SetAcceptAllCookies(bool accept_all_cookies) {
-  CookiePolicy::Type policy_type = accept_all_cookies ?
-      CookiePolicy::ALLOW_ALL_COOKIES : CookiePolicy::BLOCK_THIRD_PARTY_COOKIES;
-  request_context->cookie_policy()->set_type(policy_type);
+  StaticCookiePolicy::Type policy_type = accept_all_cookies ?
+      StaticCookiePolicy::ALLOW_ALL_COOKIES :
+      StaticCookiePolicy::BLOCK_THIRD_PARTY_COOKIES;
+  static_cast<StaticCookiePolicy*>(request_context->cookie_policy())->
+      set_type(policy_type);
 }

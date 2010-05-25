@@ -36,10 +36,16 @@ class LoginView : public views::View, public LoginModelObserver {
   // of the caller to inform this view if the model is deleted.
   void SetModel(LoginModel* model);
 
+  virtual void RequestFocus();
+
  protected:
   // views::View overrides:
   virtual void ViewHierarchyChanged(bool is_add, views::View *parent,
                                     views::View *child);
+
+  virtual void NativeViewHierarchyChanged(bool attached,
+                                          gfx::NativeView native_view,
+                                          views::RootView* root_view);
 
  private:
   void FocusFirstField();
@@ -60,6 +66,10 @@ class LoginView : public views::View, public LoginModelObserver {
   LoginModel* login_model_;
 
   ScopedRunnableMethodFactory<LoginView> focus_grabber_factory_;
+
+  // Indicates that this view was created when focus manager was unavailable
+  // (on the hidden tab, for example).
+  bool focus_delayed_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginView);
 };

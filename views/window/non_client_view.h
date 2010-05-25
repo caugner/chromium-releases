@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,9 @@ class NonClientFrameView : public View {
   // frame border.
   static const int kClientEdgeThickness;
 
+  // Prevent the frame view from painting its inactive state. Prevents a related
+  // window from causing its owner to appear deactivated. Used for windows like
+  // bubbles.
   void DisableInactiveRendering(bool disable) {
     paint_as_active_ = disable;
     if (!paint_as_active_)
@@ -53,7 +56,11 @@ class NonClientFrameView : public View {
 
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const = 0;
-  virtual gfx::Point GetSystemMenuPoint() const = 0;
+
+  // This function must ask the ClientView to do a hittest.  We don't do this in
+  // the parent NonClientView because that makes it more difficult to calculate
+  // hittests for regions that are partially obscured by the ClientView, e.g.
+  // HTSYSMENU.
   virtual int NonClientHitTest(const gfx::Point& point) = 0;
   virtual void GetWindowMask(const gfx::Size& size,
                              gfx::Path* window_mask) = 0;
@@ -81,8 +88,10 @@ class NonClientFrameView : public View {
                              int resize_corner_width,
                              bool can_resize);
 
-  // Accessor for paint_as_active_.
-  bool paint_as_active() const { return paint_as_active_; }
+  // Used to determine if the frame should be painted as active. Keyed off the
+  // window's actual active state and the override, see
+  // DisableInactiveRendering() above.
+  bool ShouldPaintAsActive() const;
 
  private:
   // True when the non-client view should always be rendered as if the window
@@ -132,6 +141,10 @@ class NonClientView : public View {
   explicit NonClientView(Window* frame);
   virtual ~NonClientView();
 
+  // Returns the current NonClientFrameView instance, or NULL if
+  // it does not exist.
+  NonClientFrameView* frame_view() const { return frame_view_.get(); }
+
   // Replaces the current NonClientFrameView (if any) with the specified one.
   void SetFrameView(NonClientFrameView* frame_view);
 
@@ -160,10 +173,6 @@ class NonClientView : public View {
   // Returns the bounds of the window required to display the content area at
   // the specified bounds.
   gfx::Rect GetWindowBoundsForClientBounds(const gfx::Rect client_bounds) const;
-
-  // Returns the point, in screen coordinates, where the system menu should
-  // be shown so it shows up anchored to the system menu icon.
-  gfx::Point GetSystemMenuPoint() const;
 
   // Determines the windows HT* code when the mouse cursor is at the
   // specified point, in window coordinates.
@@ -200,8 +209,6 @@ class NonClientView : public View {
   virtual gfx::Size GetMinimumSize();
   virtual void Layout();
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleName(std::wstring* name);
-  virtual void SetAccessibleName(const std::wstring& name);
 
  protected:
   // NonClientView, View overrides:

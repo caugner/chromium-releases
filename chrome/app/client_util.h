@@ -9,37 +9,49 @@
 #define CHROME_APP_CLIENT_UTIL_H_
 
 #include <windows.h>
-
 #include <string>
 
-#include "sandbox/src/sandbox_factory.h"
+namespace sandbox {
+  union SandboxInterfaceInfo;
+}
 
-namespace client_util {
-typedef int (*DLL_MAIN)(HINSTANCE instance, sandbox::SandboxInterfaceInfo*,
-                        TCHAR*);
+// Implements the common aspects of loading chrome.dll for both chrome and
+// chromium scenarios, which are in charge of implementing two abstract
+// methods: GetRegistryPath() and OnBeforeLaunch().
+class MainDllLoader {
+ public:
+  MainDllLoader();
+  virtual ~MainDllLoader();
 
-extern const wchar_t kProductVersionKey[];
+  // Loads and calls the entry point of chrome.dll. |instance| is the exe
+  // instance retrieved from wWinMain and the |sbox_info| is the broker or
+  // target services interface pointer.
+  // The return value is what the main entry point of chrome.dll returns
+  // upon termination.
+  int Launch(HINSTANCE instance, sandbox::SandboxInterfaceInfo* sbox_info);
 
-// Returns true if file specified by file_path exists
-bool FileExists(const wchar_t* const file_path);
+  // Derived classes must return the relative registry path that holds the
+  // most current version of chrome.dll.
+  virtual std::wstring GetRegistryPath() = 0;
 
-// Returns Chromium version after reading it from reg_key registry key. Uses
-// exe_path to detemine registry root key (HKLM/HKCU). Note it is the
-// responsibility of caller to free *version when function is successful.
-bool GetChromiumVersion(const wchar_t* const exe_path,
-                        const wchar_t* const reg_key_path,
-                        wchar_t** version);
+  // Called after chrome.dll has been loaded but before the entry point
+  // is invoked. Derived classes can implement custom actions here.
+  virtual void OnBeforeLaunch(const std::wstring& version) {}
 
-// Get path to DLL specified by dll_name. If dll_path is specified and it
-// exists we assume DLL is in that directory and return that. Else we search
-// for that DLL by calling Windows API.
-std::wstring GetDLLPath(const std::wstring dll_name,
-                        const std::wstring dll_path);
+  // Called after the chrome.dll entry point returns and before terminating
+  // this process. The return value will be used as the process return code.
+  virtual int OnBeforeExit(int return_code) { return return_code; }
 
-// Returns the path to the exe (without the file name) that called this
-// function. The buffer should already be allocated (ideally of MAX_PATH size).
-void GetExecutablePath(wchar_t* exe_path);
+ protected:
+  HMODULE Load(std::wstring* version, std::wstring* file);
 
-}  // namespace client_util
+ private:
+  // Chrome.dll handle.
+  HMODULE dll_;
+};
+
+// Factory for the MainDllLoader. Caller owns the pointer and should call
+// delete to free it.
+MainDllLoader* MakeMainDllLoader();
 
 #endif  // CHROME_APP_CLIENT_UTIL_H_

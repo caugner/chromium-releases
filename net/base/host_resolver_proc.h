@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/ref_counted.h"
+#include "net/base/address_family.h"
 
 namespace net {
 
@@ -23,26 +24,42 @@ class AddressList;
 class HostResolverProc : public base::RefCountedThreadSafe<HostResolverProc> {
  public:
   explicit HostResolverProc(HostResolverProc* previous);
-  virtual ~HostResolverProc() {}
 
-  // Resolves |host| to an address list. If successful returns OK and fills
-  // |addrlist| with a list of socket addresses. Otherwise returns a
-  // network error code.
-  virtual int Resolve(const std::string& host, AddressList* addrlist) = 0;
+  // Resolves |host| to an address list, restricting the results to addresses
+  // in |address_family|. If successful returns OK and fills |addrlist| with
+  // a list of socket addresses. Otherwise returns a network error code.
+  virtual int Resolve(const std::string& host,
+                      AddressFamily address_family,
+                      HostResolverFlags host_resolver_flags,
+                      AddressList* addrlist) = 0;
 
  protected:
+  friend class base::RefCountedThreadSafe<HostResolverProc>;
+
+  virtual ~HostResolverProc() {}
+
   // Asks the fallback procedure (if set) to do the resolve.
-  int ResolveUsingPrevious(const std::string& host, AddressList* addrlist);
+  int ResolveUsingPrevious(const std::string& host,
+                           AddressFamily address_family,
+                           HostResolverFlags host_resolver_flags,
+                           AddressList* addrlist);
 
  private:
   friend class HostResolverImpl;
   friend class MockHostResolverBase;
   friend class ScopedDefaultHostResolverProc;
 
-  // Sets the previous procedure in the chain.
-  void set_previous_proc(HostResolverProc* proc) {
-    previous_proc_ = proc;
-  }
+  // Sets the previous procedure in the chain.  Aborts if this would result in a
+  // cycle.
+  void SetPreviousProc(HostResolverProc* proc);
+
+  // Sets the last procedure in the chain, i.e. appends |proc| to the end of the
+  // current chain.  Aborts if this would result in a cycle.
+  void SetLastProc(HostResolverProc* proc);
+
+  // Returns the last procedure in the chain starting at |proc|.  Will return
+  // NULL iff |proc| is NULL.
+  static HostResolverProc* GetLastProc(HostResolverProc* proc);
 
   // Sets the default host resolver procedure that is used by HostResolverImpl.
   // This can be used through ScopedDefaultHostResolverProc to set a catch-all
@@ -51,7 +68,6 @@ class HostResolverProc : public base::RefCountedThreadSafe<HostResolverProc> {
   static HostResolverProc* SetDefault(HostResolverProc* proc);
   static HostResolverProc* GetDefault();
 
- private:
   scoped_refptr<HostResolverProc> previous_proc_;
   static HostResolverProc* default_proc_;
 
@@ -62,7 +78,10 @@ class HostResolverProc : public base::RefCountedThreadSafe<HostResolverProc> {
 // (i.e. this calls out to getaddrinfo()). If successful returns OK and fills
 // |addrlist| with a list of socket addresses. Otherwise returns a
 // network error code.
-int SystemHostResolverProc(const std::string& host, AddressList* addrlist);
+int SystemHostResolverProc(const std::string& host,
+                           AddressFamily address_family,
+                           HostResolverFlags host_resolver_flags,
+                           AddressList* addrlist);
 
 }  // namespace net
 

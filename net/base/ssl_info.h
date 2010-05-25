@@ -5,6 +5,8 @@
 #ifndef NET_BASE_SSL_INFO_H_
 #define NET_BASE_SSL_INFO_H_
 
+#include <string>
+
 #include "net/base/cert_status_flags.h"
 #include "net/base/x509_certificate.h"
 

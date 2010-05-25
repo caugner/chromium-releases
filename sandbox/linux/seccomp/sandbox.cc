@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "library.h"
 #include "sandbox_impl.h"
 #include "syscall_table.h"
@@ -5,12 +9,13 @@
 namespace playground {
 
 // Global variables
+int                           Sandbox::proc_self_maps_ = -1;
+enum Sandbox::SandboxStatus   Sandbox::status_ = STATUS_UNKNOWN;
 int                           Sandbox::pid_;
 int                           Sandbox::processFdPub_;
 int                           Sandbox::cloneFdPub_;
 Sandbox::ProtectedMap         Sandbox::protectedMap_;
 std::vector<SecureMem::Args*> Sandbox::secureMemPool_;
-
 
 bool Sandbox::sendFd(int transport, int fd0, int fd1, const void* buf,
                      size_t len) {
@@ -329,44 +334,123 @@ void (*Sandbox::segv())(int signo) {
       ".popsection\n"
   "999:pop  %0\n"
       : "=g"(fnc)
+      :
+      : "memory"
+#if defined(__x86_64__)
+        , "rsp"
+#elif defined(__i386__)
+        , "esp"
+#endif
   );
   return fnc;
 }
 
-void Sandbox::snapshotMemoryMappings(int processFd) {
+void Sandbox::snapshotMemoryMappings(int processFd, int proc_self_maps) {
   SysCalls sys;
-  int mapsFd = sys.open("/proc/self/maps", O_RDONLY, 0);
-  if (mapsFd < 0 || !sendFd(processFd, mapsFd, -1, NULL, 0)) {
+  if (sys.lseek(proc_self_maps, 0, SEEK_SET) ||
+      !sendFd(processFd, proc_self_maps, -1, NULL, 0)) {
  failure:
     die("Cannot access /proc/self/maps");
   }
-  NOINTR_SYS(sys.close(mapsFd));
   int dummy;
   if (read(sys, processFd, &dummy, sizeof(dummy)) != sizeof(dummy)) {
     goto failure;
   }
 }
 
-void Sandbox::startSandbox() {
+int Sandbox::supportsSeccompSandbox(int proc_fd) {
+  if (status_ != STATUS_UNKNOWN) {
+    return status_ != STATUS_UNSUPPORTED;
+  }
+  int fds[2];
   SysCalls sys;
+  if (sys.pipe(fds)) {
+    status_ = STATUS_UNSUPPORTED;
+    return 0;
+  }
+  pid_t pid;
+  switch ((pid = sys.fork())) {
+    case -1:
+      status_ = STATUS_UNSUPPORTED;
+      return 0;
+    case 0: {
+      int devnull = sys.open("/dev/null", O_RDWR, 0);
+      if (devnull >= 0) {
+        sys.dup2(devnull, 0);
+        sys.dup2(devnull, 1);
+        sys.dup2(devnull, 2);
+        sys.close(devnull);
+      }
+      if (proc_fd >= 0) {
+        setProcSelfMaps(sys.openat(proc_fd, "self/maps", O_RDONLY, 0));
+      }
+      startSandbox();
+      write(sys, fds[1], "", 1);
+
+      // Try to tell the trusted thread to shut down the entire process in an
+      // orderly fashion
+      defaultSystemCallHandler(__NR_exit_group, 0, 0, 0, 0, 0, 0);
+
+      // If that did not work (e.g. because the kernel does not know about the
+      // exit_group() system call), make a direct _exit() system call instead.
+      // This system call is unrestricted in seccomp mode, so it will always
+      // succeed. Normally, we don't like it, because unlike exit_group() it
+      // does not terminate any other thread. But since we know that
+      // exit_group() exists in all kernels which support kernel-level threads,
+      // this is OK we only get here for old kernels where _exit() is OK.
+      sys._exit(0);
+    }
+    default:
+      NOINTR_SYS(sys.close(fds[1]));
+      char ch;
+      if (read(sys, fds[0], &ch, 1) != 1) {
+        status_ = STATUS_UNSUPPORTED;
+      } else {
+        status_ = STATUS_AVAILABLE;
+      }
+      int rc;
+      NOINTR_SYS(sys.waitpid(pid, &rc, 0));
+      NOINTR_SYS(sys.close(fds[0]));
+      return status_ != STATUS_UNSUPPORTED;
+  }
+}
+
+void Sandbox::setProcSelfMaps(int proc_self_maps) {
+  proc_self_maps_ = proc_self_maps;
+}
+
+void Sandbox::startSandbox() {
+  if (status_ == STATUS_UNSUPPORTED) {
+    die("The seccomp sandbox is not supported on this computer");
+  } else if (status_ == STATUS_ENABLED) {
+    return;
+  }
+
+  SysCalls sys;
+  if (proc_self_maps_ < 0) {
+    proc_self_maps_        = sys.open("/proc/self/maps", O_RDONLY, 0);
+    if (proc_self_maps_ < 0) {
+      die("Cannot access \"/proc/self/maps\"");
+    }
+  }
 
   // The pid is unchanged for the entire program, so we can retrieve it once
   // and store it in a global variable.
-  pid_                           = sys.getpid();
+  pid_                     = sys.getpid();
 
   // Block all signals, except for the RDTSC handler
   setupSignalHandlers();
 
   // Get socketpairs for talking to the trusted process
   int pair[4];
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) ||
-      socketpair(AF_UNIX, SOCK_STREAM, 0, pair+2)) {
+  if (sys.socketpair(AF_UNIX, SOCK_STREAM, 0, pair) ||
+      sys.socketpair(AF_UNIX, SOCK_STREAM, 0, pair+2)) {
     die("Failed to create trusted thread");
   }
-  processFdPub_                  = pair[0];
-  cloneFdPub_                    = pair[2];
-  SecureMemArgs::Args* secureMem = createTrustedProcess(pair[0], pair[1],
-                                                        pair[2], pair[3]);
+  processFdPub_            = pair[0];
+  cloneFdPub_              = pair[2];
+  SecureMemArgs* secureMem = createTrustedProcess(pair[0], pair[1],
+                                                  pair[2], pair[3]);
 
   // We find all libraries that have system calls and redirect the system
   // calls to the sandbox. If we miss any system calls, the application will be
@@ -374,8 +458,8 @@ void Sandbox::startSandbox() {
   // view, if this code fails to identify system calls, we are still behaving
   // correctly.
   {
-    Maps maps("/proc/self/maps");
-    const char *libs[] = { "ld", "libc", "librt", "libpthread", NULL };
+    Maps maps(proc_self_maps_);
+    const char *libs[]     = { "ld", "libc", "librt", "libpthread", NULL };
 
     // Intercept system calls in the VDSO segment (if any). This has to happen
     // before intercepting system calls in any of the other libraries, as
@@ -384,7 +468,7 @@ void Sandbox::startSandbox() {
     // other libraries.
     for (Maps::const_iterator iter = maps.begin(); iter != maps.end(); ++iter){
       Library* library = *iter;
-      if (library->isVDSO()) {
+      if (library->isVDSO() && library->parseElf()) {
         library->makeWritable(true);
         library->patchSystemCalls();
         library->makeWritable(false);
@@ -395,15 +479,32 @@ void Sandbox::startSandbox() {
     // Intercept system calls in libraries that are known to have them.
     for (Maps::const_iterator iter = maps.begin(); iter != maps.end(); ++iter){
       Library* library = *iter;
+      const char* mapping = iter.name().c_str();
+
+      // Find the actual base name of the mapped library by skipping past any
+      // SPC and forward-slashes. We don't want to accidentally find matches,
+      // because the directory name included part of our well-known lib names.
+      //
+      // Typically, prior to pruning, entries would look something like this:
+      // 08:01 2289011 /lib/libc-2.7.so
+      for (const char *delim = " /"; *delim; ++delim) {
+        const char* skip = strrchr(mapping, *delim);
+        if (skip) {
+          mapping = skip + 1;
+        }
+      }
+
       for (const char **ptr = libs; *ptr; ptr++) {
-        const char *name = strstr(iter.name().c_str(), *ptr);
-        if (name) {
+        const char *name = strstr(mapping, *ptr);
+        if (name == mapping) {
           char ch = name[strlen(*ptr)];
           if (ch < 'A' || (ch > 'Z' && ch < 'a') || ch > 'z') {
-            library->makeWritable(true);
-            library->patchSystemCalls();
-            library->makeWritable(false);
-            break;
+            if (library->parseElf()) {
+              library->makeWritable(true);
+              library->patchSystemCalls();
+              library->makeWritable(false);
+              break;
+            }
           }
         }
       }
@@ -412,10 +513,17 @@ void Sandbox::startSandbox() {
 
   // Take a snapshot of the current memory mappings. These mappings will be
   // off-limits to all future mmap(), munmap(), mremap(), and mprotect() calls.
-  snapshotMemoryMappings(processFdPub_);
+  snapshotMemoryMappings(processFdPub_, proc_self_maps_);
+  NOINTR_SYS(sys.close(proc_self_maps_));
+  proc_self_maps_ = -1;
 
   // Creating the trusted thread enables sandboxing
   createTrustedThread(processFdPub_, cloneFdPub_, secureMem);
+
+  // We can no longer check for sandboxing support at this point, but we also
+  // know for a fact that it is available (as we just turned it on). So update
+  // the status to reflect this information.
+  status_ = STATUS_ENABLED;
 }
 
 } // namespace

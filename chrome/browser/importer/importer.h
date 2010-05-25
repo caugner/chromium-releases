@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,45 +10,35 @@
 
 #include "build/build_config.h"
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
-#include "chrome/browser/history/history_types.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_list.h"
-#include "chrome/browser/profile.h"
 #include "chrome/common/notification_registrar.h"
+#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 
+using importer::ImportItem;
+using importer::ProfileInfo;
+
 class ImporterBridge;
-class MessageLoop;
+class Profile;
+class Task;
 class TemplateURL;
 
 struct IE7PasswordInfo;
 
+namespace history {
+struct ImportedFavIconUsage;
+class URLRow;
+}
+
 namespace webkit_glue {
 struct PasswordForm;
 }
-
-// An enumeration of the type of data we want to import.
-enum ImportItem {
-  NONE           = 0x0000,
-  HISTORY        = 0x0001,
-  FAVORITES      = 0x0002,
-  COOKIES        = 0x0004,  // not supported yet.
-  PASSWORDS      = 0x0008,
-  SEARCH_ENGINES = 0x0010,
-  HOME_PAGE      = 0x0020,
-  ALL            = 0x003f
-};
-
-struct ProfileInfo {
-  std::wstring description;
-  ProfileType browser_type;
-  std::wstring source_path;
-  std::wstring app_path;
-  uint16 services_supported;  // bitmap of ImportItem
-};
 
 class FirefoxProfileLock;
 class Importer;
@@ -70,7 +60,6 @@ class ProfileWriter : public base::RefCountedThreadSafe<ProfileWriter> {
   };
 
   explicit ProfileWriter(Profile* profile) : profile_(profile) { }
-  virtual ~ProfileWriter() { }
 
   virtual bool BookmarkModelIsLoaded() const;
   virtual bool TemplateURLModelIsLoaded() const;
@@ -129,6 +118,11 @@ class ProfileWriter : public base::RefCountedThreadSafe<ProfileWriter> {
 
   Profile* GetProfile() const { return profile_; }
 
+ protected:
+  friend class base::RefCountedThreadSafe<ProfileWriter>;
+
+  virtual ~ProfileWriter() { }
+
  private:
   // Generates a unique folder name. If folder_name is not unique, then this
   // repeatedly tests for '|folder_name| + (i)' until a unique name is found.
@@ -156,11 +150,6 @@ class ImporterHost : public base::RefCountedThreadSafe<ImporterHost>,
                      public NotificationObserver {
  public:
   ImporterHost();
-  ~ImporterHost();
-
-  // This constructor only be used by unit-tests, where file thread does not
-  // exist.
-  explicit ImporterHost(MessageLoop* file_loop);
 
   // BookmarkModelObserver methods.
   virtual void Loaded(BookmarkModel* model);
@@ -251,7 +240,7 @@ class ImporterHost : public base::RefCountedThreadSafe<ImporterHost>,
   void ImportItemEnded(ImportItem item);
   void ImportEnded();
 
-  int GetAvailableProfileCount() {
+  int GetAvailableProfileCount() const {
       return importer_list_.GetAvailableProfileCount();
   }
 
@@ -268,13 +257,17 @@ class ImporterHost : public base::RefCountedThreadSafe<ImporterHost>,
   }
 
   // Returns the ProfileInfo with the given browser type.
-  const ProfileInfo& GetSourceProfileInfoForBrowserType(int browser_type)
-      const {
+  const ProfileInfo& GetSourceProfileInfoForBrowserType(
+      int browser_type) const {
     return importer_list_.GetSourceProfileInfoForBrowserType(browser_type);
   }
 
 
  private:
+  friend class base::RefCountedThreadSafe<ImporterHost>;
+
+  ~ImporterHost();
+
   // If we're not waiting on any model to finish loading, invokes the task_.
   void InvokeTaskIfDone();
 
@@ -292,9 +285,6 @@ class ImporterHost : public base::RefCountedThreadSafe<ImporterHost>,
 
   // The importer used in the task;
   Importer* importer_;
-
-  // The message loop for reading the source profiles.
-  MessageLoop* file_loop_;
 
   // True if we're waiting for the model to finish loading.
   bool waiting_for_bookmarkbar_model_;
@@ -340,7 +330,10 @@ class Importer : public base::RefCountedThreadSafe<Importer> {
   bool cancelled() const { return cancelled_; }
 
  protected:
+  friend class base::RefCountedThreadSafe<Importer>;
+
   Importer();
+  virtual ~Importer();
 
   // Given raw image data, decodes the icon, re-sampling to the correct size as
   // necessary, and re-encodes as PNG data in the given output vector. Returns

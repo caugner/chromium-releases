@@ -13,7 +13,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/logging_win.h"
 #include "base/path_service.h"
 #include "base/registry.h"
 #include "base/string_piece.h"
@@ -23,11 +25,30 @@
 #include "chrome/common/chrome_constants.h"
 #include "grit/chrome_frame_resources.h"
 #include "chrome_frame/bho.h"
+#include "chrome_frame/chrome_active_document.h"
+#include "chrome_frame/chrome_frame_activex.h"
 #include "chrome_frame/chrome_frame_automation.h"
+#include "chrome_frame/exception_barrier.h"
 #include "chrome_frame/chrome_frame_reporting.h"
 #include "chrome_frame/chrome_launcher.h"
+#include "chrome_frame/chrome_protocol.h"
+#include "chrome_frame/module_utils.h"
 #include "chrome_frame/resource.h"
 #include "chrome_frame/utils.h"
+#include "googleurl/src/url_util.h"
+
+namespace {
+// This function has the side effect of initializing an unprotected
+// vector pointer inside GoogleUrl. If this is called during DLL loading,
+// it has the effect of avoiding an initializiation race on that pointer.
+// TODO(siggi): fix GoogleUrl.
+void InitGoogleUrl() {
+  static const char kDummyUrl[] = "http://www.google.com";
+
+  url_util::IsStandard(kDummyUrl,
+                       url_parse::MakeRange(0, arraysize(kDummyUrl)));
+}
+}
 
 static const wchar_t kBhoRegistryPath[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer"
@@ -36,7 +57,26 @@ static const wchar_t kBhoRegistryPath[] =
 const wchar_t kInternetSettings[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
+const wchar_t kProtocolHandlers[] =
+    L"Software\\Classes\\Protocols\\Handler";
+
 const wchar_t kBhoNoLoadExplorerValue[] = L"NoExplorer";
+
+// {0562BFC3-2550-45b4-BD8E-A310583D3A6F}
+static const GUID kChromeFrameProvider =
+    { 0x562bfc3, 0x2550, 0x45b4,
+        { 0xbd, 0x8e, 0xa3, 0x10, 0x58, 0x3d, 0x3a, 0x6f } };
+
+// Object entries go here instead of with each object, so that we can move
+// the objects to a lib. Also reduces magic.
+OBJECT_ENTRY_AUTO(CLSID_ChromeFrameBHO, Bho)
+OBJECT_ENTRY_AUTO(__uuidof(ChromeActiveDocument), ChromeActiveDocument)
+OBJECT_ENTRY_AUTO(__uuidof(ChromeFrame), ChromeFrameActivex)
+OBJECT_ENTRY_AUTO(__uuidof(ChromeProtocol), ChromeProtocol)
+
+
+// See comments in DllGetClassObject.
+LPFNGETCLASSOBJECT g_dll_get_class_object_redir_ptr = NULL;
 
 class ChromeTabModule
     : public AtlPerUserModule<CAtlDllModuleT<ChromeTabModule> > {
@@ -126,12 +166,34 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
     ATL::CTrace::s_trace.ChangeCategory(atlTraceRegistrar, 0,
                                         ATLTRACESTATUS_DISABLED);
 #endif
-    InitializeCrashReporting();
+    InitGoogleUrl();
+
     g_exit_manager = new base::AtExitManager();
     CommandLine::Init(0, NULL);
+    InitializeCrashReporting();
     logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
                         logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE);
+
+    if (!DllRedirector::RegisterAsFirstCFModule()) {
+      // We are not the first ones in, get the module who registered first.
+      HMODULE original_module = DllRedirector::GetFirstCFModule();
+      DCHECK(original_module != NULL)
+          << "Could not get first CF module handle.";
+      HMODULE this_module = reinterpret_cast<HMODULE>(&__ImageBase);
+      if (original_module != this_module) {
+        // Someone else was here first, try and get a pointer to their
+        // DllGetClassObject export:
+        g_dll_get_class_object_redir_ptr =
+            DllRedirector::GetDllGetClassObjectPtr(original_module);
+        DCHECK(g_dll_get_class_object_redir_ptr != NULL)
+            << "Found CF module with no DllGetClassObject export.";
+      }
+    }
+
+    // Enable ETW logging.
+    logging::LogEventProvider::Initialize(kChromeFrameProvider);
   } else if (reason == DLL_PROCESS_DETACH) {
+    DllRedirector::UnregisterAsFirstCFModule();
     g_patch_helper.UnpatchIfNeeded();
     delete g_exit_manager;
     g_exit_manager = NULL;
@@ -173,6 +235,13 @@ HRESULT RefreshElevationPolicy() {
   const wchar_t kIEFrameDll[] = L"ieframe.dll";
   const char kIERefreshPolicy[] = "IERefreshElevationPolicy";
   HRESULT hr = E_NOTIMPL;
+
+  // Stick an SEH in the chain to prevent the VEH from picking up on first
+  // chance exceptions caused by loading ieframe.dll. Use the vanilla
+  // ExceptionBarrier to report any exceptions that do make their way to us
+  // though.
+  ExceptionBarrier barrier;
+
   HMODULE ieframe_module = LoadLibrary(kIEFrameDll);
   if (ieframe_module) {
     typedef HRESULT (__stdcall *IERefreshPolicy)();
@@ -218,7 +287,6 @@ HRESULT RegisterChromeTabBHO() {
   DLOG(INFO) << "Registered ChromeTab BHO";
 
   // We now add the chromeframe user agent at runtime.
-  // SetClockUserAgent(L"1");
   RefreshElevationPolicy();
   return S_OK;
 }
@@ -252,6 +320,26 @@ HRESULT UnregisterChromeTabBHO() {
   return S_OK;
 }
 
+HRESULT CleanupCFProtocol() {
+  RegKey protocol_handlers_key;
+  if (protocol_handlers_key.Open(HKEY_LOCAL_MACHINE, kProtocolHandlers,
+                                 KEY_READ | KEY_WRITE)) {
+    RegKey cf_protocol_key;
+    if (cf_protocol_key.Open(protocol_handlers_key.Handle(), L"cf",
+                             KEY_QUERY_VALUE)) {
+      std::wstring protocol_clsid_string;
+      if (cf_protocol_key.ReadValue(L"CLSID", &protocol_clsid_string)) {
+        CLSID protocol_clsid = {0};
+        IIDFromString(protocol_clsid_string.c_str(), &protocol_clsid);
+        if (IsEqualGUID(protocol_clsid, CLSID_ChromeProtocol))
+          protocol_handlers_key.DeleteKey(L"cf");
+      }
+    }
+  }
+
+  return S_OK;
+}
+
 // Used to determine whether the DLL can be unloaded by OLE
 STDAPI DllCanUnloadNow() {
   return _AtlModule.DllCanUnloadNow();
@@ -259,24 +347,20 @@ STDAPI DllCanUnloadNow() {
 
 // Returns a class factory to create an object of the requested type
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
-  if (g_patch_helper.state() == PatchHelper::UNKNOWN) {
+  // If we found another module present when we were loaded, then delegate to
+  // that:
+  if (g_dll_get_class_object_redir_ptr) {
+    return g_dll_get_class_object_redir_ptr(rclsid, riid, ppv);
+  } else {
     g_patch_helper.InitializeAndPatchProtocolsIfNeeded();
-    UrlMkSetSessionOption(URLMON_OPTION_USERAGENT_REFRESH, NULL, 0, 0);
+    return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
   }
-
-  return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
 }
 
 // DllRegisterServer - Adds entries to the system registry
 STDAPI DllRegisterServer() {
   // registers object, typelib and all interfaces in typelib
   HRESULT hr = _AtlModule.DllRegisterServer(TRUE);
-
-#ifdef GOOGLE_CHROME_BUILD
-  // Muck with the Omaha configuration so that we don't get updated by non-CF
-  // Google Chrome builds.
-  UtilUpdateOmahaConfig(true);
-#endif
 
   if (SUCCEEDED(hr)) {
     // Best effort attempt to register the BHO. At this point we silently
@@ -287,17 +371,16 @@ STDAPI DllRegisterServer() {
       hr = E_FAIL;
   }
 
+  if (UtilIsPersistentNPAPIMarkerSet()) {
+    hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI, TRUE);
+  }
+
   return hr;
 }
 
 // DllUnregisterServer - Removes entries from the system registry
 STDAPI DllUnregisterServer() {
   HRESULT hr = _AtlModule.DllUnregisterServer(TRUE);
-
-#ifdef GOOGLE_CHROME_BUILD
-  // Undo any prior mucking with the Omaha config.
-  UtilUpdateOmahaConfig(false);
-#endif
 
   if (SUCCEEDED(hr)) {
     // Best effort attempt to unregister the BHO. At this point we silently
@@ -307,18 +390,39 @@ STDAPI DllUnregisterServer() {
     if (!RegisterSecuredMimeHandler(false))
       hr = E_FAIL;
   }
+
+  if (UtilIsNPAPIPluginRegistered()) {
+    hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI, FALSE);
+  }
+
+  // TODO(joshia): Remove after 2 refresh releases
+  CleanupCFProtocol();
   return hr;
 }
 
+// Registers the NPAPI plugin and sets the persistent marker that tells us
+// to re-register it through updates.
 STDAPI RegisterNPAPIPlugin() {
   HRESULT hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI,
                                                       TRUE);
+  if (SUCCEEDED(hr)) {
+    if (!UtilChangePersistentNPAPIMarker(true)) {
+      hr = E_FAIL;
+    }
+  }
   return hr;
 }
 
+// Unregisters the NPAPI plugin and clears the persistent marker that tells us
+// to re-register it through updates.
 STDAPI UnregisterNPAPIPlugin() {
   HRESULT hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_NPAPI,
                                                       FALSE);
+  if (SUCCEEDED(hr)) {
+    if (!UtilChangePersistentNPAPIMarker(false)) {
+      hr = E_FAIL;
+    }
+  }
   return hr;
 }
 

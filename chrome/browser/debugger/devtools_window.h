@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_DEBUGGER_DEV_TOOLS_WINDOW_H_
-#define CHROME_BROWSER_DEBUGGER_DEV_TOOLS_WINDOW_H_
+#ifndef CHROME_BROWSER_DEBUGGER_DEVTOOLS_WINDOW_H_
+#define CHROME_BROWSER_DEBUGGER_DEVTOOLS_WINDOW_H_
 
 #include <string>
 
@@ -24,11 +24,12 @@ class Profile;
 class RenderViewHost;
 class TabContents;
 
-class DevToolsWindow :
-    public DevToolsClientHost,
-    public NotificationObserver,
-    TabContentsDelegate {
+class DevToolsWindow
+    : public DevToolsClientHost,
+      public NotificationObserver,
+      public TabContentsDelegate {
  public:
+  static const std::wstring kDevToolsApp;
   static TabContents* GetDevToolsContents(TabContents* inspected_tab);
 
   DevToolsWindow(Profile* profile, RenderViewHost* inspected_rvh, bool docked);
@@ -39,23 +40,27 @@ class DevToolsWindow :
   virtual void SendMessageToClient(const IPC::Message& message);
   virtual void InspectedTabClosing();
 
-  void Show();
+  void Show(bool open_console);
   void Activate();
   void SetDocked(bool docked);
   RenderViewHost* GetRenderViewHost();
 
   TabContents* tab_contents() { return tab_contents_; }
   Browser* browser() { return browser_; } //  For tests.
-  bool is_docked() { return docked_; };
+  bool is_docked() { return docked_; }
 
  private:
   void CreateDevToolsBrowser();
   BrowserWindow* GetInspectedBrowserWindow();
+  void SetAttachedWindow();
 
   // Overridden from NotificationObserver.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  void ScheduleOpenConsole();
+  void DoOpenConsole();
 
   // Overridden from TabContentsDelegate.
   virtual void OpenURLFromTab(TabContents* source,
@@ -75,18 +80,23 @@ class DevToolsWindow :
   virtual void CloseContents(TabContents* source) {}
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
   virtual bool IsPopup(TabContents* source) { return false; }
+  virtual bool CanReloadContents(TabContents* source) const { return false; }
   virtual void URLStarredChanged(TabContents* source, bool starred) {}
   virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
   virtual void ToolbarSizeChanged(TabContents* source, bool is_animating) {}
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   Profile* profile_;
   TabContents* inspected_tab_;
   TabContents* tab_contents_;
   Browser* browser_;
-  BrowserWindow* inspected_window_;
   bool docked_;
+  bool is_loaded_;
+  bool open_console_on_load_;
   NotificationRegistrar registrar_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 
-#endif  // CHROME_BROWSER_DEBUGGER_DEV_TOOLS_WINDOW_H_
+#endif  // CHROME_BROWSER_DEBUGGER_DEVTOOLS_WINDOW_H_

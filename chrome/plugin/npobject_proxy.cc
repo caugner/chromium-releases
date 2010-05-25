@@ -7,7 +7,7 @@
 #include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel.h"
-#include "webkit/api/public/WebBindings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 
@@ -49,15 +49,13 @@ NPObjectProxy* NPObjectProxy::GetProxy(NPObject* object) {
 NPObjectProxy::NPObjectProxy(
     PluginChannelBase* channel,
     int route_id,
-    intptr_t npobject_ptr,
     gfx::NativeViewId containing_window,
     const GURL& page_url)
     : channel_(channel),
       route_id_(route_id),
-      npobject_ptr_(npobject_ptr),
       containing_window_(containing_window),
       page_url_(page_url) {
-  channel_->AddRoute(route_id, this, true);
+  channel_->AddRoute(route_id, this, this);
 }
 
 NPObjectProxy::~NPObjectProxy() {
@@ -70,13 +68,12 @@ NPObjectProxy::~NPObjectProxy() {
 
 NPObject* NPObjectProxy::Create(PluginChannelBase* channel,
                                 int route_id,
-                                intptr_t npobject_ptr,
                                 gfx::NativeViewId containing_window,
                                 const GURL& page_url) {
   NPObjectWrapper* obj = reinterpret_cast<NPObjectWrapper*>(
       WebBindings::createObject(0, &npclass_proxy_));
   obj->proxy = new NPObjectProxy(
-      channel, route_id, npobject_ptr, containing_window, page_url);
+      channel, route_id, containing_window, page_url);
 
   return reinterpret_cast<NPObject*>(obj);
 }
@@ -358,7 +355,11 @@ bool NPObjectProxy::NPNEnumerate(NPObject *obj,
   bool result = false;
   NPObjectProxy* proxy = GetProxy(obj);
   if (!proxy) {
-    return obj->_class->enumerate(obj, value, count);
+    if (obj->_class->structVersion >= NP_CLASS_STRUCT_VERSION_ENUM) {
+      return obj->_class->enumerate(obj, value, count);
+    } else {
+      return false;
+    }
   }
 
   std::vector<NPIdentifier_Param> value_param;
@@ -388,7 +389,11 @@ bool NPObjectProxy::NPNConstruct(NPObject *obj,
 
   NPObjectProxy* proxy = GetProxy(obj);
   if (!proxy) {
-    return obj->_class->construct(obj, args, arg_count, np_result);
+    if (obj->_class->structVersion >= NP_CLASS_STRUCT_VERSION_CTOR) {
+      return obj->_class->construct(obj, args, arg_count, np_result);
+    } else {
+      return false;
+    }
   }
 
   bool result = false;
@@ -483,19 +488,4 @@ bool NPObjectProxy::NPNEvaluate(NPP npp,
   CreateNPVariant(
       result_param, channel.get(), result_var, containing_window, page_url);
   return true;
-}
-
-void NPObjectProxy::NPNSetException(NPObject *obj,
-                                    const NPUTF8 *message) {
-  NPObjectProxy* proxy = GetProxy(obj);
-  if (!proxy) {
-    return;
-  }
-
-  NPVariant_Param result_param;
-  std::string message_str(message);
-
-  proxy->Send(new NPObjectMsg_SetException(proxy->route_id(), message_str));
-  // Send may delete proxy.
-  proxy = NULL;
 }

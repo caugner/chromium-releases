@@ -9,20 +9,24 @@
 
 #include <string>
 
-#include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_nsobject.h"
 #include "chrome/browser/cocoa/base_view.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/notification_registrar.h"
+#include "gfx/size.h"
 
 class FilePath;
 class FindBarMac;
 @class FocusTracker;
-@class SadTabView;
+@class SadTabController;
+class SkBitmap;
 class TabContentsViewMac;
 @class WebDragSource;
 @class WebDropTarget;
+namespace gfx {
+class Point;
+}
 
 @interface TabContentsViewCocoa : BaseView {
  @private
@@ -44,6 +48,7 @@ class TabContentsViewMac : public TabContentsView,
   // lifetime. This doesn't need to be the case, but is this way currently
   // because that's what was easiest when they were split.
   explicit TabContentsViewMac(TabContents* web_contents);
+  virtual ~TabContentsViewMac();
 
   // TabContentsView implementation --------------------------------------------
 
@@ -62,25 +67,33 @@ class TabContentsViewMac : public TabContentsView,
   virtual void SetInitialFocus();
   virtual void StoreFocus();
   virtual void RestoreFocus();
-  virtual RenderWidgetHostView* CreateNewWidgetInternal(int route_id,
-                                                        bool activatable);
+  virtual RenderWidgetHostView* CreateNewWidgetInternal(
+      int route_id,
+      WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWidgetInternal(RenderWidgetHostView* widget_host_view,
                                          const gfx::Rect& initial_pos);
+  virtual bool IsEventTracking() const;
+  virtual void CloseTabAfterEventTracking();
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
-                             WebKit::WebDragOperationsMask allowed_operations);
+                             WebKit::WebDragOperationsMask allowed_operations,
+                             const SkBitmap& image,
+                             const gfx::Point& image_offset);
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   // NotificationObserver implementation ---------------------------------------
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  // A helper method for closing the tab in the
+  // CloseTabAfterEventTracking() implementation.
+  void CloseTab();
 
  private:
   // The Cocoa NSView that lives in the view hierarchy.
@@ -95,7 +108,7 @@ class TabContentsViewMac : public TabContentsView,
 
   // Used to render the sad tab. This will be non-NULL only when the sad tab is
   // visible.
-  scoped_nsobject<SadTabView> sad_tab_;
+  scoped_nsobject<SadTabController> sad_tab_;
 
   // The page content's intrinsic width.
   int preferred_width_;

@@ -7,14 +7,24 @@
 #include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+// See http://crbug.com/40764 for details.
+#define MAYBE_TestResourceContentLength FLAKY_TestResourceContentLength
+#else
+#define MAYBE_TestResourceContentLength TestResourceContentLength
+#endif
 
 namespace {
 
@@ -46,6 +56,13 @@ const wchar_t kConsoleTestPage[] = L"files/devtools/console_test_page.html";
 const wchar_t kDebuggerTestPage[] = L"files/devtools/debugger_test_page.html";
 const wchar_t kEvalTestPage[] = L"files/devtools/eval_test_page.html";
 const wchar_t kJsPage[] = L"files/devtools/js_page.html";
+const wchar_t kPauseOnExceptionTestPage[] =
+    L"files/devtools/pause_on_exception.html";
+const wchar_t kPauseWhenLoadingDevTools[] =
+    L"files/devtools/pause_when_loading_devtools.html";
+const wchar_t kPauseWhenScriptIsRunning[] =
+    L"files/devtools/pause_when_script_is_running.html";
+const wchar_t kResourceContentLengthTestPage[] = L"files/devtools/image.html";
 const wchar_t kResourceTestPage[] = L"files/devtools/resource_test_page.html";
 const wchar_t kSimplePage[] = L"files/devtools/simple_page.html";
 const wchar_t kSyntaxErrorTestPage[] =
@@ -58,6 +75,8 @@ const wchar_t kDebuggerIntrinsicPropertiesPage[] =
     L"files/devtools/debugger_intrinsic_properties.html";
 const wchar_t kCompletionOnPause[] =
     L"files/devtools/completion_on_pause.html";
+const wchar_t kPageWithContentScript[] =
+    L"files/devtools/page_with_content_script.html";
 
 
 class DevToolsSanityTest : public InProcessBrowserTest {
@@ -103,8 +122,7 @@ class DevToolsSanityTest : public InProcessBrowserTest {
     GURL url = server->TestServerPageW(test_page);
     ui_test_utils::NavigateToURL(browser(), url);
 
-    TabContents* tab = browser()->GetTabContentsAt(0);
-    inspected_rvh_ = tab->render_view_host();
+    inspected_rvh_ = GetInspectedTab()->render_view_host();
     DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
     devtools_manager->OpenDevToolsWindow(inspected_rvh_);
 
@@ -116,18 +134,137 @@ class DevToolsSanityTest : public InProcessBrowserTest {
     ui_test_utils::WaitForNavigation(&client_contents_->controller());
   }
 
+  TabContents* GetInspectedTab() {
+    return browser()->GetTabContentsAt(0);
+  }
+
   void CloseDevToolsWindow() {
     DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
     // UnregisterDevToolsClientHostFor may destroy window_ so store the browser
     // first.
     Browser* browser = window_->browser();
     devtools_manager->UnregisterDevToolsClientHostFor(inspected_rvh_);
-    BrowserClosedObserver close_observer(browser);
+
+    // Wait only when DevToolsWindow has a browser. For docked DevTools, this
+    // is NULL and we skip the wait.
+    if (browser)
+      BrowserClosedObserver close_observer(browser);
   }
 
   TabContents* client_contents_;
   DevToolsWindow* window_;
   RenderViewHost* inspected_rvh_;
+};
+
+
+class CancelableQuitTask : public Task {
+ public:
+  explicit CancelableQuitTask(const std::string& timeout_message)
+      : timeout_message_(timeout_message),
+        cancelled_(false) {
+  }
+
+  void cancel() {
+    cancelled_ = true;
+  }
+
+  virtual void Run() {
+    if (cancelled_) {
+      return;
+    }
+    FAIL() << timeout_message_;
+    MessageLoop::current()->Quit();
+  }
+
+ private:
+  std::string timeout_message_;
+  bool cancelled_;
+};
+
+
+// Base class for DevTools tests that test devtools functionality for
+// extensions and content scripts.
+class DevToolsExtensionDebugTest : public DevToolsSanityTest,
+                                   public NotificationObserver {
+ public:
+  DevToolsExtensionDebugTest() : DevToolsSanityTest() {
+    PathService::Get(chrome::DIR_TEST_DATA, &test_extensions_dir_);
+    test_extensions_dir_ = test_extensions_dir_.AppendASCII("devtools");
+    test_extensions_dir_ = test_extensions_dir_.AppendASCII("extensions");
+  }
+
+ protected:
+  // Load an extention from test\data\devtools\extensions\<extension_name>
+  void LoadExtension(const char* extension_name) {
+    FilePath path = test_extensions_dir_.AppendASCII(extension_name);
+    ASSERT_TRUE(LoadExtensionFromPath(path)) << "Failed to load extension.";
+  }
+
+ private:
+  bool LoadExtensionFromPath(const FilePath& path) {
+    ExtensionsService* service = browser()->profile()->GetExtensionsService();
+    size_t num_before = service->extensions()->size();
+    {
+      NotificationRegistrar registrar;
+      registrar.Add(this, NotificationType::EXTENSION_LOADED,
+                    NotificationService::AllSources());
+      CancelableQuitTask* delayed_quit =
+          new CancelableQuitTask("Extension load timed out.");
+      MessageLoop::current()->PostDelayedTask(FROM_HERE, delayed_quit,
+          4*1000);
+      service->LoadExtension(path);
+      ui_test_utils::RunMessageLoop();
+      delayed_quit->cancel();
+    }
+    size_t num_after = service->extensions()->size();
+    if (num_after != (num_before + 1))
+      return false;
+
+    return WaitForExtensionHostsToLoad();
+  }
+
+  bool WaitForExtensionHostsToLoad() {
+    // Wait for all the extension hosts that exist to finish loading.
+    // NOTE: This assumes that the extension host list is not changing while
+    // this method is running.
+
+    NotificationRegistrar registrar;
+    registrar.Add(this, NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
+                  NotificationService::AllSources());
+    CancelableQuitTask* delayed_quit =
+        new CancelableQuitTask("Extension host load timed out.");
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, delayed_quit,
+        4*1000);
+
+    ExtensionProcessManager* manager =
+          browser()->profile()->GetExtensionProcessManager();
+    for (ExtensionProcessManager::const_iterator iter = manager->begin();
+         iter != manager->end();) {
+      if ((*iter)->did_stop_loading())
+        ++iter;
+      else
+        ui_test_utils::RunMessageLoop();
+    }
+
+    delayed_quit->cancel();
+    return true;
+  }
+
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details) {
+    switch (type.value) {
+      case NotificationType::EXTENSION_LOADED:
+      case NotificationType::EXTENSION_HOST_DID_STOP_LOADING:
+        MessageLoopForUI::current()->Quit();
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+  }
+
+  FilePath test_extensions_dir_;
 };
 
 // WebInspector opens.
@@ -150,9 +287,20 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEnableResourcesTab) {
   RunTest("testEnableResourcesTab", kSimplePage);
 }
 
+// Tests resources have correct sizes.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestResourceContentLength) {
+  RunTest("testResourceContentLength", kResourceContentLengthTestPage);
+}
+
 // Tests resource headers.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestResourceHeaders) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestResourceHeaders) {
   RunTest("testResourceHeaders", kResourceTestPage);
+}
+
+// Tests cached resource mime type.
+// @see http://crbug.com/27364
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestCachedResourceMimeType) {
+  RunTest("testCachedResourceMimeType", kResourceTestPage);
 }
 
 // Tests profiler panel.
@@ -165,6 +313,28 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
   RunTest("testShowScriptsTab", kDebuggerTestPage);
 }
 
+// Tests that scripts tab is populated with inspected scripts even if it
+// hadn't been shown by the moment inspected paged refreshed.
+// @see http://crbug.com/26312
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
+                       TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
+  // Reset inspector settings to defaults to ensure that Elements will be
+  // current panel when DevTools window is open.
+  GetInspectedTab()->render_view_host()->delegate()->UpdateInspectorSettings(
+      WebPreferences().inspector_settings);
+  RunTest("testScriptsTabIsPopulatedOnInspectedPageRefresh",
+          kDebuggerTestPage);
+}
+
+
+// Tests that a content script is in the scripts list.
+// This test is disabled, see bug 28961.
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionDebugTest,
+                       TestContentScriptIsPresent) {
+  LoadExtension("simple_content_script");
+  RunTest("testContentScriptIsPresent", kPageWithContentScript);
+}
+
 // Tests that scripts are not duplicated after Scripts Panel switch.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
                        TestNoScriptDuplicatesOnPanelSwitch) {
@@ -174,6 +344,23 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
 // Tests set breakpoint.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestSetBreakpoint) {
   RunTest("testSetBreakpoint", kDebuggerTestPage);
+}
+
+// Tests pause on exception.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseOnException) {
+  RunTest("testPauseOnException", kPauseOnExceptionTestPage);
+}
+
+// Tests that debugger works correctly if pause event occurs when DevTools
+// frontend is being loaded.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseWhenLoadingDevTools) {
+  RunTest("testPauseWhenLoadingDevTools", kPauseWhenLoadingDevTools);
+}
+
+// Tests that pressing 'Pause' will pause script execution if the script
+// is already running.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPauseWhenScriptIsRunning) {
+  RunTest("testPauseWhenScriptIsRunning", kPauseWhenScriptIsRunning);
 }
 
 // Tests eval on call frame.
@@ -224,11 +411,11 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestPauseInEval) {
 
 // Tests console eval.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleEval) {
-  RunTest("testConsoleEval", kConsoleTestPage);
+  RunTest("testConsoleEval", kEvalTestPage);
 }
 
 // Tests console log.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleLog) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestConsoleLog) {
   RunTest("testConsoleLog", kConsoleTestPage);
 }
 
@@ -236,5 +423,11 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleLog) {
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEvalGlobal) {
   RunTest("testEvalGlobal", kEvalTestPage);
 }
+
+// Test that Storage panel can be shown.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowStoragePanel) {
+  RunTest("testShowStoragePanel", kDebuggerTestPage);
+}
+
 
 }  // namespace

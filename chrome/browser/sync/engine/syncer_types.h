@@ -19,27 +19,18 @@ class Id;
 // in a single place without having dependencies between other files.
 namespace browser_sync {
 
-class SyncProcessState;
-class SyncCycleState;
-class SyncerSession;
+namespace sessions {
+struct SyncSessionSnapshot;
+}
 class Syncer;
 
 enum UpdateAttemptResponse {
   // Update was applied or safely ignored.
   SUCCESS,
 
-  // This state is deprecated.
-  // TODO(sync): Remove this state.
-  BLOCKED,
-
   // Conflicts with the local data representation. This can also mean that the
   // entry doesn't currently make sense if we applied it.
   CONFLICT,
-
-  // This return value is only returned by AttemptToUpdateEntryWithoutMerge
-  // if we have a name conflict. Users of AttemptToUpdateEntry should never
-  // see this return value, we'll return CONFLICT.
-  NAME_CONFLICT,
 };
 
 enum ServerUpdateProcessingResult {
@@ -74,7 +65,6 @@ enum VerifyResult {
 };
 
 enum VerifyCommitResult {
-  VERIFY_BLOCKED,
   VERIFY_UNSYNCABLE,
   VERIFY_OK,
 };
@@ -101,7 +91,20 @@ struct SyncerEvent {
     // Check the SyncerSession for information like whether we need to continue
     // syncing (SyncerSession::HasMoreToSync).
     SYNC_CYCLE_ENDED,
+
+    // This event is sent when the thread is paused in response to a
+    // pause request.
+    PAUSED,
+
+    // This event is sent when the thread is resumed in response to a
+    // resume request.
+    RESUMED,
   };
+
+  explicit SyncerEvent(EventCause cause) : what_happened(cause),
+                                           snapshot(NULL),
+                                           successful_commit_count(0),
+                                           nudge_delay_milliseconds(0) {}
 
   static bool IsChannelShutdownEvent(const SyncerEvent& e) {
     return SHUTDOWN_USE_WITH_CARE == e.what_happened;
@@ -115,7 +118,7 @@ struct SyncerEvent {
   EventCause what_happened;
 
   // The last session used for syncing.
-  SyncerSession* last_session;
+  const sessions::SyncSessionSnapshot* snapshot;
 
   int successful_commit_count;
 

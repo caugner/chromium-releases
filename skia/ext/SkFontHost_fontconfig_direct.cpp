@@ -22,6 +22,55 @@
 
 #include <fontconfig/fontconfig.h>
 
+namespace {
+
+// Equivalence classes, used to match the Liberation fonts with their
+// metric-compatible replacements.  See the discussion in
+// GetFontEquivClass().
+enum FontEquivClass
+{
+    OTHER,
+    SANS,
+    SERIF
+};
+
+// Match the font name against a whilelist of fonts, returning the equivalence
+// class.
+FontEquivClass GetFontEquivClass(const char* fontname)
+{
+    // It would be nice for fontconfig to tell us whether a given suggested
+    // replacement is a "strong" match (that is, an equivalent font) or
+    // a "weak" match (that is, fontconfig's next-best attempt at finding a
+    // substitute).  However, I played around with the fontconfig API for
+    // a good few hours and could not make it reveal this information.
+    //
+    // So instead, we hardcode.  Initially this function emulated
+    //   /etc/fonts/conf.d/30-metric-aliases.conf
+    // from my Ubuntu system, but we're better off being very conservative.
+
+    if (strcasecmp(fontname, "Arial") == 0 ||
+        strcasecmp(fontname, "Liberation Sans") == 0) {
+        return SANS;
+    } else if (strcasecmp(fontname, "Times New Roman") == 0 ||
+               strcasecmp(fontname, "Liberation Serif") == 0) {
+        return SERIF;
+    }
+    return OTHER;
+}
+
+
+// Return true if |font_a| and |font_b| are visually and at the metrics
+// level interchangeable.
+bool IsMetricCompatibleReplacement(const char* font_a, const char* font_b)
+{
+    FontEquivClass class_a = GetFontEquivClass(font_a);
+    FontEquivClass class_b = GetFontEquivClass(font_b);
+
+    return class_a != OTHER && class_a == class_b;
+}
+
+}  // anonymous namespace
+
 FontConfigDirect::FontConfigDirect()
     : next_file_id_(0) {
   FcInit();
@@ -46,10 +95,12 @@ bool FontConfigDirect::Match(std::string* result_family,
                              bool fileid_valid, unsigned fileid,
                              const std::string& family, bool* is_bold,
                              bool* is_italic) {
+    if (family.length() > kMaxFontFamilyLength)
+        return false;
+
     SkAutoMutexAcquire ac(mutex_);
     FcPattern* pattern = FcPatternCreate();
 
-    FcValue fcvalue;
     if (fileid_valid) {
         const std::map<unsigned, std::string>::const_iterator
             i = fileid_to_filename_.find(fileid);
@@ -58,29 +109,21 @@ bool FontConfigDirect::Match(std::string* result_family,
             return false;
         }
 
-        fcvalue.type = FcTypeString;
-        fcvalue.u.s = (FcChar8*) i->second.c_str();
-        FcPatternAdd(pattern, FC_FILE, fcvalue, 0);
+        FcPatternAddString(pattern, FC_FILE, (FcChar8*) i->second.c_str());
     }
     if (!family.empty()) {
-        fcvalue.type = FcTypeString;
-        fcvalue.u.s = (FcChar8*) family.c_str();
-        FcPatternAdd(pattern, FC_FAMILY, fcvalue, 0);
+        FcPatternAddString(pattern, FC_FAMILY, (FcChar8*) family.c_str());
     }
 
-    fcvalue.type = FcTypeInteger;
-    fcvalue.u.i = is_bold && *is_bold ? FC_WEIGHT_BOLD : FC_WEIGHT_NORMAL;
-    FcPatternAdd(pattern, FC_WEIGHT, fcvalue, 0);
+    FcPatternAddInteger(pattern, FC_WEIGHT,
+                        is_bold && *is_bold ? FC_WEIGHT_BOLD
+                                            : FC_WEIGHT_NORMAL);
+    FcPatternAddInteger(pattern, FC_SLANT,
+                        is_italic && *is_italic ? FC_SLANT_ITALIC
+                                                : FC_SLANT_ROMAN);
+    FcPatternAddBool(pattern, FC_SCALABLE, FcTrue);
 
-    fcvalue.type = FcTypeInteger;
-    fcvalue.u.i = is_italic && *is_italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
-    FcPatternAdd(pattern, FC_SLANT, fcvalue, 0);
-
-    fcvalue.type = FcTypeBool;
-    fcvalue.u.b = FcTrue;
-    FcPatternAdd(pattern, FC_SCALABLE, fcvalue, 0);
-
-    FcConfigSubstitute(0, pattern, FcMatchPattern);
+    FcConfigSubstitute(NULL, pattern, FcMatchPattern);
     FcDefaultSubstitute(pattern);
 
     // Font matching:
@@ -153,13 +196,13 @@ bool FontConfigDirect::Match(std::string* result_family,
     }
 
     if (!IsFallbackFontAllowed(family)) {
-      bool family_names_match = false;
+      bool acceptable_substitute = false;
       for (int id = 0; id < 255; ++id) {
         FcChar8* post_match_family;
         if (FcPatternGetString(match, FC_FAMILY, id, &post_match_family) !=
             FcResultMatch)
           break;
-        family_names_match =
+        acceptable_substitute =
           family.empty() ?
           true :
           (strcasecmp((char *)post_config_family,
@@ -170,11 +213,13 @@ bool FontConfigDirect::Match(std::string* result_family,
            //   post_match_family: "Bitstream Vera Sans"
            // -> We should treat this case as a good match.
            strcasecmp(family.c_str(),
-                      (char *)post_match_family) == 0);
-        if (family_names_match)
+                      (char *)post_match_family) == 0) ||
+           IsMetricCompatibleReplacement(family.c_str(),
+                                         (char*)post_match_family);
+        if (acceptable_substitute)
           break;
       }
-      if (!family.empty() && !family_names_match) {
+      if (!acceptable_substitute) {
         FcPatternDestroy(pattern);
         FcFontSetDestroy(font_set);
         return false;
@@ -236,7 +281,7 @@ bool FontConfigDirect::Match(std::string* result_family,
         FcPatternGet(match, FC_EMBOLDEN, 0, &embolden) == 0;
 
     if (is_bold)
-      *is_bold = resulting_bold >= FC_WEIGHT_BOLD && !have_embolden;
+      *is_bold = resulting_bold > FC_WEIGHT_MEDIUM && !have_embolden;
     if (is_italic)
       *is_italic = resulting_italic > FC_SLANT_ROMAN && !have_matrix;
 

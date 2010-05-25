@@ -2,11 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_APP_BREAKPAD_H_
-#define CHROME_APP_BREAKPAD_H_
+#ifndef CHROME_APP_BREAKPAD_WIN_H_
+#define CHROME_APP_BREAKPAD_WIN_H_
 
 #include <windows.h>
 #include <string>
+
+// The maximum number of 64-char URL chunks we will report.
+static const int kMaxUrlChunks = 8;
+
+// The maximum number of active extensions we will report.
+static const int kMaxReportedActiveExtensions = 10;
 
 // Calls InitCrashReporterThread in it's own thread for the browser process
 // or directly for the plugin and renderer process.
@@ -20,4 +26,4 @@ void InitDefaultCrashCallback();
 // a dialog asking for permission to continue execution or to exit now.
 bool ShowRestartDialogIfCrashed(bool* exit_now);
 
-#endif  // CHROME_APP_BREAKPAD_H_
+#endif  // CHROME_APP_BREAKPAD_WIN_H_

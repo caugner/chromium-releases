@@ -5,20 +5,28 @@
 #include "chrome/browser/views/clear_browsing_data.h"
 
 #include "app/l10n_util.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/insets.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/url_request/url_request_context.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
+#include "views/controls/separator.h"
 #include "views/controls/throbber.h"
+#include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
+#include "views/window/dialog_client_view.h"
 #include "views/window/window.h"
+
+using views::GridLayout;
 
 // The combo box is vertically aligned to the 'time-period' label, which makes
 // the combo box look a little too close to the check box above it when we use
@@ -68,13 +76,12 @@ ClearBrowsingDataView::~ClearBrowsingDataView(void) {
 void ClearBrowsingDataView::Init() {
   // Views we will add to the *parent* of this dialog, since it will display
   // next to the buttons which we don't draw ourselves.
-  throbber_.reset(new views::Throbber(50, true));
-  throbber_->SetParentOwned(false);
+  throbber_ = new views::Throbber(50, true);
   throbber_->SetVisible(false);
 
-  status_label_.SetText(l10n_util::GetString(IDS_CLEAR_DATA_DELETING));
-  status_label_.SetVisible(false);
-  status_label_.SetParentOwned(false);
+  status_label_ = new views::Label(
+      l10n_util::GetString(IDS_CLEAR_DATA_DELETING));
+  status_label_->SetVisible(false);
 
   // Regular view controls we draw by ourself. First, we add the dialog label.
   delete_all_label_ = new views::Label(
@@ -116,7 +123,30 @@ void ClearBrowsingDataView::Init() {
   time_period_combobox_->SetSelectedItem(profile_->GetPrefs()->GetInteger(
                                          prefs::kDeleteTimePeriod));
   time_period_combobox_->set_listener(this);
+  time_period_combobox_->SetAccessibleName(time_period_label_->GetText());
   AddChildView(time_period_combobox_);
+
+  // Create the throbber and related views. The throbber and status link are
+  // contained in throbber_view_, which is positioned by DialogClientView right
+  // next to the buttons.
+  throbber_view_ = new views::View();
+
+  GridLayout* layout = new GridLayout(throbber_view_);
+  throbber_view_->SetLayoutManager(layout);
+  views::ColumnSet* column_set = layout->AddColumnSet(0);
+  // DialogClientView positions the extra view at kButtonHEdgeMargin, but we
+  // put all our controls at kPanelHorizMargin. Add a padding column so things
+  // line up nicely.
+  if (kPanelHorizMargin - kButtonHEdgeMargin > 0)
+    column_set->AddPaddingColumn(0, kPanelHorizMargin - kButtonHEdgeMargin);
+  column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+  layout->StartRow(1, 0);
+  layout->AddView(throbber_);
+  layout->AddView(status_label_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -198,47 +228,6 @@ void ClearBrowsingDataView::Layout() {
                                    time_period_label_->y() -
                                        ((sz.height() - label_y_size) / 2),
                                    sz.width(), sz.height());
-
-  // Get the y-coordinate of our parent so we can position the throbber and
-  // status message at the bottom of the panel.
-  gfx::Rect parent_bounds = GetParent()->GetLocalBounds(false);
-
-  sz = throbber_->GetPreferredSize();
-  int throbber_topleft_x = kPanelHorizMargin;
-  int throbber_topleft_y = parent_bounds.bottom() - sz.height() -
-                           kButtonVEdgeMargin - 3;
-  throbber_->SetBounds(throbber_topleft_x, throbber_topleft_y, sz.width(),
-                       sz.height());
-
-  // The status label should be at the bottom of the screen, to the right of
-  // the throbber.
-  sz = status_label_.GetPreferredSize();
-  int status_label_x = throbber_->x() + throbber_->width() +
-                       kRelatedControlHorizontalSpacing;
-  status_label_.SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  status_label_.SetBounds(status_label_x,
-                          throbber_topleft_y + 1,
-                          sz.width(),
-                          sz.height());
-}
-
-void ClearBrowsingDataView::ViewHierarchyChanged(bool is_add,
-                                                 views::View* parent,
-                                                 views::View* child) {
-  // Since we want the some of the controls to show up in the same visual row
-  // as the buttons, which are provided by the framework, we must add the
-  // buttons to the non-client view, which is the parent of this view.
-  // Similarly, when we're removed from the view hierarchy, we must take care
-  // to remove these items as well.
-  if (child == this) {
-    if (is_add) {
-      parent->AddChildView(&status_label_);
-      parent->AddChildView(throbber_.get());
-    } else {
-      parent->RemoveChildView(&status_label_);
-      parent->RemoveChildView(throbber_.get());
-    }
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -313,19 +302,48 @@ views::View* ClearBrowsingDataView::GetContentsView() {
   return this;
 }
 
+views::View* ClearBrowsingDataView::GetInitiallyFocusedView() {
+  return GetDialogClientView()->cancel_button();
+}
+
+views::ClientView* ClearBrowsingDataView::CreateClientView(
+    views::Window* window) {
+  views::Link* flash_link =
+      new views::Link(l10n_util::GetString(IDS_FLASH_STORAGE_SETTINGS));
+  flash_link->SetController(this);
+
+  views::View* settings_view = new views::View();
+  GridLayout* layout = new GridLayout(settings_view);
+  layout->SetInsets(gfx::Insets(0, kPanelHorizMargin, 0, kButtonHEdgeMargin));
+  settings_view->SetLayoutManager(layout);
+  views::ColumnSet* column_set = layout->AddColumnSet(0);
+  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
+                        GridLayout::USE_PREF, 0, 0);
+  layout->StartRow(0, 0);
+  layout->AddView(new views::Separator());
+  layout->StartRowWithPadding(0, 0, 0, kRelatedControlVerticalSpacing);
+  layout->AddView(flash_link, 1, 1, GridLayout::LEADING, GridLayout::CENTER);
+
+  views::DialogClientView* client_view =
+      new views::DialogClientView(window, GetContentsView());
+  client_view->SetBottomView(settings_view);
+  return client_view;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, ComboboxModel implementation:
 
 int ClearBrowsingDataView::GetItemCount() {
-  return 4;
+  return 5;
 }
 
 std::wstring ClearBrowsingDataView::GetItemAt(int index) {
   switch (index) {
-    case 0: return l10n_util::GetString(IDS_CLEAR_DATA_DAY);
-    case 1: return l10n_util::GetString(IDS_CLEAR_DATA_WEEK);
-    case 2: return l10n_util::GetString(IDS_CLEAR_DATA_4WEEKS);
-    case 3: return l10n_util::GetString(IDS_CLEAR_DATA_EVERYTHING);
+    case 0: return l10n_util::GetString(IDS_CLEAR_DATA_HOUR);
+    case 1: return l10n_util::GetString(IDS_CLEAR_DATA_DAY);
+    case 2: return l10n_util::GetString(IDS_CLEAR_DATA_WEEK);
+    case 3: return l10n_util::GetString(IDS_CLEAR_DATA_4WEEKS);
+    case 4: return l10n_util::GetString(IDS_CLEAR_DATA_EVERYTHING);
     default: NOTREACHED() << L"Missing item";
              return L"?";
   }
@@ -369,6 +387,14 @@ void ClearBrowsingDataView::ButtonPressed(
   GetDialogClientView()->UpdateDialogButtons();
 }
 
+void ClearBrowsingDataView::LinkActivated(views::Link* source,
+                                          int event_flags) {
+  Browser* browser = Browser::Create(profile_);
+  browser->OpenURL(GURL(l10n_util::GetStringUTF8(IDS_FLASH_STORAGE_URL)),
+                   GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  browser->window()->Show();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ClearBrowsingDataView, private:
 
@@ -392,7 +418,7 @@ void ClearBrowsingDataView::UpdateControlEnabledState() {
   del_form_data_checkbox_->SetEnabled(!delete_in_progress_);
   time_period_combobox_->SetEnabled(!delete_in_progress_);
 
-  status_label_.SetVisible(delete_in_progress_);
+  status_label_->SetVisible(delete_in_progress_);
   throbber_->SetVisible(delete_in_progress_);
   if (delete_in_progress_)
     throbber_->Start();

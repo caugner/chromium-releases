@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,18 +39,31 @@ class TestBrowserWindow : public BrowserWindow {
   virtual bool IsMaximized() const { return false; }
   virtual void SetFullscreen(bool fullscreen) {}
   virtual bool IsFullscreen() const { return false; }
+  virtual bool IsFullscreenBubbleVisible() const { return false; }
   virtual LocationBar* GetLocationBar() const {
     return const_cast<TestLocationBar*>(&location_bar_);
   }
-  virtual void SetFocusToLocationBar() {}
+  virtual void SetFocusToLocationBar(bool select_all) {}
   virtual void UpdateStopGoState(bool is_loading, bool force) {}
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state) {}
   virtual void FocusToolbar() {}
+  virtual void FocusPageAndAppMenus() {}
   virtual void ShowPageMenu() {}
   virtual void ShowAppMenu() {}
-  virtual int GetCommandId(const NativeWebKeyboardEvent& event) { return -1; }
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) {
+    return false;
+  }
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
+  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents) {}
+#if defined(TOOLKIT_VIEWS)
+  virtual void ToggleCompactNavigationBar() {}
+#endif  // defined(TOOLKIT_VIEWS)
+
   virtual bool IsBookmarkBarVisible() const { return false; }
+  virtual bool IsBookmarkBarAnimating() const { return false; }
+  virtual bool IsToolbarVisible() const { return false; }
   virtual gfx::Rect GetRootWindowResizerRect() const { return gfx::Rect(); }
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
@@ -70,7 +83,9 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowSelectProfileDialog() {}
   virtual void ShowNewProfileDialog() {}
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) {}
-  virtual void ShowHistoryTooNewDialog() {}
+  virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
+                                         Profile* profile) {}
+  virtual void ShowProfileErrorDialog(int message_id) {}
   virtual void ShowThemeInstallBubble() {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() {}
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -82,6 +97,9 @@ class TestBrowserWindow : public BrowserWindow {
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history) { }
+  virtual void Cut() { }
+  virtual void Copy() { }
+  virtual void Paste() { }
 
  protected:
   virtual void DestroyBrowser() {}

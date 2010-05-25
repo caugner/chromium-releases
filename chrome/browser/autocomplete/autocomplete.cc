@@ -18,10 +18,10 @@
 #include "chrome/browser/dom_ui/history_ui.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon_ip.h"
@@ -172,18 +172,54 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   const std::wstring host(text.substr(parts->host.begin, parts->host.len));
   const size_t registry_length =
       net::RegistryControlledDomainService::GetRegistryLength(host, false);
-  if (registry_length == std::wstring::npos)
+  if (registry_length == std::wstring::npos) {
+    // Try to append the desired_tld.
+    if (!desired_tld.empty()) {
+      std::wstring host_with_tld(host);
+      if (host[host.length() - 1] != '.')
+        host_with_tld += '.';
+      host_with_tld += desired_tld;
+      if (net::RegistryControlledDomainService::GetRegistryLength(
+          host_with_tld, false) != std::wstring::npos)
+        return REQUESTED_URL;  // Something like "99999999999" that looks like a
+                               // bad IP address, but becomes valid on attaching
+                               // a TLD.
+    }
     return QUERY;  // Could be a broken IP address, etc.
+  }
 
-  // See if the hostname is valid per RFC 1738.  While IE and GURL allow
-  // hostnames to contain many other characters (perhaps for weird intranet
-  // machines), it's extremely unlikely that a user would be trying to type
-  // those in for anything other than a search query.
+
+  // See if the hostname is valid.  While IE and GURL allow hostnames to contain
+  // many other characters (perhaps for weird intranet machines), it's extremely
+  // unlikely that a user would be trying to type those in for anything other
+  // than a search query.
   url_canon::CanonHostInfo host_info;
   const std::string canonicalized_host(net::CanonicalizeHost(host, &host_info));
   if ((host_info.family == url_canon::CanonHostInfo::NEUTRAL) &&
-      !net::IsCanonicalizedHostRFC1738Compliant(canonicalized_host))
-    return QUERY;
+      !net::IsCanonicalizedHostCompliant(canonicalized_host,
+                                         WideToUTF8(desired_tld))) {
+    // Invalid hostname.  There are several possible cases:
+    // * Our checker is too strict and the user pasted in a real-world URL
+    //   that's "invalid" but resolves.  To catch these, we return UNKNOWN when
+    //   the user explicitly typed a scheme, so we'll still search by default
+    //   but we'll show the accidental search infobar if necessary.
+    // * The user is typing a multi-word query.  If we see a space anywhere in
+    //   the hostname we assume this is a search and return QUERY.
+    // * Our checker is too strict and the user is typing a real-world hostname
+    //   that's "invalid" but resolves.  We return UNKNOWN if the TLD is known.
+    //   Note that we explicitly excluded hosts with spaces above so that
+    //   "toys at amazon.com" will be treated as a search.
+    // * The user is typing some garbage string.  Return QUERY.
+    //
+    // Thus we fall down in the following cases:
+    // * Trying to navigate to a hostname with spaces
+    // * Trying to navigate to a hostname with invalid characters and an unknown
+    //   TLD
+    // These are rare, though probably possible in intranets.
+    return (parts->scheme.is_nonempty() ||
+           ((registry_length != 0) && (host.find(' ') == std::wstring::npos))) ?
+        UNKNOWN : QUERY;
+  }
 
   // Presence of a port means this is likely a URL, if the port is really a port
   // number.  If it's just garbage after a colon, this is a query.
@@ -417,10 +453,6 @@ void AutocompleteMatch::ClassifyLocationInString(
     size_t overall_length,
     int style,
     ACMatchClassifications* classification) {
-  // Classifying an empty match makes no sense and will lead to validation
-  // errors later.
-  DCHECK(match_length > 0);
-
   classification->clear();
 
   // Don't classify anything about an empty string
@@ -438,6 +470,9 @@ void AutocompleteMatch::ClassifyLocationInString(
     // No match, above classification will suffice for whole string.
     return;
   }
+  // Classifying an empty match makes no sense and will lead to validation
+  // errors later.
+  DCHECK(match_length > 0);
   classification->push_back(ACMatchClassification(match_location,
       (style | ACMatchClassification::MATCH) & ~ACMatchClassification::DIM));
 
@@ -490,7 +525,7 @@ AutocompleteProvider::~AutocompleteProvider() {
 
 void AutocompleteProvider::SetProfile(Profile* profile) {
   DCHECK(profile);
-  Stop();  // It makes no sense to continue running a query from an old profile.
+  DCHECK(done_);  // The controller should have already stopped us.
   profile_ = profile;
 }
 
@@ -660,6 +695,15 @@ AutocompleteController::AutocompleteController(Profile* profile)
 }
 
 AutocompleteController::~AutocompleteController() {
+  // The providers may have tasks outstanding that hold refs to them.  We need
+  // to ensure they won't call us back if they outlive us.  (Practically,
+  // calling Stop() should also cancel those tasks and make it so that we hold
+  // the only refs.)  We also don't want to bother notifying anyone of our
+  // result changes here, because the notification observer is in the midst of
+  // shutdown too, so we don't ask Stop() to clear |result_| (and notify).
+  result_.Reset();  // Not really necessary.
+  Stop(false);
+
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
     (*i)->Release();
 
@@ -667,6 +711,7 @@ AutocompleteController::~AutocompleteController() {
 }
 
 void AutocompleteController::SetProfile(Profile* profile) {
+  Stop(true);
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
     (*i)->SetProfile(profile);
   input_.Clear();  // Ensure we don't try to do a "minimal_changes" query on a
@@ -735,7 +780,7 @@ void AutocompleteController::Stop(bool clear_result) {
   updated_latest_result_ = false;
   delay_interval_has_passed_ = false;
   done_ = true;
-  if (clear_result) {
+  if (clear_result && !result_.empty()) {
     result_.Reset();
     NotificationService::current()->Notify(
         NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,

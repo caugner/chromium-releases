@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_IMPORTER_IE_IMPORTER_H_
 
 #include "chrome/browser/importer/importer.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class IEImporter : public Importer {
  public:
   IEImporter() {}
-  virtual ~IEImporter() {}
 
   // Importer methods.
   virtual void StartImport(ProfileInfo browser_info,
@@ -19,6 +19,8 @@ class IEImporter : public Importer {
 
  private:
   FRIEND_TEST(ImporterTest, IEImporter);
+
+  virtual ~IEImporter() {}
 
   void ImportFavorites();
   void ImportHistory();

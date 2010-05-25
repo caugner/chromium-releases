@@ -46,17 +46,20 @@ void STDCALL InvokeLaterCallback(void* data) {
 // ResponseStream: Manages the streaming of the payload data.
 
 class ResponseStream : public base::RefCounted<ResponseStream> {
-public:
+ public:
   ResponseStream(const TestResponsePayload* payload, CPRequest* request);
-  ~ResponseStream() {
-    request_->pdata = NULL;
-  }
 
   void Init();
   int GetResponseInfo(CPResponseInfoType type, void* buf, uint32 buf_size);
   int ReadData(void* buf, uint32 buf_size);
 
-private:
+ private:
+  friend class base::RefCounted<ResponseStream>;
+
+  ~ResponseStream() {
+    request_->pdata = NULL;
+  }
+
   // Called asynchronously via InvokeLater.
   void ResponseStarted();
   int ReadCompleted(void* buf, uint32 buf_size);
@@ -224,13 +227,13 @@ int STDCALL CPR_Read(CPRequest* request, void* buf, uint32 buf_size) {
 // RequestResponse: manages the retrieval of response data from the host
 
 class RequestResponse {
-public:
-  RequestResponse(const std::string& raw_headers)
+ public:
+  explicit RequestResponse(const std::string& raw_headers)
       : raw_headers_(raw_headers), offset_(0) {}
   void StartReading(CPRequest* request);
   void ReadCompleted(CPRequest* request, int bytes_read);
 
-private:
+ private:
   std::string raw_headers_;
   std::string body_;
   int offset_;

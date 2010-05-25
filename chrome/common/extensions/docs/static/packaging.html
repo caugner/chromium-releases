@@ -1,4 +1,4 @@
-<div id="pageData-title" class="pageData">Packaging</div>
+<div id="pageData-name" class="pageData">Packaging</div>
 <div id="pageData-showTOC" class="pageData">true</div>
 
 <p>
@@ -10,6 +10,18 @@ for example, <code>myextension.crx</code>.
 </p>
 
 <p>
+<b>Note:</b>
+You might not need to package your extension.
+If you publish your extension using the
+<a href="https://chrome.google.com/extensions">gallery</a>,
+then the only reason to create your own <code>.crx</code> file
+would be to distribute a non-public version &mdash;
+for example, to alpha testers.
+</p>
+
+<!-- [PENDING: Refer to instructions on submitting an extension for inclusion in the gallery.] -->
+
+<p>
 When you package an extension,
 the extension is assigned a unique key pair.
 The public key is used as the identifier for the extension.
@@ -17,12 +29,6 @@ The private key is kept private
 and used to sign each version of the extension.
 </p>
 
-<p class="comment">
-[PENDING: Perhaps mention that once the gallery is up,
-creating and updating a package will be much easier.
-Also refer to instructions on submitting an extension
-for inclusion in the gallery.]
-</p>
 
 <h2>Creating a package</h2>
 
@@ -68,8 +74,8 @@ You'll need it later if you want to do any of the following:
 </p>
 <ul>
 <li><a href="#update">Update</a> the extension</li>
-<li>Import the extension into the extensions gallery,
-once the gallery becomes available</li>
+<li>Upload the extension to the
+<a href="https://chrome.google.com/extensions">extensions gallery</a> </li>
 </ul>
 
 <p>
@@ -144,16 +150,14 @@ To suppress the dialog,
 add <code>--no-message-box</code> to the command.
 </p>
 
-<h2 id="ruby">Packaging on the Mac</h2>
+<h2 id="ruby">Ruby script</h2>
 
 <p>
-Google Chrome for the Mac doesn't yet support creating packages.
-Until that support exists,
-you can use a Ruby script to create packages.
-See the following thread for details:
+You can also use a Ruby script to create packages.
+See the following page for details:
 </p>
 
 <blockquote>
-<a href="http://groups.google.com/group/chromium-extensions/browse_thread/thread/2e967e04d59fbacb">Chromium-extensions: extension packaging script</a>
+<a href="http://github.com/Constellation/crxmake">github: crxmake</a>
 
 

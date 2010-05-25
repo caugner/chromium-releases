@@ -12,18 +12,20 @@
 #include <vector>
 
 #include "app/combobox_model.h"
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
+#include "app/l10n_util_collator.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/native_theme_win.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/locale_settings.h"
@@ -291,6 +293,7 @@ void FontsPageView::FontSelected(const gfx::Font& const_font, void* params) {
         serif_font_display_view_->font_name(),
         sans_serif_font_size_pixel_);
   } else if (font_type_being_changed_ == FIXED_WIDTH) {
+    fixed_width_font_size_pixel_ = font_size;
     fixed_width_font_display_view_->SetFontType(font.FontName(), font_size);
   }
   font_changed_ = true;

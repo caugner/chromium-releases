@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
-#include "app/l10n_util.h"
 #include "app/message_box_flags.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/checkbox.h"
 #include "views/standard_layout.h"
 #include "views/views_delegate.h"
@@ -48,7 +48,7 @@ MessageBoxView::MessageBoxView(int dialog_flags,
 std::wstring MessageBoxView::GetInputText() {
   if (prompt_field_)
     return UTF16ToWideHack(prompt_field_->text());
-  return EmptyWString();
+  return std::wstring();
 }
 
 bool MessageBoxView::IsCheckBoxSelected() {
@@ -120,17 +120,17 @@ void MessageBoxView::Init(int dialog_flags,
   if (dialog_flags & MessageBoxFlags::kAutoDetectAlignment) {
     // Determine the alignment and directionality based on the first character
     // with strong directionality.
-    l10n_util::TextDirection direction =
-        l10n_util::GetFirstStrongCharacterDirection(message_label_->GetText());
+    base::i18n::TextDirection direction =
+        base::i18n::GetFirstStrongCharacterDirection(message_label_->GetText());
     views::Label::Alignment alignment;
-    if (direction == l10n_util::RIGHT_TO_LEFT)
+    if (direction == base::i18n::RIGHT_TO_LEFT)
       alignment = views::Label::ALIGN_RIGHT;
     else
       alignment = views::Label::ALIGN_LEFT;
     // In addition, we should set the RTL alignment mode as
     // AUTO_DETECT_ALIGNMENT so that the alignment will not be flipped around
     // in RTL locales.
-    message_label_->SetRTLAlignmentMode(views::Label::AUTO_DETECT_ALIGNMENT);
+    message_label_->set_rtl_alignment_mode(views::Label::AUTO_DETECT_ALIGNMENT);
     message_label_->SetHorizontalAlignment(alignment);
   } else {
     message_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);

@@ -12,7 +12,7 @@
 
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/browser_process_impl.h"
-
+#include "chrome/browser/chrome_thread.h"
 #include "chrome_frame/test/test_server.h"
 #include "chrome_frame/test/net/test_automation_provider.h"
 #include "chrome_frame/test/net/process_singleton_subclass.h"
@@ -21,14 +21,11 @@
 
 class ProcessSingleton;
 
-class FakeExternalTab { 
+class FakeExternalTab {
  public:
   FakeExternalTab();
-  ~FakeExternalTab();
+  virtual ~FakeExternalTab();
 
-  virtual std::wstring GetProfileName();
-
-  virtual std::wstring GetProfilePath();
   virtual void Initialize();
   virtual void Shutdown();
 
@@ -92,7 +89,6 @@ class CFUrlRequestUnittestRunner
  protected:
   ScopedHandle test_thread_;
   DWORD test_thread_id_;
-  scoped_ptr<MessageLoop> test_thread_message_loop_;
 
   scoped_ptr<test_server::SimpleWebServer> test_http_server_;
   test_server::SimpleResponse chrome_frame_html_;
@@ -101,6 +97,7 @@ class CFUrlRequestUnittestRunner
   // on the main thread.
   FakeExternalTab fake_chrome_;
   scoped_ptr<ProcessSingletonSubclass> pss_subclass_;
+  scoped_ptr<ChromeThread> main_thread_;
 };
 
 #endif  // CHROME_FRAME_TEST_NET_FAKE_EXTERNAL_TAB_H_

@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/gfx/gdi_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/simple_thread.h"
+#include "base/test/test_file_util.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "gfx/gdi_util.h"
 #include "net/url_request/url_request_unittest.h"
 #include "printing/image.h"
 #include "printing/printing_test.h"
@@ -49,16 +50,13 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
   void PrintNowTab() {
     scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
-    if (!tab_proxy.get())
-      return;
-
     ASSERT_TRUE(tab_proxy->PrintNow());
   }
 
   // Finds the dump for the last print job and compares it to the data named
   // |verification_name|. Compares the saved printed job pixels with the test
   // data pixels and returns the percentage of different pixels; 0 for success,
-  // ]0, 100] for failure.
+  // [0, 100] for failure.
   double CompareWithResult(const std::wstring& verification_name) {
     FilePath test_result(ScanFiles(verification_name));
     if (test_result.value().empty()) {
@@ -118,21 +116,8 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
 
   // Makes sure the directory exists and is empty.
   void CleanupDumpDirectory() {
-    // Tries to delete the dumping directory for around 10 seconds.
-    for (int i = 0; i < 100 && file_util::PathExists(emf_path()); ++i) {
-      // It's fine fail sometimes because of opened left over .PRN file.
-      // Explanation:
-      // When calling PrintNowTab(), it makes sure the page is rendered and
-      // sent to the spooler. It does *not* wait for the spooler to flush the
-      // job. It is completely unnecessary to wait for that. So the printer
-      // may write the file too late. Since the printer holds an exclusive
-      // access to the file, it can't be deleted until the printer is done.
-      if (file_util::Delete(emf_path(), true)) {
-        break;
-      }
-      PlatformThread::Sleep(100);
-    }
-    file_util::CreateDirectory(emf_path());
+    EXPECT_TRUE(file_util::DieFileDie(emf_path(), true));
+    EXPECT_TRUE(file_util::CreateDirectory(emf_path()));
   }
 
   // Returns if Clear Type is currently enabled.

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,14 +47,15 @@ class MockAlsaWrapper : public AlsaWrapper {
                                  unsigned int latency));
   MOCK_METHOD1(PcmName, const char*(snd_pcm_t* handle));
   MOCK_METHOD1(PcmAvailUpdate, snd_pcm_sframes_t (snd_pcm_t* handle));
+  MOCK_METHOD1(PcmState, snd_pcm_state_t (snd_pcm_t* handle));
 
   MOCK_METHOD1(StrError, const char*(int errnum));
 };
 
 class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
  public:
-  MOCK_METHOD4(OnMoreData, size_t(AudioOutputStream* stream, void* dest,
-                                  size_t max_size, int pending_bytes));
+  MOCK_METHOD4(OnMoreData, uint32(AudioOutputStream* stream, void* dest,
+                                  uint32 max_size, uint32 pending_bytes));
   MOCK_METHOD1(OnClose, void(AudioOutputStream* stream));
   MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
 };
@@ -112,8 +113,8 @@ class AlsaPcmOutputStreamTest : public testing::Test {
   static const AudioManager::Format kTestFormat;
   static const char kTestDeviceName[];
   static const char kDummyMessage[];
-  static const int kTestFramesPerPacket;
-  static const size_t kTestPacketSize;
+  static const uint32 kTestFramesPerPacket;
+  static const uint32 kTestPacketSize;
   static const int kTestFailedErrno;
   static snd_pcm_t* const kFakeHandle;
 
@@ -147,8 +148,8 @@ const AudioManager::Format AlsaPcmOutputStreamTest::kTestFormat =
     AudioManager::AUDIO_PCM_LINEAR;
 const char AlsaPcmOutputStreamTest::kTestDeviceName[] = "TestDevice";
 const char AlsaPcmOutputStreamTest::kDummyMessage[] = "dummy";
-const int AlsaPcmOutputStreamTest::kTestFramesPerPacket = 1000;
-const size_t AlsaPcmOutputStreamTest::kTestPacketSize =
+const uint32 AlsaPcmOutputStreamTest::kTestFramesPerPacket = 1000;
+const uint32 AlsaPcmOutputStreamTest::kTestPacketSize =
     AlsaPcmOutputStreamTest::kTestFramesPerPacket *
     AlsaPcmOutputStreamTest::kTestBytesPerFrame;
 const int AlsaPcmOutputStreamTest::kTestFailedErrno = -EACCES;
@@ -193,7 +194,7 @@ TEST_F(AlsaPcmOutputStreamTest, ConstructedState) {
 
   // Bad format.
   test_stream_ = new AlsaPcmOutputStream(kTestDeviceName,
-                                         AudioManager::AUDIO_PCM_DELTA,
+                                         AudioManager::AUDIO_LAST_FORMAT,
                                          kTestChannels,
                                          kTestSampleRate,
                                          kTestBitsPerSample,
@@ -227,7 +228,9 @@ TEST_F(AlsaPcmOutputStreamTest, LatencyFloor) {
   message_loop_.RunAllPending();
 
   // Now close it and test that everything was released.
-  EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle)) .WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle)).WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmName(kFakeHandle))
+      .WillOnce(Return(kTestDeviceName));
   EXPECT_CALL(mock_manager_, ReleaseStream(test_stream_.get()));
   test_stream_->Close();
   message_loop_.RunAllPending();
@@ -258,6 +261,8 @@ TEST_F(AlsaPcmOutputStreamTest, LatencyFloor) {
   // Now close it and test that everything was released.
   EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle))
       .WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmName(kFakeHandle))
+      .WillOnce(Return(kTestDeviceName));
   EXPECT_CALL(mock_manager_, ReleaseStream(test_stream_.get()));
   test_stream_->Close();
   message_loop_.RunAllPending();
@@ -303,6 +308,8 @@ TEST_F(AlsaPcmOutputStreamTest, OpenClose) {
   // Now close it and test that everything was released.
   EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle))
       .WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmName(kFakeHandle))
+      .WillOnce(Return(kTestDeviceName));
   EXPECT_CALL(mock_manager_, ReleaseStream(test_stream_.get()));
   test_stream_->Close();
   message_loop_.RunAllPending();
@@ -346,6 +353,8 @@ TEST_F(AlsaPcmOutputStreamTest, PcmSetParamsFailed) {
       .WillOnce(Return(kTestFailedErrno));
   EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle))
       .WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmName(kFakeHandle))
+      .WillOnce(Return(kTestDeviceName));
   EXPECT_CALL(mock_alsa_wrapper_, StrError(kTestFailedErrno))
       .WillOnce(Return(kDummyMessage));
 
@@ -392,6 +401,9 @@ TEST_F(AlsaPcmOutputStreamTest, StartStop) {
 
   // Expect the pre-roll.
   MockAudioSourceCallback mock_callback;
+  EXPECT_CALL(mock_alsa_wrapper_, PcmState(kFakeHandle))
+      .Times(2)
+      .WillRepeatedly(Return(SND_PCM_STATE_RUNNING));
   EXPECT_CALL(mock_alsa_wrapper_, PcmDelay(kFakeHandle, _))
       .Times(2)
       .WillRepeatedly(DoAll(SetArgumentPointee<1>(0), Return(0)));
@@ -414,6 +426,8 @@ TEST_F(AlsaPcmOutputStreamTest, StartStop) {
   EXPECT_CALL(mock_callback, OnClose(test_stream_.get()));
   EXPECT_CALL(mock_alsa_wrapper_, PcmClose(kFakeHandle))
       .WillOnce(Return(0));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmName(kFakeHandle))
+      .WillOnce(Return(kTestDeviceName));
   test_stream_->Close();
   message_loop_.RunAllPending();
 }
@@ -484,11 +498,53 @@ TEST_F(AlsaPcmOutputStreamTest, BufferPacket) {
 
   // Return a partially filled packet.
   MockAudioSourceCallback mock_callback;
+  EXPECT_CALL(mock_alsa_wrapper_, PcmState(_))
+      .WillOnce(Return(SND_PCM_STATE_RUNNING));
   EXPECT_CALL(mock_alsa_wrapper_, PcmDelay(_, _))
       .WillOnce(DoAll(SetArgumentPointee<1>(1), Return(0)));
   EXPECT_CALL(mock_callback,
               OnMoreData(test_stream_.get(), packet_.buffer.get(),
                          packet_.capacity, kTestBytesPerFrame))
+      .WillOnce(Return(10));
+
+  test_stream_->shared_data_.set_source_callback(&mock_callback);
+  test_stream_->BufferPacket(&packet_);
+
+  EXPECT_EQ(0u, packet_.used);
+  EXPECT_EQ(10u, packet_.size);
+}
+
+TEST_F(AlsaPcmOutputStreamTest, BufferPacket_Negative) {
+  packet_.used = packet_.size;
+
+  // Simulate where the underrun has occurred right after checking the delay.
+  MockAudioSourceCallback mock_callback;
+  EXPECT_CALL(mock_alsa_wrapper_, PcmState(_))
+      .WillOnce(Return(SND_PCM_STATE_RUNNING));
+  EXPECT_CALL(mock_alsa_wrapper_, PcmDelay(_, _))
+      .WillOnce(DoAll(SetArgumentPointee<1>(-1), Return(0)));
+  EXPECT_CALL(mock_callback,
+              OnMoreData(test_stream_.get(), packet_.buffer.get(),
+                         packet_.capacity, 0))
+      .WillOnce(Return(10));
+
+  test_stream_->shared_data_.set_source_callback(&mock_callback);
+  test_stream_->BufferPacket(&packet_);
+
+  EXPECT_EQ(0u, packet_.used);
+  EXPECT_EQ(10u, packet_.size);
+}
+
+TEST_F(AlsaPcmOutputStreamTest, BufferPacket_Underrun) {
+  packet_.used = packet_.size;
+
+  // If ALSA has underrun then we should assume a delay of zero.
+  MockAudioSourceCallback mock_callback;
+  EXPECT_CALL(mock_alsa_wrapper_, PcmState(_))
+      .WillOnce(Return(SND_PCM_STATE_XRUN));
+  EXPECT_CALL(mock_callback,
+              OnMoreData(test_stream_.get(), packet_.buffer.get(),
+                         packet_.capacity, 0))
       .WillOnce(Return(10));
 
   test_stream_->shared_data_.set_source_callback(&mock_callback);

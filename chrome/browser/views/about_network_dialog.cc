@@ -4,9 +4,9 @@
 
 #include "chrome/browser/views/about_network_dialog.h"
 
-#include "base/string_util.h"
 #include "base/thread.h"
-#include "chrome/browser/browser_process.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/chrome_thread.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_tracker.h"
@@ -50,8 +50,7 @@ std::wstring URLForJob(URLRequestJob* job) {
 class JobTracker : public URLRequestJobTracker::JobObserver,
                    public base::RefCountedThreadSafe<JobTracker> {
  public:
-  JobTracker(AboutNetworkDialog* view);
-  ~JobTracker();
+  explicit JobTracker(AboutNetworkDialog* view);
 
   // Called by the NetworkStatusView on the main application thread.
   void StartTracking();
@@ -70,6 +69,10 @@ class JobTracker : public URLRequestJobTracker::JobObserver,
   void DetachView() { view_ = NULL; }
 
  private:
+  friend class base::RefCountedThreadSafe<JobTracker>;
+
+  ~JobTracker();
+
   void InvokeOnIOThread(void (JobTracker::*method)());
 
   // Called on the IO thread
@@ -96,10 +99,8 @@ JobTracker::~JobTracker() {
 
 // main thread:
 void JobTracker::InvokeOnIOThread(void (JobTracker::*m)()) {
-  base::Thread* thread = g_browser_process->io_thread();
-  if (!thread)
-    return;
-  thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this, m));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE, NewRunnableMethod(this, m));
 }
 
 // main thread:
@@ -309,7 +310,7 @@ void AboutNetworkDialog::SetupControls() {
   //
   // This raises the maximum number of chars from 32K to some large maximum,
   // probably 2GB. 32K is not nearly enough for our use-case.
-  //SendMessageW(text_field_->GetNativeComponent(), EM_SETLIMITTEXT, 0, 0);
+  // SendMessageW(text_field_->GetNativeComponent(), EM_SETLIMITTEXT, 0, 0);
 
   static const int first_column_set = 1;
   views::ColumnSet* column_set = layout->AddColumnSet(first_column_set);

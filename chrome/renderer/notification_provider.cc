@@ -4,17 +4,24 @@
 
 #include "chrome/renderer/notification_provider.h"
 
+#include "base/string_util.h"
 #include "base/task.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebNotificationPermissionCallback.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNotificationPermissionCallback.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 
+using WebKit::WebDocument;
 using WebKit::WebNotification;
 using WebKit::WebNotificationPresenter;
 using WebKit::WebNotificationPermissionCallback;
+using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
+using WebKit::WebURL;
 
 NotificationProvider::NotificationProvider(RenderView* view)
     : view_(view) {
@@ -31,7 +38,7 @@ bool NotificationProvider::show(const WebNotification& notification) {
 void NotificationProvider::cancel(const WebNotification& notification) {
   int id;
   bool id_found = manager_.GetId(notification, id);
-  DCHECK(id_found);
+  // Won't be found if the notification has already been closed by the user.
   if (id_found)
     Send(new ViewHostMsg_CancelDesktopNotification(view_->routing_id(), id));
 }
@@ -40,25 +47,33 @@ void NotificationProvider::objectDestroyed(
     const WebNotification& notification) {
   int id;
   bool id_found = manager_.GetId(notification, id);
-  DCHECK(id_found);
+  // Won't be found if the notification has already been closed by the user.
   if (id_found)
     manager_.UnregisterNotification(id);
 }
 
 WebNotificationPresenter::Permission NotificationProvider::checkPermission(
-    const WebString& origin) {
+    const WebURL& url) {
   int permission;
-  Send(new ViewHostMsg_CheckNotificationPermission(view_->routing_id(),
-                                                   GURL(origin), &permission));
+  Send(new ViewHostMsg_CheckNotificationPermission(
+          view_->routing_id(),
+          url,
+          &permission));
   return static_cast<WebNotificationPresenter::Permission>(permission);
 }
 
 void NotificationProvider::requestPermission(
-    const WebString& origin, WebNotificationPermissionCallback* callback) {
+    const WebSecurityOrigin& origin,
+    WebNotificationPermissionCallback* callback) {
+  // We only request permission in response to a user gesture.
+  if (!view_->webview()->mainFrame()->isProcessingUserGesture())
+    return;
+
   int id = manager_.RegisterPermissionRequest(callback);
 
   Send(new ViewHostMsg_RequestNotificationPermission(view_->routing_id(),
-                                                     GURL(origin), id));
+                                                     GURL(origin.toString()),
+                                                     id));
 }
 
 bool NotificationProvider::OnMessageReceived(const IPC::Message& message) {
@@ -74,11 +89,22 @@ bool NotificationProvider::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
+void NotificationProvider::OnNavigate() {
+  manager_.Clear();
+}
+
 bool NotificationProvider::ShowHTML(const WebNotification& notification,
                                     int id) {
+  // Disallow HTML notifications from non-HTTP schemes.
+  GURL url = notification.url();
+  if (!url.SchemeIs(chrome::kHttpScheme) &&
+      !url.SchemeIs(chrome::kHttpsScheme) &&
+      !url.SchemeIs(chrome::kExtensionScheme))
+    return false;
+
   DCHECK(notification.isHTML());
   return Send(new ViewHostMsg_ShowDesktopNotification(view_->routing_id(),
-              GURL(view_->webview()->mainFrame()->url()),
+              GURL(view_->webview()->mainFrame()->url()).GetOrigin(),
               notification.url(), id));
 }
 
@@ -86,8 +112,8 @@ bool NotificationProvider::ShowText(const WebNotification& notification,
                                     int id) {
   DCHECK(!notification.isHTML());
   return Send(new ViewHostMsg_ShowDesktopNotificationText(view_->routing_id(),
-              GURL(view_->webview()->mainFrame()->url()),
-              GURL(notification.icon()),
+              GURL(view_->webview()->mainFrame()->url()).GetOrigin(),
+              notification.iconURL(),
               notification.title(), notification.body(), id));
 }
 
@@ -114,9 +140,10 @@ void NotificationProvider::OnClose(int id, bool by_user) {
   bool found = manager_.GetNotification(id, &notification);
   // |found| may be false if the WebNotification went out of scope in
   // the page before the associated toast was closed by the user.
-  if (found)
+  if (found) {
     notification.dispatchCloseEvent(by_user);
-  manager_.UnregisterNotification(id);
+    manager_.UnregisterNotification(id);
+  }
 }
 
 void NotificationProvider::OnPermissionRequestComplete(int id) {

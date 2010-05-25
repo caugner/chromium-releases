@@ -4,8 +4,11 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "app/download_file_interface.h"
+#include "base/file_path.h"
 #include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
+#include "googleurl/src/gurl.h"
 
 struct WebDropData;
 @class TabContentsViewCocoa;
@@ -20,11 +23,23 @@ struct WebDropData;
   // Our drop data. Should only be initialized once.
   scoped_ptr<WebDropData> dropData_;
 
+  // The image to show as drag image. Can be nil.
+  scoped_nsobject<NSImage> dragImage_;
+
+  // The offset to draw |dragImage_| at.
+  NSPoint imageOffset_;
+
   // Our pasteboard.
   scoped_nsobject<NSPasteboard> pasteboard_;
 
   // A mask of the allowed drag operations.
   NSDragOperation dragOperationMask_;
+
+  // The file name to be saved to for a drag-out download.
+  FilePath downloadFileName_;
+
+  // The URL to download from for a drag-out download.
+  GURL downloadURL_;
 }
 
 // Initialize a WebDragSource object for a drag (originating on the given
@@ -32,6 +47,8 @@ struct WebDropData;
 // with data types appropriate for dropData.
 - (id)initWithContentsView:(TabContentsViewCocoa*)contentsView
                   dropData:(const WebDropData*)dropData
+                     image:(NSImage*)image
+                    offset:(NSPoint)offset
                 pasteboard:(NSPasteboard*)pboard
          dragOperationMask:(NSDragOperation)dragOperationMask;
 

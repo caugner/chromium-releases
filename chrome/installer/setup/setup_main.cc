@@ -13,10 +13,12 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/registry.h"
 #include "base/scoped_handle_win.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/setup/install.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
@@ -39,7 +41,7 @@
 
 namespace {
 
-  // This method unpacks and uncompresses the given archive file. For Chrome
+// This method unpacks and uncompresses the given archive file. For Chrome
 // install we are creating a uncompressed archive that contains all the files
 // needed for the installer. This uncompressed archive is later compressed.
 //
@@ -61,8 +63,15 @@ DWORD UnPackArchive(const std::wstring& archive, bool system_install,
   if (ret != NO_ERROR)
     return ret;
 
+  std::wstring archive_name;
+  if (InstallUtil::IsChromeFrameProcess()) {
+    archive_name = installer::kChromeFrameArchive;
+  } else {
+    archive_name = installer::kChromeArchive;
+  }
+
   std::wstring uncompressed_archive(temp_path);
-  file_util::AppendToPath(&uncompressed_archive, installer::kChromeArchive);
+  file_util::AppendToPath(&uncompressed_archive, archive_name);
 
   // Check if this is differential update and if it is, patch it to the
   // installer archive that should already be on the machine. We assume
@@ -80,7 +89,7 @@ DWORD UnPackArchive(const std::wstring& archive, bool system_install,
     file_util::AppendToPath(&existing_archive,
                             installed_version->GetString());
     file_util::AppendToPath(&existing_archive, installer_util::kInstallerDir);
-    file_util::AppendToPath(&existing_archive, installer::kChromeArchive);
+    file_util::AppendToPath(&existing_archive, archive_name);
     if (int i = setup_util::ApplyDiffPatch(existing_archive, unpacked_file,
                                            uncompressed_archive)) {
       LOG(ERROR) << "Binary patching failed with error " << i;
@@ -110,15 +119,14 @@ installer_util::InstallStatus RenameChromeExecutables(bool system_install) {
 
   scoped_ptr<WorkItemList> install_list(WorkItem::CreateWorkItemList());
   install_list->AddDeleteTreeWorkItem(chrome_old_exe, std::wstring());
-  std::wstring temp_path;
-  if (!file_util::CreateNewTempDirectory(std::wstring(L"chrome_"),
-                                         &temp_path)) {
-    LOG(ERROR) << "Failed to create Temp directory " << temp_path;
+  FilePath temp_path;
+  if (!file_util::CreateNewTempDirectory(L"chrome_", &temp_path)) {
+    LOG(ERROR) << "Failed to create Temp directory " << temp_path.value();
     return installer_util::RENAME_FAILED;
   }
   install_list->AddCopyTreeWorkItem(chrome_new_exe,
                                     chrome_exe,
-                                    temp_path,
+                                    temp_path.ToWStringHack(),
                                     WorkItem::IF_DIFFERENT,
                                     std::wstring());
   HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
@@ -145,12 +153,44 @@ installer_util::InstallStatus RenameChromeExecutables(bool system_install) {
 bool CheckPreInstallConditions(const installer::Version* installed_version,
                                bool system_install,
                                installer_util::InstallStatus& status) {
+  bool is_first_install = (NULL == installed_version);
   // Check to avoid simultaneous per-user and per-machine installs.
   scoped_ptr<installer::Version>
       chrome_version(InstallUtil::GetChromeVersion(!system_install));
   if (chrome_version.get()) {
     LOG(ERROR) << "Already installed version " << chrome_version->GetString()
                << " conflicts with the current install mode.";
+    if (!system_install && is_first_install) {
+      // This is user-level install and there is a system-level chrome
+      // installation. Instruct omaha to launch the existing one. There
+      // should be no error dialog.
+      std::wstring chrome_exe(installer::GetChromeInstallPath(!system_install));
+      if (chrome_exe.empty()) {
+        // If we failed to construct install path. Give up.
+        status = installer_util::OS_ERROR;
+        InstallUtil::WriteInstallerResult(system_install, status,
+                                          IDS_INSTALL_OS_ERROR_BASE, NULL);
+        return false;
+      } else {
+        status = installer_util::EXISTING_VERSION_LAUNCHED;
+        file_util::AppendToPath(&chrome_exe, installer_util::kChromeExe);
+        chrome_exe = L"\"" + chrome_exe + L"\" --"
+                     + ASCIIToWide(switches::kFirstRun);
+        InstallUtil::WriteInstallerResult(system_install, status,
+                                          0, NULL);
+        LOG(INFO) << "Launching existing system-level chrome instead.";
+        base::LaunchApp(chrome_exe, false, false, NULL);
+        return false;
+      }
+    }
+    // If the following compile assert fires it means that the InstallStatus
+    // enumeration changed which will break the contract between the old chrome
+    // installed and the new setup.exe that is trying to upgrade.
+    COMPILE_ASSERT(installer_util::SXS_OPTION_NOT_SUPPORTED == 33,
+                   dont_change_enum);
+
+    // This is an update, not an install. Omaha should know the difference
+    // and not show a dialog.
     status = system_install ? installer_util::USER_LEVEL_INSTALL_EXISTS :
                               installer_util::SYSTEM_LEVEL_INSTALL_EXISTS;
     int str_id = system_install ? IDS_INSTALL_USER_LEVEL_EXISTS_BASE :
@@ -158,11 +198,10 @@ bool CheckPreInstallConditions(const installer::Version* installed_version,
     InstallUtil::WriteInstallerResult(system_install, status, str_id, NULL);
     return false;
   }
-
   // If no previous installation of Chrome, make sure installation directory
   // either does not exist or can be deleted (i.e. is not locked by some other
   // process).
-  if (!installed_version) {
+  if (is_first_install) {
     FilePath install_path = FilePath::FromWStringHack(
         installer::GetChromeInstallPath(system_install));
     if (file_util::PathExists(install_path) &&
@@ -192,8 +231,13 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
   // For install the default location for chrome.packed.7z is in current
   // folder, so get that value first.
   std::wstring archive = file_util::GetDirectoryFromPath(cmd_line.program());
-  file_util::AppendToPath(&archive,
-                          std::wstring(installer::kChromeCompressedArchive));
+  if (InstallUtil::IsChromeFrameProcess()) {
+    file_util::AppendToPath(&archive,
+        std::wstring(installer::kChromeFrameCompressedArchive));
+  } else {
+    file_util::AppendToPath(&archive,
+                            std::wstring(installer::kChromeCompressedArchive));
+  }
   // If --install-archive is given, get the user specified value
   if (cmd_line.HasSwitch(installer_util::switches::kInstallArchive)) {
     archive = cmd_line.GetSwitchValue(
@@ -203,9 +247,8 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
 
   // Create a temp folder where we will unpack Chrome archive. If it fails,
   // then we are doomed, so return immediately and no cleanup is required.
-  std::wstring temp_path;
-  if (!file_util::CreateNewTempDirectory(std::wstring(L"chrome_"),
-                                         &temp_path)) {
+  FilePath temp_path;
+  if (!file_util::CreateNewTempDirectory(L"chrome_", &temp_path)) {
     LOG(ERROR) << "Could not create temporary path.";
     InstallUtil::WriteInstallerResult(system_level,
                                       installer_util::TEMP_DIR_FAILED,
@@ -213,15 +256,16 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
                                       NULL);
     return installer_util::TEMP_DIR_FAILED;
   }
-  LOG(INFO) << "created path " << temp_path;
+  LOG(INFO) << "created path " << temp_path.value();
 
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  std::wstring unpack_path(temp_path);
+  std::wstring unpack_path(temp_path.ToWStringHack());
   file_util::AppendToPath(&unpack_path,
                           std::wstring(installer::kInstallSourceDir));
   bool incremental_install = false;
   if (UnPackArchive(archive, system_level, installed_version,
-                    temp_path, unpack_path, incremental_install)) {
+                    temp_path.ToWStringHack(), unpack_path,
+                    incremental_install)) {
     install_status = installer_util::UNCOMPRESSION_FAILED;
     InstallUtil::WriteInstallerResult(system_level, install_status,
                                       IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
@@ -250,18 +294,25 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
       } else {
         // We want to keep uncompressed archive (chrome.7z) that we get after
         // uncompressing and binary patching. Get the location for this file.
-        std::wstring archive_to_copy(temp_path);
-        file_util::AppendToPath(&archive_to_copy,
-                                std::wstring(installer::kChromeArchive));
+        std::wstring archive_to_copy(temp_path.ToWStringHack());
+        std::wstring archive_name;
+        if (InstallUtil::IsChromeFrameProcess()) {
+          archive_name = installer::kChromeFrameArchive;
+        } else {
+          archive_name = installer::kChromeArchive;
+        }
+        file_util::AppendToPath(&archive_to_copy, archive_name);
         std::wstring prefs_source_path = cmd_line.GetSwitchValue(
             installer_util::switches::kInstallerData);
         install_status = installer::InstallOrUpdateChrome(
-            cmd_line.program(), archive_to_copy, temp_path, prefs_source_path,
-            prefs, *installer_version, installed_version);
+            cmd_line.program(), archive_to_copy, temp_path.ToWStringHack(),
+            prefs_source_path, prefs, *installer_version, installed_version);
 
         int install_msg_base = IDS_INSTALL_FAILED_BASE;
         std::wstring chrome_exe;
-        if (install_status != installer_util::INSTALL_FAILED) {
+        if (install_status == installer_util::SAME_VERSION_REPAIR_FAILED) {
+            install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_BASE;
+        } else if (install_status != installer_util::INSTALL_FAILED) {
           chrome_exe = installer::GetChromeInstallPath(system_level);
           if (chrome_exe.empty()) {
             // If we failed to construct install path, it means the OS call to
@@ -279,7 +330,8 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
         installer_util::GetDistroBooleanPreference(prefs,
             installer_util::master_preferences::kDoNotRegisterForUpdateLaunch,
             &value);
-        bool write_chrome_launch_string = !value;
+        bool write_chrome_launch_string = (!value) &&
+            (install_status != installer_util::IN_USE_UPDATED);
 
         InstallUtil::WriteInstallerResult(system_level, install_status,
             install_msg_base, write_chrome_launch_string ? &chrome_exe : NULL);
@@ -293,7 +345,8 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
               &do_not_launch_chrome);
           if (!system_level && !do_not_launch_chrome)
             installer::LaunchChrome(system_level);
-        } else if (install_status == installer_util::NEW_VERSION_UPDATED) {
+        } else if ((install_status == installer_util::NEW_VERSION_UPDATED) ||
+                   (install_status == installer_util::IN_USE_UPDATED)) {
           installer_setup::RemoveLegacyRegistryKeys();
         }
       }
@@ -301,7 +354,10 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
     // There might be an experiment (for upgrade usually) that needs to happen.
     // An experiment's outcome can include chrome's uninstallation. If that is
     // the case we would not do that directly at this point but in another
-    //  instance of setup.exe
+    // instance of setup.exe
+    //
+    // There is another way to reach this same function if this is a system
+    // level install. See HandleNonInstallCmdLineOptions().
     dist->LaunchUserExperiment(install_status, *installer_version,
                                system_level);
   }
@@ -309,8 +365,9 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
   // Delete temporary files. These include install temporary directory
   // and master profile file if present.
   scoped_ptr<WorkItemList> cleanup_list(WorkItem::CreateWorkItemList());
-  LOG(INFO) << "Deleting temporary directory " << temp_path;
-  cleanup_list->AddDeleteTreeWorkItem(temp_path, std::wstring());
+  LOG(INFO) << "Deleting temporary directory " << temp_path.value();
+  cleanup_list->AddDeleteTreeWorkItem(temp_path.ToWStringHack(),
+                                      std::wstring());
   if (cmd_line.HasSwitch(installer_util::switches::kInstallerData)) {
     std::wstring prefs_path = cmd_line.GetSwitchValue(
         installer_util::switches::kInstallerData);
@@ -386,16 +443,15 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     // patch to current exe, and store the resulting binary in the path
     // specified by --new-setup-exe. But we need to first unpack the file
     // given in --update-setup-exe.
-    std::wstring temp_path;
-    if (!file_util::CreateNewTempDirectory(std::wstring(L"chrome_"),
-                                           &temp_path)) {
+    FilePath temp_path;
+    if (!file_util::CreateNewTempDirectory(L"chrome_", &temp_path)) {
       LOG(ERROR) << "Could not create temporary path.";
     } else {
       std::wstring setup_patch = cmd_line.GetSwitchValue(
           installer_util::switches::kUpdateSetupExe);
       LOG(INFO) << "Opening archive " << setup_patch;
       std::wstring uncompressed_patch;
-      if (LzmaUtil::UnPackArchive(setup_patch, temp_path,
+      if (LzmaUtil::UnPackArchive(setup_patch, temp_path.ToWStringHack(),
                                   &uncompressed_patch) == NO_ERROR) {
         std::wstring old_setup_exe = cmd_line.program();
         std::wstring new_setup_exe = cmd_line.GetSwitchValue(
@@ -463,11 +519,19 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     exit_code = tmp;
     return true;
   } else if (cmd_line.HasSwitch(installer_util::switches::kInactiveUserToast)) {
-    // Launch the inactive user toast experiment. If there is no value
-    // associated with the switch the function uses 0 as the flavor.
+    // Launch the inactive user toast experiment.
     std::wstring flavor =
         cmd_line.GetSwitchValue(installer_util::switches::kInactiveUserToast);
-    dist->InactiveUserToastExperiment(StringToInt(flavor));
+    dist->InactiveUserToastExperiment(StringToInt(flavor),
+        cmd_line.HasSwitch(installer_util::switches::kSystemLevelToast));
+    return true;
+  } else if (cmd_line.HasSwitch(installer_util::switches::kSystemLevelToast)) {
+    // We started as system-level and have been re-launched as user level
+    // to continue with the toast experiment.
+    scoped_ptr<installer::Version>
+        installed_version(InstallUtil::GetChromeVersion(system_install));
+    dist->LaunchUserExperiment(installer_util::REENTRY_SYS_UPDATE,
+                               *installed_version, true);
     return true;
   }
   return false;
@@ -507,6 +571,29 @@ bool ShowRebootDialog() {
   return true;
 }
 
+// Class to manage COM initialization and uninitialization
+class AutoCom {
+ public:
+  AutoCom() : initialized_(false) { }
+  ~AutoCom() {
+    if (initialized_) CoUninitialize();
+  }
+  bool Init(bool system_install) {
+    if (CoInitializeEx(NULL, COINIT_APARTMENTTHREADED) != S_OK) {
+      LOG(ERROR) << "COM initialization failed.";
+      InstallUtil::WriteInstallerResult(system_install,
+                                        installer_util::OS_ERROR,
+                                        IDS_INSTALL_OS_ERROR_BASE, NULL);
+      return false;
+    }
+    initialized_ = true;
+    return true;
+  }
+
+ private:
+  bool initialized_;
+};
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
@@ -516,13 +603,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   CommandLine::Init(0, NULL);
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   installer::InitInstallerLogging(parsed_command_line);
-  scoped_ptr<DictionaryValue> prefs(setup_util::GetInstallPreferences(
+  scoped_ptr<DictionaryValue> prefs(installer_util::GetInstallPreferences(
       parsed_command_line));
   bool value = false;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
           installer_util::master_preferences::kVerboseLogging, &value) &&
       value)
     logging::SetMinLogLevel(logging::LOG_INFO);
+
+  LOG(INFO) << "Command Line: " << parsed_command_line.command_line_string();
 
   bool system_install = false;
   installer_util::GetDistroBooleanPreference(prefs.get(),
@@ -540,12 +629,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   }
 
   // Initialize COM for use later.
-  if (CoInitializeEx(NULL, COINIT_APARTMENTTHREADED) != S_OK) {
-    LOG(ERROR) << "COM initialization failed.";
-    InstallUtil::WriteInstallerResult(system_install,
-                                      installer_util::OS_ERROR,
-                                      IDS_INSTALL_OS_ERROR_BASE, NULL);
+  AutoCom auto_com;
+  if (!auto_com.Init(system_install)) {
     return installer_util::OS_ERROR;
+  }
+
+  // Some command line options don't work with SxS install/uninstall
+  if (InstallUtil::IsChromeSxSProcess()) {
+    if (system_install ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kForceUninstall) ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kMakeChromeDefault) ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kRegisterChromeBrowser) ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kRemoveChromeRegistration) ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kInactiveUserToast) ||
+        parsed_command_line.HasSwitch(
+            installer_util::switches::kSystemLevelToast)) {
+      return installer_util::SXS_OPTION_NOT_SUPPORTED;
+    }
   }
 
   int exit_code = 0;
@@ -596,15 +701,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
                                    prefs.get());
   }
 
-  if (install_status == installer_util::UNINSTALL_REQUIRES_REBOOT) {
-    install_status = installer_util::UNINSTALL_SUCCESSFUL;
-#if defined(CHROME_FRAME_BUILD)
-    ShowRebootDialog();
-#endif
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+
+  if (InstallUtil::IsChromeFrameProcess() &&
+      !parsed_command_line.HasSwitch(
+          installer_util::switches::kForceUninstall)) {
+    if (install_status == installer_util::UNINSTALL_REQUIRES_REBOOT) {
+      ShowRebootDialog();
+    } else if (parsed_command_line.HasSwitch(
+        installer_util::switches::kUninstall)) {
+      ::MessageBoxW(NULL,
+                    installer_util::GetLocalizedString(
+                        IDS_UNINSTALL_COMPLETE_BASE).c_str(),
+                    dist->GetApplicationName().c_str(),
+                    MB_OK);
+    }
   }
 
-  CoUninitialize();
+  int return_code = 0;
+  // MSI demands that custom actions always return 0 (ERROR_SUCCESS) or it will
+  // rollback the action. If we're uninstalling we want to avoid this, so always
+  // report success, squashing any more informative return codes.
+  if (!(InstallUtil::IsMSIProcess(system_install) &&
+        parsed_command_line.HasSwitch(installer_util::switches::kUninstall))) {
+    // Note that we allow the status installer_util::UNINSTALL_REQUIRES_REBOOT
+    // to pass through, since this is only returned on uninstall which is never
+    // invoked directly by Google Update.
+    dist->GetInstallReturnCode(install_status);
+  }
 
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  return dist->GetInstallReturnCode(install_status);
+  LOG(INFO) << "Installation complete, returning: " << return_code;
+  return return_code;
 }

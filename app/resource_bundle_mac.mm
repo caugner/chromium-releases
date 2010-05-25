@@ -6,114 +6,54 @@
 
 #import <Foundation/Foundation.h>
 
-#include "app/gfx/font.h"
-#include "app/l10n_util.h"
-#include "base/base_paths.h"
-#include "base/data_pack.h"
 #include "base/file_path.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
-#include "base/path_service.h"
-#include "base/string_piece.h"
-#include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "skia/ext/skia_utils_mac.h"
-
-ResourceBundle::~ResourceBundle() {
-  FreeImages();
-
-  delete locale_resources_data_;
-  locale_resources_data_ = NULL;
-  delete theme_data_;
-  theme_data_ = NULL;
-  delete resources_data_;
-  resources_data_ = NULL;
-}
 
 namespace {
 
-base::DataPack *LoadResourceDataPack(NSString *name) {
-  base::DataPack *resource_pack = NULL;
-
-  NSString *resource_path = [mac_util::MainAppBundle() pathForResource:name
-                                                                ofType:@"pak"];
-  if (resource_path) {
-    FilePath resources_pak_path([resource_path fileSystemRepresentation]);
-    resource_pack = new base::DataPack;
-    bool success = resource_pack->Load(resources_pak_path);
-    if (!success) {
-      delete resource_pack;
-      resource_pack = NULL;
-    }
+FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {
+  NSString *resource_path;
+  // Some of the helper processes need to be able to fetch resources
+  // (chrome_dll_main.cc SubprocessNeedsResourceBundle()). Fetch the same locale
+  // as the already-running browser instead of using what NSBundle might pick
+  // based on values at helper launch time.
+  if ([mac_locale length]) {
+    resource_path = [mac_util::MainAppBundle() pathForResource:name
+                                                        ofType:@"pak"
+                                                   inDirectory:@""
+                                               forLocalization:mac_locale];
+  } else {
+    resource_path = [mac_util::MainAppBundle() pathForResource:name
+                                                        ofType:@"pak"];
   }
-
-  return resource_pack;
+  if (!resource_path)
+    return FilePath();
+  return FilePath([resource_path fileSystemRepresentation]);
 }
 
 }  // namespace
 
-void ResourceBundle::LoadResources(const std::wstring& pref_locale) {
-  DLOG_IF(WARNING, pref_locale.size() != 0)
-      << "ignoring requested locale in favor of NSBundle's selection";
-
-  DCHECK(resources_data_ == NULL) << "resource data already loaded!";
-  resources_data_ = LoadResourceDataPack(@"chrome");
-  DCHECK(resources_data_) << "failed to load chrome.pak";
-
-  DCHECK(locale_resources_data_ == NULL) << "locale data already loaded!";
-  locale_resources_data_ = LoadResourceDataPack(@"locale");
-  DCHECK(locale_resources_data_) << "failed to load locale.pak";
-}
-
-void ResourceBundle::LoadThemeResources() {
-  DCHECK(theme_data_ == NULL) << "theme data already loaded!";
-  theme_data_ = LoadResourceDataPack(@"theme");
-  DCHECK(theme_data_) << "failed to load theme.pak";
+// static
+FilePath ResourceBundle::GetResourcesFilePath() {
+  return GetResourcesPakFilePath(@"chrome", nil);
 }
 
 // static
-RefCountedStaticMemory* ResourceBundle::LoadResourceBytes(
-    DataHandle module, int resource_id) {
-  DCHECK(module);
-  base::StringPiece bytes;
-  if (!module->Get(resource_id, &bytes))
-    return NULL;
+FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale) {
+  NSString* mac_locale = base::SysUTF8ToNSString(app_locale);
 
-  return new RefCountedStaticMemory(
-      reinterpret_cast<const unsigned char*>(bytes.data()), bytes.length());
-}
+  // Mac OS X uses "_" instead of "-", so swap to get a Mac-style value.
+  mac_locale = [mac_locale stringByReplacingOccurrencesOfString:@"-"
+                                                     withString:@"_"];
 
-base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
-  DCHECK(resources_data_);
-  base::StringPiece data;
-  if (!resources_data_->Get(resource_id, &data))
-    return base::StringPiece();
-  return data;
-}
+  // On disk, the "en_US" resources are just "en" (http://crbug.com/25578).
+  if ([mac_locale isEqual:@"en_US"])
+    mac_locale = @"en";
 
-string16 ResourceBundle::GetLocalizedString(int message_id) {
-  // If for some reason we were unable to load a resource dll, return an empty
-  // string (better than crashing).
-  if (!locale_resources_data_) {
-    LOG(WARNING) << "locale resources are not loaded";
-    return string16();
-  }
-
-  base::StringPiece data;
-  if (!locale_resources_data_->Get(message_id, &data)) {
-    // Fall back on the main data pack (shouldn't be any strings here except in
-    // unittests).
-    data = GetRawDataResource(message_id);
-    if (data.empty()) {
-      NOTREACHED() << "unable to find resource: " << message_id;
-      return string16();
-    }
-  }
-
-  // Data pack encodes strings as UTF16.
-  string16 msg(reinterpret_cast<const char16*>(data.data()),
-               data.length() / 2);
-  return msg;
+  return GetResourcesPakFilePath(@"locale", mac_locale);
 }
 
 NSImage* ResourceBundle::GetNSImageNamed(int resource_id) {

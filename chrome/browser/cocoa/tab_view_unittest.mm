@@ -12,39 +12,49 @@
 
 namespace {
 
-class TabViewTest : public PlatformTest {
+class TabViewTest : public CocoaTest {
  public:
   TabViewTest() {
     NSRect frame = NSMakeRect(0, 0, 50, 30);
-    view_.reset([[TabView alloc] initWithFrame:frame]);
-    [cocoa_helper_.contentView() addSubview:view_.get()];
+    scoped_nsobject<TabView> view([[TabView alloc] initWithFrame:frame]);
+    view_ = view.get();
+    [[test_window() contentView] addSubview:view_];
   }
 
-  scoped_nsobject<TabView> view_;
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
+  TabView* view_;
 };
 
-// Test adding/removing from the view hierarchy, mostly to ensure nothing
-// leaks or crashes.
-TEST_F(TabViewTest, AddRemove) {
-  EXPECT_EQ(cocoa_helper_.contentView(), [view_ superview]);
-  [view_.get() removeFromSuperview];
-  EXPECT_FALSE([view_ superview]);
-}
+TEST_VIEW(TabViewTest, view_)
 
 // Test drawing, mostly to ensure nothing leaks or crashes.
 TEST_F(TabViewTest, Display) {
-  [view_ setHoverAlpha:0.0];
-  [view_ display];
-  [view_ setHoverAlpha:0.5];
-  [view_ display];
-  [view_ setHoverAlpha:1.0];
-  [view_ display];
+  for (int i = 0; i < 5; i++) {
+    for (int j = 0; j < 5; j++) {
+      [view_ setHoverAlpha:i*0.2];
+      [view_ setAlertAlpha:j*0.2];
+      [view_ display];
+    }
+  }
 }
 
-// Test dragging and mouse tracking.
-TEST_F(TabViewTest, MouseTracking) {
-  // TODO(pinkerton): Test dragging out of window
+// Test it doesn't crash when asked for its menu with no TabController set.
+TEST_F(TabViewTest, Menu) {
+  EXPECT_FALSE([view_ menu]);
+}
+
+TEST_F(TabViewTest, Glow) {
+  // TODO(viettrungluu): Figure out how to test this, which is timing-sensitive
+  // and which moreover uses |-performSelector:withObject:afterDelay:|.
+
+  // Call |-startAlert|/|-cancelAlert| and make sure it doesn't crash.
+  for (int i = 0; i < 5; i++) {
+    [view_ startAlert];
+    [view_ cancelAlert];
+  }
+  [view_ startAlert];
+  [view_ startAlert];
+  [view_ cancelAlert];
+  [view_ cancelAlert];
 }
 
 }  // namespace

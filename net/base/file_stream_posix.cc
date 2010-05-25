@@ -1,6 +1,6 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 // For 64-bit file access (off_t = off64_t, lseek64, etc).
 #define _FILE_OFFSET_BITS 64
@@ -14,6 +14,7 @@
 #include <errno.h>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/logging.h"
@@ -329,9 +330,10 @@ int FileStream::Open(const FilePath& path, int open_flags) {
   }
 
   open_flags_ = open_flags;
-  file_ = base::CreatePlatformFile(path.ToWStringHack(), open_flags_, NULL);
+  file_ = base::CreatePlatformFile(path, open_flags_, NULL);
   if (file_ == base::kInvalidPlatformFileValue) {
-    LOG(WARNING) << "Failed to open file: " << errno;
+    LOG(WARNING) << "Failed to open file: " << errno
+          << " (" << path.ToWStringHack() << ")";
     return MapErrorCode(errno);
   }
 

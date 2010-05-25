@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,23 @@
 #include "base/thread.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
+#include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/bindings_policy.h"
+#include "chrome/common/dom_storage_common.h"
 #if defined(TOOLKIT_GTK)
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
 #endif
 #include "chrome/common/notification_service.h"
 #include "grit/browser_resources.h"
@@ -82,21 +87,24 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
 
   // RenderViewHostDelegate::View implementation:
   virtual void CreateNewWindow(int route_id);
-  virtual void CreateNewWidget(int route_id, bool activatable);
+  virtual void CreateNewWidget(int route_id,
+                               WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
-                                 bool user_gesture,
-                                 const GURL& creator_url);
+                                 bool user_gesture);
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos);
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
-                             WebDragOperationsMask operations_allowed);
+                             WebDragOperationsMask operations_allowed,
+                             const SkBitmap& image,
+                             const gfx::Point& image_offset);
   virtual void UpdateDragCursor(WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
   virtual void HandleMouseEvent();
   virtual void HandleMouseLeave();
@@ -125,25 +133,23 @@ InterstitialPage::InterstitialPage(TabContents* tab,
       new_navigation_(new_navigation),
       should_discard_pending_nav_entry_(new_navigation),
       enabled_(true),
-      action_taken_(false),
+      action_taken_(NO_ACTION),
       render_view_host_(NULL),
       original_child_id_(tab->render_view_host()->process()->id()),
       original_rvh_id_(tab->render_view_host()->routing_id()),
       should_revert_tab_title_(false),
       resource_dispatcher_host_notified_(false),
-      ui_loop_(MessageLoop::current()),
       ALLOW_THIS_IN_INITIALIZER_LIST(rvh_view_delegate_(
           new InterstitialPageRVHViewDelegate(this))) {
+  renderer_preferences_util::UpdateFromSystemSettings(
+      &renderer_preferences_, tab_->profile());
+
   InitInterstitialPageMap();
   // It would be inconsistent to create an interstitial with no new navigation
   // (which is the case when the interstitial was triggered by a sub-resource on
   // a page) when we have a pending entry (in the process of loading a new top
   // frame).
   DCHECK(new_navigation || !tab->controller().pending_entry());
-
-#if defined(TOOLKIT_GTK)
-  gtk_util::InitRendererPrefsFromGtkSettings(&renderer_preferences_);
-#endif
 }
 
 InterstitialPage::~InterstitialPage() {
@@ -160,7 +166,7 @@ void InterstitialPage::Show() {
   // If an interstitial is already showing, close it before showing the new one.
   // Be careful not to take an action on the old interstitial more than once.
   if (tab_->interstitial_page()) {
-    if (tab_->interstitial_page()->action_taken()) {
+    if (tab_->interstitial_page()->action_taken_ != NO_ACTION) {
       tab_->interstitial_page()->Hide();
     } else {
       // If we are currently showing an interstitial page for which we created
@@ -221,9 +227,12 @@ void InterstitialPage::Show() {
 
 void InterstitialPage::Hide() {
   RenderWidgetHostView* old_view = tab_->render_view_host()->view();
-  if (old_view) {
+  if (old_view && !old_view->IsShowing()) {
     // Show the original RVH since we're going away.  Note it might not exist if
     // the renderer crashed while the interstitial was showing.
+    // Note that it is important that we don't call Show() if the view is
+    // already showing. That would result in bad things (unparented HWND on
+    // Windows for example) happening.
     old_view->Show();
   }
 
@@ -242,7 +251,7 @@ void InterstitialPage::Hide() {
   NavigationEntry* entry = tab_->controller().GetActiveEntry();
   if (!new_navigation_ && should_revert_tab_title_) {
     entry->set_title(WideToUTF16Hack(original_tab_title_));
-    tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
+    tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
   }
   delete this;
 }
@@ -262,11 +271,10 @@ void InterstitialPage::Observe(NotificationType type,
       // request won't be blocked if the same RenderViewHost was used for the
       // new navigation.
       Disable();
-      DCHECK(!resource_dispatcher_host_notified_);
       TakeActionOnResourceDispatcher(CANCEL);
       break;
     case NotificationType::RENDER_WIDGET_HOST_DESTROYED:
-      if (!action_taken_) {
+      if (action_taken_ == NO_ACTION) {
         // The RenderViewHost is being destroyed (as part of the tab being
         // closed), make sure we clear the blocked requests.
         RenderViewHost* rvh = Source<RenderViewHost>(source).ptr();
@@ -277,7 +285,7 @@ void InterstitialPage::Observe(NotificationType type,
       break;
     case NotificationType::TAB_CONTENTS_DESTROYED:
     case NotificationType::NAV_ENTRY_COMMITTED:
-      if (!action_taken_) {
+      if (action_taken_ == NO_ACTION) {
         // We are navigating away from the interstitial or closing a tab with an
         // interstitial.  Default to DontProceed(). We don't just call Hide as
         // subclasses will almost certainly override DontProceed to do some work
@@ -369,7 +377,7 @@ void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
     should_revert_tab_title_ = true;
   }
   entry->set_title(WideToUTF16Hack(title));
-  tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
+  tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
 }
 
 void InterstitialPage::DomOperationResponse(const std::string& json_string,
@@ -381,7 +389,7 @@ void InterstitialPage::DomOperationResponse(const std::string& json_string,
 RenderViewHost* InterstitialPage::CreateRenderViewHost() {
   RenderViewHost* render_view_host = new RenderViewHost(
       SiteInstance::CreateSiteInstance(tab()->profile()),
-      this, MSG_ROUTING_NONE);
+      this, MSG_ROUTING_NONE, kInvalidSessionStorageNamespaceId);
   return render_view_host;
 }
 
@@ -391,7 +399,13 @@ TabContentsView* InterstitialPage::CreateTabContentsView() {
       tab_contents_view->CreateViewForWidget(render_view_host_);
   render_view_host_->set_view(view);
   render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
-  render_view_host_->CreateRenderView();
+
+  scoped_refptr<URLRequestContextGetter> request_context =
+      tab()->request_context();
+  if (!request_context.get())
+    request_context = tab()->profile()->GetRequestContext();
+
+  render_view_host_->CreateRenderView(request_context.get());
   view->SetSize(tab_contents_view->GetContainerSize());
   // Don't show the interstitial until we have navigated to it.
   view->Hide();
@@ -399,12 +413,12 @@ TabContentsView* InterstitialPage::CreateTabContentsView() {
 }
 
 void InterstitialPage::Proceed() {
-  if (action_taken_) {
+  if (action_taken_ != NO_ACTION) {
     NOTREACHED();
     return;
   }
   Disable();
-  action_taken_ = true;
+  action_taken_ = PROCEED_ACTION;
 
   // Resumes the throbber.
   tab_->SetIsLoading(true, NULL);
@@ -427,12 +441,10 @@ void InterstitialPage::Proceed() {
 }
 
 void InterstitialPage::DontProceed() {
-  if (action_taken_) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(action_taken_ != DONT_PROCEED_ACTION);
+
   Disable();
-  action_taken_ = true;
+  action_taken_ = DONT_PROCEED_ACTION;
 
   // If this is a new navigation, we are returning to the original page, so we
   // resume blocked requests for it.  If it is not a new navigation, then it
@@ -456,14 +468,28 @@ void InterstitialPage::DontProceed() {
   // WARNING: we are now deleted!
 }
 
+void InterstitialPage::CancelForNavigation() {
+  // The user is trying to navigate away.  We should unblock the renderer and
+  // disable the interstitial, but keep it visible until the navigation
+  // completes.
+  Disable();
+  // If this interstitial was shown for a new navigation, allow any navigations
+  // on the original page to resume (e.g., subresource requests, XHRs, etc).
+  // Otherwise, cancel the pending, possibly dangerous navigations.
+  if (new_navigation_)
+    TakeActionOnResourceDispatcher(RESUME);
+  else
+    TakeActionOnResourceDispatcher(CANCEL);
+}
+
 void InterstitialPage::SetSize(const gfx::Size& size) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
   // When a tab is closed, we might be resized after our view was NULLed
   // (typically if there was an info-bar).
   if (render_view_host_->view())
     render_view_host_->view()->SetSize(size);
 #else
-  // TODO(port): do Mac or Linux need to SetSize?
+  // TODO(port): Does Mac need to SetSize?
   NOTIMPLEMENTED();
 #endif
 }
@@ -483,7 +509,7 @@ void InterstitialPage::Disable() {
 
 void InterstitialPage::TakeActionOnResourceDispatcher(
     ResourceRequestAction action) {
-  DCHECK(MessageLoop::current() == ui_loop_) <<
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI)) <<
       "TakeActionOnResourceDispatcher should be called on the main thread.";
 
   if (action == CANCEL || action == RESUME) {
@@ -495,16 +521,16 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   // The tab might not have a render_view_host if it was closed (in which case,
   // we have taken care of the blocked requests when processing
   // NOTIFY_RENDER_WIDGET_HOST_DESTROYED.
-  // Also we need to test there is an IO thread, as when unit-tests we don't
-  // have one.
+  // Also we need to test there is a ResourceDispatcherHost, as when unit-tests
+  // we don't have one.
   RenderViewHost* rvh = RenderViewHost::FromID(original_child_id_,
                                                original_rvh_id_);
-  if (rvh && g_browser_process->io_thread()) {
-    g_browser_process->io_thread()->message_loop()->PostTask(
-        FROM_HERE, new ResourceRequestTask(original_child_id_,
-                                           original_rvh_id_,
-                                           action));
-  }
+  if (!rvh || !g_browser_process->resource_dispatcher_host())
+    return;
+
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      new ResourceRequestTask(original_child_id_, original_rvh_id_, action));
 }
 
 // static
@@ -536,13 +562,13 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::CreateNewWindow(
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::CreateNewWidget(
-    int route_id, bool activatable) {
+    int route_id, WebKit::WebPopupType popup_type) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::ShowCreatedWindow(
     int route_id, WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos, bool user_gesture, const GURL& creator_url) {
+    const gfx::Rect& initial_pos, bool user_gesture) {
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
 
@@ -557,7 +583,9 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::ShowContextMenu(
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::StartDragging(
     const WebDropData& drop_data,
-    WebDragOperationsMask allowed_operations) {
+    WebDragOperationsMask allowed_operations,
+    const SkBitmap& image,
+    const gfx::Point& image_offset) {
   NOTREACHED() << "InterstitialPage does not support dragging yet.";
 }
 
@@ -579,8 +607,11 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
 }
 
-bool InterstitialPage::InterstitialPageRVHViewDelegate::IsReservedAccelerator(
-    const NativeWebKeyboardEvent& event) {
+bool InterstitialPage::InterstitialPageRVHViewDelegate::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
+    return interstitial_page_->tab()->GetViewDelegate()->PreHandleKeyboardEvent(
+        event, is_keyboard_shortcut);
   return false;
 }
 

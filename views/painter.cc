@@ -4,10 +4,10 @@
 
 #include "views/painter.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/insets.h"
 #include "app/resource_bundle.h"
 #include "base/logging.h"
+#include "gfx/canvas.h"
+#include "gfx/insets.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 
@@ -51,15 +51,18 @@ class GradientPainter : public Painter {
   bool horizontal_;
   SkColor colors_[2];
 
-  DISALLOW_EVIL_CONSTRUCTORS(GradientPainter);
+  DISALLOW_COPY_AND_ASSIGN(GradientPainter);
 };
 
 
 class ImagePainter : public Painter {
  public:
-  ImagePainter(const SkBitmap& image, const gfx::Insets& insets)
+  ImagePainter(const SkBitmap& image,
+               const gfx::Insets& insets,
+               bool paint_center)
       : image_(image),
-        insets_(insets) {
+        insets_(insets),
+        paint_center_(paint_center) {
     DCHECK(image.width() > insets.width() &&
            image.height() > insets.height());
   }
@@ -116,11 +119,21 @@ class ImagePainter : public Painter {
         image_,
         0, insets_.top(), insets_.left(), image_.height() - insets_.height(),
         0, insets_.top(), insets_.left(), h - insets_.height(), true);
+    // Center.
+    if (paint_center_) {
+      canvas->DrawBitmapInt(
+          image_,
+          insets_.top(), insets_.left(),
+          image_.width() - insets_.width(), image_.height() - insets_.height(),
+          insets_.left(), insets_.top(),
+          w - insets_.width(), h - insets_.height(), true);
+    }
   }
 
  private:
   const SkBitmap image_;
   const gfx::Insets insets_;
+  bool paint_center_;
 
   DISALLOW_COPY_AND_ASSIGN(ImagePainter);
 };
@@ -151,8 +164,9 @@ Painter* Painter::CreateVerticalGradient(SkColor c1, SkColor c2) {
 
 // static
 Painter* Painter::CreateImagePainter(const SkBitmap& image,
-                                     const gfx::Insets& insets) {
-  return new ImagePainter(image, insets);
+                                     const gfx::Insets& insets,
+                                     bool paint_center) {
+  return new ImagePainter(image, insets, paint_center);
 }
 
 HorizontalPainter::HorizontalPainter(const int image_resource_names[]) {

@@ -9,108 +9,64 @@
 #include "base/basictypes.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/engine/syncproto.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
 
 using std::vector;
 
 namespace browser_sync {
 
+using sessions::SyncSession;
+using sessions::StatusController;
+
 ProcessUpdatesCommand::ProcessUpdatesCommand() {}
 ProcessUpdatesCommand::~ProcessUpdatesCommand() {}
 
-void ProcessUpdatesCommand::ModelChangingExecuteImpl(SyncerSession* session) {
-  syncable::ScopedDirLookup dir(session->dirman(), session->account_name());
+bool ProcessUpdatesCommand::ModelNeutralExecuteImpl(SyncSession* session) {
+  const GetUpdatesResponse& updates =
+      session->status_controller()->updates_response().get_updates();
+  const int update_count = updates.entries_size();
+
+  // Don't bother processing updates if there were none.
+  return update_count != 0;
+}
+
+void ProcessUpdatesCommand::ModelChangingExecuteImpl(SyncSession* session) {
+  syncable::ScopedDirLookup dir(session->context()->directory_manager(),
+                                session->context()->account_name());
   if (!dir.good()) {
     LOG(ERROR) << "Scoped dir lookup failed!";
     return;
   }
-  SyncerStatus status(session);
 
-  const GetUpdatesResponse updates = session->update_response().get_updates();
-  const int update_count = updates.entries_size();
+  StatusController* status = session->status_controller();
 
-  LOG(INFO) << "Get updates from ts " << dir->last_sync_timestamp() <<
-    " returned " << update_count << " updates.";
-
-  if (updates.has_newest_timestamp()) {
-    int64 newest_timestamp = updates.newest_timestamp();
-    LOG(INFO) << "Newest Timestamp:" << newest_timestamp;
-    status.set_servers_latest_timestamp(newest_timestamp);
-  }
-
-  int64 new_timestamp = 0;
-  if (updates.has_new_timestamp()) {
-    new_timestamp = updates.new_timestamp();
-    LOG(INFO) << "Get Updates got new timestamp: " << new_timestamp;
-    if (0 == update_count) {
-      if (new_timestamp > dir->last_sync_timestamp()) {
-        dir->set_last_sync_timestamp(new_timestamp);
-        session->set_timestamp_dirty();
-      }
-      return;
-    }
-  }
-
-  if (0 == status.servers_latest_timestamp()) {
-    // Hack since new server never gives us the server's latest timestamp. But
-    // if a getupdates returns zero, then we know we are up to date.
-    status.set_servers_latest_timestamp(status.current_sync_timestamp());
-  }
-  // If we have updates that are ALL supposed to be skipped, we don't want to
-  // get them again.  In fact, the account's final updates are all supposed to
-  // be skipped and we DON'T step past them, we will sync forever.
-  int64 latest_skip_timestamp = 0;
-  bool any_non_skip_results = false;
-  vector<VerifiedUpdate>::iterator it;
-  for (it = session->VerifiedUpdatesBegin();
-       it < session->VerifiedUpdatesEnd();
+  const sessions::UpdateProgress& progress(status->update_progress());
+  vector<sessions::VerifiedUpdate>::const_iterator it;
+  for (it = progress.VerifiedUpdatesBegin();
+       it != progress.VerifiedUpdatesEnd();
        ++it) {
-    const sync_pb::SyncEntity update = it->second;
-
-    any_non_skip_results = (it->first != VERIFY_SKIP);
-    if (!any_non_skip_results) {
-      // ALL updates were to be skipped, including this one.
-      if (update.sync_timestamp() > latest_skip_timestamp) {
-        latest_skip_timestamp = update.sync_timestamp();
-      }
-    } else {
-      latest_skip_timestamp = 0;
-    }
+    const sync_pb::SyncEntity& update = it->second;
 
     if (it->first != VERIFY_SUCCESS && it->first != VERIFY_UNDELETE)
       continue;
     switch (ProcessUpdate(dir, update)) {
       case SUCCESS_PROCESSED:
       case SUCCESS_STORED:
-        // We can update the timestamp because we store the update even if we
-        // can't apply it now.
-        if (update.sync_timestamp() > new_timestamp)
-          new_timestamp = update.sync_timestamp();
         break;
       default:
         NOTREACHED();
         break;
     }
-
   }
 
-  if (latest_skip_timestamp > new_timestamp)
-    new_timestamp = latest_skip_timestamp;
+  status->set_num_consecutive_errors(0);
 
-  if (new_timestamp > dir->last_sync_timestamp()) {
-    dir->set_last_sync_timestamp(new_timestamp);
-    session->set_timestamp_dirty();
-  }
-
-  status.zero_consecutive_problem_get_updates();
-  status.zero_consecutive_errors();
-  status.set_current_sync_timestamp(dir->last_sync_timestamp());
-  status.set_syncing(true);
+  // TODO(nick): The following line makes no sense to me.
+  status->set_syncing(true);
   return;
 }
 
@@ -121,14 +77,14 @@ bool ReverifyEntry(syncable::WriteTransaction* trans, const SyncEntity& entry,
 
   const bool deleted = entry.has_deleted() && entry.deleted();
   const bool is_directory = entry.IsFolder();
-  const bool is_bookmark = entry.has_bookmarkdata();
+  const syncable::ModelType model_type = entry.GetModelType();
 
   return VERIFY_SUCCESS == SyncerUtil::VerifyUpdateConsistency(trans,
                                                                entry,
                                                                same_id,
                                                                deleted,
                                                                is_directory,
-                                                               is_bookmark);
+                                                               model_type);
 }
 }  // namespace
 
@@ -140,7 +96,7 @@ ServerUpdateProcessingResult ProcessUpdatesCommand::ProcessUpdate(
   const SyncEntity& entry = *static_cast<const SyncEntity*>(&pb_entry);
   using namespace syncable;
   syncable::Id id = entry.id();
-  SyncName name = SyncerProtoUtil::NameFromSyncEntity(entry);
+  const std::string name = SyncerProtoUtil::NameFromSyncEntity(entry);
 
   WriteTransaction trans(dir, SYNCER, __FILE__, __LINE__);
 
@@ -159,8 +115,12 @@ ServerUpdateProcessingResult ProcessUpdatesCommand::ProcessUpdate(
 
   if (update_entry.Get(SERVER_VERSION) == update_entry.Get(BASE_VERSION) &&
       !update_entry.Get(IS_UNSYNCED)) {
-      CHECK(SyncerUtil::ServerAndLocalEntriesMatch(
-          &update_entry)) << update_entry;
+      // It's largely OK if data doesn't match exactly since a future update
+      // will just clobber the data. Conflict resolution will overwrite and
+      // take one side as the winner and does not try to merge, so strict
+      // equality isn't necessary.
+      LOG_IF(ERROR, !SyncerUtil::ServerAndLocalEntriesMatch(&update_entry))
+          << update_entry;
   }
   return SUCCESS_PROCESSED;
 }

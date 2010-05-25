@@ -1,21 +1,26 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/most_visited_handler.h"
 
+#include <set>
+
 #include "app/l10n_util.h"
+#include "base/callback.h"
 #include "base/md5.h"
-#include "base/string_util.h"
+#include "base/singleton.h"
+#include "base/utf_string_conversions.h"
 #include "base/thread.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/dom_ui/dom_ui_thumbnail_source.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_source.h"
@@ -55,19 +60,22 @@ DOMMessageHandler* MostVisitedHandler::Attach(DOMUI* dom_ui) {
       GetMutableDictionary(prefs::kNTPMostVisitedURLsBlacklist);
   pinned_urls_ = dom_ui->GetProfile()->GetPrefs()->
       GetMutableDictionary(prefs::kNTPMostVisitedPinnedURLs);
-  // Set up our sources for thumbnail and favicon data. Since we may be in
-  // testing mode with no I/O thread, only add our handler when an I/O thread
-  // exists. Ownership is passed to the ChromeURLDataManager.
-  if (g_browser_process->io_thread()) {
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(&chrome_url_data_manager,
-                          &ChromeURLDataManager::AddDataSource,
-                          new DOMUIThumbnailSource(dom_ui->GetProfile())));
-    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(&chrome_url_data_manager,
-                          &ChromeURLDataManager::AddDataSource,
-                          new DOMUIFavIconSource(dom_ui->GetProfile())));
-  }
+  // Set up our sources for thumbnail and favicon data.
+  DOMUIThumbnailSource* thumbnail_src =
+      new DOMUIThumbnailSource(dom_ui->GetProfile());
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+                        &ChromeURLDataManager::AddDataSource,
+                        make_scoped_refptr(thumbnail_src)));
+
+  DOMUIFavIconSource* favicon_src =
+      new DOMUIFavIconSource(dom_ui->GetProfile());
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+                        &ChromeURLDataManager::AddDataSource,
+                        make_scoped_refptr(favicon_src)));
 
   // Get notifications when history is cleared.
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
@@ -123,7 +131,7 @@ void MostVisitedHandler::StartQueryForMostVisited() {
   // we'll be filtering-out the returned list with the blacklist URLs.
   // We do not subtract the number of pinned URLs we have because the
   // HistoryService does not know about those.
-  const int result_count = page_count + url_blacklist_->GetSize();
+  const int result_count = page_count + url_blacklist_->size();
   HistoryService* hs =
       dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
   // |hs| may be null during unit tests.
@@ -185,7 +193,7 @@ void MostVisitedHandler::HandleAddPinnedURL(const Value* value) {
   }
 
   const ListValue* list = static_cast<const ListValue*>(value);
-  DCHECK(list->GetSize() == 5) << "Wrong number of params to addPinnedURL";
+  DCHECK_EQ(5U, list->GetSize()) << "Wrong number of params to addPinnedURL";
   MostVisitedPage mvp;
   std::string tmp_string;
   int index;
@@ -227,12 +235,8 @@ void MostVisitedHandler::AddPinnedURL(const MostVisitedPage& page, int index) {
   DictionaryValue* new_value = new DictionaryValue();
   SetMostVisistedPage(new_value, page);
 
-  bool r = new_value->SetInteger(L"index", index);
-  DCHECK(r) << "Failed to set the index for a pinned URL from the NTP Most "
-            << "Visited.";
-
-  r = pinned_urls_->Set(GetDictionaryKeyForURL(page.url.spec()), new_value);
-  DCHECK(r) << "Failed to add pinned URL from the NTP Most Visited.";
+  new_value->SetInteger(L"index", index);
+  pinned_urls_->Set(GetDictionaryKeyForURL(page.url.spec()), new_value);
 
   // TODO(arv): Notify observers?
 
@@ -264,8 +268,8 @@ void MostVisitedHandler::RemovePinnedURL(const GURL& url) {
   // Don't call HandleGetMostVisited. Let the client call this as needed.
 }
 
-const bool MostVisitedHandler::GetPinnedURLAtIndex(const int index,
-    MostVisitedPage* page) {
+bool MostVisitedHandler::GetPinnedURLAtIndex(int index,
+                                             MostVisitedPage* page) {
   // This iterates over all the pinned URLs. It might seem like it is worth
   // having a map from the index to the item but the number of items is limited
   // to the number of items the most visited section is showing on the NTP so
@@ -273,7 +277,7 @@ const bool MostVisitedHandler::GetPinnedURLAtIndex(const int index,
   for (DictionaryValue::key_iterator it = pinned_urls_->begin_keys();
       it != pinned_urls_->end_keys(); ++it) {
     Value* value;
-    if (pinned_urls_->Get(*it, &value)) {
+    if (pinned_urls_->GetWithoutPathExpansion(*it, &value)) {
       if (!value->IsType(DictionaryValue::TYPE_DICTIONARY)) {
         NOTREACHED();
         return false;

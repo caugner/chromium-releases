@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,8 @@
 #include "base/logging.h"
 #include "base/singleton.h"
 #include "base/third_party/dmg_fp/dmg_fp.h"
+#include "base/utf_string_conversion_utils.h"
+#include "base/third_party/icu/icu_utf.h"
 
 namespace {
 
@@ -40,12 +42,12 @@ struct EmptyStrings {
 // Used by ReplaceStringPlaceholders to track the position in the string of
 // replaced parameters.
 struct ReplacementOffset {
-  ReplacementOffset(int parameter, size_t offset)
+  ReplacementOffset(uintptr_t parameter, size_t offset)
       : parameter(parameter),
         offset(offset) {}
 
   // Index of the parameter.
-  int parameter;
+  uintptr_t parameter;
 
   // Starting position in the string.
   size_t offset;
@@ -293,7 +295,6 @@ namespace base {
 
 bool IsWprintfFormatPortable(const wchar_t* format) {
   for (const wchar_t* position = format; *position != '\0'; ++position) {
-
     if (*position == '%') {
       bool in_specification = true;
       bool modifier_l = false;
@@ -322,7 +323,6 @@ bool IsWprintfFormatPortable(const wchar_t* format) {
         }
       }
     }
-
   }
 
   return true;
@@ -389,6 +389,47 @@ const char kWhitespaceASCII[] = {
   0x20,    // Space
   0
 };
+
+const char kUtf8ByteOrderMark[] = "\xEF\xBB\xBF";
+
+template<typename STR>
+bool RemoveCharsT(const STR& input,
+                  const typename STR::value_type remove_chars[],
+                  STR* output) {
+  bool removed = false;
+  size_t found;
+
+  *output = input;
+
+  found = output->find_first_of(remove_chars);
+  while (found != STR::npos) {
+    removed = true;
+    output->replace(found, 1, STR());
+    found = output->find_first_of(remove_chars, found);
+  }
+
+  return removed;
+}
+
+bool RemoveChars(const std::wstring& input,
+                 const wchar_t remove_chars[],
+                 std::wstring* output) {
+  return RemoveCharsT(input, remove_chars, output);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool RemoveChars(const string16& input,
+                 const char16 remove_chars[],
+                 string16* output) {
+  return RemoveCharsT(input, remove_chars, output);
+}
+#endif
+
+bool RemoveChars(const std::string& input,
+                 const char remove_chars[],
+                 std::string* output) {
+  return RemoveCharsT(input, remove_chars, output);
+}
 
 template<typename STR>
 TrimPositions TrimStringT(const STR& input,
@@ -529,6 +570,48 @@ std::string CollapseWhitespaceASCII(const std::string& text,
   return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
 }
 
+bool ContainsOnlyWhitespaceASCII(const std::string& str) {
+  for (std::string::const_iterator i(str.begin()); i != str.end(); ++i) {
+    if (!IsAsciiWhitespace(*i))
+      return false;
+  }
+  return true;
+}
+
+bool ContainsOnlyWhitespace(const string16& str) {
+  for (string16::const_iterator i(str.begin()); i != str.end(); ++i) {
+    if (!IsWhitespace(*i))
+      return false;
+  }
+  return true;
+}
+
+template<typename STR>
+static bool ContainsOnlyCharsT(const STR& input, const STR& characters) {
+  for (typename STR::const_iterator iter = input.begin();
+       iter != input.end(); ++iter) {
+    if (characters.find(*iter) == STR::npos)
+      return false;
+  }
+  return true;
+}
+
+bool ContainsOnlyChars(const std::wstring& input,
+                       const std::wstring& characters) {
+  return ContainsOnlyCharsT(input, characters);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool ContainsOnlyChars(const string16& input, const string16& characters) {
+  return ContainsOnlyCharsT(input, characters);
+}
+#endif
+
+bool ContainsOnlyChars(const std::string& input,
+                       const std::string& characters) {
+  return ContainsOnlyCharsT(input, characters);
+}
+
 std::string WideToASCII(const std::wstring& wide) {
   DCHECK(IsStringASCII(wide)) << wide;
   return std::string(wide.begin(), wide.end());
@@ -595,140 +678,18 @@ bool IsStringASCII(const base::StringPiece& str) {
   return DoIsStringASCII(str);
 }
 
-// Helper functions that determine whether the given character begins a
-// UTF-8 sequence of bytes with the given length. A character satisfies
-// "IsInUTF8Sequence" if it is anything but the first byte in a multi-byte
-// character.
-static inline bool IsBegin2ByteUTF8(int c) {
-  return (c & 0xE0) == 0xC0;
-}
-static inline bool IsBegin3ByteUTF8(int c) {
-  return (c & 0xF0) == 0xE0;
-}
-static inline bool IsBegin4ByteUTF8(int c) {
-  return (c & 0xF8) == 0xF0;
-}
-static inline bool IsInUTF8Sequence(int c) {
-  return (c & 0xC0) == 0x80;
-}
+bool IsStringUTF8(const std::string& str) {
+  const char *src = str.data();
+  int32 src_len = static_cast<int32>(str.length());
+  int32 char_index = 0;
 
-// This function was copied from Mozilla, with modifications. The original code
-// was 'IsUTF8' in xpcom/string/src/nsReadableUtils.cpp. The license block for
-// this function is:
-//   This function subject to the Mozilla Public License Version
-//   1.1 (the "License"); you may not use this code except in compliance with
-//   the License. You may obtain a copy of the License at
-//   http://www.mozilla.org/MPL/
-//
-//   Software distributed under the License is distributed on an "AS IS" basis,
-//   WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
-//   for the specific language governing rights and limitations under the
-//   License.
-//
-//   The Original Code is mozilla.org code.
-//
-//   The Initial Developer of the Original Code is
-//   Netscape Communications Corporation.
-//   Portions created by the Initial Developer are Copyright (C) 2000
-//   the Initial Developer. All Rights Reserved.
-//
-//   Contributor(s):
-//     Scott Collins <scc@mozilla.org> (original author)
-//
-// This is a template so that it can be run on wide and 8-bit strings. We want
-// to run it on wide strings when we have input that we think may have
-// originally been UTF-8, but has been converted to wide characters because
-// that's what we (and Windows) use internally.
-template<typename CHAR>
-static bool IsStringUTF8T(const CHAR* str, int length) {
-  bool overlong = false;
-  bool surrogate = false;
-  bool nonchar = false;
-
-  // overlong byte upper bound
-  typename ToUnsigned<CHAR>::Unsigned olupper = 0;
-
-  // surrogate byte lower bound
-  typename ToUnsigned<CHAR>::Unsigned slower = 0;
-
-  // incremented when inside a multi-byte char to indicate how many bytes
-  // are left in the sequence
-  int positions_left = 0;
-
-  for (int i = 0; i < length; i++) {
-    // This whole function assume an unsigned value so force its conversion to
-    // an unsigned value.
-    typename ToUnsigned<CHAR>::Unsigned c = str[i];
-    if (c < 0x80)
-      continue;  // ASCII
-
-    if (c <= 0xC1) {
-      // [80-BF] where not expected, [C0-C1] for overlong
-      return false;
-    } else if (IsBegin2ByteUTF8(c)) {
-      positions_left = 1;
-    } else if (IsBegin3ByteUTF8(c)) {
-      positions_left = 2;
-      if (c == 0xE0) {
-        // to exclude E0[80-9F][80-BF]
-        overlong = true;
-        olupper = 0x9F;
-      } else if (c == 0xED) {
-        // ED[A0-BF][80-BF]: surrogate codepoint
-        surrogate = true;
-        slower = 0xA0;
-      } else if (c == 0xEF) {
-        // EF BF [BE-BF] : non-character
-        // TODO(jungshik): EF B7 [90-AF] should be checked as well.
-        nonchar = true;
-      }
-    } else if (c <= 0xF4) {
-      positions_left = 3;
-      nonchar = true;
-      if (c == 0xF0) {
-        // to exclude F0[80-8F][80-BF]{2}
-        overlong = true;
-        olupper = 0x8F;
-      } else if (c == 0xF4) {
-        // to exclude F4[90-BF][80-BF]
-        // actually not surrogates but codepoints beyond 0x10FFFF
-        surrogate = true;
-        slower = 0x90;
-      }
-    } else {
-      return false;
-    }
-
-    // eat the rest of this multi-byte character
-    while (positions_left) {
-      positions_left--;
-      i++;
-      c = str[i];
-      if (!c)
-        return false;  // end of string but not end of character sequence
-
-      // non-character : EF BF [BE-BF] or F[0-7] [89AB]F BF [BE-BF]
-      if (nonchar && ((!positions_left && c < 0xBE) ||
-                      (positions_left == 1 && c != 0xBF) ||
-                      (positions_left == 2 && 0x0F != (0x0F & c) ))) {
-        nonchar = false;
-      }
-      if (!IsInUTF8Sequence(c) || (overlong && c <= olupper) ||
-          (surrogate && slower <= c) || (nonchar && !positions_left) ) {
-        return false;
-      }
-      overlong = surrogate = false;
-    }
+  while (char_index < src_len) {
+    int32 code_point;
+    CBU8_NEXT(src, char_index, src_len, code_point);
+    if (!base::IsValidCharacter(code_point))
+       return false;
   }
   return true;
-}
-
-bool IsStringUTF8(const std::string& str) {
-  return IsStringUTF8T(str.data(), str.length());
-}
-
-bool IsStringWideUTF8(const std::wstring& str) {
-  return IsStringUTF8T(str.data(), str.length());
 }
 
 template<typename Iter>
@@ -814,9 +775,9 @@ bool StartsWithASCII(const std::string& str,
 
 template <typename STR>
 bool StartsWithT(const STR& str, const STR& search, bool case_sensitive) {
-  if (case_sensitive)
+  if (case_sensitive) {
     return str.compare(0, search.length(), search) == 0;
-  else {
+  } else {
     if (search.size() > str.size())
       return false;
     return std::equal(search.begin(), search.end(), str.begin(),
@@ -851,6 +812,11 @@ bool EndsWithT(const STR& str, const STR& search, bool case_sensitive) {
   }
 }
 
+bool EndsWith(const std::string& str, const std::string& search,
+              bool case_sensitive) {
+  return EndsWithT(str, search, case_sensitive);
+}
+
 bool EndsWith(const std::wstring& str, const std::wstring& search,
               bool case_sensitive) {
   return EndsWithT(str, search, case_sensitive);
@@ -869,9 +835,9 @@ DataUnits GetByteDisplayUnits(int64 bytes) {
   // This must match the DataUnits enum.
   static const int64 kUnitThresholds[] = {
     0,              // DATA_UNITS_BYTE,
-    3*1024,         // DATA_UNITS_KILOBYTE,
-    2*1024*1024,    // DATA_UNITS_MEGABYTE,
-    1024*1024*1024  // DATA_UNITS_GIGABYTE,
+    3*1024,         // DATA_UNITS_KIBIBYTE,
+    2*1024*1024,    // DATA_UNITS_MEBIBYTE,
+    1024*1024*1024  // DATA_UNITS_GIBIBYTE,
   };
 
   if (bytes < 0) {
@@ -885,7 +851,7 @@ DataUnits GetByteDisplayUnits(int64 bytes) {
       break;
   }
 
-  DCHECK(unit_index >= DATA_UNITS_BYTE && unit_index <= DATA_UNITS_GIGABYTE);
+  DCHECK(unit_index >= DATA_UNITS_BYTE && unit_index <= DATA_UNITS_GIBIBYTE);
   return DataUnits(unit_index);
 }
 
@@ -914,7 +880,7 @@ std::wstring FormatBytesInternal(int64 bytes,
     return std::wstring();
   }
 
-  DCHECK(units >= DATA_UNITS_BYTE && units <= DATA_UNITS_GIGABYTE);
+  DCHECK(units >= DATA_UNITS_BYTE && units <= DATA_UNITS_GIBIBYTE);
 
   // Put the quantity in the right units.
   double unit_amount = static_cast<double>(bytes);
@@ -1098,7 +1064,6 @@ namespace {
 
 template <typename STR, typename INT, typename UINT, bool NEG>
 struct IntToStringT {
-
   // This is to avoid a compiler warning about unary minus on unsigned type.
   // For example, say you had the following code:
   //   template <typename INT>
@@ -1123,6 +1088,24 @@ struct IntToStringT {
     }
   };
 
+  // This set of templates is very similar to the above templates, but
+  // for testing whether an integer is negative.
+  template <typename INT2, bool NEG2>
+  struct TestNegT { };
+  template <typename INT2>
+  struct TestNegT<INT2, false> {
+    static bool TestNeg(INT2 value) {
+      // value is unsigned, and can never be negative.
+      return false;
+    }
+  };
+  template <typename INT2>
+  struct TestNegT<INT2, true> {
+    static bool TestNeg(INT2 value) {
+      return value < 0;
+    }
+  };
+
   static STR IntToString(INT value) {
     // log10(2) ~= 0.3 bytes needed per bit or per byte log10(2**8) ~= 2.4.
     // So round up to allocate 3 output characters per byte, plus 1 for '-'.
@@ -1132,7 +1115,7 @@ struct IntToStringT {
     // then return the substr of what we ended up using.
     STR outbuf(kOutputBufSize, 0);
 
-    bool is_neg = value < 0;
+    bool is_neg = TestNegT<INT, NEG>::TestNeg(value);
     // Even though is_neg will never be true when INT is parameterized as
     // unsigned, even the presence of the unary operation causes a warning.
     UINT res = ToUnsignedT<INT, UINT, NEG>::ToUnsigned(value);
@@ -1238,6 +1221,12 @@ std::wstring StringPrintf(const wchar_t* format, ...) {
   return result;
 }
 
+std::string StringPrintV(const char* format, va_list ap) {
+  std::string result;
+  StringAppendV(&result, format, ap);
+  return result;
+}
+
 const std::string& SStringPrintf(std::string* dst, const char* format, ...) {
   va_list ap;
   va_start(ap, format);
@@ -1335,6 +1324,95 @@ void SplitStringDontTrim(const std::string& str,
   SplitStringT(str, s, false, r);
 }
 
+template <typename STR>
+static void SplitStringUsingSubstrT(const STR& str,
+                                    const STR& s,
+                                    std::vector<STR>* r) {
+  typename STR::size_type begin_index = 0;
+  while (true) {
+    const typename STR::size_type end_index = str.find(s, begin_index);
+    if (end_index == STR::npos) {
+      const STR term = str.substr(begin_index);
+      STR tmp;
+      TrimWhitespace(term, TRIM_ALL, &tmp);
+      r->push_back(tmp);
+      return;
+    }
+    const STR term = str.substr(begin_index, end_index - begin_index);
+    STR tmp;
+    TrimWhitespace(term, TRIM_ALL, &tmp);
+    r->push_back(tmp);
+    begin_index = end_index + s.size();
+  }
+}
+
+void SplitStringUsingSubstr(const string16& str,
+                            const string16& s,
+                            std::vector<string16>* r) {
+  SplitStringUsingSubstrT(str, s, r);
+}
+
+void SplitStringUsingSubstr(const std::string& str,
+                            const std::string& s,
+                            std::vector<std::string>* r) {
+  SplitStringUsingSubstrT(str, s, r);
+}
+
+std::vector<string16> SplitStringUsingSubstr(const string16& str,
+                                             const string16& s) {
+  std::vector<string16> result;
+  SplitStringUsingSubstr(str, s, &result);
+  return result;
+}
+
+std::vector<std::string> SplitStringUsingSubstr(const std::string& str,
+                                                const std::string& s) {
+  std::vector<std::string> result;
+  SplitStringUsingSubstr(str, s, &result);
+  return result;
+}
+
+template<typename STR>
+static size_t TokenizeT(const STR& str,
+                        const STR& delimiters,
+                        std::vector<STR>* tokens) {
+  tokens->clear();
+
+  typename STR::size_type start = str.find_first_not_of(delimiters);
+  while (start != STR::npos) {
+    typename STR::size_type end = str.find_first_of(delimiters, start + 1);
+    if (end == STR::npos) {
+      tokens->push_back(str.substr(start));
+      break;
+    } else {
+      tokens->push_back(str.substr(start, end - start));
+      start = str.find_first_not_of(delimiters, end + 1);
+    }
+  }
+
+  return tokens->size();
+}
+
+size_t Tokenize(const std::wstring& str,
+                const std::wstring& delimiters,
+                std::vector<std::wstring>* tokens) {
+  return TokenizeT(str, delimiters, tokens);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+size_t Tokenize(const string16& str,
+                const string16& delimiters,
+                std::vector<string16>* tokens) {
+  return TokenizeT(str, delimiters, tokens);
+}
+#endif
+
+size_t Tokenize(const std::string& str,
+                const std::string& delimiters,
+                std::vector<std::string>* tokens) {
+  return TokenizeT(str, delimiters, tokens);
+}
+
 template<typename STR>
 static STR JoinStringT(const std::vector<STR>& parts,
                        typename STR::value_type sep) {
@@ -1357,7 +1435,7 @@ std::string JoinString(const std::vector<std::string>& parts, char sep) {
 }
 
 #if !defined(WCHAR_T_IS_UTF16)
-string16 JoinString(const std::vector<string16>& parts, char sep) {
+string16 JoinString(const std::vector<string16>& parts, char16 sep) {
   return JoinStringT(parts, sep);
 }
 #endif
@@ -1375,7 +1453,7 @@ void SplitStringAlongWhitespaceT(const STR& str, std::vector<STR>* result) {
   bool last_was_ws = false;
   size_t last_non_ws_start = 0;
   for (size_t i = 0; i < length; ++i) {
-    switch(str[i]) {
+    switch (str[i]) {
       // HTML 5 defines whitespace as: space, tab, LF, line tab, FF, or CR.
       case L' ':
       case L'\t':
@@ -1423,25 +1501,23 @@ void SplitStringAlongWhitespace(const std::string& str,
   SplitStringAlongWhitespaceT(str, result);
 }
 
-template<class StringType>
-StringType DoReplaceStringPlaceholders(const StringType& format_string,
-                                       const std::vector<StringType>& subst,
-                                       std::vector<size_t>* offsets) {
-  int substitutions = subst.size();
+template<class FormatStringType, class OutStringType>
+OutStringType DoReplaceStringPlaceholders(const FormatStringType& format_string,
+    const std::vector<OutStringType>& subst, std::vector<size_t>* offsets) {
+  size_t substitutions = subst.size();
   DCHECK(substitutions < 10);
 
-  int sub_length = 0;
-  for (typename std::vector<StringType>::const_iterator iter = subst.begin();
-       iter != subst.end();
-       ++iter) {
+  size_t sub_length = 0;
+  for (typename std::vector<OutStringType>::const_iterator iter = subst.begin();
+       iter != subst.end(); ++iter) {
     sub_length += (*iter).length();
   }
 
-  StringType formatted;
+  OutStringType formatted;
   formatted.reserve(format_string.length() + sub_length);
 
   std::vector<ReplacementOffset> r_offsets;
-  for (typename StringType::const_iterator i = format_string.begin();
+  for (typename FormatStringType::const_iterator i = format_string.begin();
        i != format_string.end(); ++i) {
     if ('$' == *i) {
       if (i + 1 != format_string.end()) {
@@ -1450,7 +1526,7 @@ StringType DoReplaceStringPlaceholders(const StringType& format_string,
         if ('$' == *i) {
           formatted.push_back('$');
         } else {
-          int index = *i - '1';
+          uintptr_t index = *i - '1';
           if (offsets) {
             ReplacementOffset r_offset(index,
                 static_cast<int>(formatted.size()));
@@ -1482,7 +1558,7 @@ string16 ReplaceStringPlaceholders(const string16& format_string,
   return DoReplaceStringPlaceholders(format_string, subst, offsets);
 }
 
-std::string ReplaceStringPlaceholders(const std::string& format_string,
+std::string ReplaceStringPlaceholders(const base::StringPiece& format_string,
                                       const std::vector<std::string>& subst,
                                       std::vector<size_t>* offsets) {
   return DoReplaceStringPlaceholders(format_string, subst, offsets);
@@ -1548,7 +1624,7 @@ static void EatSameChars(const CHAR** pattern, const CHAR** string) {
 
 template <class CHAR>
 static void EatWildcard(const CHAR** pattern) {
-  while(**pattern) {
+  while (**pattern) {
     if (!IsWildcard(**pattern))
       return;
     (*pattern)++;
@@ -1556,7 +1632,11 @@ static void EatWildcard(const CHAR** pattern) {
 }
 
 template <class CHAR>
-static bool MatchPatternT(const CHAR* eval, const CHAR* pattern) {
+static bool MatchPatternT(const CHAR* eval, const CHAR* pattern, int depth) {
+  const int kMaxDepth = 16;
+  if (depth > kMaxDepth)
+    return false;
+
   // Eat all the matching chars.
   EatSameChars(&pattern, &eval);
 
@@ -1576,8 +1656,8 @@ static bool MatchPatternT(const CHAR* eval, const CHAR* pattern) {
   // If this is a question mark, then we need to compare the rest with
   // the current string or the string with one character eaten.
   if (pattern[0] == '?') {
-    if (MatchPatternT(eval, pattern + 1) ||
-        MatchPatternT(eval + 1, pattern + 1))
+    if (MatchPatternT(eval, pattern + 1, depth + 1) ||
+        MatchPatternT(eval + 1, pattern + 1, depth + 1))
       return true;
   }
 
@@ -1585,7 +1665,7 @@ static bool MatchPatternT(const CHAR* eval, const CHAR* pattern) {
   // of the pattern.
   if (pattern[0] == '*') {
     while (*eval) {
-      if (MatchPatternT(eval, pattern + 1))
+      if (MatchPatternT(eval, pattern + 1, depth + 1))
         return true;
       eval++;
     }
@@ -1603,12 +1683,13 @@ static bool MatchPatternT(const CHAR* eval, const CHAR* pattern) {
   return false;
 }
 
-bool MatchPattern(const std::wstring& eval, const std::wstring& pattern) {
-  return MatchPatternT(eval.c_str(), pattern.c_str());
+bool MatchPatternWide(const std::wstring& eval, const std::wstring& pattern) {
+  return MatchPatternT(eval.c_str(), pattern.c_str(), 0);
 }
 
-bool MatchPattern(const std::string& eval, const std::string& pattern) {
-  return MatchPatternT(eval.c_str(), pattern.c_str());
+bool MatchPatternASCII(const std::string& eval, const std::string& pattern) {
+  DCHECK(IsStringASCII(eval) && IsStringASCII(pattern));
+  return MatchPatternT(eval.c_str(), pattern.c_str(), 0);
 }
 
 bool StringToInt(const std::string& input, int* output) {
@@ -1653,10 +1734,10 @@ bool HexDigitToIntT(const CHAR digit, uint8* val) {
 template<typename STR>
 bool HexStringToBytesT(const STR& input, std::vector<uint8>* output) {
   DCHECK(output->size() == 0);
-  int count = input.size();
+  size_t count = input.size();
   if (count == 0 || (count % 2) != 0)
     return false;
-  for (int i = 0; i < count / 2; ++i) {
+  for (uintptr_t i = 0; i < count / 2; ++i) {
     uint8 msb = 0;  // most significant 4 bits
     uint8 lsb = 0;  // least significant 4 bits
     if (!HexDigitToIntT(input[i * 2], &msb) ||

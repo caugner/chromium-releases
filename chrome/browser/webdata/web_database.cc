@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,33 @@
 
 #include <algorithm>
 #include <limits>
-#include <vector>
+#include <set>
+#include <string>
 
-#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/sql/statement.h"
 #include "app/sql/transaction.h"
-#include "base/string_util.h"
-#include "base/time.h"
+#include "base/tuple.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/autofill/autofill_profile.h"
+#include "chrome/browser/autofill/autofill_type.h"
+#include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/webdata/autofill_change.h"
+#include "chrome/common/notification_service.h"
+#include "gfx/codec/png_codec.h"
 #include "webkit/glue/password_form.h"
 
 // Encryptor is the *wrong* way of doing things; we need to turn it into a
 // bottleneck to use the platform methods (e.g. Keychain on the Mac, Gnome
 // Keyring / KWallet on Linux). That's going to take a massive change in its
 // API... see:
-// http://code.google.com/p/chromium/issues/detail?id=8205 (Linux)
+//   http://code.google.com/p/chromium/issues/detail?id=25404 (Linux)
+// but the (possibly-now-unused) Mac encryptor stub code needs to die too.
 #include "chrome/browser/password_manager/encryptor.h"
 
+using webkit_glue::FormField;
 using webkit_glue::PasswordForm;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -85,6 +92,43 @@ using webkit_glue::PasswordForm;
 //   pair_id
 //   date_created
 //
+// autofill_profiles    This table contains AutoFill profile data added by the
+//                      user with the AutoFill dialog.  Most of the columns are
+//                      standard entries in a contact information form.
+//
+//   label              The label of the profile.  Presented to the user when
+//                      selecting profiles.
+//   unique_id          The unique ID of this profile.
+//   first_name
+//   middle_name
+//   last_name
+//   email
+//   company_name
+//   address_line_1
+//   address_line_2
+//   city
+//   state
+//   zipcode
+//   country
+//   phone
+//   fax
+//
+// credit_cards         This table contains credit card data added by the user
+//                      with the AutoFill dialog.  Most of the columns are
+//                      standard entries in a credit card form.
+//
+//   label              The label of the credit card.  Presented to the user
+//                      when selecting credit cards.
+//   unique_id          The unique ID of this credit card.
+//   name_on_card
+//   type
+//   card_number
+//   expiration_month
+//   expiration_year
+//   verification_code  The CVC/CVV/CVV2 card security code.
+//   billing_address    A foreign key into the autofill_profiles table.
+//   shipping_address   A foreign key into the autofill_profiles table.
+//
 // web_app_icons
 //   url         URL of the web app.
 //   width       Width of the image.
@@ -98,7 +142,6 @@ using webkit_glue::PasswordForm;
 ////////////////////////////////////////////////////////////////////////////////
 
 using base::Time;
-using webkit_glue::AutofillForm;
 
 // Current version number.
 static const int kCurrentVersionNumber = 22;
@@ -119,6 +162,10 @@ std::string JoinStrings(const std::string& separator,
   return result;
 }
 
+namespace {
+typedef std::vector<Tuple3<int64, string16, string16> > AutofillElementList;
+}
+
 WebDatabase::WebDatabase() {
 }
 
@@ -133,7 +180,12 @@ void WebDatabase::CommitTransaction() {
   db_.CommitTransaction();
 }
 
-bool WebDatabase::Init(const FilePath& db_name) {
+sql::InitStatus WebDatabase::Init(const FilePath& db_name) {
+  // When running in unit tests, there is already a NotificationService object.
+  // Since only one can exist at a time per thread, check first.
+  if (!NotificationService::current())
+    notification_service_.reset(new NotificationService);
+
   // Set the exceptional sqlite error handler.
   db_.set_error_delegate(GetErrorHandlerForWebDb());
 
@@ -151,33 +203,34 @@ bool WebDatabase::Init(const FilePath& db_name) {
   db_.set_exclusive_locking();
 
   if (!db_.Open(db_name))
-    return false;
+    return sql::INIT_FAILURE;
 
   // Initialize various tables
   sql::Transaction transaction(&db_);
   if (!transaction.Begin())
-    return false;
+    return sql::INIT_FAILURE;
 
   // Version check.
   if (!meta_table_.Init(&db_, kCurrentVersionNumber, kCompatibleVersionNumber))
-    return false;
+    return sql::INIT_FAILURE;
   if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
     LOG(WARNING) << "Web database is too new.";
-    return false;
+    return sql::INIT_TOO_NEW;
   }
 
   // Initialize the tables.
   if (!InitKeywordsTable() || !InitLoginsTable() || !InitWebAppIconsTable() ||
       !InitWebAppsTable() || !InitAutofillTable() ||
-      !InitAutofillDatesTable()) {
+      !InitAutofillDatesTable() || !InitAutoFillProfilesTable() ||
+      !InitCreditCardsTable()) {
     LOG(WARNING) << "Unable to initialize the web database.";
-    return false;
+    return sql::INIT_FAILURE;
   }
 
   // If the file on disk is an older database version, bring it up to date.
   MigrateOldVersionsAsNeeded();
 
-  return transaction.Commit();
+  return transaction.Commit() ? sql::INIT_OK : sql::INIT_FAILURE;
 }
 
 bool WebDatabase::SetWebAppImage(const GURL& url, const SkBitmap& image) {
@@ -210,12 +263,11 @@ bool WebDatabase::GetWebAppImages(const GURL& url,
   s.BindString(0, history::HistoryDatabase::GURLToDatabaseURL(url));
   while (s.Step()) {
     SkBitmap image;
-    std::vector<unsigned char> image_data;
     int col_bytes = s.ColumnByteLength(0);
     if (col_bytes > 0) {
-      image_data.resize(col_bytes);
-      memcpy(&image_data[0], s.ColumnBlob(0), col_bytes);
-      if (gfx::PNGCodec::Decode(&image_data, &image)) {
+      if (gfx::PNGCodec::Decode(
+              reinterpret_cast<const unsigned char*>(s.ColumnBlob(0)),
+              col_bytes, &image)) {
         images->push_back(image);
       } else {
         // Should only have valid image data in the db.
@@ -380,6 +432,61 @@ bool WebDatabase::InitAutofillDatesTable() {
     }
     if (!db_.Execute("CREATE INDEX autofill_dates_pair_id ON "
                      "autofill_dates (pair_id)")) {
+      NOTREACHED();
+      return false;
+    }
+  }
+  return true;
+}
+
+bool WebDatabase::InitAutoFillProfilesTable() {
+  if (!db_.DoesTableExist("autofill_profiles")) {
+    if (!db_.Execute("CREATE TABLE autofill_profiles ( "
+                     "label VARCHAR, "
+                     "unique_id INTEGER PRIMARY KEY, "
+                     "first_name VARCHAR, "
+                     "middle_name VARCHAR, "
+                     "last_name VARCHAR, "
+                     "email VARCHAR, "
+                     "company_name VARCHAR, "
+                     "address_line_1 VARCHAR, "
+                     "address_line_2 VARCHAR, "
+                     "city VARCHAR, "
+                     "state VARCHAR, "
+                     "zipcode VARCHAR, "
+                     "country VARCHAR, "
+                     "phone VARCHAR, "
+                     "fax VARCHAR)")) {
+      NOTREACHED();
+      return false;
+    }
+    if (!db_.Execute("CREATE INDEX autofill_profiles_label_index "
+                     "ON autofill_profiles (label)")) {
+      NOTREACHED();
+      return false;
+    }
+  }
+  return true;
+}
+
+bool WebDatabase::InitCreditCardsTable() {
+  if (!db_.DoesTableExist("credit_cards")) {
+    if (!db_.Execute("CREATE TABLE credit_cards ( "
+                     "label VARCHAR, "
+                     "unique_id INTEGER PRIMARY KEY, "
+                     "name_on_card VARCHAR, "
+                     "type VARCHAR, "
+                     "card_number VARCHAR, "
+                     "expiration_month INTEGER, "
+                     "expiration_year INTEGER, "
+                     "verification_code VARCHAR, "
+                     "billing_address VARCHAR, "
+                     "shipping_address VARCHAR)")) {
+      NOTREACHED();
+      return false;
+    }
+    if (!db_.Execute("CREATE INDEX credit_cards_label_index "
+                     "ON credit_cards (label)")) {
       NOTREACHED();
       return false;
     }
@@ -596,14 +703,13 @@ bool WebDatabase::AddLogin(const PasswordForm& form) {
   std::string encrypted_password;
   s.BindString(0, form.origin.spec());
   s.BindString(1, form.action.spec());
-  s.BindString(2, WideToUTF8(form.username_element));
-  s.BindString(3, WideToUTF8(form.username_value));
-  s.BindString(4, WideToUTF8(form.password_element));
-  Encryptor::EncryptString16(WideToUTF16Hack(form.password_value),
-                             &encrypted_password);
+  s.BindString(2, UTF16ToUTF8(form.username_element));
+  s.BindString(3, UTF16ToUTF8(form.username_value));
+  s.BindString(4, UTF16ToUTF8(form.password_element));
+  Encryptor::EncryptString16(form.password_value, &encrypted_password);
   s.BindBlob(5, encrypted_password.data(),
              static_cast<int>(encrypted_password.length()));
-  s.BindString(6, WideToUTF8(form.submit_element));
+  s.BindString(6, UTF16ToUTF8(form.submit_element));
   s.BindString(7, form.signon_realm);
   s.BindInt(8, form.ssl_valid);
   s.BindInt(9, form.preferred);
@@ -636,16 +742,15 @@ bool WebDatabase::UpdateLogin(const PasswordForm& form) {
 
   s.BindString(0, form.action.spec());
   std::string encrypted_password;
-  Encryptor::EncryptString16(WideToUTF16Hack(form.password_value),
-                             &encrypted_password);
+  Encryptor::EncryptString16(form.password_value, &encrypted_password);
   s.BindBlob(1, encrypted_password.data(),
              static_cast<int>(encrypted_password.length()));
   s.BindInt(2, form.ssl_valid);
   s.BindInt(3, form.preferred);
   s.BindString(4, form.origin.spec());
-  s.BindString(5, WideToUTF8(form.username_element));
-  s.BindString(6, WideToUTF8(form.username_value));
-  s.BindString(7, WideToUTF8(form.password_element));
+  s.BindString(5, UTF16ToUTF8(form.username_element));
+  s.BindString(6, UTF16ToUTF8(form.username_value));
+  s.BindString(7, UTF16ToUTF8(form.password_element));
   s.BindString(8, form.signon_realm);
 
   if (!s.Run()) {
@@ -670,10 +775,10 @@ bool WebDatabase::RemoveLogin(const PasswordForm& form) {
     return false;
   }
   s.BindString(0, form.origin.spec());
-  s.BindString(1, WideToUTF8(form.username_element));
-  s.BindString(2, WideToUTF8(form.username_value));
-  s.BindString(3, WideToUTF8(form.password_element));
-  s.BindString(4, WideToUTF8(form.submit_element));
+  s.BindString(1, UTF16ToUTF8(form.username_element));
+  s.BindString(2, UTF16ToUTF8(form.username_value));
+  s.BindString(3, UTF16ToUTF8(form.password_element));
+  s.BindString(4, UTF16ToUTF8(form.submit_element));
   s.BindString(5, form.signon_realm);
 
   if (!s.Run()) {
@@ -725,9 +830,9 @@ static void InitPasswordFormFromStatement(PasswordForm* form,
   form->origin = GURL(tmp);
   tmp = s->ColumnString(1);
   form->action = GURL(tmp);
-  form->username_element = UTF8ToWide(s->ColumnString(2));
-  form->username_value = UTF8ToWide(s->ColumnString(3));
-  form->password_element = UTF8ToWide(s->ColumnString(4));
+  form->username_element = UTF8ToUTF16(s->ColumnString(2));
+  form->username_value = UTF8ToUTF16(s->ColumnString(3));
+  form->password_element = UTF8ToUTF16(s->ColumnString(4));
 
   int encrypted_password_len = s->ColumnByteLength(5);
   std::string encrypted_password;
@@ -737,8 +842,8 @@ static void InitPasswordFormFromStatement(PasswordForm* form,
     Encryptor::DecryptString16(encrypted_password, &decrypted_password);
   }
 
-  form->password_value = UTF16ToWideHack(decrypted_password);
-  form->submit_element = UTF8ToWide(s->ColumnString(6));
+  form->password_value = decrypted_password;
+  form->submit_element = UTF8ToUTF16(s->ColumnString(6));
   tmp = s->ColumnString(7);
   form->signon_realm = tmp;
   form->ssl_valid = (s->ColumnInt(8) > 0);
@@ -804,14 +909,20 @@ bool WebDatabase::GetAllLogins(std::vector<PasswordForm*>* forms,
   return s.Succeeded();
 }
 
-bool WebDatabase::AddAutofillFormElements(
-    const std::vector<AutofillForm::Element>& elements) {
+bool WebDatabase::AddFormFieldValues(const std::vector<FormField>& elements,
+                                     std::vector<AutofillChange>* changes) {
+  return AddFormFieldValuesTime(elements, changes, Time::Now());
+}
+
+bool WebDatabase::AddFormFieldValuesTime(const std::vector<FormField>& elements,
+                                         std::vector<AutofillChange>* changes,
+                                         base::Time time) {
   bool result = true;
-  for (std::vector<AutofillForm::Element>::const_iterator
+  for (std::vector<FormField>::const_iterator
        itr = elements.begin();
        itr != elements.end();
        itr++) {
-    result = result && AddAutofillFormElement(*itr);
+    result = result && AddFormFieldValueTime(*itr, changes, time);
   }
   return result;
 }
@@ -839,7 +950,7 @@ bool WebDatabase::ClearAutofillEmptyValueElements() {
 }
 
 bool WebDatabase::GetIDAndCountOfFormElement(
-    const AutofillForm::Element& element,
+    const FormField& element,
     int64* pair_id,
     int* count) {
   sql::Statement s(db_.GetUniqueStatement(
@@ -850,8 +961,8 @@ bool WebDatabase::GetIDAndCountOfFormElement(
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(element.name));
-  s.BindString(1, UTF16ToUTF8(element.value));
+  s.BindString(0, UTF16ToUTF8(element.name()));
+  s.BindString(1, UTF16ToUTF8(element.value()));
 
   *count = 0;
 
@@ -880,7 +991,146 @@ bool WebDatabase::GetCountOfFormElement(int64 pair_id, int* count) {
   return false;
 }
 
-bool WebDatabase::InsertFormElement(const AutofillForm::Element& element,
+bool WebDatabase::GetAllAutofillEntries(std::vector<AutofillEntry>* entries) {
+  DCHECK(entries);
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT name, value, date_created FROM autofill a JOIN "
+      "autofill_dates ad ON a.pair_id=ad.pair_id"));
+
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  bool first_entry = true;
+  AutofillKey* current_key_ptr = NULL;
+  std::vector<base::Time>* timestamps_ptr = NULL;
+  string16 name, value;
+  base::Time time;
+  while (s.Step()) {
+    name = UTF8ToUTF16(s.ColumnString(0));
+    value = UTF8ToUTF16(s.ColumnString(1));
+    time = Time::FromTimeT(s.ColumnInt64(2));
+
+    if (first_entry) {
+      current_key_ptr = new AutofillKey(name, value);
+
+      timestamps_ptr = new std::vector<base::Time>;
+      timestamps_ptr->push_back(time);
+
+      first_entry = false;
+    } else {
+      // we've encountered the next entry
+      if (current_key_ptr->name().compare(name) != 0 ||
+          current_key_ptr->value().compare(value) != 0) {
+        AutofillEntry entry(*current_key_ptr, *timestamps_ptr);
+        entries->push_back(entry);
+
+        delete current_key_ptr;
+        delete timestamps_ptr;
+
+        current_key_ptr = new AutofillKey(name, value);
+        timestamps_ptr = new std::vector<base::Time>;
+      }
+      timestamps_ptr->push_back(time);
+    }
+  }
+  // If there is at least one result returned, first_entry will be false.
+  // For this case we need to do a final cleanup step.
+  if (!first_entry) {
+    AutofillEntry entry(*current_key_ptr, *timestamps_ptr);
+    entries->push_back(entry);
+    delete current_key_ptr;
+    delete timestamps_ptr;
+  }
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::GetAutofillTimestamps(const string16& name,
+                                        const string16& value,
+                                        std::vector<base::Time>* timestamps) {
+  DCHECK(timestamps);
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT date_created FROM autofill a JOIN "
+      "autofill_dates ad ON a.pair_id=ad.pair_id "
+      "WHERE a.name = ? AND a.value = ?"));
+
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindString(0, UTF16ToUTF8(name));
+  s.BindString(1, UTF16ToUTF8(value));
+  while (s.Step()) {
+    timestamps->push_back(Time::FromTimeT(s.ColumnInt64(0)));
+  }
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::UpdateAutofillEntries(
+    const std::vector<AutofillEntry>& entries) {
+  if (!entries.size())
+    return true;
+
+  // Remove all existing entries.
+  for (size_t i = 0; i < entries.size(); i++) {
+    std::string sql = "SELECT pair_id FROM autofill "
+                      "WHERE name = ? AND value = ?";
+    sql::Statement s(db_.GetUniqueStatement(sql.c_str()));
+    if (!s.is_valid()) {
+      NOTREACHED() << "Statement prepare failed";
+      return false;
+    }
+
+    s.BindString(0, UTF16ToUTF8(entries[i].key().name()));
+    s.BindString(1, UTF16ToUTF8(entries[i].key().value()));
+    if (s.Step()) {
+      if (!RemoveFormElementForID(s.ColumnInt64(0)))
+        return false;
+    }
+  }
+
+  // Insert all the supplied autofill entries.
+  for (size_t i = 0; i < entries.size(); i++) {
+    if (!InsertAutofillEntry(entries[i]))
+      return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::InsertAutofillEntry(const AutofillEntry& entry) {
+  std::string sql = "INSERT INTO autofill (name, value, value_lower, count) "
+                    "VALUES (?, ?, ?, ?)";
+  sql::Statement s(db_.GetUniqueStatement(sql.c_str()));
+  if (!s.is_valid()) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindString(0, UTF16ToUTF8(entry.key().name()));
+  s.BindString(1, UTF16ToUTF8(entry.key().value()));
+  s.BindString(2, UTF16ToUTF8(l10n_util::ToLower(entry.key().value())));
+  s.BindInt(3, entry.timestamps().size());
+
+  if (!s.Run()) {
+    NOTREACHED();
+    return false;
+  }
+
+  int64 pair_id = db_.GetLastInsertRowId();
+  for (size_t i = 0; i < entry.timestamps().size(); i++) {
+    if (!InsertPairIDAndDate(pair_id, entry.timestamps()[i]))
+      return false;
+  }
+
+  return true;
+}
+
+bool WebDatabase::InsertFormElement(const FormField& element,
                                     int64* pair_id) {
   sql::Statement s(db_.GetUniqueStatement(
       "INSERT INTO autofill (name, value, value_lower) VALUES (?,?,?)"));
@@ -889,9 +1139,9 @@ bool WebDatabase::InsertFormElement(const AutofillForm::Element& element,
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(element.name));
-  s.BindString(1, UTF16ToUTF8(element.value));
-  s.BindString(2, UTF16ToUTF8(l10n_util::ToLower(element.value)));
+  s.BindString(0, UTF16ToUTF8(element.name()));
+  s.BindString(1, UTF16ToUTF8(element.value()));
+  s.BindString(2, UTF16ToUTF8(l10n_util::ToLower(element.value())));
 
   if (!s.Run()) {
     NOTREACHED();
@@ -941,7 +1191,14 @@ bool WebDatabase::SetCountOfFormElement(int64 pair_id, int count) {
   return true;
 }
 
-bool WebDatabase::AddAutofillFormElement(const AutofillForm::Element& element) {
+bool WebDatabase::AddFormFieldValue(const FormField& element,
+                                    std::vector<AutofillChange>* changes) {
+  return AddFormFieldValueTime(element, changes, base::Time::Now());
+}
+
+bool WebDatabase::AddFormFieldValueTime(const FormField& element,
+                                        std::vector<AutofillChange>* changes,
+                                        base::Time time) {
   int count = 0;
   int64 pair_id;
 
@@ -951,8 +1208,18 @@ bool WebDatabase::AddAutofillFormElement(const AutofillForm::Element& element) {
   if (count == 0 && !InsertFormElement(element, &pair_id))
     return false;
 
-  return SetCountOfFormElement(pair_id, count + 1) &&
-      InsertPairIDAndDate(pair_id, Time::Now());
+  if (!SetCountOfFormElement(pair_id, count + 1))
+    return false;
+
+  if (!InsertPairIDAndDate(pair_id, time))
+    return false;
+
+  AutofillChange::Type change_type =
+      count == 0 ? AutofillChange::ADD : AutofillChange::UPDATE;
+  changes->push_back(
+      AutofillChange(change_type,
+                     AutofillKey(element.name(), element.value())));
+  return true;
 }
 
 bool WebDatabase::GetFormValuesForElementName(const string16& name,
@@ -1004,11 +1271,17 @@ bool WebDatabase::GetFormValuesForElementName(const string16& name,
   return s.Succeeded();
 }
 
-bool WebDatabase::RemoveFormElementsAddedBetween(base::Time delete_begin,
-                                                 base::Time delete_end) {
+bool WebDatabase::RemoveFormElementsAddedBetween(
+    base::Time delete_begin,
+    base::Time delete_end,
+    std::vector<AutofillChange>* changes) {
+  DCHECK(changes);
+  // Query for the pair_id, name, and value of all form elements that
+  // were used between the given times.
   sql::Statement s(db_.GetUniqueStatement(
-      "SELECT DISTINCT pair_id FROM autofill_dates "
-      "WHERE date_created >= ? AND date_created < ?"));
+      "SELECT DISTINCT a.pair_id, a.name, a.value "
+      "FROM autofill_dates ad JOIN autofill a ON ad.pair_id = a.pair_id "
+      "WHERE ad.date_created >= ? AND ad.date_created < ?"));
   if (!s) {
     NOTREACHED() << "Statement 1 prepare failed";
     return false;
@@ -1019,25 +1292,32 @@ bool WebDatabase::RemoveFormElementsAddedBetween(base::Time delete_begin,
                   std::numeric_limits<int64>::max() :
                   delete_end.ToTimeT());
 
-  std::vector<int64> pair_ids;
+  AutofillElementList elements;
   while (s.Step())
-    pair_ids.push_back(s.ColumnInt64(0));
+    elements.push_back(MakeTuple(s.ColumnInt64(0),
+                                 UTF8ToUTF16(s.ColumnString(1)),
+                                 UTF8ToUTF16(s.ColumnString(2))));
 
   if (!s.Succeeded()) {
     NOTREACHED();
     return false;
   }
 
-  for (std::vector<int64>::iterator itr = pair_ids.begin();
-       itr != pair_ids.end();
+  for (AutofillElementList::iterator itr = elements.begin();
+       itr != elements.end();
        itr++) {
     int how_many = 0;
-    if (!RemoveFormElementForTimeRange(*itr, delete_begin, delete_end,
+    if (!RemoveFormElementForTimeRange(itr->a, delete_begin, delete_end,
                                        &how_many)) {
       return false;
     }
-    if (!AddToCountOfFormElement(*itr, -how_many))
+    bool was_removed = false;
+    if (!AddToCountOfFormElement(itr->a, -how_many, &was_removed))
       return false;
+    AutofillChange::Type change_type =
+        was_removed ? AutofillChange::REMOVE : AutofillChange::UPDATE;
+    changes->push_back(AutofillChange(change_type,
+                                      AutofillKey(itr->b, itr->c)));
   }
 
   return true;
@@ -1083,8 +1363,334 @@ bool WebDatabase::RemoveFormElement(const string16& name,
   return false;
 }
 
-bool WebDatabase::AddToCountOfFormElement(int64 pair_id, int delta) {
+static void BindAutoFillProfileToStatement(const AutoFillProfile& profile,
+                                           sql::Statement* s) {
+  s->BindString(0, UTF16ToUTF8(profile.Label()));
+  s->BindInt(1, profile.unique_id());
+
+  string16 text = profile.GetFieldText(AutoFillType(NAME_FIRST));
+  s->BindString(2, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(NAME_MIDDLE));
+  s->BindString(3, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(NAME_LAST));
+  s->BindString(4, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(EMAIL_ADDRESS));
+  s->BindString(5, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(COMPANY_NAME));
+  s->BindString(6, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE1));
+  s->BindString(7, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE2));
+  s->BindString(8, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_CITY));
+  s->BindString(9, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_STATE));
+  s->BindString(10, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_ZIP));
+  s->BindString(11, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_COUNTRY));
+  s->BindString(12, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(PHONE_HOME_WHOLE_NUMBER));
+  s->BindString(13, UTF16ToUTF8(text));
+  text = profile.GetFieldText(AutoFillType(PHONE_FAX_WHOLE_NUMBER));
+  s->BindString(14, UTF16ToUTF8(text));
+}
+
+bool WebDatabase::AddAutoFillProfile(const AutoFillProfile& profile) {
+  sql::Statement s(db_.GetUniqueStatement(
+      "INSERT INTO autofill_profiles"
+      "(label, unique_id, first_name, middle_name, last_name, email,"
+      " company_name, address_line_1, address_line_2, city, state, zipcode,"
+      " country, phone, fax)"
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  BindAutoFillProfileToStatement(profile, &s);
+
+  if (!s.Run()) {
+    NOTREACHED();
+    return false;
+  }
+
+  return s.Succeeded();
+}
+
+static AutoFillProfile* AutoFillProfileFromStatement(const sql::Statement& s) {
+  AutoFillProfile* profile = new AutoFillProfile(
+      UTF8ToUTF16(s.ColumnString(0)), s.ColumnInt(1));
+  profile->SetInfo(AutoFillType(NAME_FIRST),
+                   UTF8ToUTF16(s.ColumnString(2)));
+  profile->SetInfo(AutoFillType(NAME_MIDDLE),
+                   UTF8ToUTF16(s.ColumnString(3)));
+  profile->SetInfo(AutoFillType(NAME_LAST),
+                   UTF8ToUTF16(s.ColumnString(4)));
+  profile->SetInfo(AutoFillType(EMAIL_ADDRESS),
+                   UTF8ToUTF16(s.ColumnString(5)));
+  profile->SetInfo(AutoFillType(COMPANY_NAME),
+                   UTF8ToUTF16(s.ColumnString(6)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_LINE1),
+                   UTF8ToUTF16(s.ColumnString(7)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_LINE2),
+                   UTF8ToUTF16(s.ColumnString(8)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_CITY),
+                   UTF8ToUTF16(s.ColumnString(9)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_STATE),
+                   UTF8ToUTF16(s.ColumnString(10)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_ZIP),
+                   UTF8ToUTF16(s.ColumnString(11)));
+  profile->SetInfo(AutoFillType(ADDRESS_HOME_COUNTRY),
+                   UTF8ToUTF16(s.ColumnString(12)));
+  profile->SetInfo(AutoFillType(PHONE_HOME_WHOLE_NUMBER),
+                   UTF8ToUTF16(s.ColumnString(13)));
+  profile->SetInfo(AutoFillType(PHONE_FAX_WHOLE_NUMBER),
+                   UTF8ToUTF16(s.ColumnString(14)));
+
+  return profile;
+}
+
+bool WebDatabase::GetAutoFillProfileForLabel(const string16& label,
+                                             AutoFillProfile** profile) {
+  DCHECK(profile);
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT * FROM autofill_profiles "
+      "WHERE label = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindString(0, UTF16ToUTF8(label));
+  if (!s.Step())
+    return false;
+
+  *profile = AutoFillProfileFromStatement(s);
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::GetAutoFillProfiles(
+    std::vector<AutoFillProfile*>* profiles) {
+  DCHECK(profiles);
+  profiles->clear();
+
+  sql::Statement s(db_.GetUniqueStatement("SELECT * FROM autofill_profiles"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  while (s.Step())
+    profiles->push_back(AutoFillProfileFromStatement(s));
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::UpdateAutoFillProfile(const AutoFillProfile& profile) {
+  DCHECK(profile.unique_id());
+  sql::Statement s(db_.GetUniqueStatement(
+      "UPDATE autofill_profiles "
+      "SET label=?, unique_id=?, first_name=?, middle_name=?, last_name=?, "
+      "    email=?, company_name=?, address_line_1=?, address_line_2=?, "
+      "    city=?, state=?, zipcode=?, country=?, phone=?, fax=? "
+      "WHERE unique_id=?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  BindAutoFillProfileToStatement(profile, &s);
+  s.BindInt(15, profile.unique_id());
+  return s.Run();
+}
+
+bool WebDatabase::RemoveAutoFillProfile(int profile_id) {
+  DCHECK_NE(0, profile_id);
+  sql::Statement s(db_.GetUniqueStatement(
+      "DELETE FROM autofill_profiles WHERE unique_id = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindInt(0, profile_id);
+  return s.Run();
+}
+
+bool WebDatabase::GetAutoFillProfileForID(int profile_id,
+    AutoFillProfile** profile) {
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT * FROM autofill_profiles "
+      "WHERE unique_id = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindInt(0, profile_id);
+  if (s.Step())
+    *profile = AutoFillProfileFromStatement(s);
+
+  return s.Succeeded();
+}
+
+static void BindCreditCardToStatement(const CreditCard& creditcard,
+                                      sql::Statement* s) {
+  s->BindString(0, UTF16ToUTF8(creditcard.Label()));
+  s->BindInt(1, creditcard.unique_id());
+
+  string16 text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_NAME));
+  s->BindString(2, UTF16ToUTF8(text));
+  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_TYPE));
+  s->BindString(3, UTF16ToUTF8(text));
+  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_NUMBER));
+  s->BindString(4, UTF16ToUTF8(text));
+  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_EXP_MONTH));
+  s->BindString(5, UTF16ToUTF8(text));
+  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+  s->BindString(6, UTF16ToUTF8(text));
+  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_VERIFICATION_CODE));
+  s->BindString(7, UTF16ToUTF8(text));
+  s->BindString(8, UTF16ToUTF8(creditcard.billing_address()));
+  s->BindString(9, UTF16ToUTF8(creditcard.shipping_address()));
+}
+
+bool WebDatabase::AddCreditCard(const CreditCard& creditcard) {
+  sql::Statement s(db_.GetUniqueStatement(
+      "INSERT INTO credit_cards"
+      "(label, unique_id, name_on_card, type, card_number, expiration_month,"
+      " expiration_year, verification_code, billing_address, shipping_address)"
+      "VALUES (?,?,?,?,?,?,?,?,?,?)"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  BindCreditCardToStatement(creditcard, &s);
+
+  if (!s.Run()) {
+    NOTREACHED();
+    return false;
+  }
+
+  return s.Succeeded();
+}
+
+static CreditCard* CreditCardFromStatement(const sql::Statement& s) {
+  CreditCard* creditcard = new CreditCard(
+      UTF8ToUTF16(s.ColumnString(0)), s.ColumnInt(1));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_NAME),
+                   UTF8ToUTF16(s.ColumnString(2)));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_TYPE),
+                   UTF8ToUTF16(s.ColumnString(3)));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_NUMBER),
+                   UTF8ToUTF16(s.ColumnString(4)));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_EXP_MONTH),
+                   UTF8ToUTF16(s.ColumnString(5)));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
+                   UTF8ToUTF16(s.ColumnString(6)));
+  creditcard->SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
+                   UTF8ToUTF16(s.ColumnString(7)));
+  creditcard->set_billing_address(UTF8ToUTF16(s.ColumnString(8)));
+  creditcard->set_shipping_address(UTF8ToUTF16(s.ColumnString(9)));
+
+  return creditcard;
+}
+
+bool WebDatabase::GetCreditCardForLabel(const string16& label,
+                                        CreditCard** creditcard) {
+  DCHECK(creditcard);
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT * FROM credit_cards "
+      "WHERE label = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindString(0, UTF16ToUTF8(label));
+  if (!s.Step())
+    return false;
+
+  *creditcard = CreditCardFromStatement(s);
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::GetCreditCardForID(int card_id, CreditCard** card) {
+  sql::Statement s(db_.GetUniqueStatement(
+      "SELECT * FROM credit_cards "
+      "WHERE unique_id = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindInt(0, card_id);
+  if (!s.Step())
+    return false;
+
+  *card = CreditCardFromStatement(s);
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::GetCreditCards(
+    std::vector<CreditCard*>* creditcards) {
+  DCHECK(creditcards);
+  creditcards->clear();
+
+  sql::Statement s(db_.GetUniqueStatement("SELECT * FROM credit_cards"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  while (s.Step())
+    creditcards->push_back(CreditCardFromStatement(s));
+
+  return s.Succeeded();
+}
+
+bool WebDatabase::UpdateCreditCard(const CreditCard& creditcard) {
+  DCHECK(creditcard.unique_id());
+  sql::Statement s(db_.GetUniqueStatement(
+      "UPDATE credit_cards "
+      "SET label=?, unique_id=?, name_on_card=?, type=?, card_number=?, "
+      "    expiration_month=?, expiration_year=?, verification_code=?, "
+      "    billing_address=?, shipping_address=? "
+      "WHERE unique_id=?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  BindCreditCardToStatement(creditcard, &s);
+  s.BindInt(10, creditcard.unique_id());
+  return s.Run();
+}
+
+bool WebDatabase::RemoveCreditCard(int creditcard_id) {
+  DCHECK_NE(0, creditcard_id);
+  sql::Statement s(db_.GetUniqueStatement(
+      "DELETE FROM credit_cards WHERE unique_id = ?"));
+  if (!s) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+
+  s.BindInt(0, creditcard_id);
+  return s.Run();
+}
+
+bool WebDatabase::AddToCountOfFormElement(int64 pair_id,
+                                          int delta,
+                                          bool* was_removed) {
+  DCHECK(was_removed);
   int count = 0;
+  *was_removed = false;
 
   if (!GetCountOfFormElement(pair_id, &count))
     return false;
@@ -1092,6 +1698,7 @@ bool WebDatabase::AddToCountOfFormElement(int64 pair_id, int delta) {
   if (count + delta == 0) {
     if (!RemoveFormElementForID(pair_id))
       return false;
+    *was_removed = true;
   } else {
     if (!SetCountOfFormElement(pair_id, count + delta))
       return false;

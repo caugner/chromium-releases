@@ -10,6 +10,12 @@
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/sandbox_methods_linux.h"
 
+#include "third_party/WebKit/WebKit/chromium/public/linux/WebFontRenderStyle.h"
+
+static int GetSandboxFD() {
+  return kSandboxIPCChannel + base::GlobalDescriptors::kBaseDescriptor;
+}
+
 namespace renderer_sandbox_support {
 
 std::string getFontFamilyForCharacters(const uint16_t* utf16, size_t num_utf16) {
@@ -20,9 +26,7 @@ std::string getFontFamilyForCharacters(const uint16_t* utf16, size_t num_utf16) 
     request.WriteUInt32(utf16[i]);
 
   uint8_t buf[512];
-  const int sandbox_fd =
-    kSandboxIPCChannel + base::GlobalDescriptors::kBaseDescriptor;
-  const ssize_t n = base::SendRecvMsg(sandbox_fd, buf, sizeof(buf), NULL,
+  const ssize_t n = base::SendRecvMsg(GetSandboxFD(), buf, sizeof(buf), NULL,
                                       request);
 
   std::string family_name;
@@ -33,6 +37,54 @@ std::string getFontFamilyForCharacters(const uint16_t* utf16, size_t num_utf16) 
   }
 
   return family_name;
+}
+
+void getRenderStyleForStrike(const char* family, int sizeAndStyle,
+                             WebKit::WebFontRenderStyle* out) {
+  Pickle request;
+  request.WriteInt(LinuxSandbox::METHOD_GET_STYLE_FOR_STRIKE);
+  request.WriteString(family);
+  request.WriteInt(sizeAndStyle);
+
+  uint8_t buf[512];
+  const ssize_t n = base::SendRecvMsg(GetSandboxFD(), buf, sizeof(buf), NULL,
+                                      request);
+
+  out->setDefaults();
+  if (n == -1) {
+    return;
+  }
+
+  Pickle reply(reinterpret_cast<char*>(buf), n);
+  void* pickle_iter = NULL;
+  int useBitmaps, useAutoHint, useHinting, hintStyle, useAntiAlias, useSubpixel;
+  if (reply.ReadInt(&pickle_iter, &useBitmaps) &&
+      reply.ReadInt(&pickle_iter, &useAutoHint) &&
+      reply.ReadInt(&pickle_iter, &useHinting) &&
+      reply.ReadInt(&pickle_iter, &hintStyle) &&
+      reply.ReadInt(&pickle_iter, &useAntiAlias) &&
+      reply.ReadInt(&pickle_iter, &useSubpixel)) {
+    out->useBitmaps = useBitmaps;
+    out->useAutoHint = useAutoHint;
+    out->useHinting = useHinting;
+    out->hintStyle = hintStyle;
+    out->useAntiAlias = useAntiAlias;
+    out->useSubpixel = useSubpixel;
+  }
+}
+
+int MakeSharedMemorySegmentViaIPC(size_t length) {
+  Pickle request;
+  request.WriteInt(LinuxSandbox::METHOD_MAKE_SHARED_MEMORY_SEGMENT);
+  request.WriteUInt32(length);
+  uint8_t reply_buf[10];
+  int result_fd;
+  ssize_t result = base::SendRecvMsg(GetSandboxFD(),
+                                     reply_buf, sizeof(reply_buf),
+                                     &result_fd, request);
+  if (result == -1)
+    return -1;
+  return result_fd;
 }
 
 }  // namespace render_sandbox_support

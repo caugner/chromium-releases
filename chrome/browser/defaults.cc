@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,19 @@ const double kAutocompleteEditFontPixelSizeInPopup = kAutocompletePopupFontSize;
 const int kAutocompletePopupFontSize = 7;
 const SessionStartupPref::Type kDefaultSessionStartupType =
     SessionStartupPref::LAST;
-const int kPinnedTabWidth = 64;
+const int kMiniTabWidth = 64;
 const bool kCanToggleSystemTitleBar = false;
+const bool kRestorePopups = true;
+const bool kShowImportOnBookmarkBar = false;
+const bool kShowExitMenuItem = true;
+const bool kShowAboutMenuItem = true;
+const bool kOSSupportsOtherBrowsers = false;
+const bool kDownloadPageHasShowInFolder = false;
+const bool kSizeTabButtonToTopOfTabStrip = true;
+const bool kBootstrapSyncAuthentication = true;
+const bool kShowOtherBrowsersInAboutMemory = false;
 
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_USES_GTK)
 
 // 13.4px = 10pt @ 96dpi.
 const double kAutocompleteEditFontPixelSize = 13.4;
@@ -41,8 +50,28 @@ const bool kCanToggleSystemTitleBar = true;
 
 const SessionStartupPref::Type kDefaultSessionStartupType =
     SessionStartupPref::DEFAULT;
-const int kPinnedTabWidth = 56;
+const int kMiniTabWidth = 56;
+const bool kRestorePopups = false;
+const bool kShowImportOnBookmarkBar = true;
+const bool kDownloadPageHasShowInFolder = true;
+#if defined(OS_MACOSX)
+const bool kShowExitMenuItem = false;
+const bool kShowAboutMenuItem = false;
+#else
+const bool kShowExitMenuItem = true;
+const bool kShowAboutMenuItem = true;
+#endif
+const bool kOSSupportsOtherBrowsers = true;
+const bool kSizeTabButtonToTopOfTabStrip = false;
+const bool kBootstrapSyncAuthentication = false;
+const bool kShowOtherBrowsersInAboutMemory = true;
 
+#endif
+
+#if defined(OS_MACOSX)
+const bool kBrowserAliveWithNoWindows = true;
+#else
+const bool kBrowserAliveWithNoWindows = false;
 #endif
 
 }  // namespace browser_defaults

@@ -11,17 +11,20 @@
 
 #include "chrome_tab.h"  // Generated from chrome_tab.idl.
 
-#include "base/file_util.h"
+#include "base/file_path.h"
+#include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_comptr_win.h"
+#include "base/scoped_variant_win.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/test/chrome_process_util.h"
-#include "chrome/test/perf/mem_usage.h"
 #include "chrome/test/ui/ui_test.h"
 
 #include "chrome_frame/test_utils.h"
@@ -35,41 +38,6 @@ const wchar_t kFlashControlKey[] =
 
 using base::TimeDelta;
 using base::TimeTicks;
-
-// Callback description for onload, onloaderror, onmessage
-static _ATL_FUNC_INFO g_single_param = {CC_STDCALL, VT_EMPTY, 1, {VT_VARIANT}};
-// Simple class that forwards the callbacks.
-template <typename T>
-class DispCallback
-    : public IDispEventSimpleImpl<1, DispCallback<T>, &IID_IDispatch> {
- public:
-  typedef HRESULT (T::*Method)(VARIANT* param);
-
-  DispCallback(T* owner, Method method) : owner_(owner), method_(method) {
-  }
-
-  BEGIN_SINK_MAP(DispCallback)
-    SINK_ENTRY_INFO(1, IID_IDispatch, DISPID_VALUE, OnCallback, &g_single_param)
-  END_SINK_MAP()
-
-  virtual ULONG STDMETHODCALLTYPE AddRef() {
-    return owner_->AddRef();
-  }
-  virtual ULONG STDMETHODCALLTYPE Release() {
-    return owner_->Release();
-  }
-
-  STDMETHOD(OnCallback)(VARIANT param) {
-    return (owner_->*method_)(&param);
-  }
-
-  IDispatch* ToDispatch() {
-    return reinterpret_cast<IDispatch*>(this);
-  }
-
-  T* owner_;
-  Method method_;
-};
 
 // This class implements an ActiveX container which hosts the ChromeFrame
 // ActiveX control. It provides hooks which can be implemented by derived
@@ -97,19 +65,19 @@ class ChromeFrameActiveXContainer
     MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
   END_MSG_MAP()
 
-  HRESULT OnMessageCallback(VARIANT* param) {
+  HRESULT OnMessageCallback(const VARIANT* param) {
     DLOG(INFO) << __FUNCTION__;
     OnMessageCallbackImpl(param);
     return S_OK;
   }
 
-  HRESULT OnLoadErrorCallback(VARIANT* param) {
+  HRESULT OnLoadErrorCallback(const VARIANT* param) {
     DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
     OnLoadErrorCallbackImpl(param);
     return S_OK;
   }
 
-  HRESULT OnLoadCallback(VARIANT* param) {
+  HRESULT OnLoadCallback(const VARIANT* param) {
     DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
     OnLoadCallbackImpl(param);
     return S_OK;
@@ -166,7 +134,7 @@ class ChromeFrameActiveXContainer
     OnReadyStateChanged(ready_state);
 
     if (ready_state == READYSTATE_COMPLETE) {
-      if(!starting_url_.empty()) {
+      if (!starting_url_.empty()) {
         Navigate(starting_url_.c_str());
       } else {
         PostMessage(WM_CLOSE);
@@ -209,9 +177,9 @@ class ChromeFrameActiveXContainer
                            &prop_notify_cookie_);
     DCHECK(hr == S_OK) << "AtlAdvice for IPropertyNotifySink failed " << hr;
 
-    CComVariant onmessage(onmsg_.ToDispatch());
-    CComVariant onloaderror(onloaderror_.ToDispatch());
-    CComVariant onload(onload_.ToDispatch());
+    ScopedVariant onmessage(onmsg_.ToDispatch());
+    ScopedVariant onloaderror(onloaderror_.ToDispatch());
+    ScopedVariant onload(onload_.ToDispatch());
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onmessage(onmessage));
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onloaderror(onloaderror));
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onload(onload));
@@ -223,13 +191,13 @@ class ChromeFrameActiveXContainer
   virtual void OnReadyStateChanged(long ready_state) {}
   virtual void OnRequestEditImpl(DISPID disp_id) {}
 
-  virtual void OnMessageCallbackImpl(VARIANT* param) {}
+  virtual void OnMessageCallbackImpl(const VARIANT* param) {}
 
-  virtual void OnLoadCallbackImpl(VARIANT* param) {
+  virtual void OnLoadCallbackImpl(const VARIANT* param) {
     PostMessage(WM_CLOSE);
   }
 
-  virtual void OnLoadErrorCallbackImpl(VARIANT* param) {
+  virtual void OnLoadErrorCallbackImpl(const VARIANT* param) {
     PostMessage(WM_CLOSE);
   }
   virtual void BeforeNavigateImpl(const char* url) {}
@@ -280,12 +248,12 @@ class ChromeFrameActiveXContainerPerf : public ChromeFrameActiveXContainer {
     }
   }
 
-  virtual void OnLoadCallbackImpl(VARIANT* param) {
+  virtual void OnLoadCallbackImpl(const VARIANT* param) {
     PostMessage(WM_CLOSE);
     perf_navigate_->Done();
   }
 
-  virtual void OnLoadErrorCallbackImpl(VARIANT* param) {
+  virtual void OnLoadErrorCallbackImpl(const VARIANT* param) {
     PostMessage(WM_CLOSE);
     perf_navigate_->Done();
   }
@@ -314,15 +282,20 @@ class ChromeFrameStartupTest : public ChromeFramePerfTestBase {
   ChromeFrameStartupTest() {}
 
   virtual void SetUp() {
+    SetConfigBool(kChromeFrameUnpinnedMode, true);
     ASSERT_TRUE(PathService::Get(chrome::DIR_APP, &dir_app_));
 
     chrome_dll_ = dir_app_.Append(FILE_PATH_LITERAL("chrome.dll"));
     chrome_exe_ = dir_app_.Append(
         FilePath::FromWStringHack(chrome::kBrowserProcessExecutableName));
-    chrome_frame_dll_ = dir_app_.Append(
-        FILE_PATH_LITERAL("servers\\npchrome_tab.dll"));
+    chrome_frame_dll_ = dir_app_.Append(FILE_PATH_LITERAL("servers"));
+    chrome_frame_dll_ = chrome_frame_dll_.Append(
+        FilePath::FromWStringHack(kChromeFrameDllName));
+    DLOG(INFO) << __FUNCTION__ << ": " << chrome_frame_dll_.value();
   }
-  virtual void TearDown() {}
+  virtual void TearDown() {
+    DeleteConfigValue(kChromeFrameUnpinnedMode);
+  }
 
   // TODO(iyengar)
   // This function is similar to the RunStartupTest function used in chrome
@@ -360,7 +333,7 @@ class ChromeFrameStartupTest : public ChromeFramePerfTestBase {
       timings[i] = end_time - start_time;
 
       CoFreeUnusedLibraries();
-      ASSERT_TRUE(GetModuleHandle(L"npchrome_tab.dll") == NULL);
+      ASSERT_TRUE(GetModuleHandle(kChromeFrameDllName) == NULL);
 
       // TODO(beng): Can't shut down so quickly. Figure out why, and fix. If we
       // do, we crash.
@@ -462,8 +435,10 @@ class ChromeFrameStartupTestActiveXReference
     chrome_frame_registrar_->RegisterReferenceChromeFrameBuild();
 
     ChromeFrameStartupTest::SetUp();
-    chrome_frame_dll_ = FilePath::FromWStringHack(
-        chrome_frame_registrar_->GetChromeFrameDllPath());
+
+    chrome_frame_dll_ = FilePath(
+        chrome_frame_registrar_->GetReferenceChromeFrameDllPath());
+    DLOG(INFO) << __FUNCTION__ << ": " << chrome_frame_dll_.value();
   }
 
   virtual void TearDown() {
@@ -479,7 +454,6 @@ class ChromeFrameStartupTestActiveXReference
 // is based on the chrome\test\memory_test.cc. We need to factor out
 // the common code.
 class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
-
   // Contains information about the memory consumption of a process.
   class ProcessMemoryInfo {
    public:
@@ -487,9 +461,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     // Added to enable us to add ProcessMemoryInfo instances to a map.
     ProcessMemoryInfo()
         : process_id_(0),
-          peak_virtual_size_(0),
           virtual_size_(0),
-          peak_working_set_size_(0),
           working_set_size_(0),
           chrome_browser_process_(false),
           chrome_frame_memory_test_instance_(NULL) {}
@@ -497,19 +469,31 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     ProcessMemoryInfo(base::ProcessId process_id, bool chrome_browser_process,
                      ChromeFrameMemoryTest* memory_test_instance)
         : process_id_(process_id),
-          peak_virtual_size_(0),
           virtual_size_(0),
-          peak_working_set_size_(0),
           working_set_size_(0),
           chrome_browser_process_(chrome_browser_process),
           chrome_frame_memory_test_instance_(memory_test_instance) {}
 
     bool GetMemoryConsumptionDetails() {
-      return GetMemoryInfo(process_id_,
-                           &peak_virtual_size_,
-                           &virtual_size_,
-                           &peak_working_set_size_,
-                           &working_set_size_);
+      base::ProcessHandle process_handle;
+      if (!base::OpenPrivilegedProcessHandle(process_id_, &process_handle)) {
+        NOTREACHED();
+      }
+
+      // TODO(sgk):  if/when base::ProcessMetrics can return real memory
+      // stats on mac, convert to:
+      //
+      // scoped_ptr<base::ProcessMetrics> process_metrics;
+      // process_metrics.reset(
+      //     base::ProcessMetrics::CreateProcessMetrics(process_handle));
+      scoped_ptr<ChromeTestProcessMetrics> process_metrics;
+      process_metrics.reset(
+          ChromeTestProcessMetrics::CreateProcessMetrics(process_handle));
+
+      virtual_size_ = process_metrics->GetPagefileUsage();
+      working_set_size_ = process_metrics->GetWorkingSetSize();
+
+      return true;
     }
 
     void Print(const char* test_name) {
@@ -537,9 +521,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     }
 
     int process_id_;
-    size_t peak_virtual_size_;
     size_t virtual_size_;
-    size_t peak_working_set_size_;
     size_t working_set_size_;
     // Set to true if this is the chrome browser process.
     bool chrome_browser_process_;
@@ -554,9 +536,8 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
   typedef std::map<DWORD, ProcessMemoryInfo> ProcessMemoryConsumptionMap;
 
  public:
-  ChromeFrameMemoryTest()
-      : current_url_index_(0),
-        browser_pid_(0) {}
+  ChromeFrameMemoryTest() : current_url_index_(0) {
+  }
 
   virtual void SetUp() {
     // Register the Chrome Frame DLL in the build directory.
@@ -570,7 +551,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     // Record the initial CommitCharge.  This is a system-wide measurement,
     // so if other applications are running, they can create variance in this
     // test.
-    start_commit_charge_ = GetSystemCommitCharge();
+    start_commit_charge_ = base::GetSystemCommitCharge();
 
     for (int i = 0; i < total_urls; i++)
       urls_.push_back(urls[i]);
@@ -582,7 +563,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     StartTest(url, test_name);
   }
 
-  void OnNavigationSuccess(VARIANT* param) {
+  void OnNavigationSuccess(const VARIANT* param) {
     ASSERT_TRUE(param != NULL);
     ASSERT_EQ(VT_BSTR, param->vt);
 
@@ -590,7 +571,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     InitiateNextNavigation();
   }
 
-  void OnNavigationFailure(VARIANT* param) {
+  void OnNavigationFailure(const VARIANT* param) {
     ASSERT_TRUE(param != NULL);
     ASSERT_EQ(VT_BSTR, param->vt);
 
@@ -607,49 +588,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     return true;
   }
 
-  // Returns the path of the current chrome.exe being used by this test.
-  // This could return the regular chrome path or that of the reference
-  // build.
-  std::wstring GetChromeExePath() {
-    std::wstring chrome_exe_path =
-        chrome_frame_registrar_->GetChromeFrameDllPath();
-    EXPECT_FALSE(chrome_exe_path.empty());
-
-    file_util::UpOneDirectory(&chrome_exe_path);
-
-    std::wstring chrome_exe_test_path = chrome_exe_path;
-    file_util::AppendToPath(&chrome_exe_test_path,
-                            chrome::kBrowserProcessExecutableName);
-
-    if (!file_util::PathExists(
-        FilePath::FromWStringHack(chrome_exe_test_path))) {
-      file_util::UpOneDirectory(&chrome_exe_path);
-
-      chrome_exe_test_path = chrome_exe_path;
-      file_util::AppendToPath(&chrome_exe_test_path,
-                              chrome::kBrowserProcessExecutableName);
-    }
-
-    EXPECT_TRUE(
-        file_util::PathExists(FilePath::FromWStringHack(chrome_exe_test_path)));
-
-    return chrome_exe_path;
-  }
-
   void InitiateNextNavigation() {
-    if (browser_pid_ == 0) {
-      std::wstring profile_directory;
-      if (GetUserProfileBaseDirectory(&profile_directory)) {
-        file_util::AppendToPath(&profile_directory,
-                                GetHostProcessName(false));
-      }
-
-      user_data_dir_ = FilePath::FromWStringHack(profile_directory);
-      browser_pid_ = ChromeBrowserProcessId(user_data_dir_);
-    }
-
-    EXPECT_TRUE(static_cast<int>(browser_pid_) > 0);
-
     // Get the memory consumption information for the child processes
     // of the chrome browser.
     ChromeProcessList child_processes = GetBrowserChildren();
@@ -682,8 +621,8 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     // chrome processes which would have exited by now.
     Sleep(200);
 
-    size_t end_commit_charge = GetSystemCommitCharge();
-    size_t commit_size = end_commit_charge - start_commit_charge_;
+    size_t end_commit_charge = base::GetSystemCommitCharge();
+    size_t commit_size = (end_commit_charge - start_commit_charge_) * 1024;
 
     std::string trace_name(test_name);
     trace_name.append("_cc");
@@ -694,9 +633,9 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
   }
 
   ChromeProcessList GetBrowserChildren() {
-    ChromeProcessList list = GetRunningChromeProcesses(user_data_dir_);
+    ChromeProcessList list = GetRunningChromeProcesses(browser_process_id());
     ChromeProcessList::iterator browser =
-        std::find(list.begin(), list.end(), browser_pid_);
+        std::find(list.begin(), list.end(), browser_process_id());
     if (browser != list.end()) {
       list.erase(browser);
     }
@@ -704,8 +643,8 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
   }
 
   void AccountProcessMemoryUsage(DWORD process_id) {
-    ProcessMemoryInfo process_memory_info(process_id,
-                                          process_id == browser_pid_, this);
+    ProcessMemoryInfo process_memory_info(
+        process_id, process_id == browser_process_id(), this);
 
     ASSERT_TRUE(process_memory_info.GetMemoryConsumptionDetails());
 
@@ -756,14 +695,11 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     ASSERT_FALSE(false);
   }
 
-  // Holds the commit charge at the start of the memory test run.
+  // Holds the commit charge in KBytes at the start of the memory test run.
   size_t start_commit_charge_;
 
   // The index of the URL being tested.
   size_t current_url_index_;
-
-  // The chrome browser pid.
-  base::ProcessId browser_pid_;
 
   // Contains the list of urls against which the tests are run.
   std::vector<std::string> urls_;
@@ -802,11 +738,11 @@ class ChromeFrameActiveXContainerMemory : public ChromeFrameActiveXContainer {
   }
 
  protected:
-  virtual void OnLoadCallbackImpl(VARIANT* param) {
+  virtual void OnLoadCallbackImpl(const VARIANT* param) {
     delegate_->OnNavigationSuccess(param);
   }
 
-  virtual void OnLoadErrorCallbackImpl(VARIANT* param) {
+  virtual void OnLoadErrorCallbackImpl(const VARIANT* param) {
     delegate_->OnNavigationFailure(param);
   }
 
@@ -848,7 +784,6 @@ class ChromeFrameActiveXMemoryTest : public MemoryTestBase {
     PrintResults(test_name_.c_str());
 
     CoFreeUnusedLibraries();
-    //ASSERT_TRUE(GetModuleHandle(L"npchrome_tab.dll") == NULL);
   }
 
   void NavigateImpl(const std::string& url) {
@@ -861,10 +796,8 @@ class ChromeFrameActiveXMemoryTest : public MemoryTestBase {
     // This can get called multiple times if the last url results in a
     // redirect.
     if (!test_completed_) {
-      ASSERT_NE(browser_pid_, 0);
-
       // Measure memory usage for the browser process.
-      AccountProcessMemoryUsage(browser_pid_);
+      AccountProcessMemoryUsage(browser_process_id());
       // Measure memory usage for the current process.
       AccountProcessMemoryUsage(GetCurrentProcessId());
 

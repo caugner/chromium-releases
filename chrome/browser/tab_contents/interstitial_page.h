@@ -8,14 +8,13 @@
 #include <map>
 #include <string>
 
-#include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/renderer_preferences.h"
+#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 
-class MessageLoop;
 class NavigationEntry;
 class TabContents;
 class TabContentsView;
@@ -41,6 +40,13 @@ enum ResourceRequestAction {
 class InterstitialPage : public NotificationObserver,
                          public RenderViewHostDelegate {
  public:
+  // The different state of actions the user can take in an interstitial.
+  enum ActionState {
+    NO_ACTION,           // No action has been taken yet.
+    PROCEED_ACTION,      // "Proceed" was selected.
+    DONT_PROCEED_ACTION  // "Don't proceed" was selected.
+  };
+
   // Creates an interstitial page to show in |tab|. |new_navigation| should be
   // set to true when the interstitial is caused by loading a new page, in which
   // case a temporary navigation entry is created with the URL |url| and
@@ -66,7 +72,8 @@ class InterstitialPage : public NotificationObserver,
   // Reverts to the page showing before the interstitial.
   // Sub-classes should call this method when the user has chosen NOT to proceed
   // to the target URL.
-  // Warning: 'this' has been deleted when this method returns.
+  // Warning: if |new_navigation| was set to true in the constructor, 'this'
+  //          will be deleted when this method returns.
   virtual void DontProceed();
 
   // Sub-classes should call this method when the user has chosen to proceed to
@@ -74,10 +81,15 @@ class InterstitialPage : public NotificationObserver,
   // Warning: 'this' has been deleted when this method returns.
   virtual void Proceed();
 
+  // Allows the user to navigate away by disabling the interstitial, canceling
+  // the pending request, and unblocking the hidden renderer.  The interstitial
+  // will stay visible until the navigation completes.
+  void CancelForNavigation();
+
   // Sizes the RenderViewHost showing the actual interstitial page contents.
   void SetSize(const gfx::Size& size);
 
-  bool action_taken() const { return action_taken_; }
+  ActionState action_taken() const { return action_taken_; }
 
   // Sets the focus to the interstitial.
   void Focus();
@@ -108,7 +120,7 @@ class InterstitialPage : public NotificationObserver,
                            const std::wstring& title);
   virtual void DomOperationResponse(const std::string& json_string,
                                     int automation_id);
-  virtual RendererPreferences GetRendererPrefs() const {
+  virtual RendererPreferences GetRendererPrefs(Profile* profile) const {
     return renderer_preferences_;
   }
 
@@ -174,8 +186,8 @@ class InterstitialPage : public NotificationObserver,
   // Whether this interstitial is enabled.  See Disable() for more info.
   bool enabled_;
 
-  // Whether the Proceed or DontProceed have been called yet.
-  bool action_taken_;
+  // Whether the Proceed or DontProceed methods have been called yet.
+  ActionState action_taken_;
 
   // Notification magic.
   NotificationRegistrar notification_registrar_;
@@ -198,8 +210,6 @@ class InterstitialPage : public NotificationObserver,
   // The original title of the tab that should be reverted to when the
   // interstitial is hidden.
   std::wstring original_tab_title_;
-
-  MessageLoop* ui_loop_;
 
   // Our RenderViewHostViewDelegate, necessary for accelerators to work.
   scoped_ptr<InterstitialPageRVHViewDelegate> rvh_view_delegate_;

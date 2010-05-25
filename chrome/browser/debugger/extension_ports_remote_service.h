@@ -34,7 +34,6 @@ class ExtensionPortsRemoteService : public DevToolsRemoteListener,
   // dispatches messages to this service.
   // The ownership of |delegate| is NOT transferred to this class.
   explicit ExtensionPortsRemoteService(DevToolsProtocolHandler* delegate);
-  virtual ~ExtensionPortsRemoteService();
 
   // DevToolsRemoteListener methods:
 
@@ -65,6 +64,8 @@ class ExtensionPortsRemoteService : public DevToolsRemoteListener,
     RESULT_CONNECT_FAILED,  // probably extension ID not found.
   } Result;
 
+  virtual ~ExtensionPortsRemoteService();
+
   // Sends a JSON message with the |response| to the external client.
   // |tool| and |destination| are used as the respective header values.
   void SendResponse(const Value& response,
@@ -72,8 +73,9 @@ class ExtensionPortsRemoteService : public DevToolsRemoteListener,
                     const std::string& destination);
 
   // Handles a message from the ExtensionMessageService.
-  void OnExtensionMessageInvoke(
-      const std::string& function_name, const ListValue& args);
+  void OnExtensionMessageInvoke(const std::string& function_name,
+                                const ListValue& args,
+                                bool requires_incognito_access);
   // Handles a message sent from an extension through the
   // ExtensionMessageService, to be passed to the external client.
   void OnExtensionMessage(const std::string& message, int port_id);

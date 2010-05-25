@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__
 #define CHROME_BROWSER_PRINTING_PRINT_JOB_WORKER_H__
 
-#include "app/gfx/native_widget_types.h"
 #include "base/task.h"
 #include "base/thread.h"
+#include "gfx/native_widget_types.h"
 #include "printing/page_number.h"
 #include "printing/printing_context.h"
 
@@ -36,7 +36,8 @@ class PrintJobWorker : public base::Thread {
   void GetSettings(bool ask_user_for_settings,
                    gfx::NativeWindow parent_window,
                    int document_page_count,
-                   bool has_selection);
+                   bool has_selection,
+                   bool use_overlays);
 
   // Starts the printing loop. Every pages are printed as soon as the data is
   // available. Makes sure the new_document is the right one.
@@ -103,7 +104,7 @@ class PrintJobWorker : public base::Thread {
   // Current page number to print.
   PageNumber page_number_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PrintJobWorker);
+  DISALLOW_COPY_AND_ASSIGN(PrintJobWorker);
 };
 
 }  // namespace printing

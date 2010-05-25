@@ -15,8 +15,8 @@
 
 class AutomationTabTracker
   : public AutomationResourceTracker<NavigationController*> {
-public:
-  AutomationTabTracker(IPC::Message::Sender* automation)
+ public:
+  explicit AutomationTabTracker(IPC::Message::Sender* automation)
       : AutomationResourceTracker<NavigationController*>(automation) {}
 
   virtual ~AutomationTabTracker() {
@@ -31,7 +31,7 @@ public:
                    Source<NavigationController>(resource));
     // We also want to know about navigations so we can keep track of the last
     // navigation time.
-    registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+    registrar_.Add(this, NotificationType::LOAD_STOP,
                    Source<NavigationController>(resource));
   }
 
@@ -40,7 +40,7 @@ public:
                       Source<NavigationController>(resource));
     registrar_.Remove(this, NotificationType::EXTERNAL_TAB_CLOSED,
                       Source<NavigationController>(resource));
-    registrar_.Remove(this, NotificationType::NAV_ENTRY_COMMITTED,
+    registrar_.Remove(this, NotificationType::LOAD_STOP,
                       Source<NavigationController>(resource));
   }
 
@@ -48,7 +48,7 @@ public:
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     switch (type.value) {
-      case NotificationType::NAV_ENTRY_COMMITTED:
+      case NotificationType::LOAD_STOP:
         last_navigation_times_[Source<NavigationController>(source).ptr()] =
             base::Time::Now();
         return;

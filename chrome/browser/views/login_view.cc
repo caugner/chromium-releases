@@ -33,9 +33,11 @@ LoginView::LoginView(const std::wstring& explanation)
           l10n_util::GetString(IDS_LOGIN_DIALOG_PASSWORD_FIELD))),
       message_label_(new views::Label(explanation)),
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)),
-      login_model_(NULL) {
+      login_model_(NULL),
+      focus_delayed_(false) {
   message_label_->SetMultiLine(true);
   message_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  message_label_->SetAllowCharacterBreak(true);
 
   // Initialize the Grid Layout Manager used for this dialog box.
   GridLayout* layout = CreatePanelGridLayout(this);
@@ -96,11 +98,27 @@ void LoginView::SetModel(LoginModel* model) {
   if (login_model_)
     login_model_->SetObserver(this);
 }
+
+void LoginView::RequestFocus() {
+  MessageLoop::current()->PostTask(FROM_HERE,
+    focus_grabber_factory_.NewRunnableMethod(&LoginView::FocusFirstField));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // LoginView, views::View, views::LoginModelObserver overrides:
 
 void LoginView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
   if (is_add && child == this) {
+    MessageLoop::current()->PostTask(FROM_HERE,
+        focus_grabber_factory_.NewRunnableMethod(&LoginView::FocusFirstField));
+  }
+}
+
+void LoginView::NativeViewHierarchyChanged(bool attached,
+                                           gfx::NativeView native_view,
+                                           views::RootView* root_view) {
+  if (focus_delayed_ && attached) {
+    focus_delayed_ = false;
     MessageLoop::current()->PostTask(FROM_HERE,
         focus_grabber_factory_.NewRunnableMethod(&LoginView::FocusFirstField));
   }
@@ -119,5 +137,10 @@ void LoginView::OnAutofillDataAvailable(const std::wstring& username,
 // LoginView, private:
 
 void LoginView::FocusFirstField() {
-  username_field_->RequestFocus();
+  if (GetFocusManager()) {
+    username_field_->RequestFocus();
+  } else {
+    // We are invisible - delay until it is no longer the case.
+    focus_delayed_ = true;
+  }
 }

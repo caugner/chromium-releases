@@ -241,6 +241,25 @@ bool ClientConnectToFifo(const std::string &pipe_name, int* client_socket) {
   return true;
 }
 
+bool SocketWriteErrorIsRecoverable() {
+#if defined(OS_MACOSX)
+  // On OS X if sendmsg() is trying to send fds between processes and there
+  // isn't enough room in the output buffer to send the fd structure over
+  // atomically then EMSGSIZE is returned.
+  //
+  // EMSGSIZE presents a problem since the system APIs can only call us when
+  // there's room in the socket buffer and not when there is "enough" room.
+  //
+  // The current behavior is to return to the event loop when EMSGSIZE is
+  // received and hopefull service another FD.  This is however still
+  // technically a busy wait since the event loop will call us right back until
+  // the receiver has read enough data to allow passing the FD over atomically.
+  return errno == EAGAIN || errno == EMSGSIZE;
+#else
+  return errno == EAGAIN;
+#endif
+}
+
 }  // namespace
 //------------------------------------------------------------------------------
 
@@ -260,7 +279,6 @@ Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
 #endif
       listener_(listener),
       waiting_connect_(true),
-      processing_incoming_(false),
       factory_(this) {
   if (!CreatePipe(channel_id, mode)) {
     // The pipe may have been closed already.
@@ -278,6 +296,11 @@ void AddChannelSocket(const std::string& name, int socket) {
 // static
 void RemoveAndCloseChannelSocket(const std::string& name) {
   Singleton<PipeMap>()->RemoveAndClose(name);
+}
+
+// static
+bool ChannelSocketExists(const std::string& name) {
+  return Singleton<PipeMap>()->Lookup(name) != -1;
 }
 
 // static
@@ -339,6 +362,17 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
           return false;
         AddChannelSocket(pipe_name_, client_pipe_);
       } else {
+        // Guard against inappropriate reuse of the initial IPC channel.  If
+        // an IPC channel closes and someone attempts to reuse it by name, the
+        // initial channel must not be recycled here.  http://crbug.com/26754.
+        static bool used_initial_channel = false;
+        if (used_initial_channel) {
+          LOG(FATAL) << "Denying attempt to reuse initial IPC channel for "
+                     << pipe_name_;
+          return false;
+        }
+        used_initial_channel = true;
+
         pipe_ = Singleton<base::GlobalDescriptors>()->Get(kPrimaryIPCChannel);
       }
     } else {
@@ -447,7 +481,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
           // to the console.
           return false;
 #endif  // defined(OS_MACOSX)
-        } else if (errno == ECONNRESET) {
+        } else if (errno == ECONNRESET || errno == EPIPE) {
           return false;
         } else {
           PLOG(ERROR) << "pipe error (" << pipe_ << ")";
@@ -763,7 +797,9 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
           reinterpret_cast<int*>(CMSG_DATA(cmsg)));
       msgh.msg_controllen = cmsg->cmsg_len;
 
-      msg->header()->num_fds = num_fds;
+      // DCHECK_LE above already checks that
+      // num_fds < MAX_DESCRIPTORS_PER_MESSAGE so no danger of overflow.
+      msg->header()->num_fds = static_cast<uint16>(num_fds);
 
 #if defined(OS_LINUX)
       if (!uses_fifo_ &&
@@ -804,7 +840,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
     if (bytes_written > 0)
       msg->file_descriptor_set()->CommitAll();
 
-    if (bytes_written < 0 && errno != EAGAIN) {
+    if (bytes_written < 0 && !SocketWriteErrorIsRecoverable()) {
 #if defined(OS_MACOSX)
       // On OSX writing to a pipe with no listener returns EPERM.
       if (errno == EPERM) {
@@ -812,7 +848,14 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
         return false;
       }
 #endif  // OS_MACOSX
-      PLOG(ERROR) << "pipe error on " << fd_written;
+      if (errno == EPIPE) {
+        Close();
+        return false;
+      }
+      PLOG(ERROR) << "pipe error on "
+                  << fd_written
+                  << " Currently writing message of size:"
+                  << msg->size();
       return false;
     }
 

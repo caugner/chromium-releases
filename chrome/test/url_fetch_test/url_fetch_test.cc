@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -47,17 +48,17 @@ class UrlFetchTest : public UITest {
                const char *waitCookieValue, const wchar_t *varToFetch,
                UrlFetchTestResult *result) {
     scoped_refptr<TabProxy> tab(GetActiveTab());
-    tab->NavigateToURL(url);
+    ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(url));
 
     if (waitCookieName) {
       if (waitCookieValue) {
         bool completed = WaitUntilCookieValue(tab.get(), url, waitCookieName,
-                                              3000, UITest::test_timeout_ms(),
+                                              UITest::test_timeout_ms(),
                                               waitCookieValue);
         ASSERT_TRUE(completed);
       } else {
         result->cookie_value = WaitUntilCookieNonEmpty(
-            tab.get(), url, waitCookieName, 3000, UITest::test_timeout_ms());
+            tab.get(), url, waitCookieName, UITest::test_timeout_ms());
         ASSERT_TRUE(result->cookie_value.length());
       }
     }

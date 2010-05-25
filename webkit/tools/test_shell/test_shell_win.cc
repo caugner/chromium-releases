@@ -19,22 +19,24 @@
 #include "base/resource_util.h"
 #include "base/stack_container.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
 #include "base/trace_event.h"
+#include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "grit/webkit_resources.h"
+#include "grit/webkit_chromium_resources.h"
 #include "net/base/net_module.h"
 #include "net/url_request/url_request_file_job.h"
 #include "skia/ext/bitmap_platform_device.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
+#include "webkit/tools/test_shell/test_webview_delegate.h"
 
 using WebKit::WebWidget;
 
@@ -252,6 +254,14 @@ bool TestShell::RunFileTest(const TestParams& params) {
   shell = static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
   DCHECK(shell);
 
+  if (strstr(params.test_url.c_str(), "/inspector/") ||
+      strstr(params.test_url.c_str(), "\\inspector\\"))
+    inspector_test_mode_ = true;
+
+  developer_extras_enabled_ = inspector_test_mode_ ||
+      strstr(params.test_url.c_str(), "/inspector-enabled/") ||
+      strstr(params.test_url.c_str(), "\\inspector-enabled\\");
+
   // Clean up state between test runs.
   webkit_glue::ResetBeforeTestRun(shell->webView());
   ResetWebPreferences();
@@ -266,14 +276,20 @@ bool TestShell::RunFileTest(const TestParams& params) {
       strstr(params.test_url.c_str(), "loading\\"))
     shell->layout_test_controller()->SetShouldDumpFrameLoadCallbacks(true);
 
-  shell->test_is_preparing_ = true;
-  shell->set_test_params(&params);
-  shell->LoadURL(GURL(params.test_url));
+  if (inspector_test_mode_)
+    shell->ShowDevTools();
 
-  shell->test_is_preparing_ = false;
-  shell->WaitTestFinished();
-  shell->set_test_params(NULL);
-
+  GURL url(params.test_url);
+  if (url.is_valid()) {  // Don't hang if we have an invalid path.
+    shell->test_is_preparing_ = true;
+    shell->set_test_params(&params);
+    shell->LoadURL(url);
+    shell->test_is_preparing_ = false;
+    shell->WaitTestFinished();
+    shell->set_test_params(NULL);
+  } else {
+    NOTREACHED() << "Invalid url: " << url.spec();
+  }
 
   return true;
 }
@@ -309,6 +325,25 @@ void TestShell::PlatformCleanUp() {
   // otherwise we will crash.
   win_util::SetWindowProc(m_editWnd, default_edit_wnd_proc_);
   win_util::SetWindowUserData(m_editWnd, NULL);
+}
+
+void TestShell::EnableUIControl(UIControl control, bool is_enabled) {
+  int id;
+  switch (control) {
+    case BACK_BUTTON:
+      id = IDC_NAV_BACK;
+      break;
+    case FORWARD_BUTTON:
+      id = IDC_NAV_FORWARD;
+      break;
+    case STOP_BUTTON:
+      id = IDC_NAV_STOP;
+      break;
+    default:
+      NOTREACHED() << "Unknown UI control";
+      return;
+  }
+  EnableWindow(GetDlgItem(m_mainWnd, id), is_enabled);
 }
 
 bool TestShell::Initialize(const GURL& starting_url) {
@@ -360,6 +395,8 @@ bool TestShell::Initialize(const GURL& starting_url) {
   m_webViewHost.reset(
       WebViewHost::Create(m_mainWnd, delegate_.get(), *TestShell::web_prefs_));
   delegate_->RegisterDragDrop();
+
+  InitializeDevToolsAgent(webView());
 
   // Load our initial content.
   if (starting_url.is_valid())
@@ -557,19 +594,44 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
       case IDM_DUMP_RENDER_TREE:
         shell->DumpRenderTree();
         break;
+      case IDM_ENABLE_IMAGES:
+      case IDM_ENABLE_PLUGINS:
+      case IDM_ENABLE_SCRIPTS: {
+        HMENU menu = GetSubMenu(GetMenu(hwnd), 1);
+        bool was_checked =
+            (GetMenuState(menu, wmId, MF_BYCOMMAND) & MF_CHECKED) != 0;
+        CheckMenuItem(menu, wmId,
+                      MF_BYCOMMAND | (was_checked ? MF_UNCHECKED : MF_CHECKED));
+        switch (wmId) {
+          case IDM_ENABLE_IMAGES:
+            shell->set_allow_images(!was_checked);
+            break;
+          case IDM_ENABLE_PLUGINS:
+            shell->set_allow_plugins(!was_checked);
+            break;
+          case IDM_ENABLE_SCRIPTS:
+            shell->set_allow_scripts(!was_checked);
+            break;
+        }
+        break;
+      }
+      case IDM_SHOW_DEV_TOOLS:
+        shell->ShowDevTools();
+        break;
       }
     }
     break;
 
   case WM_DESTROY:
     {
-      // Dump all in use memory just before shutdown if in use memory
-      // debugging has been enabled.
-      base::MemoryDebug::DumpAllMemoryInUse();
 
       RemoveWindowFromList(hwnd);
 
       if (TestShell::windowList()->empty() || shell->is_modal()) {
+        // Dump all in use memory just before shutdown if in use memory
+        // debugging has been enabled.
+        base::MemoryDebug::DumpAllMemoryInUse();
+
         MessageLoop::current()->PostTask(FROM_HERE,
                                          new MessageLoop::QuitTask());
       }
@@ -725,6 +787,8 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_SOUND_DISABLED:
   case IDR_MEDIA_SLIDER_THUMB:
   case IDR_MEDIA_VOLUME_SLIDER_THUMB:
+  case IDR_DEVTOOLS_INJECT_WEBKIT_JS:
+  case IDR_DEVTOOLS_INJECT_DISPATCH_JS:
     return NetResourceProvider(resource_id);
 
   default:

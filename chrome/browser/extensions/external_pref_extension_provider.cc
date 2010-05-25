@@ -44,10 +44,9 @@ void ExternalPrefExtensionProvider::VisitRegisteredExtension(
     if (ids_to_ignore.find(WideToASCII(extension_id)) != ids_to_ignore.end())
       continue;
 
-    DictionaryValue* extension = NULL;
-    if (!prefs_->GetDictionary(extension_id, &extension)) {
+    DictionaryValue* extension;
+    if (!prefs_->GetDictionaryWithoutPathExpansion(extension_id, &extension))
       continue;
-    }
 
     FilePath::StringType external_crx;
     std::string external_version;
@@ -99,19 +98,16 @@ Version* ExternalPrefExtensionProvider::RegisteredVersion(
 void ExternalPrefExtensionProvider::SetPreferences(
     ValueSerializer* serializer) {
   std::string error_msg;
-  Value* extensions = serializer->Deserialize(&error_msg);
+  Value* extensions = serializer->Deserialize(NULL, &error_msg);
   scoped_ptr<DictionaryValue> dictionary(new DictionaryValue());
-  if (!error_msg.empty()) {
+  if (!extensions) {
     LOG(WARNING) << L"Unable to deserialize json data: "
-                 << error_msg.c_str();
+                 << error_msg;
   } else {
-    // This can be null if the json file specified does not exist.
-    if (extensions) {
-      if (!extensions->IsType(Value::TYPE_DICTIONARY)) {
-        NOTREACHED() << L"Invalid json data";
-      } else {
-        dictionary.reset(static_cast<DictionaryValue*>(extensions));
-      }
+    if (!extensions->IsType(Value::TYPE_DICTIONARY)) {
+      NOTREACHED() << L"Invalid json data";
+    } else {
+      dictionary.reset(static_cast<DictionaryValue*>(extensions));
     }
   }
   prefs_.reset(dictionary.release());

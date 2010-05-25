@@ -7,7 +7,10 @@
 #ifndef CHROME_BROWSER_SYNC_ENGINE_SYNCPROTO_H_
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCPROTO_H_
 
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
 
 namespace browser_sync {
@@ -46,7 +49,12 @@ class SyncEntity : public IdWrapper<sync_pb::SyncEntity> {
   // directly, because the addition of bookmarks to the protobuf schema
   // makes the check slightly more tricky.
   bool IsFolder() const {
-    return (!has_bookmarkdata() || bookmarkdata().bookmark_folder());
+    return ((has_folder() && folder()) ||
+            (has_bookmarkdata() && bookmarkdata().bookmark_folder()));
+  }
+
+  syncable::ModelType GetModelType() const {
+    return syncable::GetModelType(*this);
   }
 };
 

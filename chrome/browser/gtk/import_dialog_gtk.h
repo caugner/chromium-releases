@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,23 @@
 
 #include "chrome/browser/importer/importer.h"
 
+class AccessibleWidgetHelper;
 class Profile;
 
 class ImportDialogGtk : public ImportObserver {
  public:
   // Displays the import box to import data from another browser into |profile|
-  static void Show(GtkWindow* parent, Profile* profile);
+  // |initial_state| is a bitmask of ImportItems. Each checkbox for the bits in
+  // is checked.
+  static void Show(GtkWindow* parent, Profile* profile, int initial_state);
 
   // Overridden from ImportObserver:
   virtual void ImportCanceled();
   virtual void ImportComplete();
 
  private:
-  ImportDialogGtk(GtkWindow* parent, Profile* profile);
-  ~ImportDialogGtk() { }
+  ImportDialogGtk(GtkWindow* parent, Profile* profile, int initial_state);
+  ~ImportDialogGtk();
 
   static void HandleOnResponseDialog(GtkWidget* widget,
                                      int response,
@@ -55,6 +58,11 @@ class ImportDialogGtk : public ImportObserver {
 
   // Utility class that does the actual import.
   scoped_refptr<ImporterHost> importer_host_;
+
+  int initial_state_;
+
+  // Helper object to manage accessibility metadata.
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ImportDialogGtk);
 };

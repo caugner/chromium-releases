@@ -6,14 +6,16 @@
 
 #include "build/build_config.h"
 
-#include "app/gfx/codec/png_codec.h"
-#include "app/gfx/favicon_size.h"
+#include "base/callback.h"
+#include "base/ref_counted_memory.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/favicon_size.h"
 #include "skia/ext/image_operations.h"
 
 FavIconHelper::FavIconHelper(TabContents* tab_contents)
@@ -21,6 +23,18 @@ FavIconHelper::FavIconHelper(TabContents* tab_contents)
       got_fav_icon_url_(false),
       got_fav_icon_from_history_(false),
       fav_icon_expired_(false) {
+}
+
+FavIconHelper::~FavIconHelper() {
+  SkBitmap empty_image;
+
+  // Call pending download callbacks with error to allow caller to clean up.
+  for (DownloadRequests::iterator i = download_requests_.begin();
+       i != download_requests_.end(); ++i) {
+    if (i->second.callback) {
+      i->second.callback->Run(i->first, true, empty_image);
+    }
+  }
 }
 
 void FavIconHelper::FetchFavIcon(const GURL& url) {
@@ -39,6 +53,13 @@ void FavIconHelper::FetchFavIcon(const GURL& url) {
   }
 }
 
+int FavIconHelper::DownloadImage(const GURL& image_url,
+                                 int image_size,
+                                 ImageDownloadCallback* callback) {
+  DCHECK(callback);  // Must provide a callback.
+  return ScheduleDownload(GURL(), image_url, image_size, callback);
+}
+
 Profile* FavIconHelper::profile() {
   return tab_contents_->profile();
 }
@@ -48,16 +69,9 @@ FaviconService* FavIconHelper::GetFaviconService() {
 }
 
 void FavIconHelper::SetFavIcon(
-    int download_id,
+    const GURL& url,
     const GURL& image_url,
     const SkBitmap& image) {
-  DownloadRequests::iterator i = download_requests_.find(download_id);
-  if (i == download_requests_.end()) {
-    // Currently TabContents notifies us of ANY downloads so that it is
-    // possible to get here.
-    return;
-  }
-
   const SkBitmap& sized_image =
       (image.width() == kFavIconSize && image.height() == kFavIconSize)
       ? image : ConvertToFavIconSize(image);
@@ -65,29 +79,20 @@ void FavIconHelper::SetFavIcon(
   if (GetFaviconService() && !profile()->IsOffTheRecord()) {
     std::vector<unsigned char> image_data;
     gfx::PNGCodec::EncodeBGRASkBitmap(sized_image, false, &image_data);
-    GetFaviconService()->SetFavicon(i->second.url, i->second.fav_icon_url,
-                                    image_data);
+    GetFaviconService()->SetFavicon(url, image_url, image_data);
   }
 
-  if (i->second.url == url_) {
+  if (url == url_) {
     NavigationEntry* entry = GetEntry();
     if (entry)
       UpdateFavIcon(entry, sized_image);
   }
-
-  download_requests_.erase(i);
-}
-
-void FavIconHelper::FavIconDownloadFailed(int download_id) {
-  DownloadRequests::iterator i = download_requests_.find(download_id);
-  if (i != download_requests_.end())
-    download_requests_.erase(i);
 }
 
 void FavIconHelper::UpdateFavIcon(NavigationEntry* entry,
-                                  const std::vector<unsigned char>& data) {
+                                  scoped_refptr<RefCountedMemory> data) {
   SkBitmap image;
-  gfx::PNGCodec::Decode(&data, &image);
+  gfx::PNGCodec::Decode(data->front(), data->size(), &image);
   UpdateFavIcon(entry, image);
 }
 
@@ -132,10 +137,20 @@ void FavIconHelper::DidDownloadFavIcon(RenderViewHost* render_view_host,
                                        const GURL& image_url,
                                        bool errored,
                                        const SkBitmap& image) {
-  if (errored)
-    FavIconDownloadFailed(id);
-  else
-    SetFavIcon(id, image_url, image);
+  DownloadRequests::iterator i = download_requests_.find(id);
+  if (i == download_requests_.end()) {
+    // Currently TabContents notifies us of ANY downloads so that it is
+    // possible to get here.
+    return;
+  }
+
+  if (i->second.callback) {
+    i->second.callback->Run(id, errored, image);
+  } else if (!errored) {
+    SetFavIcon(i->second.url, image_url, image);
+  }
+
+  download_requests_.erase(i);
 }
 
 NavigationEntry* FavIconHelper::GetEntry() {
@@ -152,7 +167,7 @@ NavigationEntry* FavIconHelper::GetEntry() {
 void FavIconHelper::OnFavIconDataForInitialURL(
     FaviconService::Handle handle,
     bool know_favicon,
-    scoped_refptr<RefCountedBytes> data,
+    scoped_refptr<RefCountedMemory> data,
     bool expired,
     GURL icon_url) {
   NavigationEntry* entry = GetEntry();
@@ -170,8 +185,8 @@ void FavIconHelper::OnFavIconDataForInitialURL(
     // to be expired (or the wrong url) we'll fetch later on. This way the
     // user doesn't see a flash of the default favicon.
     entry->favicon().set_url(icon_url);
-    if (data && !data->data.empty())
-      UpdateFavIcon(entry, data->data);
+    if (data.get() && data->size())
+      UpdateFavIcon(entry, data);
     entry->favicon().set_is_valid(true);
   }
 
@@ -187,15 +202,16 @@ void FavIconHelper::OnFavIconDataForInitialURL(
     // favicon or its expired. Continue on to DownloadFavIconOrAskHistory to
     // either download or check history again.
     DownloadFavIconOrAskHistory(entry);
-  } // else we haven't got the icon url. When we get it we'll ask the
-    // renderer to download the icon.
+  }
+  // else we haven't got the icon url. When we get it we'll ask the
+  // renderer to download the icon.
 }
 
 void FavIconHelper::DownloadFavIconOrAskHistory(NavigationEntry* entry) {
-  DCHECK(entry); // We should only get here if entry is valid.
+  DCHECK(entry);  // We should only get here if entry is valid.
   if (fav_icon_expired_) {
     // We have the mapping, but the favicon is out of date. Download it now.
-    ScheduleDownload(entry);
+    ScheduleDownload(entry->url(), entry->favicon().url(), kFavIconSize, NULL);
   } else if (GetFaviconService()) {
     // We don't know the favicon, but we may have previously downloaded the
     // favicon for another page that shares the same favicon. Ask for the
@@ -223,7 +239,7 @@ void FavIconHelper::DownloadFavIconOrAskHistory(NavigationEntry* entry) {
 void FavIconHelper::OnFavIconData(
     FaviconService::Handle handle,
     bool know_favicon,
-    scoped_refptr<RefCountedBytes> data,
+    scoped_refptr<RefCountedMemory> data,
     bool expired,
     GURL icon_url) {
   NavigationEntry* entry = GetEntry();
@@ -233,29 +249,33 @@ void FavIconHelper::OnFavIconData(
   // No need to update the favicon url. By the time we get here
   // UpdateFavIconURL will have set the favicon url.
 
-  if (know_favicon && data && !data->data.empty()) {
+  if (know_favicon && data.get() && data->size()) {
     // There is a favicon, set it now. If expired we'll download the current
     // one again, but at least the user will get some icon instead of the
     // default and most likely the current one is fine anyway.
-    UpdateFavIcon(entry, data->data);
+    UpdateFavIcon(entry, data);
   }
 
   if (!know_favicon || expired) {
     // We don't know the favicon, or it is out of date. Request the current one.
-    ScheduleDownload(entry);
+    ScheduleDownload(entry->url(), entry->favicon().url(), kFavIconSize, NULL);
   }
 }
 
-void FavIconHelper::ScheduleDownload(NavigationEntry* entry) {
+int FavIconHelper::ScheduleDownload(const GURL& url,
+                                    const GURL& image_url,
+                                    int image_size,
+                                    ImageDownloadCallback* callback) {
   const int download_id = tab_contents_->render_view_host()->DownloadFavIcon(
-      entry->favicon().url(), kFavIconSize);
-  if (!download_id)
-    return;  // Download request failed.
+      image_url, image_size);
 
-  // Download ids should be unique.
-  DCHECK(download_requests_.find(download_id) == download_requests_.end());
-  download_requests_[download_id] =
-      DownloadRequest(entry->url(), entry->favicon().url());
+  if (download_id) {
+    // Download ids should be unique.
+    DCHECK(download_requests_.find(download_id) == download_requests_.end());
+    download_requests_[download_id] = DownloadRequest(url, image_url, callback);
+  }
+
+  return download_id;
 }
 
 SkBitmap FavIconHelper::ConvertToFavIconSize(const SkBitmap& image) {

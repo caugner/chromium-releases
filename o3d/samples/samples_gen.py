@@ -5,6 +5,7 @@
 
 import posixpath
 import sys
+import os.path
 
 output_filename = 'samples_gen.gyp'
 try:
@@ -65,15 +66,6 @@ assets = [
  {'path': 'io/convert_levels/all_actors.kmz', 'up': y_up},
  {'path': 'io/convert_levels/map1.kmz', 'up': y_up},
  {'path': 'simpleviewer/convert_assets/cube.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/bamboo.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/coconuts.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/driftwood.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/island.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/lazy_bridge.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/palm_leaves.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/palm_trees.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/rocks.9.zip', 'up': y_up},
- {'path': 'waterdemo/convert_assets/rocks.zip', 'up': y_up},
 ]
 
 output_file.write("""# Copyright (c) 2009 The Chromium Authors. All rights reserved.
@@ -107,6 +99,7 @@ for asset in assets:
   output_file.write("        {\n")
   output_file.write("          'action_name': '%s',\n" % name)
   output_file.write("          'inputs': [\n")
+  output_file.write("            '<(PRODUCT_DIR)/o3dConverter',\n")
   output_file.write("            '../o3d_assets/samples/%s',\n" % asset['path'])
   output_file.write("          ],\n")
   output_file.write("          'outputs': [\n")
@@ -120,12 +113,10 @@ for asset in assets:
     output_file.write("            '../samples/%s',\n" % output)
   output_file.write("          ],\n")
   output_file.write("          'action': [\n")
-  if sys.platform[:5] == 'linux':
-    output_file.write("            'LD_LIBRARY_PATH=<(PRODUCT_DIR):<(PRODUCT_DIR)/lib',\n")
   output_file.write("            '<(PRODUCT_DIR)/o3dConverter',\n")
   output_file.write("            '--no-condition',\n")
   output_file.write("            '--up-axis=%s',\n" % asset['up'])
-  output_file.write("            '<(_inputs)',\n")
+  output_file.write("            '../o3d_assets/samples/%s',\n" % asset['path'])
   output_file.write("            '<(_outputs)',\n")
   output_file.write("          ],\n")
   output_file.write("        },\n")
@@ -148,8 +139,13 @@ for asset in assets:
 
 # Add in all the MANIFEST files to be copied,
 # Skipping the ones in the assets above (if any).
-manifest = open("MANIFEST", "r")
-for item in manifest.read().splitlines():
+items = eval(open("MANIFEST", "r").read())
+if not os.path.exists("../../o3d-internal/jscomp/JSCompiler_deploy.jar"):
+  # add in the o3djs files.
+  js_files = eval(open("o3djs/js_list.manifest", "r").read())
+  js_files = ["o3djs/" + f for f in js_files]
+  items = items + js_files
+for item in items:
   item_dir = posixpath.dirname(item)
   if item_dir in copies:
     if not item in copies[item_dir]:

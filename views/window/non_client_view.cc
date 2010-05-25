@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ NonClientView::~NonClientView() {
 
 void NonClientView::SetFrameView(NonClientFrameView* frame_view) {
   // See comment in header about ownership.
-  frame_view->SetParentOwned(false);
+  frame_view->set_parent_owned(false);
   if (frame_view_.get())
     RemoveChildView(frame_view_.get());
   frame_view_.reset(frame_view);
@@ -91,23 +91,8 @@ gfx::Rect NonClientView::GetWindowBoundsForClientBounds(
   return frame_view_->GetWindowBoundsForClientBounds(client_bounds);
 }
 
-gfx::Point NonClientView::GetSystemMenuPoint() const {
-  return frame_view_->GetSystemMenuPoint();
-}
-
 int NonClientView::NonClientHitTest(const gfx::Point& point) {
-  // Sanity check.
-  if (!bounds().Contains(point))
-    return HTNOWHERE;
-
-  // The ClientView gets first crack, since it overlays the NonClientFrameView
-  // in the display stack.
-  int frame_component = client_view_->NonClientHitTest(point);
-  if (frame_component != HTNOWHERE)
-    return frame_component;
-
-  // Finally ask the NonClientFrameView. It's at the back of the display stack
-  // so it gets asked last.
+  // The NonClientFrameView is responsible for also asking the ClientView.
   return frame_view_->NonClientHitTest(point);
 }
 
@@ -187,7 +172,7 @@ views::View* NonClientView::GetViewForPoint(const gfx::Point& point) {
   gfx::Point point_in_child_coords(point);
   View::ConvertPointToView(this, frame_view_.get(), &point_in_child_coords);
   if (frame_view_->HitTest(point_in_child_coords))
-    return frame_view_->GetViewForPoint(point);
+    return frame_view_->GetViewForPoint(point_in_child_coords);
 
   return View::GetViewForPoint(point);
 }
@@ -195,18 +180,6 @@ views::View* NonClientView::GetViewForPoint(const gfx::Point& point) {
 bool NonClientView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   *role = AccessibilityTypes::ROLE_WINDOW;
   return true;
-}
-
-bool NonClientView::GetAccessibleName(std::wstring* name) {
-  if (!accessible_name_.empty()) {
-    *name = accessible_name_;
-    return true;
-  }
-  return false;
-}
-
-void NonClientView::SetAccessibleName(const std::wstring& name) {
-  accessible_name_ = name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -274,6 +247,10 @@ int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
   // If the window can't be resized, there are no resize boundaries, just
   // window borders.
   return can_resize ? component : HTBORDER;
+}
+
+bool NonClientFrameView::ShouldPaintAsActive() const {
+  return GetWindow()->IsActive() || paint_as_active_;
 }
 
 }  // namespace views

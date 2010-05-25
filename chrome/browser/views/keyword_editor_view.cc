@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,17 @@
 #include <vector>
 
 #include "app/l10n_util.h"
-#include "base/gfx/point.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_table_model.h"
 #include "chrome/browser/views/browser_dialogs.h"
+#include "chrome/browser/views/first_run_search_engine_view.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -51,7 +52,19 @@ void ShowKeywordEditorView(Profile* profile) {
 static views::Window* open_window = NULL;
 
 // static
+// The typical case for showing a KeywordEditorView does not involve an
+// observer, so use this function signature generally.
 void KeywordEditorView::Show(Profile* profile) {
+  KeywordEditorView::ShowAndObserve(profile, NULL);
+}
+
+// static
+void KeywordEditorView::ShowAndObserve(Profile* profile,
+    SearchEngineSelectionObserver* observer) {
+  // If this panel is opened from an Incognito window, closing that window can
+  // leave this with a stale pointer. Use the original profile instead.
+  // See http://crbug.com/23359.
+  profile = profile ->GetOriginalProfile();
   if (!profile->GetTemplateURLModel())
     return;
 
@@ -60,7 +73,7 @@ void KeywordEditorView::Show(Profile* profile) {
   DCHECK(!open_window);
 
   // Both of these will be deleted when the dialog closes.
-  KeywordEditorView* keyword_editor = new KeywordEditorView(profile);
+  KeywordEditorView* keyword_editor = new KeywordEditorView(profile, observer);
 
   // Initialize the UI. By passing in an empty rect KeywordEditorView is
   // queried for its preferred size.
@@ -70,9 +83,12 @@ void KeywordEditorView::Show(Profile* profile) {
   open_window->Show();
 }
 
-KeywordEditorView::KeywordEditorView(Profile* profile)
+KeywordEditorView::KeywordEditorView(Profile* profile,
+                                     SearchEngineSelectionObserver* observer)
     : profile_(profile),
-      controller_(new KeywordEditorController(profile)) {
+      observer_(observer),
+      controller_(new KeywordEditorController(profile)),
+      default_chosen_(false) {
   DCHECK(controller_->url_model());
   controller_->url_model()->AddObserver(this);
   Init();
@@ -121,11 +137,17 @@ int KeywordEditorView::GetDialogButtons() const {
 }
 
 bool KeywordEditorView::Accept() {
+  if (observer_)
+      observer_->SearchEngineChosen(
+          profile_->GetTemplateURLModel()->GetDefaultSearchProvider());
   open_window = NULL;
   return true;
 }
 
 bool KeywordEditorView::Cancel() {
+  if (observer_)
+      observer_->SearchEngineChosen(
+          profile_->GetTemplateURLModel()->GetDefaultSearchProvider());
   open_window = NULL;
   return true;
 }
@@ -151,6 +173,9 @@ void KeywordEditorView::Init() {
   add_button_ = new views::NativeButton(
       this, l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_NEW_BUTTON));
   add_button_->SetEnabled(controller_->loaded());
+  add_button_->AddAccelerator(
+      views::Accelerator(base::VKEY_A, false, false, true));
+  add_button_->SetAccessibleKeyboardShortcut(L"A");
 
   edit_button_ = new views::NativeButton(
       this, l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_EDIT_BUTTON));
@@ -159,6 +184,9 @@ void KeywordEditorView::Init() {
   remove_button_ = new views::NativeButton(
       this, l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_REMOVE_BUTTON));
   remove_button_->SetEnabled(false);
+  remove_button_->AddAccelerator(
+      views::Accelerator(base::VKEY_R, false, false, true));
+  remove_button_->SetAccessibleKeyboardShortcut(L"R");
 
   make_default_button_ = new views::NativeButton(
       this,
@@ -205,18 +233,28 @@ void KeywordEditorView::InitLayoutManager() {
 }
 
 void KeywordEditorView::OnSelectionChanged() {
-  const int selected_row_count = table_view_->SelectedRowCount();
-  edit_button_->SetEnabled(selected_row_count == 1);
-  bool can_make_default = false;
-  bool can_remove = false;
-  if (selected_row_count == 1) {
+  bool only_one_url_left =
+      controller_->url_model()->GetTemplateURLs().size() == 1;
+  if (table_view_->SelectedRowCount() == 1) {
+    edit_button_->SetEnabled(true);
     const TemplateURL* selected_url =
         controller_->GetTemplateURL(table_view_->FirstSelectedRow());
-    can_make_default = controller_->CanMakeDefault(selected_url);
-    can_remove = controller_->CanRemove(selected_url);
+    make_default_button_->SetEnabled(controller_->CanMakeDefault(selected_url));
+    remove_button_->SetEnabled(!only_one_url_left &&
+                               controller_->CanRemove(selected_url));
+  } else {
+    edit_button_->SetEnabled(false);
+    make_default_button_->SetEnabled(false);
+    for (views::TableView::iterator i = table_view_->SelectionBegin();
+         i != table_view_->SelectionEnd(); ++i) {
+      const TemplateURL* selected_url = controller_->GetTemplateURL(*i);
+      if (!controller_->CanRemove(selected_url)) {
+        remove_button_->SetEnabled(false);
+        return;
+      }
+    }
+    remove_button_->SetEnabled(!only_one_url_left);
   }
-  remove_button_->SetEnabled(can_remove);
-  make_default_button_->SetEnabled(can_make_default);
 }
 
 void KeywordEditorView::OnDoubleClick() {
@@ -236,7 +274,7 @@ void KeywordEditorView::ButtonPressed(
     browser::EditSearchEngine(GetWindow()->GetNativeWindow(), NULL, this,
                               profile_);
   } else if (sender == remove_button_) {
-    DCHECK_EQ(1, table_view_->SelectedRowCount());
+    DCHECK_GT(table_view_->SelectedRowCount(), 0);
     int last_view_row = -1;
     for (views::TableView::iterator i = table_view_->SelectionBegin();
          i != table_view_->SelectionEnd(); ++i) {
@@ -269,4 +307,5 @@ void KeywordEditorView::MakeDefaultTemplateURL() {
       controller_->MakeDefaultTemplateURL(table_view_->FirstSelectedRow());
   if (new_index >= 0)
     table_view_->Select(new_index);
+  default_chosen_ = true;
 }

@@ -11,10 +11,11 @@
 #include "base/thread.h"
 #include "base/values.h"
 #include "net/base/file_stream.h"
-#include "chrome/browser/extensions/extension_file_util.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
@@ -22,6 +23,9 @@
 #include "ipc/ipc_message_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/image_decoder.h"
+
+namespace errors = extension_manifest_errors;
+namespace keys = extension_manifest_keys;
 
 namespace {
 // The name of a temporary directory to install an extension into for
@@ -31,9 +35,13 @@ const char kTempExtensionName[] = "TEMP_INSTALL";
 // The file to write our decoded images to, relative to the extension_path.
 const char kDecodedImagesFilename[] = "DECODED_IMAGES";
 
+// The file to write our decoded message catalogs to, relative to the
+// extension_path.
+const char kDecodedMessageCatalogsFilename[] = "DECODED_MESSAGE_CATALOGS";
+
 // Errors
 const char* kCouldNotCreateDirectoryError =
-    "Could not create directory for unzipping.";
+    "Could not create directory for unzipping: ";
 const char* kCouldNotDecodeImageError = "Could not decode theme image.";
 const char* kCouldNotUnzipExtension = "Could not unzip extension.";
 const char* kPathNamesMustBeAbsoluteOrLocalError =
@@ -85,26 +93,54 @@ static bool PathContainsParentDirectory(const FilePath& path) {
 
 DictionaryValue* ExtensionUnpacker::ReadManifest() {
   FilePath manifest_path =
-      temp_install_dir_.AppendASCII(Extension::kManifestFilename);
+      temp_install_dir_.Append(Extension::kManifestFilename);
   if (!file_util::PathExists(manifest_path)) {
-    SetError(extension_manifest_errors::kInvalidManifest);
+    SetError(errors::kInvalidManifest);
     return NULL;
   }
 
   JSONFileValueSerializer serializer(manifest_path);
   std::string error;
-  scoped_ptr<Value> root(serializer.Deserialize(&error));
+  scoped_ptr<Value> root(serializer.Deserialize(NULL, &error));
   if (!root.get()) {
     SetError(error);
     return NULL;
   }
 
   if (!root->IsType(Value::TYPE_DICTIONARY)) {
-    SetError(extension_manifest_errors::kInvalidManifest);
+    SetError(errors::kInvalidManifest);
     return NULL;
   }
 
   return static_cast<DictionaryValue*>(root.release());
+}
+
+bool ExtensionUnpacker::ReadAllMessageCatalogs(
+    const std::string& default_locale) {
+  FilePath locales_path =
+    temp_install_dir_.Append(Extension::kLocaleFolder);
+
+  // Not all folders under _locales have to be valid locales.
+  file_util::FileEnumerator locales(locales_path,
+                                    false,
+                                    file_util::FileEnumerator::DIRECTORIES);
+
+  std::set<std::string> all_locales;
+  extension_l10n_util::GetAllLocales(&all_locales);
+  FilePath locale_path;
+  while (!(locale_path = locales.Next()).empty()) {
+    if (extension_l10n_util::ShouldSkipValidation(locales_path, locale_path,
+                                                  all_locales))
+      continue;
+
+    FilePath messages_path =
+      locale_path.Append(Extension::kMessagesFilename);
+
+    if (!ReadMessageCatalog(messages_path))
+      return false;
+  }
+
+  return true;
 }
 
 bool ExtensionUnpacker::Run() {
@@ -114,7 +150,12 @@ bool ExtensionUnpacker::Run() {
   temp_install_dir_ =
       extension_path_.DirName().AppendASCII(kTempExtensionName);
   if (!file_util::CreateDirectory(temp_install_dir_)) {
-    SetError(kCouldNotCreateDirectoryError);
+#if defined(OS_WIN)
+    std::string dir_string = WideToUTF8(temp_install_dir_.value());
+#else
+    std::string dir_string = temp_install_dir_.value();
+#endif
+    SetError(kCouldNotCreateDirectoryError + dir_string);
     return false;
   }
 
@@ -154,6 +195,13 @@ bool ExtensionUnpacker::Run() {
       return false;  // Error was already reported.
   }
 
+  // Parse all message catalogs (if any).
+  parsed_catalogs_.reset(new DictionaryValue);
+  if (!extension.default_locale().empty()) {
+    if (!ReadAllMessageCatalogs(extension.default_locale()))
+      return false;  // Error was already reported.
+  }
+
   return true;
 }
 
@@ -165,6 +213,21 @@ bool ExtensionUnpacker::DumpImagesToFile() {
   if (!file_util::WriteFile(path, static_cast<const char*>(pickle.data()),
                             pickle.size())) {
     SetError("Could not write image data to disk.");
+    return false;
+  }
+
+  return true;
+}
+
+bool ExtensionUnpacker::DumpMessageCatalogsToFile() {
+  IPC::Message pickle;
+  IPC::WriteParam(&pickle, *parsed_catalogs_.get());
+
+  FilePath path = extension_path_.DirName().AppendASCII(
+      kDecodedMessageCatalogsFilename);
+  if (!file_util::WriteFile(path, static_cast<const char*>(pickle.data()),
+                            pickle.size())) {
+    SetError("Could not write message catalogs to disk.");
     return false;
   }
 
@@ -184,6 +247,19 @@ bool ExtensionUnpacker::ReadImagesFromFile(const FilePath& extension_path,
   return IPC::ReadParam(&pickle, &iter, images);
 }
 
+// static
+bool ExtensionUnpacker::ReadMessageCatalogsFromFile(
+    const FilePath& extension_path, DictionaryValue* catalogs) {
+  FilePath path = extension_path.AppendASCII(kDecodedMessageCatalogsFilename);
+  std::string file_str;
+  if (!file_util::ReadFileToString(path, &file_str))
+    return false;
+
+  IPC::Message pickle(file_str.data(), file_str.size());
+  void* iter = NULL;
+  return IPC::ReadParam(&pickle, &iter, catalogs);
+}
+
 bool ExtensionUnpacker::AddDecodedImage(const FilePath& path) {
   // Make sure it's not referencing a file outside the extension's subdir.
   if (path.IsAbsolute() || PathContainsParentDirectory(path)) {
@@ -198,6 +274,34 @@ bool ExtensionUnpacker::AddDecodedImage(const FilePath& path) {
   }
 
   decoded_images_.push_back(MakeTuple(image_bitmap, path));
+  return true;
+}
+
+bool ExtensionUnpacker::ReadMessageCatalog(const FilePath& message_path) {
+  std::string error;
+  JSONFileValueSerializer serializer(message_path);
+  scoped_ptr<DictionaryValue> root(
+      static_cast<DictionaryValue*>(serializer.Deserialize(NULL, &error)));
+  if (!root.get()) {
+    std::string messages_file = WideToASCII(message_path.ToWStringHack());
+    if (error.empty()) {
+      // If file is missing, Deserialize will fail with empty error.
+      SetError(StringPrintf("%s %s", errors::kLocalesMessagesFileMissing,
+                            messages_file.c_str()));
+    } else {
+      SetError(StringPrintf("%s: %s", messages_file.c_str(), error.c_str()));
+    }
+    return false;
+  }
+
+  FilePath relative_path;
+  // message_path was created from temp_install_dir. This should never fail.
+  if (!temp_install_dir_.AppendRelativePath(message_path, &relative_path))
+    NOTREACHED();
+
+  parsed_catalogs_->Set(relative_path.DirName().ToWStringHack(),
+                        root.release());
+
   return true;
 }
 

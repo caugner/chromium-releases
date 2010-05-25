@@ -4,16 +4,20 @@
 
 #include "chrome/browser/history/thumbnail_database.h"
 
-#include "app/gfx/codec/jpeg_codec.h"
 #include "app/sql/statement.h"
 #include "app/sql/transaction.h"
 #include "base/file_util.h"
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#endif
+#include "base/ref_counted_memory.h"
 #include "base/time.h"
 #include "base/string_util.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/common/thumbnail_score.h"
+#include "gfx/codec/jpeg_codec.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace history {
@@ -29,8 +33,9 @@ ThumbnailDatabase::~ThumbnailDatabase() {
   // The DBCloseScoper will delete the DB and the cache.
 }
 
-InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
-                                   const HistoryPublisher* history_publisher) {
+sql::InitStatus ThumbnailDatabase::Init(
+    const FilePath& db_name,
+    const HistoryPublisher* history_publisher) {
   history_publisher_ = history_publisher;
 
   // Set the exceptional sqlite error handler.
@@ -57,11 +62,20 @@ InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
   db_.set_exclusive_locking();
 
   if (!db_.Open(db_name))
-    return INIT_FAILURE;
+    return sql::INIT_FAILURE;
 
   // Scope initialization in a transaction so we can't be partially initialized.
   sql::Transaction transaction(&db_);
   transaction.Begin();
+
+#if defined(OS_MACOSX)
+  // Exclude the thumbnails file and its journal from backups.
+  mac_util::SetFileBackupExclusion(db_name, true);
+  FilePath::StringType db_name_string(db_name.value());
+  db_name_string += "-journal";
+  FilePath db_journal_name(db_name_string);
+  mac_util::SetFileBackupExclusion(db_journal_name, true);
+#endif
 
   // Create the tables.
   if (!meta_table_.Init(&db_, kCurrentVersionNumber,
@@ -69,7 +83,7 @@ InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
       !InitThumbnailTable() ||
       !InitFavIconsTable(false)) {
     db_.Close();
-    return INIT_FAILURE;
+    return sql::INIT_FAILURE;
   }
   InitFavIconsIndex();
 
@@ -77,7 +91,7 @@ InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
   // in the wild, so we try to continue in that case.
   if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
     LOG(WARNING) << "Thumbnail database is too new.";
-    return INIT_TOO_NEW;
+    return sql::INIT_TOO_NEW;
   }
 
   int cur_version = meta_table_.GetVersionNumber();
@@ -85,7 +99,7 @@ InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
     if (!UpgradeToVersion3()) {
       LOG(WARNING) << "Unable to update to thumbnail database to version 3.";
       db_.Close();
-      return INIT_FAILURE;
+      return sql::INIT_FAILURE;
     }
     ++cur_version;
   }
@@ -96,33 +110,10 @@ InitStatus ThumbnailDatabase::Init(const FilePath& db_name,
   // Initialization is complete.
   if (!transaction.Commit()) {
     db_.Close();
-    return INIT_FAILURE;
+    return sql::INIT_FAILURE;
   }
 
-  // The following code is useful in debugging the thumbnail database. Upon
-  // startup, it will spit out a file for each thumbnail in the database so you
-  // can open them in an external viewer. Insert the path name on your system
-  // into the string below (I recommend using a blank directory since there may
-  // be a lot of files).
-#if 0
-  sql::Statement statement(db_.GetUniqueStatement(
-      "SELECT id, image_data FROM favicons"));
-  while (statement.Step()) {
-    int idx = statement.ColumnInt(0);
-    std::vector<unsigned char> data;
-    statement.ColumnBlobAsVector(1, &data);
-
-    char filename[256];
-    sprintf(filename, "<<< YOUR PATH HERE >>>\\%d.png", idx);
-    if (!data.empty()) {
-      file_util::WriteFile(ASCIIToWide(std::string(filename)),
-                           reinterpret_cast<char*>(&data[0]),
-                           data.size());
-    }
-  }
-#endif
-
-  return INIT_OK;
+  return sql::INIT_OK;
 }
 
 bool ThumbnailDatabase::InitThumbnailTable() {
@@ -315,17 +306,17 @@ bool ThumbnailDatabase::ThumbnailScoreForId(URLID id,
 }
 
 bool ThumbnailDatabase::SetFavIcon(URLID icon_id,
-                                   const std::vector<unsigned char>& icon_data,
+                                   scoped_refptr<RefCountedMemory> icon_data,
                                    base::Time time) {
   DCHECK(icon_id);
-  if (icon_data.size()) {
+  if (icon_data->size()) {
     sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
         "UPDATE favicons SET image_data=?, last_updated=? WHERE id=?"));
     if (!statement)
       return 0;
 
-    statement.BindBlob(0, &icon_data.front(),
-                       static_cast<int>(icon_data.size()));
+    statement.BindBlob(0, icon_data->front(),
+                       static_cast<int>(icon_data->size()));
     statement.BindInt64(1, time.ToTimeT());
     statement.BindInt64(2, icon_id);
     return statement.Run();

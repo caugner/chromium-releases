@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT
-#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT
+#ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT_H_
+#define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT_H_
 
 #include <map>
 
@@ -25,7 +25,6 @@ class PasswordStoreDefault : public PasswordStore,
                              public WebDataServiceConsumer {
  public:
   explicit PasswordStoreDefault(WebDataService* web_data_service);
-  virtual ~PasswordStoreDefault();
 
   // Overridden to bypass the threading logic in PasswordStore, since
   // WebDataService's API is not threadsafe.
@@ -41,6 +40,8 @@ class PasswordStoreDefault : public PasswordStore,
   virtual void CancelLoginsQuery(int handle);
 
  protected:
+  virtual ~PasswordStoreDefault();
+
   // Implements PasswordStore interface.
   void AddLoginImpl(const webkit_glue::PasswordForm& form);
   void UpdateLoginImpl(const webkit_glue::PasswordForm& form);
@@ -87,4 +88,4 @@ class PasswordStoreDefault : public PasswordStore,
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreDefault);
 };
 
-#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT
+#endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_DEFAULT_H_

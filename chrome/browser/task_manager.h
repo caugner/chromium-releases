@@ -18,13 +18,13 @@
 #include "base/singleton.h"
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "net/url_request/url_request_job_tracker.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
-#include "webkit/api/public/WebCache.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 
-class MessageLoop;
+class Extension;
 class SkBitmap;
+class TabContents;
 class TaskManager;
 class TaskManagerModel;
 
@@ -55,8 +55,16 @@ class TaskManager {
     virtual bool ReportsSqliteMemoryUsed() const { return false; }
     virtual size_t SqliteMemoryUsedBytes() const { return 0; }
 
+    // Return extension associated with the resource, or NULL
+    // if not applicable.
+    virtual const Extension* GetExtension() const { return NULL; }
+
+    virtual bool ReportsV8MemoryStats() const { return false; }
+    virtual size_t GetV8MemoryAllocated() const { return 0; }
+    virtual size_t GetV8MemoryUsed() const { return 0; }
+
     // A helper function for ActivateFocusedTab.  Returns NULL by default
-    // because not all resources have an assoiciated tab.
+    // because not all resources have an associated tab.
     virtual TabContents* GetTabContents() const { return NULL; }
 
     // Whether this resource does report the network usage accurately.
@@ -76,6 +84,8 @@ class TaskManager {
 
     virtual void NotifyResourceTypeStats(
         const WebKit::WebCache::ResourceTypeStats& stats) {}
+    virtual void NotifyV8HeapStats(size_t v8_memory_allocated,
+                                   size_t v8_memory_used) {}
   };
 
   // ResourceProviders are responsible for adding/removing resources to the task
@@ -92,8 +102,6 @@ class TaskManager {
   // MessageLoop::InvokeLater().
   class ResourceProvider : public base::RefCountedThreadSafe<ResourceProvider> {
    public:
-    virtual ~ResourceProvider() {}
-
     // Should return the resource associated to the specified ids, or NULL if
     // the resource does not belong to this provider.
     virtual TaskManager::Resource* GetResource(int process_id,
@@ -101,6 +109,11 @@ class TaskManager {
                                                int routing_id) = 0;
     virtual void StartUpdating() = 0;
     virtual void StopUpdating() = 0;
+
+   protected:
+    friend class base::RefCountedThreadSafe<ResourceProvider>;
+
+    virtual ~ResourceProvider() {}
   };
 
   static void RegisterPrefs(PrefService* prefs);
@@ -174,7 +187,6 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
                          public base::RefCountedThreadSafe<TaskManagerModel> {
  public:
   explicit TaskManagerModel(TaskManager* task_manager);
-  ~TaskManagerModel();
 
   void AddObserver(TaskManagerModelObserver* observer);
   void RemoveObserver(TaskManagerModelObserver* observer);
@@ -196,6 +208,7 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   std::wstring GetResourceWebCoreCSSCacheSize(int index) const;
   std::wstring GetResourceSqliteMemoryUsed(int index) const;
   std::wstring GetResourceGoatsTeleported(int index) const;
+  std::wstring GetResourceV8MemoryAllocatedSize(int index) const;
 
   // Returns true if the resource is first in its group (resources
   // rendered by the same process are groupped together).
@@ -218,6 +231,9 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   // Returns TabContents of given resource or NULL if not applicable.
   TabContents* GetResourceTabContents(int index) const;
 
+  // Returns Extension of given resource or NULL if not applicable.
+  const Extension* GetResourceExtension(int index) const;
+
   // JobObserver methods:
   void OnJobAdded(URLRequestJob* job);
   void OnJobRemoved(URLRequestJob* job);
@@ -237,11 +253,18 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   void Clear();  // Removes all items.
 
   void NotifyResourceTypeStats(
-        base::ProcessId renderer_handle,
+        base::ProcessId renderer_id,
         const WebKit::WebCache::ResourceTypeStats& stats);
 
+  void NotifyV8HeapStats(base::ProcessId renderer_id,
+                         size_t v8_memory_allocated,
+                         size_t v8_memory_used);
+
  private:
+  friend class base::RefCountedThreadSafe<TaskManagerModel>;
   FRIEND_TEST(TaskManagerTest, RefreshCalled);
+
+  ~TaskManagerModel();
 
   enum UpdateState {
     IDLE = 0,      // Currently not updating.
@@ -276,7 +299,7 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   typedef std::vector<TaskManager::ResourceProvider*> ResourceProviderList;
   typedef std::map<base::ProcessHandle, ResourceList*> GroupMap;
   typedef std::map<base::ProcessHandle, base::ProcessMetrics*> MetricsMap;
-  typedef std::map<base::ProcessHandle, int> CPUUsageMap;
+  typedef std::map<base::ProcessHandle, double> CPUUsageMap;
   typedef std::map<TaskManager::Resource*, int64> ResourceValueMap;
 
   // Updates the values for all rows.
@@ -303,30 +326,28 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
   // Returns the CPU usage (in %) that should be displayed for the passed
   // |resource|.
-  int GetCPUUsage(TaskManager::Resource* resource) const;
+  double GetCPUUsage(TaskManager::Resource* resource) const;
 
-  // Retrieves the private memory (in KB) that should be displayed from the
-  // passed |process_metrics|.
-  size_t GetPrivateMemory(const base::ProcessMetrics* process_metrics) const;
+  // Gets the private memory (in bytes) that should be displayed for the passed
+  // resource index.
+  bool GetPrivateMemory(int index, size_t* result) const;
 
-  // Returns the shared memory (in KB) that should be displayed from the passed
-  // |process_metrics|.
-  size_t GetSharedMemory(const base::ProcessMetrics* process_metrics) const;
+  // Gets the shared memory (in bytes) that should be displayed for the passed
+  // resource index.
+  bool GetSharedMemory(int index, size_t* result) const;
 
-  // Returns the pysical memory (in KB) that should be displayed from the passed
-  // |process_metrics|.
-  size_t GetPhysicalMemory(const base::ProcessMetrics* process_metrics) const;
+  // Gets the physical memory (in bytes) that should be displayed for the passed
+  // resource index.
+  bool GetPhysicalMemory(int index, size_t* result) const;
 
   // Returns the stat value at the column |col_id| that should be displayed from
   // the passed |process_metrics|.
   int GetStatsValue(const TaskManager::Resource* resource, int col_id) const;
 
-  // Retrieves the ProcessMetrics for the resources at the specified rows.
-  // Returns true if there was a ProcessMetrics available for both rows.
-  bool GetProcessMetricsForRows(int row1,
-                                int row2,
-                                base::ProcessMetrics** proc_metrics1,
-                                base::ProcessMetrics** proc_metrics2) const;
+  // Retrieves the ProcessMetrics for the resources at the specified row.
+  // Returns true if there was a ProcessMetrics available.
+  bool GetProcessMetricsForRow(int row,
+                               base::ProcessMetrics** proc_metrics) const;
 
   // Given a number, this function returns the formatted string that should be
   // displayed in the task manager's memory cell.
@@ -362,13 +383,8 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
   ObserverList<TaskManagerModelObserver> observer_list_;
 
-  MessageLoop* ui_loop_;
-
   // Whether we are currently in the process of updating.
   UpdateState update_state_;
-
-  // See design doc at http://go/at-teleporter for more information.
-  static int goats_teleported_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerModel);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/win_util.h"
 #include "sandbox/src/crosscall_client.h"
 #include "sandbox/src/interception.h"
+#include "sandbox/src/interceptors.h"
 #include "sandbox/src/ipc_tags.h"
 #include "sandbox/src/policy_broker.h"
 #include "sandbox/src/policy_params.h"
@@ -109,13 +110,13 @@ ThreadProcessDispatcher::ThreadProcessDispatcher(PolicyBase* policy_base)
   };
 
   static const IPCCall process_token = {
-    {IPC_NTOPENPROCESSTOKEN_TAG, ULONG_TYPE, ULONG_TYPE},
+    {IPC_NTOPENPROCESSTOKEN_TAG, VOIDPTR_TYPE, ULONG_TYPE},
     reinterpret_cast<CallbackGeneric>(
         &ThreadProcessDispatcher::NtOpenProcessToken)
   };
 
   static const IPCCall process_tokenex = {
-    {IPC_NTOPENPROCESSTOKENEX_TAG, ULONG_TYPE, ULONG_TYPE, ULONG_TYPE},
+    {IPC_NTOPENPROCESSTOKENEX_TAG, VOIDPTR_TYPE, ULONG_TYPE, ULONG_TYPE},
     reinterpret_cast<CallbackGeneric>(
         &ThreadProcessDispatcher::NtOpenProcessTokenEx)
   };
@@ -146,9 +147,9 @@ bool ThreadProcessDispatcher::SetupService(InterceptionManager* manager,
 
     case IPC_CREATEPROCESSW_TAG:
       return INTERCEPT_EAT(manager, L"kernel32.dll", CreateProcessW,
-                           L"_TargetCreateProcessW@44") &&
+                           CREATE_PROCESSW_ID, 44) &&
              INTERCEPT_EAT(manager, L"kernel32.dll", CreateProcessA,
-                           L"_TargetCreateProcessA@44");
+                           CREATE_PROCESSA_ID, 44);
 
     default:
       return false;
@@ -177,7 +178,7 @@ bool ThreadProcessDispatcher::NtOpenProcess(IPCInfo* ipc, DWORD desired_access,
   return true;
 }
 
-bool ThreadProcessDispatcher::NtOpenProcessToken(IPCInfo* ipc, DWORD process,
+bool ThreadProcessDispatcher::NtOpenProcessToken(IPCInfo* ipc, HANDLE process,
                                                  DWORD desired_access) {
   HANDLE handle;
   NTSTATUS ret = ProcessPolicy::OpenProcessTokenAction(*ipc->client_info,
@@ -188,7 +189,7 @@ bool ThreadProcessDispatcher::NtOpenProcessToken(IPCInfo* ipc, DWORD process,
   return true;
 }
 
-bool ThreadProcessDispatcher::NtOpenProcessTokenEx(IPCInfo* ipc, DWORD process,
+bool ThreadProcessDispatcher::NtOpenProcessTokenEx(IPCInfo* ipc, HANDLE process,
                                                    DWORD desired_access,
                                                    DWORD attributes) {
   HANDLE handle;

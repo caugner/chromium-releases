@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef SECURE_MEM_H__
 #define SECURE_MEM_H__
 
@@ -50,7 +54,6 @@ class SecureMem {
             void*        r14;
             void*        r15;
             #elif defined(__i386__)
-            void*        ret2;
             void*        ebp;
             void*        edi;
             void*        esi;
@@ -86,9 +89,9 @@ class SecureMem {
       char               securePage[4096];
     };
     union {
-      // This scratch space is used by the trusted thread to read parameters
-      // for unrestricted system calls.
       struct {
+        // This scratch space is used by the trusted thread to read parameters
+        // for unrestricted system calls.
         long             tmpSyscallNum;
         void*            tmpArg1;
         void*            tmpArg2;
@@ -97,6 +100,21 @@ class SecureMem {
         void*            tmpArg5;
         void*            tmpArg6;
         void*            tmpReturnValue;
+
+        // Scratch space used to return the result of a rdtsc instruction
+        int              rdtscpEax;
+        int              rdtscpEdx;
+        int              rdtscpEcx;
+
+        // We often have long sequences of calls to gettimeofday(). This is
+        // needlessly expensive. Coalesce them into a single call.
+        int              lastSyscallNum;
+        int              gettimeofdayCounter;
+
+        // For debugging purposes, we want to be able to log messages. This can
+        // result in additional system calls. Make sure that we don't trigger
+        // logging of those recursive calls.
+        int              recursionLevel;
       } __attribute__((packed));
       char               scratchPage[4096];
     };

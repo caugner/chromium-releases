@@ -4,19 +4,16 @@
 
 #include "base/crypto/rsa_private_key.h"
 
-// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
-// until NSS 3.12.2 comes out and we update to it.
-#define Lock FOO_NSS_Lock
 #include <cryptohi.h>
 #include <keyhi.h>
 #include <pk11pub.h>
-#undef Lock
 
 #include <iostream>
 #include <list>
 
+#include "base/leak_annotations.h"
 #include "base/logging.h"
-#include "base/nss_init.h"
+#include "base/nss_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 
@@ -67,6 +64,9 @@ RSAPrivateKey* RSAPrivateKey::Create(uint16 num_bits) {
 // static
 RSAPrivateKey* RSAPrivateKey::CreateFromPrivateKeyInfo(
     const std::vector<uint8>& input) {
+  // This method currently leaks some memory.
+  // See http://crbug.com/34742.
+  ANNOTATE_SCOPED_MEMORY_LEAK;
   scoped_ptr<RSAPrivateKey> result(new RSAPrivateKey);
 
   PK11SlotInfo *slot = PK11_GetInternalSlot();

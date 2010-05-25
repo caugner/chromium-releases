@@ -5,7 +5,7 @@
 #ifndef PRINTING_PRINT_SETTINGS_H_
 #define PRINTING_PRINT_SETTINGS_H_
 
-#include "base/gfx/rect.h"
+#include "gfx/rect.h"
 #include "printing/page_overlays.h"
 #include "printing/page_range.h"
 #include "printing/page_setup.h"
@@ -84,6 +84,11 @@ class PrintSettings {
 
   // Indicates if the user only wants to print the current selection.
   bool selection_only;
+
+  // Indicates whether we should use browser-controlled page overlays
+  // (header, footer, margins etc). If it is false, the overlays are
+  // controlled by the renderer.
+  bool use_overlays;
 
   // Cookie generator. It is used to initialize PrintedDocument with its
   // associated PrintSettings, to be sure that each generated PrintedPage is

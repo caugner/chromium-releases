@@ -73,6 +73,16 @@ ThemeInstallBubbleView::ThemeInstallBubbleView(NSWindow* window)
       this,
       NotificationType::EXTENSION_INSTALLED,
       NotificationService::AllSources());
+  registrar_.Add(
+      this,
+      NotificationType::EXTENSION_INSTALL_ERROR,
+      NotificationService::AllSources());
+
+  // Don't let the bubble overlap the confirm dialog.
+  registrar_.Add(
+      this,
+      NotificationType::EXTENSION_WILL_SHOW_CONFIRM_DIALOG,
+      NotificationService::AllSources());
 
   // Add the view.
   [cocoa_view_ setFrame:parent_bounds];
@@ -120,9 +130,8 @@ void ThemeInstallBubbleView::Show(NSWindow* window) {
 - (id)init {
   self = [super initWithFrame:NSZeroRect];
   if (self) {
-    // Need our own copy of the "Loading..." string: http://crbug.com/24177
     NSString* loadingString =
-        l10n_util::GetNSStringWithFixup(IDS_TAB_LOADING_TITLE);
+        l10n_util::GetNSStringWithFixup(IDS_THEME_LOADING_TITLE);
     NSFont* loadingFont = [NSFont systemFontOfSize:kLoadingTextSize];
     NSColor* textColor = [NSColor whiteColor];
     NSDictionary* loadingAttrs = [NSDictionary dictionaryWithObjectsAndKeys:
@@ -142,6 +151,12 @@ void ThemeInstallBubbleView::Show(NSWindow* window) {
   size.width += kTextHorizPadding;
   size.height += kTextVertPadding;
   return size;
+}
+
+// Update the layout to keep the view centered when the window is resized.
+- (void)resizeWithOldSuperviewSize:(NSSize)oldBoundsSize {
+  [super resizeWithOldSuperviewSize:oldBoundsSize];
+  [self layout];
 }
 
 - (void)layout {

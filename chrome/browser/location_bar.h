@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,19 @@
 
 #include <string>
 
+#include "chrome/browser/first_run.h"
 #include "chrome/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditView;
+class ExtensionAction;
 class LocationBarTesting;
 class TabContents;
 
 class LocationBar {
  public:
   // Shows the first run information bubble anchored to the location bar.
-  virtual void ShowFirstRunBubble(bool use_OEM_bubble) = 0;
+  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) = 0;
 
   // Returns the string of text entered in the location bar.
   virtual std::wstring GetInputString() const = 0;
@@ -42,12 +44,15 @@ class LocationBar {
   // Accepts the current input, overriding the disposition.
   virtual void AcceptInputWithDisposition(WindowOpenDisposition) = 0;
 
-  // Focuses and selects the contents of the location bar.
-  virtual void FocusLocation() = 0;
+  // Focuses the location bar.  Optionally also selects its contents.
+  virtual void FocusLocation(bool select_all) = 0;
 
   // Clears the location bar, inserts an annoying little "?" turd and sets
   // focus to it.
   virtual void FocusSearch() = 0;
+
+  // Updates the state of the images showing the content settings status.
+  virtual void UpdateContentSettingsIcons() = 0;
 
   // Updates the state of the page actions.
   virtual void UpdatePageActions() = 0;
@@ -68,6 +73,9 @@ class LocationBar {
 
   // Returns a pointer to the testing interface.
   virtual LocationBarTesting* GetLocationBarForTesting() = 0;
+
+ protected:
+  virtual ~LocationBar() {}
 };
 
 class LocationBarTesting {
@@ -77,6 +85,18 @@ class LocationBarTesting {
 
   // Returns the number of visible page actions in the Omnibox.
   virtual int PageActionVisibleCount() = 0;
+
+  // Returns the ExtensionAction at |index|.
+  virtual ExtensionAction* GetPageAction(size_t index) = 0;
+
+  // Returns the visible ExtensionAction at |index|.
+  virtual ExtensionAction* GetVisiblePageAction(size_t index) = 0;
+
+  // Simulates a left mouse pressed on the visible page action at |index|.
+  virtual void TestPageActionPressed(size_t index) = 0;
+
+ protected:
+  virtual ~LocationBarTesting() {}
 };
 
 #endif  // CHROME_BROWSER_LOCATION_BAR_H_

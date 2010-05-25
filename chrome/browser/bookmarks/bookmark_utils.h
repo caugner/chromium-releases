@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/history/snippet.h"
+#include "gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class BookmarkModel;
@@ -64,12 +64,20 @@ bool IsValidDropLocation(Profile* profile,
                          const BookmarkNode* drop_parent,
                          int index);
 
+// TODO(mrossetti): Rename CloneDragData to CloneBookmarkNode.
+// See: http://crbug.com/37891
+
 // Clones drag data, adding newly created nodes to |parent| starting at
 // |index_to_add_at|.
 void CloneDragData(BookmarkModel* model,
                    const std::vector<BookmarkDragData::Element>& elements,
                    const BookmarkNode* parent,
                    int index_to_add_at);
+
+// Begins dragging a group of bookmarks.
+void DragBookmarks(Profile* profile,
+                   const std::vector<const BookmarkNode*>& nodes,
+                   gfx::NativeView view);
 
 // Recursively opens all bookmarks. |initial_disposition| dictates how the
 // first URL is opened, all subsequent URLs are opened as background tabs.
@@ -149,9 +157,9 @@ bool DoesBookmarkContainText(const BookmarkNode* node,
                              const std::wstring& languages);
 
 // Modifies a bookmark node (assuming that there's no magic that needs to be
-// done regarding moving from one folder to another).  If the URL changed or a
-// new node is explicitly being added, returns a pointer to the new node that
-// was created.  Otherwise the return value is identically |node|.
+// done regarding moving from one folder to another).  If a new node is
+// explicitly being added, returns a pointer to the new node that was created.
+// Otherwise the return value is identically |node|.
 const BookmarkNode* ApplyEditsWithNoGroupChange(
     BookmarkModel* model,
     const BookmarkNode* parent,
@@ -161,9 +169,9 @@ const BookmarkNode* ApplyEditsWithNoGroupChange(
     BookmarkEditor::Handler* handler);
 
 // Modifies a bookmark node assuming that the parent of the node may have
-// changed and the node will need to be removed and reinserted.  If the URL
-// changed or a new node is explicitly being added, returns a pointer to the
-// new node that was created.  Otherwise the return value is identically |node|.
+// changed and the node will need to be removed and reinserted.  If a new node
+// is explicitly being added, returns a pointer to the new node that was
+// created.  Otherwise the return value is identically |node|.
 const BookmarkNode* ApplyEditsWithPossibleGroupChange(
     BookmarkModel* model,
     const BookmarkNode* new_parent,
@@ -191,6 +199,15 @@ void GetURLAndTitleToBookmark(TabContents* tab_contents,
 // tab in browser.
 void GetURLsForOpenTabs(Browser* browser,
                         std::vector<std::pair<GURL, std::wstring> >* urls);
+
+// Returns the parent for newly created folders/bookmarks. If |selection| has
+// one element and it is a folder, |selection[0]| is returned, otherwise
+// |parent| is returned. If |index| is non-null it is set to the index newly
+// added nodes should be added at.
+const BookmarkNode* GetParentForNewNodes(
+    const BookmarkNode* parent,
+    const std::vector<const BookmarkNode*>& selection,
+    int* index);
 
 // Number of bookmarks we'll open before prompting the user to see if they
 // really want to open all.

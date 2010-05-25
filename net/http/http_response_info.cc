@@ -38,12 +38,16 @@ enum {
   // This bit is set if the request was cancelled before completion.
   RESPONSE_INFO_TRUNCATED = 1 << 12,
 
+  // This bit is set if the response was received via SPDY.
+  RESPONSE_INFO_WAS_SPDY = 1 << 13,
+
   // TODO(darin): Add other bits to indicate alternate request methods.
   // For now, we don't support storing those.
 };
 
 HttpResponseInfo::HttpResponseInfo()
-    : was_cached(false) {
+    : was_cached(false),
+      was_fetched_via_spdy(false) {
 }
 
 HttpResponseInfo::~HttpResponseInfo() {
@@ -103,6 +107,8 @@ bool HttpResponseInfo::InitFromPickle(const Pickle& pickle,
       return false;
   }
 
+  was_fetched_via_spdy = (flags & RESPONSE_INFO_WAS_SPDY) != 0;
+
   *response_truncated = (flags & RESPONSE_INFO_TRUNCATED) ? true : false;
 
   return true;
@@ -122,6 +128,8 @@ void HttpResponseInfo::Persist(Pickle* pickle,
     flags |= RESPONSE_INFO_HAS_VARY_DATA;
   if (response_truncated)
     flags |= RESPONSE_INFO_TRUNCATED;
+  if (was_fetched_via_spdy)
+    flags |= RESPONSE_INFO_WAS_SPDY;
 
   pickle->WriteInt(flags);
   pickle->WriteInt64(request_time.ToInternalValue());

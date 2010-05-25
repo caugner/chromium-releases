@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/webplugininfo.h"
+#include "webkit/glue/plugins/webplugininfo.h"
 
 #if defined(OS_WIN)
 #include "base/registry.h"
@@ -31,6 +31,7 @@ class Message;
 
 class MessageLoop;
 class PluginProcessHost;
+class Profile;
 class URLRequestContext;
 class ResourceDispatcherHost;
 class ResourceMessageFilter;
@@ -41,6 +42,10 @@ class PluginService
     : public base::WaitableEventWatcher::Delegate,
       public NotificationObserver {
  public:
+  // Initializes the global instance; should be called on startup from the main
+  // thread.
+  static void InitGlobalInstance(Profile* profile);
+
   // Returns the PluginService singleton.
   static PluginService* GetInstance();
 
@@ -90,6 +95,8 @@ class PluginService
   ResourceDispatcherHost* resource_dispatcher_host() const {
     return resource_dispatcher_host_;
   }
+
+  static void EnableChromePlugins(bool enable);
 
  private:
   friend struct DefaultSingletonTraits<PluginService>;
@@ -142,6 +149,9 @@ class PluginService
   base::WaitableEventWatcher hkcu_watcher_;
   base::WaitableEventWatcher hklm_watcher_;
 #endif
+
+  // Set to true if chrome plugins are enabled. Defaults to true.
+  static bool enable_chrome_plugins_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginService);
 };

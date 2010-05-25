@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef IPC_IPC_MESSAGE_UTILS_H_
 #define IPC_IPC_MESSAGE_UTILS_H_
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <map>
@@ -14,6 +15,7 @@
 #include "base/nullable_string16.h"
 #include "base/string16.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/tuple.h"
 #include "base/values.h"
@@ -45,16 +47,16 @@ enum IPCMessageStart {
   WorkerMsgStart,
   WorkerHostMsgStart,
   NaClProcessMsgStart,
+  GpuCommandBufferMsgStart,
+  UtilityMsgStart,
+  UtilityHostMsgStart,
+  GpuMsgStart,
+  GpuHostMsgStart,
+  GpuChannelMsgStart,
   // NOTE: When you add a new message class, also update
   // IPCStatusView::IPCStatusView to ensure logging works.
-  // NOTE: this enum is used by IPC_MESSAGE_MACRO to generate a unique message
-  // id.  Only 4 bits are used for the message type, so if this enum needs more
-  // than 16 entries, that code needs to be updated.
   LastMsgIndex
 };
-
-COMPILE_ASSERT(LastMsgIndex <= 16, need_to_update_IPC_MESSAGE_MACRO);
-
 
 namespace IPC {
 
@@ -66,14 +68,8 @@ class MessageIterator {
   explicit MessageIterator(const Message& m) : msg_(m), iter_(NULL) {
   }
   int NextInt() const {
-    int val;
+    int val = -1;
     if (!msg_.ReadInt(&iter_, &val))
-      NOTREACHED();
-    return val;
-  }
-  intptr_t NextIntPtr() const {
-    intptr_t val;
-    if (!msg_.ReadIntPtr(&iter_, &val))
       NOTREACHED();
     return val;
   }
@@ -89,7 +85,7 @@ class MessageIterator {
       NOTREACHED();
     return val;
   }
-  const void NextData(const char** data, int* length) const {
+  void NextData(const char** data, int* length) const {
     if (!msg_.ReadData(&iter_, data, length)) {
       NOTREACHED();
     }
@@ -454,22 +450,16 @@ struct ParamTraits<std::vector<P> > {
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     int size;
+    // ReadLength() checks for < 0 itself.
     if (!m->ReadLength(iter, &size))
       return false;
     // Resizing beforehand is not safe, see BUG 1006367 for details.
-    if (m->IteratorHasRoomFor(*iter, size * sizeof(P))) {
-      r->resize(size);
-      for (int i = 0; i < size; i++) {
-        if (!ReadParam(m, iter, &(*r)[i]))
-          return false;
-      }
-    } else {
-      for (int i = 0; i < size; i++) {
-        P element;
-        if (!ReadParam(m, iter, &element))
-          return false;
-        r->push_back(element);
-      }
+    if (INT_MAX / sizeof(P) <= static_cast<size_t>(size))
+      return false;
+    r->resize(size);
+    for (int i = 0; i < size; i++) {
+      if (!ReadParam(m, iter, &(*r)[i]))
+        return false;
     }
     return true;
   }
@@ -597,11 +587,13 @@ template <>
 struct ParamTraits<HANDLE> {
   typedef HANDLE param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteIntPtr(reinterpret_cast<intptr_t>(p));
+    // Note that HWNDs/HANDLE/HCURSOR/HACCEL etc are always 32 bits, even on 64
+    // bit systems.
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    DCHECK_EQ(sizeof(param_type), sizeof(intptr_t));
-    return m->ReadIntPtr(iter, reinterpret_cast<intptr_t*>(r));
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(StringPrintf(L"0x%X", p));
@@ -612,11 +604,11 @@ template <>
 struct ParamTraits<HCURSOR> {
   typedef HCURSOR param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteIntPtr(reinterpret_cast<intptr_t>(p));
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    DCHECK_EQ(sizeof(param_type), sizeof(intptr_t));
-    return m->ReadIntPtr(iter, reinterpret_cast<intptr_t*>(r));
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(StringPrintf(L"0x%X", p));
@@ -627,11 +619,11 @@ template <>
 struct ParamTraits<HACCEL> {
   typedef HACCEL param_type;
   static void Write(Message* m, const param_type& p) {
-    m->WriteIntPtr(reinterpret_cast<intptr_t>(p));
+    m->WriteUInt32(reinterpret_cast<uint32>(p));
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
-    DCHECK_EQ(sizeof(param_type), sizeof(intptr_t));
-    return m->ReadIntPtr(iter, reinterpret_cast<intptr_t*>(r));
+    DCHECK_EQ(sizeof(param_type), sizeof(uint32));
+    return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
   }
 };
 
@@ -723,7 +715,7 @@ struct ParamTraits<base::FileDescriptor> {
     }
   }
 };
-#endif // defined(OS_POSIX)
+#endif  // defined(OS_POSIX)
 
 // A ChannelHandle is basically a platform-inspecific wrapper around the
 // fact that IPC endpoints are handled specially on POSIX.  See above comments
@@ -782,7 +774,7 @@ struct ParamTraits<XFORM> {
 struct LogData {
   std::string channel;
   int32 routing_id;
-  uint16 type;  // "User-defined" message type, from ipc_message.h.
+  uint32 type;  // "User-defined" message type, from ipc_message.h.
   std::wstring flags;
   int64 sent;  // Time that the message was sent (i.e. at Send()).
   int64 receive;  // Time before it was dispatched (i.e. before calling
@@ -810,7 +802,7 @@ struct ParamTraits<LogData> {
     int type;
     bool result =
       ReadParam(m, iter, &r->channel) &&
-      ReadParam(m, iter, &r->routing_id);
+      ReadParam(m, iter, &r->routing_id) &&
       ReadParam(m, iter, &type) &&
       ReadParam(m, iter, &r->flags) &&
       ReadParam(m, iter, &r->sent) &&
@@ -978,7 +970,7 @@ class MessageWithTuple : public Message {
   typedef ParamType Param;
   typedef typename ParamType::ParamTuple RefParam;
 
-  MessageWithTuple(int32 routing_id, uint16 type, const RefParam& p)
+  MessageWithTuple(int32 routing_id, uint32 type, const RefParam& p)
       : Message(routing_id, type, PRIORITY_NORMAL) {
     WriteParam(this, p);
   }
@@ -1142,7 +1134,7 @@ class MessageWithReply : public SyncMessage {
   typedef typename SendParam::ParamTuple RefSendParam;
   typedef ReplyParamType ReplyParam;
 
-  MessageWithReply(int32 routing_id, uint16 type,
+  MessageWithReply(int32 routing_id, uint32 type,
                    const RefSendParam& send, const ReplyParam& reply)
       : SyncMessage(routing_id, type, PRIORITY_NORMAL,
                     new ParamDeserializer<ReplyParam>(reply)) {

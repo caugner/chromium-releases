@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,10 +31,6 @@ class TestBrowsingInstance : public BrowsingInstance {
         deleteCounter_(deleteCounter) {
   }
 
-  ~TestBrowsingInstance() {
-    (*deleteCounter_)++;
-  }
-
   // Overrides BrowsingInstance::ShouldUseProcessPerSite so that we can test
   // both alternatives without using command-line switches.
   bool ShouldUseProcessPerSite(const GURL& url) {
@@ -45,6 +41,10 @@ class TestBrowsingInstance : public BrowsingInstance {
   bool use_process_per_site;
 
  private:
+  ~TestBrowsingInstance() {
+    (*deleteCounter_)++;
+  }
+
   int* deleteCounter_;
 };
 
@@ -224,19 +224,19 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
 
   // Javascript URLs have no site.
   test_url = GURL("javascript:foo();");
-  EXPECT_EQ(GURL::EmptyGURL(), SiteInstance::GetSiteForURL(test_url));
+  EXPECT_EQ(GURL(), SiteInstance::GetSiteForURL(test_url));
 
   test_url = GURL("http://foo/a.html");
   EXPECT_EQ(GURL("http://foo"), SiteInstance::GetSiteForURL(test_url));
 
   test_url = GURL("file:///C:/Downloads/");
-  EXPECT_EQ(GURL::EmptyGURL(), SiteInstance::GetSiteForURL(test_url));
+  EXPECT_EQ(GURL(), SiteInstance::GetSiteForURL(test_url));
 
   // TODO(creis): Do we want to special case file URLs to ensure they have
   // either no site or a special "file://" site?  We currently return
   // "file://home/" as the site, which seems broken.
   // test_url = GURL("file://home/");
-  // EXPECT_EQ(GURL::EmptyGURL(), SiteInstance::GetSiteForURL(test_url));
+  // EXPECT_EQ(GURL(), SiteInstance::GetSiteForURL(test_url));
 }
 
 // Test of distinguishing URLs from different sites.  Most of this logic is
@@ -425,7 +425,6 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Create some extension instances and make sure they share a process.
   scoped_refptr<SiteInstance> extension1_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome-extension://foo/bar")));
-  policy->Add(extension1_instance->GetProcess()->id());
   policy->GrantExtensionBindings(extension1_instance->GetProcess()->id());
 
   scoped_refptr<SiteInstance> extension2_instance(
@@ -439,7 +438,6 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Create some DOMUI instances and make sure they share a process.
   scoped_refptr<SiteInstance> dom1_instance(
       CreateSiteInstance(&rph_factory, GURL("chrome://newtab")));
-  policy->Add(dom1_instance->GetProcess()->id());
   policy->GrantDOMUIBindings(dom1_instance->GetProcess()->id());
 
   scoped_refptr<SiteInstance> dom2_instance(

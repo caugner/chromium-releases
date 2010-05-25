@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sandbox {
+
+#define BINDNTDLL(name) \
+    name ## Function name = reinterpret_cast<name ## Function>( \
+      ::GetProcAddress(::GetModuleHandle(L"ntdll.dll"), #name))
 
 // Reverts to self and verify that SetInformationToken was faked. Returns
 // SBOX_TEST_SUCCEEDED if faked and SBOX_TEST_FAILED if not faked.
@@ -71,14 +75,45 @@ SBOX_TESTS_COMMAND int PolicyTargetTest_token2(int argc, wchar_t **argv) {
   return SBOX_TEST_SUCCEEDED;
 }
 
+// Opens the thread token with and without impersonation, using
+// NtOpenThreadTokenEX.
+SBOX_TESTS_COMMAND int PolicyTargetTest_token3(int argc, wchar_t **argv) {
+  BINDNTDLL(NtOpenThreadTokenEx);
+  if (!NtOpenThreadTokenEx)
+    return SBOX_TEST_FAILED_TO_EXECUTE_COMMAND;
+
+  HANDLE thread_token;
+  // Get the thread token, using impersonation.
+  NTSTATUS status = NtOpenThreadTokenEx(GetCurrentThread(),
+                                        TOKEN_IMPERSONATE | TOKEN_DUPLICATE,
+                                        FALSE, 0, &thread_token);
+  if (status == STATUS_NO_TOKEN)
+    return ERROR_NO_TOKEN;
+  if (!NT_SUCCESS(status))
+    return SBOX_TEST_FAILED;
+
+  ::CloseHandle(thread_token);
+
+  // Get the thread token, without impersonation.
+  status = NtOpenThreadTokenEx(GetCurrentThread(),
+                               TOKEN_IMPERSONATE | TOKEN_DUPLICATE, TRUE, 0,
+                               &thread_token);
+  if (!NT_SUCCESS(status))
+    return SBOX_TEST_FAILED;
+
+  ::CloseHandle(thread_token);
+  return SBOX_TEST_SUCCEEDED;
+}
+
 // Tests that we can open the current thread.
 SBOX_TESTS_COMMAND int PolicyTargetTest_thread(int argc, wchar_t **argv) {
   DWORD thread_id = ::GetCurrentThreadId();
   HANDLE thread = ::OpenThread(SYNCHRONIZE, FALSE, thread_id);
   if (!thread)
     return ::GetLastError();
+  if (!::CloseHandle(thread))
+    return ::GetLastError();
 
-  ::CloseHandle(thread);
   return SBOX_TEST_SUCCEEDED;
 }
 
@@ -96,12 +131,15 @@ SBOX_TESTS_COMMAND int PolicyTargetTest_thread2(int argc, wchar_t **argv) {
                                  &thread_id);
   if (!thread)
     return ::GetLastError();
-  ::CloseHandle(thread);
+  if (!::CloseHandle(thread))
+    return ::GetLastError();
 
   thread = ::OpenThread(SYNCHRONIZE, FALSE, thread_id);
   if (!thread)
     return ::GetLastError();
-  ::CloseHandle(thread);
+
+  if (!::CloseHandle(thread))
+    return ::GetLastError();
 
   return SBOX_TEST_SUCCEEDED;
 }
@@ -112,10 +150,10 @@ SBOX_TESTS_COMMAND int PolicyTargetTest_process(int argc, wchar_t **argv) {
   STARTUPINFO startup_info = {0};
   startup_info.cb = sizeof(startup_info);
   PROCESS_INFORMATION process_info;
-  ::CreateProcess(L"foo.exe", L"foo.exe", NULL, NULL, FALSE, 0, NULL, NULL,
-                  &startup_info, &process_info);
-
-  return SBOX_TEST_SUCCEEDED;
+  if (!::CreateProcessW(L"foo.exe", L"foo.exe", NULL, NULL, FALSE, 0,
+                        NULL, NULL, &startup_info, &process_info))
+    return SBOX_TEST_SUCCEEDED;
+  return SBOX_TEST_FAILED;
 }
 
 TEST(PolicyTargetTest, SetInformationThread) {
@@ -142,6 +180,18 @@ TEST(PolicyTargetTest, OpenThreadToken) {
 
   runner.SetTestState(AFTER_REVERT);
   EXPECT_EQ(ERROR_NO_TOKEN, runner.RunTest(L"PolicyTargetTest_token2"));
+}
+
+TEST(PolicyTargetTest, OpenThreadTokenEx) {
+  TestRunner runner;
+  if (win_util::GetWinVersion() < win_util::WINVERSION_XP)
+    return;
+
+  runner.SetTestState(BEFORE_REVERT);
+  EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(L"PolicyTargetTest_token3"));
+
+  runner.SetTestState(AFTER_REVERT);
+  EXPECT_EQ(ERROR_NO_TOKEN, runner.RunTest(L"PolicyTargetTest_token3"));
 }
 
 TEST(PolicyTargetTest, OpenThread) {

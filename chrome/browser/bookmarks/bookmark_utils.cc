@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,26 +9,41 @@
 #include "app/l10n_util.h"
 #include "app/tree_node_iterator.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/string_util.h"
+#include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#if defined(OS_MACOSX)
+#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
+#endif
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/history/query_parser.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/app_strings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "views/event.h"
+
+#if defined(TOOLKIT_VIEWS)
+#include "app/os_exchange_data.h"
+#include "views/drag_utils.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#elif defined(TOOLKIT_GTK)
+#include "app/gtk_util.h"
+#include "chrome/browser/gtk/custom_drag.h"
+#endif
 
 using base::Time;
 
@@ -70,6 +85,9 @@ class NewBrowserPageNavigator : public PageNavigator {
 
   DISALLOW_COPY_AND_ASSIGN(NewBrowserPageNavigator);
 };
+
+// TODO(mrossetti): Rename CloneDragDataImpl to CloneBookmarkNodeImpl.
+// See: http://crbug.com/37891
 
 void CloneDragDataImpl(BookmarkModel* model,
                        const BookmarkDragData::Element& element,
@@ -146,15 +164,34 @@ bool ShouldOpenAll(gfx::NativeWindow parent,
   if (descendant_count < bookmark_utils::num_urls_before_prompting)
     return true;
 
+  // Bug 40011: we should refactor this into a cross-platform "prompt before
+  // continuing" function.
+#if defined(OS_WIN)
   std::wstring message =
       l10n_util::GetStringF(IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
                             IntToWString(descendant_count));
-#if defined(OS_WIN)
   return MessageBox(parent, message.c_str(),
                     l10n_util::GetString(IDS_PRODUCT_NAME).c_str(),
                     MB_YESNO | MB_ICONWARNING | MB_TOPMOST) == IDYES;
+#elif defined(TOOLKIT_GTK)
+  std::string message = l10n_util::GetStringFUTF8(
+      IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
+      IntToString16(descendant_count));
+  GtkWidget* dialog = gtk_message_dialog_new(parent,
+      static_cast<GtkDialogFlags>(
+          GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+      GTK_MESSAGE_QUESTION,
+      GTK_BUTTONS_YES_NO,
+      "%s", message.c_str());
+  gtk_util::ApplyMessageDialogQuirks(dialog);
+  gtk_window_set_title(GTK_WINDOW(dialog),
+                       l10n_util::GetStringUTF8(IDS_PRODUCT_NAME).c_str());
+  gint result = gtk_dialog_run(GTK_DIALOG(dialog));
+  gtk_widget_destroy(dialog);
+  return (result == GTK_RESPONSE_YES);
 #else
   // TODO(port): Display a dialog prompt.
+  // http://crbug.com/34481
   NOTIMPLEMENTED();
   return true;
 #endif
@@ -184,9 +221,10 @@ bool DoesBookmarkContainWords(const BookmarkNode* node,
   return
       DoesBookmarkTextContainWords(
           l10n_util::ToLower(node->GetTitle()), words) ||
-      DoesBookmarkTextContainWords(UTF8ToWide(node->GetURL().spec()), words) ||
-      DoesBookmarkTextContainWords(net::FormatUrl(
-          node->GetURL(), languages, false, true, NULL, NULL), words);
+      DoesBookmarkTextContainWords(
+          l10n_util::ToLower(UTF8ToWide(node->GetURL().spec())), words) ||
+      DoesBookmarkTextContainWords(l10n_util::ToLower(net::FormatUrl(
+          node->GetURL(), languages, false, true, NULL, NULL, NULL)), words);
 }
 
 }  // namespace
@@ -241,28 +279,23 @@ int PerformBookmarkDrop(Profile* profile,
                         const BookmarkDragData& data,
                         const BookmarkNode* parent_node,
                         int index) {
-  const BookmarkNode* dragged_node = data.GetFirstNode(profile);
   BookmarkModel* model = profile->GetBookmarkModel();
-  if (dragged_node) {
-    // Drag from same profile, do a move.
-    model->Move(dragged_node, parent_node, index);
-    return DragDropTypes::DRAG_MOVE;
-  } else if (data.has_single_url()) {
-    // New URL, add it at the specified location.
-    std::wstring title = data.elements[0].title;
-    if (title.empty()) {
-      // No title, use the host.
-      title = UTF8ToWide(data.elements[0].url.host());
-      if (title.empty())
-        title = l10n_util::GetString(IDS_BOOMARK_BAR_UNKNOWN_DRAG_TITLE);
+  if (data.IsFromProfile(profile)) {
+    const std::vector<const BookmarkNode*> dragged_nodes =
+        data.GetNodes(profile);
+    if (!dragged_nodes.empty()) {
+      // Drag from same profile. Move nodes.
+      for (size_t i = 0; i < dragged_nodes.size(); ++i) {
+        model->Move(dragged_nodes[i], parent_node, index);
+        index = parent_node->IndexOfChild(dragged_nodes[i]) + 1;
+      }
+      return DragDropTypes::DRAG_MOVE;
     }
-    model->AddURL(parent_node, index, title, data.elements[0].url);
-    return DragDropTypes::DRAG_COPY | DragDropTypes::DRAG_LINK;
-  } else {
-    // Dropping a group from different profile. Always accept.
-    bookmark_utils::CloneDragData(model, data.elements, parent_node, index);
-    return DragDropTypes::DRAG_COPY;
+    return DragDropTypes::DRAG_NONE;
   }
+  // Dropping a group from different profile. Always accept.
+  bookmark_utils::CloneDragData(model, data.elements, parent_node, index);
+  return DragDropTypes::DRAG_COPY;
 }
 
 bool IsValidDropLocation(Profile* profile,
@@ -310,6 +343,41 @@ void CloneDragData(BookmarkModel* model,
     CloneDragDataImpl(model, elements[i], parent, index_to_add_at + i);
 }
 
+
+// Bookmark dragging
+void DragBookmarks(Profile* profile,
+                   const std::vector<const BookmarkNode*>& nodes,
+                   gfx::NativeView view) {
+  DCHECK(!nodes.empty());
+
+#if defined(TOOLKIT_VIEWS)
+  // Set up our OLE machinery
+  OSExchangeData data;
+  BookmarkDragData drag_data(nodes);
+  drag_data.Write(profile, &data);
+
+  views::RootView* root_view = views::Widget::GetWidgetFromNativeView(view)->GetRootView();
+
+  // Allow nested message loop so we get DnD events as we drag this around.
+  bool was_nested = MessageLoop::current()->IsNested();
+  MessageLoop::current()->SetNestableTasksAllowed(true);
+
+  root_view->StartDragForViewFromMouseEvent(NULL, data,
+      DragDropTypes::DRAG_COPY | DragDropTypes::DRAG_MOVE |
+      DragDropTypes::DRAG_LINK);
+
+  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
+#elif defined(OS_MACOSX)
+  // Allow nested message loop so we get DnD events as we drag this around.
+  bool was_nested = MessageLoop::current()->IsNested();
+  MessageLoop::current()->SetNestableTasksAllowed(true);
+  bookmark_pasteboard_helper_mac::StartDrag(profile, nodes, view);
+  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
+#elif defined(TOOLKIT_GTK)
+  BookmarkDrag::BeginDrag(profile, nodes);
+#endif
+}
+
 void OpenAll(gfx::NativeWindow parent,
              Profile* profile,
              PageNavigator* navigator,
@@ -321,7 +389,7 @@ void OpenAll(gfx::NativeWindow parent,
   NewBrowserPageNavigator navigator_impl(profile);
   if (!navigator) {
     Browser* browser =
-        BrowserList::FindBrowserWithType(profile, Browser::TYPE_NORMAL);
+        BrowserList::FindBrowserWithType(profile, Browser::TYPE_NORMAL, false);
     if (!browser || !browser->GetSelectedTabContents()) {
       navigator = &navigator_impl;
     } else {
@@ -351,7 +419,6 @@ void OpenAll(gfx::NativeWindow parent,
 void CopyToClipboard(BookmarkModel* model,
                      const std::vector<const BookmarkNode*>& nodes,
                      bool remove_nodes) {
-#if defined(OS_WIN) || defined(OS_LINUX)
   if (nodes.empty())
     return;
 
@@ -363,15 +430,11 @@ void CopyToClipboard(BookmarkModel* model,
                     nodes[i]->GetParent()->IndexOfChild(nodes[i]));
     }
   }
-#else
-  // Not implemented on mac yet.
-#endif
 }
 
 void PasteFromClipboard(BookmarkModel* model,
                         const BookmarkNode* parent,
                         int index) {
-#if defined(OS_WIN) || defined(OS_LINUX)
   if (!parent)
     return;
 
@@ -382,28 +445,18 @@ void PasteFromClipboard(BookmarkModel* model,
   if (index == -1)
     index = parent->GetChildCount();
   bookmark_utils::CloneDragData(model, bookmark_data.elements, parent, index);
-#else
-  // Not implemented on mac yet.
-#endif
 }
 
 bool CanPasteFromClipboard(const BookmarkNode* node) {
   if (!node)
     return false;
-
-#if defined(OS_MACOSX)
-  NOTIMPLEMENTED();
-  return false;
-#else
-  return g_browser_process->clipboard()->IsFormatAvailableByString(
-      BookmarkDragData::kClipboardFormatString, Clipboard::BUFFER_STANDARD);
-#endif
+  return BookmarkDragData::ClipboardContainsBookmarks();
 }
 
 std::string GetNameForURL(const GURL& url) {
   if (url.is_valid()) {
     return WideToUTF8(net::GetSuggestedFilename(
-        url, std::string(), std::string(), std::wstring()));
+        url, std::string(), std::string(), FilePath()).ToWStringHack());
   } else {
     return l10n_util::GetStringUTF8(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
   }
@@ -518,7 +571,7 @@ static const BookmarkNode* CreateNewNode(BookmarkModel* model,
       model->AddURL(node, node->GetChildCount(), details.urls[i].second,
                     details.urls[i].first);
     }
-    // TODO(sky): update parent modified time.
+    model->SetDateGroupModified(parent, Time::Now());
   } else {
     NOTREACHED();
     return NULL;
@@ -540,24 +593,11 @@ const BookmarkNode* ApplyEditsWithNoGroupChange(BookmarkModel* model,
 
   const BookmarkNode* node = details.existing_node;
   DCHECK(node);
-  const BookmarkNode* old_parent = node->GetParent();
-  int old_index = old_parent ? old_parent->IndexOfChild(node) : -1;
 
-  // If we're not showing the tree we only need to modify the node.
-  if (old_index == -1) {
-    NOTREACHED();
-    return node;
-  }
+  if (node->is_url())
+    model->SetURL(node, new_url);
+  model->SetTitle(node, new_title);
 
-  if (new_url != node->GetURL()) {
-    // TODO(sky): need SetURL on the model.
-    const BookmarkNode* new_node = model->AddURLWithCreationTime(old_parent,
-        old_index, new_title, new_url, node->date_added());
-    model->Remove(old_parent, old_index + 1);
-    return new_node;
-  } else {
-    model->SetTitle(node, new_title);
-  }
   return node;
 }
 
@@ -573,31 +613,14 @@ const BookmarkNode* ApplyEditsWithPossibleGroupChange(BookmarkModel* model,
 
   const BookmarkNode* node = details.existing_node;
   DCHECK(node);
-  const BookmarkNode* old_parent = node->GetParent();
-  int old_index = old_parent->IndexOfChild(node);
-  const BookmarkNode* return_node = node;
 
-  Time date_added = node->date_added();
-  if (new_parent == node->GetParent()) {
-    // The parent is the same.
-    if (node->is_url() && new_url != node->GetURL()) {
-      model->Remove(old_parent, old_index);
-      return_node = model->AddURLWithCreationTime(old_parent, old_index,
-          new_title, new_url, date_added);
-    } else {
-      model->SetTitle(node, new_title);
-    }
-  } else if (node->is_url() && new_url != node->GetURL()) {
-    // The parent and URL changed.
-    model->Remove(old_parent, old_index);
-    return_node = model->AddURLWithCreationTime(new_parent,
-        new_parent->GetChildCount(), new_title, new_url, date_added);
-  } else {
-    // The parent and title changed. Move the node and change the title.
+  if (new_parent != node->GetParent())
     model->Move(node, new_parent, new_parent->GetChildCount());
-    model->SetTitle(node, new_title);
-  }
-  return return_node;
+  if (node->is_url())
+    model->SetURL(node, new_url);
+  model->SetTitle(node, new_title);
+
+  return node;
 }
 
 // Formerly in BookmarkBarView
@@ -649,6 +672,31 @@ void GetURLsForOpenTabs(Browser* browser,
                              &(entry.second));
     urls->push_back(entry);
   }
+}
+
+const BookmarkNode* GetParentForNewNodes(
+    const BookmarkNode* parent,
+    const std::vector<const BookmarkNode*>& selection,
+    int* index) {
+  const BookmarkNode* real_parent = parent;
+
+  if (selection.size() == 1 && selection[0]->is_folder())
+    real_parent = selection[0];
+
+  if (index) {
+    if (selection.size() == 1 && selection[0]->is_url()) {
+      *index = real_parent->IndexOfChild(selection[0]) + 1;
+      if (*index == 0) {
+        // Node doesn't exist in parent, add to end.
+        NOTREACHED();
+        *index = real_parent->GetChildCount();
+      }
+    } else {
+      *index = real_parent->GetChildCount();
+    }
+  }
+
+  return real_parent;
 }
 
 }  // namespace bookmark_utils

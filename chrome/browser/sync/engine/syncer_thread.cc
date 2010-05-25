@@ -15,12 +15,11 @@
 #include <map>
 #include <queue>
 
-#include "base/command_line.h"
+#include "base/dynamic_annotations.h"
 #include "chrome/browser/sync/engine/auth_watcher.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/engine/syncer.h"
-#include "chrome/browser/sync/engine/syncer_thread_timed_stop.h"
 #include "chrome/browser/sync/notifier/listener/talk_mediator.h"
 #include "chrome/browser/sync/notifier/listener/talk_mediator_impl.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
@@ -32,103 +31,22 @@ using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 
-namespace {
-
-// Returns the amount of time since the user last interacted with the computer,
-// in milliseconds
-int UserIdleTime() {
-#if defined(OS_WIN)
-  LASTINPUTINFO last_input_info;
-  last_input_info.cbSize = sizeof(LASTINPUTINFO);
-
-  // Get time in windows ticks since system start of last activity.
-  BOOL b = ::GetLastInputInfo(&last_input_info);
-  if (b == TRUE)
-    return ::GetTickCount() - last_input_info.dwTime;
-#elif defined(OS_MACOSX)
-  // It would be great to do something like:
-  //
-  // return 1000 *
-  //     CGEventSourceSecondsSinceLastEventType(
-  //         kCGEventSourceStateCombinedSessionState,
-  //         kCGAnyInputEventType);
-  //
-  // Unfortunately, CGEvent* lives in ApplicationServices, and we're a daemon
-  // and can't link that high up the food chain. Thus this mucking in IOKit.
-
-  io_service_t hid_service =
-      IOServiceGetMatchingService(kIOMasterPortDefault,
-                                  IOServiceMatching("IOHIDSystem"));
-  if (!hid_service) {
-    LOG(WARNING) << "Could not obtain IOHIDSystem";
-    return 0;
-  }
-
-  CFTypeRef object = IORegistryEntryCreateCFProperty(hid_service,
-                                                     CFSTR("HIDIdleTime"),
-                                                     kCFAllocatorDefault,
-                                                     0);
-  if (!object) {
-    LOG(WARNING) << "Could not get IOHIDSystem's HIDIdleTime property";
-    IOObjectRelease(hid_service);
-    return 0;
-  }
-
-  int64 idle_time;  // in nanoseconds
-  Boolean success = false;
-  if (CFGetTypeID(object) == CFNumberGetTypeID()) {
-    success = CFNumberGetValue((CFNumberRef)object,
-                               kCFNumberSInt64Type,
-                               &idle_time);
-  } else {
-    LOG(WARNING) << "IOHIDSystem's HIDIdleTime property isn't a number!";
-  }
-
-  CFRelease(object);
-  IOObjectRelease(hid_service);
-
-  if (!success) {
-    LOG(WARNING) << "Could not get IOHIDSystem's HIDIdleTime property's value";
-    return 0;
-  } else {
-    return idle_time / 1000000;  // nano to milli
-  }
-#else
-  static bool was_logged = false;
-  if (!was_logged) {
-    was_logged = true;
-    LOG(INFO) << "UserIdleTime unimplemented on this platform, "
-        "synchronization will not throttle when user idle";
-  }
-#endif
-
-  return 0;
-}
-
-}  // namespace
 
 namespace browser_sync {
 
-const int SyncerThread::kDefaultShortPollIntervalSeconds = 60;
-const int SyncerThread::kDefaultLongPollIntervalSeconds = 3600;
-const int SyncerThread::kDefaultMaxPollIntervalMs = 30 * 60 * 1000;
+// We use high values here to ensure that failure to receive poll updates from
+// the server doesn't result in rapid-fire polling from the client due to low
+// local limits.
+const int SyncerThread::kDefaultShortPollIntervalSeconds = 3600 * 8;
+const int SyncerThread::kDefaultLongPollIntervalSeconds = 3600 * 12;
 
-SyncerThread* SyncerThreadFactory::Create(
-    ClientCommandChannel* command_channel,
-    syncable::DirectoryManager* mgr,
-    ServerConnectionManager* connection_manager, AllStatus* all_status,
-    ModelSafeWorker* model_safe_worker) {
-  const CommandLine* cmd = CommandLine::ForCurrentProcess();
-  if (cmd->HasSwitch(switches::kSyncerThreadTimedStop)) {
-    return new SyncerThreadTimedStop(command_channel, mgr, connection_manager,
-        all_status, model_safe_worker);
-  } else {
-    // The default SyncerThread implementation, which does not time-out when
-    // Stop is called.
-    return new SyncerThread(command_channel, mgr, connection_manager,
-        all_status, model_safe_worker);
-  }
-}
+// TODO(tim): This is used to regulate the short poll (when notifications are
+// disabled) based on user idle time.  If it is set to a smaller value than
+// the short poll interval, it basically does nothing; for now, this is what
+// we want and allows stronger control over the poll rate from the server. We
+// should probably re-visit this code later and figure out if user idle time
+// is really something we want and make sure it works, if it is.
+const int SyncerThread::kDefaultMaxPollIntervalMs = 30 * 60 * 1000;
 
 void SyncerThread::NudgeSyncer(int milliseconds_from_now, NudgeSource source) {
   AutoLock lock(lock_);
@@ -139,77 +57,42 @@ void SyncerThread::NudgeSyncer(int milliseconds_from_now, NudgeSource source) {
   NudgeSyncImpl(milliseconds_from_now, source);
 }
 
-SyncerThread::SyncerThread()
+SyncerThread::SyncerThread(sessions::SyncSessionContext* context,
+    AllStatus* all_status)
     : thread_main_started_(false, false),
       thread_("SyncEngine_SyncerThread"),
       vault_field_changed_(&lock_),
       p2p_authenticated_(false),
       p2p_subscribed_(false),
-      client_command_hookup_(NULL),
-      conn_mgr_hookup_(NULL),
-      allstatus_(NULL),
-      dirman_(NULL),
-      scm_(NULL),
-      syncer_short_poll_interval_seconds_(kDefaultShortPollIntervalSeconds),
-      syncer_long_poll_interval_seconds_(kDefaultLongPollIntervalSeconds),
-      syncer_polling_interval_(kDefaultShortPollIntervalSeconds),
-      syncer_max_interval_(kDefaultMaxPollIntervalMs),
-      talk_mediator_hookup_(NULL),
-      command_channel_(NULL),
-      directory_manager_hookup_(NULL),
-      syncer_events_(NULL),
-      model_safe_worker_(NULL),
-      disable_idle_detection_(false) {
-}
-
-SyncerThread::SyncerThread(
-    ClientCommandChannel* command_channel,
-    syncable::DirectoryManager* mgr,
-    ServerConnectionManager* connection_manager,
-    AllStatus* all_status,
-    ModelSafeWorker* model_safe_worker)
-    : thread_main_started_(false, false),
-      thread_("SyncEngine_SyncerThread"),
-      vault_field_changed_(&lock_),
-      p2p_authenticated_(false),
-      p2p_subscribed_(false),
-      client_command_hookup_(NULL),
       conn_mgr_hookup_(NULL),
       allstatus_(all_status),
-      dirman_(mgr),
-      scm_(connection_manager),
       syncer_short_poll_interval_seconds_(kDefaultShortPollIntervalSeconds),
       syncer_long_poll_interval_seconds_(kDefaultLongPollIntervalSeconds),
       syncer_polling_interval_(kDefaultShortPollIntervalSeconds),
       syncer_max_interval_(kDefaultMaxPollIntervalMs),
       talk_mediator_hookup_(NULL),
-      command_channel_(command_channel),
       directory_manager_hookup_(NULL),
       syncer_events_(NULL),
-      model_safe_worker_(model_safe_worker),
+      session_context_(context),
       disable_idle_detection_(false) {
+  DCHECK(context);
+  syncer_event_relay_channel_.reset(new SyncerEventChannel(SyncerEvent(
+      SyncerEvent::SHUTDOWN_USE_WITH_CARE)));
 
-  SyncerEvent shutdown = { SyncerEvent::SHUTDOWN_USE_WITH_CARE };
-  syncer_event_channel_.reset(new SyncerEventChannel(shutdown));
-
-  if (dirman_) {
+  if (context->directory_manager()) {
     directory_manager_hookup_.reset(NewEventListenerHookup(
-        dirman_->channel(), this, &SyncerThread::HandleDirectoryManagerEvent));
+        context->directory_manager()->channel(), this,
+            &SyncerThread::HandleDirectoryManagerEvent));
   }
 
-  if (scm_) {
-    WatchConnectionManager(scm_);
-  }
+  if (context->connection_manager())
+    WatchConnectionManager(context->connection_manager());
 
-  if (command_channel_) {
-    WatchClientCommands(command_channel_);
-  }
 }
 
 SyncerThread::~SyncerThread() {
-  client_command_hookup_.reset();
   conn_mgr_hookup_.reset();
-  syncer_event_channel_.reset();
+  syncer_event_relay_channel_.reset();
   directory_manager_hookup_.reset();
   syncer_events_.reset();
   delete vault_.syncer_;
@@ -280,25 +163,49 @@ bool SyncerThread::Stop(int max_wait) {
   return true;
 }
 
-void SyncerThread::WatchClientCommands(ClientCommandChannel* channel) {
+bool SyncerThread::RequestPause() {
   AutoLock lock(lock_);
-  client_command_hookup_.reset(NewEventListenerHookup(channel, this,
-      &SyncerThread::HandleClientCommand));
+  if (!thread_.IsRunning())
+    return false;
+
+  vault_.pause_ = true;
+  vault_field_changed_.Broadcast();
+  return true;
 }
 
-void SyncerThread::HandleClientCommand(ClientCommandChannel::EventType event) {
-  if (!event) {
-    return;
-  }
+bool SyncerThread::RequestResume() {
+  AutoLock lock(lock_);
+  if (!thread_.IsRunning() || !vault_.pause_)
+    return false;
 
-  // Mutex not really necessary for these.
-  if (event->has_set_sync_poll_interval()) {
-    syncer_short_poll_interval_seconds_ = event->set_sync_poll_interval();
-  }
+  vault_.pause_ = false;
+  vault_field_changed_.Broadcast();
+  return true;
+}
 
-  if (event->has_set_sync_long_poll_interval()) {
-    syncer_long_poll_interval_seconds_ = event->set_sync_long_poll_interval();
-  }
+void SyncerThread::OnReceivedLongPollIntervalUpdate(
+    const base::TimeDelta& new_interval) {
+  syncer_long_poll_interval_seconds_ = static_cast<int>(
+      new_interval.InSeconds());
+}
+
+void SyncerThread::OnReceivedShortPollIntervalUpdate(
+    const base::TimeDelta& new_interval) {
+  syncer_short_poll_interval_seconds_ = static_cast<int>(
+      new_interval.InSeconds());
+}
+
+void SyncerThread::OnSilencedUntil(const base::TimeTicks& silenced_until) {
+  silenced_until_ = silenced_until;
+}
+
+bool SyncerThread::IsSyncingCurrentlySilenced() {
+  // We should ignore reads from silenced_until_ under ThreadSanitizer
+  // since this is a benign race.
+  ANNOTATE_IGNORE_READS_BEGIN();
+  bool ret = (silenced_until_ - TimeTicks::Now()) >= TimeDelta::FromSeconds(0);
+  ANNOTATE_IGNORE_READS_END();
+  return ret;
 }
 
 void SyncerThread::ThreadMainLoop() {
@@ -313,6 +220,10 @@ void SyncerThread::ThreadMainLoop() {
   TimeTicks last_sync_time;
   bool initial_sync_for_thread = true;
   bool continue_sync_cycle = false;
+
+#if defined(OS_LINUX)
+  idle_query_.reset(new IdleQueryLinux());
+#endif
 
   while (!vault_.stop_syncer_thread_) {
     // The Wait()s in these conditionals using |vault_| are not TimedWait()s (as
@@ -335,6 +246,12 @@ void SyncerThread::ThreadMainLoop() {
       continue;
     }
 
+    // Check if a pause was requested.
+    if (vault_.pause_) {
+      PauseUntilResumedOrQuit();
+      continue;
+    }
+
     const TimeTicks next_poll = last_sync_time +
         vault_.current_wait_interval_.poll_delta;
     bool throttled = vault_.current_wait_interval_.mode ==
@@ -351,7 +268,7 @@ void SyncerThread::ThreadMainLoop() {
     // We block until the CV is signaled (e.g a control field changed, loss of
     // network connection, nudge, spurious, etc), or the poll interval elapses.
     TimeDelta sleep_time = end_wait - TimeTicks::Now();
-    if (sleep_time > TimeDelta::FromSeconds(0)) {
+    if (!initial_sync_for_thread && sleep_time > TimeDelta::FromSeconds(0)) {
       vault_field_changed_.TimedWait(sleep_time);
 
       if (TimeTicks::Now() < end_wait) {
@@ -383,6 +300,27 @@ void SyncerThread::ThreadMainLoop() {
         static_cast<int>(vault_.current_wait_interval_.poll_delta.InSeconds()),
         &user_idle_milliseconds, &continue_sync_cycle, nudged);
   }
+#if defined(OS_LINUX)
+  idle_query_.reset();
+#endif
+}
+
+void SyncerThread::PauseUntilResumedOrQuit() {
+  LOG(INFO) << "Syncer thread entering pause.";
+  SyncerEvent event(SyncerEvent::PAUSED);
+  relay_channel()->NotifyListeners(event);
+
+  // Thread will get stuck here until either a resume is requested
+  // or shutdown is started.
+  while (vault_.pause_ && !vault_.stop_syncer_thread_)
+    vault_field_changed_.Wait();
+
+  // Notify that we have resumed if we are not shutting down.
+  if (!vault_.stop_syncer_thread_) {
+    SyncerEvent event(SyncerEvent::RESUMED);
+    relay_channel()->NotifyListeners(event);
+  }
+  LOG(INFO) << "Syncer thread exiting pause.";
 }
 
 // We check how long the user's been idle and sync less often if the machine is
@@ -398,11 +336,10 @@ SyncerThread::WaitInterval SyncerThread::CalculatePollingWaitTime(
   WaitInterval return_interval;
 
   // Server initiated throttling trumps everything.
-  if (vault_.syncer_ && vault_.syncer_->is_silenced()) {
+  if (!silenced_until_.is_null()) {
     // We don't need to reset other state, it can continue where it left off.
     return_interval.mode = WaitInterval::THROTTLED;
-    return_interval.poll_delta = vault_.syncer_->silenced_until() -
-        TimeTicks::Now();
+    return_interval.poll_delta = silenced_until_ - TimeTicks::Now();
     return return_interval;
   }
 
@@ -480,8 +417,14 @@ void SyncerThread::ThreadMain() {
 
 void SyncerThread::SyncMain(Syncer* syncer) {
   CHECK(syncer);
+
+  // Since we are initiating a new session for which we are the delegate, we
+  // are not currently silenced so reset this state for the next session which
+  // may need to use it.
+  silenced_until_ = base::TimeTicks();
+
   AutoUnlock unlock(lock_);
-  while (syncer->SyncShare() && !syncer->is_silenced()) {
+  while (syncer->SyncShare(this) && silenced_until_.is_null()) {
     LOG(INFO) << "Looping in sync share";
   }
   LOG(INFO) << "Done looping in sync share";
@@ -512,7 +455,7 @@ bool SyncerThread::UpdateNudgeSource(bool was_throttled,
 
 void SyncerThread::SetUpdatesSource(bool nudged, NudgeSource nudge_source,
                                     bool* initial_sync) {
-  sync_pb::GetUpdatesCallerInfo::GET_UPDATES_SOURCE updates_source =
+  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source =
       sync_pb::GetUpdatesCallerInfo::UNKNOWN;
   if (*initial_sync) {
     updates_source = sync_pb::GetUpdatesCallerInfo::FIRST_UPDATE;
@@ -541,7 +484,7 @@ void SyncerThread::SetUpdatesSource(bool nudged, NudgeSource nudge_source,
 
 void SyncerThread::HandleSyncerEvent(const SyncerEvent& event) {
   AutoLock lock(lock_);
-  channel()->NotifyListeners(event);
+  relay_channel()->NotifyListeners(event);
   if (SyncerEvent::REQUEST_SYNC_NUDGE != event.what_happened) {
     return;
   }
@@ -557,21 +500,34 @@ void SyncerThread::HandleDirectoryManagerEvent(
     // The underlying database structure is ready, and we should create
     // the syncer.
     CHECK(vault_.syncer_ == NULL);
-    vault_.syncer_ =
-        new Syncer(dirman_, event.dirname, scm_, model_safe_worker_.get());
+    session_context_->set_account_name(event.dirname);
+    vault_.syncer_ = new Syncer(session_context_.get());
 
-    vault_.syncer_->set_command_channel(command_channel_);
     syncer_events_.reset(NewEventListenerHookup(
-        vault_.syncer_->channel(), this, &SyncerThread::HandleSyncerEvent));
+        session_context_->syncer_event_channel(), this,
+        &SyncerThread::HandleSyncerEvent));
     vault_field_changed_.Broadcast();
   }
 }
 
+// Sets |*connected| to false if it is currently true but |code| suggests that
+// the current network configuration and/or auth state cannot be used to make
+// forward progress, and user intervention (e.g changing server URL or auth
+// credentials) is likely necessary.  If |*connected| is false, set it to true
+// if |code| suggests that we just recently made healthy contact with the
+// server.
 static inline void CheckConnected(bool* connected,
                                   HttpResponse::ServerConnectionCode code,
                                   ConditionVariable* condvar) {
   if (*connected) {
-    if (HttpResponse::CONNECTION_UNAVAILABLE == code) {
+    // Note, be careful when adding cases here because if the SyncerThread
+    // thinks there is no valid connection as determined by this method, it
+    // will drop out of *all* forward progress sync loops (it won't poll and it
+    // will queue up Talk notifications but not actually call SyncShare) until
+    // some external action causes a ServerConnectionManager to broadcast that
+    // a valid connection has been re-established.
+    if (HttpResponse::CONNECTION_UNAVAILABLE == code ||
+        HttpResponse::SYNC_AUTH_ERROR == code) {
       *connected = false;
       condvar->Broadcast();
     }
@@ -599,8 +555,8 @@ void SyncerThread::HandleServerConnectionEvent(
   }
 }
 
-SyncerEventChannel* SyncerThread::channel() {
-  return syncer_event_channel_.get();
+SyncerEventChannel* SyncerThread::relay_channel() {
+  return syncer_event_relay_channel_.get();
 }
 
 // Inputs and return value in milliseconds.
@@ -627,6 +583,9 @@ int SyncerThread::CalculateSyncWaitTime(int last_interval, int user_idle_ms) {
 // Called with mutex_ already locked.
 void SyncerThread::NudgeSyncImpl(int milliseconds_from_now,
                                  NudgeSource source) {
+  // TODO(sync): Add the option to reset the backoff state machine.
+  // This is needed so nudges that are a result of the user's desire
+  // to download updates for a new data type can be satisfied quickly.
   if (vault_.current_wait_interval_.mode == WaitInterval::THROTTLED ||
       vault_.current_wait_interval_.had_nudge_during_backoff) {
     // Drop nudges on the floor if we've already had one since starting this
@@ -682,10 +641,85 @@ void SyncerThread::HandleTalkMediatorEvent(const TalkMediatorEvent& event) {
       break;
   }
 
-  if (NULL != vault_.syncer_) {
-    vault_.syncer_->set_notifications_enabled(
-        p2p_authenticated_ && p2p_subscribed_);
+  session_context_->set_notifications_enabled(p2p_authenticated_ &&
+                                              p2p_subscribed_);
+}
+
+// Returns the amount of time since the user last interacted with the computer,
+// in milliseconds
+int SyncerThread::UserIdleTime() {
+#if defined(OS_WIN)
+  LASTINPUTINFO last_input_info;
+  last_input_info.cbSize = sizeof(LASTINPUTINFO);
+
+  // Get time in windows ticks since system start of last activity.
+  BOOL b = ::GetLastInputInfo(&last_input_info);
+  if (b == TRUE)
+    return ::GetTickCount() - last_input_info.dwTime;
+#elif defined(OS_MACOSX)
+  // It would be great to do something like:
+  //
+  // return 1000 *
+  //     CGEventSourceSecondsSinceLastEventType(
+  //         kCGEventSourceStateCombinedSessionState,
+  //         kCGAnyInputEventType);
+  //
+  // Unfortunately, CGEvent* lives in ApplicationServices, and we're a daemon
+  // and can't link that high up the food chain. Thus this mucking in IOKit.
+
+  io_service_t hid_service =
+      IOServiceGetMatchingService(kIOMasterPortDefault,
+                                  IOServiceMatching("IOHIDSystem"));
+  if (!hid_service) {
+    LOG(WARNING) << "Could not obtain IOHIDSystem";
+    return 0;
   }
+
+  CFTypeRef object = IORegistryEntryCreateCFProperty(hid_service,
+                                                     CFSTR("HIDIdleTime"),
+                                                     kCFAllocatorDefault,
+                                                     0);
+  if (!object) {
+    LOG(WARNING) << "Could not get IOHIDSystem's HIDIdleTime property";
+    IOObjectRelease(hid_service);
+    return 0;
+  }
+
+  int64 idle_time;  // in nanoseconds
+  Boolean success = false;
+  if (CFGetTypeID(object) == CFNumberGetTypeID()) {
+    success = CFNumberGetValue((CFNumberRef)object,
+                               kCFNumberSInt64Type,
+                               &idle_time);
+  } else {
+    LOG(WARNING) << "IOHIDSystem's HIDIdleTime property isn't a number!";
+  }
+
+  CFRelease(object);
+  IOObjectRelease(hid_service);
+
+  if (!success) {
+    LOG(WARNING) << "Could not get IOHIDSystem's HIDIdleTime property's value";
+    return 0;
+  } else {
+    return idle_time / 1000000;  // nano to milli
+  }
+#elif defined(OS_LINUX)
+  if (idle_query_.get()) {
+    return idle_query_->IdleTime();
+  } else {
+    return 0;
+  }
+#else
+  static bool was_logged = false;
+  if (!was_logged) {
+    was_logged = true;
+    LOG(INFO) << "UserIdleTime unimplemented on this platform, "
+        "synchronization will not throttle when user idle";
+  }
+#endif
+
+  return 0;
 }
 
 }  // namespace browser_sync

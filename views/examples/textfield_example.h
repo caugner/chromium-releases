@@ -5,7 +5,7 @@
 #ifndef VIEWS_EXAMPLES_TEXTFIELD_EXAMPLE_H_
 #define VIEWS_EXAMPLES_TEXTFIELD_EXAMPLE_H_
 
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
@@ -17,22 +17,28 @@ namespace examples {
 using views::Textfield;
 
 // TextfieldExample mimics login screen.
-class TextfieldExample : protected ExampleBase,
-                         private Textfield::Controller,
-                         private views::ButtonListener {
+class TextfieldExample : public ExampleBase,
+                         public Textfield::Controller,
+                         public views::ButtonListener {
  public:
-  TextfieldExample(views::TabbedPane* tabbed_pane, views::Label* message)
-      : ExampleBase(message),
-        name_(new Textfield()),
-        password_(new Textfield(Textfield::STYLE_PASSWORD)),
-        show_password_(new views::TextButton(this, L"Show password")),
-        clear_all_(new views::TextButton(this, L"Clear All")),
-        append_(new views::TextButton(this, L"Append")) {
+  explicit TextfieldExample(ExamplesMain* main) : ExampleBase(main) {}
+
+  virtual ~TextfieldExample() {}
+
+  virtual std::wstring GetExampleTitle() {
+    return L"Textfield";
+  }
+
+  virtual void CreateExampleView(views::View* container) {
+    name_ = new Textfield();
+    password_ = new Textfield(Textfield::STYLE_PASSWORD);
+    password_->set_text_to_display_when_empty(ASCIIToUTF16("password"));
+    show_password_ = new views::TextButton(this, L"Show password");
+    clear_all_ = new views::TextButton(this, L"Clear All");
+    append_ = new views::TextButton(this, L"Append");
     name_->SetController(this);
     password_->SetController(this);
 
-    views::View* container = new views::View();
-    tabbed_pane->AddTab(L"Textfield", container);
     views::GridLayout* layout = new views::GridLayout(container);
     container->SetLayoutManager(layout);
 
@@ -54,8 +60,6 @@ class TextfieldExample : protected ExampleBase,
     layout->StartRow(0, 0);
     layout->AddView(append_);
   }
-
-  virtual ~TextfieldExample() {}
 
  private:
   // Textfield::Controller implementations:
@@ -104,3 +108,4 @@ class TextfieldExample : protected ExampleBase,
 }  // namespace examples
 
 #endif  // VIEWS_EXAMPLES_TEXTFIELD_EXAMPLE_H_
+

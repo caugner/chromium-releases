@@ -9,37 +9,92 @@
 #include <vector>
 
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
-#include "chrome/browser/sync/engine/syncproto.h"
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
 using std::set;
 using std::string;
 using std::vector;
 using syncable::ExtendedAttribute;
+using syncable::IS_DEL;
 using syncable::Id;
 using syncable::MutableEntry;
-using syncable::Name;
+using syncable::SPECIFICS;
+using syncable::UNSPECIFIED;
 
 namespace browser_sync {
+
+using sessions::SyncSession;
 
 BuildCommitCommand::BuildCommitCommand() {}
 BuildCommitCommand::~BuildCommitCommand() {}
 
-void BuildCommitCommand::ExecuteImpl(SyncerSession* session) {
+void BuildCommitCommand::AddExtensionsActivityToMessage(
+    SyncSession* session, CommitMessage* message) {
+  // We only send ExtensionsActivity to the server if bookmarks are being
+  // committed.
+  ExtensionsActivityMonitor* monitor = session->context()->extensions_monitor();
+  if (!session->status_controller()->HasBookmarkCommitActivity()) {
+    // Return the records to the activity monitor.
+    monitor->PutRecords(session->extensions_activity());
+    session->mutable_extensions_activity()->clear();
+    return;
+  }
+  const ExtensionsActivityMonitor::Records& records =
+      session->extensions_activity();
+  for (ExtensionsActivityMonitor::Records::const_iterator it = records.begin();
+       it != records.end(); ++it) {
+    sync_pb::CommitMessage_ChromiumExtensionsActivity* activity_message =
+        message->add_extensions_activity();
+    activity_message->set_extension_id(it->second.extension_id);
+    activity_message->set_bookmark_writes_since_last_commit(
+        it->second.bookmark_write_count);
+  }
+}
+
+namespace {
+void SetEntrySpecifics(MutableEntry* meta_entry, SyncEntity* sync_entry) {
+  // Add the new style extension and the folder bit.
+  sync_entry->mutable_specifics()->CopyFrom(meta_entry->Get(SPECIFICS));
+  sync_entry->set_folder(meta_entry->Get(syncable::IS_DIR));
+
+  DCHECK(meta_entry->GetModelType() == sync_entry->GetModelType());
+}
+
+void SetOldStyleBookmarkData(MutableEntry* meta_entry, SyncEntity* sync_entry) {
+  DCHECK(meta_entry->Get(SPECIFICS).HasExtension(sync_pb::bookmark));
+
+  // Old-style inlined bookmark data.
+  sync_pb::SyncEntity_BookmarkData* bookmark =
+      sync_entry->mutable_bookmarkdata();
+
+  if (!meta_entry->Get(syncable::IS_DIR)) {
+    const sync_pb::BookmarkSpecifics& bookmark_specifics =
+        meta_entry->Get(SPECIFICS).GetExtension(sync_pb::bookmark);
+    bookmark->set_bookmark_url(bookmark_specifics.url());
+    bookmark->set_bookmark_favicon(bookmark_specifics.favicon());
+    bookmark->set_bookmark_folder(false);
+  } else {
+    bookmark->set_bookmark_folder(true);
+  }
+}
+}  // namespace
+
+void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
   ClientToServerMessage message;
-  message.set_share(ToUTF8(session->account_name()).get_string());
+  message.set_share(session->context()->account_name());
   message.set_message_contents(ClientToServerMessage::COMMIT);
 
   CommitMessage* commit_message = message.mutable_commit();
   commit_message->set_cache_guid(
       session->write_transaction()->directory()->cache_guid());
+  AddExtensionsActivityToMessage(session, commit_message);
 
-  const vector<Id>& commit_ids = session->commit_ids();
+  const vector<Id>& commit_ids = session->status_controller()->commit_ids();
   for (size_t i = 0; i < commit_ids.size(); i++) {
     Id id = commit_ids[i];
     SyncEntity* sync_entry =
@@ -52,18 +107,24 @@ void BuildCommitCommand::ExecuteImpl(SyncerSession* session) {
     // This is the only change we make to the entry in this function.
     meta_entry.Put(syncable::SYNCING, true);
 
-    Name name = meta_entry.GetName();
-    CHECK(!name.value().empty());  // Make sure this isn't an update.
-    sync_entry->set_name(ToUTF8(name.value()).get_string());
-    // Set the non_unique_name if we have one.  If we do, the server ignores
+    DCHECK(0 != session->routing_info().count(meta_entry.GetModelType()))
+        << "Committing change to datatype that's not actively enabled.";
+
+    string name = meta_entry.Get(syncable::NON_UNIQUE_NAME);
+    CHECK(!name.empty());  // Make sure this isn't an update.
+    sync_entry->set_name(name);
+
+    // Set the non_unique_name.  If we do, the server ignores
     // the |name| value (using |non_unique_name| instead), and will return
-    // in the CommitResponse a unique name if one is generated.  Even though
-    // we could get away with only sending |name|, we send both because it
-    // may aid in logging.
-    if (name.value() != name.non_unique_value()) {
-      sync_entry->set_non_unique_name(
-        ToUTF8(name.non_unique_value()).get_string());
+    // in the CommitResponse a unique name if one is generated.
+    // We send both because it may aid in logging.
+    sync_entry->set_non_unique_name(name);
+
+    if (!meta_entry.Get(syncable::UNIQUE_CLIENT_TAG).empty()) {
+      sync_entry->set_client_defined_unique_tag(
+          meta_entry.Get(syncable::UNIQUE_CLIENT_TAG));
     }
+
     // Deleted items with negative parent ids can be a problem so we set the
     // parent to 0. (TODO(sync): Still true in protocol?).
     Id new_parent_id;
@@ -111,32 +172,31 @@ void BuildCommitCommand::ExecuteImpl(SyncerSession* session) {
         ++iter) {
       sync_pb::ExtendedAttributes_ExtendedAttribute *extended_attribute =
           mutable_extended_attributes->add_extendedattribute();
-      extended_attribute->set_key(ToUTF8(iter->key()).get_string());
+      extended_attribute->set_key(iter->key());
       SyncerProtoUtil::CopyBlobIntoProtoBytes(iter->value(),
           extended_attribute->mutable_value());
     }
 
     // Deletion is final on the server, let's move things and then delete them.
-    if (meta_entry.Get(syncable::IS_DEL)) {
+    if (meta_entry.Get(IS_DEL)) {
       sync_entry->set_deleted(true);
-    } else if (meta_entry.Get(syncable::IS_BOOKMARK_OBJECT)) {
-      sync_pb::SyncEntity_BookmarkData* bookmark =
-          sync_entry->mutable_bookmarkdata();
-      bookmark->set_bookmark_folder(meta_entry.Get(syncable::IS_DIR));
-      const Id& prev_id = meta_entry.Get(syncable::PREV_ID);
-      string prev_string = prev_id.IsRoot() ? string() : prev_id.GetServerId();
-      sync_entry->set_insert_after_item_id(prev_string);
+    } else {
+      if (meta_entry.Get(SPECIFICS).HasExtension(sync_pb::bookmark)) {
+        // Common data in both new and old protocol.
+        const Id& prev_id = meta_entry.Get(syncable::PREV_ID);
+        string prev_id_string =
+            prev_id.IsRoot() ? string() : prev_id.GetServerId();
+        sync_entry->set_insert_after_item_id(prev_id_string);
 
-      if (!meta_entry.Get(syncable::IS_DIR)) {
-        string bookmark_url = ToUTF8(meta_entry.Get(syncable::BOOKMARK_URL));
-        bookmark->set_bookmark_url(bookmark_url);
-        SyncerProtoUtil::CopyBlobIntoProtoBytes(
-            meta_entry.Get(syncable::BOOKMARK_FAVICON),
-            bookmark->mutable_bookmark_favicon());
+        // TODO(ncarter): In practice we won't want to send this data twice
+        // over the wire; instead, when deployed servers are able to accept
+        // the new-style scheme, we should abandon the old way.
+        SetOldStyleBookmarkData(&meta_entry, sync_entry);
       }
+      SetEntrySpecifics(&meta_entry, sync_entry);
     }
   }
-  session->set_commit_message(message);
+  session->status_controller()->mutable_commit_message()->CopyFrom(message);
 }
 
 }  // namespace browser_sync

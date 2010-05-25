@@ -1,29 +1,79 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
+#import "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/menu_controller.h"
 #import "chrome/browser/cocoa/tab_controller.h"
 #import "chrome/browser/cocoa/tab_controller_target.h"
 #import "chrome/browser/cocoa/tab_view.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
-
-@interface TabController(Private)
-- (void)updateVisibility;
-@end
+#import "chrome/browser/cocoa/themed_window.h"
+#include "grit/generated_resources.h"
 
 @implementation TabController
 
 @synthesize loadingState = loadingState_;
+@synthesize mini = mini_;
+@synthesize phantom = phantom_;
 @synthesize target = target_;
 @synthesize action = action_;
+
+namespace TabControllerInternal {
+
+// A C++ delegate that handles enabling/disabling menu items and handling when
+// a menu command is chosen. Also fixes up the menu item label for "pin/unpin
+// tab".
+class MenuDelegate : public menus::SimpleMenuModel::Delegate {
+ public:
+  explicit MenuDelegate(id<TabControllerTarget> target, TabController* owner)
+      : target_(target), owner_(owner) { }
+
+  // Overridden from menus::SimpleMenuModel::Delegate
+  virtual bool IsCommandIdChecked(int command_id) const { return false; }
+  virtual bool IsCommandIdEnabled(int command_id) const {
+    TabStripModel::ContextMenuCommand command =
+        static_cast<TabStripModel::ContextMenuCommand>(command_id);
+    return [target_ isCommandEnabled:command forController:owner_];
+  }
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      menus::Accelerator* accelerator) { return false; }
+  virtual void ExecuteCommand(int command_id) {
+    TabStripModel::ContextMenuCommand command =
+        static_cast<TabStripModel::ContextMenuCommand>(command_id);
+    [target_ commandDispatch:command forController:owner_];
+  }
+
+  virtual bool IsLabelForCommandIdDynamic(int command_id) const {
+    return command_id == TabStripModel::CommandTogglePinned;
+  }
+  virtual string16 GetLabelForCommandId(int command_id) const {
+    // Display "Pin Tab" when the tab is not pinned and "Unpin Tab" when it is
+    // (this is not a checkmark menu item, per Apple's HIG).
+    if (command_id == TabStripModel::CommandTogglePinned) {
+      return l10n_util::GetStringUTF16(
+          [owner_ mini] ? IDS_TAB_CXMENU_UNPIN_TAB_MAC
+                          : IDS_TAB_CXMENU_PIN_TAB_MAC);
+    }
+    return string16();
+  }
+
+ private:
+  id<TabControllerTarget> target_;  // weak
+  TabController* owner_;  // weak, owns me
+};
+
+}  // TabControllerInternal namespace
 
 // The min widths match the windows values and are sums of left + right
 // padding, of which we have no comparable constants (we draw using paths, not
 // images). The selected tab width includes the close button width.
-+ (float)minTabWidth { return 31; }
-+ (float)minSelectedTabWidth { return 47; }
-+ (float)maxTabWidth { return 220; }
++ (CGFloat)minTabWidth { return 31; }
++ (CGFloat)minSelectedTabWidth { return 47; }
++ (CGFloat)maxTabWidth { return 220; }
++ (CGFloat)miniTabWidth { return 53; }
 
 - (TabView*)tabView {
   return static_cast<TabView*>([self view]);
@@ -40,7 +90,7 @@
                         object:[self view]];
     [defaultCenter addObserver:self
                       selector:@selector(themeChangedNotification:)
-                          name:kGTMThemeDidChangeNotification
+                          name:kBrowserThemeDidChangeNotification
                         object:nil];
   }
   return self;
@@ -48,6 +98,7 @@
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [[self tabView] setController:nil];
   [super dealloc];
 }
 
@@ -57,7 +108,9 @@
 - (void)internalSetSelected:(BOOL)selected {
   selected_ = selected;
   TabView* tabView = static_cast<TabView*>([self view]);
+  DCHECK([tabView isKindOfClass:[TabView class]]);
   [tabView setState:selected];
+  [tabView cancelAlert];
   [self updateVisibility];
   [self updateTitleColor];
 }
@@ -79,6 +132,19 @@
   [self internalSetSelected:selected_];
 }
 
+// Called when Cocoa wants to display the context menu. Lazily instantiate
+// the menu based off of the cross-platform model. Re-create the menu and
+// model every time to get the correct labels and enabling.
+- (NSMenu*)menu {
+  contextMenuDelegate_.reset(
+      new TabControllerInternal::MenuDelegate(target_, self));
+  contextMenuModel_.reset(new TabMenuModel(contextMenuDelegate_.get()));
+  contextMenuController_.reset(
+      [[MenuController alloc] initWithModel:contextMenuModel_.get()
+                     useWithPopUpButtonCell:NO]);
+  return [contextMenuController_ menu];
+}
+
 - (IBAction)closeTab:(id)sender {
   if ([[self target] respondsToSelector:@selector(closeTab:)]) {
     [[self target] performSelector:@selector(closeTab:)
@@ -86,24 +152,13 @@
   }
 }
 
-// Dispatches the command in the tag to the registered target object.
-- (IBAction)commandDispatch:(id)sender {
-  TabStripModel::ContextMenuCommand command =
-      static_cast<TabStripModel::ContextMenuCommand>([sender tag]);
-  [[self target] commandDispatch:command forController:self];
-}
-
-// Called for each menu item on its target, which would be this controller.
-// Returns YES if the menu item should be enabled. We ask the tab's
-// target for the proper answer.
-- (BOOL)validateMenuItem:(NSMenuItem*)item {
-  TabStripModel::ContextMenuCommand command =
-      static_cast<TabStripModel::ContextMenuCommand>([item tag]);
-  return [[self target] isCommandEnabled:command forController:self];
-}
-
 - (void)setTitle:(NSString*)title {
   [[self view] setToolTip:title];
+  if ([self mini] && ![self selected]) {
+    TabView* tabView = static_cast<TabView*>([self view]);
+    DCHECK([tabView isKindOfClass:[TabView class]]);
+    [tabView startAlert];
+  }
   [super setTitle:title];
 }
 
@@ -141,8 +196,8 @@
 // tab. We never actually do this, but it's a helpful guide for determining
 // how much space we have available.
 - (int)iconCapacity {
-  float width = NSMaxX([closeButton_ frame]) - NSMinX(originalIconFrame_);
-  float iconWidth = NSWidth(originalIconFrame_);
+  CGFloat width = NSMaxX([closeButton_ frame]) - NSMinX(originalIconFrame_);
+  CGFloat iconWidth = NSWidth(originalIconFrame_);
 
   return width / iconWidth;
 }
@@ -155,6 +210,9 @@
   if (!iconView_)
     return NO;
 
+  if ([self mini])
+    return YES;
+
   int iconCapacity = [self iconCapacity];
   if ([self selected])
     return iconCapacity >= 2;
@@ -164,12 +222,11 @@
 // Returns YES if we should be showing the close button. The selected tab
 // always shows the close button.
 - (BOOL)shouldShowCloseButton {
-  return [self selected] || [self iconCapacity] >= 3;
+  if ([self mini])
+    return NO;
+  return ([self selected] || [self iconCapacity] >= 3);
 }
 
-// Updates the visibility of certain subviews, such as the icon and close
-// button, based on criteria such as the tab's selected state and its current
-// width.
 - (void)updateVisibility {
   // iconView_ may have been replaced or it may be nil, so [iconView_ isHidden]
   // won't work.  Instead, the state of the icon is tracked separately in
@@ -179,6 +236,9 @@
 
   [iconView_ setHidden:newShowIcon ? NO : YES];
   isIconShowing_ = newShowIcon;
+
+  // If the tab is a mini-tab, hide the title.
+  [titleView_ setHidden:[self mini]];
 
   BOOL oldShowCloseButton = [closeButton_ isHidden] ? NO : YES;
   BOOL newShowCloseButton = [self shouldShowCloseButton] ? YES : NO;
@@ -216,15 +276,16 @@
 
 - (void)updateTitleColor {
   NSColor* titleColor = nil;
-  GTMTheme* theme = [[self view] gtm_theme];
-  if (![self selected]) {
-    titleColor = [theme textColorForStyle:GTMThemeStyleTabBarDeselected
-                                    state:GTMThemeStateActiveWindow];
+  ThemeProvider* theme = [[[self view] window] themeProvider];
+  if (theme && ![self selected]) {
+    titleColor =
+        theme->GetNSColor(BrowserThemeProvider::COLOR_BACKGROUND_TAB_TEXT,
+                          true);
   }
   // Default to the selected text color unless told otherwise.
-  if (!titleColor) {
-    titleColor = [theme textColorForStyle:GTMThemeStyleTabBarSelected
-                                    state:GTMThemeStateActiveWindow];
+  if (theme && !titleColor) {
+    titleColor = theme->GetNSColor(BrowserThemeProvider::COLOR_TAB_TEXT,
+                                   true);
   }
   [titleView_ setTextColor:titleColor ? titleColor : [NSColor textColor]];
 }
@@ -238,11 +299,7 @@
 }
 
 - (void)themeChangedNotification:(NSNotification*)notification {
-  GTMTheme* theme = [notification object];
-  NSView* view = [self view];
-  if ([theme isEqual:[view gtm_theme]]) {
-    [self updateTitleColor];
-  }
+  [self updateTitleColor];
 }
 
 // Called by the tabs to determine whether we are in rapid (tab) closure mode.

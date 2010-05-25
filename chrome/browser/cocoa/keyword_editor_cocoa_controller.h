@@ -5,7 +5,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include "app/table_model_observer.h"
+#import "base/cocoa_protocols_mac.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/cocoa/table_row_nsimage_cache.h"
 #include "chrome/browser/search_engines/edit_search_engine_controller.h"
 #include "chrome/browser/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/search_engines/template_url_model.h"
@@ -13,11 +15,13 @@
 class EditSearchEngineControllerDelegate;
 @class KeywordEditorCocoaController;
 class Profile;
+@class WindowSizeAutosaver;
 
 // Very thin bridge that simply pushes notifications from C++ to ObjC.
 class KeywordEditorModelObserver : public TemplateURLModelObserver,
                                    public EditSearchEngineControllerDelegate,
-                                   public TableModelObserver {
+                                   public TableModelObserver,
+                                   public TableRowNSImageCache::Table {
  public:
   explicit KeywordEditorModelObserver(KeywordEditorCocoaController* controller);
   virtual ~KeywordEditorModelObserver();
@@ -41,19 +45,17 @@ class KeywordEditorModelObserver : public TemplateURLModelObserver,
   virtual void OnItemsAdded(int start, int length);
   virtual void OnItemsRemoved(int start, int length);
 
-  // Lazily converts the image at the given row and caches it in |iconImages_|.
-  NSImage* GetImageForRow(int row);
+  // TableRowNSImageCache::Table
+  virtual int RowCount() const;
+  virtual SkBitmap GetIcon(int row) const;
 
- protected:
-  // Invalidates a range of the |iconImages_| cache.
-  void InvalidateIconCache(int start, int length);
+  // Lazily converts the image at the given row and caches it in |icon_cache_|.
+  NSImage* GetImageForRow(int row);
 
  private:
   KeywordEditorCocoaController* controller_;
 
-  // Stores strong NSImage refs for icons. If an entry is NULL, it will be
-  // created in GetImageForRow().
-  scoped_nsobject<NSPointerArray> iconImages_;
+  TableRowNSImageCache icon_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(KeywordEditorModelObserver);
 };
@@ -62,15 +64,22 @@ class KeywordEditorModelObserver : public TemplateURLModelObserver,
 // acts as |tableView_|'s data source and delegate, feeding it data from the
 // KeywordEditorController's |table_model()|.
 
-@interface KeywordEditorCocoaController : NSWindowController {
+@interface KeywordEditorCocoaController : NSWindowController
+                                          <NSWindowDelegate,
+                                           NSTableViewDataSource,
+                                           NSTableViewDelegate> {
   IBOutlet NSTableView* tableView_;
   IBOutlet NSButton* addButton_;
   IBOutlet NSButton* removeButton_;
   IBOutlet NSButton* makeDefaultButton_;
 
+  scoped_nsobject<NSTextFieldCell> groupCell_;
+
   Profile* profile_;  // weak
   scoped_ptr<KeywordEditorController> controller_;
   scoped_ptr<KeywordEditorModelObserver> observer_;
+
+  scoped_nsobject<WindowSizeAutosaver> sizeSaver_;
 }
 @property (readonly) KeywordEditorController* controller;
 
@@ -99,5 +108,9 @@ class KeywordEditorModelObserver : public TemplateURLModelObserver,
 // Returns a reference to the shared instance for the given profile,
 // or nil if there is none.
 + (KeywordEditorCocoaController*)sharedInstanceForProfile:(Profile*)profile;
+
+// Converts a row index in our table view (which has group header rows) into
+// one in the |controller_|'s model, which does not have them.
+- (int)indexInModelForRow:(NSUInteger)row;
 
 @end

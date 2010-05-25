@@ -4,7 +4,14 @@
 
 {
   'variables': {
-    'use_system_bzip2%': 0,
+    'conditions': [
+      [ 'OS=="linux"', {
+        # Link to system .so since we already use it due to GTK.
+        'use_system_bzip2%': 1,
+      }, {  # OS!="linux"
+        'use_system_bzip2%': 0,
+      }],
+    ],
   },
   'conditions': [
     ['use_system_bzip2==0', {
@@ -34,7 +41,7 @@
             ['OS=="win"', {
               'product_name': 'libbzip2',
             }, {  # else: OS!="win"
-              'product_name': 'bz2',
+              'product_name': 'chrome_bz2',
             }],
           ],
         },

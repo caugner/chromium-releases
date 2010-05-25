@@ -6,10 +6,10 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
@@ -17,11 +17,12 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/info_bubble_gtk.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/gtk_util.h"
 #include "grit/generated_resources.h"
 
 namespace {
@@ -33,13 +34,16 @@ BookmarkBubbleGtk* g_bubble = NULL;
 // Max number of most recently used folders.
 const size_t kMaxMRUFolders = 5;
 
+// Padding between content and edge of info bubble.
+const int kContentBorder = 7;
+
 std::vector<const BookmarkNode*> PopulateFolderCombo(BookmarkModel* model,
                                                      const GURL& url,
                                                      GtkWidget* folder_combo) {
-  const BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url);
-  const BookmarkNode* parent = node->GetParent();
   const BookmarkNode* bookmark_bar = model->GetBookmarkBarNode();
   const BookmarkNode* other = model->other_node();
+  const BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url);
+  const BookmarkNode* parent = node ? node->GetParent() : NULL;
 
   // Use + 2 to account for bookmark bar and other node.
   std::vector<const BookmarkNode*> recent_nodes =
@@ -47,7 +51,7 @@ std::vector<const BookmarkNode*> PopulateFolderCombo(BookmarkModel* model,
 
   std::vector<const BookmarkNode*> nodes;
   // Make the parent the first item, unless it's the bookmark bar or other node.
-  if (parent != bookmark_bar && parent != other)
+  if (parent && parent != bookmark_bar && parent != other)
     nodes.push_back(parent);
 
   for (size_t i = 0; i < recent_nodes.size(); ++i) {
@@ -75,8 +79,11 @@ std::vector<const BookmarkNode*> PopulateFolderCombo(BookmarkModel* model,
       l10n_util::GetStringUTF8(
           IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER).c_str());
 
-  int parent_index = static_cast<int>(
-      std::find(nodes.begin(), nodes.end(), parent) - nodes.begin());
+  gint parent_index = 0;
+  if (parent) {
+    parent_index = static_cast<gint>(
+        std::find(nodes.begin(), nodes.end(), parent) - nodes.begin());
+  }
   gtk_combo_box_set_active(GTK_COMBO_BOX(folder_combo), parent_index);
 
   return nodes;
@@ -85,8 +92,7 @@ std::vector<const BookmarkNode*> PopulateFolderCombo(BookmarkModel* model,
 }  // namespace
 
 // static
-void BookmarkBubbleGtk::Show(GtkWindow* toplevel_window,
-                             const gfx::Rect& rect,
+void BookmarkBubbleGtk::Show(GtkWidget* anchor,
                              Profile* profile,
                              const GURL& url,
                              bool newly_bookmarked) {
@@ -96,8 +102,7 @@ void BookmarkBubbleGtk::Show(GtkWindow* toplevel_window,
   // think that closing the previous bubble and opening the new one would make
   // more sense, but I guess then you would commit the bubble's changes.
   DCHECK(!g_bubble);
-  g_bubble = new BookmarkBubbleGtk(toplevel_window, rect, profile,
-                                   url, newly_bookmarked);
+  g_bubble = new BookmarkBubbleGtk(anchor, profile, url, newly_bookmarked);
 }
 
 void BookmarkBubbleGtk::InfoBubbleClosing(InfoBubbleGtk* info_bubble,
@@ -135,15 +140,14 @@ void BookmarkBubbleGtk::Observe(NotificationType type,
   }
 }
 
-BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* toplevel_window,
-                                     const gfx::Rect& rect,
+BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
                                      Profile* profile,
                                      const GURL& url,
                                      bool newly_bookmarked)
     : url_(url),
       profile_(profile),
       theme_provider_(GtkThemeProvider::GetFrom(profile_)),
-      toplevel_window_(toplevel_window),
+      anchor_(anchor),
       content_(NULL),
       name_entry_(NULL),
       folder_combo_(NULL),
@@ -161,13 +165,14 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* toplevel_window,
   GtkWidget* edit_button = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_OPTIONS).c_str());
   GtkWidget* close_button = gtk_button_new_with_label(
-      l10n_util::GetStringUTF8(IDS_CLOSE).c_str());
+      l10n_util::GetStringUTF8(IDS_DONE).c_str());
 
   // Our content is arranged in 3 rows.  |top| contains a left justified
   // message, and a right justified remove link button.  |table| is the middle
   // portion with the name entry and the folder combo.  |bottom| is the final
   // row with a spacer, and the edit... and close buttons on the right.
   GtkWidget* content = gtk_vbox_new(FALSE, 5);
+  gtk_container_set_border_width(GTK_CONTAINER(content), kContentBorder);
   GtkWidget* top = gtk_hbox_new(FALSE, 0);
 
   gtk_misc_set_alignment(GTK_MISC(label), 0, 1);
@@ -213,9 +218,16 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* toplevel_window,
   // We want the focus to start on the entry, not on the remove button.
   gtk_container_set_focus_child(GTK_CONTAINER(content), table);
 
-  bubble_ = InfoBubbleGtk::Show(toplevel_window_,
-                                rect,
+  InfoBubbleGtk::ArrowLocationGtk arrow_location =
+      !base::i18n::IsRTL() ?
+      InfoBubbleGtk::ARROW_LOCATION_TOP_LEFT :
+      InfoBubbleGtk::ARROW_LOCATION_TOP_RIGHT;
+  bubble_ = InfoBubbleGtk::Show(anchor_,
+                                NULL,
                                 content,
+                                arrow_location,
+                                true,  // match_system_theme
+                                true,  // grab_input
                                 theme_provider_,
                                 this);  // delegate
   if (!bubble_) {
@@ -224,19 +236,19 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWindow* toplevel_window,
   }
 
   g_signal_connect(content, "destroy",
-                   G_CALLBACK(&HandleDestroyThunk), this);
+                   G_CALLBACK(&OnDestroyThunk), this);
   g_signal_connect(name_entry_, "activate",
-                   G_CALLBACK(&HandleNameActivateThunk), this);
+                   G_CALLBACK(&OnNameActivateThunk), this);
   g_signal_connect(folder_combo_, "changed",
-                   G_CALLBACK(&HandleFolderChangedThunk), this);
+                   G_CALLBACK(&OnFolderChangedThunk), this);
   g_signal_connect(folder_combo_, "notify::popup-shown",
-                   G_CALLBACK(&HandleFolderPopupShownThunk), this);
+                   G_CALLBACK(&OnFolderPopupShownThunk), this);
   g_signal_connect(edit_button, "clicked",
-                   G_CALLBACK(&HandleEditButtonThunk), this);
+                   G_CALLBACK(&OnEditClickedThunk), this);
   g_signal_connect(close_button, "clicked",
-                   G_CALLBACK(&HandleCloseButtonThunk), this);
+                   G_CALLBACK(&OnCloseClickedThunk), this);
   g_signal_connect(remove_button_, "clicked",
-                   G_CALLBACK(&HandleRemoveButtonThunk), this);
+                   G_CALLBACK(&OnRemoveClickedThunk), this);
 
   registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
@@ -259,21 +271,22 @@ BookmarkBubbleGtk::~BookmarkBubbleGtk() {
   }
 }
 
-void BookmarkBubbleGtk::HandleDestroy() {
+void BookmarkBubbleGtk::OnDestroy(GtkWidget* widget) {
   // We are self deleting, we have a destroy signal setup to catch when we
   // destroyed (via the InfoBubble being destroyed), and delete ourself.
   content_ = NULL;  // We are being destroyed.
   delete this;
 }
 
-void BookmarkBubbleGtk::HandleNameActivate() {
+void BookmarkBubbleGtk::OnNameActivate(GtkWidget* widget) {
   bubble_->Close();
 }
 
-void BookmarkBubbleGtk::HandleFolderChanged() {
+void BookmarkBubbleGtk::OnFolderChanged(GtkWidget* widget) {
   size_t cur_folder = gtk_combo_box_get_active(GTK_COMBO_BOX(folder_combo_));
   if (cur_folder == folder_nodes_.size()) {
-    UserMetrics::RecordAction(L"BookmarkBubble_EditFromCombobox", profile_);
+    UserMetrics::RecordAction(
+        UserMetricsAction("BookmarkBubble_EditFromCombobox"), profile_);
     // GTK doesn't handle having the combo box destroyed from the changed
     // signal.  Since showing the editor also closes the bubble, delay this
     // so that GTK can unwind.  Specifically gtk_menu_shell_button_release
@@ -283,7 +296,8 @@ void BookmarkBubbleGtk::HandleFolderChanged() {
   }
 }
 
-void BookmarkBubbleGtk::HandleFolderPopupShown() {
+void BookmarkBubbleGtk::OnFolderPopupShown(GtkWidget* widget,
+                                           GParamSpec* property) {
   // GtkComboBox grabs the keyboard and pointer when it displays its popup,
   // which steals the grabs that InfoBubbleGtk had installed.  When the popup is
   // hidden, we notify InfoBubbleGtk so it can try to reacquire the grabs
@@ -294,17 +308,19 @@ void BookmarkBubbleGtk::HandleFolderPopupShown() {
     bubble_->HandlePointerAndKeyboardUngrabbedByContent();
 }
 
-void BookmarkBubbleGtk::HandleEditButton() {
-  UserMetrics::RecordAction(L"BookmarkBubble_Edit", profile_);
+void BookmarkBubbleGtk::OnEditClicked(GtkWidget* widget) {
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Edit"),
+                            profile_);
   ShowEditor();
 }
 
-void BookmarkBubbleGtk::HandleCloseButton() {
+void BookmarkBubbleGtk::OnCloseClicked(GtkWidget* widget) {
   bubble_->Close();
 }
 
-void BookmarkBubbleGtk::HandleRemoveButton() {
-  UserMetrics::RecordAction(L"BookmarkBubble_Unstar", profile_);
+void BookmarkBubbleGtk::OnRemoveClicked(GtkWidget* widget) {
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"),
+                            profile_);
 
   apply_edits_ = false;
   remove_bookmark_ = true;
@@ -325,8 +341,9 @@ void BookmarkBubbleGtk::ApplyEdits() {
 
     if (new_title != node->GetTitle()) {
       model->SetTitle(node, new_title);
-      UserMetrics::RecordAction(L"BookmarkBubble_ChangeTitleInBubble",
-                                profile_);
+      UserMetrics::RecordAction(
+          UserMetricsAction("BookmarkBubble_ChangeTitleInBubble"),
+          profile_);
     }
 
     size_t cur_folder = gtk_combo_box_get_active(GTK_COMBO_BOX(folder_combo_));
@@ -335,7 +352,8 @@ void BookmarkBubbleGtk::ApplyEdits() {
     if (cur_folder < folder_nodes_.size()) {
       const BookmarkNode* new_parent = folder_nodes_[cur_folder];
       if (new_parent != node->GetParent()) {
-        UserMetrics::RecordAction(L"BookmarkBubble_ChangeParent", profile_);
+        UserMetrics::RecordAction(
+            UserMetricsAction("BookmarkBubble_ChangeParent"), profile_);
         model->Move(node, new_parent, new_parent->GetChildCount());
       }
     }
@@ -361,9 +379,9 @@ void BookmarkBubbleGtk::ShowEditor() {
   // Commit any edits now.
   ApplyEdits();
 
-  // Closing might delete us, so we'll cache what we want we need on the stack.
+  // Closing might delete us, so we'll cache what we need on the stack.
   Profile* profile = profile_;
-  GtkWindow* toplevel = toplevel_window_;
+  GtkWindow* toplevel = GTK_WINDOW(gtk_widget_get_toplevel(anchor_));
 
   // Close the bubble, deleting the C++ objects, etc.
   bubble_->Close();

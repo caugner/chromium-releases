@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,10 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/sessions/base_session_service.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/common/notification_observer.h"
@@ -50,7 +53,12 @@ class SessionService : public BaseSessionService,
   // For testing.
   explicit SessionService(const FilePath& save_path);
 
-  virtual ~SessionService();
+  // Invoke at a point when you think session restore might occur. For example,
+  // during startup and window creation this is invoked to see if a session
+  // needs to be restored. If a session needs to be restored it is done so
+  // asynchronously and true is returned. If false is returned the session was
+  // not restored and the caller needs to create a new window.
+  bool RestoreIfNecessary(const std::vector<GURL>& urls_to_open);
 
   // Resets the contents of the file from the current state of all open
   // browsers whose profile matches our profile.
@@ -136,7 +144,7 @@ class SessionService : public BaseSessionService,
   //
   // The time gives the time the session was closed.
   typedef Callback2<Handle, std::vector<SessionWindow*>*>::Type
-      LastSessionCallback;
+      SessionCallback;
 
   // Fetches the contents of the last session, notifying the callback when
   // done. If the callback is supplied an empty vector of SessionWindows
@@ -146,18 +154,52 @@ class SessionService : public BaseSessionService,
   // callback invokes OnGotSessionCommands from which we map the
   // SessionCommands to browser state, then notify the callback.
   Handle GetLastSession(CancelableRequestConsumerBase* consumer,
-                        LastSessionCallback* callback);
+                        SessionCallback* callback);
+
+  // Fetches the contents of the current session, notifying the callback when
+  // done. If the callback is supplied an empty vector of SessionWindows
+  // it means the session could not be restored.
+  //
+  // The created request does NOT directly invoke the callback, rather the
+  // callback invokes OnGotSessionCommands from which we map the
+  // SessionCommands to browser state, then notify the callback.
+  Handle GetCurrentSession(CancelableRequestConsumerBase* consumer,
+                           SessionCallback* callback);
 
  private:
   typedef std::map<SessionID::id_type,std::pair<int,int> > IdToRange;
   typedef std::map<SessionID::id_type,SessionTab*> IdToSessionTab;
   typedef std::map<SessionID::id_type,SessionWindow*> IdToSessionWindow;
 
+  virtual ~SessionService();
+
+  // These types mirror Browser::Type, but are re-defined here because these
+  // specific enumeration _values_ are written into the session database and
+  // are needed to maintain forward compatibility.
+  enum WindowType {
+    TYPE_NORMAL = 0,
+    TYPE_POPUP = 1,
+    TYPE_APP = 2,
+    TYPE_APP_POPUP = TYPE_APP + TYPE_POPUP,
+    TYPE_DEVTOOLS = TYPE_APP + 4,
+    TYPE_APP_PANEL = TYPE_APP + 8
+  };
+
   void Init();
+
+  // Implementation of RestoreIfNecessary. If |browser| is non-null and we need
+  // to restore, the tabs are added to it, otherwise a new browser is created.
+  bool RestoreIfNecessary(const std::vector<GURL>& urls_to_open,
+                          Browser* browser);
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  // Sets the application extension id of the specified tab.
+  void SetTabAppExtensionID(const SessionID& window_id,
+                            const SessionID& tab_id,
+                            const std::string& app_extension_id);
 
   // Methods to create the various commands. It is up to the caller to delete
   // the returned the SessionCommand* object.
@@ -183,7 +225,7 @@ class SessionService : public BaseSessionService,
       int index);
 
   SessionCommand* CreateSetWindowTypeCommand(const SessionID& window_id,
-                                             Browser::Type type);
+                                             WindowType type);
 
   SessionCommand* CreatePinnedStateCommand(const SessionID& tab_id,
                                            bool is_pinned);
@@ -191,7 +233,7 @@ class SessionService : public BaseSessionService,
   // Callback form the backend for getting the commands from the previous
   // or save file. Converts the commands in SessionWindows and notifies
   // the real callback.
-  void OnGotLastSessionCommands(
+  void OnGotSessionCommands(
       Handle handle,
       scoped_refptr<InternalGetCommandsRequest> request);
 
@@ -304,17 +346,37 @@ class SessionService : public BaseSessionService,
   // our profile.
   bool IsOnlyOneTabLeft();
 
-  // Returns true if there are no open tabbed browser windows with our profile,
-  // or the only tabbed browser open has a session id of window_id.
-  bool HasOpenTabbedBrowsers(const SessionID& window_id);
+  // Returns true if there are open trackable browser windows whose ids do
+  // match |window_id| with our profile. A trackable window is a window from
+  // which |should_track_changes_for_browser_type| returns true. See
+  // |should_track_changes_for_browser_type| for details.
+  bool HasOpenTrackableBrowsers(const SessionID& window_id);
 
   // Returns true if changes to tabs in the specified window should be tracked.
   bool ShouldTrackChangesToWindow(const SessionID& window_id);
 
   // Returns true if we track changes to the specified browser type.
   static bool should_track_changes_for_browser_type(Browser::Type type) {
-    return type == Browser::TYPE_NORMAL;
+    return type == Browser::TYPE_NORMAL ||
+        (type == Browser::TYPE_POPUP && browser_defaults::kRestorePopups);
   }
+
+  // Returns true if we should record a window close as pending.
+  // |has_open_trackable_browsers_| must be up-to-date before calling this.
+  bool should_record_close_as_pending() const {
+    // When this is called, the browser window being closed is still open, hence
+    // still in the browser list. If there is a browser window other than the
+    // one being closed but no trackable windows, then the others must be App
+    // windows or similar. In this case, we record the close as pending.
+    return !has_open_trackable_browsers_ &&
+        (!browser_defaults::kBrowserAliveWithNoWindows ||
+         BrowserList::size() > 1);
+    }
+
+  // Convert back/forward between the Browser and SessionService DB window
+  // types.
+  static WindowType WindowTypeForBrowserType(Browser::Type type);
+  static Browser::Type BrowserTypeForWindowType(WindowType type);
 
   NotificationRegistrar registrar_;
 
@@ -347,11 +409,11 @@ class SessionService : public BaseSessionService,
   typedef std::set<SessionID::id_type> WindowsTracking;
   WindowsTracking windows_tracking_;
 
-  // Are there any open open tabbed browsers?
-  bool has_open_tabbed_browsers_;
+  // Are there any open trackable browsers?
+  bool has_open_trackable_browsers_;
 
   // If true and a new tabbed browser is created and there are no opened tabbed
-  // browser (has_open_tabbed_browsers_ is false), then the current session
+  // browser (has_open_trackable_browsers_ is false), then the current session
   // is made the previous session. See description above class for details on
   // current/previou session.
   bool move_on_new_browser_;

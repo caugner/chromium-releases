@@ -10,7 +10,9 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -19,17 +21,21 @@
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 
+const std::wstring DevToolsWindow::kDevToolsApp = L"DevToolsApp";
 
 // static
 TabContents* DevToolsWindow::GetDevToolsContents(TabContents* inspected_tab) {
   if (!inspected_tab) {
     return NULL;
   }
+
+  if (!DevToolsManager::GetInstance())
+    return NULL;  // Happens only in tests.
+
   DevToolsClientHost* client_host = DevToolsManager::GetInstance()->
           GetDevToolsClientHostFor(inspected_tab->render_view_host());
   if (!client_host) {
@@ -48,8 +54,9 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
                                bool docked)
     : profile_(profile),
       browser_(NULL),
-      inspected_window_(NULL),
-      docked_(docked) {
+      docked_(docked),
+      is_loaded_(false),
+      open_console_on_load_(false) {
   // Create TabContents with devtools.
   tab_contents_ = new TabContents(profile, NULL, MSG_ROUTING_NONE, NULL);
   GURL url(std::string(chrome::kChromeUIDevToolsURL) + "devtools.html");
@@ -89,7 +96,10 @@ void DevToolsWindow::SendMessageToClient(const IPC::Message& message) {
 void DevToolsWindow::InspectedTabClosing() {
   if (docked_) {
     // Update dev tools to reflect removed dev tools window.
-    inspected_window_->UpdateDevTools();
+
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window)
+      inspected_window->UpdateDevTools();
     // In case of docked tab_contents we own it, so delete here.
     delete tab_contents_;
 
@@ -104,14 +114,17 @@ void DevToolsWindow::InspectedTabClosing() {
   }
 }
 
-void DevToolsWindow::Show() {
+void DevToolsWindow::Show(bool open_console) {
   if (docked_) {
     // Just tell inspected browser to update splitter.
-    inspected_window_ = GetInspectedBrowserWindow();
-    if (inspected_window_) {
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window) {
       tab_contents_->set_delegate(this);
-      inspected_window_->UpdateDevTools();
+      inspected_window->UpdateDevTools();
+      SetAttachedWindow();
       tab_contents_->view()->SetInitialFocus();
+      if (open_console)
+        ScheduleOpenConsole();
       return;
     } else {
       // Sometimes we don't know where to dock. Stay undocked.
@@ -119,11 +132,15 @@ void DevToolsWindow::Show() {
     }
   }
 
-  if (!browser_) {
+  if (!browser_)
     CreateDevToolsBrowser();
-  }
+
   browser_->window()->Show();
+  SetAttachedWindow();
   tab_contents_->view()->SetInitialFocus();
+
+  if (open_console)
+    ScheduleOpenConsole();
 }
 
 void DevToolsWindow::Activate() {
@@ -132,12 +149,18 @@ void DevToolsWindow::Activate() {
       browser_->window()->Activate();
     }
   } else {
-    inspected_window_->FocusDevTools();
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window)
+      inspected_window->FocusDevTools();
   }
 }
 
 void DevToolsWindow::SetDocked(bool docked) {
   if (docked_ == docked) {
+    return;
+  }
+  if (docked && !GetInspectedBrowserWindow()) {
+    // Cannot dock, avoid window flashing due to close-reopen cycle.
     return;
   }
   docked_ = docked;
@@ -151,10 +174,13 @@ void DevToolsWindow::SetDocked(bool docked) {
     browser_ = NULL;
   } else {
     // Update inspected window to hide split and reset it.
-    inspected_window_->UpdateDevTools();
-    inspected_window_ = NULL;
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window) {
+      inspected_window->UpdateDevTools();
+      inspected_window = NULL;
+    }
   }
-  Show();
+  Show(false);
 }
 
 RenderViewHost* DevToolsWindow::GetRenderViewHost() {
@@ -166,7 +192,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
   std::wstring wp_key = L"";
   wp_key.append(prefs::kBrowserWindowPlacement);
   wp_key.append(L"_");
-  wp_key.append(L"DevToolsApp");
+  wp_key.append(kDevToolsApp);
 
   PrefService* prefs = g_browser_process->local_state();
   if (!prefs->FindPreference(wp_key.c_str())) {
@@ -184,7 +210,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     defaults->SetBoolean(L"always_on_top", false);
   }
 
-  browser_ = Browser::CreateForApp(L"DevToolsApp", profile_, false);
+  browser_ = Browser::CreateForDevTools(profile_);
   browser_->tabstrip_model()->AddTabContents(
       tab_contents_, -1, false, PageTransition::START_PAGE, true);
 }
@@ -203,14 +229,23 @@ BrowserWindow* DevToolsWindow::GetInspectedBrowserWindow() {
   return NULL;
 }
 
+void DevToolsWindow::SetAttachedWindow() {
+  tab_contents_->render_view_host()->
+      ExecuteJavascriptInWebFrame(
+          L"", docked_ ? L"WebInspector.setAttachedWindow(true);" :
+                         L"WebInspector.setAttachedWindow(false);");
+}
+
 void DevToolsWindow::Observe(NotificationType type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
   if (type == NotificationType::LOAD_STOP) {
-    tab_contents_->render_view_host()->
-        ExecuteJavascriptInWebFrame(
-            L"", docked_ ? L"WebInspector.setAttachedWindow(true);" :
-                           L"WebInspector.setAttachedWindow(false);");
+    SetAttachedWindow();
+    is_loaded_ = true;
+    if (open_console_on_load_) {
+      DoOpenConsole();
+      open_console_on_load_ = false;
+    }
   } else if (type == NotificationType::TAB_CLOSING) {
     if (Source<NavigationController>(source).ptr() ==
             &tab_contents_->controller()) {
@@ -221,5 +256,36 @@ void DevToolsWindow::Observe(NotificationType type,
       NotifyCloseListener();
       delete this;
     }
+  }
+}
+
+void DevToolsWindow::ScheduleOpenConsole() {
+  if (is_loaded_)
+    DoOpenConsole();
+  else
+    open_console_on_load_ = true;
+}
+
+void DevToolsWindow::DoOpenConsole() {
+  tab_contents_->render_view_host()->
+      ExecuteJavascriptInWebFrame(L"", L"WebInspector.showConsole();");
+}
+
+bool DevToolsWindow::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+  if (docked_) {
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window)
+      return inspected_window->PreHandleKeyboardEvent(
+          event, is_keyboard_shortcut);
+  }
+  return false;
+}
+
+void DevToolsWindow::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+  if (docked_) {
+    BrowserWindow* inspected_window = GetInspectedBrowserWindow();
+    if (inspected_window)
+      inspected_window->HandleKeyboardEvent(event);
   }
 }

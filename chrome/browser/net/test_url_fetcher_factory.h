@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_NET_TEST_URL_FETCHER_FACTORY_H_
 
 #include <map>
+#include <string>
 
 #include "chrome/browser/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
@@ -48,6 +49,9 @@ class TestURLFetcher : public URLFetcher {
   // in your tests.
   const GURL& original_url() const { return original_url_; }
 
+  // Returns the data uploaded on this URLFetcher.
+  const std::string& upload_data() const { return URLFetcher::upload_data(); }
+
  private:
   const GURL original_url_;
 
@@ -75,4 +79,4 @@ class TestURLFetcherFactory : public URLFetcher::Factory {
   DISALLOW_COPY_AND_ASSIGN(TestURLFetcherFactory);
 };
 
-#endif  // CHROME_TEST_TEST_URL_FETCHER_FACTORY_H_
+#endif  // CHROME_BROWSER_NET_TEST_URL_FETCHER_FACTORY_H_

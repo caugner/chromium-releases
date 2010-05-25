@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/values.h"
@@ -47,7 +48,15 @@ class DomCheckerTest : public UITest {
     ResultsSet expected_failures, current_failures;
 
     std::string failures_file = use_http ?
-        "expected_failures-http.txt" : "expected_failures-file.txt";
+#if defined(OS_MACOSX)
+        "expected_failures_mac-http.txt" : "expected_failures_mac-file.txt";
+#elif defined(OS_LINUX)
+        "expected_failures_linux-http.txt" : "expected_failures_linux-file.txt";
+#elif defined(OS_WIN)
+        "expected_failures_win-http.txt" : "expected_failures_win-file.txt";
+#else
+        "" : "";
+#endif
 
     GetExpectedFailures(failures_file, &expected_failures);
 
@@ -131,7 +140,7 @@ class DomCheckerTest : public UITest {
   bool WaitUntilTestCompletes(TabProxy* tab) {
     return WaitUntilJavaScriptCondition(tab, L"",
         L"window.domAutomationController.send(automation.IsDone());",
-        1000, UITest::test_timeout_ms());
+        UITest::test_timeout_ms());
   }
 
   bool GetTestCount(TabProxy* tab, int* test_count) {
@@ -155,7 +164,7 @@ class DomCheckerTest : public UITest {
 
     std::string json = WideToUTF8(json_wide);
     JSONStringValueSerializer deserializer(json);
-    scoped_ptr<Value> value(deserializer.Deserialize(NULL));
+    scoped_ptr<Value> value(deserializer.Deserialize(NULL, NULL));
 
     EXPECT_TRUE(value.get());
     if (!value.get())
@@ -201,7 +210,7 @@ class DomCheckerTest : public UITest {
 
     scoped_refptr<TabProxy> tab(GetActiveTab());
     ASSERT_TRUE(tab.get());
-    tab->NavigateToURL(test_url);
+    ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(test_url));
 
     // Wait for the test to finish.
     ASSERT_TRUE(WaitUntilTestCompletes(tab.get()));

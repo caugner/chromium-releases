@@ -30,6 +30,32 @@ message ProfilingData {
   optional int64 total_request_time = 6;
 }
 
+message EntitySpecifics {
+  // To add new datatype-specific fields to the protocol, extend
+  // EntitySpecifics.  First, pick a non-colliding tag number by
+  // picking a revision number of one of your past commits
+  // to src.chromium.org.  Then, in a different protocol buffer
+  // definition that includes this, do the following:
+  //
+  //   extend EntitySpecifics {
+  //     MyDatatypeSpecifics my_datatype = 32222;
+  //   }
+  //
+  // where:
+  //   - 32222 is the non-colliding tag number you picked earlier.
+  //   - MyDatatypeSpecifics is the type (probably a message type defined
+  //     in your new .proto file) that you want to associate with each
+  //     object of the new datatype.
+  //   - my_datatype is the field identifier you'll use to access the
+  //     datatype specifics from the code.
+  //
+  // Server implementations are obligated to preserve the contents of
+  // EntitySpecifics when it contains unrecognized extensions.  In this
+  // way, it is possible to add new datatype fields without having
+  // to update the server.
+  extensions 30000 to max;
+}
+
 message SyncEntity {
   // This item's identifier.  In a commit of a new item, this will be a
   // client-generated ID.  If the commit succeeds, the server will generate
@@ -95,14 +121,23 @@ message SyncEntity {
   // Present only in GetUpdatesResponse.
   optional int64 sync_timestamp = 9;
 
-  // If present, singleton_tag identifies this item as being a uniquely
+  // If present, this tag identifies this item as being a uniquely
   // instanced item.  The server ensures that there is never more
-  // than one entity in a user's store with the same singleton_tag value.
+  // than one entity in a user's store with the same tag value.
   // This value is used to identify and find e.g. the "Google Chrome" settings
   // folder without relying on it existing at a particular path, or having
   // a particular name, in the data store.
+  //
+  // This variant of the tag is created by the server, so clients can't create
+  // an item with a tag using this field.
+  //
+  // Use client_defined_unique_tag if you want to create one from the client.
+  //
+  // An item can't have both a client_defined_unique_tag and
+  // a server_defined_unique_tag.
+  //
   // Present only in GetUpdatesResponse.
-  optional string singleton_tag = 10;
+  optional string server_defined_unique_tag = 10;
 
   // If this group is present, it implies that this SyncEntity corresponds to
   // a bookmark or a bookmark folder.
@@ -164,6 +199,42 @@ message SyncEntity {
   // committed this entity. Typically a negative integer.
   // Present only in GetUpdatesResponse.
   optional string originator_client_item_id = 20;
+
+  // Extensible container for datatype-specific data.
+  // This became available in version 23 of the protocol.
+  optional EntitySpecifics specifics = 21;
+
+  // Indicate whether this is a folder or not. Available in version 23+.
+  optional bool folder = 22 [default = false];
+
+  // A client defined unique hash for this entity.
+  // Similar to server_defined_unique_tag.
+  //
+  // When initially committing an entity, a client can request that the entity
+  // is unique per that account. To do so, the client should specify a 
+  // client_defined_unique_tag. At most one entity per tag value may exist.
+  // per account. The server will enforce uniqueness on this tag
+  // and fail attempts to create duplicates of this tag.
+  // Will be returned in any updates for this entity.
+  //
+  // The difference between server_defined_unique_tag and
+  // client_defined_unique_tag is the creator of the entity. Server defined
+  // tags are entities created by the server at account creation,
+  // while client defined tags are entities created by the client at any time.
+  //
+  // During GetUpdates, a sync entity update will come back with ONE of:
+  // a) Originator and cache id - If client committed the item as non "unique"
+  // b) Server tag - If server committed the item as unique
+  // c) Client tag - If client committed the item as unique
+  //
+  // May be present in CommitMessages for the initial creation of an entity.
+  // If present in Commit updates for the entity, it will be ignored.
+  //
+  // Available in version 24+.
+  //
+  // May be returned in GetUpdatesMessage and sent up in CommitMessage.
+  //
+  optional string client_defined_unique_tag = 23;
 };
 
 message CommitMessage {
@@ -172,10 +243,26 @@ message CommitMessage {
   // A GUID that identifies the committing sync client.  This value will be
   // returned as originator_cache_guid for any new items.
   optional string cache_guid = 2;
+
+  // This message contains diagnostic information used to correlate
+  // commit-related traffic with extensions-related mutations to the
+  // data models in chromium.  It plays no functional role in
+  // processing this CommitMessage.
+  message ChromiumExtensionsActivity {
+    // The human-readable ID identifying the extension responsible
+    // for the traffic reported in this ChromiumExtensionsActivity.
+    optional string extension_id = 1;
+
+    // How many times the extension successfully invoked a write
+    // operation through the bookmarks API since the last CommitMessage.
+    optional uint32 bookmark_writes_since_last_commit = 2;
+  }
+
+  repeated ChromiumExtensionsActivity extensions_activity = 3;
 };
 
 message GetUpdatesCallerInfo {
-  enum GET_UPDATES_SOURCE {
+  enum GetUpdatesSource {
     UNKNOWN = 0;  // The source was not set by the caller.
     FIRST_UPDATE = 1;  // First update from an instance of Chrome.
     LOCAL = 2;  // The source of the update was a local change.
@@ -184,7 +271,7 @@ message GetUpdatesCallerInfo {
     SYNC_CYCLE_CONTINUATION = 5;  // The source of the update was a
   }                               // continuation of a previous update.
 
-  required GET_UPDATES_SOURCE source = 1;
+  required GetUpdatesSource source = 1;
 
   // True only if notifications were enabled for this GetUpdateMessage.
   optional bool notifications_enabled = 2;
@@ -195,6 +282,20 @@ message GetUpdatesMessage {
 
   // Indicates the reason for the GetUpdatesMessage.
   optional GetUpdatesCallerInfo caller_info = 2;
+
+  // Indicates whether related folders should be fetched.
+  optional bool fetch_folders = 3 [default = true];
+
+  // The presence of an individual EntitySpecifics extension indicates that the
+  // client requests sync object types associated with that extension.  This
+  // determination depends only on the presence of the extension field, not its
+  // contents -- thus clients should send empty extension messages.  For 
+  // backwards compatibility only bookmark objects will be sent to the client 
+  // should requested_types not be present.
+  //
+  // requested_types may contain multiple EntitySpecifics extensions -- in this
+  // event, the server will return items of all the indicated types.
+  optional EntitySpecifics requested_types = 4;
 };
 
 message AuthenticateMessage {
@@ -203,14 +304,14 @@ message AuthenticateMessage {
 
 message ClientToServerMessage {
   required string share = 1;
-  optional int32 protocol_version = 2 [default = 20];
-  enum CONTENTS {
+  optional int32 protocol_version = 2 [default = 24];
+  enum Contents {
     COMMIT = 1;
     GET_UPDATES = 2;
     AUTHENTICATE = 3;
   }
 
-  required CONTENTS message_contents = 3;
+  required Contents message_contents = 3;
   optional CommitMessage commit = 4;
   optional GetUpdatesMessage get_updates = 5;
   optional AuthenticateMessage authenticate = 6;
@@ -222,7 +323,7 @@ message ClientToServerMessage {
 };
 
 message CommitResponse {
-  enum RESPONSE_TYPE {
+  enum ResponseType {
     SUCCESS = 1;
     CONFLICT = 2; // You're out of date; update and check your data
     // TODO(ncarter): What's the difference between RETRY and TRANSIENT_ERROR?
@@ -233,7 +334,7 @@ message CommitResponse {
     TRANSIENT_ERROR = 6; // Something went wrong; try again in a bit
   }
   repeated group EntryResponse = 1 {
-    required RESPONSE_TYPE response_type = 2;
+    required ResponseType response_type = 2;
 
     // Sync servers may also return a new ID for an existing item, indicating
     // a new entry's been created to hold the data the client's sending up.
@@ -243,8 +344,7 @@ message CommitResponse {
     optional string parent_id_string = 4;
 
     // This value is the same as the position_in_parent value returned within
-    // the SyncEntity message in GetUpdatesResponse.  It is returned if the
-    // item was assigned a new position.
+    // the SyncEntity message in GetUpdatesResponse.
     optional int64 position_in_parent = 5;
 
     // The item's current version.
@@ -270,8 +370,10 @@ message GetUpdatesResponse {
   // GetUpdates request, the client should send another GetUpdates request and
   // use new_timestamp as the from_timestamp value within GetUpdatesMessage.
   optional int64 new_timestamp = 2;
-  // The newest timestamp in the share. Used to give UI feedback on progress.
-  optional int64 newest_timestamp = 3;
+  // DEPRECATED FIELD - server does not set this anymore.
+  optional int64 deprecated_newest_timestamp = 3;
+  // Estimated number of changes remaining - use this for UI feedback.
+  optional int64 changes_remaining = 4;
 };
 
 // A user-identifying struct.  For a given Google account the email and display
@@ -313,7 +415,7 @@ message ClientToServerResponse {
   optional GetUpdatesResponse get_updates = 2;
   optional AuthenticateResponse authenticate = 3;
 
-  enum ERROR_TYPE {
+  enum ErrorType {
     SUCCESS            = 0;
     ACCESS_DENIED      = 1; // Returned when the user doesn't have access to
                             // store (instead of HTTP 401).
@@ -326,7 +428,7 @@ message ClientToServerResponse {
                             // Google Account.
     AUTH_INVALID       = 6; // Auth token or cookie is otherwise invalid.
   }
-  optional ERROR_TYPE error_code = 4 [default = SUCCESS];
+  optional ErrorType error_code = 4 [default = SUCCESS];
   optional string error_message = 5;
 
   // Opaque store ID; if it changes, the contents of the client's cache

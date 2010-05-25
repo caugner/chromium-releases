@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,16 @@
 
 #include "app/gtk_dnd_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/rect.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/gtk/bookmark_bubble_gtk.h"
 #include "chrome/browser/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/rect.h"
 #include "grit/theme_resources.h"
 
 ToolbarStarToggleGtk::ToolbarStarToggleGtk(BrowserToolbarGtk* host)
@@ -22,8 +23,10 @@ ToolbarStarToggleGtk::ToolbarStarToggleGtk(BrowserToolbarGtk* host)
       widget_(gtk_chrome_button_new()),
       is_starred_(false),
       theme_provider_(GtkThemeProvider::GetFrom(host->profile())),
-      unstarred_(theme_provider_, IDR_STAR, IDR_STAR_P, IDR_STAR_H, IDR_STAR_D),
-      starred_(theme_provider_, IDR_STARRED, IDR_STARRED_P, IDR_STARRED_H, 0) {
+      unstarred_(theme_provider_, IDR_STAR, IDR_STAR_P, IDR_STAR_H, IDR_STAR_D,
+                 IDR_STAR_MASK),
+      starred_(theme_provider_, IDR_STARRED, IDR_STARRED_P, IDR_STARRED_H, 0,
+               IDR_STAR_MASK) {
   gtk_widget_set_size_request(widget_.get(), unstarred_.Width(),
                               unstarred_.Height());
 
@@ -33,20 +36,23 @@ ToolbarStarToggleGtk::ToolbarStarToggleGtk(BrowserToolbarGtk* host)
 
   g_signal_connect(widget(), "expose-event",
                    G_CALLBACK(OnExpose), this);
-  GTK_WIDGET_UNSET_FLAGS(widget_.get(), GTK_CAN_FOCUS);
+  GTK_WIDGET_UNSET_FLAGS(widget(), GTK_CAN_FOCUS);
 
-  gtk_drag_source_set(widget(), GDK_BUTTON1_MASK,
-                      NULL, 0, GDK_ACTION_COPY);
-  GtkDndUtil::SetSourceTargetListFromCodeMask(widget(),
-                                              GtkDndUtil::TEXT_PLAIN |
-                                              GtkDndUtil::TEXT_URI_LIST |
-                                              GtkDndUtil::CHROME_NAMED_URL);
+  gtk_drag_source_set(widget(), GDK_BUTTON1_MASK, NULL, 0,
+      static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_LINK));
+  gtk_dnd_util::SetSourceTargetListFromCodeMask(widget(),
+                                              gtk_dnd_util::TEXT_PLAIN |
+                                              gtk_dnd_util::TEXT_URI_LIST |
+                                              gtk_dnd_util::CHROME_NAMED_URL |
+                                              gtk_dnd_util::NETSCAPE_URL);
   g_signal_connect(widget(), "drag-data-get", G_CALLBACK(OnDragDataGet), this);
 
   theme_provider_->InitThemesFor(this);
   registrar_.Add(this,
                  NotificationType::BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
+
+  hover_controller_.Init(widget());
 }
 
 ToolbarStarToggleGtk::~ToolbarStarToggleGtk() {
@@ -66,8 +72,7 @@ void ToolbarStarToggleGtk::Observe(NotificationType type,
 void ToolbarStarToggleGtk::ShowStarBubble(const GURL& url,
                                           bool newly_bookmarked) {
   GtkWidget* widget = widget_.get();
-  BookmarkBubbleGtk::Show(GTK_WINDOW(gtk_widget_get_toplevel(widget)),
-                          gfx::Rect(widget->allocation),
+  BookmarkBubbleGtk::Show(widget,
                           host_->profile(),
                           url,
                           newly_bookmarked);
@@ -85,11 +90,11 @@ gboolean ToolbarStarToggleGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
   if (button->theme_provider_->UseGtkTheme()) {
     return FALSE;
   } else {
-    if (button->is_starred_) {
-      return button->starred_.OnExpose(widget, e);
-    } else {
-      return button->unstarred_.OnExpose(widget, e);
-    }
+    double hover_state = button->hover_controller_.GetCurrentValue();
+    if (button->is_starred_)
+      return button->starred_.OnExpose(widget, e, hover_state);
+    else
+      return button->unstarred_.OnExpose(widget, e, hover_state);
   }
 }
 
@@ -101,7 +106,7 @@ void ToolbarStarToggleGtk::OnDragDataGet(GtkWidget* widget,
       GetSelectedTabContents();
   if (!tab)
     return;
-  GtkDndUtil::WriteURLWithName(data, tab->GetURL(), tab->GetTitle(), info);
+  gtk_dnd_util::WriteURLWithName(data, tab->GetURL(), tab->GetTitle(), info);
 }
 
 void ToolbarStarToggleGtk::UpdateGTKButton() {

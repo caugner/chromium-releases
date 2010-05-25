@@ -10,10 +10,10 @@
 
 #include "app/combobox_model.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/rect.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "gfx/rect.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "views/background.h"
 #include "views/border.h"
@@ -37,7 +37,8 @@
 #if defined(OS_WIN)
 #include "views/widget/widget_win.h"
 #include "views/window/window_win.h"
-#else
+#elif defined(OS_LINUX)
+#include "base/keyboard_code_conversion_gtk.h"
 #include "views/window/window_gtk.h"
 #endif
 
@@ -105,7 +106,6 @@ const int kThumbnailSuperStarID = count++;
 
 namespace views {
 
-
 class FocusManagerTest : public testing::Test, public WindowDelegate {
  public:
   FocusManagerTest()
@@ -143,7 +143,7 @@ class FocusManagerTest : public testing::Test, public WindowDelegate {
     return static_cast<WindowWin*>(window_)->GetFocusManager();
 #elif defined(OS_LINUX)
     return static_cast<WindowGtk*>(window_)->GetFocusManager();
-#elif
+#else
     NOTIMPLEMENTED();
 #endif
   }
@@ -217,6 +217,46 @@ class FocusManagerTest : public testing::Test, public WindowDelegate {
 
   void PostKeyUp(base::KeyboardCode key_code) {
     ::PostMessage(window_->GetNativeWindow(), WM_KEYUP, key_code, 0);
+  }
+#elif defined(OS_LINUX)
+  void PostKeyDown(base::KeyboardCode key_code) {
+    PostKeyEvent(key_code, true);
+  }
+
+  void PostKeyUp(base::KeyboardCode key_code) {
+    PostKeyEvent(key_code, false);
+  }
+
+  void PostKeyEvent(base::KeyboardCode key_code, bool pressed) {
+    int keyval = GdkKeyCodeForWindowsKeyCode(key_code, false);
+    GdkKeymapKey* keys;
+    gint n_keys;
+    gdk_keymap_get_entries_for_keyval(
+        gdk_keymap_get_default(),
+        keyval,
+        &keys,
+        &n_keys);
+    GdkEvent* event = gdk_event_new(pressed ? GDK_KEY_PRESS : GDK_KEY_RELEASE);
+    GdkEventKey* key_event = reinterpret_cast<GdkEventKey*>(event);
+    int modifier = 0;
+    if (pressed)
+      key_event->state = modifier | GDK_KEY_PRESS_MASK;
+    else
+      key_event->state = modifier | GDK_KEY_RELEASE_MASK;
+
+    key_event->window = GTK_WIDGET(window_->GetNativeWindow())->window;
+    DCHECK(key_event->window != NULL);
+    g_object_ref(key_event->window);
+    key_event->send_event = true;
+    key_event->time = GDK_CURRENT_TIME;
+    key_event->keyval = keyval;
+    key_event->hardware_keycode = keys[0].keycode;
+    key_event->group = keys[0].group;
+
+    g_free(keys);
+
+    gdk_event_put(event);
+    gdk_event_free(event);
   }
 #endif
 
@@ -758,7 +798,6 @@ class TestRadioButton : public RadioButton {
   }
 };
 
-#if defined(OS_WIN)
 class TestTextfield : public Textfield {
  public:
   TestTextfield() { }
@@ -788,13 +827,9 @@ class TestTabbedPane : public TabbedPane {
     return native_tabbed_pane_->GetTestingHandle();
   }
 };
-#endif
 
 // Tests that NativeControls do set the focus View appropriately on the
 // FocusManager.
-// TODO(jcampan): make these tests work on the Linux build-bot. They don't work
-//                when the screen is locked.
-#if defined(OS_WIN)
 TEST_F(FocusManagerTest, FocusNativeControls) {
   TestNativeButton* button = new TestNativeButton(L"Press me");
   TestCheckbox* checkbox = new TestCheckbox(L"Checkbox");
@@ -834,11 +869,13 @@ TEST_F(FocusManagerTest, FocusNativeControls) {
   FocusNativeView(tab_button->TestGetNativeControlView());
   EXPECT_EQ(tab_button, GetFocusManager()->GetFocusedView());
 }
-#endif
 
 // Test that when activating/deactivating the top window, the focus is stored/
 // restored properly.
 TEST_F(FocusManagerTest, FocusStoreRestore) {
+  // Simulate an activate, otherwise the deactivate isn't going to do anything.
+  SimulateActivateWindow();
+
   NativeButton* button = new NativeButton(NULL, L"Press me");
   View* view = new View();
   view->SetFocusable(true);
@@ -1227,7 +1264,6 @@ class MessageTrackingView : public View {
   DISALLOW_COPY_AND_ASSIGN(MessageTrackingView);
 };
 
-#if defined(OS_WIN)
 // Tests that the keyup messages are eaten for accelerators.
 TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   FocusManager* focus_manager = GetFocusManager();
@@ -1244,9 +1280,9 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   MessageLoopForUI::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   MessageLoopForUI::current()->Run(&accelerator_handler);
   // Make sure we get a key-up and key-down.
-  ASSERT_EQ(1, mtv->keys_pressed().size());
+  ASSERT_EQ(1U, mtv->keys_pressed().size());
   EXPECT_EQ(base::VKEY_9, mtv->keys_pressed().at(0));
-  ASSERT_EQ(1, mtv->keys_released().size());
+  ASSERT_EQ(1U, mtv->keys_released().size());
   EXPECT_EQ(base::VKEY_9, mtv->keys_released().at(0));
   EXPECT_FALSE(mtv->accelerator_pressed());
   mtv->Reset();
@@ -1263,13 +1299,13 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   MessageLoopForUI::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   MessageLoopForUI::current()->Run(&accelerator_handler);
   // Make sure we get a key-up and key-down.
-  ASSERT_EQ(5, mtv->keys_pressed().size());
+  ASSERT_EQ(5U, mtv->keys_pressed().size());
   EXPECT_EQ(base::VKEY_9, mtv->keys_pressed().at(0));
   EXPECT_EQ(base::VKEY_9, mtv->keys_pressed().at(1));
   EXPECT_EQ(base::VKEY_8, mtv->keys_pressed().at(2));
   EXPECT_EQ(base::VKEY_9, mtv->keys_pressed().at(3));
   EXPECT_EQ(base::VKEY_7, mtv->keys_pressed().at(4));
-  ASSERT_EQ(3, mtv->keys_released().size());
+  ASSERT_EQ(3U, mtv->keys_released().size());
   EXPECT_EQ(base::VKEY_9, mtv->keys_released().at(0));
   EXPECT_EQ(base::VKEY_7, mtv->keys_released().at(1));
   EXPECT_EQ(base::VKEY_8, mtv->keys_released().at(2));
@@ -1296,10 +1332,72 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
   PostKeyUp(base::VKEY_0);
   MessageLoopForUI::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   MessageLoopForUI::current()->Run(&accelerator_handler);
+#if defined(OS_WIN)
+  // Linux eats only last accelerator's release event.
+  // See http://crbug.com/23383 for details.
   EXPECT_TRUE(mtv->keys_pressed().empty());
   EXPECT_TRUE(mtv->keys_released().empty());
+#endif
   EXPECT_TRUE(mtv->accelerator_pressed());
   mtv->Reset();
+}
+
+#if defined(OS_WIN)
+// Test that the focus manager is created successfully for the first view
+// window parented to a native dialog.
+TEST_F(FocusManagerTest, CreationForNativeRoot) {
+  // Create a window class.
+  WNDCLASSEX class_ex;
+  memset(&class_ex, 0, sizeof(class_ex));
+  class_ex.cbSize = sizeof(WNDCLASSEX);
+  class_ex.lpfnWndProc = &DefWindowProc;
+  class_ex.lpszClassName = L"TestWindow";
+  ATOM atom = RegisterClassEx(&class_ex);
+  ASSERT_TRUE(atom);
+
+  // Create a native dialog window.
+  HWND hwnd = CreateWindowEx(0, class_ex.lpszClassName, NULL,
+                             WS_OVERLAPPEDWINDOW, 0, 0, 200, 200,
+                             NULL, NULL, NULL, NULL);
+  ASSERT_TRUE(hwnd);
+
+  // Create a view window parented to native dialog.
+  WidgetWin window1;
+  window1.set_delete_on_destroy(false);
+  window1.set_window_style(WS_CHILD);
+  window1.Init(hwnd, gfx::Rect(0, 0, 100, 100));
+
+  // Get the focus manager directly from the first window.  Should exist
+  // because the first window is the root widget.
+  views::FocusManager* focus_manager_member1 = window1.GetFocusManager();
+  EXPECT_TRUE(focus_manager_member1);
+
+  // Create another view window parented to the first view window.
+  WidgetWin window2;
+  window2.set_delete_on_destroy(false);
+  window2.set_window_style(WS_CHILD);
+  window2.Init(window1.GetNativeView(), gfx::Rect(0, 0, 100, 100));
+
+  // Get the focus manager directly from the second window. Should return the
+  // first window's focus manager.
+  views::FocusManager* focus_manager_member2 = window2.GetFocusManager();
+  EXPECT_EQ(focus_manager_member2, focus_manager_member1);
+
+  // Get the focus manager indirectly using the first window handle. Should
+  // return the first window's focus manager.
+  views::FocusManager* focus_manager_indirect =
+      views::FocusManager::GetFocusManagerForNativeView(
+          window1.GetNativeView());
+  EXPECT_EQ(focus_manager_indirect, focus_manager_member1);
+
+  // Get the focus manager indirectly using the second window handle. Should
+  // return the first window's focus manager.
+  focus_manager_indirect =
+      views::FocusManager::GetFocusManagerForNativeView(
+          window2.GetNativeView());
+  EXPECT_EQ(focus_manager_indirect, focus_manager_member1);
+
+  DestroyWindow(hwnd);
 }
 #endif
 

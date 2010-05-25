@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,9 +120,13 @@ class SdchManager {
     // defunct = 73,  // PASSING_THROUGH_NON_SDCH plus DISCARD_TENTATIVE_SDCH.
     META_REFRESH_UNSUPPORTED = 74,         // Unrecoverable error.
     CACHED_META_REFRESH_UNSUPPORTED = 75,  // As above, but pulled from cache.
-    PASSING_THROUGH_NON_SDCH = 76,  // Non-html tagged as sdch but malformed.
+    PASSING_THROUGH_NON_SDCH = 76,  // Tagged sdch but missing dictionary-hash.
     INCOMPLETE_SDCH_CONTENT = 77,   // Last window was not completely decoded.
     PASS_THROUGH_404_CODE = 78,     // URL not found message passing through.
+
+    // This next report is very common, and not really an error scenario, but
+    // it exercises the error recovery logic.
+    PASS_THROUGH_OLD_CACHED = 79,   // Back button got pre-SDCH cached content.
 
     // Common decoded recovery methods.
     META_REFRESH_CACHED_RECOVERY = 80,  // Probably startup tab loading.
@@ -159,6 +163,7 @@ class SdchManager {
     const std::string& text() const { return text_; }
 
    private:
+    friend class base::RefCounted<Dictionary>;
     friend class SdchManager;  // Only manager can construct an instance.
     FRIEND_TEST(SdchFilterTest, PathMatch);
 
@@ -169,6 +174,7 @@ class SdchManager {
                const std::string& client_hash, const GURL& url,
                const std::string& domain, const std::string& path,
                const base::Time& expiration, const std::set<int> ports);
+    ~Dictionary() {}
 
     const GURL& url() const { return url_; }
     const std::string& client_hash() const { return client_hash_; }
@@ -268,7 +274,7 @@ class SdchManager {
   // supported domain (i.e., not blacklisted, and either the specific supported
   // domain, or all domains were assumed supported).  If it is blacklist, reduce
   // by 1 the number of times it will be reported as blacklisted.
-  const bool IsInSupportedDomain(const GURL& url);
+  bool IsInSupportedDomain(const GURL& url);
 
   // Schedule the URL fetching to load a dictionary. This will always return
   // before the dictionary is actually loaded and added.

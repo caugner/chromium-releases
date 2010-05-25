@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "chrome/renderer/render_process.h"
 
+#include "app/surface/transport_dib.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -26,11 +27,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/nacl_types.h"
-#include "chrome/common/transport_dib.h"
 #include "chrome/renderer/render_view.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_utils.h"
 #include "media/base/media.h"
+#include "media/base/media_switches.h"
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -105,12 +106,17 @@ RenderProcess::RenderProcess()
   initialized_media_library_ =
       PathService::Get(base::DIR_MODULE, &module_path) &&
       media::InitializeMediaLibrary(module_path);
+
+  // TODO(hclam): Add more checks here. Currently this is not used.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableOpenMax)) {
+    media::InitializeOpenMaxLibrary(module_path);
+  }
 #endif
 }
 
 RenderProcess::~RenderProcess() {
-  // TODO(port)
-  // Try and limit what we pull in for our non-Win unit test bundle
+  // TODO(port): Try and limit what we pull in for our non-Win unit test bundle.
 #ifndef NDEBUG
   // log important leaked objects
   webkit_glue::CheckForLeaks();
@@ -142,17 +148,17 @@ bool RenderProcess::LaunchNaClProcess(const char* url,
   // TODO(gregoryd): nacl::FileDescriptor will be soon merged with
   // base::FileDescriptor
   nacl::FileDescriptor imc_descriptor;
-  nacl::FileDescriptor nacl_process_descriptor;
+  base::ProcessHandle nacl_process;
   if (!RenderThread::current()->Send(
     new ViewHostMsg_LaunchNaCl(ASCIIToWide(url),
-                               imc_fd,
-                               &imc_descriptor,
-                               &nacl_process_descriptor,
-                               nacl_process_id))) {
+        imc_fd,
+        &imc_descriptor,
+        &nacl_process,
+        reinterpret_cast<base::ProcessId*>(nacl_process_id)))) {
     return false;
   }
-  *imc_handle = NATIVE_HANDLE(imc_descriptor);
-  *nacl_process_handle = NATIVE_HANDLE(nacl_process_descriptor);
+  *imc_handle = nacl::ToNativeHandle(imc_descriptor);
+  *nacl_process_handle = nacl_process;
   return true;
 }
 
@@ -165,9 +171,9 @@ TransportDIB* RenderProcess::CreateTransportDIB(size_t size) {
   return TransportDIB::Create(size, sequence_number_++);
 #elif defined(OS_MACOSX)  // defined(OS_WIN) || defined(OS_LINUX)
   // Mac creates transport DIBs in the browser, so we need to do a sync IPC to
-  // get one.
+  // get one.  The TransportDIB is cached in the browser.
   TransportDIB::Handle handle;
-  IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(size, &handle);
+  IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(size, true, &handle);
   if (!main_thread()->Send(msg))
     return NULL;
   if (handle.fd < 0)

@@ -7,10 +7,10 @@
 
 #include <vector>
 
-#include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "webkit/api/public/WebViewClient.h"
+#include "gfx/size.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebViewClient.h"
 
 namespace gfx {
 class Size;
@@ -20,7 +20,7 @@ namespace IPC {
 class Message;
 }
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 namespace printing {
 class PdfPsMetafile;
 typedef PdfPsMetafile NativeMetafile;
@@ -47,6 +47,10 @@ class PrepareFrameAndViewForPrint {
     return expected_pages_count_;
   }
 
+  bool ShouldUseBrowserOverlays() const {
+    return use_browser_overlays_;
+  }
+
   const gfx::Size& GetPrintCanvasSize() const {
     return print_canvas_size_;
   }
@@ -57,6 +61,7 @@ class PrepareFrameAndViewForPrint {
   gfx::Size print_canvas_size_;
   gfx::Size prev_view_size_;
   int expected_pages_count_;
+  bool use_browser_overlays_;
 
   DISALLOW_COPY_AND_ASSIGN(PrepareFrameAndViewForPrint);
 };
@@ -93,7 +98,7 @@ class PrintWebViewHelper : public WebKit::WebViewClient {
                     WebKit::WebFrame* web_frame);
 
   // Prints the page listed in |params|.
-#if defined(OS_LINUX)
+#if defined(USE_X11)
   void PrintPage(const ViewMsg_PrintPage_Params& params,
                  const gfx::Size& canvas_size,
                  WebKit::WebFrame* frame,
@@ -114,122 +119,8 @@ class PrintWebViewHelper : public WebKit::WebViewClient {
 
   int32 routing_id();
 
-  // WebKit::WebViewClient
-  virtual WebKit::WebView* createView(WebKit::WebFrame* creator) { return NULL; }
-  virtual WebKit::WebWidget* createPopupMenu(bool activatable) { return NULL; }
-  virtual WebKit::WebWidget* createPopupMenu(
-      const WebKit::WebPopupMenuInfo& info) { return NULL; }
-  virtual void didAddMessageToConsole(
-      const WebKit::WebConsoleMessage& message,
-      const WebKit::WebString& source_name, unsigned source_line) {}
-  virtual void printPage(WebKit::WebFrame* frame) {}
-  virtual WebKit::WebNotificationPresenter* notificationPresenter() {
-    return NULL;
-  }
-  virtual void didStartLoading() {}
+  // WebKit::WebViewClient override:
   virtual void didStopLoading();
-  virtual bool shouldBeginEditing(const WebKit::WebRange& range) {
-    return false;
-  }
-  virtual bool shouldEndEditing(const WebKit::WebRange& range) {
-    return false;
-  }
-  virtual bool shouldInsertNode(
-      const WebKit::WebNode& node, const WebKit::WebRange& range,
-      WebKit::WebEditingAction action) { return false; }
-  virtual bool shouldInsertText(
-      const WebKit::WebString& text, const WebKit::WebRange& range,
-      WebKit::WebEditingAction action) { return false; }
-  virtual bool shouldChangeSelectedRange(
-      const WebKit::WebRange& from, const WebKit::WebRange& to,
-      WebKit::WebTextAffinity affinity, bool still_selecting) { return false; }
-  virtual bool shouldDeleteRange(const WebKit::WebRange& range) {
-    return false;
-  }
-  virtual bool shouldApplyStyle(
-      const WebKit::WebString& style, const WebKit::WebRange& range) {
-    return false;
-  }
-  virtual bool isSmartInsertDeleteEnabled() { return false; }
-  virtual bool isSelectTrailingWhitespaceEnabled() { return false; }
-  virtual void setInputMethodEnabled(bool enabled) {}
-  virtual void didBeginEditing() {}
-  virtual void didChangeSelection(bool is_selection_empty) {}
-  virtual void didChangeContents() {}
-  virtual void didExecuteCommand(const WebKit::WebString& command_name) {}
-  virtual void didEndEditing() {}
-  virtual bool handleCurrentKeyboardEvent() { return false; }
-  virtual void spellCheck(
-      const WebKit::WebString& text, int& offset, int& length) {}
-  virtual WebKit::WebString autoCorrectWord(
-      const WebKit::WebString& misspelled_word);
-  virtual void showSpellingUI(bool show) {}
-  virtual bool isShowingSpellingUI() { return false; }
-  virtual void updateSpellingUIWithMisspelledWord(
-      const WebKit::WebString& word) {}
-  virtual bool runFileChooser(
-      bool multi_select, const WebKit::WebString& title,
-      const WebKit::WebString& initial_value,
-      WebKit::WebFileChooserCompletion* chooser_completion) {
-    return false;
-  }
-  virtual void runModalAlertDialog(
-      WebKit::WebFrame* frame, const WebKit::WebString& message) {}
-  virtual bool runModalConfirmDialog(
-      WebKit::WebFrame* frame, const WebKit::WebString& message) {
-    return false;
-  }
-  virtual bool runModalPromptDialog(
-      WebKit::WebFrame* frame, const WebKit::WebString& message,
-      const WebKit::WebString& default_value,
-      WebKit::WebString* actual_value) { return false; }
-  virtual bool runModalBeforeUnloadDialog(
-      WebKit::WebFrame* frame, const WebKit::WebString& message) {
-    return true;
-  }
-  virtual void showContextMenu(
-      WebKit::WebFrame* frame, const WebKit::WebContextMenuData& data) {}
-  virtual void setStatusText(const WebKit::WebString& text) {}
-  virtual void setMouseOverURL(const WebKit::WebURL& url) {}
-  virtual void setToolTipText(
-      const WebKit::WebString& text, WebKit::WebTextDirection hint) {}
-  virtual void startDragging(
-      const WebKit::WebPoint& from, const WebKit::WebDragData& data,
-      WebKit::WebDragOperationsMask mask) {}
-  virtual bool acceptsLoadDrops() { return false; }
-  virtual void focusNext() {}
-  virtual void focusPrevious() {}
-  virtual void navigateBackForwardSoon(int offset) {}
-  virtual int historyBackListCount() { return 0; }
-  virtual int historyForwardListCount() { return 0; }
-  virtual void didAddHistoryItem() {}
-  virtual void focusAccessibilityObject(
-      const WebKit::WebAccessibilityObject& object) {}
-  virtual void didUpdateInspectorSettings() {}
-  virtual WebKit::WebDevToolsAgentClient* devToolsAgentClient() {
-    return NULL;
-  }
-  virtual void queryAutofillSuggestions(
-      const WebKit::WebNode& node, const WebKit::WebString& name,
-      const WebKit::WebString& value) {}
-  virtual void removeAutofillSuggestions(
-      const WebKit::WebString& name, const WebKit::WebString& value) {}
-
-  // WebKit::WebWidgetClient
-  virtual void didInvalidateRect(const WebKit::WebRect&) {}
-  virtual void didScrollRect(
-      int dx, int dy, const WebKit::WebRect& clipRect) {}
-  virtual void didFocus() {}
-  virtual void didBlur() {}
-  virtual void didChangeCursor(const WebKit::WebCursorInfo&) {}
-  virtual void closeWidgetSoon() {}
-  virtual void show(WebKit::WebNavigationPolicy) {}
-  virtual void runModal() {}
-  virtual WebKit::WebRect windowRect();
-  virtual void setWindowRect(const WebKit::WebRect&) {}
-  virtual WebKit::WebRect windowResizerRect();
-  virtual WebKit::WebRect rootWindowRect();
-  virtual WebKit::WebScreenInfo screenInfo();
 
  private:
   RenderView* render_view_;

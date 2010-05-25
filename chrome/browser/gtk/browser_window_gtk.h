@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,15 @@
 #include <map>
 
 #include "app/active_window_watcher_x.h"
-#include "base/gfx/rect.h"
+#include "app/x11_util.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/pref_member.h"
-#include "chrome/common/x11_util.h"
-
-#ifdef OS_CHROMEOS
-class CompactNavigationBar;
-class StatusAreaView;
-#endif
+#include "gfx/rect.h"
 
 class BookmarkBarGtk;
 class Browser;
@@ -31,17 +26,13 @@ class BrowserTitlebar;
 class BrowserToolbarGtk;
 class CustomDrawButton;
 class DownloadShelfGtk;
-class ExtensionShelfGtk;
 class FindBarGtk;
+class FullscreenExitBubbleGtk;
 class InfoBarContainerGtk;
 class LocationBar;
 class StatusBubbleGtk;
 class TabContentsContainerGtk;
 class TabStripGtk;
-
-#ifdef OS_CHROMEOS
-class PanelController;
-#endif
 
 // An implementation of BrowserWindow for GTK.
 // Cross-platform code will interact with this object when
@@ -54,11 +45,6 @@ class BrowserWindowGtk : public BrowserWindow,
  public:
   explicit BrowserWindowGtk(Browser* browser);
   virtual ~BrowserWindowGtk();
-
-  Browser* browser() const { return browser_.get(); }
-
-  // Process a keyboard event which was not handled by webkit.
-  void HandleKeyboardEvent(GdkEventKey* event);
 
   // Overridden from BrowserWindow
   virtual void Show();
@@ -82,13 +68,17 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
+  virtual bool IsFullscreenBubbleVisible() const;
   virtual LocationBar* GetLocationBar() const;
-  virtual void SetFocusToLocationBar();
+  virtual void SetFocusToLocationBar(bool select_all);
   virtual void UpdateStopGoState(bool is_loading, bool force);
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state);
   virtual void FocusToolbar();
+  virtual void FocusPageAndAppMenus();
   virtual bool IsBookmarkBarVisible() const;
+  virtual bool IsBookmarkBarAnimating() const;
+  virtual bool IsToolbarVisible() const;
   virtual gfx::Rect GetRootWindowResizerRect() const;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
@@ -108,7 +98,9 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ShowSelectProfileDialog();
   virtual void ShowNewProfileDialog();
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
-  virtual void ShowHistoryTooNewDialog();
+  virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
+                                         Profile* profile);
+  virtual void ShowProfileErrorDialog(int message_id);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -122,7 +114,13 @@ class BrowserWindowGtk : public BrowserWindow,
                             bool show_history);
   virtual void ShowPageMenu();
   virtual void ShowAppMenu();
-  virtual int GetCommandId(const NativeWebKeyboardEvent& event);
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents);
+  virtual void Cut();
+  virtual void Copy();
+  virtual void Paste();
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -164,23 +162,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // Add the find bar widget to the window hierarchy.
   void AddFindBar(FindBarGtk* findbar);
 
-#if defined(OS_CHROMEOS)
-  // Sets whether a drag is active. If a drag is active the window will not
-  // close.
-  void set_drag_active(bool drag_active) { drag_active_ = drag_active; }
-
-  // Sets the flag that the next toplevel browser window being created will
-  // use the compact nav bar. This is used to implement the "new compact nav
-  // window" menu option. This flag will be cleared after the next window is
-  // opened, which will revert to the old behavior.
-  //
-  // TODO(brettw) remove this when we figure out how this is actually going
-  // to work long-term. This is a hack so the feature can be tested.
-  static void set_next_window_should_use_compact_nav() {
-    next_window_should_use_compact_nav_ = true;
-  }
-#endif
-
   // Reset the mouse cursor to the default cursor if it was set to something
   // else for the custom frame.
   void ResetCustomFrameCursor();
@@ -193,11 +174,11 @@ class BrowserWindowGtk : public BrowserWindow,
   // ID of the top-level X window of this object.
   static GtkWindow* GetBrowserWindowForXID(XID xid);
 
-  Browser* browser() {
-    return browser_.get();
-  }
+  Browser* browser() const { return browser_.get(); }
 
   GtkWindow* window() const { return window_; }
+
+  BrowserToolbarGtk* GetToolbar() { return toolbar_.get(); }
 
   gfx::Rect bounds() const { return bounds_; }
 
@@ -214,13 +195,18 @@ class BrowserWindowGtk : public BrowserWindow,
   // GtkAlignment that holds the interior components of the chromium window.
   // This is used to draw the custom frame border and content shadow.
   GtkWidget* window_container_;
-  // VBox that holds everything (tabs, toolbar, bookmarks bar, tab contents,
-  // and extension shelf).
+  // VBox that holds everything (tabs, toolbar, bookmarks bar, tab contents).
   GtkWidget* window_vbox_;
   // VBox that holds everything below the toolbar.
   GtkWidget* render_area_vbox_;
-  // EventBox that holds render_area_vbox_.
+  // Floating container that holds the render area. It is needed to position
+  // the findbar.
+  GtkWidget* render_area_floating_container_;
+  // EventBox that holds render_area_floating_container_.
   GtkWidget* render_area_event_box_;
+  // Border between toolbar and render area. This is hidden when the find bar
+  // is added because thereafter the findbar will draw the border for us.
+  GtkWidget* toolbar_border_;
 
   scoped_ptr<Browser> browser_;
 
@@ -276,19 +262,26 @@ class BrowserWindowGtk : public BrowserWindow,
   // border during an expose.
   static void DrawContentShadow(cairo_t* cr, BrowserWindowGtk* window);
 
+  // Callback for accelerator activation. |user_data| stores the command id
+  // of the matched accelerator.
   static gboolean OnGtkAccelerator(GtkAccelGroup* accel_group,
                                    GObject* acceleratable,
                                    guint keyval,
                                    GdkModifierType modifier,
-                                   BrowserWindowGtk* browser_window);
+                                   void* user_data);
+
+  // Key press event callback.
+  static gboolean OnKeyPress(GtkWidget* widget,
+                             GdkEventKey* event,
+                             BrowserWindowGtk* window);
 
   // Mouse move and mouse button press callbacks.
   static gboolean OnMouseMoveEvent(GtkWidget* widget,
                                    GdkEventMotion* event,
-                                   BrowserWindowGtk* browser);
+                                   BrowserWindowGtk* window);
   static gboolean OnButtonPressEvent(GtkWidget* widget,
                                      GdkEventButton* event,
-                                     BrowserWindowGtk* browser);
+                                     BrowserWindowGtk* window);
 
   // Maps and Unmaps the xid of |widget| to |window|.
   static void MainWindowMapped(GtkWidget* widget, BrowserWindowGtk* window);
@@ -297,13 +290,14 @@ class BrowserWindowGtk : public BrowserWindow,
   // Tracks focus state of browser.
   static gboolean OnFocusIn(GtkWidget* widget,
                             GdkEventFocus* event,
-                            BrowserWindowGtk* browser);
+                            BrowserWindowGtk* window);
   static gboolean OnFocusOut(GtkWidget* widget,
                              GdkEventFocus* event,
-                             BrowserWindowGtk* browser);
+                             BrowserWindowGtk* window);
 
   // A small shim for browser_->ExecuteCommand.
-  void ExecuteBrowserCommand(int id);
+  // Returns true if the command was executed.
+  bool ExecuteBrowserCommand(int id);
 
   // Callback for the loading animation(s) associated with this window.
   void LoadingAnimationCallback();
@@ -319,7 +313,6 @@ class BrowserWindowGtk : public BrowserWindow,
   bool IsTabStripSupported() const;
   bool IsToolbarSupported() const;
   bool IsBookmarkBarSupported() const;
-  bool IsExtensionShelfSupported() const;
 
   // Checks to see if the mouse pointer at |x|, |y| is over the border of the
   // custom frame (a spot that should trigger a window resize). Returns true if
@@ -356,9 +349,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // bookmark bar is not supported.
   scoped_ptr<BookmarkBarGtk> bookmark_bar_;
 
-  // The object that manages the extension shelf.
-  scoped_ptr<ExtensionShelfGtk> extension_shelf_;
-
   // The status bubble manager.  Always non-NULL.
   scoped_ptr<StatusBubbleGtk> status_bubble_;
 
@@ -391,18 +381,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // not.
   BooleanPrefMember use_custom_frame_pref_;
 
-#if defined(OS_CHROMEOS)
-  // True if a drag is active. See description above setter for details.
-  bool drag_active_;
-  // Controls interactions with the window manager for popup panels.
-  PanelController* panel_controller_;
-
-  CompactNavigationBar* compact_navigation_bar_;
-  StatusAreaView* status_area_;
-
-  static bool next_window_should_use_compact_nav_;
-#endif
-
   // A map which translates an X Window ID into its respective GtkWindow.
   static std::map<XID, GtkWindow*> xid_map_;
 
@@ -426,6 +404,8 @@ class BrowserWindowGtk : public BrowserWindow,
 
   // The accelerator group used to handle accelerators, owned by this object.
   GtkAccelGroup* accel_group_;
+
+  scoped_ptr<FullscreenExitBubbleGtk> fullscreen_exit_bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowGtk);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 #include <atlframe.h>
 #include <atlmisc.h>
 
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util_win.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/win_util.h"
+#include "gfx/native_theme_win.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/native/native_view_host.h"
@@ -159,7 +159,7 @@ class NativeControlContainer : public CWindowImpl<NativeControlContainer,
 
   NativeControl* parent_;
   HWND control_;
-  DISALLOW_EVIL_CONSTRUCTORS(NativeControlContainer);
+  DISALLOW_COPY_AND_ASSIGN(NativeControlContainer);
 };
 
 NativeControl::NativeControl() : hwnd_view_(NULL),
@@ -260,16 +260,10 @@ void NativeControl::OnContextMenu(const POINT& location) {
   if (!GetContextMenuController())
     return;
 
-  int x = location.x;
-  int y = location.y;
-  bool is_mouse = true;
-  if (x == -1 && y == -1) {
-    gfx::Point point = GetKeyboardContextMenuLocation();
-    x = point.x();
-    y = point.y();
-    is_mouse = false;
-  }
-  ShowContextMenu(x, y, is_mouse);
+  if (location.x == -1 && location.y == -1)
+    ShowContextMenu(GetKeyboardContextMenuLocation(), false);
+  else
+    ShowContextMenu(gfx::Point(location), true);
 }
 
 void NativeControl::Focus() {
@@ -320,13 +314,13 @@ void NativeControl::VisibilityChanged(View* starting_from, bool is_visible) {
 }
 
 void NativeControl::SetFixedWidth(int width, Alignment alignment) {
-  DCHECK(width > 0);
+  DCHECK_GT(width, 0);
   fixed_width_ = width;
   horizontal_alignment_ = alignment;
 }
 
 void NativeControl::SetFixedHeight(int height, Alignment alignment) {
-  DCHECK(height > 0);
+  DCHECK_GT(height, 0);
   fixed_height_ = height;
   vertical_alignment_ = alignment;
 }

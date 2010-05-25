@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,15 @@ class Clipboard;
 class DevToolsManager;
 class DownloadRequestManager;
 class GoogleURLTracker;
+class IntranetRedirectDetector;
 class IconManager;
 class MetricsService;
+class NotificationUIManager;
 class PrefService;
 class ProfileManager;
 class DebuggerWrapper;
 class ResourceDispatcherHost;
+class StatusTrayManager;
 class SuspendController;
 class ThumbnailGenerator;
 class WebAppInstallerService;
@@ -36,15 +39,11 @@ class Thread;
 class WaitableEvent;
 }
 
-#if defined(OS_WIN)
-namespace sandbox {
-class BrokerServices;
-}
-#endif  // defined(OS_WIN)
-
 namespace printing {
 class PrintJobManager;
 }
+
+class IOThread;
 
 // NOT THREAD SAFE, call only from the main thread.
 // These functions shouldn't return NULL unless otherwise noted.
@@ -69,10 +68,21 @@ class BrowserProcess {
   virtual DevToolsManager* devtools_manager() = 0;
   virtual Clipboard* clipboard() = 0;
 
+  // Returns the manager for desktop notifications.
+  virtual NotificationUIManager* notification_ui_manager() = 0;
+
+  // Returns the status tray manager (provides APIs for manipulating status
+  // icons).
+  virtual StatusTrayManager* status_tray_manager() = 0;
+
   // Returns the thread that we perform I/O coordination on (network requests,
   // communication with renderers, etc.
-  // NOTE: need to check the return value for NULL.
-  virtual base::Thread* io_thread() = 0;
+  // NOTE: You should ONLY use this to pass to IPC or other objects which must
+  // need a MessageLoop*.  If you just want to post a task, use
+  // ChromeThread::PostTask (or other variants) as they take care of checking
+  // that a thread is still alive, race conditions, lifetime differences etc.
+  // If you still must use this, need to check the return value for NULL.
+  virtual IOThread* io_thread() = 0;
 
   // Returns the thread that we perform random file operations on. For code
   // that wants to do I/O operations (not network requests or even file: URL
@@ -84,7 +94,7 @@ class BrowserProcess {
   // database. History has its own thread since it has much higher traffic.
   virtual base::Thread* db_thread() = 0;
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
   // Returns the thread that is used to process UI requests in cases where
   // we can't route the request to the UI thread. Note that this thread
   // should only be used by the IO thread and this method is only safe to call
@@ -92,11 +102,6 @@ class BrowserProcess {
   // This method is only included for uniformity.
   virtual base::Thread* background_x11_thread() = 0;
 #endif
-
-#if defined(OS_WIN)
-  virtual sandbox::BrokerServices* broker_services() = 0;
-  virtual void InitBrokerServices(sandbox::BrokerServices*) = 0;
-#endif  // defined(OS_WIN)
 
   virtual IconManager* icon_manager() = 0;
 
@@ -114,9 +119,11 @@ class BrowserProcess {
   virtual printing::PrintJobManager* print_job_manager() = 0;
 
   virtual GoogleURLTracker* google_url_tracker() = 0;
+  virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
 
   // Returns the locale used by the application.
   virtual const std::string& GetApplicationLocale() = 0;
+  virtual void SetApplicationLocale(const std::string& locale) = 0;
 
   DownloadRequestManager* download_request_manager();
 
@@ -131,6 +138,19 @@ class BrowserProcess {
   // Trigger an asynchronous check to see if we have the inspector's files on
   // disk.
   virtual void CheckForInspectorFiles() = 0;
+
+#if defined(OS_WIN)
+
+  // This will start a timer that, if Chrome is in persistent mode, will check
+  // whether an update is available, and if that's the case, restart the
+  // browser. Note that restart code will strip some of the command line keys
+  // and all loose values from the cl this instance of Chrome was launched with,
+  // and add the command line key that will force Chrome to start in the
+  // background mode. For the full list of "blacklisted" keys, refer to
+  // |kSwitchesToRemoveOnAutorestart| array in browser_process_impl.cc.
+  virtual void StartAutoupdateTimer() = 0;
+
+#endif  // OS_WIN
 
   // Return true iff we found the inspector files on disk. It's possible to
   // call this function before we have a definite answer from the disk. In that

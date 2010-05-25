@@ -18,11 +18,12 @@ class GURL;
 class FileIconSource : public ChromeURLDataManager::DataSource {
  public:
   explicit FileIconSource();
-  virtual ~FileIconSource();
 
   // Called when the network layer has requested a resource underneath
   // the path we registered.
-  virtual void StartDataRequest(const std::string& path, int request_id);
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_off_the_record,
+                                int request_id);
 
   virtual std::string GetMimeType(const std::string&) const {
     // Rely on image decoder inferring the correct type.
@@ -35,6 +36,8 @@ class FileIconSource : public ChromeURLDataManager::DataSource {
       SkBitmap* icon);
 
  private:
+  virtual ~FileIconSource();
+
   CancelableRequestConsumerT<int, 0> cancelable_consumer_;
 
   // Raw PNG representation of the favicon to show when the favicon

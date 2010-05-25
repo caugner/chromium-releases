@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 #define WEBKIT_GLUE_PLUGIN_PLUGIN_STREAM_URL_H__
 
 
-#include "webkit/glue/webplugin.h"
 #include "webkit/glue/plugins/plugin_stream.h"
+#include "webkit/glue/plugins/webplugin.h"
 #include "googleurl/src/gurl.h"
 
 namespace NPAPI {
@@ -22,7 +22,7 @@ class PluginStreamUrl : public PluginStream,
   // a URL. If notifyNeeded is set, then the plugin will be notified
   // when the stream has been fully sent to the plugin.  Initialize
   // must be called before the object is used.
-  PluginStreamUrl(int resource_id,
+  PluginStreamUrl(unsigned long resource_id,
                   const GURL &url,
                   PluginInstance *instance,
                   bool notify_needed,
@@ -59,7 +59,7 @@ class PluginStreamUrl : public PluginStream,
 
  private:
   GURL url_;
-  int id_;
+  unsigned long id_;
 
   DISALLOW_EVIL_CONSTRUCTORS(PluginStreamUrl);
 };

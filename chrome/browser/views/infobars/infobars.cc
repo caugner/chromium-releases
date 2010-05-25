@@ -1,16 +1,19 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/infobars/infobars.h"
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/slide_animation.h"
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif  // defined(OS_WIN)
 #include "base/message_loop.h"
 #include "chrome/browser/views/event_utils.h"
 #include "chrome/browser/views/infobars/infobar_container.h"
+#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/background.h"
@@ -22,12 +25,13 @@
 #include "views/widget/widget.h"
 
 // static
-const double InfoBar::kTargetHeight = 37.0;
-
-static const int kVerticalPadding = 3;
-static const int kHorizontalPadding = 3;
-static const int kIconLabelSpacing = 5;
-static const int kButtonSpacing = 5;
+const double InfoBar::kDefaultTargetHeight = 36.0;
+const int InfoBar::kHorizontalPadding = 6;
+const int InfoBar::kIconLabelSpacing = 6;
+const int InfoBar::kButtonButtonSpacing = 10;
+const int InfoBar::kEndOfLabelSpacing = 16;
+const int InfoBar::kCloseButtonSpacing = 12;
+const int InfoBar::kButtonInLabelSpacing = 5;
 
 static const SkColor kInfoBackgroundColorTop = SkColorSetRGB(170, 214, 112);
 static const SkColor kInfoBackgroundColorBottom = SkColorSetRGB(146, 205, 114);
@@ -40,71 +44,55 @@ static const SkColor kErrorBackgroundColorTop = kWarningBackgroundColorTop;
 static const SkColor kErrorBackgroundColorBottom =
     kWarningBackgroundColorBottom;
 
+static const SkColor kPageActionBackgroundColorTop =
+    SkColorSetRGB(218, 231, 249);
+static const SkColor kPageActionBackgroundColorBottom =
+    SkColorSetRGB(179, 202, 231);
+
 static const int kSeparatorLineHeight = 1;
 
-namespace {
-// Returns a centered y-position of a control of height specified in |prefsize|
-// within the standard InfoBar height. Stable during an animation.
-int CenterY(const gfx::Size prefsize) {
-  return std::max((static_cast<int>(InfoBar::kTargetHeight) -
-      prefsize.height()) / 2, 0);
-}
+// InfoBarBackground, public: --------------------------------------------------
 
-// Returns a centered y-position of a control of height specified in |prefsize|
-// within the standard InfoBar height, adjusted according to the current amount
-// of animation offset the |parent| InfoBar currently has. Changes during an
-// animation.
-int OffsetY(views::View* parent, const gfx::Size prefsize) {
-  return CenterY(prefsize) -
-      (static_cast<int>(InfoBar::kTargetHeight) - parent->height());
-}
-}
-
-// InfoBarBackground -----------------------------------------------------------
-
-class InfoBarBackground : public views::Background {
- public:
-  InfoBarBackground(InfoBarDelegate::Type infobar_type) {
-    SkColor top_color;
-    SkColor bottom_color;
-    switch (infobar_type) {
-      case InfoBarDelegate::INFO_TYPE:
-        top_color = kInfoBackgroundColorTop;
-        bottom_color = kInfoBackgroundColorBottom;
-        break;
-      case InfoBarDelegate::WARNING_TYPE:
-        top_color = kWarningBackgroundColorTop;
-        bottom_color = kWarningBackgroundColorBottom;
-        break;
-      case InfoBarDelegate::ERROR_TYPE:
-        top_color = kErrorBackgroundColorTop;
-        bottom_color = kErrorBackgroundColorBottom;
-        break;
-      default:
-        NOTREACHED();
-        break;
-    }
-    gradient_background_.reset(
-        views::Background::CreateVerticalGradientBackground(top_color,
-                                                            bottom_color));
+InfoBarBackground::InfoBarBackground(InfoBarDelegate::Type infobar_type) {
+  SkColor top_color;
+  SkColor bottom_color;
+  switch (infobar_type) {
+    case InfoBarDelegate::INFO_TYPE:
+      top_color = kInfoBackgroundColorTop;
+      bottom_color = kInfoBackgroundColorBottom;
+      break;
+    case InfoBarDelegate::WARNING_TYPE:
+      top_color = kWarningBackgroundColorTop;
+      bottom_color = kWarningBackgroundColorBottom;
+      break;
+    case InfoBarDelegate::ERROR_TYPE:
+      top_color = kErrorBackgroundColorTop;
+      bottom_color = kErrorBackgroundColorBottom;
+      break;
+    case InfoBarDelegate::PAGE_ACTION_TYPE:
+      top_color = kPageActionBackgroundColorTop;
+      bottom_color = kPageActionBackgroundColorBottom;
+      break;
+    default:
+      NOTREACHED();
+      break;
   }
+  gradient_background_.reset(
+      views::Background::CreateVerticalGradientBackground(top_color,
+                                                          bottom_color));
+}
 
-  // Overridden from views::View:
-  virtual void Paint(gfx::Canvas* canvas, views::View* view) const {
-    // First paint the gradient background.
-    gradient_background_->Paint(canvas, view);
+// InfoBarBackground, views::Background overrides: -----------------------------
 
-    // Now paint the separator line.
-    canvas->FillRectInt(ResourceBundle::toolbar_separator_color, 0,
-                        view->height() - kSeparatorLineHeight, view->width(),
-                        kSeparatorLineHeight);
-  }
+void InfoBarBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
+  // First paint the gradient background.
+  gradient_background_->Paint(canvas, view);
 
- private:
-  scoped_ptr<views::Background> gradient_background_;
-
-  DISALLOW_COPY_AND_ASSIGN(InfoBarBackground);
-};
+  // Now paint the separator line.
+  canvas->FillRectInt(ResourceBundle::toolbar_separator_color, 0,
+                      view->height() - kSeparatorLineHeight, view->width(),
+                      kSeparatorLineHeight);
+}
 
 // InfoBar, public: ------------------------------------------------------------
 
@@ -112,11 +100,30 @@ InfoBar::InfoBar(InfoBarDelegate* delegate)
     : delegate_(delegate),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           close_button_(new views::ImageButton(this))),
-      ALLOW_THIS_IN_INITIALIZER_LIST(delete_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(delete_factory_(this)),
+      target_height_(kDefaultTargetHeight) {
   // We delete ourselves when we're removed from the view hierarchy.
-  SetParentOwned(false);
+  set_parent_owned(false);
 
   set_background(new InfoBarBackground(delegate->GetInfoBarType()));
+
+  switch (delegate->GetInfoBarType()) {
+    case InfoBarDelegate::INFO_TYPE:
+      SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_INFO));
+      break;
+    case InfoBarDelegate::WARNING_TYPE:
+      SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_WARNING));
+      break;
+    case InfoBarDelegate::ERROR_TYPE:
+      SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_ERROR));
+      break;
+    case InfoBarDelegate::PAGE_ACTION_TYPE:
+      SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_PAGE_ACTION));
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
@@ -145,7 +152,16 @@ void InfoBar::Open() {
 }
 
 void InfoBar::AnimateClose() {
-  DestroyFocusTracker(true);
+  bool restore_focus = true;
+#if defined(OS_WIN)
+  // Do not restore focus (and active state with it) on Windows if some other
+  // top-level window became active.
+  if (GetWidget() &&
+      !win_util::DoesWindowBelongToActiveWindow(GetWidget()->GetNativeView())) {
+    restore_focus = false;
+  }
+#endif  // defined(OS_WIN)
+  DestroyFocusTracker(restore_focus);
   animation_->Hide();
 }
 
@@ -162,14 +178,21 @@ void InfoBar::Close() {
 
 // InfoBar, views::View overrides: ---------------------------------------------
 
+bool InfoBar::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_PANE;
+  return true;
+}
+
 gfx::Size InfoBar::GetPreferredSize() {
-  int height = static_cast<int>(kTargetHeight * animation_->GetCurrentValue());
+  int height = static_cast<int>(target_height_ * animation_->GetCurrentValue());
   return gfx::Size(0, height);
 }
 
 void InfoBar::Layout() {
   gfx::Size button_ps = close_button_->GetPreferredSize();
-  close_button_->SetBounds(width() - kButtonSpacing - button_ps.width(),
+  close_button_->SetBounds(width() - kHorizontalPadding - button_ps.width(),
                            OffsetY(this, button_ps), button_ps.width(),
                            button_ps.height());
 }
@@ -188,11 +211,22 @@ void InfoBar::ViewHierarchyChanged(bool is_add, views::View* parent,
 // InfoBar, protected: ---------------------------------------------------------
 
 int InfoBar::GetAvailableWidth() const {
-  return close_button_->x() - kButtonSpacing;
+  return close_button_->x() - kCloseButtonSpacing;
 }
 
 void InfoBar::RemoveInfoBar() const {
-  container_->RemoveDelegate(delegate());
+  if (container_)
+    container_->RemoveDelegate(delegate());
+}
+
+int InfoBar::CenterY(const gfx::Size prefsize) {
+  return std::max((static_cast<int>(target_height_) -
+      prefsize.height()) / 2, 0);
+}
+
+int InfoBar::OffsetY(views::View* parent, const gfx::Size prefsize) {
+  return CenterY(prefsize) -
+      (static_cast<int>(target_height_) - parent->height());
 }
 
 // InfoBar, views::ButtonListener implementation: ------------------
@@ -281,7 +315,6 @@ AlertInfoBar::AlertInfoBar(AlertInfoBarDelegate* delegate)
 }
 
 AlertInfoBar::~AlertInfoBar() {
-
 }
 
 // AlertInfoBar, views::View overrides: ----------------------------------------
@@ -296,8 +329,9 @@ void AlertInfoBar::Layout() {
                    icon_ps.height());
 
   gfx::Size text_ps = label_->GetPreferredSize();
-  int text_width =
-      GetAvailableWidth() - icon_->bounds().right() - kIconLabelSpacing;
+  int text_width = std::min(
+      text_ps.width(),
+      GetAvailableWidth() - icon_->bounds().right() - kIconLabelSpacing);
   label_->SetBounds(icon_->bounds().right() + kIconLabelSpacing,
                     OffsetY(this, text_ps), text_width, text_ps.height());
 }
@@ -417,23 +451,60 @@ ConfirmInfoBar::ConfirmInfoBar(ConfirmInfoBarDelegate* delegate)
     : AlertInfoBar(delegate),
       ok_button_(NULL),
       cancel_button_(NULL),
+      link_(NULL),
       initialized_(false) {
   ok_button_ = new views::NativeButton(
       this, delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_OK));
+  ok_button_->SetAccessibleName(ok_button_->label());
   if (delegate->GetButtons() & ConfirmInfoBarDelegate::BUTTON_OK_DEFAULT)
     ok_button_->SetAppearsAsDefault(true);
+  if (delegate->NeedElevation(ConfirmInfoBarDelegate::BUTTON_OK))
+    ok_button_->SetNeedElevation(true);
   cancel_button_ = new views::NativeButton(
       this, delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_CANCEL));
+  cancel_button_->SetAccessibleName(cancel_button_->label());
+
+  // Set up the link.
+  link_ = new views::Link;
+  link_->SetText(delegate->GetLinkText());
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  link_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  link_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  link_->SetController(this);
+  link_->MakeReadableOverBackgroundColor(background()->get_color());
 }
 
 ConfirmInfoBar::~ConfirmInfoBar() {
+  if (!initialized_) {
+    delete ok_button_;
+    delete cancel_button_;
+    delete link_;
+  }
+}
+
+// ConfirmInfoBar, views::LinkController implementation: -----------------------
+
+void ConfirmInfoBar::LinkActivated(views::Link* source, int event_flags) {
+  DCHECK(source == link_);
+  DCHECK(link_->IsVisible());
+  DCHECK(!link_->GetText().empty());
+  if (GetDelegate()->LinkClicked(
+          event_utils::DispositionFromEventFlags(event_flags))) {
+    RemoveInfoBar();
+  }
 }
 
 // ConfirmInfoBar, views::View overrides: --------------------------------------
 
 void ConfirmInfoBar::Layout() {
+  // First layout right aligned items (from right to left) in order to determine
+  // the space avalable, then layout the left aligned items.
+
+  // Layout the close button.
   InfoBar::Layout();
-  int available_width = InfoBar::GetAvailableWidth();
+
+  // Layout the cancel and OK buttons.
+  int available_width = AlertInfoBar::GetAvailableWidth();
   int ok_button_width = 0;
   int cancel_button_width = 0;
   gfx::Size ok_ps = ok_button_->GetPreferredSize();
@@ -453,10 +524,19 @@ void ConfirmInfoBar::Layout() {
   cancel_button_->SetBounds(available_width - cancel_button_width,
                             OffsetY(this, cancel_ps), cancel_ps.width(),
                             cancel_ps.height());
-  int spacing = cancel_button_width > 0 ? kButtonSpacing : 0;
+  int spacing = cancel_button_width > 0 ? kButtonButtonSpacing : 0;
   ok_button_->SetBounds(cancel_button_->x() - spacing - ok_button_width,
                         OffsetY(this, ok_ps), ok_ps.width(), ok_ps.height());
+
+  // Layout the icon and label.
   AlertInfoBar::Layout();
+
+  // Now append the link to the label's right edge.
+  link_->SetVisible(!link_->GetText().empty());
+  gfx::Size link_ps = link_->GetPreferredSize();
+  int link_x = label()->bounds().right() + kEndOfLabelSpacing;
+  int link_w = std::min(GetAvailableWidth() - link_x, link_ps.width());
+  link_->SetBounds(link_x, OffsetY(this, link_ps), link_w, link_ps.height());
 }
 
 void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
@@ -486,11 +566,7 @@ void ConfirmInfoBar::ButtonPressed(
 // ConfirmInfoBar, InfoBar overrides: ------------------------------------------
 
 int ConfirmInfoBar::GetAvailableWidth() const {
-  if (ok_button_)
-    return ok_button_->x() - kButtonSpacing;
-  if (cancel_button_)
-    return cancel_button_->x() - kButtonSpacing;
-  return InfoBar::GetAvailableWidth();
+  return ok_button_->x() - kEndOfLabelSpacing;
 }
 
 // ConfirmInfoBar, private: ----------------------------------------------------
@@ -502,6 +578,7 @@ ConfirmInfoBarDelegate* ConfirmInfoBar::GetDelegate() {
 void ConfirmInfoBar::Init() {
   AddChildView(ok_button_);
   AddChildView(cancel_button_);
+  AddChildView(link_);
 }
 
 // AlertInfoBarDelegate, InfoBarDelegate overrides: ----------------------------

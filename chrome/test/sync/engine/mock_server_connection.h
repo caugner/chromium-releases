@@ -7,15 +7,15 @@
 #ifndef CHROME_TEST_SYNC_ENGINE_MOCK_SERVER_CONNECTION_H_
 #define CHROME_TEST_SYNC_ENGINE_MOCK_SERVER_CONNECTION_H_
 
+#include <bitset>
 #include <string>
 #include <vector>
 
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-
-using std::string;
-using std::vector;
+#include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/util/closure.h"
 
 namespace syncable {
 class DirectoryManager;
@@ -27,28 +27,26 @@ struct HttpResponse;
 
 class MockConnectionManager : public browser_sync::ServerConnectionManager {
  public:
-  // A callback function type. These can be set to be called when server
-  // activity would normally take place. This aids simulation of race
-  // conditions.
-  typedef bool (*TestCallbackFunction)(syncable::Directory* dir);
   class MidCommitObserver {
    public:
     virtual void Observe() = 0;
   };
 
-  MockConnectionManager(syncable::DirectoryManager* dirmgr, PathString name);
+  MockConnectionManager(syncable::DirectoryManager* dirmgr,
+                        const std::string& name);
   virtual ~MockConnectionManager();
 
   // Overridden ServerConnectionManager functions.
   virtual bool PostBufferToPath(const PostBufferParams*,
-                                const string& path,
-                                const string& auth_token);
+      const string& path,
+      const string& auth_token,
+      browser_sync::ScopedServerStatusWatcher* watcher);
 
   virtual bool IsServerReachable();
   virtual bool IsUserAuthenticated();
 
   // Control of commit response.
-  void SetMidCommitCallbackFunction(TestCallbackFunction callback);
+  void SetMidCommitCallback(Closure* callback);
   void SetMidCommitObserver(MidCommitObserver* observer);
 
   // Set this if you want commit to perform commit time rename. Will request
@@ -97,17 +95,18 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
                                          int64 version,
                                          int64 sync_ts);
   void AddUpdateExtendedAttributes(sync_pb::SyncEntity* ent,
-                                   PathString* xattr_key,
+                                   std::string* xattr_key,
                                    syncable::Blob* xattr_value,
                                    int xattr_count);
-  // Prepare to add checksums.
+
   void SetLastUpdateDeleted();
-  void SetLastUpdateSingletonTag(const string& tag);
+  void SetLastUpdateServerTag(const string& tag);
+  void SetLastUpdateClientTag(const string& tag);
   void SetLastUpdateOriginatorFields(const string& client_id,
                                      const string& entry_id);
   void SetLastUpdatePosition(int64 position_in_parent);
   void SetNewTimestamp(int64 ts);
-  void SetNewestTimestamp(int64 ts);
+  void SetChangesRemaining(int64 timestamp);
 
   // For AUTHENTICATE responses.
   void SetAuthenticationResponseInfo(const std::string& valid_auth_token,
@@ -118,15 +117,17 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   void FailNextPostBufferToPathCall() { fail_next_postbuffer_ = true; }
 
   // A visitor class to allow a test to change some monitoring state atomically
-  // with the action of throttling requests (for example, so you can say
-  // "ThrottleNextRequest, and assert no more requests are made once throttling
-  // is in effect" in one step.
-  class ThrottleRequestVisitor {
+  // with the action of overriding the response codes sent back to the Syncer
+  // (for example, so you can say "ThrottleNextRequest, and assert no more
+  // requests are made once throttling is in effect" in one step.
+  class ResponseCodeOverrideRequestor {
    public:
-    // Called with throttle parameter lock acquired.
-    virtual void VisitAtomically() = 0;
+    // Called with response_code_override_lock_ acquired.
+    virtual void OnOverrideComplete() = 0;
   };
-  void ThrottleNextRequest(ThrottleRequestVisitor* visitor);
+  void ThrottleNextRequest(ResponseCodeOverrideRequestor* visitor);
+  void FailWithAuthInvalid(ResponseCodeOverrideRequestor* visitor);
+  void StopFailingWithAuthInvalid(ResponseCodeOverrideRequestor* visitor);
   void FailNonPeriodicGetUpdates() { fail_non_periodic_get_updates_ = true; }
 
   // Simple inspectors.
@@ -134,12 +135,19 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   sync_pb::ClientCommand* GetNextClientCommand();
 
-  const vector<syncable::Id>& committed_ids() const { return committed_ids_; }
-  const vector<sync_pb::CommitMessage*>& commit_messages() const {
+  const std::vector<syncable::Id>& committed_ids() const {
+    return committed_ids_;
+  }
+  const std::vector<sync_pb::CommitMessage*>& commit_messages() const {
     return commit_messages_;
   }
   // Retrieve the last sent commit message.
   const sync_pb::CommitMessage& last_sent_commit() const;
+
+  // Retrieve the last request submitted to the server (regardless of type).
+  const sync_pb::ClientToServerMessage& last_request() const {
+    return last_request_;
+  }
 
   void set_conflict_all_commits(bool value) {
     conflict_all_commits_ = value;
@@ -149,6 +157,27 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   }
   void set_conflict_n_commits(int value) {
     conflict_n_commits_ = value;
+  }
+
+  void set_use_legacy_bookmarks_protocol(bool value) {
+    use_legacy_bookmarks_protocol_ = value;
+  }
+
+  // Retrieve the number of GetUpdates requests that the mock server has
+  // seen since the last time this function was called.  Can be used to
+  // verify that a GetUpdates actually did or did not happen after running
+  // the syncer.
+  int GetAndClearNumGetUpdatesRequests() {
+    int result = num_get_updates_requests_;
+    num_get_updates_requests_ = 0;
+    return result;
+  }
+
+  // Expect that GetUpdates will request exactly the types indicated in
+  // the bitset.
+  void ExpectGetUpdatesRequestTypes(
+      std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter) {
+    expected_filter_ = expected_filter;
   }
 
  private:
@@ -167,6 +196,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
                            const std::string& auth_token);
   void ProcessCommit(sync_pb::ClientToServerMessage* csm,
                      sync_pb::ClientToServerResponse* response_buffer);
+
+  void AddDefaultBookmarkData(sync_pb::SyncEntity* entity, bool is_folder);
+
   // Locate the most recent update message for purpose of alteration.
   sync_pb::SyncEntity* GetMutableLastUpdate();
 
@@ -180,15 +212,21 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
     return next_position_in_parent_--;
   }
 
+  // Determine whether an EntitySpecifics filter (like that sent in
+  // GetUpdates.requested_types) indicates that a particular ModelType
+  // should be included.
+  bool IsModelTypePresentInSpecifics(const sync_pb::EntitySpecifics& filter,
+      syncable::ModelType value);
+
   // All IDs that have been committed.
-  vector<syncable::Id> committed_ids_;
+  std::vector<syncable::Id> committed_ids_;
 
   // Control of when/if we return conflicts.
   bool conflict_all_commits_;
   int conflict_n_commits_;
 
   // Commit messages we've sent
-  vector<sync_pb::CommitMessage*> commit_messages_;
+  std::vector<sync_pb::CommitMessage*> commit_messages_;
 
   // The next id the mock will return to a commit.
   int next_new_id_;
@@ -204,11 +242,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // Our directory.
   syncable::DirectoryManager* directory_manager_;
-  PathString directory_name_;
+  std::string directory_name_;
 
   // The updates we'll return to the next request.
   sync_pb::GetUpdatesResponse updates_;
-  TestCallbackFunction mid_commit_callback_function_;
+  Closure* mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
 
   // The AUTHENTICATE response we'll return for auth requests.
@@ -217,9 +255,15 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   std::string valid_auth_token_;
 
   // Whether we are faking a server mandating clients to throttle requests.
-  // Protected by |throttle_lock_|.
+  // Protected by |response_code_override_lock_|.
   bool throttling_;
-  Lock throttle_lock_;
+
+  // Whether we are failing all requests by returning
+  // ClientToServerResponse::AUTH_INVALID.
+  // Protected by |response_code_override_lock_|.
+  bool fail_with_auth_invalid_;
+
+  Lock response_code_override_lock_;
 
   // True if we are only accepting GetUpdatesCallerInfo::PERIODIC requests.
   bool fail_non_periodic_get_updates_;
@@ -228,6 +272,17 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // The next value to use for the position_in_parent property.
   int64 next_position_in_parent_;
+
+  // The default is to use the newer sync_pb::BookmarkSpecifics-style protocol.
+  // If this option is set to true, then the MockConnectionManager will
+  // use the older sync_pb::SyncEntity_BookmarkData-style protocol.
+  bool use_legacy_bookmarks_protocol_;
+
+  std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter_;
+
+  int num_get_updates_requests_;
+
+  sync_pb::ClientToServerMessage last_request_;
 
   DISALLOW_COPY_AND_ASSIGN(MockConnectionManager);
 };

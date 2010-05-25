@@ -13,8 +13,9 @@
 #include "base/mac_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/keychain_mac.h"
-#include "chrome/browser/password_manager/login_database_mac.h"
+#include "chrome/browser/password_manager/login_database.h"
 
 using webkit_glue::PasswordForm;
 
@@ -22,7 +23,7 @@ using webkit_glue::PasswordForm;
 // search from a set of attributes.
 class KeychainSearch {
  public:
-  KeychainSearch(const MacKeychain& keychain);
+  explicit KeychainSearch(const MacKeychain& keychain);
   ~KeychainSearch();
 
   // Sets up a keycahin search based on an non "null" (NULL for char*,
@@ -258,8 +259,8 @@ bool FillPasswordFormFromKeychainItem(const MacKeychain& keychain,
     return false;
   }
 
-  UTF8ToWide(static_cast<const char *>(password_data), password_length,
-             &(form->password_value));
+  UTF8ToUTF16(static_cast<const char *>(password_data), password_length,
+              &(form->password_value));
 
   int port = kAnyPort;
   std::string server;
@@ -272,8 +273,8 @@ bool FillPasswordFormFromKeychainItem(const MacKeychain& keychain,
     }
     switch (attr.tag) {
       case kSecAccountItemAttr:
-        UTF8ToWide(static_cast<const char *>(attr.data), attr.length,
-                   &(form->username_value));
+        UTF8ToUTF16(static_cast<const char *>(attr.data), attr.length,
+                    &(form->username_value));
         break;
       case kSecServerItemAttr:
         server.assign(static_cast<const char *>(attr.data), attr.length);
@@ -321,7 +322,7 @@ bool FillPasswordFormFromKeychainItem(const MacKeychain& keychain,
   // kSecNegativeItemAttr doesn't seem to actually be in widespread use. In
   // practice, other browsers seem to use a "" or " " password (and a special
   // user name) to indicated blacklist entries.
-  if (form->password_value.empty() || form->password_value == L" ") {
+  if (form->password_value.empty() || EqualsASCII(form->password_value, " ")) {
     form->blacklisted_by_user = true;
   }
 
@@ -477,7 +478,7 @@ std::vector<PasswordForm*>
 std::vector<PasswordForm*>
     MacKeychainPasswordFormAdapter::PasswordsMergeableWithForm(
         const PasswordForm& query_form) {
-  std::string username = WideToUTF8(query_form.username_value);
+  std::string username = UTF16ToUTF8(query_form.username_value);
   std::vector<SecKeychainItemRef> keychain_items =
       MatchingKeychainItems(query_form.signon_realm, query_form.scheme,
                             NULL, username.c_str());
@@ -530,8 +531,8 @@ bool MacKeychainPasswordFormAdapter::AddPassword(const PasswordForm& form) {
                                     &is_secure, &security_domain)) {
     return false;
   }
-  std::string username = WideToUTF8(form.username_value);
-  std::string password = WideToUTF8(form.password_value);
+  std::string username = UTF16ToUTF8(form.username_value);
+  std::string password = UTF16ToUTF8(form.password_value);
   std::string path = form.origin.path();
   SecProtocolType protocol = is_secure ? kSecProtocolTypeHTTPS
                                        : kSecProtocolTypeHTTP;
@@ -601,7 +602,7 @@ SecKeychainItemRef MacKeychainPasswordFormAdapter::KeychainItemForForm(
   }
 
   std::string path = form.origin.path();
-  std::string username = WideToUTF8(form.username_value);
+  std::string username = UTF16ToUTF8(form.username_value);
   std::vector<SecKeychainItemRef> matches = MatchingKeychainItems(
       form.signon_realm, form.scheme, path.c_str(), username.c_str());
 
@@ -708,7 +709,7 @@ OSType MacKeychainPasswordFormAdapter::CreatorCodeForSearch() {
 #pragma mark -
 
 PasswordStoreMac::PasswordStoreMac(MacKeychain* keychain,
-                                   LoginDatabaseMac* login_db)
+                                   LoginDatabase* login_db)
     : keychain_(keychain), login_metadata_db_(login_db) {
   DCHECK(keychain_.get());
   DCHECK(login_metadata_db_.get());

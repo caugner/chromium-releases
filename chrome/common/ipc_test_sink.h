@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 
 namespace IPC {
@@ -39,11 +40,15 @@ namespace IPC {
 //   test_sink.ClearMessages();
 //
 // To hook up the sink, all you need to do is call OnMessageReceived when a
-// message is recieved.
-class TestSink {
+// message is received.
+class TestSink : public IPC::Channel {
  public:
   TestSink();
   ~TestSink();
+
+  // Interface in IPC::Channel. This copies the message to the sink and then
+  // deletes it.
+  virtual bool Send(IPC::Message* message);
 
   // Used by the source of the messages to send the message to the sink. This
   // will make a copy of the message and store it in the list.
@@ -63,14 +68,14 @@ class TestSink {
   // Returns the first message with the given ID in the queue. If there is no
   // message with the given ID, returns NULL. The returned pointer will only be
   // valid until another message is received or the list is cleared.
-  const Message* GetFirstMessageMatching(uint16 id) const;
+  const Message* GetFirstMessageMatching(uint32 id) const;
 
   // Returns the message with the given ID in the queue. If there is no such
   // message or there is more than one of that message, this will return NULL
   // (with the expectation that you'll do an ASSERT_TRUE() on the result).
   // The returned pointer will only be valid until another message is received
   // or the list is cleared.
-  const Message* GetUniqueMessageMatching(uint16 id) const;
+  const Message* GetUniqueMessageMatching(uint32 id) const;
 
  private:
   // The actual list of received messages.

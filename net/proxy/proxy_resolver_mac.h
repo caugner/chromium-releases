@@ -9,7 +9,6 @@
 
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
-#include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_resolver.h"
 
 namespace net {
@@ -25,7 +24,7 @@ class ProxyResolverMac : public ProxyResolver {
                              ProxyInfo* results,
                              CompletionCallback* callback,
                              RequestHandle* request,
-                             LoadLog* load_log);
+                             const BoundNetLog& net_log);
 
   virtual void CancelRequest(RequestHandle request) {
     NOTREACHED();
@@ -40,12 +39,6 @@ class ProxyResolverMac : public ProxyResolver {
   }
 
   GURL pac_url_;
-};
-
-class ProxyConfigServiceMac : public ProxyConfigService {
- public:
-  // ProxyConfigService methods:
-  virtual int GetProxyConfig(ProxyConfig* config);
 };
 
 }  // namespace net

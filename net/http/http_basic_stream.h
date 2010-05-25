@@ -18,6 +18,7 @@
 
 namespace net {
 
+class BoundNetLog;
 class ClientSocketHandle;
 class HttpRequestInfo;
 class HttpResponseInfo;
@@ -25,13 +26,14 @@ class UploadDataStream;
 
 class HttpBasicStream : public HttpStream {
  public:
-  explicit HttpBasicStream(ClientSocketHandle* handle);
+  HttpBasicStream(ClientSocketHandle* handle, const BoundNetLog& net_log);
   virtual ~HttpBasicStream() {}
 
   // HttpStream methods:
   virtual int SendRequest(const HttpRequestInfo* request,
                           const std::string& headers,
                           UploadDataStream* request_body,
+                          HttpResponseInfo* response,
                           CompletionCallback* callback);
 
   virtual uint64 GetUploadProgress() const;

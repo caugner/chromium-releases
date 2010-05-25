@@ -10,14 +10,14 @@
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/task.h"
-#include "chrome/common/child_process_host.h"
+#include "chrome/browser/child_process_host.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "ipc/ipc_channel.h"
 
 class CommandLine;
 class DictionaryValue;
 class ListValue;
-class MessageLoop;
 
 // This class acts as the browser-side host to a utility child process.  A
 // utility process is a short-lived sandboxed process that is created to run
@@ -30,14 +30,14 @@ class UtilityProcessHost : public ChildProcessHost {
   class Client : public base::RefCountedThreadSafe<Client> {
    public:
     Client() {}
-    virtual ~Client() {}
 
     // Called when the process has crashed.
     virtual void OnProcessCrashed() {}
 
     // Called when the extension has unpacked successfully.  |manifest| is the
-    // parsed manifest.json file.  |images| contains a list of decoded images
-    // and the associated paths where those images live on disk.
+    // parsed manifest.json file.  |catalogs| contains list of all parsed
+    // message catalogs.  |images| contains a list of decoded images and the
+    // associated paths where those images live on disk.
     virtual void OnUnpackExtensionSucceeded(const DictionaryValue& manifest) {}
 
     // Called when an error occurred while unpacking the extension.
@@ -52,27 +52,32 @@ class UtilityProcessHost : public ChildProcessHost {
 
     // Called when an error occurred while parsing the resource data.
     // |error_message| contains a description of the problem.
-    virtual void OnUnpackWebResourceFailed(
-        const std::string& error_message) {}
+    virtual void OnUnpackWebResourceFailed(const std::string& error_message) {}
 
     // Called when an update manifest xml file was successfully parsed.
     virtual void OnParseUpdateManifestSucceeded(
-        const UpdateManifest::ResultList& list) {}
+        const UpdateManifest::Results& results) {}
 
     // Called when an update manifest xml file failed parsing. |error_message|
     // contains details suitable for logging.
     virtual void OnParseUpdateManifestFailed(
         const std::string& error_message) {}
 
+   protected:
+    friend class base::RefCountedThreadSafe<Client>;
+
+    virtual ~Client() {}
+
    private:
     friend class UtilityProcessHost;
+
     void OnMessageReceived(const IPC::Message& message);
 
     DISALLOW_COPY_AND_ASSIGN(Client);
   };
 
   UtilityProcessHost(ResourceDispatcherHost* rdh, Client* client,
-                     MessageLoop* client_loop);
+                     ChromeThread::ID client_thread_id);
   virtual ~UtilityProcessHost();
 
   // Start a process to unpack the extension at the given path.  The process
@@ -95,9 +100,6 @@ class UtilityProcessHost : public ChildProcessHost {
  protected:
   // Allow these methods to be overridden for tests.
   virtual FilePath GetUtilityProcessCmd();
-  virtual bool UseSandbox() {
-    return true;
-  }
 
  private:
   // Starts a process.  Returns true iff it succeeded.
@@ -107,7 +109,7 @@ class UtilityProcessHost : public ChildProcessHost {
   void OnMessageReceived(const IPC::Message& message);
 
   // ChildProcessHost:
-  virtual void OnChannelError();
+  virtual void OnProcessCrashed();
   virtual bool CanShutdown() { return true; }
   virtual URLRequestContext* GetRequestContext(
       uint32 request_id,
@@ -117,7 +119,7 @@ class UtilityProcessHost : public ChildProcessHost {
 
   // A pointer to our client interface, who will be informed of progress.
   scoped_refptr<Client> client_;
-  MessageLoop* client_loop_;
+  ChromeThread::ID client_thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilityProcessHost);
 };

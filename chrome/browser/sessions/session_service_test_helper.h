@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_SESSIONS_SERVICE_TEST_HELPER_H_
-#define CHROME_BROWSER_SESSIONS_SERVICE_TEST_HELPER_H_
+#ifndef CHROME_BROWSER_SESSIONS_SESSION_SERVICE_TEST_HELPER_H_
+#define CHROME_BROWSER_SESSIONS_SESSION_SERVICE_TEST_HELPER_H_
 
+#include <string>
 #include <vector>
 
 #include "base/ref_counted.h"
@@ -33,6 +34,10 @@ class SessionServiceTestHelper {
                           const SessionID& tab_id,
                           int visual_index,
                           bool select);
+
+  void SetTabAppExtensionID(const SessionID& window_id,
+                            const SessionID& tab_id,
+                            const std::string& app_extension_id);
 
   // Reads the contents of the last session.
   void ReadWindows(std::vector<SessionWindow*>* windows);
@@ -67,4 +72,4 @@ class SessionServiceTestHelper {
   DISALLOW_COPY_AND_ASSIGN(SessionServiceTestHelper);
 };
 
-#endif  // CHROME_BROWSER_SESSIONS_SERVICE_TEST_HELPER_H_
+#endif  // CHROME_BROWSER_SESSIONS_SESSION_SERVICE_TEST_HELPER_H_

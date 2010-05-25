@@ -1,24 +1,18 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'variables': {
     'chromium_code': 1,
-  },
-  'target_defaults': {
-    'conditions': [
-      ['OS!="linux"', {'sources/': [['exclude', '/linux/']]}],
-      ['OS!="freebsd"', {'sources/': [['exclude', '/freebsd/']]}],
-      ['OS!="mac"', {'sources/': [['exclude', '/mac/']]}],
-      ['OS!="win"', {'sources/': [['exclude', '/win/']]}],
-    ],
+    'player_x11_renderer%': 'x11',
   },
   'targets': [
     {
       'target_name': 'media',
       'type': '<(library)',
       'dependencies': [
+        'omx_wrapper',
         '../base/base.gyp:base',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
       ],
@@ -38,6 +32,8 @@
         'audio/linux/alsa_output.h',
         'audio/linux/alsa_wrapper.cc',
         'audio/linux/alsa_wrapper.h',
+        'audio/openbsd/audio_manager_openbsd.cc',
+        'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
         'audio/mac/audio_output_mac.cc',
@@ -52,6 +48,7 @@
         'base/buffer_queue.h',
         'base/buffers.cc',
         'base/buffers.h',
+        'base/callback.h',
         'base/clock.h',
         'base/clock_impl.cc',
         'base/clock_impl.h',
@@ -72,18 +69,25 @@
         'base/pipeline.h',
         'base/pipeline_impl.cc',
         'base/pipeline_impl.h',
+        'base/pts_heap.h',
         'base/seekable_buffer.cc',
         'base/seekable_buffer.h',
         'base/synchronizer.cc',
         'base/synchronizer.h',
-        'base/video_frame_impl.cc',
-        'base/video_frame_impl.h',
+        'base/video_frame.cc',
+        'base/video_frame.h',
         'base/yuv_convert.cc',
         'base/yuv_convert.h',
         'base/yuv_row_win.cc',
-        'base/yuv_row_mac.cc',
-        'base/yuv_row_linux.cc',
+        'base/yuv_row_posix.cc',
+        'base/yuv_row_table.cc',
         'base/yuv_row.h',
+        'ffmpeg/ffmpeg_common.cc',
+        'ffmpeg/ffmpeg_common.h',
+        'ffmpeg/ffmpeg_util.cc',
+        'ffmpeg/ffmpeg_util.h',
+        'ffmpeg/file_protocol.cc',
+        'ffmpeg/file_protocol.h',
         'filters/audio_renderer_algorithm_base.cc',
         'filters/audio_renderer_algorithm_base.h',
         'filters/audio_renderer_algorithm_default.cc',
@@ -94,23 +98,32 @@
         'filters/audio_renderer_base.h',
         'filters/audio_renderer_impl.cc',
         'filters/audio_renderer_impl.h',
+        'filters/bitstream_converter.cc',
+        'filters/bitstream_converter.h',
         'filters/decoder_base.h',
         'filters/ffmpeg_audio_decoder.cc',
         'filters/ffmpeg_audio_decoder.h',
-        'filters/ffmpeg_common.cc',
-        'filters/ffmpeg_common.h',
         'filters/ffmpeg_demuxer.cc',
         'filters/ffmpeg_demuxer.h',
         'filters/ffmpeg_glue.cc',
         'filters/ffmpeg_glue.h',
         'filters/ffmpeg_interfaces.cc',
         'filters/ffmpeg_interfaces.h',
+        'filters/ffmpeg_video_decode_engine.cc',
+        'filters/ffmpeg_video_decode_engine.h',
         'filters/ffmpeg_video_decoder.cc',
         'filters/ffmpeg_video_decoder.h',
         'filters/file_data_source.cc',
         'filters/file_data_source.h',
         'filters/null_audio_renderer.cc',
         'filters/null_audio_renderer.h',
+        'filters/omx_video_decode_engine.cc',
+        'filters/omx_video_decode_engine.h',
+        'filters/omx_video_decoder.cc',
+        'filters/omx_video_decoder.h',
+        'filters/video_decoder_impl.cc',
+        'filters/video_decoder_impl.h',
+        'filters/video_decode_engine.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
       ],
@@ -120,36 +133,35 @@
         ],
       },
       'conditions': [
-        ['OS =="linux"', {
-          'sources/': [ ['exclude', '_(mac|win)\\.cc$'],
-                        ['exclude', '\\.mm?$' ] ],
+        ['OS=="linux" or OS=="freebsd"', {
           'link_settings': {
             'libraries': [
               '-lasound',
             ],
           },
         }],
-        ['OS =="freebsd"', {
-          'sources/': [ ['exclude', '_(mac|win)\\.cc$'],
+        ['OS=="openbsd"', {
+          'sources/': [ ['exclude', 'alsa_' ],
+                        ['exclude', 'audio_manager_linux' ],
                         ['exclude', '\\.mm?$' ] ],
           'link_settings': {
             'libraries': [
             ],
           },
         }],
-        ['OS =="mac"', {
+        ['OS!="openbsd"', {
+          'sources!': [
+            'audio/openbsd/audio_manager_openbsd.cc',
+            'audio/openbsd/audio_manager_openbsd.h',
+          ],
+        }],
+        ['OS=="mac"', {
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
               '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
             ],
           },
-          'sources/': [ ['exclude', '_(linux|win)\\.cc$'],
-          ],
-        }],
-        [ 'OS == "win"', {
-          'sources/': [ ['exclude', '_(linux|mac|posix)\\.cc$'],
-                        ['exclude', '\\.mm?$' ] ],
         }],
       ],
     },
@@ -164,6 +176,10 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+        '../third_party/openmax/openmax.gyp:il',
+      ],
+      'sources!': [
+        '../third_party/openmax/omx_stub.cc',
       ],
       'sources': [
         'audio/audio_util_unittest.cc',
@@ -181,27 +197,43 @@
         'base/mock_filters.cc',
         'base/mock_filters.h',
         'base/mock_reader.h',
+        'base/mock_task.h',
         'base/pipeline_impl_unittest.cc',
+        'base/pts_heap_unittest.cc',
         'base/run_all_unittests.cc',
         'base/seekable_buffer_unittest.cc',
-        'base/video_frame_impl_unittest.cc',
+        'base/video_frame_unittest.cc',
         'base/yuv_convert_unittest.cc',
         'filters/audio_renderer_algorithm_ola_unittest.cc',
         'filters/audio_renderer_base_unittest.cc',
+        'filters/bitstream_converter_unittest.cc',
+        'filters/decoder_base_unittest.cc',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
-        'filters/ffmpeg_video_decoder_unittest.cc',
+        'filters/ffmpeg_video_decode_engine_unittest.cc',
         'filters/file_data_source_unittest.cc',
+        'filters/video_decoder_impl_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
+        'omx/mock_omx.cc',
+        'omx/mock_omx.h',
+        'omx/omx_codec_unittest.cc',
+        'omx/omx_input_buffer_unittest.cc',
       ],
       'conditions': [
-        ['OS=="linux" or OS=="freebsd"', {
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'dependencies': [
             # Needed for the following #include chain:
             #   base/run_all_unittests.cc
             #   ../base/test_suite.h
             #   gtk/gtk.h
             '../build/linux/system.gyp:gtk',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         }],
       ],
@@ -216,9 +248,19 @@
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
       ],
       'sources': [
-        'bench/bench.cc',
-        'bench/file_protocol.cc',
-        'bench/file_protocol.h',
+        'tools/media_bench/media_bench.cc',
+      ],
+    },
+    {
+      'target_name': 'ffmpeg_tests',
+      'type': 'executable',
+      'dependencies': [
+        'media',
+        '../base/base.gyp:base',
+        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+      ],
+      'sources': [
+        'test/ffmpeg_tests/ffmpeg_tests.cc',
       ],
     },
     {
@@ -228,14 +270,74 @@
         'media',
       ],
       'sources': [
-        'tools/wav_ola_test.cc'
+        'tools/wav_ola_test/wav_ola_test.cc'
       ],
     },
     {
       'target_name': 'qt_faststart',
       'type': 'executable',
       'sources': [
-        'tools/qt_faststart.c'
+        'tools/qt_faststart/qt_faststart.c'
+      ],
+    },
+    {
+      'target_name': 'omx_test',
+      'type': 'executable',
+      'dependencies': [
+        'media',
+        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+        '../third_party/openmax/openmax.gyp:il',
+      ],
+      'sources': [
+        'tools/omx_test/color_space_util.cc',
+        'tools/omx_test/color_space_util.h',
+        'tools/omx_test/file_reader_util.cc',
+        'tools/omx_test/file_reader_util.h',
+        'tools/omx_test/file_sink.cc',
+        'tools/omx_test/file_sink.h',
+        'tools/omx_test/omx_test.cc',
+      ],
+    },
+    {
+      'target_name': 'omx_unittests',
+      'type': 'executable',
+      'dependencies': [
+        'media',
+        'omx_wrapper',
+        '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'conditions': [
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+          ],
+        }],
+      ],
+      'sources': [
+        'omx/omx_unittest.cc',
+        'omx/run_all_unittests.cc',
+      ],
+    },
+    {
+      'target_name': 'omx_wrapper',
+      'type': '<(library)',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../third_party/openmax/openmax.gyp:il',
+      ],
+      'sources': [
+        'omx/omx_codec.cc',
+        'omx/omx_codec.h',
+        'omx/omx_configurator.cc',
+        'omx/omx_configurator.h',
+        'omx/omx_input_buffer.cc',
+        'omx/omx_input_buffer.h',
+      ],
+      'hard_dependency': 1,
+      'export_dependent_settings': [
+        '../third_party/openmax/openmax.gyp:il',
       ],
     },
   ],
@@ -243,28 +345,28 @@
     ['OS=="win"', {
       'targets': [
         {
-          'target_name': 'media_player',
+          'target_name': 'player_wtl',
           'type': 'executable',
           'dependencies': [
             'media',
             '../base/base.gyp:base',
           ],
           'include_dirs': [
-            '../chrome/third_party/wtl/include',
+            '<(DEPTH)/third_party/wtl/include',
           ],
           'sources': [
-            'player/list.h',
-            'player/mainfrm.h',
-            'player/movie.cc',
-            'player/movie.h',
-            'player/player_wtl.cc',
-            'player/player_wtl.rc',
-            'player/props.h',
-            'player/seek.h',
-            'player/resource.h',
-            'player/view.h',
-            'player/wtl_renderer.cc',
-            'player/wtl_renderer.h',
+            'tools/player_wtl/list.h',
+            'tools/player_wtl/mainfrm.h',
+            'tools/player_wtl/movie.cc',
+            'tools/player_wtl/movie.h',
+            'tools/player_wtl/player_wtl.cc',
+            'tools/player_wtl/player_wtl.rc',
+            'tools/player_wtl/props.h',
+            'tools/player_wtl/seek.h',
+            'tools/player_wtl/resource.h',
+            'tools/player_wtl/view.h',
+            'tools/player_wtl/wtl_renderer.cc',
+            'tools/player_wtl/wtl_renderer.h',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
@@ -273,6 +375,65 @@
           },
           'defines': [
             '_CRT_SECURE_NO_WARNINGS=1',
+          ],
+        },
+      ],
+    }],
+    ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+      'targets': [
+        {
+          'target_name': 'player_x11',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            '../base/base.gyp:base',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+              '-lX11',
+              '-lXrender',
+              '-lXext',
+            ],
+          },
+          'sources': [
+            'tools/player_x11/player_x11.cc',
+          ],
+          'conditions' : [
+            ['player_x11_renderer == "x11"', {
+              'sources': [
+                'tools/player_x11/x11_video_renderer.cc',
+                'tools/player_x11/x11_video_renderer.h',
+              ],
+              'defines': [
+                'RENDERER_X11',
+              ],
+            }],
+            ['player_x11_renderer == "gles"', {
+              'libraries': [
+                '-lEGL',
+                '-lGLESv2',
+              ],
+              'sources': [
+                'tools/player_x11/gles_video_renderer.cc',
+                'tools/player_x11/gles_video_renderer.h',
+              ],
+              'defines': [
+                'RENDERER_GLES',
+              ],
+            }],
+            ['player_x11_renderer == "gl"', {
+              'dependencies': [
+                '../gpu/gpu.gyp:gl_libs',
+              ],
+              'sources': [
+                'tools/player_x11/gl_video_renderer.cc',
+                'tools/player_x11/gl_video_renderer.h',
+              ],
+              'defines': [
+                'RENDERER_GL',
+              ],
+            }],
           ],
         },
       ],

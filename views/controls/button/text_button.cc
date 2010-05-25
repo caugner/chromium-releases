@@ -6,10 +6,9 @@
 
 #include <algorithm>
 
-#include "app/gfx/canvas.h"
-#include "app/l10n_util.h"
 #include "app/throb_animation.h"
 #include "app/resource_bundle.h"
+#include "gfx/canvas.h"
 #include "views/controls/button/button.h"
 #include "views/event.h"
 #include "grit/app_resources.h"
@@ -29,6 +28,8 @@ const SkColor TextButton::kEnabledColor = SkColorSetRGB(6, 45, 117);
 const SkColor TextButton::kHighlightColor = SkColorSetARGB(200, 255, 255, 255);
 // static
 const SkColor TextButton::kDisabledColor = SkColorSetRGB(161, 161, 146);
+// static
+const SkColor TextButton::kHoverColor = TextButton::kEnabledColor;
 
 // How long the hover fade animation should last.
 static const int kHoverAnimationDurationMs = 170;
@@ -66,9 +67,10 @@ TextButtonBorder::TextButtonBorder() {
 TextButtonBorder::~TextButtonBorder() {
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
 //
-// TextButtonBackground - painting
+// TextButtonBorder - painting
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -82,69 +84,74 @@ void TextButtonBorder::Paint(const View& view, gfx::Canvas* canvas) const {
     set = &pushed_set_;
 
   if (set) {
-    gfx::Rect bounds = view.bounds();
-
-    // Draw the top left image
-    canvas->DrawBitmapInt(*set->top_left, 0, 0);
-
-    // Tile the top image
-    canvas->TileImageInt(
-        *set->top,
-        set->top_left->width(),
-        0,
-        bounds.width() - set->top_right->width() - set->top_left->width(),
-        set->top->height());
-
-    // Draw the top right image
-    canvas->DrawBitmapInt(*set->top_right,
-                          bounds.width() - set->top_right->width(), 0);
-
-    // Tile the left image
-    canvas->TileImageInt(
-        *set->left,
-        0,
-        set->top_left->height(),
-        set->top_left->width(),
-        bounds.height() - set->top->height() - set->bottom_left->height());
-
-    // Tile the center image
-    canvas->TileImageInt(
-        *set->center,
-        set->left->width(),
-        set->top->height(),
-        bounds.width() - set->right->width() - set->left->width(),
-        bounds.height() - set->bottom->height() - set->top->height());
-
-    // Tile the right image
-    canvas->TileImageInt(
-        *set->right,
-        bounds.width() - set->right->width(),
-        set->top_right->height(),
-        bounds.width(),
-        bounds.height() - set->bottom_right->height() -
-            set->top_right->height());
-
-    // Draw the bottom left image
-    canvas->DrawBitmapInt(*set->bottom_left,
-                          0,
-                          bounds.height() - set->bottom_left->height());
-
-    // Tile the bottom image
-    canvas->TileImageInt(
-        *set->bottom,
-        set->bottom_left->width(),
-        bounds.height() - set->bottom->height(),
-        bounds.width() - set->bottom_right->width() -
-            set->bottom_left->width(),
-        set->bottom->height());
-
-    // Draw the bottom right image
-    canvas->DrawBitmapInt(*set->bottom_right,
-                          bounds.width() - set->bottom_right->width(),
-                          bounds.height() -  set->bottom_right->height());
+    Paint(view, canvas, *set);
   } else {
     // Do nothing
   }
+}
+
+void TextButtonBorder::Paint(const View& view, gfx::Canvas* canvas,
+    const MBBImageSet& set) const {
+  gfx::Rect bounds = view.bounds();
+
+  // Draw the top left image
+  canvas->DrawBitmapInt(*set.top_left, 0, 0);
+
+  // Tile the top image
+  canvas->TileImageInt(
+      *set.top,
+      set.top_left->width(),
+      0,
+      bounds.width() - set.top_right->width() - set.top_left->width(),
+      set.top->height());
+
+  // Draw the top right image
+  canvas->DrawBitmapInt(*set.top_right,
+                        bounds.width() - set.top_right->width(), 0);
+
+  // Tile the left image
+  canvas->TileImageInt(
+      *set.left,
+      0,
+      set.top_left->height(),
+      set.top_left->width(),
+      bounds.height() - set.top->height() - set.bottom_left->height());
+
+  // Tile the center image
+  canvas->TileImageInt(
+      *set.center,
+      set.left->width(),
+      set.top->height(),
+      bounds.width() - set.right->width() - set.left->width(),
+      bounds.height() - set.bottom->height() - set.top->height());
+
+  // Tile the right image
+  canvas->TileImageInt(
+      *set.right,
+      bounds.width() - set.right->width(),
+      set.top_right->height(),
+      bounds.width(),
+      bounds.height() - set.bottom_right->height() -
+          set.top_right->height());
+
+  // Draw the bottom left image
+  canvas->DrawBitmapInt(*set.bottom_left,
+                        0,
+                        bounds.height() - set.bottom_left->height());
+
+  // Tile the bottom image
+  canvas->TileImageInt(
+      *set.bottom,
+      set.bottom_left->width(),
+      bounds.height() - set.bottom->height(),
+      bounds.width() - set.bottom_right->width() -
+          set.bottom_left->width(),
+      set.bottom->height());
+
+  // Draw the bottom right image
+  canvas->DrawBitmapInt(*set.bottom_right,
+                        bounds.width() - set.bottom_right->width(),
+                        bounds.height() -  set.bottom_right->height());
 }
 
 void TextButtonBorder::GetInsets(gfx::Insets* insets) const {
@@ -158,13 +165,17 @@ void TextButtonBorder::GetInsets(gfx::Insets* insets) const {
 TextButton::TextButton(ButtonListener* listener, const std::wstring& text)
     : CustomButton(listener),
       alignment_(ALIGN_LEFT),
+      icon_placement_(ICON_ON_LEFT),
       font_(ResourceBundle::GetSharedInstance().GetFont(
           ResourceBundle::BaseFont)),
       color_(kEnabledColor),
       color_enabled_(kEnabledColor),
       color_disabled_(kDisabledColor),
       color_highlight_(kHighlightColor),
-      max_width_(0) {
+      color_hover_(kHoverColor),
+      has_hover_icon_(false),
+      max_width_(0),
+      normal_has_border_(false) {
   SetText(text);
   set_border(new TextButtonBorder);
   SetAnimationDuration(kHoverAnimationDurationMs);
@@ -186,6 +197,11 @@ void TextButton::SetIcon(const SkBitmap& icon) {
   icon_ = icon;
 }
 
+void TextButton::SetHoverIcon(const SkBitmap& icon) {
+  icon_hover_ = icon;
+  has_hover_icon_ = true;
+}
+
 void TextButton::SetFont(const gfx::Font& font) {
   font_ = font;
 }
@@ -204,8 +220,16 @@ void TextButton::SetHighlightColor(SkColor color) {
   color_highlight_ = color;
 }
 
+void TextButton::SetHoverColor(SkColor color) {
+  color_hover_ = color;
+}
+
 void TextButton::ClearMaxTextSize() {
   max_text_size_ = text_size_;
+}
+
+void TextButton::SetNormalHasBorder(bool normal_has_border) {
+  normal_has_border_ = normal_has_border;
 }
 
 void TextButton::Paint(gfx::Canvas* canvas, bool for_drag) {
@@ -221,20 +245,27 @@ void TextButton::Paint(gfx::Canvas* canvas, bool for_drag) {
       canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
       PaintBorder(canvas);
       canvas->restore();
-    } else if (state_ == BS_HOT || state_ == BS_PUSHED) {
+    } else if (state_ == BS_HOT || state_ == BS_PUSHED ||
+               (state_ == BS_NORMAL && normal_has_border_)) {
       PaintBorder(canvas);
     }
 
     PaintFocusBorder(canvas);
   }
 
+  SkBitmap icon;
+  if (has_hover_icon_ && (state() == BS_HOT || state() == BS_PUSHED))
+    icon = icon_hover_;
+  else
+    icon = icon_;
+
   gfx::Insets insets = GetInsets();
   int available_width = width() - insets.width();
   int available_height = height() - insets.height();
   // Use the actual text (not max) size to properly center the text.
   int content_width = text_size_.width();
-  if (icon_.width() > 0) {
-    content_width += icon_.width();
+  if (icon.width() > 0) {
+    content_width += icon.width();
     if (!text_.empty())
       content_width += kIconTextPadding;
   }
@@ -249,11 +280,18 @@ void TextButton::Paint(gfx::Canvas* canvas, bool for_drag) {
         std::max(0, (available_width - content_width) / 2) + insets.left();
   }
   int text_x = icon_x;
-  if (icon_.width() > 0)
-    text_x += icon_.width() + kIconTextPadding;
+  if (icon.width() > 0)
+    text_x += icon.width() + kIconTextPadding;
   const int text_width = std::min(text_size_.width(),
                                   width() - insets.right() - text_x);
   int text_y = (available_height - text_size_.height()) / 2 + insets.top();
+
+  // If the icon should go on the other side, swap the elements.
+  if (icon_placement_ == ICON_ON_RIGHT) {
+    int new_text_x = icon_x;
+    icon_x = new_text_x + text_width + kIconTextPadding;
+    text_x = new_text_x;
+  }
 
   if (text_width > 0) {
     // Because the text button can (at times) draw multiple elements on the
@@ -267,21 +305,35 @@ void TextButton::Paint(gfx::Canvas* canvas, bool for_drag) {
     gfx::Rect text_bounds(text_x, text_y, text_width, text_size_.height());
     text_bounds.set_x(MirroredLeftPointForRect(text_bounds));
 
+    SkColor text_color;
+    if (state() == BS_HOT || state() == BS_PUSHED)
+      text_color = color_hover_;
+    else
+      text_color = color_;
+
     if (for_drag) {
 #if defined(OS_WIN)
       // TODO(erg): Either port DrawStringWithHalo to linux or find an
       // alternative here.
-      canvas->DrawStringWithHalo(text_, font_, color_, color_highlight_,
+      canvas->DrawStringWithHalo(text_, font_, text_color, color_highlight_,
                                  text_bounds.x(),
                                  text_bounds.y(),
                                  text_bounds.width(),
                                  text_bounds.height(),
-                                 l10n_util::DefaultCanvasTextAlignment());
+                                 gfx::Canvas::DefaultCanvasTextAlignment());
+#else
+      canvas->DrawStringInt(text_,
+                            font_,
+                            text_color,
+                            text_bounds.x(),
+                            text_bounds.y(),
+                            text_bounds.width(),
+                            text_bounds.height());
 #endif
     } else {
       canvas->DrawStringInt(text_,
                             font_,
-                            color_,
+                            text_color,
                             text_bounds.x(),
                             text_bounds.y(),
                             text_bounds.width(),
@@ -289,13 +341,13 @@ void TextButton::Paint(gfx::Canvas* canvas, bool for_drag) {
     }
   }
 
-  if (icon_.width() > 0) {
-    int icon_y = (available_height - icon_.height()) / 2 + insets.top();
+  if (icon.width() > 0) {
+    int icon_y = (available_height - icon.height()) / 2 + insets.top();
 
     // Mirroring the icon position if necessary.
-    gfx::Rect icon_bounds(icon_x, icon_y, icon_.width(), icon_.height());
+    gfx::Rect icon_bounds(icon_x, icon_y, icon.width(), icon.height());
     icon_bounds.set_x(MirroredLeftPointForRect(icon_bounds));
-    canvas->DrawBitmapInt(icon_, icon_bounds.x(), icon_bounds.y());
+    canvas->DrawBitmapInt(icon, icon_bounds.x(), icon_bounds.y());
   }
 }
 

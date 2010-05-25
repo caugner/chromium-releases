@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// See header file for description of class
-
 #include "chrome/browser/net/dns_host_info.h"
 
 #include <math.h>
@@ -11,6 +9,8 @@
 #include <algorithm>
 #include <string>
 
+#include "base/field_trial.h"
+#include "base/format_macros.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -105,10 +105,10 @@ void DnsHostInfo::RemoveFromQueue() {
   }
   // Make a custom linear histogram for the region from 0 to boundary.
   const size_t kBucketCount = 52;
-  static LinearHistogram histogram("DNS.QueueRecycledUnder2", TimeDelta(),
-                                   kBoundary, kBucketCount);
-  histogram.SetFlags(kUmaTargetedHistogramFlag);
-  histogram.AddTime(queue_duration_);
+  static scoped_refptr<Histogram> histogram = LinearHistogram::FactoryGet(
+      "DNS.QueueRecycledUnder2", TimeDelta(), kBoundary, kBucketCount,
+      Histogram::kUmaTargetedHistogramFlag);
+  histogram->AddTime(queue_duration_);
 }
 
 void DnsHostInfo::SetPendingDeleteState() {
@@ -121,7 +121,18 @@ void DnsHostInfo::SetFoundState() {
   state_ = FOUND;
   resolve_duration_ = GetDuration();
   if (kMaxNonNetworkDnsLookupDuration <= resolve_duration_) {
-    UMA_HISTOGRAM_LONG_TIMES("DNS.PrefetchFoundNameL", resolve_duration_);
+    UMA_HISTOGRAM_CUSTOM_TIMES("DNS.PrefetchResolution", resolve_duration_,
+        kMaxNonNetworkDnsLookupDuration, TimeDelta::FromMinutes(15), 100);
+
+    static bool use_ipv6_histogram(FieldTrialList::Find("IPv6_Probe") &&
+        !FieldTrialList::Find("IPv6_Probe")->group_name().empty());
+    if (use_ipv6_histogram) {
+      UMA_HISTOGRAM_CUSTOM_TIMES(
+          FieldTrial::MakeName("DNS.PrefetchResolution", "IPv6_Probe"),
+          resolve_duration_, kMaxNonNetworkDnsLookupDuration,
+          TimeDelta::FromMinutes(15), 100);
+    }
+
     // Record potential beneficial time, and maybe we'll get a cache hit.
     // We keep the maximum, as the warming we did earlier may still be
     // helping with a cache upstream in DNS resolution.
@@ -326,7 +337,7 @@ void DnsHostInfo::GetHtmlTable(const DnsInfoTable host_infos,
   if (0 == host_infos.size())
     return;
   output->append(description);
-  StringAppendF(output, "%d %s", host_infos.size(),
+  StringAppendF(output, "%" PRIuS " %s", host_infos.size(),
                 (1 == host_infos.size()) ? "hostname" : "hostnames");
 
   if (brief) {

@@ -11,9 +11,10 @@
 
 #include "base/file_path.h"
 #include "base/process_util.h"
-
-// TODO(dkegel): share this between net/base and
-// chrome/browser without putting it in net.lib
+#if defined(USE_NSS)
+#include "base/ref_counted.h"
+#include "net/base/x509_certificate.h"
+#endif
 
 namespace net {
 
@@ -117,9 +118,8 @@ class TestServerLauncher {
   int connection_attempts_;
   int connection_timeout_;
 
-#if defined(OS_LINUX)
-  struct PrivateCERTCertificate;
-  PrivateCERTCertificate *cert_;
+#if defined(USE_NSS)
+  scoped_refptr<X509Certificate> cert_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(TestServerLauncher);

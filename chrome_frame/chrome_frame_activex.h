@@ -11,6 +11,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_comptr_win.h"
@@ -22,6 +23,8 @@
 // Include without path to make GYP build see it.
 #include "chrome_tab.h"  // NOLINT
 
+#define WM_HOST_MOVED_NOTIFICATION (WM_APP + 1)
+
 // ChromeFrameActivex: Implementation of the ActiveX control that is
 // responsible for hosting a chrome frame, i.e. an iframe like widget which
 // hosts the the chrome window. This object delegates to Chrome.exe
@@ -31,6 +34,7 @@ class ATL_NO_VTABLE ChromeFrameActivex
       public IObjectSafetyImpl<ChromeFrameActivex,
                                  INTERFACESAFE_FOR_UNTRUSTED_CALLER |
                                  INTERFACESAFE_FOR_UNTRUSTED_DATA>,
+      public IObjectWithSiteImpl<ChromeFrameActivex>,
       public IPersistPropertyBag {
  public:
   typedef ChromeFrameActivexBase<ChromeFrameActivex, CLSID_ChromeFrame> Base;
@@ -40,6 +44,7 @@ class ATL_NO_VTABLE ChromeFrameActivex
 DECLARE_REGISTRY_RESOURCEID(IDR_CHROMEFRAME)
 
 BEGIN_COM_MAP(ChromeFrameActivex)
+  COM_INTERFACE_ENTRY(IObjectWithSite)
   COM_INTERFACE_ENTRY(IObjectSafety)
   COM_INTERFACE_ENTRY(IPersistPropertyBag)
   COM_INTERFACE_ENTRY(IConnectionPointContainer)
@@ -48,12 +53,13 @@ END_COM_MAP()
 
 BEGIN_MSG_MAP(ChromeFrameActivex)
   MESSAGE_HANDLER(WM_CREATE, OnCreate)
+  MESSAGE_HANDLER(WM_HOST_MOVED_NOTIFICATION, OnHostMoved)
   CHAIN_MSG_MAP(Base)
 END_MSG_MAP()
 
   HRESULT FinalConstruct();
 
-  virtual HRESULT OnDraw(ATL_DRAWINFO& draw_info);
+  virtual HRESULT OnDraw(ATL_DRAWINFO& draw_info);  // NOLINT
 
   // IPersistPropertyBag implementation
   STDMETHOD(GetClassID)(CLSID* class_id) {
@@ -74,31 +80,40 @@ END_MSG_MAP()
 
   // Used to setup the document_url_ member needed for completing navigation.
   // Create external tab (possibly in incognito mode).
-  HRESULT IOleObject_SetClientSite(IOleClientSite *pClientSite);
+  HRESULT IOleObject_SetClientSite(IOleClientSite* client_site);
 
   // Overridden to perform security checks.
   STDMETHOD(put_src)(BSTR src);
 
+  // IChromeFrame
+  // On a fresh install of ChromeFrame the BHO will not be loaded in existing
+  // IE tabs/windows. This function instantiates the BHO and registers it
+  // explicitly.
+  STDMETHOD(registerBhoIfNeeded)();
+
  protected:
+  // ChromeFrameDelegate overrides
   virtual void OnLoad(int tab_handle, const GURL& url);
   virtual void OnMessageFromChromeFrame(int tab_handle,
                                         const std::string& message,
                                         const std::string& origin,
                                         const std::string& target);
+  virtual void OnLoadFailed(int error_code, const std::string& url);
+  virtual void OnAutomationServerLaunchFailed(
+      AutomationLaunchResult reason, const std::string& server_version);
+  virtual void OnExtensionInstalled(const FilePath& path,
+      void* user_data, AutomationMsg_ExtensionResponseValues response);
+  virtual void OnGetEnabledExtensionsComplete(
+      void* user_data,
+      const std::vector<FilePath>& extension_directories);
+  virtual void OnChannelError();
 
  private:
-
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
                    BOOL& handled);  // NO_LINT
+  LRESULT OnHostMoved(UINT message, WPARAM wparam, LPARAM lparam,
+                      BOOL& handled);  // NO_LINT
 
-  // ChromeFrameDelegate overrides
-  virtual void ChromeFrameActivex::OnAutomationServerLaunchFailed(
-      AutomationLaunchResult reason, const std::string& server_version);
-  virtual void OnLoadFailed(int error_code, const std::string& url);
-
-  // Helper function to execute a function on a script IDispatch interface.
-  HRESULT InvokeScriptFunction(const VARIANT& script, const std::string& param);
-  HRESULT InvokeScriptFunction(const VARIANT& script, VARIANT* param);
   HRESULT GetContainingDocument(IHTMLDocument2** doc);
   HRESULT GetDocumentWindow(IHTMLWindow2** window);
 
@@ -114,12 +129,6 @@ END_MSG_MAP()
                                     BSTR instance_id, BSTR script,
                                     BSTR event_name);
 
-  // Creates a new event object that supports the |data| property.
-  // Note: you should supply an empty string for |origin| unless you're
-  // creating a "message" event.
-  HRESULT CreateDomEvent(const std::string& event_type, const std::string& data,
-                         const std::string& origin, IDispatch** event);
-
   // Utility function that checks the size of the vector and if > 0 creates
   // a variant for the string argument and forwards the call to the other
   // FireEvent method.
@@ -132,8 +141,11 @@ END_MSG_MAP()
   void FireEvent(const EventHandlers& handlers, IDispatch* event,
                  BSTR target);
 
-};
+  // Installs a hook on the top-level window hosting the control.
+  HRESULT InstallTopLevelHook(IOleClientSite* client_site);
 
-OBJECT_ENTRY_AUTO(__uuidof(ChromeFrame), ChromeFrameActivex)
+  // A hook attached to the top-level window containing the ActiveX control.
+  HHOOK chrome_wndproc_hook_;
+};
 
 #endif  // CHROME_FRAME_CHROME_FRAME_ACTIVEX_H_

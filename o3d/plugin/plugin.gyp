@@ -40,6 +40,7 @@
       'cross/stream_manager.cc',
       'cross/stream_manager.h',
       'cross/texture_static_glue.cc',
+      'cross/whitelist.cc',
     ],
     'plugin_depends': [
       '../../<(jpegdir)/libjpeg.gyp:libjpeg',
@@ -50,15 +51,17 @@
       '../../v8/tools/gyp/v8.gyp:v8',
       '../core/core.gyp:o3dCore',
       '../core/core.gyp:o3dCorePlatform',
-      '../gpu_plugin/gpu_plugin.gyp:np_utils',
       '../import/archive.gyp:o3dArchive',
       '../utils/utils.gyp:o3dUtils',
       '../../native_client/src/shared/imc/imc.gyp:google_nacl_imc',
       'idl/idl.gyp:o3dPluginIdl',
     ],
+    # A comma-separated list of strings, each double-quoted.
+    'plugin_domain_whitelist%': '',
   },
   'includes': [
     '../build/common.gypi',
+    'branding.gypi',
   ],
   'target_defaults': {
     'include_dirs': [
@@ -67,16 +70,37 @@
       '../../<(gtestdir)',
     ],
     'defines': [
-      'O3D_PLUGIN_DESCRIPTION="<!(python version_info.py --description)"',
-      'O3D_PLUGIN_MIME_TYPE="<!(python version_info.py --mimetype)"',
-      'O3D_PLUGIN_NAME="<!(python version_info.py --name)"',
+      'O3D_PLUGIN_DESCRIPTION="<!(python version_info.py --set_name="<(plugin_name)" --set_npapi_mimetype="<(plugin_npapi_mimetype)" --description)"',
+      'O3D_PLUGIN_NPAPI_FILENAME="<(plugin_npapi_filename)"',
+      'O3D_PLUGIN_NPAPI_MIMETYPE="<(plugin_npapi_mimetype)"',
+      'O3D_PLUGIN_NAME="<(plugin_name)"',
       'O3D_PLUGIN_VERSION="<!(python version_info.py --version)"',
+      'O3D_PLUGIN_INSTALLDIR_CSIDL=<(plugin_installdir_csidl)',
+      'O3D_PLUGIN_VENDOR_DIRECTORY="<(plugin_vendor_directory)"',
+      'O3D_PLUGIN_PRODUCT_DIRECTORY="<(plugin_product_directory)"',
+    ],
+    'conditions': [
+      # The funky quoting here is so that GYP doesn't shoot itself in the foot
+      # when expanding a quoted variable which itself contains quotes.
+      ["""'<(plugin_domain_whitelist)' != ''""",
+        {
+          'defines': [
+            'O3D_PLUGIN_DOMAIN_WHITELIST=<(plugin_domain_whitelist)',
+          ],
+        },
+      ],
     ],
   },
   'targets': [
     {
       # This is the shared library version of the plugin.
-      'target_name': 'npo3dautoplugin',
+      'variables': {
+        # Default values. Can be overridden with GYP_DEFINES for ease of
+        # repackaging.
+        'plugin_rpath%'         : '/opt/google/o3d/lib',      # empty => none
+        'plugin_env_vars_file%' : '/opt/google/o3d/envvars',  # empty => none
+      },
+      'target_name': '<(plugin_npapi_filename)',
       'type': 'loadable_module',
       'dependencies': [
         '<@(plugin_depends)',
@@ -103,6 +127,13 @@
             ],
           },
         ],
+        ['renderer == "gles2"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:gles2_libs',
+            ],
+          },
+        ],
         ['OS == "mac"',
           {
             'mac_bundle': 1,
@@ -119,12 +150,12 @@
             ],
             'sources': [
               'mac/config_mac.mm',
-              'mac/main_mac.mm',
               'mac/o3d_plugin.r',
               'mac/plugin_logging-mac.mm',
               'mac/plugin_mac.h',
               'mac/plugin_mac.mm',
               'mac/graphics_utils_mac.mm',
+              'mac/main_mac.mm',
             ],
             'mac_framework_dirs': [
               '../../<(cgdir)',
@@ -174,6 +205,8 @@
                 'postbuild_name': 'Process Resource File',
                 'action': ['python',
                   'version_info.py',
+                  '--set_name=<(plugin_name)',
+                  '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
                   'mac/o3d_plugin.r',
                   '${BUILT_PRODUCTS_DIR}/O3D.r',
                 ],
@@ -192,14 +225,50 @@
         ['OS == "linux"',
           {
             'sources': [
-              'linux/main_linux.cc',
               'linux/config.cc',
+              'linux/envvars.cc',
+              'linux/main_linux.cc',
             ],
-            'link_settings': {
-              'libraries': [
-                '-lGL',
+            'ldflags': [
+              '-Wl,-znodelete',
+              '-Wl,--gc-sections',
+              '<!@(pkg-config --libs-only-L xt)',
+              # The Cg libs use three other libraries without linking to them,
+              # which breaks --as-needed, so we have to specify them here before
+              # the --as-needed flag.
+              '-lGL',       # Used by libCgGL
+              '-lpthread',  # Used by libCg
+              '-lm',        # Used by libCg
+              # GYP dumps all static and shared libraries into one archive group
+              # on the command line in arbitrary order, which breaks
+              # --as-needed, so we have to specify the out-of-order ones before
+              # the --as-needed flag.
+              '-lCgGL',
+              '-lGLEW',
+              '-lrt',
+              # Directs the linker to only generate dependencies on libraries
+              # that we actually use. Must come last.
+              '-Wl,--as-needed',
+            ],
+            'libraries': [
+              '<!@(pkg-config --libs-only-l xt)',
+            ],
+            'conditions' : [
+              ['plugin_rpath != ""',
+                {
+                  'ldflags': [
+                    '-Wl,-rpath', '-Wl,<(plugin_rpath)',
+                  ],
+                },
               ],
-            },
+              ['plugin_env_vars_file != ""',
+                {
+                  'defines': [
+                    'O3D_PLUGIN_ENV_VARS_FILE="<(plugin_env_vars_file)"',
+                  ],
+                },
+              ],
+            ],
           },
         ],
         ['OS == "win"',
@@ -231,14 +300,6 @@
               'libraries': [
                 '"$(DXSDK_DIR)/Lib/x86/d3dx9.lib"',
                 '-ld3d9.lib',
-              ],
-            },
-          },
-        ],
-        ['OS == "win" and (renderer == "d3d9" or cb_service == "d3d9")',
-          {
-            'link_settings': {
-              'libraries': [
                 '"$(DXSDK_DIR)/Lib/x86/DxErr.lib"',
               ],
             },
@@ -255,6 +316,12 @@
         # tree.
         'targets': [
           {
+            'variables': {
+              # By default the built-in Chrome version does not read an env
+              # vars file, but this can be overridden by giving a different
+              # value for this.
+              'plugin_env_vars_file%' : '',
+            },
             'target_name': 'o3dPlugin',
             'type': 'static_library',
             'dependencies': [
@@ -279,6 +346,13 @@
                   'dependencies': [
                     '../build/libs.gyp:gl_libs',
                     '../build/libs.gyp:cg_libs',
+                  ],
+                },
+              ],
+              ['renderer == "gles2"',
+                {
+                  'dependencies': [
+                    '../build/libs.gyp:gles2_libs',
                   ],
                 },
               ],
@@ -335,6 +409,7 @@
                   'sources': [
                     'linux/main_linux.cc',
                     'linux/config.cc',
+                    'linux/envvars.cc',
                   ],
                   'link_settings': {
                     'libraries': [
@@ -351,6 +426,15 @@
                         '<(PRODUCT_DIR)/obj/o3d/plugin/<(SHARED_LIB_PREFIX)<(_target_name)<(SHARED_LIB_SUFFIX)',
                       ],
                     },
+                  ],
+                  'conditions' : [
+                    ['plugin_env_vars_file != ""',
+                      {
+                        'defines': [
+                          'O3D_PLUGIN_ENV_VARS_FILE="<(plugin_env_vars_file)"',
+                        ],
+                      },
+                    ],
                   ],
                 },
               ],
@@ -387,7 +471,7 @@
                   },
                 },
               ],
-              ['OS == "win" and (renderer == "d3d9" or cb_service == "d3d9")',
+              ['OS == "win" and renderer == "d3d9"',
                 {
                   'link_settings': {
                     'libraries': [
@@ -431,7 +515,7 @@
             'type': 'none',
             'actions': [
               {
-                'action_name': 'add_version',
+                'action_name': 'add_version_rc',
                 'inputs': [
                   'version_info.py',
                 ],
@@ -446,6 +530,9 @@
                       ],
                       'action': ['python',
                         'version_info.py',
+                        '--set_name=<(plugin_name)',
+                        '--set_npapi_filename=<(plugin_npapi_filename)',
+                        '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
                         'win/o3dPlugin.rc_template',
                         'win/o3dPlugin.rc'],
                     },
@@ -460,6 +547,8 @@
                       ],
                       'action': ['python',
                         'version_info.py',
+                        '--set_name=<(plugin_name)',
+                        '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
                         'mac/Info.plist',
                         '<(SHARED_INTERMEDIATE_DIR)/plugin/Info.plist',
                       ],
@@ -467,6 +556,29 @@
                   ],
                 ],
               },
+            ],
+            'conditions': [
+              ['OS=="win"',
+                {
+                  'actions': [
+                    {
+                      'action_name': 'add_version_def',
+                      'inputs': [
+                        'version_info.py',
+                        'win/o3dPlugin.def_template',
+                      ],
+                      'outputs': [
+                        'win/o3dPlugin.def',
+                      ],
+                      'action': ['python',
+                        'version_info.py',
+                        '--set_npapi_filename=<(plugin_npapi_filename)',
+                        'win/o3dPlugin.def_template',
+                        'win/o3dPlugin.def'],
+                    },
+                  ],
+                },
+              ],
             ],
           },
         ],
@@ -476,8 +588,66 @@
       {
         'targets': [
           {
+            'target_name': 'gen_host_control_rgs',
+            'type': 'none',
+            'actions': [
+              {
+                'action_name': 'gen_host_control_rgs',
+                'inputs': [
+                  'version_info.py',
+                  'npapi_host_control/win/host_control.rgs_template',
+                ],
+                'outputs': [
+                  'npapi_host_control/win/host_control.rgs',
+                ],
+                'action': ['python',
+                  'version_info.py',
+                  '--set_activex_hostcontrol_clsid=' +
+                      '<(plugin_activex_hostcontrol_clsid)',
+                  '--set_activex_typelib_clsid=<(plugin_activex_typelib_clsid)',
+                  '--set_activex_hostcontrol_name=' +
+                      '<(plugin_activex_hostcontrol_name)',
+                  '--set_activex_typelib_name=<(plugin_activex_typelib_name)',
+                  'npapi_host_control/win/host_control.rgs_template',
+                  'npapi_host_control/win/host_control.rgs',
+                ],
+              },
+            ],
+          },
+          {
+            'target_name': 'gen_npapi_host_control_idl',
+            'type': 'none',
+            'actions': [
+              {
+                'action_name': 'gen_npapi_host_control_idl',
+                'inputs': [
+                  'version_info.py',
+                  'npapi_host_control/win/npapi_host_control.idl_template',
+                ],
+                'outputs': [
+                  'npapi_host_control/win/npapi_host_control.idl',
+                ],
+                'action': ['python',
+                  'version_info.py',
+                  '--set_activex_hostcontrol_clsid=' +
+                      '<(plugin_activex_hostcontrol_clsid)',
+                  '--set_activex_typelib_clsid=<(plugin_activex_typelib_clsid)',
+                  '--set_activex_hostcontrol_name=' +
+                      '<(plugin_activex_hostcontrol_name)',
+                  '--set_activex_typelib_name=<(plugin_activex_typelib_name)',
+                  'npapi_host_control/win/npapi_host_control.idl_template',
+                  'npapi_host_control/win/npapi_host_control.idl',
+                ],
+              },
+            ],
+          },
+          {
             'target_name': 'o3d_host',
             'type': 'shared_library',
+            'dependencies': [
+              'gen_host_control_rgs',
+              'gen_npapi_host_control_idl',
+            ],
             'include_dirs': [
               '<(INTERMEDIATE_DIR)',
             ],
@@ -529,27 +699,20 @@
               'UseOfATL': '1', # 1 = static link to ATL, 2 = dynamic link
             },
           },
+        ],
+      },
+    ],
+    # If compiling with re-branding, we alias the branded NPAPI target name to
+    # the unbranded one so that targets depending on it can just refer to it
+    # by a constant name.
+    ['"<(plugin_npapi_filename)" != "npo3dautoplugin"', 
+      {
+        'targets': [
           {
-            'target_name': 'o3d_host_register',
+            'target_name': 'npo3dautoplugin',
             'type': 'none',
             'dependencies': [
-              'o3d_host',
-            ],
-            'actions': [
-              {
-                'action_name': 'register_o3d_host',
-                'inputs': [
-                  '<(PRODUCT_DIR)/o3d_host.dll',
-                ],
-                'outputs': [
-                  'file_that_never_exists_so_this_action_always_runs',
-                ],
-                'action': [
-                  'regsvr32',
-                  '/s',
-                  '<(_inputs)',
-                ],
-              },
+              '<(plugin_npapi_filename)',
             ],
           },
         ],

@@ -168,42 +168,35 @@
 #include "third_party/bzip2/bzlib.h"
 #endif
 
-#include "base/file_path.h"
-#include "base/histogram.h"
-#include "base/path_service.h"
-#include "base/platform_thread.h"
-#include "base/rand_util.h"
-#include "base/string_util.h"
-#include "base/task.h"
+#include "base/thread.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/memory_details.h"
+#include "chrome/browser/metrics/histogram_synchronizer.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/child_process_info.h"
-#include "chrome/common/chrome_paths.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/histogram_synchronizer.h"
-#include "chrome/common/libxml_utils.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
-#include "googleurl/src/gurl.h"
-#include "net/base/load_flags.h"
 #include "webkit/glue/plugins/plugin_list.h"
 
-#if defined(OS_POSIX)
-// TODO(port): Move these headers above as they are ported.
-#include "chrome/common/temp_scaffolding_stubs.h"
-#else
+#if !defined(OS_WIN)
+#include "base/rand_util.h"
+#endif
+
+// TODO(port): port browser_distribution.h.
+#if !defined(OS_POSIX)
 #include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/google_update_settings.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/external_metrics.h"
 #endif
 
 using base::Time;
@@ -283,6 +276,8 @@ class MetricsMemoryDetails : public MemoryDetails {
   }
 
  private:
+  ~MetricsMemoryDetails() {}
+
   Task* completion_;
   DISALLOW_EVIL_CONSTRUCTORS(MetricsMemoryDetails);
 };
@@ -323,8 +318,8 @@ void MetricsService::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterInt64Pref(prefs::kMetricsClientIDTimestamp, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLaunchTimeSec, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLastTimestampSec, 0);
-  local_state->RegisterInt64Pref(prefs::kStabilityUptimeSec, 0);
   local_state->RegisterStringPref(prefs::kStabilityStatsVersion, L"");
+  local_state->RegisterInt64Pref(prefs::kStabilityStatsBuildTime, 0);
   local_state->RegisterBooleanPref(prefs::kStabilityExitedCleanly, true);
   local_state->RegisterBooleanPref(prefs::kStabilitySessionEndCompleted, true);
   local_state->RegisterIntegerPref(prefs::kMetricsSessionID, -1);
@@ -333,10 +328,11 @@ void MetricsService::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterIntegerPref(prefs::kStabilityIncompleteSessionEndCount,
                                    0);
   local_state->RegisterIntegerPref(prefs::kStabilityPageLoadCount, 0);
-  local_state->RegisterIntegerPref(prefs::kSecurityRendererOnSboxDesktop, 0);
-  local_state->RegisterIntegerPref(prefs::kSecurityRendererOnDefaultDesktop, 0);
   local_state->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
+  local_state->RegisterIntegerPref(prefs::kStabilityExtensionRendererCrashCount,
+                                   0);
   local_state->RegisterIntegerPref(prefs::kStabilityRendererHangCount, 0);
+  local_state->RegisterIntegerPref(prefs::kStabilityChildProcessCrashCount, 0);
   local_state->RegisterIntegerPref(prefs::kStabilityBreakpadRegistrationFail,
                                    0);
   local_state->RegisterIntegerPref(prefs::kStabilityBreakpadRegistrationSuccess,
@@ -380,12 +376,8 @@ void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
   local_state->SetInteger(prefs::kStabilityRendererCrashCount, 0);
   local_state->SetInteger(prefs::kStabilityRendererHangCount, 0);
 
-  local_state->SetInteger(prefs::kSecurityRendererOnSboxDesktop, 0);
-  local_state->SetInteger(prefs::kSecurityRendererOnDefaultDesktop, 0);
-
-  local_state->SetString(prefs::kStabilityLaunchTimeSec, L"0");
-  local_state->SetString(prefs::kStabilityLastTimestampSec, L"0");
-  local_state->SetString(prefs::kStabilityUptimeSec, L"0");
+  local_state->SetInt64(prefs::kStabilityLaunchTimeSec, 0);
+  local_state->SetInt64(prefs::kStabilityLastTimestampSec, 0);
 
   local_state->ClearPref(prefs::kStabilityPluginStats);
 
@@ -472,6 +464,7 @@ void MetricsService::SetRecording(bool enabled) {
                         Int64ToWString(Time::Now().ToTimeT()));
       }
     }
+    child_process_logging::SetClientId(client_id_);
     StartRecording();
 
     registrar_.Add(this, NotificationType::BROWSER_OPENED,
@@ -487,8 +480,6 @@ void MetricsService::SetRecording(bool enabled) {
     registrar_.Add(this, NotificationType::LOAD_START,
                    NotificationService::AllSources());
     registrar_.Add(this, NotificationType::LOAD_STOP,
-                   NotificationService::AllSources());
-    registrar_.Add(this, NotificationType::RENDERER_PROCESS_IN_SBOX,
                    NotificationService::AllSources());
     registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
                    NotificationService::AllSources());
@@ -545,7 +536,7 @@ void MetricsService::Observe(NotificationType type,
 
   switch (type.value) {
     case NotificationType::USER_ACTION:
-        current_log_->RecordUserAction(*Details<const wchar_t*>(details).ptr());
+        current_log_->RecordUserAction(*Details<const char*>(details).ptr());
       break;
 
     case NotificationType::BROWSER_OPENED:
@@ -567,16 +558,21 @@ void MetricsService::Observe(NotificationType type,
       break;
 
     case NotificationType::RENDERER_PROCESS_CLOSED:
-      if (*Details<bool>(details).ptr())
-        LogRendererCrash();
+      {
+        RenderProcessHost::RendererClosedDetails* process_details =
+            Details<RenderProcessHost::RendererClosedDetails>(details).ptr();
+        if (process_details->did_crash) {
+          if (process_details->was_extension_renderer) {
+            LogExtensionRendererCrash();
+          } else {
+            LogRendererCrash();
+          }
+        }
+      }
       break;
 
     case NotificationType::RENDERER_PROCESS_HANG:
       LogRendererHang();
-      break;
-
-    case NotificationType::RENDERER_PROCESS_IN_SBOX:
-      LogRendererInSandbox(*Details<bool>(details).ptr());
       break;
 
     case NotificationType::CHILD_PROCESS_HOST_CONNECTED:
@@ -665,13 +661,17 @@ void MetricsService::InitializeMetricsState() {
   PrefService* pref = g_browser_process->local_state();
   DCHECK(pref);
 
-  if (WideToUTF8(pref->GetString(prefs::kStabilityStatsVersion)) !=
-      MetricsLog::GetVersionString()) {
+  if ((pref->GetInt64(prefs::kStabilityStatsBuildTime)
+       != MetricsLog::GetBuildTime()) ||
+      (WideToUTF8(pref->GetString(prefs::kStabilityStatsVersion))
+       != MetricsLog::GetVersionString())) {
     // This is a new version, so we don't want to confuse the stats about the
     // old version with info that we upload.
     DiscardOldStabilityStats(pref);
     pref->SetString(prefs::kStabilityStatsVersion,
                     UTF8ToWide(MetricsLog::GetVersionString()));
+    pref->SetInt64(prefs::kStabilityStatsBuildTime,
+                   MetricsLog::GetBuildTime());
   }
 
   // Update session ID
@@ -695,25 +695,12 @@ void MetricsService::InitializeMetricsState() {
     pref->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
   }
 
-  int64 last_start_time = pref->GetInt64(prefs::kStabilityLaunchTimeSec);
-  int64 last_end_time = pref->GetInt64(prefs::kStabilityLastTimestampSec);
-  int64 uptime = pref->GetInt64(prefs::kStabilityUptimeSec);
-
-  // Same idea as uptime, except this one never gets reset and is used at
-  // uninstallation.
-  int64 uninstall_metrics_uptime =
-      pref->GetInt64(prefs::kUninstallMetricsUptimeSec);
-
-  if (last_start_time && last_end_time) {
-    // TODO(JAR): Exclude sleep time.  ... which must be gathered in UI loop.
-    int64 uptime_increment = last_end_time - last_start_time;
-    uptime += uptime_increment;
-    pref->SetInt64(prefs::kStabilityUptimeSec, uptime);
-
-    uninstall_metrics_uptime += uptime_increment;
-    pref->SetInt64(prefs::kUninstallMetricsUptimeSec,
-                   uninstall_metrics_uptime);
-  }
+  // Initialize uptime counters.
+  int64 startup_uptime = MetricsLog::GetIncrementalUptime(pref);
+  DCHECK(0 == startup_uptime);
+  // For backwards compatibility, leave this intact in case Omaha is checking
+  // them.  prefs::kStabilityLastTimestampSec may also be useless now.
+  // TODO(jar): Delete these if they have no uses.
   pref->SetInt64(prefs::kStabilityLaunchTimeSec, Time::Now().ToTimeT());
 
   // Bookkeeping for the uninstall metrics.
@@ -790,11 +777,11 @@ std::string MetricsService::GenerateClientID() {
 // TODO(cmasone): Once we're comfortable this works, migrate Windows code to
 // use this as well.
 std::string MetricsService::RandomBytesToGUIDString(const uint64 bytes[2]) {
-  return StringPrintf("%08llX-%04llX-%04llX-%04llX-%012llX",
-                      bytes[0] >> 32,
-                      (bytes[0] >> 16) & 0x0000ffff,
-                      bytes[0] & 0x0000ffff,
-                      bytes[1] >> 48,
+  return StringPrintf("%08X-%04X-%04X-%04X-%012llX",
+                      static_cast<unsigned int>(bytes[0] >> 32),
+                      static_cast<unsigned int>((bytes[0] >> 16) & 0x0000ffff),
+                      static_cast<unsigned int>(bytes[0] & 0x0000ffff),
+                      static_cast<unsigned int>(bytes[1] >> 48),
                       bytes[1] & 0x0000ffffffffffffULL);
 }
 #endif
@@ -953,7 +940,7 @@ void MetricsService::LogTransmissionTimerDone() {
   Task* task = log_sender_factory_.
       NewRunnableMethod(&MetricsService::OnMemoryDetailCollectionDone);
 
-  MetricsMemoryDetails* details = new MetricsMemoryDetails(task);
+  scoped_refptr<MetricsMemoryDetails> details = new MetricsMemoryDetails(task);
   details->StartFetch();
 
   // Collect WebCore cache information to put into a histogram.
@@ -1674,17 +1661,12 @@ void MetricsService::LogLoadStarted() {
   // might be lost due to a crash :-(.
 }
 
-void MetricsService::LogRendererInSandbox(bool on_sandbox_desktop) {
-  PrefService* prefs = g_browser_process->local_state();
-  DCHECK(prefs);
-  if (on_sandbox_desktop)
-    IncrementPrefValue(prefs::kSecurityRendererOnSboxDesktop);
-  else
-    IncrementPrefValue(prefs::kSecurityRendererOnDefaultDesktop);
-}
-
 void MetricsService::LogRendererCrash() {
   IncrementPrefValue(prefs::kStabilityRendererCrashCount);
+}
+
+void MetricsService::LogExtensionRendererCrash() {
+  IncrementPrefValue(prefs::kStabilityExtensionRendererCrashCount);
 }
 
 void MetricsService::LogRendererHang() {
@@ -1697,7 +1679,6 @@ void MetricsService::LogChildProcessChange(
     const NotificationDetails& details) {
   Details<ChildProcessInfo> child_details(details);
   const std::wstring& child_name = child_details->name();
-
 
   if (child_process_stats_buffer_.find(child_name) ==
       child_process_stats_buffer_.end()) {
@@ -1717,6 +1698,11 @@ void MetricsService::LogChildProcessChange(
 
     case NotificationType::CHILD_PROCESS_CRASHED:
       stats.process_crashes++;
+      // Exclude plugin crashes from the count below because we report them via
+      // a separate UMA metric.
+      if (child_details->type() != ChildProcessInfo::PLUGIN_PROCESS) {
+        IncrementPrefValue(prefs::kStabilityChildProcessCrashCount);
+      }
       break;
 
     default:
@@ -1879,7 +1865,7 @@ void MetricsService::RecordCurrentHistograms() {
   for (StatisticsRecorder::Histograms::iterator it = histograms.begin();
        histograms.end() != it;
        ++it) {
-    if ((*it)->flags() & kUmaTargetedHistogramFlag)
+         if ((*it)->flags() & Histogram::kUmaTargetedHistogramFlag)
       // TODO(petersont): Only record historgrams if they are not precluded by
       // the UMA response data.
       // Bug http://code.google.com/p/chromium/issues/detail?id=2739.
@@ -1916,34 +1902,16 @@ void MetricsService::RecordHistogram(const Histogram& histogram) {
   }
 }
 
-void MetricsService::AddProfileMetric(Profile* profile,
-                                      const std::wstring& key,
-                                      int value) {
-  // Restriction of types is needed for writing values. See
-  // MetricsLog::WriteProfileMetrics.
-  DCHECK(profile && !key.empty());
-  PrefService* prefs = g_browser_process->local_state();
-  DCHECK(prefs);
-
-  // Key is stored in prefs, which interpret '.'s as paths. As such, key
-  // shouldn't have any '.'s in it.
-  DCHECK(key.find(L'.') == std::wstring::npos);
-  // The id is most likely an email address. We shouldn't send it to the server.
-  const std::wstring id_hash =
-      UTF8ToWide(MetricsLog::CreateBase64Hash(WideToUTF8(profile->GetID())));
-  DCHECK(id_hash.find('.') == std::string::npos);
-
-  DictionaryValue* prof_prefs = prefs->GetMutableDictionary(
-      prefs::kProfileMetrics);
-  DCHECK(prof_prefs);
-  const std::wstring pref_key = std::wstring(prefs::kProfilePrefix) + id_hash +
-      L"." + key;
-  prof_prefs->SetInteger(pref_key.c_str(), value);
-}
-
 static bool IsSingleThreaded() {
   static PlatformThreadId thread_id = 0;
   if (!thread_id)
     thread_id = PlatformThread::CurrentId();
   return PlatformThread::CurrentId() == thread_id;
 }
+
+#if defined(OS_CHROMEOS)
+void MetricsService::StartExternalMetrics(Profile* profile) {
+  external_metrics_ = new chromeos::ExternalMetrics;
+  external_metrics_->Start(profile);
+}
+#endif

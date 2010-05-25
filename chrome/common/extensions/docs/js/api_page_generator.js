@@ -38,8 +38,8 @@ var typeModule = {};
 // Auto-created page name as default
 var pageName;
 
-// If this page is an apiModule, the title of the api module
-var apiModuleTitle;
+// If this page is an apiModule, the name of the api module
+var apiModuleName;
 
 Array.prototype.each = function(f) {
   for (var i = 0; i < this.length; i++) {
@@ -78,13 +78,13 @@ function extend(obj, obj2) {
  * render the template from |pageData|.
  */
 function renderPage() {
-  var pathParts = document.location.href.split(/\/|\./);
-  pageBase = pathParts[pathParts.length - 2];
+  // The page name minus the ".html" extension.
+  pageBase = document.location.href.match(/\/([^\/]*)\.html/)[1];
   if (!pageBase) {
     alert("Empty page name for: " + document.location.href);
     return;
   }
-  
+
   pageName = pageBase.replace(/([A-Z])/g, " $1");
   pageName = pageName.substring(0, 1).toUpperCase() + pageName.substring(1);
 
@@ -94,7 +94,7 @@ function renderPage() {
     fetchStatic();
   }, function(error) {
     alert("Failed to load " + API_TEMPLATE + ". " + error);
-  });	
+  });
 }
 
 function fetchStatic() {
@@ -115,7 +115,7 @@ function fetchSchema() {
   fetchContent(SCHEMA, function(schemaContent) {
     schema = JSON.parse(schemaContent);
     renderTemplate();
-    
+
   }, function(error) {
     alert("Failed to load " + SCHEMA);
   });
@@ -169,12 +169,16 @@ function fetchContent(url, onSuccess, onError) {
 function renderTemplate() {
   schema.each(function(mod) {
     if (mod.namespace == pageBase) {
+      // Do not render page for modules which are marked as "nodoc": true.
+      if (mod.nodoc) {
+        return;
+      }
       // This page is an api page. Setup types and apiDefinition.
       module = mod;
-      apiModuleTitle = "chrome." + module.namespace;  
+      apiModuleName = "chrome." + module.namespace;
       pageData.apiDefinition = module;
     }
-    
+
     if (mod.types) {
       mod.types.each(function(type) {
         typeModule[type.id] = mod;
@@ -188,7 +192,7 @@ function renderTemplate() {
   jstProcess(input, output);
 
   selectCurrentPageOnLeftNav();
-  
+
   document.title = getPageTitle();
   // Show
   if (window.postRender)
@@ -200,7 +204,8 @@ function renderTemplate() {
 
 function removeJsTemplateAttributes(root) {
   var jsattributes = ["jscontent", "jsselect", "jsdisplay", "transclude",
-                      "jsvalues", "jsvars", "jseval", "jsskip", "jstcache"];
+                      "jsvalues", "jsvars", "jseval", "jsskip", "jstcache",
+                      "jsinstance"];
 
   var nodes = root.getElementsByTagName("*");
   for (var i = 0; i < nodes.length; i++) {
@@ -224,7 +229,7 @@ function evalXPathFromNode(expression, node) {
   while(n = results.iterateNext()) {
     retval.push(n);
   }
-  
+
   return retval;
 }
 
@@ -232,7 +237,7 @@ function evalXPathFromId(expression, id) {
   return evalXPathFromNode(expression, document.getElementById(id));
 }
 
-// Select the current page on the left nav. Note: if already rendered, this 
+// Select the current page on the left nav. Note: if already rendered, this
 // will not effect any nodes.
 function selectCurrentPageOnLeftNav() {
   function finalPathPart(str) {
@@ -240,10 +245,10 @@ function selectCurrentPageOnLeftNav() {
     var lastPart = pathParts[pathParts.length - 1];
     return lastPart.split(/\?/)[0];
   }
-  
+
   var pageBase = finalPathPart(document.location.href);
-  
-  evalXPathFromId(".//li/a", "leftNav").select(function(node) {
+
+  evalXPathFromId(".//li/a", "gc-toc").select(function(node) {
     if (pageBase == finalPathPart(node.href)) {
       var parent = node.parentNode;
       if (node.firstChild.nodeName == 'DIV') {
@@ -254,7 +259,7 @@ function selectCurrentPageOnLeftNav() {
       parent.removeChild(node);
       parent.insertBefore(node.firstChild, parent.firstChild);
       return true;
-    }  
+    }
   });
 }
 
@@ -262,6 +267,22 @@ function selectCurrentPageOnLeftNav() {
  * Template Callout Functions
  * The jstProcess() will call out to these functions from within the page template
  */
+
+function stableAPIs() {
+  return schema.filter(function(module) {
+    return !module.nodoc && module.namespace.indexOf("experimental") < 0;
+  }).map(function(module) {
+    return module.namespace;
+  }).sort();
+}
+ 
+function experimentalAPIs() {
+  return schema.filter(function(module) {
+    return !module.nodoc && module.namespace.indexOf("experimental") == 0;
+  }).map(function(module) {
+    return module.namespace;
+  }).sort();
+}
 
 function getDataFromPageHTML(id) {
   var node = document.getElementById(id);
@@ -282,11 +303,15 @@ function showPageTOC() {
   return module || getDataFromPageHTML('pageData-showTOC');
 }
 
+function showSideNav() {
+  return getDataFromPageHTML("pageData-showSideNav") != "false";
+}
+
 function getStaticTOC() {
   var staticHNodes = evalXPathFromId(".//h2|h3", "static");
   var retval = [];
   var lastH2;
-  
+
   staticHNodes.each(function(n, i) {
     var anchorName = n.id || n.nodeName + "-" + i;
     if (!n.id) {
@@ -295,7 +320,7 @@ function getStaticTOC() {
       n.parentNode.insertBefore(a, n);
     }
     var dataNode = { name: n.innerHTML, href: anchorName };
-    
+
     if (n.nodeName == "H2") {
       retval.push(dataNode);
       lastH2 = dataNode;
@@ -304,7 +329,7 @@ function getStaticTOC() {
       lastH2.children.push(dataNode);
     }
   });
-   
+
   return retval;
 }
 
@@ -312,10 +337,24 @@ function getTypeRefPage(type) {
   return typeModule[type.$ref].namespace + ".html";
 }
 
+function getPageName() {
+  var pageDataName = getDataFromPageHTML("pageData-name");
+  // Allow empty string to be explitly set via pageData.
+  if (pageDataName == "") {
+    return pageDataName;
+  }
+
+  return pageDataName || apiModuleName || pageName;
+}
+
 function getPageTitle() {
-  return getDataFromPageHTML("pageData-title") || 
-         apiModuleTitle || 
-         pageName;
+  var pageName = getPageName();
+  var pageTitleSuffix = "Google Chrome Extensions - Google Code";
+  if (pageName == "") {
+    return pageTitleSuffix;
+  }
+
+  return pageName + " - " + pageTitleSuffix;
 }
 
 function getModuleName() {
@@ -365,6 +404,9 @@ function getTypeName(schema) {
   if (schema.type == "array")
     return "array of " + getTypeName(schema.items);
 
+  if (schema.isInstanceOf)
+    return schema.isInstanceOf;
+
   return schema.type;
 }
 
@@ -374,7 +416,7 @@ function getSignatureString(parameters) {
     retval.push(getTypeName(param) + " " + param.name);
   });
 
-  return retval.join(", ");	
+  return retval.join(", ");
 }
 
 function sortByName(a, b) {

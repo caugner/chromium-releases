@@ -9,18 +9,17 @@
 
 #include <string>
 
-#include "app/gfx/font.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_nsobject.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
+#include "gfx/font.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompletePopupModel;
 class AutocompleteEditModel;
 class AutocompleteEditViewMac;
-@class AutocompleteMatrixTarget;
 class Profile;
 
 // Implements AutocompletePopupView using a raw NSWindow containing an
@@ -66,17 +65,16 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
   // everything.  Popup should already be visible.
   virtual void PaintUpdatesNow();
 
+  virtual void OnDragCanceled() {}
+
   // Returns the popup's model.
   virtual AutocompletePopupModel* GetModel();
 
-  // Updates model_'s sense of selected line from the UI before
-  // calling edit_view_'s AcceptInput().  Used by internal Objective-C
-  // helper object.
-  void AcceptInput();
-
-  // Called when the user middle-clicks an item.  Opens the hovered
-  // item in a background tab.
-  void OnMiddleClick();
+  // Opens the URL corresponding to the given |row|.  If |force_background| is
+  // true, forces the URL to open in a background tab.  Otherwise, determines
+  // the proper window open disposition from the modifier flags on |[NSApp
+  // currentEvent]|.
+  void OpenURLForRow(int row, bool force_background);
 
   // Return the text to show for the match, based on the match's
   // contents and description.  Result will be in |font|, with the
@@ -114,10 +112,7 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
   const BubblePositioner* bubble_positioner_;  // owned by toolbar controller
   NSTextField* field_;  // owned by tab controller
 
-  scoped_nsobject<AutocompleteMatrixTarget> matrix_target_;
-  // TODO(shess): Before checkin review implementation to make sure
-  // that popup_'s object hierarchy doesn't keep references to
-  // destructed objects.
+  // Child window containing a matrix which implements the popup.
   scoped_nsobject<NSWindow> popup_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompletePopupViewMac);

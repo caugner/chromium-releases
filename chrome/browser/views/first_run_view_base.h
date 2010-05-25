@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 namespace views {
 class Checkbox;
+class Label;
 class Window;
 class ImageView;
 class Separator;
@@ -24,10 +25,12 @@ class ImporterHost;
 // first-run dialogs. This amounts to the bitmap, the two separators, the
 // progress throbber and some common resize code.
 class FirstRunViewBase : public views::View,
+                         public views::ButtonListener,
                          public views::DialogDelegate {
  public:
   explicit FirstRunViewBase(Profile* profile, bool homepage_defined,
-                            int import_items, int dont_import_items);
+                            int import_items, int dont_import_items,
+                            bool search_engine_experiment);
   virtual ~FirstRunViewBase();
 
   // Overridden from views::View.
@@ -38,6 +41,9 @@ class FirstRunViewBase : public views::View,
   virtual bool CanMaximize() const;
   virtual bool IsAlwaysOnTop() const;
   virtual bool HasAlwaysOnTopMenu() const;
+
+  // Overridden form views::ButtonListener.
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Overridden from views::DialogDelegate.
   std::wstring GetDialogButtonLabel(MessageBoxFlags::DialogButton button) const;
@@ -81,11 +87,13 @@ class FirstRunViewBase : public views::View,
   scoped_refptr<ImporterHost> importer_host_;
   Profile* profile_;
   views::Checkbox* default_browser_;
+  views::Label* non_default_browser_label_;
 
  protected:
   bool homepage_defined_;
   int import_items_;
   int dont_import_items_;
+  bool search_engine_experiment_;
 
  private:
   // Initializes the controls on the dialog.

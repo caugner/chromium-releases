@@ -5,15 +5,20 @@
 #include "chrome/browser/gtk/rounded_window.h"
 
 #include <gtk/gtk.h>
+#include <math.h>
 
-#include "app/l10n_util.h"
-#include "chrome/common/gtk_util.h"
+#include "base/i18n/rtl.h"
+#include "chrome/browser/gtk/gtk_util.h"
 
 namespace gtk_util {
 
 namespace {
 
 const char* kRoundedData = "rounded-window-data";
+
+// If the border radius is less than |kMinRoundedBorderSize|, we don't actually
+// round the corners, we just truncate the corner.
+const int kMinRoundedBorderSize = 8;
 
 struct RoundedWindowData {
   // Expected window size. Used to detect when we need to reshape the window.
@@ -55,7 +60,7 @@ std::vector<GdkPoint> MakeFramePolygonPoints(RoundedWindowData* data,
 
   std::vector<GdkPoint> points;
 
-  bool ltr = l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT;
+  bool ltr = !base::i18n::IsRTL();
   // If we have a stroke, we have to offset some of our points by 1 pixel.
   // We have to inset by 1 pixel when we draw horizontal lines that are on the
   // bottom or when we draw vertical lines that are closer to the end (end is
@@ -66,14 +71,35 @@ std::vector<GdkPoint> MakeFramePolygonPoints(RoundedWindowData* data,
   // We use this one for RTL.
   int x_off_r = !ltr ? -y_off : 0;
 
+  // Build up points starting with the bottom left corner and continuing
+  // clockwise.
+
   // Bottom left corner.
   if (type == FRAME_MASK ||
       (data->drawn_borders & (BORDER_LEFT | BORDER_BOTTOM))) {
     if (data->rounded_edges & ROUNDED_BOTTOM_LEFT) {
-      points.push_back(MakeBidiGdkPoint(
-          corner_size + x_off_l, height + y_off, width, ltr));
-      points.push_back(MakeBidiGdkPoint(
-          x_off_r, height - corner_size, width, ltr));
+      if (corner_size >= kMinRoundedBorderSize) {
+        // We are careful to only add points that are horizontal or vertically
+        // offset from the previous point (not both).  This avoids rounding
+        // differences when two points are connected.
+        for (int x = 0; x <= corner_size; ++x) {
+          int y = static_cast<int>(sqrt(static_cast<double>(
+              (corner_size * corner_size) - (x * x))));
+          if (x > 0) {
+            points.push_back(MakeBidiGdkPoint(
+                corner_size - x + x_off_r + 1,
+                height - (corner_size - y) + y_off, width, ltr));
+          }
+          points.push_back(MakeBidiGdkPoint(
+              corner_size - x + x_off_r,
+              height - (corner_size - y) + y_off, width, ltr));
+        }
+      } else {
+        points.push_back(MakeBidiGdkPoint(
+            corner_size + x_off_l, height + y_off, width, ltr));
+        points.push_back(MakeBidiGdkPoint(
+            x_off_r, height - corner_size, width, ltr));
+      }
     } else {
       points.push_back(MakeBidiGdkPoint(x_off_r, height + y_off, width, ltr));
     }
@@ -83,10 +109,23 @@ std::vector<GdkPoint> MakeFramePolygonPoints(RoundedWindowData* data,
   if (type == FRAME_MASK ||
       (data->drawn_borders & (BORDER_LEFT | BORDER_TOP))) {
     if (data->rounded_edges & ROUNDED_TOP_LEFT) {
-      points.push_back(MakeBidiGdkPoint(
-          x_off_r, corner_size - 1, width, ltr));
-      points.push_back(MakeBidiGdkPoint(
-          corner_size + x_off_r - 1, 0, width, ltr));
+      if (corner_size >= kMinRoundedBorderSize) {
+        for (int x = corner_size; x >= 0; --x) {
+          int y = static_cast<int>(sqrt(static_cast<double>(
+              (corner_size * corner_size) - (x * x))));
+          points.push_back(MakeBidiGdkPoint(corner_size - x + x_off_r,
+              corner_size - y, width, ltr));
+          if (x > 0) {
+            points.push_back(MakeBidiGdkPoint(corner_size - x + 1 + x_off_r,
+                corner_size - y, width, ltr));
+          }
+        }
+      } else {
+        points.push_back(MakeBidiGdkPoint(
+            x_off_r, corner_size - 1, width, ltr));
+        points.push_back(MakeBidiGdkPoint(
+            corner_size + x_off_r - 1, 0, width, ltr));
+      }
     } else {
       points.push_back(MakeBidiGdkPoint(x_off_r, 0, width, ltr));
     }
@@ -96,10 +135,25 @@ std::vector<GdkPoint> MakeFramePolygonPoints(RoundedWindowData* data,
   if (type == FRAME_MASK ||
       (data->drawn_borders & (BORDER_TOP | BORDER_RIGHT))) {
     if (data->rounded_edges & ROUNDED_TOP_RIGHT) {
-      points.push_back(MakeBidiGdkPoint(
-          width - corner_size + 1 + x_off_l, 0, width, ltr));
-      points.push_back(MakeBidiGdkPoint(
-          width + x_off_l, corner_size - 1, width, ltr));
+      if (corner_size >= kMinRoundedBorderSize) {
+        for (int x = 0; x <= corner_size; ++x) {
+          int y = static_cast<int>(sqrt(static_cast<double>(
+              (corner_size * corner_size) - (x * x))));
+          if (x > 0) {
+            points.push_back(MakeBidiGdkPoint(
+                width - (corner_size - x) + x_off_l - 1,
+                corner_size - y, width, ltr));
+          }
+          points.push_back(MakeBidiGdkPoint(
+              width - (corner_size - x) + x_off_l,
+              corner_size - y, width, ltr));
+        }
+      } else {
+        points.push_back(MakeBidiGdkPoint(
+            width - corner_size + 1 + x_off_l, 0, width, ltr));
+        points.push_back(MakeBidiGdkPoint(
+            width + x_off_l, corner_size - 1, width, ltr));
+      }
     } else {
       points.push_back(MakeBidiGdkPoint(
           width + x_off_l, 0, width, ltr));
@@ -110,10 +164,25 @@ std::vector<GdkPoint> MakeFramePolygonPoints(RoundedWindowData* data,
   if (type == FRAME_MASK ||
       (data->drawn_borders & (BORDER_RIGHT | BORDER_BOTTOM))) {
     if (data->rounded_edges & ROUNDED_BOTTOM_RIGHT) {
-      points.push_back(MakeBidiGdkPoint(
-          width + x_off_l, height - corner_size, width, ltr));
-      points.push_back(MakeBidiGdkPoint(
-          width - corner_size + x_off_r, height + y_off, width, ltr));
+      if (corner_size >= kMinRoundedBorderSize) {
+        for (int x = corner_size; x >= 0; --x) {
+          int y = static_cast<int>(sqrt(static_cast<double>(
+              (corner_size * corner_size) - (x * x))));
+          points.push_back(MakeBidiGdkPoint(
+              width - (corner_size - x) + x_off_l,
+              height - (corner_size - y) + y_off, width, ltr));
+          if (x > 0) {
+            points.push_back(MakeBidiGdkPoint(
+                width - (corner_size - x) + x_off_l - 1,
+                height - (corner_size - y) + y_off, width, ltr));
+          }
+        }
+      } else {
+        points.push_back(MakeBidiGdkPoint(
+            width + x_off_l, height - corner_size, width, ltr));
+        points.push_back(MakeBidiGdkPoint(
+            width - corner_size + x_off_r, height + y_off, width, ltr));
+      }
     } else {
       points.push_back(MakeBidiGdkPoint(
           width + x_off_l, height + y_off, width, ltr));
@@ -184,10 +253,12 @@ void ActAsRoundedWindow(
     GtkWidget* widget, const GdkColor& color, int corner_size,
     int rounded_edges, int drawn_borders) {
   DCHECK(widget);
+  DCHECK(!g_object_get_data(G_OBJECT(widget), kRoundedData));
+
   gtk_widget_set_app_paintable(widget, TRUE);
-  g_signal_connect(G_OBJECT(widget), "expose-event",
+  g_signal_connect(widget, "expose-event",
                    G_CALLBACK(OnRoundedWindowExpose), NULL);
-  g_signal_connect(G_OBJECT(widget), "style-set", G_CALLBACK(OnStyleSet), NULL);
+  g_signal_connect(widget, "style-set", G_CALLBACK(OnStyleSet), NULL);
 
   RoundedWindowData* data = new RoundedWindowData;
   data->expected_width = -1;
@@ -209,8 +280,24 @@ void StopActingAsRoundedWindow(GtkWidget* widget) {
   g_signal_handlers_disconnect_by_func(widget,
       reinterpret_cast<gpointer>(OnStyleSet), NULL);
 
+  delete static_cast<RoundedWindowData*>(
+      g_object_steal_data(G_OBJECT(widget), kRoundedData));
+
   if (GTK_WIDGET_REALIZED(widget))
     gdk_window_shape_combine_mask(widget->window, NULL, 0, 0);
+}
+
+void SetRoundedWindowEdgesAndBorders(GtkWidget* widget,
+                                     int corner_size,
+                                     int rounded_edges,
+                                     int drawn_borders) {
+  DCHECK(widget);
+  RoundedWindowData* data = static_cast<RoundedWindowData*>(
+      g_object_get_data(G_OBJECT(widget), kRoundedData));
+  DCHECK(data);
+  data->corner_size = corner_size;
+  data->rounded_edges = rounded_edges;
+  data->drawn_borders = drawn_borders;
 }
 
 void SetRoundedWindowBorderColor(GtkWidget* widget, GdkColor color) {

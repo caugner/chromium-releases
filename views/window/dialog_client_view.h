@@ -5,7 +5,7 @@
 #ifndef VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
 #define VIEWS_WINDOW_DIALOG_CLIENT_VIEW_H_
 
-#include "app/gfx/font.h"
+#include "gfx/font.h"
 #include "views/focus/focus_manager.h"
 #include "views/controls/button/button.h"
 #include "views/window/client_view.h"
@@ -24,6 +24,9 @@ class Window;
 //  accelerator handlers for accept and cancel, and the ability for the
 //  embedded contents view to provide extra UI to be shown in the row of
 //  buttons.
+//
+//  DialogClientView also provides the ability to set an arbitrary view that is
+//  positioned beneath the buttons.
 //
 class DialogClientView : public ClientView,
                          public ButtonListener,
@@ -49,6 +52,16 @@ class DialogClientView : public ClientView,
   // Accessors in case the user wishes to adjust these buttons.
   NativeButton* ok_button() const { return ok_button_; }
   NativeButton* cancel_button() const { return cancel_button_; }
+
+  // Sets the view that is positioned along the bottom of the buttons. The
+  // bottom view is positioned beneath the buttons at the full width of the
+  // dialog. If there is an existing bottom view it is removed and deleted.
+  void SetBottomView(View* bottom_view);
+
+  // Overridden from View:
+  virtual void NativeViewHierarchyChanged(bool attached,
+                                          gfx::NativeView native_view,
+                                          RootView* root_view);
 
   // Overridden from ClientView:
   virtual bool CanClose() const;
@@ -98,6 +111,11 @@ class DialogClientView : public ClientView,
   // Closes the window.
   void Close();
 
+  // Updates focus listener.
+  void UpdateFocusListener();
+
+  static void InitClass();
+
   // The dialog buttons.
   NativeButton* ok_button_;
   NativeButton* cancel_button_;
@@ -108,14 +126,26 @@ class DialogClientView : public ClientView,
   // The button-level extra view, NULL unless the dialog delegate supplies one.
   View* extra_view_;
 
+  // See description of DialogDelegate::GetSizeExtraViewHeightToButtons for
+  // details on this.
+  bool size_extra_view_height_to_buttons_;
+
   // The layout rect of the size box, when visible.
   gfx::Rect size_box_bounds_;
 
   // True if the window was Accepted by the user using the OK button.
   bool accepted_;
 
+  // true if focus listener is added.
+  bool listening_to_focus_;
+
+  // When ancestor gets changed focus manager gets changed as well.
+  FocusManager* saved_focus_manager_;
+
+  // View positioned along the bottom, beneath the buttons.
+  View* bottom_view_;
+
   // Static resource initialization
-  static void InitClass();
   static gfx::Font* dialog_button_font_;
 
   DISALLOW_COPY_AND_ASSIGN(DialogClientView);

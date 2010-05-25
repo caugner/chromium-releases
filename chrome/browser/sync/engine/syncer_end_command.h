@@ -1,6 +1,6 @@
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE entry.
+// found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_ENGINE_SYNCER_END_COMMAND_H_
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCER_END_COMMAND_H_
@@ -9,8 +9,6 @@
 #include "chrome/browser/sync/engine/syncer_command.h"
 
 namespace browser_sync {
-
-class SyncerSession;
 
 // A syncer command for wrapping up a sync cycle.
 //
@@ -23,7 +21,8 @@ class SyncerEndCommand : public SyncerCommand {
   SyncerEndCommand();
   virtual ~SyncerEndCommand();
 
-  virtual void ExecuteImpl(SyncerSession* session);
+  // SyncerCommand implementation.
+  virtual void ExecuteImpl(sessions::SyncSession* session);
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncerEndCommand);
 };

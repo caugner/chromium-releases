@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-#include "Cache.h"
 #include "base/stats_table.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/glue/webkit_glue.h"
+
+using WebKit::WebCache;
 
 namespace extensions_v8 {
 
@@ -49,7 +50,7 @@ class BenchmarkingWrapper : public v8::Extension {
   }
 
   static v8::Handle<v8::Value> CloseConnections(const v8::Arguments& args) {
-    webkit_glue::CloseIdleConnections();
+    webkit_glue::CloseCurrentConnections();
     return v8::Undefined();
   }
 
@@ -57,14 +58,12 @@ class BenchmarkingWrapper : public v8::Extension {
     // TODO(mbelshe): should be enable/disable?
     webkit_glue::SetCacheMode(false);
 
-    // Disabling and re-enabling the cache forces it to flush.
-    WebCore::cache()->setDisabled(true);
-    WebCore::cache()->setDisabled(false);
+    WebCache::clear();
     return v8::Undefined();
   }
 
   static v8::Handle<v8::Value> GetCounter(const v8::Arguments& args) {
-    if (!args.Length() || !args[0]->IsString())
+    if (!args.Length() || !args[0]->IsString() || !StatsTable::current())
       return v8::Undefined();
 
     // Extract the name argument

@@ -17,10 +17,10 @@
 #define WEBKIT_TOOLS_TEST_SHELL_EVENT_SENDING_CONTROLLER_H_
 
 #include "build/build_config.h"
-#include "base/gfx/point.h"
+#include "gfx/point.h"
 #include "base/task.h"
-#include "webkit/api/public/WebDragOperation.h"
-#include "webkit/api/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 class TestShell;
@@ -41,14 +41,14 @@ class EventSendingController : public CppBoundClass {
   void Reset();
 
   // Simulate drag&drop system call.
-  static void DoDragDrop(const WebKit::WebPoint &event_pos,
-                         const WebKit::WebDragData& drag_data,
-                         WebKit::WebDragOperationsMask operations_mask);
+  void DoDragDrop(const WebKit::WebDragData& drag_data,
+                  WebKit::WebDragOperationsMask operations_mask);
 
   // JS callback methods.
   void mouseDown(const CppArgumentList& args, CppVariant* result);
   void mouseUp(const CppArgumentList& args, CppVariant* result);
   void mouseMoveTo(const CppArgumentList& args, CppVariant* result);
+  void mouseWheelTo(const CppArgumentList& args, CppVariant* result);
   void leapForward(const CppArgumentList& args, CppVariant* result);
   void keyDown(const CppArgumentList& args, CppVariant* result);
   void dispatchMessage(const CppArgumentList& args, CppVariant* result);
@@ -60,6 +60,17 @@ class EventSendingController : public CppBoundClass {
                                  CppVariant* result);
   void beginDragWithFiles(const CppArgumentList& args, CppVariant* result);
   CppVariant dragMode;
+
+  void addTouchPoint(const CppArgumentList& args, CppVariant* result);
+  void cancelTouchPoint(const CppArgumentList& args, CppVariant* result);
+  void clearTouchPoints(const CppArgumentList& args, CppVariant* result);
+  void releaseTouchPoint(const CppArgumentList& args, CppVariant* result);
+  void setTouchModifier(const CppArgumentList& args, CppVariant* result);
+  void touchCancel(const CppArgumentList& args, CppVariant* result);
+  void touchEnd(const CppArgumentList& args, CppVariant* result);
+  void touchMove(const CppArgumentList& args, CppVariant* result);
+  void touchStart(const CppArgumentList& args, CppVariant* result);
+  void updateTouchPoint(const CppArgumentList& args, CppVariant* result);
 
   // Unimplemented stubs
   void contextClick(const CppArgumentList& args, CppVariant* result);
@@ -81,17 +92,17 @@ class EventSendingController : public CppBoundClass {
 
  private:
   // Returns the test shell's webview.
-  static WebKit::WebView* webview();
+  WebKit::WebView* webview();
 
   // Returns true if dragMode is true.
   bool drag_mode() { return dragMode.isBool() && dragMode.ToBoolean(); }
 
   // Sometimes we queue up mouse move and mouse up events for drag drop
   // handling purposes.  These methods dispatch the event.
-  static void DoMouseMove(const WebKit::WebMouseEvent& e);
-  static void DoMouseUp(const WebKit::WebMouseEvent& e);
+  void DoMouseMove(const WebKit::WebMouseEvent& e);
+  void DoMouseUp(const WebKit::WebMouseEvent& e);
   static void DoLeapForward(int milliseconds);
-  static void ReplaySavedEvents();
+  void ReplaySavedEvents();
 
   // Helper to return the button type given a button code
   static WebKit::WebMouseEvent::Button GetButtonTypeFromButtonNumber(
@@ -107,10 +118,13 @@ class EventSendingController : public CppBoundClass {
 
   void UpdateClickCountForButton(WebKit::WebMouseEvent::Button button_type);
 
+  // Compose a touch event from the current touch points and send it.
+  void SendCurrentTouchEvent(const WebKit::WebInputEvent::Type type);
+
   ScopedRunnableMethodFactory<EventSendingController> method_factory_;
 
   // Non-owning pointer.  The LayoutTestController is owned by the host.
-  static TestShell* shell_;
+  TestShell* shell_;
 
   // Location of last mouseMoveTo event.
   static gfx::Point last_mouse_pos_;

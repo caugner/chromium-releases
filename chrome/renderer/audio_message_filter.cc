@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/renderer/audio_message_filter.h"
+
 #include "base/message_loop.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/audio_message_filter.h"
 #include "ipc/ipc_logging.h"
 
 AudioMessageFilter::AudioMessageFilter(int32 route_id)
@@ -22,6 +23,15 @@ bool AudioMessageFilter::Send(IPC::Message* message) {
     delete message;
     return false;
   }
+
+  if (MessageLoop::current() != message_loop_) {
+    // Can only access the IPC::Channel on the IPC thread since it's not thread
+    // safe.
+    message_loop_->PostTask(
+        FROM_HERE, NewRunnableMethod(this, &AudioMessageFilter::Send, message));
+    return true;
+  }
+
   message->set_routing_id(route_id_);
   return channel_->Send(message);
 }
@@ -34,6 +44,8 @@ bool AudioMessageFilter::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AudioMessageFilter, message)
     IPC_MESSAGE_HANDLER(ViewMsg_RequestAudioPacket, OnRequestPacket)
     IPC_MESSAGE_HANDLER(ViewMsg_NotifyAudioStreamCreated, OnStreamCreated)
+    IPC_MESSAGE_HANDLER(ViewMsg_NotifyLowLatencyAudioStreamCreated,
+                        OnLowLatencyStreamCreated)
     IPC_MESSAGE_HANDLER(ViewMsg_NotifyAudioStreamStateChanged,
                         OnStreamStateChanged)
     IPC_MESSAGE_HANDLER(ViewMsg_NotifyAudioStreamVolume, OnStreamVolume)
@@ -58,7 +70,7 @@ void AudioMessageFilter::OnChannelClosing() {
 
 void AudioMessageFilter::OnRequestPacket(const IPC::Message& msg,
                                          int stream_id,
-                                         size_t bytes_in_buffer,
+                                         uint32 bytes_in_buffer,
                                          int64 message_timestamp) {
   Delegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
@@ -73,7 +85,7 @@ void AudioMessageFilter::OnRequestPacket(const IPC::Message& msg,
 
 void AudioMessageFilter::OnStreamCreated(int stream_id,
                                          base::SharedMemoryHandle handle,
-                                         int length) {
+                                         uint32 length) {
   Delegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
     DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
@@ -83,8 +95,30 @@ void AudioMessageFilter::OnStreamCreated(int stream_id,
   delegate->OnCreated(handle, length);
 }
 
-void AudioMessageFilter::OnStreamStateChanged(int stream_id,
-                                              ViewMsg_AudioStreamState state) {
+void AudioMessageFilter::OnLowLatencyStreamCreated(
+    int stream_id,
+    base::SharedMemoryHandle handle,
+#if defined(OS_WIN)
+    base::SyncSocket::Handle socket_handle,
+#else
+    base::FileDescriptor socket_descriptor,
+#endif
+    uint32 length) {
+  Delegate* delegate = delegates_.Lookup(stream_id);
+  if (!delegate) {
+    DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
+        " audio renderer.";
+    return;
+  }
+#if !defined(OS_WIN)
+  base::SyncSocket::Handle socket_handle = socket_descriptor.fd;
+#endif
+  delegate->OnLowLatencyCreated(handle, socket_handle, length);
+}
+
+void AudioMessageFilter::OnStreamStateChanged(
+    int stream_id,
+    const ViewMsg_AudioStreamState_Params& state) {
   Delegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
     DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
@@ -94,15 +128,14 @@ void AudioMessageFilter::OnStreamStateChanged(int stream_id,
   delegate->OnStateChanged(state);
 }
 
-void AudioMessageFilter::OnStreamVolume(int stream_id,
-                                        double left, double right) {
+void AudioMessageFilter::OnStreamVolume(int stream_id, double volume) {
   Delegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate) {
     DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
         " audio renderer.";
     return;
   }
-  delegate->OnVolume(left, right);
+  delegate->OnVolume(volume);
 }
 
 int32 AudioMessageFilter::AddDelegate(Delegate* delegate) {

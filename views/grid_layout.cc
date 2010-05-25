@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/logging.h"
+#include "gfx/insets.h"
 #include "views/standard_layout.h"
 #include "views/view.h"
 
@@ -143,7 +144,7 @@ class LayoutElement {
   int location_;
   int size_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(LayoutElement);
+  DISALLOW_COPY_AND_ASSIGN(LayoutElement);
 };
 
 // Column -------------------------------------------------------------
@@ -213,7 +214,7 @@ class Column : public LayoutElement {
   std::vector<Column*> same_size_columns_;
   Column* master_column_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Column);
+  DISALLOW_COPY_AND_ASSIGN(Column);
 };
 
 void Column::ResetSize() {
@@ -265,17 +266,35 @@ class Row : public LayoutElement {
     : LayoutElement(resize_percent),
       fixed_height_(fixed_height),
       height_(height),
-      column_set_(column_set) {
+      column_set_(column_set),
+      max_ascent_(0),
+      max_descent_(0) {
   }
 
   virtual ~Row() {}
 
   virtual void ResetSize() {
+    max_ascent_ = max_descent_ = 0;
     SetSize(height_);
   }
 
   ColumnSet* column_set() {
     return column_set_;
+  }
+
+  // Adjusts the size to accomodate the specified ascent/descent.
+  void AdjustSizeForBaseline(int ascent, int descent) {
+    max_ascent_ = std::max(ascent, max_ascent_);
+    max_descent_ = std::max(descent, max_descent_);
+    AdjustSize(max_ascent_ + max_descent_);
+  }
+
+  int max_ascent() const {
+    return max_ascent_;
+  }
+
+  int max_descent() const {
+    return max_descent_;
   }
 
  private:
@@ -284,7 +303,10 @@ class Row : public LayoutElement {
   // The column set used for this row; null for padding rows.
   ColumnSet* column_set_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Row);
+  int max_ascent_;
+  int max_descent_;
+
+  DISALLOW_COPY_AND_ASSIGN(Row);
 };
 
 // ViewState -------------------------------------------------------------
@@ -308,7 +330,8 @@ struct ViewState {
         pref_width(pref_width),
         pref_height(pref_height),
         remaining_width(0),
-        remaining_height(0) {
+        remaining_height(0),
+        baseline(-1) {
     DCHECK(view && start_col >= 0 && start_row >= 0 && col_span > 0 &&
            row_span > 0 && start_col < column_set->num_columns() &&
            (start_col + col_span) <= column_set->num_columns());
@@ -336,6 +359,10 @@ struct ViewState {
   // distributed to the columns/rows the view is in.
   int remaining_width;
   int remaining_height;
+
+  // The baseline. Only used if the view is vertically aligned along the
+  // baseline.
+  int baseline;
 };
 
 static bool CompareByColumnSpan(const ViewState* v1, const ViewState* v2) {
@@ -518,8 +545,10 @@ void ColumnSet::DistributeRemainingWidth(ViewState* view_state) {
   int pref_size_columns = 0;
   int start_col = view_state->start_col;
   int max_col = view_state->start_col + view_state->col_span;
+  float total_resize = 0;
   for (int i = start_col; i < max_col; ++i) {
     if (columns_[i]->IsResizable()) {
+      total_resize += columns_[i]->ResizePercent();
       resizable_columns++;
     } else if (columns_[i]->size_type_ == GridLayout::USE_PREF) {
       pref_size_columns++;
@@ -527,16 +556,17 @@ void ColumnSet::DistributeRemainingWidth(ViewState* view_state) {
   }
 
   if (resizable_columns > 0) {
-    // There are resizable columns, give the remaining width to them.
-    int to_distribute = width / resizable_columns;
-    for (int i = start_col; i < max_col; ++i) {
+    // There are resizable columns, give them the remaining width. The extra
+    // width is distributed using the resize values of each column.
+    int remaining_width = width;
+    for (int i = start_col, resize_i = 0; i < max_col; ++i) {
       if (columns_[i]->IsResizable()) {
-        width -= to_distribute;
-        if (width < to_distribute) {
-          // Give all slop to the last column.
-          to_distribute += width;
-        }
-        columns_[i]->SetSize(columns_[i]->Size() + to_distribute);
+        resize_i++;
+        int delta = (resize_i == resizable_columns) ? remaining_width :
+            static_cast<int>(width * columns_[i]->ResizePercent() /
+                             total_resize);
+        remaining_width -= delta;
+        columns_[i]->SetSize(columns_[i]->Size() + delta);
       }
     }
   } else if (pref_size_columns > 0) {
@@ -664,6 +694,10 @@ void GridLayout::SetInsets(int top, int left, int bottom, int right) {
   right_inset_ = right;
 }
 
+void GridLayout::SetInsets(const gfx::Insets& insets) {
+  SetInsets(insets.top(), insets.left(), insets.bottom(), insets.right());
+}
+
 ColumnSet* GridLayout::AddColumnSet(int id) {
   DCHECK(GetColumnSet(id) == NULL);
   ColumnSet* column_set = new ColumnSet(id);
@@ -716,6 +750,9 @@ void GridLayout::AddView(View* view, int col_span, int row_span,
                          int pref_width, int pref_height) {
   DCHECK(current_row_col_set_ && col_span > 0 && row_span > 0 &&
          (next_column_ + col_span) <= current_row_col_set_->num_columns());
+  // We don't support baseline alignment of views spanning rows. Please add if
+  // you need it.
+  DCHECK(v_align != BASELINE || row_span == 1);
   ViewState* state =
       new ViewState(current_row_col_set_, view, next_column_, current_row_,
                     col_span, row_span, h_align, v_align, pref_width,
@@ -732,6 +769,9 @@ static void CalculateSize(int pref_size, GridLayout::Alignment alignment,
       case GridLayout::LEADING:
         // Nothing to do, location already points to start.
         break;
+      case GridLayout::BASELINE:  // If we were asked to align on baseline, but
+                                  // the view doesn't have a baseline, fall back
+                                  // to center.
       case GridLayout::CENTER:
         *location += (available_size - *size) / 2;
         break;
@@ -783,8 +823,12 @@ void GridLayout::Layout(View* host) {
     int y = rows_[view_state->start_row]->Location() + top_inset_;
     int height = LayoutElement::TotalSize(view_state->start_row,
                                           view_state->row_span, &rows_);
-    CalculateSize(view_state->pref_height, view_state->v_align,
-                  &y, &height);
+    if (view_state->v_align == BASELINE && view_state->baseline != -1) {
+      y += rows_[view_state->start_row]->max_ascent() - view_state->baseline;
+      height = view_state->pref_height;
+    } else {
+      CalculateSize(view_state->pref_height, view_state->v_align, &y, &height);
+    }
     view->SetBounds(x, y, width, height);
   }
 }
@@ -830,7 +874,9 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
   // Reset the height of each row.
   LayoutElement::ResetSizes(&rows_);
 
-  // Do two things:
+  // Do the following:
+  // . If the view is aligned along it's baseline, obtain the baseline from the
+  //   view and update the rows ascent/descent.
   // . Reset the remaining_height of each view state.
   // . If the width the view will be given is different than it's pref, ask
   //   for the height given a particularly width.
@@ -838,6 +884,10 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
        i != view_states_.end() ; ++i) {
     ViewState* view_state = *i;
     view_state->remaining_height = view_state->pref_height;
+
+    if (view_state->v_align == BASELINE)
+      view_state->baseline = view_state->view->GetBaseline();
+
     if (view_state->h_align == FILL) {
       // The view is resizable. As the pref height may vary with the width,
       // ask for the pref again.
@@ -855,13 +905,18 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
     }
   }
 
-  // Update the height of each row from the views.
+  // Update the height/ascent/descent of each row from the views.
   std::vector<ViewState*>::iterator view_states_iterator = view_states_.begin();
   for (; view_states_iterator != view_states_.end() &&
       (*view_states_iterator)->row_span == 1; ++view_states_iterator) {
     ViewState* view_state = *view_states_iterator;
     Row* row = rows_[view_state->start_row];
     row->AdjustSize(view_state->remaining_height);
+    if (view_state->baseline != -1 &&
+        view_state->baseline <= view_state->pref_height) {
+      row->AdjustSizeForBaseline(view_state->baseline,
+          view_state->pref_height - view_state->baseline);
+    }
     view_state->remaining_height = 0;
   }
 

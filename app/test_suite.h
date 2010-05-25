@@ -31,7 +31,6 @@ class AppTestSuite : public TestSuite {
     TestSuite::Initialize();
 
     app::RegisterPathProvider();
-
 #if defined(OS_MACOSX)
     // Look in the framework bundle for resources.
     // TODO(port): make a resource bundle for non-app exes.  What's done here
@@ -52,7 +51,6 @@ class AppTestSuite : public TestSuite {
     // Force unittests to run using en-US so if we test against string
     // output, it'll pass regardless of the system language.
     ResourceBundle::InitSharedInstance(L"en-US");
-    ResourceBundle::GetSharedInstance().LoadThemeResources();
   }
 
   virtual void Shutdown() {

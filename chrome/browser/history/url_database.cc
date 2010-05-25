@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
+#include <vector>
 
 #include "app/l10n_util.h"
 #include "app/sql/connection.h"
 #include "app/sql/statement.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 
@@ -36,7 +38,13 @@ URLDatabase::~URLDatabase() {
 // static
 std::string URLDatabase::GURLToDatabaseURL(const GURL& gurl) {
   // TODO(brettw): do something fancy here with encoding, etc.
-  return gurl.spec();
+
+  // Strip username and password from URL before sending to DB.
+  GURL::Replacements replacements;
+  replacements.ClearUsername();
+  replacements.ClearPassword();
+
+  return (gurl.ReplaceComponents(replacements)).spec();
 }
 
 // Convenience to fill a history::URLRow. Must be in sync with the fields in
@@ -71,6 +79,20 @@ bool URLDatabase::GetURLRow(URLID url_id, URLRow* info) {
   return false;
 }
 
+bool URLDatabase::GetAllTypedUrls(std::vector<history::URLRow>* urls) {
+  sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
+      "SELECT" HISTORY_URL_ROW_FIELDS "FROM urls WHERE typed_count > 0"));
+  if (!statement)
+    return false;
+
+  while (statement.Step()) {
+    URLRow info;
+    FillURLRow(statement, &info);
+    urls->push_back(info);
+  }
+  return true;
+}
+
 URLID URLDatabase::GetRowForURL(const GURL& url, history::URLRow* info) {
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "SELECT" HISTORY_URL_ROW_FIELDS "FROM urls WHERE url=?"));
@@ -80,7 +102,7 @@ URLID URLDatabase::GetRowForURL(const GURL& url, history::URLRow* info) {
   std::string url_string = GURLToDatabaseURL(url);
   statement.BindString(0, url_string);
   if (!statement.Step())
-    return 0; // no data
+    return 0;  // no data
 
   if (info)
     FillURLRow(statement, info);

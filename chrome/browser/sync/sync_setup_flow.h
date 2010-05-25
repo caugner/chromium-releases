@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #ifndef CHROME_BROWSER_SYNC_SYNC_SETUP_FLOW_H_
 #define CHROME_BROWSER_SYNC_SYNC_SETUP_FLOW_H_
 
@@ -15,6 +13,14 @@
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
+#if defined(OS_WIN)
+#include "chrome/browser/views/options/customize_sync_window_view.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/gtk/options/customize_sync_window_gtk.h"
+#elif defined(OS_MACOSX)
+#include "chrome/browser/cocoa/sync_customize_controller_cppsafe.h"
+#endif
+#include "gfx/native_widget_types.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
@@ -78,13 +84,40 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
     return false;
   }
 
-  void OnUserSubmittedAuth(const std::string& username,
-                           const std::string& password) {
-    service_->OnUserSubmittedAuth(username, password);
+  void OnUserClickedCustomize() {
+#if defined(OS_WIN)
+    CustomizeSyncWindowView::Show(NULL, service_->profile());
+#elif defined(OS_LINUX)
+    ShowCustomizeSyncWindow(service_->profile());
+#elif defined(OS_MACOSX)
+    DCHECK(html_dialog_window_);
+    ShowSyncCustomizeDialog(html_dialog_window_, service_);
+#endif
   }
 
-  void OnUserAcceptedMergeAndSync() {
-    service_->OnUserAcceptedMergeAndSync();
+  bool ClickCustomizeOk() {
+#if defined(OS_WIN)
+    return CustomizeSyncWindowView::ClickOk();
+#elif defined(OS_LINUX)
+    return CustomizeSyncWindowOk();
+#else
+    return true;
+#endif
+  }
+
+  void ClickCustomizeCancel() {
+#if defined(OS_WIN)
+    CustomizeSyncWindowView::ClickCancel();
+#elif defined(OS_LINUX)
+    CustomizeSyncWindowCancel();
+#endif
+  }
+
+
+  void OnUserSubmittedAuth(const std::string& username,
+                           const std::string& password,
+                           const std::string& captcha) {
+    service_->OnUserSubmittedAuth(username, password, captcha);
   }
 
  private:
@@ -99,15 +132,7 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   SyncSetupFlow(SyncSetupWizard::State start_state,
                 SyncSetupWizard::State end_state,
                 const std::string& args, SyncSetupFlowContainer* container,
-                FlowHandler* handler, ProfileSyncService* service)
-      : container_(container),
-        dialog_start_args_(args),
-        current_state_(start_state),
-        end_state_(end_state),
-        login_start_time_(base::TimeTicks::Now()),
-        flow_handler_(handler),
-        service_(service) {
-  }
+                ProfileSyncService* service);
 
   // Returns true if |this| should transition its state machine to |state|
   // based on |current_state_|, or false if that would be nonsense or is
@@ -123,11 +148,17 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   // Time that the GAIA_LOGIN step was received.
   base::TimeTicks login_start_time_;
 
-  // The handler needed for the entire flow.  We don't own this.
+  // The handler needed for the entire flow.
   FlowHandler* flow_handler_;
+  mutable bool owns_flow_handler_;
 
   // We need this to write the sentinel "setup completed" pref.
   ProfileSyncService* service_;
+
+  // Currently used only on OS X
+  // TODO(akalin): Add the necessary support to the other OSes and use
+  // this for them.
+  gfx::NativeWindow html_dialog_window_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupFlow);
 };
@@ -162,6 +193,9 @@ class FlowHandler : public DOMMessageHandler {
   virtual void RegisterMessages();
 
   // Callbacks from the page.
+  void HandleUserClickedCustomize(const Value* value);
+  void ClickCustomizeOk(const Value* value);
+  void ClickCustomizeCancel(const Value* value);
   void HandleSubmitAuth(const Value* value);
   void HandleSubmitMergeAndSync(const Value* value);
 
@@ -169,8 +203,6 @@ class FlowHandler : public DOMMessageHandler {
   void ShowGaiaLogin(const DictionaryValue& args);
   void ShowGaiaSuccessAndClose();
   void ShowGaiaSuccessAndSettingUp();
-  void ShowMergeAndSync();
-  void ShowMergeAndSyncError();
   void ShowSetupDone(const std::wstring& user);
   void ShowFirstTimeDone(const std::wstring& user);
 
@@ -186,4 +218,3 @@ class FlowHandler : public DOMMessageHandler {
 };
 
 #endif  // CHROME_BROWSER_SYNC_SYNC_SETUP_FLOW_H_
-#endif  // defined(BROWSER_SYNC)

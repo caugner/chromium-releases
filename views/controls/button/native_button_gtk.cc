@@ -1,13 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
+// Copyright (c) 2010 The Chromium Authors. All rights reserved. Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
-#include <gtk/gtk.h>
-
 #include "views/controls/button/native_button_gtk.h"
 
+#include <gtk/gtk.h>
+
+#include <vector>
+
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/button/radio_button.h"
@@ -40,15 +42,14 @@ void NativeButtonGtk::UpdateFont() {
   if (!native_view())
     return;
 
-  gtk_widget_modify_font(
-      native_view(),
-      gfx::Font::PangoFontFromGfxFont(native_button_->font()));
+  PangoFontDescription* pfd =
+      gfx::Font::PangoFontFromGfxFont(native_button_->font());
+  gtk_widget_modify_font(native_view(), pfd);
+  pango_font_description_free(pfd);
   preferred_size_ = gfx::Size();
 }
 
 void NativeButtonGtk::UpdateEnabled() {
-  if (!native_view())
-    return;
   SetEnabled(native_button_->IsEnabled());
 }
 
@@ -87,15 +88,14 @@ gfx::Size NativeButtonGtk::GetPreferredSize() {
   if (preferred_size_.IsEmpty()) {
     GtkRequisition size_request = { 0, 0 };
     gtk_widget_size_request(native_view(), &size_request);
-    preferred_size_.SetSize(size_request.width,
-                            std::max(size_request.height, 29));
+    preferred_size_.SetSize(size_request.width, size_request.height);
   }
   return preferred_size_;
 }
 
 void NativeButtonGtk::CreateNativeControl() {
   GtkWidget* widget = gtk_button_new();
-  g_signal_connect(G_OBJECT(widget), "clicked",
+  g_signal_connect(widget, "clicked",
                    G_CALLBACK(CallClicked), this);
 
   // Any push button can become the default button.
@@ -139,7 +139,7 @@ Checkbox* NativeCheckboxGtk::checkbox() {
 
 void NativeCheckboxGtk::CreateNativeControl() {
   GtkWidget* widget = gtk_check_button_new();
-  g_signal_connect(G_OBJECT(widget), "clicked",
+  g_signal_connect(widget, "clicked",
                    G_CALLBACK(CallClicked), this);
   NativeControlCreated(widget);
 }
@@ -191,9 +191,9 @@ RadioButton* NativeRadioButtonGtk::radio_button() {
 
 void NativeRadioButtonGtk::CreateNativeControl() {
   GtkWidget* widget = gtk_radio_button_new(NULL);
-  g_signal_connect(G_OBJECT(widget), "clicked",
+  g_signal_connect(widget, "clicked",
                    G_CALLBACK(CallClicked), this);
-  g_signal_connect(G_OBJECT(widget), "toggled",
+  g_signal_connect(widget, "toggled",
                    G_CALLBACK(CallToggled), this);
   NativeControlCreated(widget);
 }
@@ -245,11 +245,15 @@ void NativeRadioButtonGtk::ViewHierarchyChanged(bool is_add,
                 "radio-button views.";
             continue;
           }
-          // Join the group
+          // Join the group, if the peer's native wrapper is present.
+          // A button without wrapper will be added to the group in
+          // its own ViewHierachyChanged.
           NativeButtonWrapper* wrapper =
               static_cast<RadioButton*>(*i)->native_wrapper();
-          SetGroupFrom(wrapper);
-          break;
+          if (wrapper) {
+            SetGroupFrom(wrapper);
+            break;
+          }
         }
       }
     }

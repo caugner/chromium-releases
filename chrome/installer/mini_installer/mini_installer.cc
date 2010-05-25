@@ -32,11 +32,9 @@
 #include <Shellapi.h>
 #include <shlwapi.h>
 
+#include "chrome/installer/mini_installer/appid.h"
 #include "chrome/installer/mini_installer/mini_installer.h"
 #include "chrome/installer/mini_installer/pe_resource.h"
-
-// Generated header that includes the Google Update id.
-#include "appid.h"
 
 // Required linker symbol. See remarks above.
 extern "C" unsigned int __sse2_available = 0;
@@ -155,7 +153,7 @@ void SetFullInstallerFlag(HKEY root_key) {
   if (!SafeStrCopy(ap_registry_key, _countof(ap_registry_key),
                    kApRegistryKeyBase) ||
       !SafeStrCat(ap_registry_key, _countof(ap_registry_key),
-                  google_update::kChromeGuid)) {
+                  google_update::kAppGuid)) {
     return;
   }
   if (::RegOpenKeyEx(root_key, ap_registry_key, NULL,
@@ -267,8 +265,11 @@ BOOL CALLBACK OnResourceFound(HMODULE module, const wchar_t* type,
     if (!SafeStrCopy(ctx->setup_resource_path,
                      ctx->setup_resource_path_size, full_path))
       return FALSE;
+  } else if (StrStartsWith(name, L"blob")) {
+    // Padded installers for size experiments include a BLOB_xMB.TXT payload.
+    return TRUE;
   } else {
-    // Resources should either start with 'chrome' or 'setup'. We dont handle
+    // Resources should start with 'chrome', 'setup', or 'blob'. We dont handle
     // anything else.
     return FALSE;
   }
@@ -406,7 +407,7 @@ void AppendCommandLineFlags(wchar_t* buffer, int size) {
   if (args_num <= 0)
     return;
 
-  wchar_t* cmd_to_append = NULL;
+  wchar_t* cmd_to_append = L"";
   if (!StrEndsWith(args[0], exe_name)) {
     // Current executable name not in the command line so just append
     // the whole command line.

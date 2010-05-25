@@ -15,11 +15,12 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/api/public/WebURLLoaderClient.h"
-#include "webkit/api/public/WebURLResponse.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 
 class GURL;
 
@@ -61,8 +62,7 @@ class ResourceFetcher : public WebKit::WebURLLoaderClient {
   virtual void didReceiveResponse(
       WebKit::WebURLLoader* loader, const WebKit::WebURLResponse& response);
   virtual void didReceiveData(
-      WebKit::WebURLLoader* loader, const char* data, int data_length,
-      long long total_data_length);
+      WebKit::WebURLLoader* loader, const char* data, int data_length);
   virtual void didFinishLoading(WebKit::WebURLLoader* loader);
   virtual void didFail(
       WebKit::WebURLLoader* loader, const WebKit::WebURLError& error);

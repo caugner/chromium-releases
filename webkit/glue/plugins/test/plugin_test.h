@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/string_util.h"
-#include "webkit/glue/plugins/nphostapi.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "third_party/npapi/bindings/nphostapi.h"
 
 namespace NPAPIClient {
 
@@ -22,6 +22,9 @@ class PluginTest {
 
   // Destructor
   virtual ~PluginTest() {}
+
+  // Returns true if the test runs in windowless plugin mode.
+  virtual bool IsWindowless() const { return false; }
 
   //
   // NPAPI Functions

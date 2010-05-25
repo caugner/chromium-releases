@@ -4,9 +4,12 @@
 
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 
+#include <string>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -15,12 +18,17 @@
 #include "grit/theme_resources.h"
 
 ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
-    TabContents* tab_contents, const std::string& name,
+    TabContents* tab_contents, const Extension* new_theme,
     const std::string& previous_theme_id)
          : ConfirmInfoBarDelegate(tab_contents),
            profile_(tab_contents->profile()),
-           name_(name),
+           name_(new_theme->name()),
            previous_theme_id_(previous_theme_id) {
+  profile_->GetThemeProvider()->OnInfobarDisplayed();
+}
+
+ThemeInstalledInfoBarDelegate::~ThemeInstalledInfoBarDelegate() {
+  profile_->GetThemeProvider()->OnInfobarDestroyed();
 }
 
 void ThemeInstalledInfoBarDelegate::InfoBarClosed() {
@@ -55,6 +63,8 @@ std::wstring ThemeInstalledInfoBarDelegate::GetButtonLabel(
       return l10n_util::GetString(IDS_THEME_INSTALL_INFOBAR_UNDO_BUTTON);
     }
     default:
+      // The InfoBar will create a default OK button and make it invisible.
+      // TODO(mirandac): remove the default OK button from ConfirmInfoBar.
       return L"";
   }
 }
@@ -63,7 +73,8 @@ bool ThemeInstalledInfoBarDelegate::Cancel() {
   if (!previous_theme_id_.empty()) {
     ExtensionsService* service = profile_->GetExtensionsService();
     if (service) {
-      Extension* previous_theme = service->GetExtensionById(previous_theme_id_);
+      Extension* previous_theme =
+          service->GetExtensionById(previous_theme_id_, true);
       if (previous_theme) {
         profile_->SetTheme(previous_theme);
         return true;

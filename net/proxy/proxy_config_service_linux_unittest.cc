@@ -1,15 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "net/proxy/proxy_config_service_linux.h"
 
 #include <map>
 #include <string>
 #include <vector>
 
-#include "net/proxy/proxy_config_service_linux.h"
-
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -17,7 +18,6 @@
 #include "base/waitable_event.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -29,7 +29,8 @@ namespace {
 struct EnvVarValues {
   // The strange capitalization is so that the field matches the
   // environment variable name exactly.
-  const char *DESKTOP_SESSION, *KDE_HOME,
+  const char *DESKTOP_SESSION, *HOME,
+      *KDE_HOME, *KDE_SESSION_VERSION,
       *auto_proxy, *all_proxy,
       *http_proxy, *https_proxy, *ftp_proxy,
       *SOCKS_SERVER, *SOCKS_VERSION,
@@ -77,12 +78,14 @@ struct SettingsTable {
   map_type settings;
 };
 
-class MockEnvironmentVariableGetter : public base::EnvironmentVariableGetter {
+class MockEnvVarGetter : public base::EnvVarGetter {
  public:
-  MockEnvironmentVariableGetter() {
+  MockEnvVarGetter() {
 #define ENTRY(x) table.settings[#x] = &values.x
     ENTRY(DESKTOP_SESSION);
+    ENTRY(HOME);
     ENTRY(KDE_HOME);
+    ENTRY(KDE_SESSION_VERSION);
     ENTRY(auto_proxy);
     ENTRY(all_proxy);
     ENTRY(http_proxy);
@@ -101,7 +104,7 @@ class MockEnvironmentVariableGetter : public base::EnvironmentVariableGetter {
     values = zero_values;
   }
 
-  virtual bool Getenv(const char* variable_name, std::string* result) {
+  virtual bool GetEnv(const char* variable_name, std::string* result) {
     const char* env_value = table.Get(variable_name);
     if (env_value) {
       // Note that the variable may be defined but empty.
@@ -325,23 +328,34 @@ class ProxyConfigServiceLinuxTest : public PlatformTest {
   virtual void SetUp() {
     PlatformTest::SetUp();
     // Set up a temporary KDE home directory.
-    std::string prefix("ProxyConfigServiceLinuxTest_kde_home");
-    file_util::CreateNewTempDirectory(prefix, &kde_home_);
+    std::string prefix("ProxyConfigServiceLinuxTest_user_home");
+    file_util::CreateNewTempDirectory(prefix, &user_home_);
+    kde_home_ = user_home_.Append(FILE_PATH_LITERAL(".kde"));
     FilePath path = kde_home_.Append(FILE_PATH_LITERAL("share"));
-    file_util::CreateDirectory(path);
     path = path.Append(FILE_PATH_LITERAL("config"));
     file_util::CreateDirectory(path);
     kioslaverc_ = path.Append(FILE_PATH_LITERAL("kioslaverc"));
+    // Set up paths but do not create the directory for .kde4.
+    kde4_home_ = user_home_.Append(FILE_PATH_LITERAL(".kde4"));
+    path = kde4_home_.Append(FILE_PATH_LITERAL("share"));
+    kde4_config_ = path.Append(FILE_PATH_LITERAL("config"));
+    kioslaverc4_ = kde4_config_.Append(FILE_PATH_LITERAL("kioslaverc"));
   }
 
   virtual void TearDown() {
     // Delete the temporary KDE home directory.
-    file_util::Delete(kde_home_, true);
+    file_util::Delete(user_home_, true);
     PlatformTest::TearDown();
   }
 
+  FilePath user_home_;
+  // KDE3 paths.
   FilePath kde_home_;
   FilePath kioslaverc_;
+  // KDE4 paths.
+  FilePath kde4_home_;
+  FilePath kde4_config_;
+  FilePath kioslaverc4_;
 };
 
 // Builds an identifier for each test in an array.
@@ -365,9 +379,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
     // Expected outputs (fields of the ProxyConfig).
     bool auto_detect;
     GURL pac_url;
-    ProxyConfig::ProxyRules proxy_rules;
-    const char* proxy_bypass_list;  // newline separated
-    bool bypass_local_names;
+    ProxyRulesExpectation proxy_rules;
   } tests[] = {
     {
       TEST_DESC("No proxying"),
@@ -383,9 +395,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                      // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -402,13 +412,11 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       true,                       // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
-      TEST_DESC("Valid PAC url"),
+      TEST_DESC("Valid PAC URL"),
       { // Input.
         "auto",                      // mode
         "http://wpad/wpad.dat",      // autoconfig_url
@@ -421,13 +429,11 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                         // auto_detect
       GURL("http://wpad/wpad.dat"),  // pac_url
-      ProxyConfig::ProxyRules(),     // proxy_rules
-      "",                            // proxy_bypass_list
-      false,                         // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
-      TEST_DESC("Invalid PAC url"),
+      TEST_DESC("Invalid PAC URL"),
       { // Input.
         "auto",                      // mode
         "wpad.dat",                  // autoconfig_url
@@ -440,9 +446,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                         // auto_detect
       GURL(),                        // pac_url
-      ProxyConfig::ProxyRules(),     // proxy_rules
-      "",                            // proxy_bypass_list
-      false,                         // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -459,9 +463,9 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("www.google.com"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:80",  // single proxy
+          ""),                  // bypass rules
     },
 
     {
@@ -478,9 +482,7 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      ProxyConfig::ProxyRules(),               // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -497,10 +499,11 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                          // auto_detect
       GURL(),                                         // pac_url
-      MakeProxyPerSchemeRules("www.google.com",       // proxy_rules
-                              "", ""),
-      "",                                             // proxy_bypass_list
-      false,                                          // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -517,9 +520,9 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                          // auto_detect
       GURL(),                                         // pac_url
-      MakeSingleProxyRules("www.google.com:88"),      // proxy_rules
-      "",                                             // proxy_bypass_list
-      false,                                          // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:88",  // single proxy
+          ""),                  // bypass rules
     },
 
     {
@@ -539,11 +542,11 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                          // auto_detect
       GURL(),                                         // pac_url
-      MakeProxyPerSchemeRules("www.google.com:88",    // proxy_rules
-                              "www.foo.com:110",
-                              "ftp.foo.com:121"),
-      "",                                             // proxy_bypass_list
-      false,                                          // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:88",  // http
+          "www.foo.com:110",    // https
+          "ftp.foo.com:121",    // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -560,9 +563,9 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
       // Expected result.
       false,                                          // auto_detect
       GURL(),                                         // pac_url
-      MakeSingleProxyRules("socks4://socks.com:99"),  // proxy_rules
-      "",                                             // proxy_bypass_list
-      false,                                          // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "socks4://socks.com:99",  // single proxy
+          "")                       // bypass rules
     },
 
     {
@@ -578,16 +581,16 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
 
       false,                                          // auto_detect
       GURL(),                                         // pac_url
-      MakeSingleProxyRules("www.google.com"),         // proxy_rules
-      "*.google.com\n",                               // proxy_bypass_list
-      false,                                          // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:80",   // single proxy
+          "*.google.com"),       // bypass rules
     },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%d] %s", i, tests[i].description.c_str()));
-    MockEnvironmentVariableGetter* env_getter =
-        new MockEnvironmentVariableGetter;
+    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
+                              tests[i].description.c_str()));
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
     MockGConfSettingGetter* gconf_getter = new MockGConfSettingGetter;
     SynchConfigGetter sync_config_getter(
         new ProxyConfigServiceLinux(env_getter, gconf_getter));
@@ -596,12 +599,9 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicGConfTest) {
     sync_config_getter.SetupAndInitialFetch();
     sync_config_getter.SyncGetProxyConfig(&config);
 
-    EXPECT_EQ(tests[i].auto_detect, config.auto_detect);
-    EXPECT_EQ(tests[i].pac_url, config.pac_url);
-    EXPECT_EQ(tests[i].proxy_bypass_list,
-              FlattenProxyBypass(config.proxy_bypass));
-    EXPECT_EQ(tests[i].bypass_local_names, config.proxy_bypass_local_names);
-    EXPECT_EQ(tests[i].proxy_rules, config.proxy_rules);
+    EXPECT_EQ(tests[i].auto_detect, config.auto_detect());
+    EXPECT_EQ(tests[i].pac_url, config.pac_url());
+    EXPECT_TRUE(tests[i].proxy_rules.Matches(config.proxy_rules()));
   }
 }
 
@@ -617,15 +617,15 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
     // Expected outputs (fields of the ProxyConfig).
     bool auto_detect;
     GURL pac_url;
-    ProxyConfig::ProxyRules proxy_rules;
-    const char* proxy_bypass_list;  // newline separated
-    bool bypass_local_names;
+    ProxyRulesExpectation proxy_rules;
   } tests[] = {
     {
       TEST_DESC("No proxying"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         NULL,  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -636,16 +636,16 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                      // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
       TEST_DESC("Auto detect"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         "",    // auto_proxy
         NULL,  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -656,16 +656,16 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       true,                       // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
-      TEST_DESC("Valid PAC url"),
+      TEST_DESC("Valid PAC URL"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         "http://wpad/wpad.dat",  // auto_proxy
         NULL,  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -676,16 +676,16 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                         // auto_detect
       GURL("http://wpad/wpad.dat"),  // pac_url
-      ProxyConfig::ProxyRules(),     // proxy_rules
-      "",                            // proxy_bypass_list
-      false,                         // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
-      TEST_DESC("Invalid PAC url"),
+      TEST_DESC("Invalid PAC URL"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         "wpad.dat",  // auto_proxy
         NULL,  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -696,16 +696,16 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                       // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
       TEST_DESC("Single-host in proxy list"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "www.google.com",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -716,16 +716,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("www.google.com"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:80",  // single proxy
+          ""),                  // bypass rules
     },
 
     {
       TEST_DESC("Single-host, different port"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "www.google.com:99",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -736,16 +738,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("www.google.com:99"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:99",  // single
+          ""),                  // bypass rules
     },
 
     {
       TEST_DESC("Tolerate a scheme"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "http://www.google.com:99",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -756,16 +760,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("www.google.com:99"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:99",  // single proxy
+          ""),                  // bypass rules
     },
 
     {
       TEST_DESC("Per-scheme proxy rules"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         NULL,  // all_proxy
         "www.google.com:80", "www.foo.com:110", "ftp.foo.com:121",  // per-proto
@@ -776,17 +782,20 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com", "www.foo.com:110",
-                              "ftp.foo.com:121"),
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "www.foo.com:110",    // https
+          "ftp.foo.com:121",    // ftp
+          ""),                  // bypass rules
     },
 
     {
       TEST_DESC("socks"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -797,16 +806,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("socks4://socks.com:888"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "socks4://socks.com:888",  // single proxy
+          ""),                       // bypass rules
     },
 
     {
       TEST_DESC("socks5"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -817,16 +828,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("socks5://socks.com:888"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "socks5://socks.com:888",  // single proxy
+          ""),                       // bypass rules
     },
 
     {
       TEST_DESC("socks default port"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "",  // all_proxy
         NULL, NULL, NULL,  // per-proto proxies
@@ -837,16 +850,18 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeSingleProxyRules("socks4://socks.com"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "socks4://socks.com:1080",  // single proxy
+          ""),                        // bypass rules
     },
 
     {
       TEST_DESC("bypass"),
       { // Input.
         NULL,  // DESKTOP_SESSION
+        NULL,  // HOME
         NULL,  // KDE_HOME
+        NULL,  // KDE_SESSION_VERSION
         NULL,  // auto_proxy
         "www.google.com",  // all_proxy
         NULL, NULL, NULL,  // per-proto
@@ -856,17 +871,17 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
 
       false,                      // auto_detect
       GURL(),                     // pac_url
-      MakeSingleProxyRules("www.google.com"),  // proxy_rules
-      // proxy_bypass_list
-      "*.google.com\n*foo.com:99\n1.2.3.4:22\n127.0.0.1/8\n",
-      false,                        // bypass_local_names
+      ProxyRulesExpectation::Single(
+          "www.google.com:80",
+          // TODO(eroman): 127.0.0.1/8 is unsupported, so it was dropped
+          "*.google.com,*foo.com:99,1.2.3.4:22"),
     },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%d] %s", i, tests[i].description.c_str()));
-    MockEnvironmentVariableGetter* env_getter =
-        new MockEnvironmentVariableGetter;
+    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
+                              tests[i].description.c_str()));
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
     MockGConfSettingGetter* gconf_getter = new MockGConfSettingGetter;
     SynchConfigGetter sync_config_getter(
         new ProxyConfigServiceLinux(env_getter, gconf_getter));
@@ -875,18 +890,14 @@ TEST_F(ProxyConfigServiceLinuxTest, BasicEnvTest) {
     sync_config_getter.SetupAndInitialFetch();
     sync_config_getter.SyncGetProxyConfig(&config);
 
-    EXPECT_EQ(tests[i].auto_detect, config.auto_detect);
-    EXPECT_EQ(tests[i].pac_url, config.pac_url);
-    EXPECT_EQ(tests[i].proxy_bypass_list,
-              FlattenProxyBypass(config.proxy_bypass));
-    EXPECT_EQ(tests[i].bypass_local_names, config.proxy_bypass_local_names);
-    EXPECT_EQ(tests[i].proxy_rules, config.proxy_rules);
+    EXPECT_EQ(tests[i].auto_detect, config.auto_detect());
+    EXPECT_EQ(tests[i].pac_url, config.pac_url());
+    EXPECT_TRUE(tests[i].proxy_rules.Matches(config.proxy_rules()));
   }
 }
 
 TEST_F(ProxyConfigServiceLinuxTest, GconfNotification) {
-  MockEnvironmentVariableGetter* env_getter =
-      new MockEnvironmentVariableGetter;
+  MockEnvVarGetter* env_getter = new MockEnvVarGetter;
   MockGConfSettingGetter* gconf_getter = new MockGConfSettingGetter;
   ProxyConfigServiceLinux* service =
       new ProxyConfigServiceLinux(env_getter, gconf_getter);
@@ -897,14 +908,14 @@ TEST_F(ProxyConfigServiceLinuxTest, GconfNotification) {
   gconf_getter->values.mode = "none";
   sync_config_getter.SetupAndInitialFetch();
   sync_config_getter.SyncGetProxyConfig(&config);
-  EXPECT_FALSE(config.auto_detect);
+  EXPECT_FALSE(config.auto_detect());
 
   // Now set to auto-detect.
   gconf_getter->values.mode = "auto";
   // Simulate gconf notification callback.
   service->OnCheckProxyConfigSettings();
   sync_config_getter.SyncGetProxyConfig(&config);
-  EXPECT_TRUE(config.auto_detect);
+  EXPECT_TRUE(config.auto_detect());
 }
 
 TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
@@ -926,9 +937,8 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
     // Expected outputs (fields of the ProxyConfig).
     bool auto_detect;
     GURL pac_url;
-    ProxyConfig::ProxyRules proxy_rules;
+    ProxyRulesExpectation proxy_rules;
     const char* proxy_bypass_list;  // newline separated
-    bool bypass_local_names;
   } tests[] = {
     {
       TEST_DESC("No proxying"),
@@ -939,9 +949,7 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       false,                      // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -953,13 +961,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       true,                       // auto_detect
       GURL(),                     // pac_url
-      ProxyConfig::ProxyRules(),  // proxy_rules
-      "",                         // proxy_bypass_list
-      false,                      // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
-      TEST_DESC("Valid PAC url"),
+      TEST_DESC("Valid PAC URL"),
 
       // Input.
       "[Proxy Settings]\nProxyType=2\n"
@@ -968,9 +974,7 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       false,                         // auto_detect
       GURL("http://wpad/wpad.dat"),  // pac_url
-      ProxyConfig::ProxyRules(),     // proxy_rules
-      "",                            // proxy_bypass_list
-      false,                         // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -983,11 +987,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "www.foo.com",
-                              "ftp.foo.com"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "www.foo.com:80",     // https
+          "ftp.foo.com:80",     // http
+          ""),                  // bypass rules
     },
 
     {
@@ -1000,10 +1004,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1016,10 +1021,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
       // Expected result.
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com:88",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:88",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1031,10 +1037,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "*.google.com\n",                        // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          "*.google.com"),      // bypass rules
     },
 
     {
@@ -1046,10 +1053,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "*.google.com\n*.kde.org\n",             // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",           // http
+          "",                            // https
+          "",                            // ftp
+          "*.google.com,*.kde.org"),     // bypass rules
     },
 
     {
@@ -1061,10 +1069,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1076,10 +1085,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1091,10 +1101,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1105,10 +1116,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1119,10 +1131,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1133,10 +1146,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", ""),         // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "",                   // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1148,10 +1162,11 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL(),                                  // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", "ftp.foo.com"),  // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "ftp.foo.com:80",     // ftp
+          ""),                  // bypass rules
     },
 
     {
@@ -1163,9 +1178,7 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                   // auto_detect
       GURL("http:// foo"),                     // pac_url
-      ProxyConfig::ProxyRules(),               // proxy_rules
-      "",                                      // proxy_bypass_list
-      false,                                   // bypass_local_names
+      ProxyRulesExpectation::Empty(),
     },
 
     {
@@ -1177,19 +1190,20 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
 
       false,                                       // auto_detect
       GURL(),                                      // pac_url
-      MakeProxyPerSchemeRules("www.google.com",
-                              "", "ftp.foo.com"),  // proxy_rules
-      "",                                          // proxy_bypass_list
-      false,                                       // bypass_local_names
+      ProxyRulesExpectation::PerScheme(
+          "www.google.com:80",  // http
+          "",                   // https
+          "ftp.foo.com:80",     // ftp
+          ""),                  // bypass rules
     },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
-    SCOPED_TRACE(StringPrintf("Test[%d] %s", i, tests[i].description.c_str()));
-    MockEnvironmentVariableGetter* env_getter =
-        new MockEnvironmentVariableGetter;
+    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
+                              tests[i].description.c_str()));
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
     // Force the KDE getter to be used and tell it where the test is.
-    env_getter->values.DESKTOP_SESSION = "kde";
+    env_getter->values.DESKTOP_SESSION = "kde4";
     env_getter->values.KDE_HOME = kde_home_.value().c_str();
     SynchConfigGetter sync_config_getter(
         new ProxyConfigServiceLinux(env_getter));
@@ -1200,12 +1214,83 @@ TEST_F(ProxyConfigServiceLinuxTest, KDEConfigParser) {
     sync_config_getter.SetupAndInitialFetch();
     sync_config_getter.SyncGetProxyConfig(&config);
 
-    EXPECT_EQ(tests[i].auto_detect, config.auto_detect);
-    EXPECT_EQ(tests[i].pac_url, config.pac_url);
-    EXPECT_EQ(tests[i].proxy_bypass_list,
-              FlattenProxyBypass(config.proxy_bypass));
-    EXPECT_EQ(tests[i].bypass_local_names, config.proxy_bypass_local_names);
-    EXPECT_EQ(tests[i].proxy_rules, config.proxy_rules);
+    EXPECT_EQ(tests[i].auto_detect, config.auto_detect());
+    EXPECT_EQ(tests[i].pac_url, config.pac_url());
+    EXPECT_TRUE(tests[i].proxy_rules.Matches(config.proxy_rules()));
+  }
+}
+
+TEST_F(ProxyConfigServiceLinuxTest, KDEHomePicker) {
+  // Auto detect proxy settings.
+  std::string slaverc3 = "[Proxy Settings]\nProxyType=3\n";
+  // Valid PAC URL.
+  std::string slaverc4 = "[Proxy Settings]\nProxyType=2\n"
+                             "Proxy Config Script=http://wpad/wpad.dat\n";
+  GURL slaverc4_pac_url("http://wpad/wpad.dat");
+
+  // Overwrite the .kde kioslaverc file.
+  file_util::WriteFile(kioslaverc_, slaverc3.c_str(), slaverc3.length());
+
+  // If .kde4 exists it will mess up the first test. It should not, as
+  // we created the directory for $HOME in the test setup.
+  CHECK(!file_util::DirectoryExists(kde4_home_));
+
+  { SCOPED_TRACE("KDE4, no .kde4 directory, verify fallback");
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
+    env_getter->values.DESKTOP_SESSION = "kde4";
+    env_getter->values.HOME = user_home_.value().c_str();
+    SynchConfigGetter sync_config_getter(
+        new ProxyConfigServiceLinux(env_getter));
+    ProxyConfig config;
+    sync_config_getter.SetupAndInitialFetch();
+    sync_config_getter.SyncGetProxyConfig(&config);
+    EXPECT_TRUE(config.auto_detect());
+    EXPECT_EQ(GURL(), config.pac_url());
+  }
+
+  // Now create .kde4 and put a kioslaverc in the config directory.
+  file_util::CreateDirectory(kde4_config_);
+  file_util::WriteFile(kioslaverc4_, slaverc4.c_str(), slaverc4.length());
+  CHECK(file_util::PathExists(kioslaverc4_));
+
+  { SCOPED_TRACE("KDE4, .kde4 directory present, use it");
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
+    env_getter->values.DESKTOP_SESSION = "kde4";
+    env_getter->values.HOME = user_home_.value().c_str();
+    SynchConfigGetter sync_config_getter(
+        new ProxyConfigServiceLinux(env_getter));
+    ProxyConfig config;
+    sync_config_getter.SetupAndInitialFetch();
+    sync_config_getter.SyncGetProxyConfig(&config);
+    EXPECT_FALSE(config.auto_detect());
+    EXPECT_EQ(slaverc4_pac_url, config.pac_url());
+  }
+
+  { SCOPED_TRACE("KDE3, .kde4 directory present, ignore it");
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
+    env_getter->values.DESKTOP_SESSION = "kde";
+    env_getter->values.HOME = user_home_.value().c_str();
+    SynchConfigGetter sync_config_getter(
+        new ProxyConfigServiceLinux(env_getter));
+    ProxyConfig config;
+    sync_config_getter.SetupAndInitialFetch();
+    sync_config_getter.SyncGetProxyConfig(&config);
+    EXPECT_TRUE(config.auto_detect());
+    EXPECT_EQ(GURL(), config.pac_url());
+  }
+
+  { SCOPED_TRACE("KDE4, .kde4 directory present, KDE_HOME set to .kde");
+    MockEnvVarGetter* env_getter = new MockEnvVarGetter;
+    env_getter->values.DESKTOP_SESSION = "kde4";
+    env_getter->values.HOME = user_home_.value().c_str();
+    env_getter->values.KDE_HOME = kde_home_.value().c_str();
+    SynchConfigGetter sync_config_getter(
+        new ProxyConfigServiceLinux(env_getter));
+    ProxyConfig config;
+    sync_config_getter.SetupAndInitialFetch();
+    sync_config_getter.SyncGetProxyConfig(&config);
+    EXPECT_TRUE(config.auto_detect());
+    EXPECT_EQ(GURL(), config.pac_url());
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 
 #include <deque>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
@@ -24,7 +26,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
-class MessageLoop;
 class Task;
 class Timer;
 class URLRequestStatus;
@@ -49,10 +50,13 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   FRIEND_TEST(SafeBrowsingProtocolManagerTest, TestGetHashBackOffTimes);
 
  public:
+  // Constructs a SafeBrowsingProtocolManager for |sb_service| that issues
+  // network requests using |request_context_getter|.
   SafeBrowsingProtocolManager(SafeBrowsingService* sb_service,
-                              MessageLoop* notify_loop,
+                              const std::string& client_name,
                               const std::string& client_key,
-                              const std::string& wrapped_key);
+                              const std::string& wrapped_key,
+                              URLRequestContextGetter* request_context_getter);
   ~SafeBrowsingProtocolManager();
 
   // Set up the update schedule and internal state for making periodic requests
@@ -212,10 +216,6 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   // added to the database yet.
   bool chunk_pending_to_write_;
 
-  // Message loop for forwarding MAC keys to the SafeBrowsingService for
-  // storage.
-  MessageLoop* notify_loop_;
-
   // The keys used for MAC. Empty keys mean we aren't using MAC.
   std::string client_key_;
   std::string wrapped_key_;
@@ -237,6 +237,12 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
 
   // Track outstanding malware report fetchers for clean up.
   std::set<const URLFetcher*> malware_reports_;
+
+  // The safe browsing client name sent in each request.
+  std::string client_name_;
+
+  // The context we use to issue network requests.
+  scoped_refptr<URLRequestContextGetter> request_context_getter_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingProtocolManager);
 };

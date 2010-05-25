@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_PRINTING_PRINT_JOB_H_
 #define CHROME_BROWSER_PRINTING_PRINT_JOB_H_
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "chrome/browser/printing/print_job_worker_owner.h"
 #include "chrome/common/notification_registrar.h"
+#include "gfx/native_widget_types.h"
 
 class GURL;
 class Thread;
@@ -38,7 +38,6 @@ class PrintJob : public PrintJobWorkerOwner,
   // Create a empty PrintJob. When initializing with this constructor,
   // post-constructor initialization must be done with Initialize().
   PrintJob();
-  virtual ~PrintJob();
 
   // Grabs the ownership of the PrintJobWorker from another job, which is
   // usually a PrinterQuery.
@@ -92,6 +91,8 @@ class PrintJob : public PrintJobWorkerOwner,
   // Access the current printed document. Warning: may be NULL.
   PrintedDocument* document() const;
 
+ protected:
+  virtual ~PrintJob();
 
  private:
   // Updates document_ to a new instance.
@@ -181,7 +182,6 @@ class JobEventDetails : public base::RefCountedThreadSafe<JobEventDetails> {
   };
 
   JobEventDetails(Type type, PrintedDocument* document, PrintedPage* page);
-  ~JobEventDetails();
 
   // Getters.
   PrintedDocument* document() const;
@@ -191,6 +191,10 @@ class JobEventDetails : public base::RefCountedThreadSafe<JobEventDetails> {
   }
 
  private:
+  friend class base::RefCountedThreadSafe<JobEventDetails>;
+
+  ~JobEventDetails();
+
   scoped_refptr<PrintedDocument> document_;
   scoped_refptr<PrintedPage> page_;
   const Type type_;

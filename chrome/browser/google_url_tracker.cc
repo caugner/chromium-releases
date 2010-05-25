@@ -4,13 +4,16 @@
 
 #include "chrome/browser/google_url_tracker.h"
 
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 

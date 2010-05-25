@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/download_types.h"
+#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/page_usage_data.h"
@@ -25,6 +26,8 @@
 #include "chrome/common/sqlite_utils.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domain.h"
 
 using base::Time;
@@ -115,6 +118,10 @@ class CommitLaterTask : public base::RefCounted<CommitLaterTask> {
   }
 
  private:
+  friend class base::RefCounted<CommitLaterTask>;
+
+  ~CommitLaterTask() {}
+
   scoped_refptr<HistoryBackend> history_backend_;
 };
 
@@ -210,8 +217,9 @@ HistoryBackend::~HistoryBackend() {
   }
 }
 
-void HistoryBackend::Init() {
-  InitImpl();
+void HistoryBackend::Init(bool force_fail) {
+  if (!force_fail)
+    InitImpl();
   delegate_->DBLoaded();
 }
 
@@ -496,16 +504,16 @@ void HistoryBackend::InitImpl() {
   // History database.
   db_.reset(new HistoryDatabase());
   switch (db_->Init(history_name, tmp_bookmarks_file)) {
-    case INIT_OK:
+    case sql::INIT_OK:
       break;
-    case INIT_FAILURE:
+    case sql::INIT_FAILURE:
       // A NULL db_ will cause all calls on this object to notice this error
       // and to not continue.
-      LOG(WARNING) << "Unable to initialize history DB.";
+      delegate_->NotifyProfileError(IDS_COULDNT_OPEN_PROFILE_ERROR);
       db_.reset();
       return;
-    case INIT_TOO_NEW:
-      delegate_->NotifyTooNew();
+    case sql::INIT_TOO_NEW:
+      delegate_->NotifyProfileError(IDS_PROFILE_TOO_NEW_ERROR);
       db_.reset();
       return;
     default:
@@ -549,7 +557,7 @@ void HistoryBackend::InitImpl() {
   // Thumbnail database.
   thumbnail_db_.reset(new ThumbnailDatabase());
   if (thumbnail_db_->Init(thumbnail_name,
-                          history_publisher_.get()) != INIT_OK) {
+                          history_publisher_.get()) != sql::INIT_OK) {
     // Unlike the main database, we don't error out when the database is too
     // new because this error is much less severe. Generally, this shouldn't
     // happen since the thumbnail and main datbase versions should be in sync.
@@ -681,7 +689,6 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   return std::make_pair(url_id, visit_id);
 }
 
-// Note: this method is only for testing purposes.
 void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls) {
   if (!db_.get())
     return;
@@ -840,6 +847,24 @@ void HistoryBackend::IterateURLs(HistoryService::URLEnumerator* iterator) {
     }
   }
   iterator->OnComplete(false);  // Failure.
+}
+
+bool HistoryBackend::GetAllTypedURLs(std::vector<history::URLRow>* urls) {
+  if (db_.get())
+    return db_->GetAllTypedUrls(urls);
+  return false;
+}
+
+bool HistoryBackend::UpdateURL(const URLID id, const history::URLRow& url) {
+  if (db_.get())
+    return db_->UpdateURLRow(id, url);
+  return false;
+}
+
+bool HistoryBackend::GetURL(const GURL& url, history::URLRow* url_row) {
+  if (db_.get())
+    return db_->GetRowForURL(url, url_row) != 0;
+  return false;
 }
 
 void HistoryBackend::QueryURL(scoped_refptr<QueryURLRequest> request,
@@ -1053,7 +1078,6 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
   // First get all visits.
   VisitVector visits;
   visit_db->GetVisibleVisitsInRange(options.begin_time, options.end_time,
-                                    options.most_recent_visit_only,
                                     options.max_count, &visits);
   DCHECK(options.max_count == 0 ||
          static_cast<int>(visits.size()) <= options.max_count);
@@ -1438,7 +1462,8 @@ void HistoryBackend::SetImportedFavicons(
       favicon_id = thumbnail_db_->AddFavIcon(favicon_usage[i].favicon_url);
       if (!favicon_id)
         continue;  // Unable to add the favicon.
-      thumbnail_db_->SetFavIcon(favicon_id, favicon_usage[i].png_data, now);
+      thumbnail_db_->SetFavIcon(favicon_id,
+          new RefCountedBytes(favicon_usage[i].png_data), now);
     }
 
     // Save the mapping from all the URLs to the favicon.
@@ -1554,7 +1579,7 @@ void HistoryBackend::GetFavIconForURL(
 void HistoryBackend::SetFavIcon(
     const GURL& page_url,
     const GURL& icon_url,
-    scoped_refptr<RefCountedBytes> data) {
+    scoped_refptr<RefCountedMemory> data) {
   DCHECK(data.get());
   if (!thumbnail_db_.get() || !db_.get())
     return;
@@ -1564,7 +1589,7 @@ void HistoryBackend::SetFavIcon(
     id = thumbnail_db_->AddFavIcon(icon_url);
 
   // Set the image data.
-  thumbnail_db_->SetFavIcon(id, data->data, Time::Now());
+  thumbnail_db_->SetFavIcon(id, data, Time::Now());
 
   SetFavIconMapping(page_url, id);
 }
@@ -1722,6 +1747,18 @@ void HistoryBackend::ReleaseDBTasks() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+void HistoryBackend::DeleteURLs(const std::vector<GURL>& urls) {
+  for (std::vector<GURL>::const_iterator url = urls.begin(); url != urls.end();
+       ++url) {
+    expirer_.DeleteURL(*url);
+  }
+
+  db_->GetStartDate(&first_recorded_time_);
+  // Force a commit, if the user is deleting something for privacy reasons, we
+  // want to get it on disk ASAP.
+  Commit();
+}
+
 void HistoryBackend::DeleteURL(const GURL& url) {
   expirer_.DeleteURL(url);
 
@@ -1733,19 +1770,20 @@ void HistoryBackend::DeleteURL(const GURL& url) {
 
 void HistoryBackend::ExpireHistoryBetween(
     scoped_refptr<ExpireHistoryRequest> request,
+    const std::set<GURL>& restrict_urls,
     Time begin_time,
     Time end_time) {
   if (request->canceled())
     return;
 
   if (db_.get()) {
-    if (begin_time.is_null() && end_time.is_null()) {
+    if (begin_time.is_null() && end_time.is_null() && restrict_urls.empty()) {
       // Special case deleting all history so it can be faster and to reduce the
       // possibility of an information leak.
       DeleteAllHistory();
     } else {
       // Clearing parts of history, have the expirer do the depend
-      expirer_.ExpireHistoryBetween(begin_time, end_time);
+      expirer_.ExpireHistoryBetween(restrict_urls, begin_time, end_time);
 
       // Force a commit, if the user is deleting something for privacy reasons,
       // we want to get it on disk ASAP.
@@ -1758,7 +1796,7 @@ void HistoryBackend::ExpireHistoryBetween(
 
   request->ForwardResult(ExpireHistoryRequest::TupleType());
 
-  if (history_publisher_.get())
+  if (history_publisher_.get() && restrict_urls.empty())
     history_publisher_->DeleteUserHistoryBetween(begin_time, end_time);
 }
 

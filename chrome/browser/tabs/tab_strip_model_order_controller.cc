@@ -24,36 +24,37 @@ int TabStripModelOrderController::DetermineInsertionIndex(
     PageTransition::Type transition,
     bool foreground) {
   int tab_count = tabstrip_->count();
-  int first_non_pinned_tab = tabstrip_->IndexOfFirstNonPinnedTab();
   if (!tab_count)
     return 0;
 
+  int first_non_app_tab = tabstrip_->IndexOfFirstNonMiniTab();
   if (transition == PageTransition::LINK && tabstrip_->selected_index() != -1) {
     if (foreground) {
       // If the page was opened in the foreground by a link click in another
       // tab, insert it adjacent to the tab that opened that link.
       // TODO(beng): (http://b/1085481) may want to open right of all locked
       //             tabs?
-      return std::max(first_non_pinned_tab,
+      return std::max(first_non_app_tab,
                       tabstrip_->selected_index() + 1);
     }
     NavigationController* opener =
         &tabstrip_->GetSelectedTabContents()->controller();
-    // Get the index of the next item opened by this tab, and insert before
+    // Get the index of the next item opened by this tab, and insert after
     // it...
     int index = tabstrip_->GetIndexOfLastTabContentsOpenedBy(
         opener, tabstrip_->selected_index());
     if (index != TabStripModel::kNoTab)
       return index + 1;
     // Otherwise insert adjacent to opener...
-    return std::max(first_non_pinned_tab, tabstrip_->selected_index() + 1);
+    return std::max(first_non_app_tab, tabstrip_->selected_index() + 1);
   }
   // In other cases, such as Ctrl+T, open at the end of the strip.
   return tab_count;
 }
 
 int TabStripModelOrderController::DetermineNewSelectedIndex(
-    int removing_index) const {
+    int removing_index,
+    bool is_remove) const {
   int tab_count = tabstrip_->count();
   DCHECK(removing_index >= 0 && removing_index < tab_count);
   NavigationController* parent_opener =
@@ -67,7 +68,7 @@ int TabStripModelOrderController::DetermineNewSelectedIndex(
                                                            removing_index,
                                                            false);
   if (index != TabStripModel::kNoTab)
-    return GetValidIndex(index, removing_index);
+    return GetValidIndex(index, removing_index, is_remove);
 
   if (parent_opener) {
     // If the tab was in a group, shift selection to the next tab in the group.
@@ -75,19 +76,19 @@ int TabStripModelOrderController::DetermineNewSelectedIndex(
                                                              removing_index,
                                                              false);
     if (index != TabStripModel::kNoTab)
-      return GetValidIndex(index, removing_index);
+      return GetValidIndex(index, removing_index, is_remove);
 
     // If we can't find a subsequent group member, just fall back to the
     // parent_opener itself. Note that we use "group" here since opener is
     // reset by select operations..
     index = tabstrip_->GetIndexOfController(parent_opener);
     if (index != TabStripModel::kNoTab)
-      return GetValidIndex(index, removing_index);
+      return GetValidIndex(index, removing_index, is_remove);
   }
 
   // No opener set, fall through to the default handler...
   int selected_index = tabstrip_->selected_index();
-  if (selected_index >= (tab_count - 1))
+  if (is_remove && selected_index >= (tab_count - 1))
     return selected_index - 1;
   return selected_index;
 }
@@ -121,8 +122,9 @@ void TabStripModelOrderController::TabSelectedAt(TabContents* old_contents,
 // TabStripModelOrderController, private:
 
 int TabStripModelOrderController::GetValidIndex(int index,
-                                                int removing_index) const {
-  if (removing_index < index)
+                                                int removing_index,
+                                                bool is_remove) const {
+  if (is_remove && removing_index < index)
     index = std::max(0, index - 1);
   return index;
 }

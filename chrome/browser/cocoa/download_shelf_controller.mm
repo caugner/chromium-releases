@@ -9,14 +9,19 @@
 #include "base/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/animatable_view.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/cocoa/download_item_controller.h"
 #include "chrome/browser/cocoa/download_shelf_mac.h"
 #import "chrome/browser/cocoa/download_shelf_view.h"
+#import "chrome/browser/cocoa/hyperlink_button_cell.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/profile.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 namespace {
 
@@ -30,14 +35,18 @@ const int kDownloadItemPadding = 0;
 // Duration for the open-new-leftmost-item animation, in seconds.
 const NSTimeInterval kDownloadItemOpenDuration = 0.8;
 
+// Duration for download shelf closing animation, in seconds.
+const NSTimeInterval kDownloadShelfCloseDuration = 0.12;
+
 }  // namespace
 
 @interface DownloadShelfController(Private)
-- (void)applyContentAreaOffset:(BOOL)apply;
 - (void)showDownloadShelf:(BOOL)enable;
-- (void)resizeDownloadLinkToFit;
 - (void)layoutItems:(BOOL)skipFirst;
 - (void)closed;
+
+- (void)updateTheme;
+- (void)themeDidChangeNotification:(NSNotification*)notification;
 @end
 
 
@@ -67,78 +76,57 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
 }
 
 - (void)awakeFromNib {
-  // Initialize "Show all downloads" link.
+  NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
+  [defaultCenter addObserver:self
+                    selector:@selector(themeDidChangeNotification:)
+                        name:kBrowserThemeDidChangeNotification
+                      object:nil];
 
-  scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
-      [[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
-  [paragraphStyle.get() setAlignment:NSRightTextAlignment];
-
-  NSFont* font = [NSFont systemFontOfSize:
-      [NSFont systemFontSizeForControlSize:NSRegularControlSize]];
-  NSDictionary* linkAttributes = [NSDictionary dictionaryWithObjectsAndKeys:
-      @"", NSLinkAttributeName,
-      [NSCursor pointingHandCursor], NSCursorAttributeName,
-      paragraphStyle.get(), NSParagraphStyleAttributeName,
-      font, NSFontAttributeName,
-      nil];
-  NSString* text =
-      base::SysWideToNSString(l10n_util::GetString(IDS_SHOW_ALL_DOWNLOADS));
-  scoped_nsobject<NSAttributedString> linkText([[NSAttributedString alloc]
-      initWithString:text attributes:linkAttributes]);
-
-  [[showAllDownloadsLink_ textStorage] setAttributedString:linkText.get()];
-  [showAllDownloadsLink_ setDelegate:self];
+  [[self animatableView] setResizeDelegate:resizeDelegate_];
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   NSImage* favicon = rb.GetNSImageNamed(IDR_DOWNLOADS_FAVICON);
   DCHECK(favicon);
   [image_ setImage:favicon];
-
-  [self resizeDownloadLinkToFit];
 }
 
 - (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+
   // The controllers will unregister themselves as observers when they are
   // deallocated. No need to do that here.
   [super dealloc];
 }
 
-- (void)resizeDownloadLinkToFit {
-  // Get width required by localized download link text.
-  // http://developer.apple.com/documentation/Cocoa/Conceptual/TextLayout/Tasks/StringHeight.html
-  [[showAllDownloadsLink_ textContainer] setLineFragmentPadding:0.0];
-  (void)[[showAllDownloadsLink_ layoutManager] glyphRangeForTextContainer:
-      [showAllDownloadsLink_ textContainer]];
-  NSRect textRect = [[showAllDownloadsLink_ layoutManager]
-      usedRectForTextContainer:[showAllDownloadsLink_ textContainer]];
-
-  int offsetX = [showAllDownloadsLink_ frame].size.width - textRect.size.width;
-
-  // Fit link itself.
-  NSRect linkFrame = [linkContainer_ frame];
-  linkFrame.origin.x += offsetX;
-  linkFrame.size.width -= offsetX;
-  [linkContainer_ setFrame:linkFrame];
-  [linkContainer_ setNeedsDisplay:YES];
-
-  // Move image.
-  NSRect imageFrame = [image_ frame];
-  imageFrame.origin.x += offsetX;
-  [image_ setFrame:imageFrame];
-  [image_ setNeedsDisplay:YES];
-
-  // Change item container size.
-  NSRect itemFrame = [itemContainerView_ frame];
-  itemFrame.size.width += offsetX;
-  [itemContainerView_ setFrame:itemFrame];
-  [itemContainerView_ setNeedsDisplay:YES];
+// Called after the current theme has changed.
+- (void)themeDidChangeNotification:(NSNotification*)notification {
+  [self updateTheme];
 }
 
-- (BOOL)textView:(NSTextView *)aTextView
-   clickedOnLink:(id)link
-         atIndex:(NSUInteger)charIndex {
+// Adapt appearance to the current theme. Called after theme changes and before
+// this is shown for the first time.
+- (void)updateTheme {
+  NSColor* color = nil;
+
+  if (bridge_.get() && bridge_->browser() && bridge_->browser()->profile()) {
+    ThemeProvider* provider = bridge_->browser()->profile()->GetThemeProvider();
+
+    color =
+        provider->GetNSColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT, false);
+  }
+
+  if (!color)
+    color = [HyperlinkButtonCell defaultTextColor];
+
+  [showAllDownloadsCell_ setTextColor:color];
+}
+
+- (AnimatableView*)animatableView {
+  return static_cast<AnimatableView*>([self view]);
+}
+
+- (void)showDownloadsTab:(id)sender {
   bridge_->browser()->ShowDownloadsTab();
-  return YES;
 }
 
 - (void)remove:(DownloadItemController*)download {
@@ -147,7 +135,10 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
   // DownloadItem. We don't want to wait for autorelease since the DownloadItem
   // we are observing will likely be gone by then.
   [[NSNotificationCenter defaultCenter] removeObserver:download];
+
+  // TODO(dmaclach): Remove -- http://crbug.com/25845
   [[download view] removeFromSuperview];
+
   [downloadItemControllers_ removeObject:download];
 
   [self layoutItems];
@@ -160,6 +151,7 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
 // We need to explicitly release our download controllers here since they need
 // to remove themselves as observers before the remaining shutdown happens.
 - (void)exiting {
+  [[self animatableView] stopAnimation];
   downloadItemControllers_.reset();
 }
 
@@ -169,8 +161,20 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
   if ([self isVisible] == enable)
     return;
 
-  [resizeDelegate_ resizeView:[self view]
-                    newHeight:(enable ? shelfHeight_ : 0)];
+  if ([[self view] window])
+    [self updateTheme];
+
+  // Animate the shelf out, but not in.
+  // TODO(rohitrao): We do not animate on the way in because Cocoa is already
+  // doing a lot of work to set up the download arrow animation.  I've chosen to
+  // do no animation over janky animation.  Find a way to make animating in
+  // smoother.
+  AnimatableView* view = [self animatableView];
+  if (enable)
+    [view setHeight:shelfHeight_];
+  else
+    [view animateToNewHeight:0 duration:kDownloadShelfCloseDuration];
+
   barIsVisible_ = enable;
 }
 
@@ -194,10 +198,11 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
     bridge_->Close();
   else
     [self showDownloadShelf:NO];
+}
 
-  // TODO(port): When closing the shelf is animated, call this only after the
-  // animation has ended:
-  [self closed];
+- (void)animationDidEnd:(NSAnimation*)animation {
+  if (![self isVisible])
+    [self closed];
 }
 
 - (float)height {
@@ -224,6 +229,7 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
 }
 
 - (void)addDownloadItem:(BaseDownloadItemModel*)model {
+  DCHECK([NSThread isMainThread]);
   // Insert new item at the left.
   scoped_nsobject<DownloadItemController> controller(
       [[DownloadItemController alloc] initWithModel:model shelf:self]);
@@ -231,7 +237,7 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
   // Adding at index 0 in NSMutableArrays is O(1).
   [downloadItemControllers_ insertObject:controller.get() atIndex:0];
 
-  [itemContainerView_ addSubview:[controller.get() view]];
+  [itemContainerView_ addSubview:[controller view]];
 
   // The controller is in charge of removing itself as an observer in its
   // dealloc.
@@ -247,15 +253,17 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
          object:itemContainerView_];
 
   // Start at width 0...
-  NSSize size = [controller.get() preferredSize];
+  NSSize size = [controller preferredSize];
   NSRect frame = NSMakeRect(0, 0, 0, size.height);
-  [[controller.get() view] setFrame:frame];
+  [[controller view] setFrame:frame];
 
   // ...then animate in
   frame.size.width = size.width;
   [NSAnimationContext beginGrouping];
-  [[NSAnimationContext currentContext] setDuration:kDownloadItemOpenDuration];
-  [[[controller.get() view] animator] setFrame:frame];
+  [[NSAnimationContext currentContext]
+      gtm_setDuration:kDownloadItemOpenDuration
+            eventMask:NSLeftMouseUpMask];
+  [[[controller view] animator] setFrame:frame];
   [NSAnimationContext endGrouping];
 
   // Keep only a limited number of items in the shelf.
@@ -276,9 +284,9 @@ const NSTimeInterval kDownloadItemOpenDuration = 0.8;
 
 - (void)closed {
   NSUInteger i = 0;
-  while (i < [downloadItemControllers_.get() count]) {
-    DownloadItemController* itemController = [downloadItemControllers_.get()
-        objectAtIndex:i];
+  while (i < [downloadItemControllers_ count]) {
+    DownloadItemController* itemController =
+        [downloadItemControllers_ objectAtIndex:i];
     bool isTransferDone =
         [itemController download]->state() == DownloadItem::COMPLETE ||
         [itemController download]->state() == DownloadItem::CANCELLED;

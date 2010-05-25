@@ -7,8 +7,9 @@
 
 #include <string>
 #include <map>
+#include <vector>
 
-#include "base/gfx/size.h"
+#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
@@ -16,14 +17,8 @@ namespace WebKit {
 class WebView;
 }
 
-struct FormData;
-class WebFrameImpl;
-
 // A collection of operations that access the underlying WebKit DOM directly.
 namespace webkit_glue {
-
-// Fill in a form identified by form |data|.
-bool FillForm(WebKit::WebView* view, const FormData& data);
 
 // Fill matching password forms and trigger autocomplete in the case of multiple
 // matching logins.
@@ -74,11 +69,11 @@ struct WebApplicationInfo {
 
   // Title of the application. This is set from the meta tag whose name is
   // 'application-name'.
-  std::wstring title;
+  string16 title;
 
   // Description of the application. This is set from the meta tag whose name
   // is 'description'.
-  std::wstring description;
+  string16 description;
 
   // URL for the app. This is set from the meta tag whose name is
   // 'application-url'.
@@ -94,7 +89,7 @@ struct WebApplicationInfo {
 // the attribute are added to sizes, or is_any is set to true.
 //
 // You shouldn't have a need to invoke this directly, it's public for testing.
-bool ParseIconSizes(const std::wstring& text,
+bool ParseIconSizes(const string16& text,
                     std::vector<gfx::Size>* sizes,
                     bool* is_any);
 
@@ -125,6 +120,14 @@ bool ElementDoesAutoCompleteForElementWithId(WebKit::WebView* view,
 
 // Returns the number of animations currently running.
 int NumberOfActiveAnimations(WebKit::WebView* view);
+
+// Returns the value in an elements resource url attribute. For IMG, SCRIPT or
+// INPUT TYPE=image, returns the value in "src". For LINK TYPE=text/css, returns
+// the value in "href". For BODY, TABLE, TR, TD, returns the value in
+// "background". For BLOCKQUOTE, Q, DEL, INS, returns the value in "cite"
+// attribute. Otherwise returns a null WebString.
+WebKit::WebString GetSubResourceLinkFromElement(
+    const WebKit::WebElement& element);
 
 }  // namespace webkit_glue
 

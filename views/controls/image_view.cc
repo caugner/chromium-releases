@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/image_view.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/insets.h"
 #include "base/logging.h"
+#include "gfx/canvas.h"
+#include "gfx/insets.h"
 
 namespace views {
 
@@ -81,7 +81,7 @@ void ImageView::ComputeImageOrigin(int image_width, int image_height,
 
   gfx::Insets insets = GetInsets();
 
-  switch(actual_horiz_alignment) {
+  switch (actual_horiz_alignment) {
     case LEADING:
       *x = insets.left();
       break;
@@ -136,14 +136,6 @@ void ImageView::Paint(gfx::Canvas* canvas) {
   }
 }
 
-bool ImageView::GetAccessibleName(std::wstring* name) {
-  if (!name || tooltip_text_.empty())
-    return false;
-
-  *name = tooltip_text_;
-  return true;
-}
-
 bool ImageView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   if (!role)
     return false;
@@ -176,19 +168,19 @@ ImageView::Alignment ImageView::GetVerticalAlignment() {
 
 void ImageView::SetTooltipText(const std::wstring& tooltip) {
   tooltip_text_ = tooltip;
+  SetAccessibleName(tooltip);
 }
 
 std::wstring ImageView::GetTooltipText() {
   return tooltip_text_;
 }
 
-bool ImageView::GetTooltipText(int x, int y, std::wstring* tooltip) {
-  if (tooltip_text_.empty()) {
+bool ImageView::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+  if (tooltip_text_.empty())
     return false;
-  } else {
-    *tooltip = GetTooltipText();
-    return true;
-  }
+
+  *tooltip = GetTooltipText();
+  return true;
 }
 
 }  // namespace views

@@ -11,8 +11,8 @@
 #import "chrome/browser/cocoa/gradient_button_cell.h"
 #import "chrome/browser/cocoa/toolbar_controller.h"
 #import "chrome/browser/cocoa/view_resizer_pong.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -37,14 +37,15 @@
 
 namespace {
 
-class ToolbarControllerTest : public PlatformTest {
+class ToolbarControllerTest : public CocoaTest {
  public:
 
   // Indexes that match the ordering returned by the private ToolbarController
   // |-toolbarViews| method.
   enum {
     kBackIndex, kForwardIndex, kReloadIndex, kHomeIndex, kStarIndex, kGoIndex,
-    kPageIndex, kWrenchIndex, kLocationIndex, kEncodingMenuIndex
+    kPageIndex, kWrenchIndex, kLocationIndex,
+    kBrowserActionContainerViewIndex
   };
 
   ToolbarControllerTest() {
@@ -62,7 +63,7 @@ class ToolbarControllerTest : public PlatformTest {
                                          browser:browser
                                   resizeDelegate:resizeDelegate_.get()]);
     EXPECT_TRUE([bar_ view]);
-    NSView* parent = [cocoa_helper_.window() contentView];
+    NSView* parent = [test_window() contentView];
     [parent addSubview:[bar_ view]];
   }
 
@@ -81,11 +82,12 @@ class ToolbarControllerTest : public PlatformTest {
               [[views objectAtIndex:kStarIndex] isEnabled] ? true : false);
   }
 
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
   BrowserTestHelper helper_;
   scoped_nsobject<ViewResizerPong> resizeDelegate_;
   scoped_nsobject<ToolbarController> bar_;
 };
+
+TEST_VIEW(ToolbarControllerTest, [bar_ view])
 
 // Test the initial state that everything is sync'd up
 TEST_F(ToolbarControllerTest, InitialState) {
@@ -93,11 +95,11 @@ TEST_F(ToolbarControllerTest, InitialState) {
   CompareState(updater, [bar_ toolbarViews]);
 }
 
-// Make sure a "titlebar only" toolbar works
+// Make sure a "titlebar only" toolbar with location bar works.
 TEST_F(ToolbarControllerTest, TitlebarOnly) {
   NSView* view = [bar_ view];
 
-  [bar_ setHasToolbar:NO];
+  [bar_ setHasToolbar:NO hasLocationBar:YES];
   EXPECT_NE(view, [bar_ view]);
 
   // Simulate a popup going fullscreen and back.
@@ -108,13 +110,14 @@ TEST_F(ToolbarControllerTest, TitlebarOnly) {
   [view removeFromSuperview];
   [superview addSubview:view];
 
-  [bar_ setHasToolbar:YES];
+  [bar_ setHasToolbar:YES hasLocationBar:YES];
   EXPECT_EQ(view, [bar_ view]);
 
   // Leave it off to make sure that's fine
-  [bar_ setHasToolbar:NO];
+  [bar_ setHasToolbar:NO hasLocationBar:YES];
 }
 
+// TODO(viettrungluu): make a version of above without location bar.
 
 // Make some changes to the enabled state of a few of the buttons and ensure
 // that we're still in sync.
@@ -127,32 +130,18 @@ TEST_F(ToolbarControllerTest, UpdateEnabledState) {
   CompareState(updater, [bar_ toolbarViews]);
 }
 
-TEST_F(ToolbarControllerTest, StarredState) {
-  // TODO(pinkerton): I'm not sure how to test this, as the only difference
-  // in internal state is in the image used. I tried using the name of the
-  // image on the button but it doesn't seem to stick to the NSImage, even
-  // when explicitly set.
-}
-
 // Focus the location bar and make sure that it's the first responder.
 TEST_F(ToolbarControllerTest, FocusLocation) {
-  NSWindow* window = cocoa_helper_.window();
+  NSWindow* window = test_window();
   [window makeFirstResponder:[window contentView]];
   EXPECT_EQ([window firstResponder], [window contentView]);
-  [bar_ focusLocationBar];
+  [bar_ focusLocationBar:YES];
   EXPECT_NE([window firstResponder], [window contentView]);
   NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
   EXPECT_EQ([window firstResponder], [(id)locationBar currentEditor]);
 }
 
-// Test drawing, mostly to ensure nothing leaks or crashes.
-TEST_F(ToolbarControllerTest, Display) {
-  [[bar_ view] display];
-}
-
 TEST_F(ToolbarControllerTest, LoadingState) {
-  // TODO(pinkerton): Same problem testing this as the starred state above.
-
   // In its initial state, the go button has a tag of IDC_GO. When loading,
   // it should be IDC_STOP.
   NSButton* go = [[bar_ toolbarViews] objectAtIndex:kGoIndex];
@@ -211,7 +200,7 @@ TEST_F(ToolbarControllerTest, TogglePageWrench) {
 // having the full toolbar. Also ensure that the location bar doesn't change
 // size.
 TEST_F(ToolbarControllerTest, DontToggleWhenNoToolbar) {
-  [bar_ setHasToolbar:NO];
+  [bar_ setHasToolbar:NO hasLocationBar:YES];
   NSView* homeButton = [[bar_ toolbarViews] objectAtIndex:kHomeIndex];
   NSView* pageButton = [[bar_ toolbarViews] objectAtIndex:kPageIndex];
   NSView* wrenchButton = [[bar_ toolbarViews] objectAtIndex:kWrenchIndex];
@@ -284,25 +273,6 @@ TEST_F(ToolbarControllerTest, HoverButtonForEvent) {
   scoped_nsobject<GradientButtonCell> cell([[GradientButtonCell alloc] init]);
   [button setCell:cell.get()];
   EXPECT_TRUE([bar_ hoverButtonForEvent:nil]);
-}
-
-TEST_F(ToolbarControllerTest, PopulateEncodingMenu) {
-  NSMenu* encodings = [[bar_ toolbarViews] objectAtIndex:kEncodingMenuIndex];
-
-  // Can't check item strings because of localization, but the nib has zero
-  // items so check that we at least populated the menu with something at
-  // startup.
-  EXPECT_NE(0, [encodings numberOfItems]);
-}
-
-TEST_F(ToolbarControllerTest, CorrectHeightWhenCompressed) {
-  [bar_ setShouldBeCompressed:YES];
-  EXPECT_EQ(30.0, [resizeDelegate_ height]);
-}
-
-TEST_F(ToolbarControllerTest, CorrectHeightWhenUnompressed) {
-  [bar_ setShouldBeCompressed:NO];
-  EXPECT_EQ(36.0, [resizeDelegate_ height]);
 }
 
 }  // namespace

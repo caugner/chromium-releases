@@ -10,6 +10,15 @@
     # available.
     'jscomp_exists': '<!(python ../build/file_exists.py '
                      '../../o3d-internal/jscomp/JSCompiler_deploy.jar)',
+    'conditions': [
+      [ 'OS=="mac"', {
+        # We need to point to Java 6 explicitly on Mac OS X
+        'java_exe%': '/System/Library/Frameworks/JavaVM.framework/Versions/1.6.0/Commands/java'
+      }, {
+        # OS!="mac"
+        'java_exe%': 'java'
+      }],
+    ],
   },
   'includes': [
     '../build/common.gypi',
@@ -69,9 +78,17 @@
                 'action': [
                   'python',
                   'build_docs.py',
-                  'java',
+                  '<@(java_exe)',
                   '../../third_party',
                   '<(PRODUCT_DIR)/docs',
+                ],
+              },
+            ],
+            'copies': [
+              {
+                'destination': '<(PRODUCT_DIR)/samples/o3djs',
+                'files': [
+                  '<(PRODUCT_DIR)/docs/documentation/base.js',
                 ],
               },
             ],

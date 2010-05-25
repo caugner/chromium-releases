@@ -7,10 +7,10 @@
 #include "webkit/tools/test_shell/webview_host.h"
 
 #include "base/logging.h"
-#include "base/gfx/rect.h"
-#include "base/gfx/size.h"
+#include "gfx/rect.h"
+#include "gfx/size.h"
 #include "skia/ext/platform_canvas.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/plugins/gtk_plugin_container.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"

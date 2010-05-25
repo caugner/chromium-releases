@@ -38,13 +38,14 @@ enum NativeLibraryType {
 };
 struct NativeLibraryStruct {
   NativeLibraryType type;
+  CFBundleRefNum bundle_resource_ref;
   union {
     CFBundleRef bundle;
     void* dylib;
   };
 };
 typedef NativeLibraryStruct* NativeLibrary;
-#elif defined(OS_LINUX) || defined(OS_FREEBSD)
+#elif defined(OS_POSIX)
 typedef void* NativeLibrary;
 #endif  // OS_*
 

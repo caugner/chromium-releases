@@ -22,8 +22,7 @@ using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgumentPointee;
 
-// When testing the floating drawing, we need to have a source of
-// theme data.
+// When testing the floating drawing, we need to have a source of theme data.
 class MockThemeProvider : public ThemeProvider {
  public:
   // Cross platform methods
@@ -33,12 +32,14 @@ class MockThemeProvider : public ThemeProvider {
   MOCK_CONST_METHOD2(GetDisplayProperty, bool(int, int*));
   MOCK_CONST_METHOD0(ShouldUseNativeFrame, bool());
   MOCK_CONST_METHOD1(HasCustomImage, bool(int));
-  MOCK_CONST_METHOD1(GetRawData,  RefCountedMemory*(int));
+  MOCK_CONST_METHOD1(GetRawData, RefCountedMemory*(int));
 
   // OSX stuff
-  MOCK_CONST_METHOD1(GetNSImageNamed, NSImage*(int));
-  MOCK_CONST_METHOD1(GetNSColor, NSColor*(int));
-  MOCK_CONST_METHOD1(GetNSColorTint, NSColor*(int));
+  MOCK_CONST_METHOD2(GetNSImageNamed, NSImage*(int, bool));
+  MOCK_CONST_METHOD2(GetNSImageColorNamed, NSColor*(int, bool));
+  MOCK_CONST_METHOD2(GetNSColor, NSColor*(int, bool));
+  MOCK_CONST_METHOD2(GetNSColorTint, NSColor*(int, bool));
+  MOCK_CONST_METHOD1(GetNSGradient, NSGradient*(int));
 };
 
 // Allows us to inject our fake controller below.
@@ -53,55 +54,82 @@ class MockThemeProvider : public ThemeProvider {
 @end
 
 // Allows us to control which way the view is rendered.
-@interface DrawFloatingFakeController :
-    NSObject<BookmarkBarToolbarViewController> {
-  int current_tab_contents_height_;
-  ThemeProvider* theme_provider_;
-  BOOL drawAsFloating_;
+@interface DrawDetachedBarFakeController :
+    NSObject<BookmarkBarState, BookmarkBarToolbarViewController> {
+ @private
+  int currentTabContentsHeight_;
+  ThemeProvider* themeProvider_;
+  bookmarks::VisualState visualState_;
 }
 @property(assign) int currentTabContentsHeight;
 @property(assign) ThemeProvider* themeProvider;
-@property(assign) BOOL drawAsFloatingBar;
+@property(assign) bookmarks::VisualState visualState;
+
+// |BookmarkBarState| protocol:
+- (BOOL)isVisible;
+- (BOOL)isAnimationRunning;
+- (BOOL)isInState:(bookmarks::VisualState)state;
+- (BOOL)isAnimatingToState:(bookmarks::VisualState)state;
+- (BOOL)isAnimatingFromState:(bookmarks::VisualState)state;
+- (BOOL)isAnimatingFromState:(bookmarks::VisualState)fromState
+                     toState:(bookmarks::VisualState)toState;
+- (BOOL)isAnimatingBetweenState:(bookmarks::VisualState)fromState
+                       andState:(bookmarks::VisualState)toState;
+- (CGFloat)detachedMorphProgress;
 @end
 
-@implementation DrawFloatingFakeController
-@synthesize currentTabContentsHeight = current_tab_contents_height_;
-@synthesize themeProvider = theme_provider_;
-@synthesize drawAsFloatingBar = drawAsFloating_;
+@implementation DrawDetachedBarFakeController
+@synthesize currentTabContentsHeight = currentTabContentsHeight_;
+@synthesize themeProvider = themeProvider_;
+@synthesize visualState = visualState_;
+
+- (id)init {
+  if ((self = [super init])) {
+    [self setVisualState:bookmarks::kHiddenState];
+  }
+  return self;
+}
+
+- (BOOL)isVisible { return YES; }
+- (BOOL)isAnimationRunning { return NO; }
+- (BOOL)isInState:(bookmarks::VisualState)state
+    { return ([self visualState] == state) ? YES : NO; }
+- (BOOL)isAnimatingToState:(bookmarks::VisualState)state { return NO; }
+- (BOOL)isAnimatingFromState:(bookmarks::VisualState)state { return NO; }
+- (BOOL)isAnimatingFromState:(bookmarks::VisualState)fromState
+                     toState:(bookmarks::VisualState)toState { return NO; }
+- (BOOL)isAnimatingBetweenState:(bookmarks::VisualState)fromState
+                       andState:(bookmarks::VisualState)toState { return NO; }
+- (CGFloat)detachedMorphProgress { return 1; }
 @end
 
-class BookmarkBarToolbarViewTest : public PlatformTest {
+class BookmarkBarToolbarViewTest : public CocoaTest {
  public:
   BookmarkBarToolbarViewTest() {
-    controller_.reset([[DrawFloatingFakeController alloc] init]);
+    controller_.reset([[DrawDetachedBarFakeController alloc] init]);
     NSRect frame = NSMakeRect(0, 0, 400, 40);
-    view_.reset([[BookmarkBarToolbarView alloc] initWithFrame:frame]);
-    [cocoa_helper_.contentView() addSubview:view_.get()];
-    [view_.get() setController:controller_.get()];
+    scoped_nsobject<BookmarkBarToolbarView> view(
+        [[BookmarkBarToolbarView alloc] initWithFrame:frame]);
+    view_ = view.get();
+    [[test_window() contentView] addSubview:view_];
+    [view_ setController:controller_.get()];
   }
 
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
-  scoped_nsobject<DrawFloatingFakeController> controller_;
-  scoped_nsobject<BookmarkBarToolbarView> view_;
+  scoped_nsobject<DrawDetachedBarFakeController> controller_;
+  BookmarkBarToolbarView* view_;
 };
 
-// Test adding/removing from the view hierarchy, mostly to ensure nothing
-// leaks or crashes.
-TEST_F(BookmarkBarToolbarViewTest, AddRemove) {
-  EXPECT_EQ(cocoa_helper_.contentView(), [view_ superview]);
-  [view_.get() removeFromSuperview];
-  EXPECT_FALSE([view_ superview]);
-}
+TEST_VIEW(BookmarkBarToolbarViewTest, view_)
 
 // Test drawing (part 1), mostly to ensure nothing leaks or crashes.
 TEST_F(BookmarkBarToolbarViewTest, DisplayAsNormalBar) {
-  [controller_.get() setDrawAsFloatingBar:NO];
+  [controller_.get() setVisualState:bookmarks::kShowingState];
   [view_ display];
 }
 
 // Test drawing (part 2), mostly to ensure nothing leaks or crashes.
-TEST_F(BookmarkBarToolbarViewTest, DisplayAsFloatingBarWithNoImage) {
-  [controller_.get() setDrawAsFloatingBar:YES];
+TEST_F(BookmarkBarToolbarViewTest, DisplayAsDetachedBarWithNoImage) {
+  [controller_.get() setVisualState:bookmarks::kDetachedState];
 
   // Tests where we don't have a background image, only a color.
   MockThemeProvider provider;
@@ -114,7 +142,7 @@ TEST_F(BookmarkBarToolbarViewTest, DisplayAsFloatingBarWithNoImage) {
   [view_ display];
 }
 
-// Actions used in DisplayAsFloatingBarWithBgImage.
+// Actions used in DisplayAsDetachedBarWithBgImage.
 ACTION(SetBackgroundTiling) {
   *arg1 = BrowserThemeProvider::NO_REPEAT;
   return true;
@@ -126,8 +154,8 @@ ACTION(SetAlignLeft) {
 }
 
 // Test drawing (part 3), mostly to ensure nothing leaks or crashes.
-TEST_F(BookmarkBarToolbarViewTest, DisplayAsFloatingBarWithBgImage) {
-  [controller_.get() setDrawAsFloatingBar:YES];
+TEST_F(BookmarkBarToolbarViewTest, DisplayAsDetachedBarWithBgImage) {
+  [controller_.get() setVisualState:bookmarks::kDetachedState];
 
   // Tests where we have a background image, with positioning information.
   MockThemeProvider provider;
@@ -159,3 +187,5 @@ TEST_F(BookmarkBarToolbarViewTest, DisplayAsFloatingBarWithBgImage) {
 
   [view_ display];
 }
+
+// TODO(viettrungluu): write more unit tests, especially after my refactoring.

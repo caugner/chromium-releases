@@ -38,20 +38,26 @@
 #ifndef CHROME_BROWSER_SYNC_ENGINE_SYNCAPI_H_
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCAPI_H_
 
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/scoped_ptr.h"
 #include "build/build_config.h"
+#include "chrome/browser/google_service_auth_error.h"
+#include "chrome/browser/sync/notification_method.h"
+#include "chrome/browser/sync/syncable/model_type.h"
+#include "googleurl/src/gurl.h"
+#include "testing/gtest/include/gtest/gtest_prod.h" // for FRIEND_TEST
 
-#if defined(OS_WIN)
-typedef wchar_t sync_char16;
-#else
-typedef uint16 sync_char16;
-#endif
+namespace browser_sync {
+class ModelSafeWorkerRegistrar;
 
-// The MSVC compiler for Windows requires that any classes exported by, or
-// imported from, a dynamic library be marked with an appropriate
-// __declspec() decoration. However, we currently use static linkage
-// on all platforms.
-#define SYNC_EXPORT
+namespace sessions {
+struct SyncSessionSnapshot;
+}
+}
 
 // Forward declarations of internal class types so that sync API objects
 // may have opaque pointers to these types.
@@ -65,15 +71,39 @@ class ScopedDirLookup;
 class WriteTransaction;
 }
 
+namespace sync_pb {
+class AutofillSpecifics;
+class BookmarkSpecifics;
+class EntitySpecifics;
+class PreferenceSpecifics;
+class ThemeSpecifics;
+class TypedUrlSpecifics;
+}
+
 namespace sync_api {
 
 // Forward declarations of classes to be defined later in this file.
 class BaseTransaction;
 class HttpPostProviderFactory;
-class ModelSafeWorkerInterface;
 class SyncManager;
 class WriteTransaction;
-struct UserShare;
+
+// A UserShare encapsulates the syncable pieces that represent an authenticated
+// user and their data (share).
+// This encompasses all pieces required to build transaction objects on the
+// syncable share.
+struct UserShare {
+  // The DirectoryManager itself, which is the parent of Transactions and can
+  // be shared across multiple threads (unlike Directory).
+  scoped_ptr<syncable::DirectoryManager> dir_manager;
+
+  // The username of the sync user. This is empty until we have performed at
+  // least one successful GAIA authentication with this username, which means
+  // on first-run it is empty until an AUTH_SUCCEEDED event and on future runs
+  // it is set as soon as the client instructs us to authenticate for the last
+  // known valid user (AuthenticateForLastKnownUser()).
+  std::string authenticated_name;
+};
 
 // A valid BaseNode will never have an ID of zero.
 static const int64 kInvalidId = 0;
@@ -83,12 +113,18 @@ static const int64 kInvalidId = 0;
 // transaction is necessary to create a BaseNode or any of its children.
 // Unlike syncable::Entry, a sync API BaseNode is identified primarily by its
 // int64 metahandle, which we call an ID here.
-class SYNC_EXPORT BaseNode {
+class BaseNode {
  public:
   // All subclasses of BaseNode must provide a way to initialize themselves by
   // doing an ID lookup.  Returns false on failure.  An invalid or deleted
   // ID will result in failure.
   virtual bool InitByIdLookup(int64 id) = 0;
+
+  // All subclasses of BaseNode must also provide a way to initialize themselves
+  // by doing a client tag lookup. Returns false on failure. A deleted node
+  // will return FALSE.
+  virtual bool InitByClientTagLookup(syncable::ModelType model_type,
+      const std::string& tag) = 0;
 
   // Each object is identified by a 64-bit id (internally, the syncable
   // metahandle).  These ids are strictly local handles.  They will persist
@@ -105,27 +141,48 @@ class SYNC_EXPORT BaseNode {
   // of syncable::Entry.
   bool GetIsFolder() const;
 
-  // Returns the title of the object as a C string.  The memory is owned by
-  // BaseNode and becomes invalid if GetTitle() is called a second time on this
-  // node, or when the node is destroyed.  A caller should convert this
-  // immediately into e.g. a std::string.  Uniqueness of the title is not
-  // enforced on siblings -- it is not an error for two children to share
-  // a title.
-  const sync_char16* GetTitle() const;
+  // Returns the title of the object.
+  // Uniqueness of the title is not enforced on siblings -- it is not an error
+  // for two children to share a title.
+  std::wstring GetTitle() const;
 
-  // Returns the URL of a bookmark object as a C string.  The memory is owned
-  // by BaseNode and becomes invalid if GetURL() is called a second time on
-  // this node, or when the node is destroyed.  A caller should convert this
-  // immediately into e.g. a std::string.
-  const sync_char16* GetURL() const;
+  // Returns the model type of this object.  The model type is set at node
+  // creation time and is expected never to change.
+  syncable::ModelType GetModelType() const;
 
-  // Return a pointer to the byte data of the favicon image for this node.
-  // Will return NULL if there is no favicon data associated with this node.
-  // The length of the array is returned to the caller via |size_in_bytes|.
+  // Getter specific to the BOOKMARK datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == BOOKMARK.
+  const sync_pb::BookmarkSpecifics& GetBookmarkSpecifics() const;
+
+  // Legacy, bookmark-specific getter that wraps GetBookmarkSpecifics() above.
+  // Returns the URL of a bookmark object.
+  // TODO(ncarter): Remove this datatype-specific accessor.
+  GURL GetURL() const;
+
+  // Legacy, bookmark-specific getter that wraps GetBookmarkSpecifics() above.
+  // Fill in a vector with the byte data of this node's favicon.  Assumes
+  // that the node is a bookmark.
   // Favicons are expected to be PNG images, and though no verification is
   // done on the syncapi client of this, the server may reject favicon updates
   // that are invalid for whatever reason.
-  const unsigned char* GetFaviconBytes(size_t* size_in_bytes);
+  // TODO(ncarter): Remove this datatype-specific accessor.
+  void GetFaviconBytes(std::vector<unsigned char>* output) const;
+
+  // Getter specific to the AUTOFILL datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == AUTOFILL.
+  const sync_pb::AutofillSpecifics& GetAutofillSpecifics() const;
+
+  // Getter specific to the PREFERENCE datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == PREFERENCE.
+  const sync_pb::PreferenceSpecifics& GetPreferenceSpecifics() const;
+
+  // Getter specific to the THEME datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == THEME.
+  const sync_pb::ThemeSpecifics& GetThemeSpecifics() const;
+
+  // Getter specific to the TYPED_URLS datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == TYPED_URLS.
+  const sync_pb::TypedUrlSpecifics& GetTypedUrlSpecifics() const;
 
   // Returns the local external ID associated with the node.
   int64 GetExternalId() const;
@@ -142,12 +199,6 @@ class SYNC_EXPORT BaseNode {
   // children, return 0.
   int64 GetFirstChildId() const;
 
-  // Get an array containing the IDs of this node's children.  The memory is
-  // owned by BaseNode and becomes invalid if GetChildIds() is called a second
-  // time on this node, or when the node is destroyed.  Return the array size
-  // in the child_count parameter.
-  const int64* GetChildIds(size_t* child_count) const;
-
   // These virtual accessors provide access to data members of derived classes.
   virtual const syncable::Entry* GetEntry() const = 0;
   virtual const BaseTransaction* GetTransaction() const = 0;
@@ -155,23 +206,24 @@ class SYNC_EXPORT BaseNode {
  protected:
   BaseNode();
   virtual ~BaseNode();
+  // The server has a size limit on client tags, so we generate a fixed length
+  // hash locally. This also ensures that ModelTypes have unique namespaces.
+  static std::string GenerateSyncableHash(syncable::ModelType model_type,
+      const std::string& client_tag);
 
  private:
-  struct BaseNodeInternal;
-
   // Node is meant for stack use only.
   void* operator new(size_t size);
 
-  // Provides storage for member functions that return pointers to class
-  // memory, e.g. C strings returned by GetTitle().
-  BaseNodeInternal* data_;
+  friend class SyncApiTest;
+  FRIEND_TEST(SyncApiTest, GenerateSyncableHash);
 
   DISALLOW_COPY_AND_ASSIGN(BaseNode);
 };
 
 // WriteNode extends BaseNode to add mutation, and wraps
 // syncable::MutableEntry. A WriteTransaction is needed to create a WriteNode.
-class SYNC_EXPORT WriteNode : public BaseNode {
+class WriteNode : public BaseNode {
  public:
   // Create a WriteNode using the given transaction.
   explicit WriteNode(WriteTransaction* transaction);
@@ -182,18 +234,33 @@ class SYNC_EXPORT WriteNode : public BaseNode {
 
   // BaseNode implementation.
   virtual bool InitByIdLookup(int64 id);
+  virtual bool InitByClientTagLookup(syncable::ModelType model_type,
+      const std::string& tag);
 
-  // Create a new node with the specified parent and predecessor.  Use a NULL
-  // |predecessor| to indicate that this is to be the first child.
+  // Create a new node with the specified parent and predecessor.  |model_type|
+  // dictates the type of the item, and controls which EntitySpecifics proto
+  // extension can be used with this item.  Use a NULL |predecessor|
+  // to indicate that this is to be the first child.
   // |predecessor| must be a child of |new_parent| or NULL. Returns false on
   // failure.
-  bool InitByCreation(const BaseNode& parent, const BaseNode* predecessor);
+  bool InitByCreation(syncable::ModelType model_type,
+                      const BaseNode& parent,
+                      const BaseNode* predecessor);
+
+  // Create nodes using this function if they're unique items that
+  // you want to fetch using client_tag. Note that the behavior of these
+  // items is slightly different than that of normal items.
+  // Most importantly, if it exists locally, this function will
+  // actually undelete it
+  // Client unique tagged nodes must NOT be folders.
+  bool InitUniqueByCreation(syncable::ModelType model_type,
+                            const BaseNode& parent,
+                            const std::string& client_tag);
 
   // These Set() functions correspond to the Get() functions of BaseNode.
   void SetIsFolder(bool folder);
-  void SetTitle(const sync_char16* title);
-  void SetURL(const sync_char16* url);
-  void SetFaviconBytes(const unsigned char* bytes, size_t size_in_bytes);
+  void SetTitle(const std::wstring& title);
+
   // External ID is a client-only field, so setting it doesn't cause the item to
   // be synced again.
   void SetExternalId(int64 external_id);
@@ -206,6 +273,32 @@ class SYNC_EXPORT WriteNode : public BaseNode {
   // be a child of |new_parent| or NULL.  Returns false on failure..
   bool SetPosition(const BaseNode& new_parent, const BaseNode* predecessor);
 
+  // Set the bookmark specifics (url and favicon).
+  // Should only be called if GetModelType() == BOOKMARK.
+  void SetBookmarkSpecifics(const sync_pb::BookmarkSpecifics& specifics);
+
+  // Legacy, bookmark-specific setters that wrap SetBookmarkSpecifics() above.
+  // Should only be called if GetModelType() == BOOKMARK.
+  // TODO(ncarter): Remove these two datatype-specific accessors.
+  void SetURL(const GURL& url);
+  void SetFaviconBytes(const std::vector<unsigned char>& bytes);
+
+  // Set the autofill specifics (name and value).
+  // Should only be called if GetModelType() == AUTOFILL.
+  void SetAutofillSpecifics(const sync_pb::AutofillSpecifics& specifics);
+
+  // Set the preference specifics (name and value).
+  // Should only be called if GetModelType() == PREFERENCE.
+  void SetPreferenceSpecifics(const sync_pb::PreferenceSpecifics& specifics);
+
+  // Set the theme specifics (name and value).
+  // Should only be called if GetModelType() == THEME.
+  void SetThemeSpecifics(const sync_pb::ThemeSpecifics& specifics);
+
+  // Set the typed_url specifics (url, title, typed_count, etc).
+  // Should only be called if GetModelType() == TYPED_URLS.
+  void SetTypedUrlSpecifics(const sync_pb::TypedUrlSpecifics& specifics);
+
   // Implementation of BaseNode's abstract virtual accessors.
   virtual const syncable::Entry* GetEntry() const;
 
@@ -214,8 +307,29 @@ class SYNC_EXPORT WriteNode : public BaseNode {
  private:
   void* operator new(size_t size);  // Node is meant for stack use only.
 
+  // Helper to set model type. This will clear any specifics data.
+  void PutModelType(syncable::ModelType model_type);
+
   // Helper to set the previous node.
   void PutPredecessor(const BaseNode* predecessor);
+
+  // Private helpers to set type-specific protobuf data.  These don't
+  // do any checking on the previous modeltype, so they can be used
+  // for internal initialization (you can use them to set the modeltype).
+  // Additionally, they will mark for syncing if the underlying value
+  // changes.
+  void PutAutofillSpecificsAndMarkForSyncing(
+      const sync_pb::AutofillSpecifics& new_value);
+  void PutBookmarkSpecificsAndMarkForSyncing(
+      const sync_pb::BookmarkSpecifics& new_value);
+  void PutPreferenceSpecificsAndMarkForSyncing(
+      const sync_pb::PreferenceSpecifics& new_value);
+  void PutThemeSpecificsAndMarkForSyncing(
+      const sync_pb::ThemeSpecifics& new_value);
+  void PutTypedUrlSpecificsAndMarkForSyncing(
+      const sync_pb::TypedUrlSpecifics& new_value);
+  void PutSpecificsAndMarkForSyncing(
+      const sync_pb::EntitySpecifics& specifics);
 
   // Sets IS_UNSYNCED and SYNCING to ensure this entry is considered in an
   // upcoming commit pass.
@@ -232,7 +346,7 @@ class SYNC_EXPORT WriteNode : public BaseNode {
 
 // ReadNode wraps a syncable::Entry to provide the functionality of a
 // read-only BaseNode.
-class SYNC_EXPORT ReadNode : public BaseNode {
+class ReadNode : public BaseNode {
  public:
   // Create an unpopulated ReadNode on the given transaction.  Call some flavor
   // of Init to populate the ReadNode with a database entry.
@@ -244,6 +358,8 @@ class SYNC_EXPORT ReadNode : public BaseNode {
 
   // BaseNode implementation.
   virtual bool InitByIdLookup(int64 id);
+  virtual bool InitByClientTagLookup(syncable::ModelType model_type,
+      const std::string& tag);
 
   // There is always a root node, so this can't fail.  The root node is
   // never mutable, so root lookup is only possible on a ReadNode.
@@ -252,8 +368,9 @@ class SYNC_EXPORT ReadNode : public BaseNode {
   // Each server-created permanent node is tagged with a unique string.
   // Look up the node with the particular tag.  If it does not exist,
   // return false.  Since these nodes are special, lookup is only
-  // provided only through ReadNode.
-  bool InitByTagLookup(const sync_char16* tag);
+  // provided through ReadNode.
+  // TODO(chron): Rename this function.
+  bool InitByTagLookup(const std::string& tag);
 
   // Implementation of BaseNode's abstract virtual accessors.
   virtual const syncable::Entry* GetEntry() const;
@@ -278,7 +395,7 @@ class SYNC_EXPORT ReadNode : public BaseNode {
 // syncable, and are used in a similar way. Unlike syncable::BaseTransaction,
 // whose construction requires an explicit syncable::ScopedDirLookup, a sync
 // API BaseTransaction creates its own ScopedDirLookup implicitly.
-class SYNC_EXPORT BaseTransaction {
+class BaseTransaction {
  public:
   // Provide access to the underlying syncable.h objects from BaseNode.
   virtual syncable::BaseTransaction* GetWrappedTrans() const = 0;
@@ -300,7 +417,7 @@ class SYNC_EXPORT BaseTransaction {
 
 // Sync API's ReadTransaction is a read-only BaseTransaction.  It wraps
 // a syncable::ReadTransaction.
-class SYNC_EXPORT ReadTransaction : public BaseTransaction {
+class ReadTransaction : public BaseTransaction {
  public:
   // Start a new read-only transaction on the specified repository.
   explicit ReadTransaction(UserShare* share);
@@ -319,7 +436,7 @@ class SYNC_EXPORT ReadTransaction : public BaseTransaction {
 
 // Sync API's WriteTransaction is a read/write BaseTransaction.  It wraps
 // a syncable::WriteTransaction.
-class SYNC_EXPORT WriteTransaction : public BaseTransaction {
+class WriteTransaction : public BaseTransaction {
  public:
   // Start a new read/write transaction.
   explicit WriteTransaction(UserShare* share);
@@ -344,11 +461,19 @@ class SYNC_EXPORT WriteTransaction : public BaseTransaction {
 // same sqlite database), they should share a single SyncManager instance.  The
 // caller should typically create one SyncManager for the lifetime of a user
 // session.
-class SYNC_EXPORT SyncManager {
+class SyncManager {
  public:
   // SyncInternal contains the implementation of SyncManager, while abstracting
   // internal types from clients of the interface.
   class SyncInternal;
+
+  // Derive from this class and add your own data members to associate extra
+  // information with a ChangeRecord.
+  class ExtraChangeRecordData {
+   public:
+    ExtraChangeRecordData() {}
+    virtual ~ExtraChangeRecordData() {}
+  };
 
   // ChangeRecord indicates a single item that changed as a result of a sync
   // operation.  This gives the sync id of the node that changed, and the type
@@ -360,26 +485,20 @@ class SYNC_EXPORT SyncManager {
       ACTION_DELETE,
       ACTION_UPDATE,
     };
-    ChangeRecord() : id(kInvalidId), action(ACTION_ADD) {}
+    ChangeRecord() : id(kInvalidId), action(ACTION_ADD), extra(NULL) {}
     int64 id;
     Action action;
+    ExtraChangeRecordData* extra;
   };
 
-  // When the SyncManager is unable to initiate the syncing process due to a
-  // failure during authentication, AuthProblem describes the actual problem
-  // more precisely.
-  enum AuthProblem {
-    AUTH_PROBLEM_NONE = 0,
-    // The credentials supplied to GAIA were either invalid, or the locally
-    // cached credentials have expired. If this happens, the sync system
-    // will continue as if offline until authentication is reattempted.
-    AUTH_PROBLEM_INVALID_GAIA_CREDENTIALS,
-    // The GAIA user is not authorized to use the sync service.
-    AUTH_PROBLEM_USER_NOT_SIGNED_UP,
-    // Could not connect to server to verify credentials. This could be in
-    // response to either failure to connect to GAIA or failure to connect to
-    // the sync service during authentication.
-    AUTH_PROBLEM_CONNECTION_FAILED,
+  // Extra specifics data that certain model types require. This is only
+  // used for autofill DELETE changes.
+  class ExtraAutofillChangeRecordData : public ExtraChangeRecordData {
+   public:
+    explicit ExtraAutofillChangeRecordData(sync_pb::AutofillSpecifics* s)
+        : pre_deletion_data(s) {}
+    virtual ~ExtraAutofillChangeRecordData();
+    const sync_pb::AutofillSpecifics* pre_deletion_data;
   };
 
   // Status encapsulates detailed state about the internals of the SyncManager.
@@ -447,13 +566,18 @@ class SYNC_EXPORT SyncManager {
    public:
     Observer() { }
     virtual ~Observer() { }
+
     // Notify the observer that changes have been applied to the sync model.
+    //
     // This will be invoked on the same thread as on which ApplyChanges was
-    // called. |changes| is an array of size |change_count|, and contains the ID
-    // of each individual item that was changed.  |changes| exists only
-    // for the duration of the call.  Because the observer is passed a |trans|,
-    // the observer can assume a read lock on the database that will be released
-    // after the function returns.
+    // called. |changes| is an array of size |change_count|, and contains the
+    // ID of each individual item that was changed. |changes| exists only for
+    // the duration of the call. If items of multiple data types change at
+    // the same time, this method is invoked once per data type and |changes|
+    // is restricted to items of the ModelType indicated by |model_type|.
+    // Because the observer is passed a |trans|, the observer can assume a
+    // read lock on the sync model that will be released after the function
+    // returns.
     //
     // The SyncManager constructs |changes| in the following guaranteed order:
     //
@@ -468,18 +592,18 @@ class SYNC_EXPORT SyncManager {
     // forward dependencies.  But since deletions come before reparent
     // operations, a delete may temporarily orphan a node that is
     // updated later in the list.
-    virtual void OnChangesApplied(const BaseTransaction* trans,
+    virtual void OnChangesApplied(syncable::ModelType model_type,
+                                  const BaseTransaction* trans,
                                   const ChangeRecord* changes,
                                   int change_count) = 0;
 
     // A round-trip sync-cycle took place and the syncer has resolved any
-    // conflicts that may have arisen.  This is kept separate from
-    // OnStatusChanged as there isn't really any state update; it is plainly
-    // a notification of a state transition.
-    virtual void OnSyncCycleCompleted() = 0;
+    // conflicts that may have arisen.
+    virtual void OnSyncCycleCompleted(
+        const browser_sync::sessions::SyncSessionSnapshot* snapshot) = 0;
 
     // Called when user interaction may be required due to an auth problem.
-    virtual void OnAuthProblem(AuthProblem auth_problem) = 0;
+    virtual void OnAuthError(const GoogleServiceAuthError& auth_error) = 0;
 
     // Called when initialization is complete to the point that SyncManager can
     // process changes. This does not necessarily mean authentication succeeded
@@ -489,6 +613,12 @@ class SYNC_EXPORT SyncManager {
     // WARNING: Calling methods on the SyncManager before receiving this
     // message, unless otherwise specified, produces undefined behavior.
     virtual void OnInitializationComplete() = 0;
+
+    // The syncer thread has been paused.
+    virtual void OnPaused() = 0;
+
+    // The syncer thread has been resumed.
+    virtual void OnResumed() = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Observer);
@@ -523,7 +653,17 @@ class SYNC_EXPORT SyncManager {
   // |model_safe_worker| ownership is given to the SyncManager.
   // |user_agent| is a 7-bit ASCII string suitable for use as the User-Agent
   // HTTP header. Used internally when collecting stats to classify clients.
-  bool Init(const sync_char16* database_location,
+  // As a fallback when no cached auth information is available, try to
+  // bootstrap authentication using |lsid|, if it isn't empty.
+  //
+  // |invalidate_last_user_auth_token| makes it so that any auth token
+  // read from user settings is invalidated.  This is used for testing
+  // code paths related to authentication failures.
+  //
+  // |invalidate_xmpp_auth_token| makes it so that any auth token
+  // used to log into XMPP is invalidated.  This is used for testing
+  // code paths related to authentication failures for XMPP only.
+  bool Init(const FilePath& database_location,
             const char* sync_server_and_path,
             int sync_server_port,
             const char* gaia_service_id,
@@ -531,14 +671,17 @@ class SYNC_EXPORT SyncManager {
             bool use_ssl,
             HttpPostProviderFactory* post_factory,
             HttpPostProviderFactory* auth_post_factory,
-            ModelSafeWorkerInterface* model_safe_worker,
+            browser_sync::ModelSafeWorkerRegistrar* registrar,
             bool attempt_last_user_authentication,
-            const char* user_agent);
+            bool invalidate_last_user_auth_token,
+            bool invalidate_xmpp_auth_token,
+            const char* user_agent,
+            const char* lsid,
+            browser_sync::NotificationMethod notification_method);
 
-  // Returns the username last used for a successful authentication as a
-  // null-terminated string. Returns empty if there is no such username.
-  // The memory is not owned by the caller and should be copied.
-  const char* GetAuthenticatedUsername();
+  // Returns the username last used for a successful authentication.
+  // Returns empty if there is no such username.
+  const std::string& GetAuthenticatedUsername();
 
   // Submit credentials to GAIA for verification and start the
   // syncing process on success. On success, both |username| and the obtained
@@ -547,8 +690,25 @@ class SYNC_EXPORT SyncManager {
   // The Observer may, in turn, decide to try again with new
   // credentials. Calling this method again is the appropriate course of action
   // to "retry".
-  // |username| and |password| are expected to be owned by the caller.
-  void Authenticate(const char* username, const char* password);
+  // |username|, |password|, and |captcha| are owned by the caller.
+  void Authenticate(const char* username, const char* password,
+                    const char* captcha);
+
+  // Requests the syncer thread to pause.  The observer's OnPause
+  // method will be called when the syncer thread is paused.  Returns
+  // false if the syncer thread can not be paused (e.g. if it is not
+  // started).
+  bool RequestPause();
+
+  // Requests the syncer thread to resume.  The observer's OnResume
+  // method will be called when the syncer thread is resumed.  Returns
+  // false if the syncer thread can not be resumed (e.g. if it is not
+  // paused).
+  bool RequestResume();
+
+  // Request a nudge of the syncer, which will cause the syncer thread
+  // to run at the next available opportunity.
+  void RequestNudge();
 
   // Adds a listener to be notified of sync events.
   // NOTE: It is OK (in fact, it's probably a good idea) to call this before
@@ -579,7 +739,7 @@ class SYNC_EXPORT SyncManager {
   // communication will take place).
   // Note: The SyncManager precondition that you must first call Init holds;
   // this will fail unless we're initialized.
-  void SetupForTestMode(const sync_char16* test_username);
+  void SetupForTestMode(const std::wstring& test_username);
 
   // Issue a final SaveChanges, close sqlite handles, and stop running threads.
   // Must be called from the same thread that called Init().
@@ -638,6 +798,11 @@ class HttpPostProviderInterface {
   // Value should be copied.
   virtual const char* GetResponseContent() const = 0;
 
+  // Get the value of a header returned in the HTTP response.
+  // If the header is not present, returns the empty string.
+  virtual const std::string GetResponseHeaderValue(
+      const std::string& name) const = 0;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(HttpPostProviderInterface);
 };
@@ -658,33 +823,6 @@ class HttpPostProviderFactory {
   // multiple threads to serve network requests.
   virtual void Destroy(HttpPostProviderInterface* http) = 0;
   virtual ~HttpPostProviderFactory() { }
-};
-
-// A class syncapi clients should use whenever the underlying model is bound to
-// a particular thread in the embedding application. This exposes an interface
-// by which any model-modifying invocations will be forwarded to the
-// appropriate thread in the embedding application.
-// "model safe" refers to not allowing an embedding application model to fall
-// out of sync with the syncable::Directory due to race conditions.
-class ModelSafeWorkerInterface {
- public:
-  virtual ~ModelSafeWorkerInterface() { }
-  // A Visitor is passed to CallDoWorkFromModelSafeThreadAndWait invocations,
-  // and it's sole purpose is to provide a way for the ModelSafeWorkerInterface
-  // implementation to actually _do_ the work required, by calling the only
-  // method on this class, DoWork().
-  class Visitor {
-   public:
-    virtual ~Visitor() { }
-    // When on a model safe thread, this should be called to have the syncapi
-    // actually perform the work needing to be done.
-    virtual void DoWork() = 0;
-  };
-  // Subclasses should implement to invoke DoWork on |visitor| once on a thread
-  // appropriate for data model modifications.
-  // While it doesn't hurt, the impl does not need to be re-entrant (for now).
-  // Note: |visitor| is owned by caller.
-  virtual void CallDoWorkFromModelSafeThreadAndWait(Visitor* visitor) = 0;
 };
 
 }  // namespace sync_api

@@ -8,6 +8,7 @@
 #include "base/pickle.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/ev_root_ca_metadata.h"
@@ -49,6 +50,9 @@ int MapSecurityError(SECURITY_STATUS err) {
       return ERR_CERT_REVOKED;
     case SEC_E_CERT_UNKNOWN:
     case CERT_E_ROLE:
+      return ERR_CERT_INVALID;
+    case CERT_E_WRONG_USAGE:
+      // TODO(wtc): Should we add ERR_CERT_WRONG_USAGE?
       return ERR_CERT_INVALID;
     // We received an unexpected_message or illegal_parameter alert message
     // from the server.
@@ -98,8 +102,8 @@ int MapCertChainErrorStatusToCertStatus(DWORD error_status) {
   const DWORD kWrongUsageErrors = CERT_TRUST_IS_NOT_VALID_FOR_USAGE |
                                   CERT_TRUST_CTL_IS_NOT_VALID_FOR_USAGE;
   if (error_status & kWrongUsageErrors) {
-    // TODO(wtc): Handle these errors.
-    // cert_status = |= CERT_STATUS_WRONG_USAGE;
+    // TODO(wtc): Should we add CERT_STATUS_WRONG_USAGE?
+    cert_status |= CERT_STATUS_INVALID;
   }
 
   // The rest of the errors.
@@ -204,6 +208,12 @@ bool CertSubjectCommonNameHasNull(PCCERT_CONTEXT cert) {
         PCERT_RDN_ATTR rdn_attr = &rdn->rgRDNAttr[j];
         if (strcmp(rdn_attr->pszObjId, szOID_COMMON_NAME) == 0) {
           switch (rdn_attr->dwValueType) {
+            // After the CryptoAPI ASN.1 security vulnerabilities described in
+            // http://www.microsoft.com/technet/security/Bulletin/MS09-056.mspx
+            // were patched, we get CERT_RDN_ENCODED_BLOB for a common name
+            // that contains a NULL character.
+            case CERT_RDN_ENCODED_BLOB:
+              break;
             // Array of 8-bit characters.
             case CERT_RDN_PRINTABLE_STRING:
             case CERT_RDN_TELETEX_STRING:
@@ -430,6 +440,7 @@ void X509Certificate::Initialize() {
   std::wstring subject_info;
   std::wstring issuer_info;
   DWORD name_size;
+  DCHECK(cert_handle_);
   name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
                             &cert_handle_->pCertInfo->Subject,
                             CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
@@ -453,9 +464,6 @@ void X509Certificate::Initialize() {
   valid_expiry_ = Time::FromFileTime(cert_handle_->pCertInfo->NotAfter);
 
   fingerprint_ = CalculateFingerprint(cert_handle_);
-
-  // Store the certificate in the cache in case we need it later.
-  X509Certificate::Cache::GetInstance()->Insert(this);
 }
 
 // static
@@ -474,10 +482,12 @@ X509Certificate* X509Certificate::CreateFromPickle(const Pickle& pickle,
       NULL, reinterpret_cast<const void **>(&cert_handle)))
     return NULL;
 
-  return CreateFromHandle(cert_handle, SOURCE_LONE_CERT_IMPORT);
+  return CreateFromHandle(cert_handle, SOURCE_LONE_CERT_IMPORT,
+                          OSCertHandles());
 }
 
 void X509Certificate::Persist(Pickle* pickle) {
+  DCHECK(cert_handle_);
   DWORD length;
   if (!CertSerializeCertificateStoreElement(cert_handle_, 0,
       NULL, &length)) {
@@ -495,16 +505,19 @@ void X509Certificate::Persist(Pickle* pickle) {
 
 void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
   dns_names->clear();
-  scoped_ptr_malloc<CERT_ALT_NAME_INFO> alt_name_info;
-  GetCertSubjectAltName(cert_handle_, &alt_name_info);
-  CERT_ALT_NAME_INFO* alt_name = alt_name_info.get();
-  if (alt_name) {
-    int num_entries = alt_name->cAltEntry;
-    for (int i = 0; i < num_entries; i++) {
-      // dNSName is an ASN.1 IA5String representing a string of ASCII
-      // characters, so we can use WideToASCII here.
-      if (alt_name->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME)
-        dns_names->push_back(WideToASCII(alt_name->rgAltEntry[i].pwszDNSName));
+  if (cert_handle_) {
+    scoped_ptr_malloc<CERT_ALT_NAME_INFO> alt_name_info;
+    GetCertSubjectAltName(cert_handle_, &alt_name_info);
+    CERT_ALT_NAME_INFO* alt_name = alt_name_info.get();
+    if (alt_name) {
+      int num_entries = alt_name->cAltEntry;
+      for (int i = 0; i < num_entries; i++) {
+        // dNSName is an ASN.1 IA5String representing a string of ASCII
+        // characters, so we can use WideToASCII here.
+        if (alt_name->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME)
+          dns_names->push_back(
+              WideToASCII(alt_name->rgAltEntry[i].pwszDNSName));
+      }
     }
   }
   if (dns_names->empty())
@@ -515,17 +528,25 @@ int X509Certificate::Verify(const std::string& hostname,
                             int flags,
                             CertVerifyResult* verify_result) const {
   verify_result->Reset();
+  if (!cert_handle_)
+    return ERR_UNEXPECTED;
 
   // Build and validate certificate chain.
 
   CERT_CHAIN_PARA chain_para;
   memset(&chain_para, 0, sizeof(chain_para));
   chain_para.cbSize = sizeof(chain_para);
-  // TODO(wtc): consider requesting the usage szOID_PKIX_KP_SERVER_AUTH
-  // or szOID_SERVER_GATED_CRYPTO or szOID_SGC_NETSCAPE
-  chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
-  chain_para.RequestedUsage.Usage.cUsageIdentifier = 0;
-  chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = NULL;  // LPSTR*
+  // TODO(wtc): Do we still need to request szOID_SERVER_GATED_CRYPTO or
+  // szOID_SGC_NETSCAPE today?
+  static const LPSTR usage[] = {
+    szOID_PKIX_KP_SERVER_AUTH,
+    szOID_SERVER_GATED_CRYPTO,
+    szOID_SGC_NETSCAPE
+  };
+  chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_OR;
+  chain_para.RequestedUsage.Usage.cUsageIdentifier = arraysize(usage);
+  chain_para.RequestedUsage.Usage.rgpszUsageIdentifier =
+      const_cast<LPSTR*>(usage);
   // We can set CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS to get more chains.
   DWORD chain_flags = CERT_CHAIN_CACHE_END_CERT;
   if (flags & VERIFY_REV_CHECKING_ENABLED) {
@@ -665,6 +686,7 @@ int X509Certificate::Verify(const std::string& hostname,
 // of the EV Certificate Guidelines Version 1.0 at
 // http://cabforum.org/EV_Certificate_Guidelines.pdf.
 bool X509Certificate::VerifyEV() const {
+  DCHECK(cert_handle_);
   net::EVRootCAMetadata* metadata = net::EVRootCAMetadata::GetInstance();
 
   PCCERT_CHAIN_CONTEXT chain_context = ConstructCertChain(cert_handle_,
@@ -721,6 +743,13 @@ X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
     return NULL;
 
   return cert_handle;
+}
+
+
+// static
+X509Certificate::OSCertHandle X509Certificate::DupOSCertHandle(
+    OSCertHandle cert_handle) {
+  return CertDuplicateCertificateContext(cert_handle);
 }
 
 // static

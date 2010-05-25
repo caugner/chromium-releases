@@ -7,13 +7,13 @@
 #include <vector>
 #include <algorithm>
 
-#include "base/gfx/rect.h"
 #include "base/logging.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 
 bool WindowProxy::SimulateOSClick(const gfx::Point& click, int flags) {
@@ -21,6 +21,13 @@ bool WindowProxy::SimulateOSClick(const gfx::Point& click, int flags) {
 
   return sender_->Send(
       new AutomationMsg_WindowClick(0, handle_, click, flags));
+}
+
+bool WindowProxy::SimulateOSMouseMove(const gfx::Point& location) {
+  if (!is_valid()) return false;
+
+  return sender_->Send(
+      new AutomationMsg_WindowMouseMove(0, handle_, location));
 }
 
 bool WindowProxy::GetWindowTitle(string16* text) {
@@ -68,14 +75,6 @@ bool WindowProxy::Activate() {
 
 bool WindowProxy::GetViewBounds(int view_id, gfx::Rect* bounds,
                                 bool screen_coordinates) {
-  return GetViewBoundsWithTimeout(view_id, bounds, screen_coordinates,
-                                  base::kNoTimeout, NULL);
-}
-
-bool WindowProxy::GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
-                                           bool screen_coordinates,
-                                           uint32 timeout_ms,
-                                           bool* is_timeout) {
   if (!is_valid())
     return false;
 
@@ -86,9 +85,10 @@ bool WindowProxy::GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
 
   bool result = false;
 
-  sender_->SendWithTimeout(new AutomationMsg_WindowViewBounds(
-      0, handle_, view_id, screen_coordinates, &result, bounds),
-      timeout_ms, is_timeout);
+  if (!sender_->Send(new AutomationMsg_WindowViewBounds(
+          0, handle_, view_id, screen_coordinates, &result, bounds))) {
+    return false;
+  }
 
   return result;
 }
@@ -121,6 +121,15 @@ bool WindowProxy::GetFocusedViewID(int* view_id) {
 
   return sender_->Send(new AutomationMsg_GetFocusedViewID(0, handle_,
                                                           view_id));
+}
+
+bool WindowProxy::WaitForFocusedViewIDToChange(
+    int old_view_id, int* new_view_id) {
+  bool result = false;
+  if (!sender_->Send(new AutomationMsg_WaitForFocusedViewIDToChange
+                     (0, handle_, old_view_id, &result, new_view_id)))
+    return false;
+  return result;
 }
 
 scoped_refptr<BrowserProxy> WindowProxy::GetBrowser() {

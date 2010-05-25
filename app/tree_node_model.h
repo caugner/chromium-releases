@@ -6,13 +6,17 @@
 #define APP_TREE_NODE_MODEL_H_
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "app/tree_model.h"
 #include "base/basictypes.h"
+#include "base/observer_list.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
 #include "base/stl_util-inl.h"
+#include "base/string16.h"
+#include "base/utf_string_conversions.h"
 
 // TreeNodeModel and TreeNodes provide an implementation of TreeModel around
 // TreeNodes. TreeNodes form a directed acyclic graph.
@@ -65,7 +69,12 @@ class TreeNode : public TreeModelNode {
  public:
   TreeNode() : parent_(NULL) { }
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
+#if !defined(WCHAR_T_IS_UTF16)
   explicit TreeNode(const std::wstring& title)
+      : title_(WideToUTF16(title)), parent_(NULL) {}
+#endif
+  explicit TreeNode(const string16& title)
       : title_(title), parent_(NULL) {}
 
   virtual ~TreeNode() {
@@ -73,7 +82,9 @@ class TreeNode : public TreeModelNode {
 
   // Adds the specified child node.
   virtual void Add(int index, NodeType* child) {
-    DCHECK(child && index >= 0 && index <= GetChildCount());
+    DCHECK(child);
+    DCHECK_LE(0, index);
+    DCHECK_GE(GetChildCount(), index);
     // If the node has a parent, remove it from its parent.
     NodeType* node_parent = child->GetParent();
     if (node_parent)
@@ -104,13 +115,25 @@ class TreeNode : public TreeModelNode {
     return static_cast<int>(children_->size());
   }
 
+  // Returns the number of all nodes in teh subtree rooted at this node,
+  // including this node.
+  int GetTotalNodeCount() const {
+    int count = 1;  // Start with one to include the node itself.
+    for (size_t i = 0; i < children_->size(); ++i) {
+      const TreeNode<NodeType>* child = children_[i];
+      count += child->GetTotalNodeCount();
+    }
+    return count;
+  }
+
   // Returns a child by index.
   NodeType* GetChild(int index) {
     DCHECK(index >= 0 && index < GetChildCount());
     return children_[index];
   }
   const NodeType* GetChild(int index) const {
-    DCHECK(index >= 0 && index < GetChildCount());
+    DCHECK_LE(0, index);
+    DCHECK_GT(GetChildCount(), index);
     return children_[index];
   }
 
@@ -133,12 +156,23 @@ class TreeNode : public TreeModelNode {
   }
 
   // Sets the title of the node.
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
+#if !defined(WCHAR_T_IS_UTF16)
   void SetTitle(const std::wstring& string) {
+    title_ = WideToUTF16(string);
+  }
+#endif
+  void SetTitle(const string16& string) {
     title_ = string;
   }
 
+  // TODO(munjal): Remove wstring version and rename GetTitleAsString16 to
+  // GetTitle once all code is moved to string16.
   // Returns the title of the node.
-  virtual const std::wstring& GetTitle() const {
+  virtual std::wstring GetTitle() const {
+    return UTF16ToWide(title_);
+  }
+  virtual const string16& GetTitleAsString16() const {
     return title_;
   }
 
@@ -160,7 +194,7 @@ class TreeNode : public TreeModelNode {
 
  private:
   // Title displayed in the tree.
-  std::wstring title_;
+  string16 title_;
 
   NodeType* parent_;
 
@@ -180,7 +214,7 @@ class TreeNodeWithValue : public TreeNode< TreeNodeWithValue<ValueType> > {
  public:
   TreeNodeWithValue() { }
 
-  TreeNodeWithValue(const ValueType& value)
+  explicit TreeNodeWithValue(const ValueType& value)
       : ParentType(std::wstring()), value(value) { }
 
   TreeNodeWithValue(const std::wstring& title, const ValueType& value)
@@ -201,18 +235,18 @@ class TreeNodeModel : public TreeModel {
   // Creates a TreeNodeModel with the specified root node. The root is owned
   // by the TreeNodeModel.
   explicit TreeNodeModel(NodeType* root)
-      : root_(root),
-        observer_(NULL) {
+      : root_(root) {
   }
 
   virtual ~TreeNodeModel() {}
 
-  virtual void SetObserver(TreeModelObserver* observer) {
-    observer_ = observer;
+  // Observer methods, calls into ObserverList.
+  virtual void AddObserver(TreeModelObserver* observer) {
+    observer_list_.AddObserver(observer);
   }
 
-  TreeModelObserver* GetObserver() {
-    return observer_;
+  virtual void RemoveObserver(TreeModelObserver* observer) {
+    observer_list_.RemoveObserver(observer);
   }
 
   // TreeModel methods, all forward to the nodes.
@@ -228,13 +262,18 @@ class TreeNodeModel : public TreeModel {
     return AsNode(parent)->GetChild(index);
   }
 
+  virtual int IndexOfChild(TreeModelNode* parent, TreeModelNode* child) {
+    DCHECK(parent);
+    return AsNode(parent)->IndexOfChild(AsNode(child));
+  }
+
   virtual TreeModelNode* GetParent(TreeModelNode* node) {
     DCHECK(node);
     return AsNode(node)->GetParent();
   }
 
   NodeType* AsNode(TreeModelNode* model_node) {
-    return reinterpret_cast<NodeType*>(model_node);
+    return static_cast<NodeType*>(model_node);
   }
 
   // Sets the title of the specified node.
@@ -259,26 +298,31 @@ class TreeNodeModel : public TreeModel {
   }
 
   void NotifyObserverTreeNodesAdded(NodeType* parent, int start, int count) {
-    if (observer_)
-      observer_->TreeNodesAdded(this, parent, start, count);
+    FOR_EACH_OBSERVER(TreeModelObserver,
+                      observer_list_,
+                      TreeNodesAdded(this, parent, start, count));
   }
 
   void NotifyObserverTreeNodesRemoved(NodeType* parent, int start, int count) {
-    if (observer_)
-      observer_->TreeNodesRemoved(this, parent, start, count);
+    FOR_EACH_OBSERVER(TreeModelObserver,
+                      observer_list_,
+                      TreeNodesRemoved(this, parent, start, count));
   }
 
   virtual void NotifyObserverTreeNodeChanged(TreeModelNode* node) {
-    if (observer_)
-      observer_->TreeNodeChanged(this, node);
+    FOR_EACH_OBSERVER(TreeModelObserver,
+                      observer_list_,
+                      TreeNodeChanged(this, node));
   }
 
+ protected:
+  ObserverList<TreeModelObserver>& observer_list() { return observer_list_; }
+
  private:
+  // The observers.
+  ObserverList<TreeModelObserver> observer_list_;
   // The root.
   scoped_ptr<NodeType> root_;
-
-  // The observer.
-  TreeModelObserver* observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TreeNodeModel);
 };

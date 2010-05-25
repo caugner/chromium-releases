@@ -3,13 +3,15 @@
 // found in the LICENSE file.
 #include "chrome/browser/web_resource/web_resource_service.h"
 
-#include "base/string_util.h"
+#include "base/command_line.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
@@ -85,7 +87,7 @@ class WebResourceService::WebResourceFetcher
   scoped_ptr<URLFetcher> url_fetcher_;
 
   // Our owner and creator.
-  scoped_ptr<WebResourceService> web_resource_service_;
+  scoped_refptr<WebResourceService> web_resource_service_;
 };
 
 // This class coordinates a web resource unpack and parse task which is run in
@@ -106,19 +108,16 @@ class WebResourceService::UnpackerClient
     // If we don't have a resource_dispatcher_host_, assume we're in
     // a test and run the unpacker directly in-process.
     bool use_utility_process =
-        web_resource_service_->resource_dispatcher_host_ != NULL;
-
-#if defined(OS_POSIX)
-    // TODO(port): Don't use a utility process on linux (crbug.com/22703) or
-    // MacOS (crbug.com/8102) until problems related to autoupdate are fixed.
-    use_utility_process = false;
-#endif
-
+        web_resource_service_->resource_dispatcher_host_ != NULL &&
+        !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
     if (use_utility_process) {
-      ChromeThread::GetMessageLoop(ChromeThread::IO)->PostTask(FROM_HERE,
+      ChromeThread::ID thread_id;
+      CHECK(ChromeThread::GetCurrentThreadIdentifier(&thread_id));
+      ChromeThread::PostTask(
+          ChromeThread::IO, FROM_HERE,
           NewRunnableMethod(this, &UnpackerClient::StartProcessOnIOThread,
                             web_resource_service_->resource_dispatcher_host_,
-                            MessageLoop::current()));
+                            thread_id));
     } else {
       WebResourceUnpacker unpacker(json_data_);
       if (unpacker.Run()) {
@@ -130,6 +129,8 @@ class WebResourceService::UnpackerClient
   }
 
  private:
+  ~UnpackerClient() {}
+
   // UtilityProcessHost::Client
   virtual void OnProcessCrashed() {
     if (got_response_)
@@ -160,8 +161,8 @@ class WebResourceService::UnpackerClient
   }
 
   void StartProcessOnIOThread(ResourceDispatcherHost* rdh,
-                              MessageLoop* file_loop) {
-    UtilityProcessHost* host = new UtilityProcessHost(rdh, this, file_loop);
+                              ChromeThread::ID thread_id) {
+    UtilityProcessHost* host = new UtilityProcessHost(rdh, this, thread_id);
     // TODO(mrc): get proper file path when we start using web resources
     // that need to be unpacked.
     host->StartWebResourceUnpacker(json_data_);
@@ -190,12 +191,10 @@ const wchar_t* WebResourceService::kDefaultResourceServer =
 const char* WebResourceService::kResourceDirectoryName =
     "Resources";
 
-WebResourceService::WebResourceService(Profile* profile,
-                                       MessageLoop* backend_loop) :
-    prefs_(profile->GetPrefs()),
-    web_resource_dir_(profile->GetPath().AppendASCII(kResourceDirectoryName)),
-    backend_loop_(backend_loop),
-    in_fetch_(false) {
+WebResourceService::WebResourceService(Profile* profile)
+    : prefs_(profile->GetPrefs()),
+      web_resource_dir_(profile->GetPath().AppendASCII(kResourceDirectoryName)),
+      in_fetch_(false) {
   Init();
 }
 
@@ -205,19 +204,19 @@ void WebResourceService::Init() {
   resource_dispatcher_host_ = g_browser_process->resource_dispatcher_host();
   web_resource_fetcher_ = new WebResourceFetcher(this);
   prefs_->RegisterStringPref(prefs::kNTPTipsCacheUpdate, L"0");
-  std::wstring language = WebResourceService::GetWebResourceLanguage(prefs_);
+  std::wstring locale = ASCIIToWide(g_browser_process->GetApplicationLocale());
 
   if (prefs_->HasPrefPath(prefs::kNTPTipsServer)) {
      web_resource_server_ = prefs_->GetString(prefs::kNTPTipsServer);
      // If we are in the correct locale, initialization is done.
-     if (EndsWith(web_resource_server_, language, false))
+     if (EndsWith(web_resource_server_, locale, false))
        return;
   }
 
   // If we have not yet set a server, or if the tips server is set to the wrong
   // locale, reset the server and force an immediate update of tips.
   web_resource_server_ = kDefaultResourceServer;
-  web_resource_server_.append(language);
+  web_resource_server_.append(locale);
   prefs_->SetString(prefs::kNTPTipsCacheUpdate, L"");
 }
 
@@ -296,18 +295,3 @@ void WebResourceService::UpdateResourceCache(const std::string& json_data) {
       DoubleToWString(base::Time::Now().ToDoubleT()));
   prefs_->SetString(prefs::kNTPTipsServer, web_resource_server_);
 }
-
-// static
-std::wstring WebResourceService::GetWebResourceLanguage(PrefService* prefs) {
-#if defined OS_MACOSX
-  // OS X derives the language for the Chrome UI from the list of accepted
-  // languages, which can be different from the locale.
-  std::wstring languageList = prefs->GetString(prefs::kAcceptLanguages);
-  int pos = languageList.find(L",");
-  pos = pos >= 0 ? pos : languageList.length();
-  return languageList.substr(0, pos);
-#else
-  return ASCIIToWide(g_browser_process->GetApplicationLocale());
-#endif
-}
-

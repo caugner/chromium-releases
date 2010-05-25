@@ -16,10 +16,11 @@
 
 #include <string>
 
+#include "app/gtk_signal.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/gtk/gtk_tree.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/options_page_base.h"
-#include "chrome/common/gtk_tree.h"
-#include "chrome/common/pref_member.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class LanguageComboboxModel;
@@ -27,7 +28,7 @@ class LanguageOrderTableModel;
 
 class LanguagesPageGtk
     : public OptionsPageBase,
-      public gtk_tree::ModelAdapter::Delegate {
+      public gtk_tree::TableAdapter::Delegate {
  public:
   explicit LanguagesPageGtk(Profile* profile);
   virtual ~LanguagesPageGtk();
@@ -36,7 +37,7 @@ class LanguagesPageGtk
     return page_;
   }
 
-  // gtk_tree::ModelAdapter::Delegate implementation.
+  // gtk_tree::TableAdapter::Delegate implementation.
   virtual void OnAnyModelUpdate();
   virtual void SetColumnValues(int row, GtkTreeIter* iter);
 
@@ -62,25 +63,18 @@ class LanguagesPageGtk
   virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
   // Callbacks for accept languages widgets.
-  static void OnSelectionChanged(GtkTreeSelection *selection,
+  static void OnSelectionChanged(GtkTreeSelection* selection,
                                  LanguagesPageGtk* languages_page);
-  static void OnAddButtonClicked(GtkButton* button,
-                                 LanguagesPageGtk* languages_page);
-  static void OnRemoveButtonClicked(GtkButton* button,
-                                    LanguagesPageGtk* languages_page);
-  static void OnMoveUpButtonClicked(GtkButton* button,
-                                    LanguagesPageGtk* languages_page);
-  static void OnMoveDownButtonClicked(GtkButton* button,
-                                      LanguagesPageGtk* languages_page);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnAddButtonClicked);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnRemoveButtonClicked);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnMoveUpButtonClicked);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnMoveDownButtonClicked);
 
   // Callbacks for spellchecker option widgets.
-  static void OnEnableSpellCheckingToggled(GtkToggleButton* toggle_button,
-                                           LanguagesPageGtk* languages_page);
-  static void OnEnableAutoSpellCheckingToggled(
-      GtkToggleButton* toggle_button, LanguagesPageGtk* languages_page);
-  static void OnDictionaryLanguageChangedThunk(
-      GtkComboBox* combo_box, LanguagesPageGtk* languages_page);
-  void OnDictionaryLanguageChanged();
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnEnableSpellCheckingToggled);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void,
+                       OnEnableAutoSpellCheckingToggled);
+  CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnDictionaryLanguageChanged);
 
   // The accept languages widgets.
   GtkListStore* language_order_store_;
@@ -101,7 +95,7 @@ class LanguagesPageGtk
 
   // The model for |language_order_store_|.
   scoped_ptr<LanguageOrderTableModel> language_order_table_model_;
-  scoped_ptr<gtk_tree::ModelAdapter> language_order_table_adapter_;
+  scoped_ptr<gtk_tree::TableAdapter> language_order_table_adapter_;
 
   // Accept languages pref.
   StringPrefMember accept_languages_;

@@ -6,38 +6,52 @@
 #include <map>
 #include <set>
 
-#include "base/command_line.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "base/waitable_event.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/engine/syncer_thread.h"
-#include "chrome/browser/sync/engine/syncer_thread_timed_stop.h"
+#include "chrome/browser/sync/engine/syncer_types.h"
+#include "chrome/browser/sync/sessions/sync_session_context.h"
 #include "chrome/test/sync/engine/mock_server_connection.h"
 #include "chrome/test/sync/engine/test_directory_setter_upper.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeTicks;
 using base::TimeDelta;
+using base::WaitableEvent;
+using testing::_;
+using testing::AnyNumber;
+using testing::Field;
 
 namespace browser_sync {
+using sessions::SyncSessionContext;
 
 typedef testing::Test SyncerThreadTest;
 typedef SyncerThread::WaitInterval WaitInterval;
 
-class SyncerThreadWithSyncerTest : public testing::Test {
+class SyncerThreadWithSyncerTest : public testing::Test,
+                                   public ModelSafeWorkerRegistrar {
  public:
-  SyncerThreadWithSyncerTest() {}
+  SyncerThreadWithSyncerTest() : sync_cycle_ended_event_(false, false) {}
   virtual void SetUp() {
     metadb_.SetUp();
     connection_.reset(new MockConnectionManager(metadb_.manager(),
                                                 metadb_.name()));
     allstatus_.reset(new AllStatus());
-
-    syncer_thread_ = SyncerThreadFactory::Create(NULL, metadb_.manager(),
-        connection_.get(), allstatus_.get(), new ModelSafeWorker());
-
+    worker_ = new ModelSafeWorker();
+    SyncSessionContext* context = new SyncSessionContext(connection_.get(),
+        NULL, metadb_.manager(), this);
+    syncer_thread_ = new SyncerThread(context, allstatus_.get());
+    syncer_event_hookup_.reset(
+        NewEventListenerHookup(syncer_thread_->relay_channel(), this,
+            &SyncerThreadWithSyncerTest::HandleSyncerEvent));
     allstatus_->WatchSyncerThread(syncer_thread_);
     syncer_thread_->SetConnected(true);
+    syncable::ModelTypeBitSet expected_types;
+    expected_types[syncable::BOOKMARKS] = true;
+    connection_->ExpectGetUpdatesRequestTypes(expected_types);
   }
   virtual void TearDown() {
     syncer_thread_ = NULL;
@@ -46,19 +60,62 @@ class SyncerThreadWithSyncerTest : public testing::Test {
     metadb_.TearDown();
   }
 
+  // ModelSafeWorkerRegistrar implementation.
+  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) {
+    out->push_back(worker_.get());
+  }
+
+  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
+    // We're just testing the sync engine here, so we shunt everything to
+    // the SyncerThread.
+    (*out)[syncable::BOOKMARKS] = GROUP_PASSIVE;
+  }
+
   ManuallyOpenedTestDirectorySetterUpper* metadb() { return &metadb_; }
   MockConnectionManager* connection() { return connection_.get(); }
   SyncerThread* syncer_thread() { return syncer_thread_; }
+
+  // Waits an indefinite amount of sync cycles for the syncer thread to become
+  // throttled.  Only call this if a throttle is supposed to occur!
+  void WaitForThrottle() {
+    while (!syncer_thread()->IsSyncingCurrentlySilenced())
+      sync_cycle_ended_event_.Wait();
+  }
+
+  void WaitForDisconnect() {
+    // Wait for the SyncerThread to detect loss of connection, up to a max of
+    // 10 seconds to timeout the test.
+    AutoLock lock(syncer_thread()->lock_);
+    TimeTicks start = TimeTicks::HighResNow();
+    TimeDelta ten_seconds = TimeDelta::FromSeconds(10);
+    while (syncer_thread()->vault_.connected_) {
+      syncer_thread()->vault_field_changed_.TimedWait(ten_seconds);
+      if (TimeTicks::HighResNow() - start > ten_seconds)
+        break;
+    }
+    EXPECT_FALSE(syncer_thread()->vault_.connected_);
+  }
+
  private:
+
+  void HandleSyncerEvent(const SyncerEvent& event) {
+    if (event.what_happened == SyncerEvent::SYNC_CYCLE_ENDED)
+      sync_cycle_ended_event_.Signal();
+  }
+
   ManuallyOpenedTestDirectorySetterUpper metadb_;
   scoped_ptr<MockConnectionManager> connection_;
   scoped_ptr<AllStatus> allstatus_;
   scoped_refptr<SyncerThread> syncer_thread_;
+  scoped_refptr<ModelSafeWorker> worker_;
+  scoped_ptr<EventListenerHookup> syncer_event_hookup_;
+  base::WaitableEvent sync_cycle_ended_event_;
   DISALLOW_COPY_AND_ASSIGN(SyncerThreadWithSyncerTest);
 };
 
-class SyncShareIntercept : public MockConnectionManager::ThrottleRequestVisitor,
-                           public MockConnectionManager::MidCommitObserver {
+class SyncShareIntercept
+    : public MockConnectionManager::ResponseCodeOverrideRequestor,
+      public MockConnectionManager::MidCommitObserver {
  public:
   SyncShareIntercept() : sync_occured_(false, false),
                          allow_multiple_interceptions_(true) {}
@@ -70,9 +127,10 @@ class SyncShareIntercept : public MockConnectionManager::ThrottleRequestVisitor,
     sync_occured_.Signal();
   }
 
-  // ThrottleRequestVisitor implementation.
-  virtual void VisitAtomically() {
-    // Server has told the client to throttle.  We should not see any syncing.
+  // ResponseCodeOverrideRequestor implementation. This assumes any override
+  // requested is intended to silence the SyncerThread.
+  virtual void OnOverrideComplete() {
+    // We should not see any syncing.
     allow_multiple_interceptions_ = false;
     times_sync_occured_.clear();
   }
@@ -84,6 +142,12 @@ class SyncShareIntercept : public MockConnectionManager::ThrottleRequestVisitor,
   std::vector<TimeTicks> times_sync_occured() const {
     return times_sync_occured_;
   }
+
+  void Reset() {
+    allow_multiple_interceptions_ = true;
+    times_sync_occured_.clear();
+    sync_occured_.Reset();
+  }
  private:
   std::vector<TimeTicks> times_sync_occured_;
   base::WaitableEvent sync_occured_;
@@ -92,13 +156,13 @@ class SyncShareIntercept : public MockConnectionManager::ThrottleRequestVisitor,
 };
 
 TEST_F(SyncerThreadTest, Construction) {
-  scoped_refptr<SyncerThread> syncer_thread(
-      SyncerThreadFactory::Create(NULL, NULL, NULL, NULL, NULL));
+  SyncSessionContext* context = new SyncSessionContext(NULL, NULL, NULL, NULL);
+  scoped_refptr<SyncerThread> syncer_thread(new SyncerThread(context, NULL));
 }
 
 TEST_F(SyncerThreadTest, StartStop) {
-  scoped_refptr<SyncerThread> syncer_thread(
-      SyncerThreadFactory::Create(NULL, NULL, NULL, NULL, NULL));
+  SyncSessionContext* context = new SyncSessionContext(NULL, NULL, NULL, NULL);
+  scoped_refptr<SyncerThread> syncer_thread(new SyncerThread(context, NULL));
   EXPECT_TRUE(syncer_thread->Start());
   EXPECT_TRUE(syncer_thread->Stop(2000));
 
@@ -109,8 +173,8 @@ TEST_F(SyncerThreadTest, StartStop) {
 }
 
 TEST_F(SyncerThreadTest, CalculateSyncWaitTime) {
-  scoped_refptr<SyncerThread> syncer_thread(
-      SyncerThreadFactory::Create(NULL, NULL, NULL, NULL, NULL));
+  SyncSessionContext* context = new SyncSessionContext(NULL, NULL, NULL, NULL);
+  scoped_refptr<SyncerThread> syncer_thread(new SyncerThread(context, NULL));
   syncer_thread->DisableIdleDetection();
 
   // Syncer_polling_interval_ is less than max poll interval.
@@ -169,8 +233,8 @@ TEST_F(SyncerThreadTest, CalculateSyncWaitTime) {
 TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
   // Set up the environment.
   int user_idle_milliseconds_param = 0;
-  scoped_refptr<SyncerThread> syncer_thread(
-      SyncerThreadFactory::Create(NULL, NULL, NULL, NULL, NULL));
+  SyncSessionContext* context = new SyncSessionContext(NULL, NULL, NULL, NULL);
+  scoped_refptr<SyncerThread> syncer_thread(new SyncerThread(context, NULL));
   syncer_thread->DisableIdleDetection();
   // Hold the lock to appease asserts in code.
   AutoLock lock(syncer_thread->lock_);
@@ -596,9 +660,136 @@ TEST_F(SyncerThreadWithSyncerTest, Throttling) {
   syncer_thread()->NudgeSyncer(0, SyncerThread::kUnknown);
   syncer_thread()->NudgeSyncer(0, SyncerThread::kUnknown);
 
-  // Stick around for several poll intervals for good measure. Any sync is
-  // a failure.
-  interceptor.WaitForSyncShare(1, poll_interval * 10);
+  // Wait until the syncer thread reports that it is throttled.  Any further
+  // sync share interceptions will result in failure.  If things are broken,
+  // we may never halt.
+  WaitForThrottle();
+  EXPECT_TRUE(syncer_thread()->IsSyncingCurrentlySilenced());
+
+  EXPECT_TRUE(syncer_thread()->Stop(2000));
+}
+
+TEST_F(SyncerThreadWithSyncerTest, AuthInvalid) {
+  SyncShareIntercept interceptor;
+  connection()->SetMidCommitObserver(&interceptor);
+  const TimeDelta poll_interval = TimeDelta::FromMilliseconds(1);
+
+  syncer_thread()->SetSyncerShortPollInterval(poll_interval);
+  EXPECT_TRUE(syncer_thread()->Start());
+  metadb()->Open();
+
+  // Wait for some healthy syncing.
+  interceptor.WaitForSyncShare(2, TimeDelta::FromSeconds(10));
+  EXPECT_GE(interceptor.times_sync_occured().size(), 2U);
+
+  // Atomically start returning auth invalid and set the interceptor to fail
+  // on any sync.
+  connection()->FailWithAuthInvalid(&interceptor);
+  WaitForDisconnect();
+
+  // Try to trigger a sync (the interceptor will assert if one occurs).
+  syncer_thread()->NudgeSyncer(0, SyncerThread::kUnknown);
+  syncer_thread()->NudgeSyncer(0, SyncerThread::kUnknown);
+
+  // Wait several poll intervals but don't expect any syncing besides the cycle
+  // that lost the connection.
+  interceptor.WaitForSyncShare(1, TimeDelta::FromSeconds(1));
+  EXPECT_EQ(1U, interceptor.times_sync_occured().size());
+
+  // Simulate a valid re-authentication and expect resumption of syncing.
+  interceptor.Reset();
+  ASSERT_TRUE(interceptor.times_sync_occured().empty());
+  connection()->StopFailingWithAuthInvalid(NULL);
+  ServerConnectionEvent e = {ServerConnectionEvent::STATUS_CHANGED,
+                             HttpResponse::SERVER_CONNECTION_OK,
+                             true};
+  connection()->channel()->NotifyListeners(e);
+
+  interceptor.WaitForSyncShare(1, TimeDelta::FromSeconds(10));
+  EXPECT_FALSE(interceptor.times_sync_occured().empty());
+
+  EXPECT_TRUE(syncer_thread()->Stop(2000));
+}
+
+ACTION_P(SignalEvent, event) {
+  event->Signal();
+}
+
+class ListenerMock {
+ public:
+  MOCK_METHOD1(HandleEvent, void(const SyncerEvent&));
+};
+
+// TODO(skrul): Bug 39070.
+TEST_F(SyncerThreadWithSyncerTest, DISABLED_Pause) {
+  WaitableEvent sync_cycle_ended_event(false, false);
+  WaitableEvent paused_event(false, false);
+  WaitableEvent resumed_event(false, false);
+  // We don't want a poll to happen during this test (except the first one).
+  const TimeDelta poll_interval = TimeDelta::FromMinutes(5);
+  syncer_thread()->SetSyncerShortPollInterval(poll_interval);
+
+  ListenerMock listener;
+  scoped_ptr<EventListenerHookup> hookup;
+  hookup.reset(
+      NewEventListenerHookup(syncer_thread()->relay_channel(),
+                             &listener,
+                             &ListenerMock::HandleEvent));
+
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::STATUS_CHANGED))).
+      Times(AnyNumber());
+
+  // Syncer thread is not running, should fail.
+  EXPECT_FALSE(syncer_thread()->RequestPause());
+  EXPECT_FALSE(syncer_thread()->RequestResume());
+
+  // Wait for the initial sync to complete.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::SYNC_CYCLE_ENDED))).
+      WillOnce(SignalEvent(&sync_cycle_ended_event));
+  ASSERT_TRUE(syncer_thread()->Start());
+  metadb()->Open();
+  sync_cycle_ended_event.Wait();
+
+  // Request a pause.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::PAUSED))).
+      WillOnce(SignalEvent(&paused_event));
+  ASSERT_TRUE(syncer_thread()->RequestPause());
+  paused_event.Wait();
+
+  // Resuming the pause.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::RESUMED))).
+      WillOnce(SignalEvent(&resumed_event));
+  ASSERT_TRUE(syncer_thread()->RequestResume());
+  resumed_event.Wait();
+
+  // Not paused, should fail.
+  EXPECT_FALSE(syncer_thread()->RequestResume());
+
+  // Request a pause.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::PAUSED))).
+      WillOnce(SignalEvent(&paused_event));
+  ASSERT_TRUE(syncer_thread()->RequestPause());
+  paused_event.Wait();
+
+  // Nudge the syncer, this should do nothing while we are paused.
+  syncer_thread()->NudgeSyncer(0, SyncerThread::kUnknown);
+
+  // Resuming will cause the nudge to be processed and a sync cycle to run.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::RESUMED))).
+      WillOnce(SignalEvent(&resumed_event));
+  // Wait for the sync cycle to run.
+  EXPECT_CALL(listener, HandleEvent(
+      Field(&SyncerEvent::what_happened, SyncerEvent::SYNC_CYCLE_ENDED))).
+      WillOnce(SignalEvent(&sync_cycle_ended_event));
+  ASSERT_TRUE(syncer_thread()->RequestResume());
+  resumed_event.Wait();
+  sync_cycle_ended_event.Wait();
 
   EXPECT_TRUE(syncer_thread()->Stop(2000));
 }

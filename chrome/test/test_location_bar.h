@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_TEST_LOCATION_BAR_H_
 #define CHROME_TEST_TEST_LOCATION_BAR_H_
 
+#include "chrome/browser/first_run.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -27,7 +28,7 @@ class TestLocationBar : public LocationBar {
   }
 
   // Overridden from LocationBar:
-  virtual void ShowFirstRunBubble(bool use_OEM_bubble) {}
+  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {}
   virtual std::wstring GetInputString() const { return input_string_; }
   virtual WindowOpenDisposition GetWindowOpenDisposition() const {
     return disposition_;
@@ -35,8 +36,9 @@ class TestLocationBar : public LocationBar {
   virtual PageTransition::Type GetPageTransition() const { return transition_; }
   virtual void AcceptInput() {}
   virtual void AcceptInputWithDisposition(WindowOpenDisposition) {}
-  virtual void FocusLocation() {}
+  virtual void FocusLocation(bool select_all) {}
   virtual void FocusSearch() {}
+  virtual void UpdateContentSettingsIcons() {}
   virtual void UpdatePageActions() {}
   virtual void InvalidatePageActions() {}
   virtual void SaveStateToContents(TabContents* contents) {}

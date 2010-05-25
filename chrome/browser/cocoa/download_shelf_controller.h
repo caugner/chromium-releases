@@ -9,12 +9,14 @@
 #include "base/scoped_ptr.h"
 #import "chrome/browser/cocoa/view_resizer.h"
 
+@class AnimatableView;
 class BaseDownloadItemModel;
 class Browser;
 @class BrowserWindowController;
 @class DownloadItemController;
 class DownloadShelf;
 @class DownloadShelfView;
+@class HyperlinkButtonCell;
 
 // A controller class that manages the download shelf for one window. It is
 // responsible for the behavior of the shelf itself (showing/hiding, handling
@@ -35,8 +37,7 @@ class DownloadShelf;
 
 @interface DownloadShelfController : NSViewController<NSTextViewDelegate> {
  @private
-  IBOutlet NSScrollView* linkContainer_;
-  IBOutlet NSTextView* showAllDownloadsLink_;
+  IBOutlet HyperlinkButtonCell* showAllDownloadsCell_;
 
   IBOutlet NSImageView* image_;
 
@@ -57,6 +58,11 @@ class DownloadShelf;
 
 - (id)initWithBrowser:(Browser*)browser
        resizeDelegate:(id<ViewResizer>)resizeDelegate;
+
+- (IBAction)showDownloadsTab:(id)sender;
+
+// Returns our view cast as an AnimatableView.
+- (AnimatableView*)animatableView;
 
 - (DownloadShelf*)bridge;
 - (BOOL)isVisible;

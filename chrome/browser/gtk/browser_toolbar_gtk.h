@@ -8,14 +8,20 @@
 #include <gtk/gtk.h>
 #include <string>
 
+#include "app/gtk_signal.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/app_menu_model.h"
 #include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/gtk/menu_bar_helper.h"
 #include "chrome/browser/gtk/menu_gtk.h"
+#include "chrome/browser/page_menu_model.h"
+#include "chrome/browser/pref_member.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/pref_member.h"
+#include "chrome/common/owned_widget_gtk.h"
 
 class BackForwardButtonGtk;
 class Browser;
@@ -34,6 +40,8 @@ class ToolbarStarToggleGtk;
 // View class that displays the GTK version of the toolbar and routes gtk
 // events back to the Browser.
 class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
+                          public ProfileSyncServiceObserver,
+                          public menus::SimpleMenuModel::Delegate,
                           public MenuGtk::Delegate,
                           public NotificationObserver,
                           public BubblePositioner,
@@ -66,18 +74,33 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   GoButtonGtk* GetGoButton() { return go_.get(); }
 
+  GtkWidget* GetAppMenuButton() { return app_menu_button_.get(); }
+
+  BrowserActionsToolbarGtk* GetBrowserActionsToolbar() {
+    return actions_toolbar_.get();
+  }
+
+  LocationBarViewGtk* GetLocationBarView() { return location_bar_.get(); }
+
   // We have to show padding on the bottom of the toolbar when the bookmark
   // is in floating mode. Otherwise the bookmark bar will paint it for us.
   void UpdateForBookmarkBarVisibility(bool show_bottom_padding);
+
+  void ShowPageMenu();
+  void ShowAppMenu();
 
   // Overridden from CommandUpdater::CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled);
 
   // Overridden from MenuGtk::Delegate:
-  virtual bool IsCommandEnabled(int command_id) const;
-  virtual bool IsItemChecked(int id) const;
-  virtual void ExecuteCommand(int command_id);
   virtual void StoppedShowing();
+
+  // Overridden from menus::SimpleMenuModel::Delegate:
+  virtual bool IsCommandIdEnabled(int id) const;
+  virtual bool IsCommandIdChecked(int id) const;
+  virtual void ExecuteCommand(int id);
+  virtual bool GetAcceleratorForCommandId(int id,
+                                          menus::Accelerator* accelerator);
 
   // NotificationObserver implementation.
   void Observe(NotificationType type,
@@ -108,6 +131,7 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                                        int active_id,
                                        int highlight_id,
                                        int depressed_id,
+                                       int background_id,
                                        const std::string& localized_tooltip,
                                        const char* stock_id);
 
@@ -128,31 +152,27 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   // Gtk callback for the "expose-event" signal.
   // The alignment contains the toolbar.
-  static gboolean OnAlignmentExpose(GtkWidget* widget, GdkEventExpose* e,
-                                    BrowserToolbarGtk* toolbar);
-  static gboolean OnLocationHboxExpose(GtkWidget* omnibox_hbox,
-                                       GdkEventExpose* e,
-                                       BrowserToolbarGtk* toolbar);
+  CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnAlignmentExpose,
+                       GdkEventExpose*);
+  CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnLocationHboxExpose,
+                       GdkEventExpose*);
 
   // Gtk callback for the "clicked" signal.
-  static void OnButtonClick(GtkWidget* button, BrowserToolbarGtk* toolbar);
+  CHROMEGTK_CALLBACK_0(BrowserToolbarGtk, void, OnButtonClick);
 
   // Gtk callback to intercept mouse clicks to the menu buttons.
-  static gboolean OnMenuButtonPressEvent(GtkWidget* button,
-                                         GdkEventButton* event,
-                                         BrowserToolbarGtk* toolbar);
-
-  // Gtk callback used when a hotkey activates the menu buttons.
-  static gboolean OnMenuClicked(GtkWidget* button,
-                                BrowserToolbarGtk* toolbar);
+  CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnMenuButtonPressEvent,
+                       GdkEventButton*);
 
   // Used for drags onto home button.
-  static void OnDragDataReceived(GtkWidget* widget,
-                                 GdkDragContext* drag_context,
-                                 gint x, gint y,
-                                 GtkSelectionData* data,
-                                 guint info, guint time,
-                                 BrowserToolbarGtk* toolbar);
+  CHROMEGTK_CALLBACK_6(BrowserToolbarGtk, void, OnDragDataReceived,
+                       GdkDragContext*, gint, gint, GtkSelectionData*,
+                       guint, guint);
+
+  // ProfileSyncServiceObserver method.
+  virtual void OnStateChanged();
+
+  static void SetSyncMenuLabel(GtkWidget* widget, gpointer userdata);
 
   // Sometimes we only want to show the location w/o the toolbar buttons (e.g.,
   // in a popup window).
@@ -173,9 +193,6 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   // The location bar view.
   scoped_ptr<LocationBarViewGtk> location_bar_;
-
-  // A pointer to our window's accelerator list.
-  GtkAccelGroup* accel_group_;
 
   // All the buttons in the toolbar.
   scoped_ptr<BackForwardButtonGtk> back_, forward_;
@@ -199,9 +216,15 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   scoped_ptr<MenuGtk> page_menu_;
   scoped_ptr<MenuGtk> app_menu_;
 
+  PageMenuModel page_menu_model_;
+  AppMenuModel app_menu_model_;
+
   Browser* browser_;
   BrowserWindowGtk* window_;
   Profile* profile_;
+
+  // A pointer to the ProfileSyncService instance if one exists.
+  ProfileSyncService* sync_service_;
 
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;

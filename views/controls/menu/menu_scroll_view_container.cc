@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include <Vssym32.h>
 #endif
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/color_utils.h"
+#include "gfx/canvas.h"
+#include "gfx/color_utils.h"
 #include "views/border.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_controller.h"
@@ -19,7 +19,7 @@
 #include "views/controls/menu/submenu_view.h"
 
 #if defined(OS_WIN)
-#include "app/gfx/native_theme_win.h"
+#include "gfx/native_theme_win.h"
 #endif
 
 #if defined(OS_WIN)
@@ -139,16 +139,15 @@ class MenuScrollViewContainer::MenuScrollView : public View {
     AddChildView(child);
   }
 
-  virtual void ScrollRectToVisible(int x, int y, int width, int height) {
+  virtual void ScrollRectToVisible(const gfx::Rect& rect) {
     // NOTE: this assumes we only want to scroll in the y direction.
 
+    // Convert rect.y() to view's coordinates and make sure we don't show past
+    // the bottom of the view.
     View* child = GetContents();
-    // Convert y to view's coordinates.
-    y -= child->y();
-    gfx::Size pref = child->GetPreferredSize();
-    // Constrain y to make sure we don't show past the bottom of the view.
-    y = std::max(0, std::min(pref.height() - this->height(), y));
-    child->SetY(-y);
+    child->SetY(-std::max(0, std::min(
+        child->GetPreferredSize().height() - this->height(),
+        rect.y() - child->y())));
   }
 
   // Returns the contents, which is the SubmenuView.
@@ -230,6 +229,13 @@ gfx::Size MenuScrollViewContainer::GetPreferredSize() {
   gfx::Insets insets = GetInsets();
   prefsize.Enlarge(insets.width(), insets.height());
   return prefsize;
+}
+
+bool MenuScrollViewContainer::GetAccessibleRole(
+    AccessibilityTypes::Role* role) {
+  DCHECK(role);
+  *role = AccessibilityTypes::ROLE_MENUPOPUP;
+  return true;
 }
 
 }  // namespace views

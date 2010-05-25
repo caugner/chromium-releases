@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "googleurl/src/gurl.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class Browser;
 class CommandLine;
@@ -22,8 +23,8 @@ class TabContents;
 // initialize the profile.
 class BrowserInit {
  public:
-  BrowserInit() {};
-  ~BrowserInit() {};
+  BrowserInit() {}
+  ~BrowserInit() {}
 
   // Adds a url to be opened during first run. This overrides the standard
   // tabs shown at first run.
@@ -61,6 +62,15 @@ class BrowserInit {
   // Returns true if the browser is coming up.
   static bool InProcessStartup();
 
+  // Launches a browser window associated with |profile|. |command_line|
+  // should be the command line passed to this process. |cur_dir| can be
+  // the null string, which implies that the directory of the executable.
+  // should be used. |process_startup| indicates whether this is the
+  // first browser.
+  bool LaunchBrowser(const CommandLine& command_line, Profile* profile,
+                     const std::wstring& cur_dir, bool process_startup,
+                     int* return_code);
+
   // LaunchWithProfile ---------------------------------------------------------
   //
   // Assists launching the application and appending the initial tabs for a
@@ -68,6 +78,24 @@ class BrowserInit {
 
   class LaunchWithProfile {
    public:
+    // Used by OpenTabsInBrowser.
+    struct Tab {
+      Tab() : is_app(false), is_pinned(true) {}
+
+      // The url to load.
+      GURL url;
+
+      // If true, the tab corresponds to an app an |app_id| gives the id of the
+      // app.
+      bool is_app;
+
+      // True if the is tab pinned.
+      bool is_pinned;
+
+      // Id of the app.
+      std::string app_id;
+    };
+
     // There are two ctors. The first one implies a NULL browser_init object
     // and thus no access to distribution-specific first-run behaviors. The
     // second one is always called when the browser starts even if it is not
@@ -85,35 +113,63 @@ class BrowserInit {
     // already running and the user wants to launch another instance.
     bool Launch(Profile* profile, bool process_startup);
 
-    // Opens the list of urls. If browser is non-null and a tabbed browser, the
-    // URLs are opened in it. Otherwise a new tabbed browser is created and the
-    // URLs are added to it. The browser the tabs are added to is returned,
-    // which is either |browser| or the newly created browser.
+    // Convenience for OpenTabsInBrowser that converts |urls| into a set of
+    // Tabs.
     Browser* OpenURLsInBrowser(Browser* browser,
                                bool process_startup,
                                const std::vector<GURL>& urls);
 
+    // Creates a tab for each of the Tabs in |tabs|. If browser is non-null
+    // and a tabbed browser, the tabs are added to it. Otherwise a new tabbed
+    // browser is created and the tabs are added to it. The browser the tabs
+    // are added to is returned, which is either |browser| or the newly created
+    // browser.
+    Browser* OpenTabsInBrowser(Browser* browser,
+                               bool process_startup,
+                               const std::vector<Tab>& tabs);
+
    private:
-    // If the process was launched with the web application command line flag,
-    // e.g. --app=http://www.google.com/, opens a web application browser and
-    // returns true. If there is no web application command line flag speciifed,
+    FRIEND_TEST(BrowserTest, RestorePinnedTabs);
+    FRIEND_TEST(BrowserTest, DISABLED_RestorePinnedTabs);
+
+    // If the process was launched with the web application command line flags,
+    // e.g. --app=http://www.google.com/ or --app_id=... return true.
+    // In this case |app_url| or |app_id| are populated if they're non-null.
+    bool IsAppLaunch(std::string* app_url, std::string* app_id);
+
+    // If IsAppLaunch is true, tries to open an application window.
+    // If the app is specified to start in a tab, or IsAppLaunch is false,
     // returns false to specify default processing.
-    bool OpenApplicationURL(Profile* profile);
+    bool OpenApplicationWindow(Profile* profile);
+
+    // Invoked from OpenURLsInBrowser to handle processing of urls. This may
+    // do any of the following:
+    // . Invoke ProcessStartupURLs if |process_startup| is true.
+    // . Restore the last session if necessary.
+    // . Open the urls directly.
+    void ProcessLaunchURLs(bool process_startup,
+                           const std::vector<GURL>& urls_to_open);
 
     // Does the following:
     // . If the user's startup pref is to restore the last session (or the
     //   command line flag is present to force using last session), it is
     //   restored, and true is returned.
-    // . If the user's startup pref is to launch a specific set of URLs, and
-    //   urls_to_open is empty, the user specified set of URLs is openned.
+    // . Attempts to restore any pinned tabs from last run of chrome and:
+    //   . If urls_to_open is non-empty, they are opened and true is returned.
+    //   . If the user's startup pref is to launch a specific set of URLs they
+    //     are opened.
     //
-    // Otherwise false is returned.
-    bool OpenStartupURLs(bool is_process_startup,
-                         const std::vector<GURL>& urls_to_open);
+    // Otherwise false is returned, which indicates the caller must create a
+    // new browser.
+    bool ProcessStartupURLs(const std::vector<GURL>& urls_to_open);
 
     // If the last session didn't exit cleanly and tab is a web contents tab,
     // an infobar is added allowing the user to restore the last session.
     void AddCrashedInfoBarIfNecessary(TabContents* tab);
+
+    // If we have been started with unsupported flags like --single-process,
+    // politely nag the user about it.
+    void AddBadFlagsInfoBarIfNecessary(TabContents* tab);
 
     // Returns the list of URLs to open from the command line. The returned
     // vector is empty if the user didn't specify any URLs on the command line.

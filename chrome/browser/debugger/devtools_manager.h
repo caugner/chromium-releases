@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_DEBUGGER_DEVTOOLS_MANAGER_H_
 
 #include <map>
+#include <set>
+#include <string>
 
 #include "base/ref_counted.h"
 #include "chrome/browser/debugger/devtools_client_host.h"
@@ -28,7 +30,6 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
   static void RegisterUserPrefs(PrefService* prefs);
 
   DevToolsManager();
-  virtual ~DevToolsManager();
 
   // Returns DevToolsClientHost registered for |inspected_rvh| or NULL if
   // there is no alive DevToolsClientHost registered for |inspected_rvh|.
@@ -49,13 +50,14 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
 
   void ActivateWindow(RenderViewHost* client_rvn);
   void CloseWindow(RenderViewHost* client_rvn);
-  void DockWindow(RenderViewHost* client_rvn);
-  void UndockWindow(RenderViewHost* client_rvn);
-  void ToggleInspectElementMode(RenderViewHost* client_rvh, bool enabled);
+  void RequestDockWindow(RenderViewHost* client_rvn);
+  void RequestUndockWindow(RenderViewHost* client_rvn);
 
   void OpenDevToolsWindow(RenderViewHost* inspected_rvh);
-
-  void ToggleDevToolsWindow(RenderViewHost* inspected_rvh);
+  void ToggleDevToolsWindow(RenderViewHost* inspected_rvh, bool open_console);
+  void RuntimeFeatureStateChanged(RenderViewHost* inspected_rvh,
+                                  const std::string& feature,
+                                  bool enabled);
 
   // Starts element inspection in the devtools client.
   // Creates one by means of OpenDevToolsWindow if no client
@@ -68,7 +70,20 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
                                   RenderViewHost* dest_rvh,
                                   const GURL& gurl);
 
-private:
+  // Detaches client host and returns cookie that can be used in
+  // AttachClientHost.
+  int DetachClientHost(RenderViewHost* from_rvh);
+
+  // Attaches orphan client host to new render view host.
+  void AttachClientHost(int client_host_cookie,
+                        RenderViewHost* to_rvh);
+
+ private:
+  friend class base::RefCounted<DevToolsManager>;
+  typedef std::set<std::string> RuntimeFeatures;
+
+  virtual ~DevToolsManager();
+
   // DevToolsClientHost::CloseListener override.
   // This method will remove all references from the manager to the
   // DevToolsClientHost and unregister all listeners related to the
@@ -86,11 +101,20 @@ private:
 
   DevToolsClientHost* FindOnwerDevToolsClientHost(RenderViewHost* client_rvh);
 
-  void ToggleDevToolsWindow(RenderViewHost* inspected_rvh, bool force_open);
+  void ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
+                            bool force_open,
+                            bool open_console);
 
   void ReopenWindow(RenderViewHost* client_rvh, bool docked);
 
   void CloseWindow(DevToolsClientHost* client_host);
+
+  void BindClientHost(RenderViewHost* inspected_rvh,
+                      DevToolsClientHost* client_host,
+                      const RuntimeFeatures& runtime_features);
+
+  void UnbindClientHost(RenderViewHost* inspected_rvh,
+                        DevToolsClientHost* client_host);
 
   // These two maps are for tracking dependencies between inspected tabs and
   // their DevToolsClientHosts. They are usful for routing devtools messages
@@ -107,8 +131,18 @@ private:
   typedef std::map<DevToolsClientHost*, RenderViewHost*>
       ClientHostToInspectedRvhMap;
   ClientHostToInspectedRvhMap client_host_to_inspected_rvh_;
+
+  typedef std::map<RenderViewHost*, RuntimeFeatures>
+      RuntimeFeaturesMap;
+  RuntimeFeaturesMap runtime_features_map_;
+
   RenderViewHost* inspected_rvh_for_reopen_;
   bool in_initial_show_;
+
+  typedef std::map<int, std::pair<DevToolsClientHost*, RuntimeFeatures> >
+      OrphanClientHosts;
+  OrphanClientHosts orphan_client_hosts_;
+  int last_orphan_cookie_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsManager);
 };

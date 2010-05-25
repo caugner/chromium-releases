@@ -5,20 +5,22 @@
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_H_
 
-#include <queue>
+#include <deque>
 
-#include "app/gfx/native_widget_types.h"
+#include "app/surface/transport_dib.h"
 #include "base/process.h"
-#include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/common/edit_command.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/property_bag.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/size.h"
 #include "ipc/ipc_channel.h"
+#include "ipc/ipc_channel_handle.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
-#include "webkit/api/public/WebTextDirection.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
 
 namespace gfx {
 class Rect;
@@ -37,10 +39,10 @@ class RenderProcessHost;
 class RenderWidgetHostView;
 class RenderWidgetHostPaintingObserver;
 class TransportDIB;
+class VideoLayer;
 class WebCursor;
-struct ViewHostMsg_PaintRect_Params;
-struct ViewHostMsg_ScrollRect_Params;
 struct ViewHostMsg_ShowPopup_Params;
+struct ViewHostMsg_UpdateRect_Params;
 
 // This class manages the browser side of a browser<->renderer HWND connection.
 // The HWND lives in the browser process, and windows events are sent over
@@ -215,6 +217,14 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // (for example, if we don't currently have a RenderWidgetHostView.)
   BackingStore* AllocBackingStore(const gfx::Size& size);
 
+  // When a backing store does asynchronous painting, it will call this function
+  // when it is done with the DIB. We will then forward a message to the
+  // renderer to send another paint.
+  void DonePaintingToBackingStore();
+
+  // Returns the video layer if it exists, NULL otherwise.
+  VideoLayer* video_layer() const { return video_layer_.get(); }
+
   // Checks to see if we can give up focus to this widget through a JS call.
   virtual bool CanBlur() const { return true; }
 
@@ -243,7 +253,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // when it has received a message.
   virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
-  void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
+  virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardEditCommand(const std::string& name,
                                   const std::string& value);
   virtual void ForwardEditCommandsForNextKeyEvent(
@@ -334,7 +344,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Makes an IPC call to toggle the spelling panel.
   void ToggleSpellPanel(bool is_currently_visible);
 
-  // Makes an IPC call to tell webkit to replace the currently selected word.
+  // Makes an IPC call to tell webkit to replace the currently selected word
+  // or a word around the cursor.
   void Replace(const string16& word);
 
   // Makes an IPC call to tell webkit to advance to the next misspelling.
@@ -343,10 +354,17 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Sets the active state (i.e., control tints).
   virtual void SetActive(bool active);
 
+  void set_ignore_input_events(bool ignore_input_events) {
+    ignore_input_events_ = ignore_input_events;
+  }
+  bool ignore_input_events() const {
+    return ignore_input_events_;
+  }
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
-  void ForwardInputEvent(
-      const WebKit::WebInputEvent& input_event, int event_size);
+  void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
+                         int event_size, bool is_keyboard_shortcut);
 
   // Called when we receive a notification indicating that the renderer
   // process has gone. This will reset our state so that our state will be
@@ -357,13 +375,18 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // This is used for various IPC messages, including plugins.
   gfx::NativeViewId GetNativeViewId();
 
-  // Called when an InputEvent is received to check if the event should be sent
-  // to the renderer or not.
-  virtual bool ShouldSendToRenderer(const NativeWebKeyboardEvent& event) {
-    return true;
+  // Called to handled a keyboard event before sending it to the renderer.
+  // This is overridden by RenderView to send upwards to its delegate.
+  // Returns true if the event was handled, and then the keyboard event will
+  // not be sent to the renderer anymore. Otherwise, if the |event| would
+  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
+  // |*is_keyboard_shortcut| should be set to true.
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) {
+    return false;
   }
 
-  // Called when we an InputEvent was not processed by the renderer. This is
+  // Called when a keyboard event was not processed by the renderer. This is
   // overridden by RenderView to send upwards to its delegate.
   virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event) {}
 
@@ -388,6 +411,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
  private:
   FRIEND_TEST(RenderWidgetHostTest, Resize);
+  FRIEND_TEST(RenderWidgetHostTest, ResizeThenCrash);
   FRIEND_TEST(RenderWidgetHostTest, HiddenPaint);
 
   // Tell this object to destroy itself.
@@ -407,8 +431,10 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgRenderViewGone();
   void OnMsgClose();
   void OnMsgRequestMove(const gfx::Rect& pos);
-  void OnMsgPaintRect(const ViewHostMsg_PaintRect_Params& params);
-  void OnMsgScrollRect(const ViewHostMsg_ScrollRect_Params& params);
+  void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
+  void OnMsgCreateVideo(const gfx::Size& size);
+  void OnMsgUpdateVideo(TransportDIB::Id bitmap, const gfx::Rect& bitmap_rect);
+  void OnMsgDestroyVideo();
   void OnMsgInputEventAck(const IPC::Message& message);
   void OnMsgFocus();
   void OnMsgBlur();
@@ -418,6 +444,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Using int instead of ViewHostMsg_ImeControl for control's type to avoid
   // having to bring in render_messages.h in a header file.
   void OnMsgImeUpdateStatus(int control, const gfx::Rect& caret_rect);
+
 #if defined(OS_LINUX)
   void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
   void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
@@ -427,21 +454,44 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnMsgGetRootWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
+  void OnAllocateFakePluginWindowHandle(gfx::PluginWindowHandle* id);
+  void OnDestroyFakePluginWindowHandle(gfx::PluginWindowHandle id);
+  void OnAcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
+                                        int32 width,
+                                        int32 height,
+                                        uint64 mach_port);
+  void OnAcceleratedSurfaceSetTransportDIB(gfx::PluginWindowHandle window,
+                                           int32 width,
+                                           int32 height,
+                                           TransportDIB::Handle transport_dib);
+  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
 #endif
 
   // Paints the given bitmap to the current backing store at the given location.
-  void PaintBackingStoreRect(TransportDIB* dib,
+  // |*painted_synchronously| will be true if the message was processed
+  // synchronously, and the bitmap is done being used. False means that the
+  // backing store will paint the bitmap at a later time and that the DIB can't
+  // be freed (it will be the backing store's job to free it later).
+  void PaintBackingStoreRect(TransportDIB::Id bitmap,
                              const gfx::Rect& bitmap_rect,
-                             const gfx::Size& view_size);
+                             const std::vector<gfx::Rect>& copy_rects,
+                             const gfx::Size& view_size,
+                             bool* painted_synchronously);
 
   // Scrolls the given |clip_rect| in the backing by the given dx/dy amount. The
   // |dib| and its corresponding location |bitmap_rect| in the backing store
   // is the newly painted pixels by the renderer.
-  void ScrollBackingStoreRect(TransportDIB* dib,
-                              const gfx::Rect& bitmap_rect,
-                              int dx, int dy,
-                              const gfx::Rect& clip_rect,
+  void ScrollBackingStoreRect(int dx, int dy, const gfx::Rect& clip_rect,
                               const gfx::Size& view_size);
+
+  // Paints the entire given bitmap into the current video layer, if it exists.
+  // |bitmap_rect| specifies the destination size and absolute location of the
+  // bitmap on the backing store.
+  void PaintVideoLayer(TransportDIB::Id bitmap,
+                       const gfx::Rect& bitmap_rect);
+
+  // Called by OnMsgInputEventAck() to process a keyboard event ack message.
+  void ProcessKeyboardEventAck(int type, bool processed);
 
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
@@ -495,6 +545,21 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // is true).
   scoped_ptr<WebKit::WebMouseEvent> next_mouse_move_;
 
+  // (Similar to |mouse_move_pending_|.) True if a mouse wheel event was sent
+  // and we are waiting for a corresponding ack.
+  bool mouse_wheel_pending_;
+
+  typedef std::deque<WebKit::WebMouseWheelEvent> WheelEventQueue;
+
+  // (Similar to |next_mouse_move_|.) The next mouse wheel events to send.
+  // Unlike mouse moves, mouse wheel events received while one is pending are
+  // coalesced (by accumulating deltas) if they match the previous event in
+  // modifiers. On the Mac, in particular, mouse wheel events are received at a
+  // high rate; not waiting for the ack results in jankiness, and using the same
+  // mechanism as for mouse moves (just dropping old events when multiple ones
+  // would be queued) results in very slow scrolling.
+  WheelEventQueue coalesced_mouse_wheel_events_;
+
   // The time when an input event was sent to the RenderWidget.
   base::TimeTicks input_event_start_time_;
 
@@ -528,12 +593,15 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   base::TimeTicks repaint_start_time_;
 
   // Queue of keyboard events that we need to track.
-  typedef std::queue<NativeWebKeyboardEvent> KeyQueue;
+  typedef std::deque<NativeWebKeyboardEvent> KeyQueue;
 
   // A queue of keyboard events. We can't trust data from the renderer so we
   // stuff key events into a queue and pop them out on ACK, feeding our copy
   // back to whatever unhandled handler instead of the returned version.
   KeyQueue key_queue_;
+
+  // Set to true if we shouldn't send input events from the render widget.
+  bool ignore_input_events_;
 
   // Set when we update the text direction of the selected input element.
   bool text_direction_updated_;
@@ -543,6 +611,24 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // This flag also ignores succeeding update requests until we call
   // NotifyTextDirection().
   bool text_direction_canceled_;
+
+  // Indicates if the next sequence of Char events should be suppressed or not.
+  // System may translate a RawKeyDown event into zero or more Char events,
+  // usually we send them to the renderer directly in sequence. However, If a
+  // RawKeyDown event was not handled by the renderer but was handled by
+  // our UnhandledKeyboardEvent() method, eg. as an accelerator key, then we
+  // shall not send the following sequence of Char events, which was generated
+  // by this RawKeyDown event, to the renderer. Otherwise the renderer may
+  // handle the Char events and cause unexpected behavior.
+  // For example, pressing alt-2 may let the browser switch to the second tab,
+  // but the Char event generated by alt-2 may also activate a HTML element
+  // if its accesskey happens to be "2", then the user may get confused when
+  // switching back to the original tab, because the content may already be
+  // changed.
+  bool suppress_next_char_events_;
+
+  // Optional video YUV layer for used for out-of-process compositing.
+  scoped_ptr<VideoLayer> video_layer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHost);
 };

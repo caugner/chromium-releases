@@ -23,16 +23,6 @@
   A race releasing NSObject
   ThreadSanitizer:Race
   ...
-  fun:CFBagContainsValue
-  fun:__CFDoExternRefOperation
-  fun:-[NSObject release]
-}
-
-{
-  And another race releasing NSObject
-  ThreadSanitizer:Race
-  ...
-  fun:CFBagRemoveValue
   fun:__CFDoExternRefOperation
   fun:-[NSObject release]
 }
@@ -44,6 +34,40 @@
   fun:CFBagAddValue
   fun:__CFDoExternRefOperation
   fun:-[NSObject retain]
+}
+
+{
+  A race retaining NSBundle
+  ThreadSanitizer:Race
+  ...
+  fun:CFBagAddValue
+  fun:__CFDoExternRefOperation
+  fun:NSIncrementExtraRefCount
+  fun:-[NSBundle retain]
+}
+
+{
+  A race deallocating NSOperationQueue
+  ThreadSanitizer:Race
+  ...
+  fun:_CFRelease
+  fun:-[NSOperationQueue dealloc]
+}
+
+{
+  Another race deallocating NSOperationQueue
+  ThreadSanitizer:Race
+  ...
+  fun:-[NSIndexSet dealloc]
+  fun:-[NSOperationQueue dealloc]
+}
+
+# A related OpenRadar bug is at http://openradar.appspot.com/7396501.
+{
+   A benign race on a debug counter in __NSAutoreleaseObject
+   ThreadSanitizer:Race
+   fun:__NSAutoreleaseObject
+   fun:-[NSObject(NSObject) autorelease]
 }
 
 # media_unittests depend on the Darwin libraries which have many reports in
@@ -98,6 +122,15 @@
   fun:*CAMutex*ock*
 }
 
+{
+  A warning on destruction of third party ClientAudioQueue object (AudioToolbox)
+  ThreadSanitizer:Race
+  ...
+  fun:*AQClient*CheckDisposal*
+  fun:*ClientAudioQueueD*
+  fun:AudioQueueDispose
+}
+
 #-----------------------------------------------------------------------
 # 2. Intentional unit test errors, or stuff that is somehow a false positive
 # in our own code, or stuff that is so trivial it's not worth fixing
@@ -115,3 +148,9 @@
 # running overnight and removing outdated bugs/suppressions.
 
 # Nothing here yet, but updates will be submitted soon.
+{
+  bug_30960
+  ThreadSanitizer:Race
+  ...
+  fun:*net*NetworkChangeNotifierThreadD*E*
+}

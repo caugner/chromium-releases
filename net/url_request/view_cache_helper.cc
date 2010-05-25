@@ -73,6 +73,9 @@ static std::string FormatEntryDetails(disk_cache::Entry* entry) {
   bool truncated;
   if (net::HttpCache::ReadResponseInfo(entry, &response, &truncated) &&
       response.headers) {
+    if (truncated)
+      result.append("<pre>RESPONSE_INFO_TRUNCATED</pre>");
+
     result.append("<hr><pre>");
     result.append(EscapeForHTML(response.headers->GetStatusLine()));
     result.push_back('\n');
@@ -116,7 +119,7 @@ static disk_cache::Backend* GetDiskCache(URLRequestContext* context) {
   if (!http_cache)
     return NULL;
 
-  return http_cache->disk_cache();
+  return http_cache->GetBackend();
 }
 
 static std::string FormatStatistics(disk_cache::Backend* disk_cache) {
@@ -160,7 +163,7 @@ void ViewCacheHelper::GetEntryInfoHTML(const std::string& key,
       data->assign(FormatEntryDetails(entry));
       entry->Close();
     } else {
-      data->assign("no matching cache entry for: " + key);
+      data->assign("no matching cache entry for: " + EscapeForHTML(key));
     }
   }
 }

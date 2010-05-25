@@ -1,12 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_PLUGIN_PLUGIN_WEBPLUGIN_PROXY_H__
-#define CHROME_PLUGIN_PLUGIN_WEBPLUGIN_PROXY_H__
+#ifndef CHROME_PLUGIN_WEBPLUGIN_PROXY_H_
+#define CHROME_PLUGIN_WEBPLUGIN_PROXY_H_
 
 #include <string>
 
+#include "app/surface/transport_dib.h"
 #include "base/hash_tables.h"
 #include "base/ref_counted.h"
 #if defined(OS_MACOSX)
@@ -17,10 +18,9 @@
 #include "base/shared_memory.h"
 #include "base/timer.h"
 #include "chrome/common/chrome_plugin_api.h"
-#include "chrome/common/transport_dib.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message.h"
-#include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/webplugin.h"
 
 class PluginChannel;
 class WebPluginDelegateImpl;
@@ -34,27 +34,34 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
   WebPluginProxy(PluginChannel* channel,
                  int route_id,
                  const GURL& page_url,
-                 gfx::NativeViewId containing_window);
+                 gfx::NativeViewId containing_window,
+                 int host_render_view_routing_id);
   ~WebPluginProxy();
 
   void set_delegate(WebPluginDelegateImpl* d) { delegate_ = d; }
 
   // WebPlugin overrides
   void SetWindow(gfx::PluginWindowHandle window);
+
+  // Whether input events should be sent to the delegate.
+  virtual void SetAcceptsInputEvents(bool accepts) {
+    NOTREACHED();
+  }
+
   void WillDestroyWindow(gfx::PluginWindowHandle window);
 #if defined(OS_WIN)
   void SetWindowlessPumpEvent(HANDLE pump_messages_event);
 #endif
 
-  void CancelResource(int id);
+  void CancelResource(unsigned long id);
   void Invalidate();
   void InvalidateRect(const gfx::Rect& rect);
   NPObject* GetWindowScriptNPObject();
   NPObject* GetPluginElement();
   void SetCookie(const GURL& url,
-                 const GURL& policy_url,
+                 const GURL& first_party_for_cookies,
                  const std::string& cookie);
-  std::string GetCookies(const GURL& url, const GURL& policy_url);
+  std::string GetCookies(const GURL& url, const GURL& first_party_for_cookies);
 
   void ShowModalHTMLDialog(const GURL& url, int width, int height,
                            const std::string& json_arguments,
@@ -85,44 +92,55 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
   // Returns the id of the renderer that contains this plugin.
   int GetRendererId();
 
+  // Returns the id of the associated render view.
+  int host_render_view_routing_id() const {
+    return host_render_view_routing_id_;
+  }
+
   // For windowless plugins, paints the given rectangle into the local buffer.
   void Paint(const gfx::Rect& rect);
 
   // Callback from the renderer to let us know that a paint occurred.
   void DidPaint();
 
-  // Notification received on a plugin issued resource request
-  // creation.
-  void OnResourceCreated(int resource_id, HANDLE cookie);
+  // Notification received on a plugin issued resource request creation.
+  void OnResourceCreated(int resource_id,
+                         webkit_glue::WebPluginResourceClient* client);
 
-  void HandleURLRequest(const char *method,
-                        bool is_javascript_url,
-                        const char* target, unsigned int len,
-                        const char* buf, bool is_file_data,
-                        bool notify, const char* url,
-                        intptr_t notify_data, bool popups_allowed);
-
+  void HandleURLRequest(const char* url,
+                        const char* method,
+                        const char* target,
+                        const char* buf,
+                        unsigned int len,
+                        int notify_id,
+                        bool popups_allowed);
   void UpdateGeometry(const gfx::Rect& window_rect,
                       const gfx::Rect& clip_rect,
                       const TransportDIB::Handle& windowless_buffer,
-                      const TransportDIB::Handle& background_buffer);
-
+                      const TransportDIB::Handle& background_buffer,
+                      bool transparent
+#if defined(OS_MACOSX)
+                      ,
+                      int ack_key
+#endif
+                      );
   void CancelDocumentLoad();
-
-  void InitiateHTTPRangeRequest(const char* url,
-                                const char* range_info,
-                                intptr_t existing_stream,
-                                bool notify_needed,
-                                intptr_t notify_data);
-
-  void SetDeferResourceLoading(int resource_id, bool defer);
-
+  void InitiateHTTPRangeRequest(
+      const char* url, const char* range_info, int range_request_id);
+  void SetDeferResourceLoading(unsigned long resource_id, bool defer);
   bool IsOffTheRecord();
-
   void ResourceClientDeleted(
       webkit_glue::WebPluginResourceClient* resource_client);
-
   gfx::NativeViewId containing_window() { return containing_window_; }
+
+#if defined(OS_MACOSX)
+  virtual void BindFakePluginWindowHandle();
+  virtual void AcceleratedFrameBuffersDidSwap(gfx::PluginWindowHandle window);
+  virtual void SetAcceleratedSurface(gfx::PluginWindowHandle window,
+                                     int32 width,
+                                     int32 height,
+                                     uint64 accelerated_surface_identifier);
+#endif
 
  private:
   bool Send(IPC::Message* msg);
@@ -132,20 +150,8 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
 
   // Updates the shared memory section where windowless plugins paint.
   void SetWindowlessBuffer(const TransportDIB::Handle& windowless_buffer,
-                           const TransportDIB::Handle& background_buffer);
-
-#if defined(OS_WIN)
-  // Converts a shared memory section handle from the renderer process into a
-  // bitmap and hdc that are mapped to this process.
-  void ConvertBuffer(const base::SharedMemoryHandle& buffer,
-                     ScopedHandle* shared_section,
-                     ScopedBitmap* bitmap,
-                     ScopedHDC* hdc);
-#endif
-
-  // Called when a plugin's origin moves, so that we can update the world
-  // transform of the local HDC.
-  void UpdateTransform();
+                           const TransportDIB::Handle& background_buffer,
+                           const gfx::Rect& window_rect);
 
   typedef base::hash_map<int, webkit_glue::WebPluginResourceClient*>
       ResourceClientMap;
@@ -163,32 +169,29 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
   // The url of the main frame hosting the plugin.
   GURL page_url_;
 
-#if defined(OS_WIN)
   // Variables used for desynchronized windowless plugin painting.  See note in
   // webplugin_delegate_proxy.h for how this works.
-
-  // These hold the bitmap where the plugin draws.
-  ScopedHandle windowless_shared_section_;
-  ScopedBitmap windowless_bitmap_;
-  ScopedHDC windowless_hdc_;
-
-  // These hold the bitmap of the background image.
-  ScopedHandle background_shared_section_;
-  ScopedBitmap background_bitmap_;
-  ScopedHDC background_hdc_;
-#elif defined(OS_MACOSX)
+  bool transparent_;
+#if defined(OS_MACOSX)
   scoped_ptr<TransportDIB> windowless_dib_;
   scoped_ptr<TransportDIB> background_dib_;
   scoped_cftyperef<CGContextRef> windowless_context_;
   scoped_cftyperef<CGContextRef> background_context_;
-#elif defined(OS_LINUX)
-  scoped_ptr<TransportDIB> windowless_dib_;
-  scoped_ptr<TransportDIB> background_dib_;
+#else
   scoped_ptr<skia::PlatformCanvas> windowless_canvas_;
   scoped_ptr<skia::PlatformCanvas> background_canvas_;
+
+#if defined(USE_X11)
+  scoped_ptr<TransportDIB> windowless_dib_;
+  scoped_ptr<TransportDIB> background_dib_;
 #endif
+
+#endif
+
+  // Contains the routing id of the host render view.
+  int host_render_view_routing_id_;
 
   ScopedRunnableMethodFactory<WebPluginProxy> runnable_method_factory_;
 };
 
-#endif  // CHROME_PLUGIN_PLUGIN_WEBPLUGIN_PROXY_H__
+#endif  // CHROME_PLUGIN_WEBPLUGIN_PROXY_H_

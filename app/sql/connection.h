@@ -76,7 +76,6 @@ class Connection;
 // corruption, low-level IO errors or locking violations.
 class ErrorDelegate : public base::RefCounted<ErrorDelegate> {
  public:
-  virtual ~ErrorDelegate() {}
   // |error| is an sqlite result code as seen in sqlite\preprocessed\sqlite3.h
   // |connection| is db connection where the error happened and |stmt| is
   // our best guess at the statement that triggered the error.  Do not store
@@ -89,6 +88,11 @@ class ErrorDelegate : public base::RefCounted<ErrorDelegate> {
   // re-tried then returning SQLITE_OK is appropiate; otherwise is recomended
   // that you return the original |error| or the appropiae error code.
   virtual int OnError(int error, Connection* connection, Statement* stmt) = 0;
+
+ protected:
+  friend class base::RefCounted<ErrorDelegate>;
+
+  virtual ~ErrorDelegate() {}
 };
 
 class Connection {
@@ -139,12 +143,12 @@ class Connection {
   // Initialization ------------------------------------------------------------
 
   // Initializes the SQL connection for the given file, returning true if the
-  // file could be opened. You can call this or InitInMemory to initialize.
+  // file could be opened. You can call this or OpenInMemory.
   bool Open(const FilePath& path);
 
   // Initializes the SQL connection for a temporary in-memory database. There
   // will be no associated file on disk, and the initial database will be
-  // empty. You must call this or Init to open the database.
+  // empty. You can call this or Open.
   bool OpenInMemory();
 
   // Returns trie if the database has been successfully opened.
@@ -220,8 +224,8 @@ class Connection {
   // you having to manage unique names. See StatementID above for more.
   //
   // Example:
-  //   sql::Statement stmt = connection_.GetCachedStatement(
-  //       SQL_FROM_HERE, "SELECT * FROM foo");
+  //   sql::Statement stmt(connection_.GetCachedStatement(
+  //       SQL_FROM_HERE, "SELECT * FROM foo"));
   //   if (!stmt)
   //     return false;  // Error creating statement.
   scoped_refptr<StatementRef> GetCachedStatement(const StatementID& id,
@@ -286,7 +290,6 @@ class Connection {
     // Default constructor initializes to an invalid statement.
     StatementRef();
     StatementRef(Connection* connection, sqlite3_stmt* stmt);
-    ~StatementRef();
 
     // When true, the statement can be used.
     bool is_valid() const { return !!stmt_; }
@@ -304,6 +307,10 @@ class Connection {
     void Close();
 
    private:
+    friend class base::RefCounted<StatementRef>;
+
+    ~StatementRef();
+
     Connection* connection_;
     sqlite3_stmt* stmt_;
 

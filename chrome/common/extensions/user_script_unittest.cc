@@ -21,6 +21,10 @@ TEST(UserScriptTest, Match1) {
   EXPECT_TRUE(script.MatchesUrl(GURL("http://mail.yahoo.com/bar")));
   EXPECT_TRUE(script.MatchesUrl(GURL("http://mail.msn.com/baz")));
   EXPECT_FALSE(script.MatchesUrl(GURL("http://www.hotmail.com")));
+
+  script.add_exclude_glob("*foo*");
+  EXPECT_TRUE(script.MatchesUrl(GURL("http://mail.google.com")));
+  EXPECT_FALSE(script.MatchesUrl(GURL("http://mail.google.com/foo")));
 }
 
 TEST(UserScriptTest, Match2) {
@@ -70,6 +74,36 @@ TEST(UserScriptTest, Match6) {
   // NOTE: URLPattern is tested more extensively in url_pattern_unittest.cc.
 }
 
+TEST(UserScriptTest, UrlPatternGlobInteraction) {
+  // If there are both, match intersection(union(globs), union(urlpatterns)).
+  UserScript script;
+  
+  URLPattern pattern;
+  ASSERT_TRUE(pattern.Parse("http://www.google.com/*"));
+  script.add_url_pattern(pattern);
+
+  script.add_glob("*bar*");
+
+  // No match, because it doesn't match the glob.
+  EXPECT_FALSE(script.MatchesUrl(GURL("http://www.google.com/foo")));
+
+  script.add_exclude_glob("*baz*");
+
+  // No match, because it matches the exclude glob.
+  EXPECT_FALSE(script.MatchesUrl(GURL("http://www.google.com/baz")));
+
+  // Match, because it matches the glob, doesn't match the exclude glob.
+  EXPECT_TRUE(script.MatchesUrl(GURL("http://www.google.com/bar")));
+
+  // Try with just a single exclude glob.
+  script.clear_globs();
+  EXPECT_TRUE(script.MatchesUrl(GURL("http://www.google.com/foo")));
+
+  // Try with no globs or exclude globs.
+  script.clear_exclude_globs();
+  EXPECT_TRUE(script.MatchesUrl(GURL("http://www.google.com/foo")));
+}
+
 TEST(UserScriptTest, Pickle) {
   URLPattern pattern1;
   URLPattern pattern2;
@@ -78,16 +112,16 @@ TEST(UserScriptTest, Pickle) {
 
   UserScript script1;
   script1.js_scripts().push_back(UserScript::File(
-      ExtensionResource(FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-                        FilePath(FILE_PATH_LITERAL("foo.user.js"))),
+      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      FilePath(FILE_PATH_LITERAL("foo.user.js")),
       GURL("chrome-user-script:/foo.user.js")));
   script1.css_scripts().push_back(UserScript::File(
-      ExtensionResource(FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-                        FilePath(FILE_PATH_LITERAL("foo.user.css"))),
+      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      FilePath(FILE_PATH_LITERAL("foo.user.css")),
       GURL("chrome-user-script:/foo.user.css")));
   script1.css_scripts().push_back(UserScript::File(
-      ExtensionResource(FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
-                        FilePath(FILE_PATH_LITERAL("foo2.user.css"))),
+      FilePath(FILE_PATH_LITERAL("c:\\foo\\")),
+      FilePath(FILE_PATH_LITERAL("foo2.user.css")),
       GURL("chrome-user-script:/foo2.user.css")));
   script1.set_run_location(UserScript::DOCUMENT_START);
 
@@ -122,5 +156,5 @@ TEST(UserScriptTest, Pickle) {
 
 TEST(UserScriptTest, Defaults) {
   UserScript script;
-  ASSERT_EQ(UserScript::DOCUMENT_END, script.run_location());
+  ASSERT_EQ(UserScript::DOCUMENT_IDLE, script.run_location());
 }

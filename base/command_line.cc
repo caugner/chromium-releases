@@ -7,9 +7,13 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <shellapi.h>
-#elif defined(OS_FREEBSD)
+#elif defined(OS_POSIX)
+#include <limits.h>
 #include <stdlib.h>
 #include <unistd.h>
+#endif
+#if defined(OS_LINUX)
+#include <sys/prctl.h>
 #endif
 
 #include <algorithm>
@@ -52,6 +56,9 @@ static void Lowercase(std::string* parameter) {
 #endif
 
 #if defined(OS_WIN)
+CommandLine::CommandLine(ArgumentsOnly args_only) {
+}
+
 void CommandLine::ParseFromString(const std::wstring& command_line) {
   TrimWhitespace(command_line, TRIM_ALL, &command_line_string_);
 
@@ -101,14 +108,12 @@ CommandLine::CommandLine(const FilePath& program) {
   }
 }
 
-// Deprecated version
-CommandLine::CommandLine(const std::wstring& program) {
-  if (!program.empty()) {
-    program_ = program;
-    command_line_string_ = L'"' + program + L'"';
-  }
-}
 #elif defined(OS_POSIX)
+CommandLine::CommandLine(ArgumentsOnly args_only) {
+  // Push an empty argument, because we always assume argv_[0] is a program.
+  argv_.push_back("");
+}
+
 void CommandLine::InitFromArgv(int argc, const char* const* argv) {
   for (int i = 0; i < argc; ++i)
     argv_.push_back(argv[i]);
@@ -145,10 +150,6 @@ CommandLine::CommandLine(const FilePath& program) {
   argv_.push_back(program.value());
 }
 
-// Deprecated version
-CommandLine::CommandLine(const std::wstring& program) {
-  argv_.push_back(base::SysWideToNativeMB(program));
-}
 #endif
 
 // static
@@ -203,19 +204,47 @@ void CommandLine::Init(int argc, const char* const* argv) {
 #endif
 }
 
-#if defined(OS_LINUX) || defined(OS_FREEBSD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 // static
 void CommandLine::SetProcTitle() {
   // Build a single string which consists of all the arguments separated
   // by spaces. We can't actually keep them separate due to the way the
   // setproctitle() function works.
   std::string title;
+  bool have_argv0 = false;
+#if defined(OS_LINUX)
+  // In Linux we sometimes exec ourselves from /proc/self/exe, but this makes us
+  // show up as "exe" in process listings. Read the symlink /proc/self/exe and
+  // use the path it points at for our process title. Note that this is only for
+  // display purposes and has no TOCTTOU security implications.
+  char buffer[PATH_MAX];
+  // Note: readlink() does not append a null byte to terminate the string.
+  ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer));
+  DCHECK(length <= static_cast<ssize_t>(sizeof(buffer)));
+  if (length > 0) {
+    have_argv0 = true;
+    title.assign(buffer, length);
+    // If the binary has since been deleted, Linux appends " (deleted)" to the
+    // symlink target. Remove it, since this is not really part of our name.
+    const std::string kDeletedSuffix = " (deleted)";
+    if (EndsWith(title, kDeletedSuffix, true))
+      title.resize(title.size() - kDeletedSuffix.size());
+#if defined(PR_SET_NAME)
+    // If PR_SET_NAME is available at compile time, we try using it. We ignore
+    // any errors if the kernel does not support it at runtime though. When
+    // available, this lets us set the short process name that shows when the
+    // full command line is not being displayed in most process listings.
+    prctl(PR_SET_NAME, FilePath(title).BaseName().value().c_str());
+#endif
+  }
+#endif
   for (size_t i = 1; i < current_process_commandline_->argv_.size(); ++i) {
     if (!title.empty())
       title += " ";
     title += current_process_commandline_->argv_[i];
   }
-  setproctitle("%s", title.c_str());
+  // Disable prepending argv[0] with '-' if we prepended it ourselves above.
+  setproctitle(have_argv0 ? "-%s" : "%s", title.c_str());
 }
 #endif
 
@@ -338,6 +367,7 @@ void CommandLine::AppendLooseValue(const std::wstring& value) {
   // TODO(evan): quoting?
   command_line_string_.append(L" ");
   command_line_string_.append(value);
+  loose_values_.push_back(value);
 }
 
 void CommandLine::AppendArguments(const CommandLine& other,

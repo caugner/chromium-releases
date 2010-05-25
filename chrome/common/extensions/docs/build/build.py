@@ -29,6 +29,7 @@ _page_shell_html = _template_dir + "/page_shell.html"
 _generator_html = _build_dir + "/generator.html"
 
 _expected_output_preamble = "<!DOCTYPE html>"
+_expected_output_postamble = "</body></html>"
 
 # HACK! This is required because we can only depend on python 2.4 and
 # the calling environment may not be setup to set the PYTHONPATH
@@ -42,13 +43,13 @@ def RenderPage(name, test_shell):
   result to .../docs/<name>.html
   """
   if not name:
-    raise Exception("RenderPage called with empty name");
+    raise Exception("RenderPage called with empty name")
 
   generator_url = "file:" + urllib.pathname2url(_generator_html) + "?" + name
   input_file = _base_dir + "/" + name + ".html"
 
   # Copy page_shell to destination output and move aside original, if it exists.
-  original = None;
+  original = None
   if (os.path.isfile(input_file)):
     original = open(input_file, 'rb').read()
     os.remove(input_file)
@@ -63,6 +64,7 @@ def RenderPage(name, test_shell):
   result = p.stdout.read()
 
   content_start = result.find(_expected_output_preamble)
+  content_end = result.find(_expected_output_postamble)
   if (content_start < 0):
     if (result.startswith("#TEST_TIMED_OUT")):
       raise Exception("test_shell returned TEST_TIMED_OUT.\n" +
@@ -73,7 +75,7 @@ def RenderPage(name, test_shell):
                         "\nAnd open it in chrome using the file: scheme.\n" +
                         "Look from javascript errors via the inspector.")
     raise Exception("test_shell returned unexpected output: " + result)
-  result = result[content_start:]
+  result = result[content_start:content_end + len(_expected_output_postamble)] + "\n"
 
   # remove the trailing #EOF that test shell appends to the output.
   result = result.replace('#EOF', '')
@@ -85,7 +87,7 @@ def RenderPage(name, test_shell):
   result = result.replace('\r', '')
 
   # Write output
-  open(input_file, 'wb').write(result);
+  open(input_file, 'wb').write(result)
   if (original and result == original):
     return None
   else:
@@ -130,17 +132,33 @@ def FindTestShell():
                    "To specify a path to test_shell use --test-shell-path")
 
 def GetAPIModuleNames():
-  contents = open(_extension_api_json, 'r').read();
-  extension_api = json.loads(contents, encoding="ASCII")
-  return set( module['namespace'].encode() for module in extension_api)
+  try:
+    contents = open(_extension_api_json, 'r').read()
+  except IOError, msg:
+    raise Exception("Failed to read the file that defines the extensions API.  "
+                    "The specific error was: %s." % msg)
+
+  try:
+    extension_api = json.loads(contents, encoding="ASCII")
+  except ValueError, msg:
+    raise Exception("File %s has a syntax error: %s" %
+                    (_extension_api_json, msg))
+  # Exclude modules with a "nodoc" property.
+  return set(module['namespace'].encode() for module in extension_api
+             if "nodoc" not in module)
 
 def GetStaticFileNames():
   static_files = os.listdir(_static_dir)
-  return set(os.path.splitext(file)[0]
-             for file in static_files
-             if file.endswith(".html"))
+  return set(os.path.splitext(file_name)[0]
+             for file_name in static_files
+             if file_name.endswith(".html"))
 
 def main():
+  # Prevent windows from using cygwin python.
+  if (sys.platform == "cygwin"):
+    raise Exception("Building docs not supported for cygwin python.\n"
+                    "Please run the build.bat script.")
+
   parser = OptionParser()
   parser.add_option("--test-shell-path", dest="test_shell_path")
   (options, args) = parser.parse_args()
@@ -173,16 +191,16 @@ def main():
            "into source control (ideally in the same changelist as the\n" +
            "underlying files that resulting in their changing).")
     for f in modified_files:
-      print f;
+      print f
 
   # Hack. Sleep here, otherwise windows doesn't properly close the debug.log
   # and the os.remove will fail with a "Permission denied".
-  time.sleep(1);
-  debug_log = os.path.normpath(_build_dir + "/" + "debug.log");
+  time.sleep(1)
+  debug_log = os.path.normpath(_build_dir + "/" + "debug.log")
   if (os.path.isfile(debug_log)):
     os.remove(debug_log)
 
-  return 0;
+  return os.EX_OK
 
 if __name__ == '__main__':
   sys.exit(main())

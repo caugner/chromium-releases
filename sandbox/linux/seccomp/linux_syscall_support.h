@@ -1,34 +1,9 @@
-/* Copyright (c) 2005-2008, Google Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * ---
+/* Copyright (c) 2005-2010, Google Inc.
  * Author: Markus Gutschke
+ *
+ * All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the Chromium LICENSE file.
  */
 
 /* This file includes Linux-specific support functions common to the
@@ -1446,7 +1421,7 @@ struct kernel_statfs {
                            "int $0x80\n"                                      \
                            "pop %%ebx"                                        \
                            args                                               \
-                           : "memory");                                       \
+                           : "esp", "memory");                                \
       LSS_RETURN(type,__res)
     #undef  _syscall0
     #define _syscall0(type,name)                                              \
@@ -1503,7 +1478,7 @@ struct kernel_statfs {
                              : "i" (__NR_##name), "ri" ((long)(arg1)),        \
                                "c" ((long)(arg2)), "d" ((long)(arg3)),        \
                                "S" ((long)(arg4)), "D" ((long)(arg5))         \
-                             : "memory");                                     \
+                             : "esp", "memory");                              \
         LSS_RETURN(type,__res);                                               \
       }
     #undef  _syscall6
@@ -1525,7 +1500,7 @@ struct kernel_statfs {
                              : "i" (__NR_##name),  "0" ((long)(&__s)),        \
                                "c" ((long)(arg2)), "d" ((long)(arg3)),        \
                                "S" ((long)(arg4)), "D" ((long)(arg5))         \
-                             : "memory");                                     \
+                             : "esp", "memory");                              \
         LSS_RETURN(type,__res);                                               \
       }
     LSS_INLINE int LSS_NAME(clone)(int (*fn)(void *), void *child_stack,
@@ -1611,7 +1586,7 @@ struct kernel_statfs {
                            : "0"(-EINVAL), "i"(__NR_clone),
                              "m"(fn), "m"(child_stack), "m"(flags), "m"(arg),
                              "m"(parent_tidptr), "m"(newtls), "m"(child_tidptr)
-                           : "memory", "ecx", "edx", "esi", "edi");
+                           : "esp", "memory", "ecx", "edx", "esi", "edi");
       LSS_RETURN(int, __res);
     }
 
@@ -1722,7 +1697,7 @@ struct kernel_statfs {
           __asm__ __volatile__("movq %5,%%r10; syscall" :                     \
             "=a" (__res) : "0" (__NR_##name),                                 \
             "D" ((long)(arg1)), "S" ((long)(arg2)), "d" ((long)(arg3)),       \
-            "g" ((long)(arg4)) : "r10", "r11", "rcx", "memory");              \
+            "r" ((long)(arg4)) : "r10", "r11", "rcx", "memory");              \
           LSS_RETURN(type, __res);                                            \
       }
     #undef _syscall5
@@ -1734,7 +1709,7 @@ struct kernel_statfs {
           __asm__ __volatile__("movq %5,%%r10; movq %6,%%r8; syscall" :       \
             "=a" (__res) : "0" (__NR_##name),                                 \
             "D" ((long)(arg1)), "S" ((long)(arg2)), "d" ((long)(arg3)),       \
-            "g" ((long)(arg4)), "g" ((long)(arg5)) :                          \
+            "r" ((long)(arg4)), "r" ((long)(arg5)) :                          \
             "r8", "r10", "r11", "rcx", "memory");                             \
           LSS_RETURN(type, __res);                                            \
       }
@@ -1748,7 +1723,7 @@ struct kernel_statfs {
                                "syscall" :                                    \
             "=a" (__res) : "0" (__NR_##name),                                 \
             "D" ((long)(arg1)), "S" ((long)(arg2)), "d" ((long)(arg3)),       \
-            "g" ((long)(arg4)), "g" ((long)(arg5)), "g" ((long)(arg6)) :      \
+            "r" ((long)(arg4)), "r" ((long)(arg5)), "r" ((long)(arg6)) :      \
             "r8", "r9", "r10", "r11", "rcx", "memory");                       \
           LSS_RETURN(type, __res);                                            \
       }
@@ -1820,7 +1795,7 @@ struct kernel_statfs {
                              : "0"(-EINVAL), "i"(__NR_clone), "i"(__NR_exit),
                                "r"(fn), "S"(child_stack), "D"(flags), "r"(arg),
                                "d"(parent_tidptr), "r"(__tls), "r"(__ctid)
-                             : "memory", "r11", "rcx");
+                             : "rsp", "memory", "r11", "rcx");
       }
       LSS_RETURN(int, __res);
     }

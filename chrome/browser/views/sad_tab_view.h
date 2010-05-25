@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_VIEWS_SAD_TAB_VIEW_H_
 #define CHROME_BROWSER_VIEWS_SAD_TAB_VIEW_H_
 
-#include "app/gfx/font.h"
 #include "base/basictypes.h"
+#include "gfx/font.h"
+#include "views/controls/link.h"
 #include "views/view.h"
 
 class SkBitmap;
+class TabContents;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -18,22 +20,19 @@ class SkBitmap;
 //  A views::View subclass used to render the presentation of the crashed
 //  "sad tab" in the browser window when a renderer is destroyed unnaturally.
 //
-//  Note that since this view is not (currently) part of a Container or
-//  RootView hierarchy, it cannot respond to events or contain controls that
-//  do, right now it is used simply to render. Adding an extra Container to
-//  TabContents seemed like a lot of complexity. Ideally, perhaps TabContents'
-//  view portion would itself become a Container in the future, then event
-//  processing will work.
-//
 ///////////////////////////////////////////////////////////////////////////////
-class SadTabView : public views::View {
+class SadTabView : public views::View,
+                   public views::LinkController {
  public:
-  SadTabView();
+  explicit SadTabView(TabContents* tab_contents);
   virtual ~SadTabView() {}
 
   // Overridden from views::View:
   virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
+
+  // Overridden from views::LinkController:
+  virtual void LinkActivated(views::Link* source, int event_flags);
 
  private:
   static void InitClass();
@@ -46,11 +45,15 @@ class SadTabView : public views::View {
   static std::wstring message_;
   static int title_width_;
 
+  TabContents* tab_contents_;
+  views::Link* learn_more_link_;
+
   // Regions within the display for different components, populated by
   // Layout().
   gfx::Rect icon_bounds_;
   gfx::Rect title_bounds_;
   gfx::Rect message_bounds_;
+  gfx::Rect link_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(SadTabView);
 };

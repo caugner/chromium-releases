@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 
 namespace base {
 
+#if !defined(OS_MACOSX)
 // The Time routines in this file use standard POSIX routines, or almost-
 // standard routines in the case of timegm.  We need to use a Mach-specific
 // function for TimeTicks::Now() on Mac OS X.
@@ -146,7 +147,7 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
 // FreeBSD 6 has CLOCK_MONOLITHIC but defines _POSIX_MONOTONIC_CLOCK to -1.
 #if (defined(OS_POSIX) &&                                               \
      defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0) || \
-    defined(OS_FREEBSD)
+     defined(OS_FREEBSD) || defined(OS_OPENBSD)
 
 // static
 TimeTicks TimeTicks::Now() {
@@ -172,6 +173,29 @@ TimeTicks TimeTicks::Now() {
 // static
 TimeTicks TimeTicks::HighResNow() {
   return Now();
+}
+
+#endif  // !OS_MACOSX
+
+struct timespec TimeDelta::ToTimeSpec() const {
+  int64 microseconds = InMicroseconds();
+  time_t seconds = 0;
+  if (microseconds >= Time::kMicrosecondsPerSecond) {
+    seconds = InSeconds();
+    microseconds -= seconds * Time::kMicrosecondsPerSecond;
+  }
+  struct timespec result =
+      {seconds,
+       microseconds * Time::kNanosecondsPerMicrosecond};
+  return result;
+}
+
+struct timeval Time::ToTimeVal() const {
+  struct timeval result;
+  int64 us = us_ - kTimeTToMicrosecondsOffset;
+  result.tv_sec = us / Time::kMicrosecondsPerSecond;
+  result.tv_usec = us % Time::kMicrosecondsPerSecond;
+  return result;
 }
 
 }  // namespace base

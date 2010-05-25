@@ -70,7 +70,7 @@ class Pickle {
   bool ReadSize(void** iter, size_t* result) const;
   bool ReadUInt32(void** iter, uint32* result) const;
   bool ReadInt64(void** iter, int64* result) const;
-  bool ReadIntPtr(void** iter, intptr_t* result) const;
+  bool ReadUInt64(void** iter, uint64* result) const;
   bool ReadString(void** iter, std::string* result) const;
   bool ReadWString(void** iter, std::wstring* result) const;
   bool ReadString16(void** iter, string16* result) const;
@@ -103,7 +103,7 @@ class Pickle {
   bool WriteInt64(int64 value) {
     return WriteBytes(&value, sizeof(value));
   }
-  bool WriteIntPtr(intptr_t value) {
+  bool WriteUInt64(uint64 value) {
     return WriteBytes(&value, sizeof(value));
   }
   bool WriteString(const std::string& value);

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,6 @@ class Profile;
 // FirstRunCustomizeView implements the dialog that allows the user to do
 // some simple customizations during the first run.
 class FirstRunCustomizeView : public FirstRunViewBase,
-                              public views::ButtonListener,
                               public ComboboxModel {
  public:
   class CustomizeViewObserver {
@@ -43,7 +42,8 @@ class FirstRunCustomizeView : public FirstRunViewBase,
                         bool default_browser_checked,
                         bool homepage_defined,
                         int import_items,
-                        int dont_import_items);
+                        int dont_import_items,
+                        bool search_engine_experiment);
   virtual ~FirstRunCustomizeView();
 
   // Overridden from views::View.
@@ -54,7 +54,7 @@ class FirstRunCustomizeView : public FirstRunViewBase,
   virtual bool Accept();
   virtual bool Cancel();
 
-  // Overridden form views::ButtonListener.
+  // Overridden form FirstRunViewBase.
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Overridden form ComboboxModel.

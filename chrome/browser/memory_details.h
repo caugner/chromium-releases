@@ -11,8 +11,6 @@
 #include "base/ref_counted.h"
 #include "chrome/common/child_process_info.h"
 
-class MessageLoop;
-
 // We collect data about each browser process.  A browser may
 // have multiple processes (of course!).  Even IE has multiple
 // processes these days.
@@ -25,7 +23,7 @@ struct ProcessMemoryInformation {
   }
 
   // The process id.
-  int pid;
+  base::ProcessId pid;
   // The working set information.
   base::WorkingSetKBytes working_set;
   // The committed bytes.
@@ -54,6 +52,10 @@ struct ProcessData {
   ProcessMemoryInformationList processes;
 };
 
+#if defined(OS_MACOSX)
+class ProcessInfoSnapshot;
+#endif
+
 // MemoryDetails fetches memory details about current running browsers.
 // Because this data can only be fetched asynchronously, callers use
 // this class via a callback.
@@ -62,21 +64,27 @@ struct ProcessData {
 //
 //    class MyMemoryDetailConsumer : public MemoryDetails {
 //
-//      MyMemoryDetailConsumer() : MemoryDetails(true) {
-//        StartFetch();  // Starts fetching details.
+//      MyMemoryDetailConsumer() {
+//        // Anything but |StartFetch()|.
 //      }
 //
-//      // Your class stuff here
+//      // (Or just call |StartFetch()| explicitly if there's nothing else to
+//      // do.)
+//      void StartDoingStuff() {
+//        StartFetch();  // Starts fetching details.
+//        // Etc.
+//      }
+//
+//      // Your other class stuff here
 //
 //      virtual void OnDetailsAvailable() {
-//           // do work with memory info here
+//        // do work with memory info here
 //      }
 //    }
 class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
  public:
   // Constructor.
   MemoryDetails();
-  virtual ~MemoryDetails() {}
 
   // Access to the process detail information.  This data is only available
   // after OnDetailsAvailable() has been called.
@@ -88,6 +96,11 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
   void StartFetch();
 
   virtual void OnDetailsAvailable() {}
+
+ protected:
+  friend class base::RefCountedThreadSafe<MemoryDetails>;
+
+  virtual ~MemoryDetails() {}
 
  private:
   // Collect child process information on the IO thread.  This is needed because
@@ -105,6 +118,16 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
   // The parameter holds information about processes from the IO thread.
   void CollectProcessData(std::vector<ProcessMemoryInformation>);
 
+#if defined(OS_MACOSX)
+  // A helper for |CollectProcessData()|, collecting data on the Chrome/Chromium
+  // process with PID |pid|. The collected data is added to the state of the
+  // object (in |process_data_|).
+  void CollectProcessDataChrome(
+      const std::vector<ProcessMemoryInformation>& child_info,
+      base::ProcessId pid,
+      const ProcessInfoSnapshot& process_info);
+#endif
+
   // Collect child process information on the UI thread.  Information about
   // renderer processes is only available there.
   void CollectChildInfoOnUIThread();
@@ -117,7 +140,6 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
   ProcessData* ChromeBrowser();
 
   std::vector<ProcessData> process_data_;
-  MessageLoop* ui_loop_;
 
   DISALLOW_EVIL_CONSTRUCTORS(MemoryDetails);
 };

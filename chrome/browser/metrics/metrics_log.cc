@@ -1,9 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/metrics/metrics_log.h"
 
+#include "base/base64.h"
+#include "base/time.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
@@ -11,13 +13,14 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/utf_string_conversions.h"
+#include "base/third_party/nspr/prtime.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/base64.h"
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
@@ -28,6 +31,9 @@ using base::TimeDelta;
 #if defined(OS_WIN)
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #endif
+
+// static
+std::string MetricsLog::version_extension_;
 
 // libxml take xmlChar*, which is unsigned char*
 inline const unsigned char* UnsignedChar(const char* input) {
@@ -59,6 +65,8 @@ MetricsLog::MetricsLog(const std::string& client_id, int session_id)
 
   StartElement("log");
   WriteAttribute("clientid", client_id_);
+  WriteInt64Attribute("buildtime", GetBuildTime());
+  WriteAttribute("appversion", GetVersionString());
 
   DCHECK_GE(result, 0);
 }
@@ -76,10 +84,10 @@ void MetricsLog::CloseLog() {
   locked_ = true;
 
   int result = xmlTextWriterEndDocument(writer_);
-  DCHECK(result >= 0);
+  DCHECK_GE(result, 0);
 
   result = xmlTextWriterFlush(writer_);
-  DCHECK(result >= 0);
+  DCHECK_GE(result, 0);
 }
 
 int MetricsLog::GetEncodedLogSize() {
@@ -129,17 +137,17 @@ std::string MetricsLog::CreateHash(const std::string& value) {
 
 std::string MetricsLog::CreateBase64Hash(const std::string& string) {
   std::string encoded_digest;
-  if (net::Base64Encode(CreateHash(string), &encoded_digest)) {
+  if (base::Base64Encode(CreateHash(string), &encoded_digest)) {
     DLOG(INFO) << "Metrics: Hash [" << encoded_digest << "]=[" << string << "]";
     return encoded_digest;
   }
   return std::string();
 }
 
-void MetricsLog::RecordUserAction(const wchar_t* key) {
+void MetricsLog::RecordUserAction(const char* key) {
   DCHECK(!locked_);
 
-  std::string command_hash = CreateBase64Hash(WideToUTF8(key));
+  std::string command_hash = CreateBase64Hash(key);
   if (command_hash.empty()) {
     NOTREACHED() << "Unable generate encoded hash of command: " << key;
     return;
@@ -297,6 +305,8 @@ std::string MetricsLog::GetVersionString() {
       FileVersionInfo::CreateFileVersionInfoForCurrentModule());
   if (version_info.get()) {
     std::string version = WideToUTF8(version_info->product_version());
+    if (!version_extension_.empty())
+      version += version_extension_;
     if (!version_info->is_official_build())
       version.append("-devel");
     return version;
@@ -305,6 +315,35 @@ std::string MetricsLog::GetVersionString() {
   }
 
   return std::string();
+}
+
+// static
+int64 MetricsLog::GetBuildTime() {
+  static int64 integral_build_time = 0;
+  if (!integral_build_time) {
+    Time time;
+    const char* kDateTime = __DATE__ " " __TIME__ " GMT";
+    bool result = Time::FromString(ASCIIToWide(kDateTime).c_str(), &time);
+    DCHECK(result);
+    integral_build_time = static_cast<int64>(time.ToTimeT());
+  }
+  return integral_build_time;
+}
+
+// static
+int64 MetricsLog::GetIncrementalUptime(PrefService* pref) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  static base::TimeTicks last_updated_time(now);
+  int64 incremental_time = (now - last_updated_time).InSeconds();
+  last_updated_time = now;
+
+  if (incremental_time > 0) {
+    int64 metrics_uptime = pref->GetInt64(prefs::kUninstallMetricsUptimeSec);
+    metrics_uptime += incremental_time;
+    pref->SetInt64(prefs::kUninstallMetricsUptimeSec, metrics_uptime);
+  }
+
+  return incremental_time;
 }
 
 std::string MetricsLog::GetInstallDate() const {
@@ -371,11 +410,6 @@ void MetricsLog::WriteStabilityElement() {
   WriteIntAttribute("debuggernotpresent",
                    pref->GetInteger(prefs::kStabilityDebuggerNotPresent));
   pref->SetInteger(prefs::kStabilityDebuggerNotPresent, 0);
-
-  // Uptime is stored as a string, since there's no int64 in Value/JSON.
-  WriteAttribute("uptimesec",
-                 WideToUTF8(pref->GetString(prefs::kStabilityUptimeSec)));
-  pref->SetString(prefs::kStabilityUptimeSec, L"0");
 
   WritePluginStabilityElements(pref);
 }
@@ -447,11 +481,27 @@ void MetricsLog::WriteRealtimeStabilityAttributes(PrefService* pref) {
     pref->SetInteger(prefs::kStabilityRendererCrashCount, 0);
   }
 
+  count = pref->GetInteger(prefs::kStabilityExtensionRendererCrashCount);
+  if (count) {
+    WriteIntAttribute("extensionrenderercrashcount", count);
+    pref->SetInteger(prefs::kStabilityExtensionRendererCrashCount, 0);
+  }
+
   count = pref->GetInteger(prefs::kStabilityRendererHangCount);
   if (count) {
     WriteIntAttribute("rendererhangcount", count);
     pref->SetInteger(prefs::kStabilityRendererHangCount, 0);
   }
+
+  count = pref->GetInteger(prefs::kStabilityChildProcessCrashCount);
+  if (count) {
+    WriteIntAttribute("childprocesscrashcount", count);
+    pref->SetInteger(prefs::kStabilityChildProcessCrashCount, 0);
+  }
+
+  int64 recent_duration = GetIncrementalUptime(pref);
+  if (recent_duration)
+    WriteInt64Attribute("uptimesec", recent_duration);
 }
 
 void MetricsLog::WritePluginList(
@@ -477,7 +527,6 @@ void MetricsLog::WriteInstallElement() {
   OPEN_ELEMENT_FOR_SCOPE("install");
   WriteAttribute("installdate", GetInstallDate());
   WriteIntAttribute("buildid", 0);  // We're using appversion instead.
-  WriteAttribute("appversion", GetVersionString());
 }
 
 void MetricsLog::RecordEnvironment(
@@ -499,17 +548,6 @@ void MetricsLog::RecordEnvironment(
   {
     OPEN_ELEMENT_FOR_SCOPE("cpu");
     WriteAttribute("arch", base::SysInfo::CPUArchitecture());
-  }
-
-  {
-    OPEN_ELEMENT_FOR_SCOPE("security");
-    WriteIntAttribute("rendereronsboxdesktop",
-                      pref->GetInteger(prefs::kSecurityRendererOnSboxDesktop));
-    pref->SetInteger(prefs::kSecurityRendererOnSboxDesktop, 0);
-
-    WriteIntAttribute("rendererondefaultdesktop",
-        pref->GetInteger(prefs::kSecurityRendererOnDefaultDesktop));
-    pref->SetInteger(prefs::kSecurityRendererOnDefaultDesktop, 0);
   }
 
   {
@@ -582,7 +620,8 @@ void MetricsLog::WriteAllProfilesMetrics(
     const std::wstring& key_name = *i;
     if (key_name.compare(0, profile_prefix.size(), profile_prefix) == 0) {
       DictionaryValue* profile;
-      if (all_profiles_metrics.GetDictionary(key_name, &profile))
+      if (all_profiles_metrics.GetDictionaryWithoutPathExpansion(key_name,
+                                                                 &profile))
         WriteProfileMetrics(key_name.substr(profile_prefix.size()), *profile);
     }
   }
@@ -595,7 +634,7 @@ void MetricsLog::WriteProfileMetrics(const std::wstring& profileidhash,
   for (DictionaryValue::key_iterator i = profile_metrics.begin_keys();
        i != profile_metrics.end_keys(); ++i) {
     Value* value;
-    if (profile_metrics.Get(*i, &value)) {
+    if (profile_metrics.GetWithoutPathExpansion(*i, &value)) {
       DCHECK(*i != L"id");
       switch (value->GetType()) {
         case Value::TYPE_STRING: {
@@ -681,7 +720,7 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
 void MetricsLog::RecordHistogramDelta(const Histogram& histogram,
                                       const Histogram::SampleSet& snapshot) {
   DCHECK(!locked_);
-  DCHECK(0 != snapshot.TotalCount());
+  DCHECK_NE(0, snapshot.TotalCount());
   snapshot.CheckSize(histogram);
 
   // We will ignore the MAX_INT/infinite value in the last element of range[].

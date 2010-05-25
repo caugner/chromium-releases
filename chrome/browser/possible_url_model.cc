@@ -4,14 +4,18 @@
 
 #include "chrome/browser/possible_url_model.h"
 
-#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/table_model_observer.h"
+#include "base/callback.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon_service.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
+#include "gfx/codec/png_codec.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 
@@ -47,7 +51,6 @@ void PossibleURLModel::Reload(Profile *profile) {
     options.end_time = Time::Now();
     options.begin_time =
         options.end_time - TimeDelta::FromDays(kPossibleURLTimeScope);
-    options.most_recent_visit_only = true;
     options.max_count = 50;
 
     hs->QueryHistory(std::wstring(), options, &consumer_,
@@ -111,7 +114,7 @@ std::wstring PossibleURLModel::GetText(int row, int col_id) {
     // since those should always have LTR directionality. Please refer to
     // http://crbug.com/6726 for more information.
     std::wstring localized_title;
-    if (l10n_util::AdjustStringForLocaleDirection(title, &localized_title))
+    if (base::i18n::AdjustStringForLocaleDirection(title, &localized_title))
       return localized_title;
     return title;
   }
@@ -119,11 +122,11 @@ std::wstring PossibleURLModel::GetText(int row, int col_id) {
   // TODO(brettw): this should probably pass the GURL up so the URL elider
   // can be used at a higher level when we know the width.
   const string16& url = results_[row].display_url.display_url();
-  if (l10n_util::GetTextDirection() == l10n_util::LEFT_TO_RIGHT)
+  if (!base::i18n::IsRTL())
     return UTF16ToWideHack(url);
   // Force URL to be LTR.
   std::wstring localized_url = UTF16ToWideHack(url);
-  l10n_util::WrapStringWithLTRFormatting(&localized_url);
+  base::i18n::WrapStringWithLTRFormatting(&localized_url);
   return localized_url;
 }
 
@@ -167,7 +170,7 @@ int PossibleURLModel::CompareValues(int row1, int row2, int column_id) {
 void PossibleURLModel::OnFavIconAvailable(
     FaviconService::Handle h,
     bool fav_icon_available,
-    scoped_refptr<RefCountedBytes> data,
+    scoped_refptr<RefCountedMemory> data,
     bool expired,
     GURL icon_url) {
   if (profile_) {
@@ -176,7 +179,8 @@ void PossibleURLModel::OnFavIconAvailable(
     size_t index = consumer_.GetClientData(favicon_service, h);
     if (fav_icon_available) {
       // The decoder will leave our bitmap empty on error.
-      gfx::PNGCodec::Decode(&data->data, &(fav_icon_map_[index]));
+      gfx::PNGCodec::Decode(data->front(), data->size(),
+                            &(fav_icon_map_[index]));
 
       // Notify the observer.
       if (!fav_icon_map_[index].isNull() && observer_)

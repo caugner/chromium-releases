@@ -4,5 +4,8 @@
   },
   "chrome_extension_description": {
     "message": "The first extension that I made."
+  },
+  "color": {
+    "message": "Color"
   }
 }

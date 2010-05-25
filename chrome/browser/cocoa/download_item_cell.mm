@@ -4,16 +4,20 @@
 
 #import "chrome/browser/cocoa/download_item_cell.h"
 
-#include "app/gfx/canvas_paint.h"
-#include "app/gfx/text_elider.h"
 #include "app/l10n_util.h"
+#include "app/text_elider.h"
 #include "base/mac_util.h"
 #include "base/sys_string_conversions.h"
+#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/download_item_cell.h"
+#import "chrome/browser/cocoa/themed_window.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+#include "gfx/canvas_paint.h"
+#include "grit/theme_resources.h"
+#import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
 
 namespace {
 
@@ -80,6 +84,82 @@ const int kCompleteAnimationDuration = 2.5;
                 animationCurve:(NSAnimationCurve)animationCurve;
 @end
 
+class BackgroundTheme : public ThemeProvider {
+public:
+  BackgroundTheme(ThemeProvider* provider);
+
+  virtual void Init(Profile* profile) { }
+  virtual SkBitmap* GetBitmapNamed(int id) const { return nil; }
+  virtual SkColor GetColor(int id) const { return SkColor(); }
+  virtual bool GetDisplayProperty(int id, int* result) const { return false; }
+  virtual bool ShouldUseNativeFrame() const { return false; }
+  virtual bool HasCustomImage(int id) const { return false; }
+  virtual RefCountedMemory* GetRawData(int id) const { return NULL; }
+  virtual NSImage* GetNSImageNamed(int id, bool allow_default) const;
+  virtual NSColor* GetNSImageColorNamed(int id, bool allow_default) const;
+  virtual NSColor* GetNSColor(int id, bool allow_default) const;
+  virtual NSColor* GetNSColorTint(int id, bool allow_default) const;
+  virtual NSGradient* GetNSGradient(int id) const;
+
+private:
+  ThemeProvider* provider_;
+  scoped_nsobject<NSGradient> buttonGradient_;
+  scoped_nsobject<NSGradient> buttonPressedGradient_;
+  scoped_nsobject<NSColor> borderColor_;
+};
+
+BackgroundTheme::BackgroundTheme(ThemeProvider* provider) :
+    provider_(provider) {
+  NSColor* bgColor = [NSColor colorWithCalibratedRed:241/255.0
+                                               green:245/255.0
+                                                blue:250/255.0
+                                               alpha:77/255.0];
+  NSColor* clickedColor = [NSColor colorWithCalibratedRed:239/255.0
+                                                    green:245/255.0
+                                                     blue:252/255.0
+                                                    alpha:51/255.0];
+
+  borderColor_.reset(
+      [[NSColor colorWithCalibratedWhite:0 alpha:36/255.0] retain]);
+  buttonGradient_.reset([[NSGradient alloc]
+      initWithColors:[NSArray arrayWithObject:bgColor]]);
+  buttonPressedGradient_.reset([[NSGradient alloc]
+      initWithColors:[NSArray arrayWithObject:clickedColor]]);
+}
+
+NSImage* BackgroundTheme::GetNSImageNamed(int id, bool allow_default) const {
+  return nil;
+}
+
+NSColor* BackgroundTheme::GetNSImageColorNamed(int id,
+                                               bool allow_default) const {
+  return nil;
+}
+
+NSColor* BackgroundTheme::GetNSColor(int id, bool allow_default) const {
+  return provider_->GetNSColor(id, allow_default);
+}
+
+NSColor* BackgroundTheme::GetNSColorTint(int id, bool allow_default) const {
+  if (id == BrowserThemeProvider::TINT_BUTTONS)
+    return borderColor_.get();
+
+  return provider_->GetNSColorTint(id, allow_default);
+}
+
+NSGradient* BackgroundTheme::GetNSGradient(int id) const {
+  switch (id) {
+    case BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON:
+    case BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_INACTIVE:
+      return buttonGradient_.get();
+    case BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_PRESSED:
+    case BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE:
+      return buttonPressedGradient_.get();
+    default:
+      return provider_->GetNSGradient(id);
+  }
+}
+
 @interface DownloadItemCell(Private)
 - (void)updateTrackingAreas:(id)sender;
 - (void)hideSecondaryTitle;
@@ -87,6 +167,10 @@ const int kCompleteAnimationDuration = 2.5;
        progressed:(NSAnimationProgress)progress;
 - (NSString*)elideTitle:(int)availableWidth;
 - (NSString*)elideStatus:(int)availableWidth;
+- (ThemeProvider*)backgroundThemeWrappingProvider:(ThemeProvider*)provider;
+- (BOOL)pressedWithDefaultThemeOnPart:(DownloadItemMousePosition)part;
+- (NSColor*)titleColorForPart:(DownloadItemMousePosition)part;
+- (void)drawSecondaryTitleInRect:(NSRect)innerFrame;
 @end
 
 @implementation DownloadItemCell
@@ -196,25 +280,28 @@ const int kCompleteAnimationDuration = 2.5;
   }
 
   // Use two distinct tracking rects for left and right parts.
+  // The tracking areas are also used to decide how to handle clicks. They must
+  // always be active, so the click is handled correctly when a download item
+  // is clicked while chrome is not the active app ( http://crbug.com/21916 ).
   NSRect bounds = [[self controlView] bounds];
   NSRect buttonRect, dropdownRect;
   NSDivideRect(bounds, &dropdownRect, &buttonRect,
       kDropdownAreaWidth, NSMaxXEdge);
 
-    trackingAreaButton_.reset([[NSTrackingArea alloc]
-                    initWithRect:buttonRect
-                         options:(NSTrackingMouseEnteredAndExited |
-                                  NSTrackingActiveInActiveApp)
-                           owner:self
-                      userInfo:nil]);
+  trackingAreaButton_.reset([[NSTrackingArea alloc]
+                  initWithRect:buttonRect
+                       options:(NSTrackingMouseEnteredAndExited |
+                                NSTrackingActiveAlways)
+                         owner:self
+                    userInfo:nil]);
   [[self controlView] addTrackingArea:trackingAreaButton_.get()];
 
-    trackingAreaDropdown_.reset([[NSTrackingArea alloc]
-                    initWithRect:dropdownRect
-                         options:(NSTrackingMouseEnteredAndExited |
-                                  NSTrackingActiveInActiveApp)
-                           owner:self
-                      userInfo:nil]);
+  trackingAreaDropdown_.reset([[NSTrackingArea alloc]
+                  initWithRect:dropdownRect
+                       options:(NSTrackingMouseEnteredAndExited |
+                                NSTrackingActiveAlways)
+                         owner:self
+                    userInfo:nil]);
   [[self controlView] addTrackingArea:trackingAreaDropdown_.get()];
 }
 
@@ -318,6 +405,58 @@ const int kCompleteAnimationDuration = 2.5;
       availableWidth));
 }
 
+- (ThemeProvider*)backgroundThemeWrappingProvider:(ThemeProvider*)provider {
+  if (!themeProvider_.get()) {
+    themeProvider_.reset(new BackgroundTheme(provider));
+  }
+
+  return themeProvider_.get();
+}
+
+// Returns if |part| was pressed while the default theme was active.
+- (BOOL)pressedWithDefaultThemeOnPart:(DownloadItemMousePosition)part {
+  ThemeProvider* themeProvider = [[[self controlView] window] themeProvider];
+  bool isDefaultTheme =
+      !themeProvider->HasCustomImage(IDR_THEME_BUTTON_BACKGROUND);
+  return isDefaultTheme && [self isHighlighted] && mousePosition_ == part;
+}
+
+// Returns the text color that should be used to draw text on |part|.
+- (NSColor*)titleColorForPart:(DownloadItemMousePosition)part {
+  ThemeProvider* themeProvider = [[[self controlView] window] themeProvider];
+  NSColor* themeTextColor =
+      themeProvider->GetNSColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT,
+                                true);
+  return [self pressedWithDefaultThemeOnPart:part]
+      ? [NSColor alternateSelectedControlTextColor] : themeTextColor;
+}
+
+- (void)drawSecondaryTitleInRect:(NSRect)innerFrame {
+  if (![self secondaryTitle] || statusAlpha_ <= 0)
+    return;
+
+  CGFloat textWidth = innerFrame.size.width -
+      (kTextPosLeft + kTextPaddingRight + kDropdownAreaWidth);
+  NSString* secondaryText = [self elideStatus:textWidth];
+  NSColor* secondaryColor =
+      [self titleColorForPart:kDownloadItemMouseOverButtonPart];
+
+  // If text is light-on-dark, lightening it alone will do nothing.
+  // Therefore we mute luminance a wee bit before drawing in this case.
+  if (![secondaryColor gtm_isDarkColor])
+    secondaryColor = [secondaryColor gtm_colorByAdjustingLuminance:-0.2];
+
+  NSDictionary* secondaryTextAttributes =
+      [NSDictionary dictionaryWithObjectsAndKeys:
+          secondaryColor, NSForegroundColorAttributeName,
+          [self secondaryFont], NSFontAttributeName,
+          nil];
+  NSPoint secondaryPos =
+      NSMakePoint(innerFrame.origin.x + kTextPosLeft, kSecondaryTextPosTop);
+  [secondaryText drawAtPoint:secondaryPos
+              withAttributes:secondaryTextAttributes];
+}
+
 - (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   // Constants from Cole.  Will kConstant them once the feedback loop
   // is complete.
@@ -328,7 +467,22 @@ const int kCompleteAnimationDuration = 2.5;
   NSWindow* window = [controlView window];
   BOOL active = [window isKeyWindow] || [window isMainWindow];
 
-  GTMTheme* theme = [controlView gtm_theme];
+  // In the default theme, draw download items with the bookmark button
+  // gradient. For some themes, this leads to unreadable text, so draw the item
+  // with a background that looks like windows (some transparent white) if a
+  // theme is used. Use custom theme object with a white color gradient to trick
+  // the superclass into drawing what we want.
+  ThemeProvider* themeProvider = [[[self controlView] window] themeProvider];
+  bool isDefaultTheme =
+      !themeProvider->HasCustomImage(IDR_THEME_BUTTON_BACKGROUND);
+
+  NSGradient* bgGradient = nil;
+  if (!isDefaultTheme) {
+    themeProvider = [self backgroundThemeWrappingProvider:themeProvider];
+    bgGradient = themeProvider->GetNSGradient(
+        active ? BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON :
+                 BrowserThemeProvider::GRADIENT_TOOLBAR_BUTTON_INACTIVE);
+  }
 
   NSRect buttonDrawRect, dropdownDrawRect;
   NSDivideRect(drawFrame, &dropdownDrawRect, &buttonDrawRect,
@@ -336,38 +490,44 @@ const int kCompleteAnimationDuration = 2.5;
 
   NSBezierPath* buttonInnerPath = [self
       leftRoundedPath:radius inRect:buttonDrawRect];
-  NSBezierPath* buttonOuterPath = [self
-      leftRoundedPath:(radius + 1)
-               inRect:NSInsetRect(buttonDrawRect, -1, -1)];
-
   NSBezierPath* dropdownInnerPath = [self
       rightRoundedPath:radius inRect:dropdownDrawRect];
-  NSBezierPath* dropdownOuterPath = [self
-      rightRoundedPath:(radius + 1)
-                inRect:NSInsetRect(dropdownDrawRect, -1, -1)];
+
+  // Draw secondary title, if any. Do this before drawing the (transparent)
+  // fill so that the text becomes a bit lighter. The default theme's "pressed"
+  // gradient is not transparent, so only do this if a theme is active.
+  bool drawStatusOnTop =
+      [self pressedWithDefaultThemeOnPart:kDownloadItemMouseOverButtonPart];
+  if (!drawStatusOnTop)
+    [self drawSecondaryTitleInRect:innerFrame];
 
   // Stroke the borders and appropriate fill gradient.
-  [self drawBorderAndFillForTheme:theme
+  [self drawBorderAndFillForTheme:themeProvider
                       controlView:controlView
-                        outerPath:buttonOuterPath
                         innerPath:buttonInnerPath
               showClickedGradient:[self isButtonPartPressed]
             showHighlightGradient:[self isMouseOverButtonPart]
                        hoverAlpha:0.0
                            active:active
-                        cellFrame:cellFrame];
+                        cellFrame:cellFrame
+                  defaultGradient:bgGradient];
 
-  [self drawBorderAndFillForTheme: theme
+  [self drawBorderAndFillForTheme:themeProvider
                       controlView:controlView
-                        outerPath:dropdownOuterPath
                         innerPath:dropdownInnerPath
               showClickedGradient:[self isDropdownPartPressed]
             showHighlightGradient:[self isMouseOverDropdownPart]
                        hoverAlpha:0.0
                            active:active
-                        cellFrame:cellFrame];
+                        cellFrame:cellFrame
+                  defaultGradient:bgGradient];
 
   [self drawInteriorWithFrame:innerFrame inView:controlView];
+
+  // For the default theme, draw the status text on top of the (opaque) button
+  // gradient.
+  if (drawStatusOnTop)
+    [self drawSecondaryTitleInRect:innerFrame];
 }
 
 - (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
@@ -376,41 +536,19 @@ const int kCompleteAnimationDuration = 2.5;
       (kTextPosLeft + kTextPaddingRight + kDropdownAreaWidth);
   [self setTitle:[self elideTitle:textWidth]];
 
-  NSColor* themeTextColor = [[[self controlView] gtm_theme]
-      textColorForStyle:GTMThemeStyleBookmarksBarButton
-                  state:GTMThemeStateActiveWindow];
-
-  NSColor* color = [self isButtonPartPressed]
-      ? [NSColor alternateSelectedControlTextColor] : themeTextColor;
+  NSColor* color = [self titleColorForPart:kDownloadItemMouseOverButtonPart];
   NSString* primaryText = [self title];
 
-  NSDictionary* primaryTextAttributes = [NSDictionary
-      dictionaryWithObjectsAndKeys:
-      color, NSForegroundColorAttributeName,
-      [self font], NSFontAttributeName,
-      nil];
+  NSDictionary* primaryTextAttributes =
+      [NSDictionary dictionaryWithObjectsAndKeys:
+          color, NSForegroundColorAttributeName,
+          [self font], NSFontAttributeName,
+          nil];
   NSPoint primaryPos = NSMakePoint(
       cellFrame.origin.x + kTextPosLeft,
       titleY_);
 
   [primaryText drawAtPoint:primaryPos withAttributes:primaryTextAttributes];
-
-  // Draw secondary title, if any
-  if ([self secondaryTitle] != nil && statusAlpha_ > 0) {
-    NSString* secondaryText = [self elideStatus:textWidth];
-    NSColor* secondaryColor = [NSColor colorWithDeviceWhite:kSecondaryTextColor
-                                                      alpha:statusAlpha_];
-    NSDictionary* secondaryTextAttributes = [NSDictionary
-        dictionaryWithObjectsAndKeys:
-        secondaryColor, NSForegroundColorAttributeName,
-        [self secondaryFont], NSFontAttributeName,
-        nil];
-    NSPoint secondaryPos = NSMakePoint(
-        cellFrame.origin.x + kTextPosLeft,
-        kSecondaryTextPosTop);
-    [secondaryText drawAtPoint:secondaryPos
-        withAttributes:secondaryTextAttributes];
-  }
 
   // Draw progress disk
   {
@@ -487,8 +625,7 @@ const int kCompleteAnimationDuration = 2.5;
   [shadow setShadowBlurRadius:0.0];
   [shadow set];
 
-  NSColor* fill = [self isDropdownPartPressed]
-      ? [NSColor alternateSelectedControlTextColor] : themeTextColor;
+  NSColor* fill = [self titleColorForPart:kDownloadItemMouseOverDropdownPart];
   [fill setFill];
 
   [triangle fill];
@@ -545,8 +682,9 @@ const int kCompleteAnimationDuration = 2.5;
 - (id)initWithDownloadItemCell:(DownloadItemCell*)cell
                       duration:(NSTimeInterval)duration
                 animationCurve:(NSAnimationCurve)animationCurve {
-  if ((self = [super initWithDuration:duration
-                       animationCurve:animationCurve])) {
+  if ((self = [super gtm_initWithDuration:duration
+                                eventMask:NSLeftMouseDownMask
+                           animationCurve:animationCurve])) {
     cell_ = cell;
     [self setAnimationBlockingMode:NSAnimationNonblocking];
   }

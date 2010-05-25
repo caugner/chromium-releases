@@ -13,8 +13,8 @@
 #include <wtypes.h>
 #endif
 
-#include "app/gfx/native_widget_types.h"
-#include "base/gfx/point.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/point.h"
 #include "base/keyboard_codes.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -84,7 +84,7 @@ bool SendMouseClick(MouseButton type);
 void MoveMouseToCenterAndPress(
 #if defined(TOOLKIT_VIEWS)
     views::View* view,
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_GTK)
     GtkWidget* widget,
 #endif
     MouseButton button,

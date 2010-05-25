@@ -7,6 +7,11 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/cocoa_protocols_mac.h"
+#include "base/scoped_nsobject.h"
+#import "chrome/browser/cocoa/styled_text_field.h"
+#import "chrome/browser/cocoa/url_drop_target.h"
+
 @class AutocompleteTextFieldCell;
 
 // AutocompleteTextField intercepts UI actions for forwarding to
@@ -25,16 +30,17 @@
 
 // Provides a hook so that we can call directly down to
 // AutocompleteEditViewMac rather than traversing the delegate chain.
-
 class AutocompleteTextFieldObserver {
  public:
-
   // Called when the control-key state changes while the field is
   // first responder.
   virtual void OnControlKeyChanged(bool pressed) = 0;
 
   // Called when the user pastes into the field.
   virtual void OnPaste() = 0;
+
+  // Called when the user copies the text.
+  virtual void OnCopy() = 0;
 
   // Returns true if the current clipboard text supports paste and go
   // (or paste and search).
@@ -47,20 +53,47 @@ class AutocompleteTextFieldObserver {
   virtual int GetPasteActionStringId() = 0;
 
   // Called when the user initiates a "paste and go" or "paste and
-  // search" into |field_|.
+  // search" into the field.
   virtual void OnPasteAndGo() = 0;
-
-  // Called when the user clicks the hint icon (i.e. the security icon) in the
-  // location bar.
-  virtual void OnSecurityIconClicked() = 0;
 
   // Called when the field's frame changes.
   virtual void OnFrameChanged() = 0;
+
+  // Called when the window containing the field loses focus.
+  virtual void OnDidResignKey() = 0;
+
+  // Called when the user begins editing the field, for every edit,
+  // and when the user is done editing the field.
+  virtual void OnDidBeginEditing() = 0;
+  virtual void OnDidChange() = 0;
+  virtual void OnDidEndEditing() = 0;
+
+  // NSResponder translates certain keyboard actions into selectors
+  // passed to -doCommandBySelector:.  The selector is forwarded here,
+  // return true if |cmd| is handled, false if the caller should
+  // handle it.
+  // TODO(shess): For now, I think having the code which makes these
+  // decisions closer to the other autocomplete code is worthwhile,
+  // since it calls a wide variety of methods which otherwise aren't
+  // clearly relevent to expose here.  But consider pulling more of
+  // the AutocompleteEditViewMac calls up to here.
+  virtual bool OnDoCommandBySelector(SEL cmd) = 0;
 };
 
-@interface AutocompleteTextField : NSTextField {
+@interface AutocompleteTextField : StyledTextField<NSTextViewDelegate,
+                                                   URLDropTarget> {
  @private
+  // Undo manager for this text field.  We use a specific instance rather than
+  // the standard undo manager in order to let us clear the undo stack at will.
+  scoped_nsobject<NSUndoManager> undoManager_;
+
   AutocompleteTextFieldObserver* observer_;  // weak, owned by location bar.
+
+  // Handles being a drag-and-drop target.
+  scoped_nsobject<URLDropTargetHandler> dropHandler_;
+
+  // Holds current tooltip strings, to keep them from being dealloced.
+  scoped_nsobject<NSMutableArray> currentToolTips_;
 }
 
 @property AutocompleteTextFieldObserver* observer;
@@ -68,14 +101,23 @@ class AutocompleteTextFieldObserver {
 // Convenience method to return the cell, casted appropriately.
 - (AutocompleteTextFieldCell*)autocompleteTextFieldCell;
 
-// If the keyword, keyword hint, or search hint changed, then the
-// field editor may need to be repositioned.
-- (void)resetFieldEditorFrameIfNeeded;
+// Superclass aborts editing before changing the string, which causes
+// problems for undo.  This version modifies the field editor's
+// contents if the control is already being edited.
+- (void)setAttributedStringValue:(NSAttributedString*)aString;
 
-// Returns the amount of the field's width which is not being taken up
-// by the text contents.  May be negative if the contents are large
-// enough to scroll.
-- (CGFloat)availableDecorationWidth;
+// Clears the undo chain for this text field.
+- (void)clearUndoChain;
+
+// Updates cursor and tooltip rects depending on the contents of the text field
+// e.g. the security icon should have a default pointer shown on hover instead
+// of an I-beam.
+- (void)updateCursorAndToolTipRects;
+
+// Return the appropriate menu for any page actions under event.
+// Returns nil if no menu is present for the action, or if the event
+// is not over an action.
+- (NSMenu*)actionMenuForEvent:(NSEvent*)event;
 
 @end
 

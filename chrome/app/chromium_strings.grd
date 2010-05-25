@@ -45,7 +45,6 @@ be available for now. -->
     <output filename="strings_nl.rc" type="rc_all" lang="nl" />
     <output filename="strings_nb.rc" type="rc_all" lang="no" />
     <!-- 'no' for Norwegian Bokmål. It should be 'nb'. -->
-    <output filename="strings_or.rc" type="rc_all" lang="or" />
     <output filename="strings_pl.rc" type="rc_all" lang="pl" />
     <output filename="strings_pt-BR.rc" type="rc_all" lang="pt-BR" />
     <output filename="strings_pt-PT.rc" type="rc_all" lang="pt-PT" />
@@ -99,7 +98,6 @@ be available for now. -->
     <output filename="chromium_strings_nl.pak" type="data_package" lang="nl" />
     <output filename="chromium_strings_nb.pak" type="data_package" lang="no" />
     <!-- 'no' for Norwegian Bokmål. It should be 'nb'. -->
-    <output filename="chromium_strings_or.pak" type="data_package" lang="or" />
     <output filename="chromium_strings_pl.pak" type="data_package" lang="pl" />
     <output filename="chromium_strings_pt-BR.pak" type="data_package" lang="pt-BR" />
     <output filename="chromium_strings_pt-PT.pak" type="data_package" lang="pt-PT" />
@@ -127,9 +125,32 @@ be available for now. -->
       <message name="IDS_PRODUCT_NAME" desc="The Chrome application name">
         Chromium
       </message>
-      <if expr="pp_ifdef('chromeos') or pp_ifdef('toolkit_views')">
+      <message name="IDS_SXS_SHORTCUT_NAME" desc="The Chrome short cut name for SxS channel">
+        Chromium
+      </message>
+      <message name="IDS_PRODUCT_DESCRIPTION" desc="Browser description">
+        Chromium is a web browser that runs web pages and applications with lightning speed. It's fast, stable, and easy to use. Browse the web more safely with malware and phishing protection built into Chromium.
+      </message>
+      <if expr="pp_ifdef('chromeos')">
         <message name="IDS_PRODUCT_OS_NAME" desc="The Chrome OS application name">
           Chromium OS
+        </message>
+      </if>
+      <if expr="os == 'win32'">
+        <message name="IDS_PRODUCT_FRAME_NAME" desc="The Chrome Frame application name">
+          Chromium Frame
+        </message>
+        <message name="IDS_VERSIONMISMATCH_HEADER">
+          Chromium Frame Update.
+        </message>
+        <message name="IDS_VERSIONMISMATCH">
+          Chromium Frame has been updated. Please restart your browser. Chrome version: <ph name="TODO_0001">%ls<ex>TODO</ex></ph>, Chromium Frame version: <ph name="TODO_0002">%ls<ex>TODO</ex></ph>
+        </message>
+        <message name="IDS_VERSIONUNKNOWN">
+          Unknown version.
+        </message>
+        <message name="IDS_CHROME_FRAME_MENU_ABOUT" desc="About Chrome Frame label">
+          About Chromium Frame...
         </message>
       </if>
       <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2" desc="2nd paragraph of extra information for an unsafe common name in an X509 certificate">
@@ -164,7 +185,7 @@ be available for now. -->
         The Chromium Authors
       </message>
       <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
-        Copyright © 2006-2009 The Chromium Authors. All Rights Reserved.
+        Copyright © 2006-2010 The Chromium Authors. All Rights Reserved.
       </message>
       <message name="IDS_ABOUT_VERSION_LICENSE" desc="The label below the copyright message, containing the URLs.">
         Chromium is made possible by the <ph name="BEGIN_LINK_CHROMIUM">BEGIN_LINK_CHR</ph>Chromium<ph name="END_LINK_CHROMIUM">END_LINK_CHR</ph> open source project and other <ph name="BEGIN_LINK_OSS">BEGIN_LINK_OSS</ph>open source software<ph name="END_LINK_OSS">END_LINK_OSS</ph>.
@@ -191,9 +212,16 @@ be available for now. -->
       <message name="IDS_IMPORTER_LOCK_TEXT" desc="The message to be displayed on dialog">
         Sadly, your Mozilla Firefox settings are not available while that browser is running. To import those settings to Chromium, save your work and close all Firefox windows. Then click Continue.
       </message>
-      <message name="IDS_BUGREPORT_CHROME_MISBEHAVES">
-        Chromium is misbehaving
-      </message>
+      <if expr="not pp_ifdef('use_titlecase')">
+        <message name="IDS_BUGREPORT_CHROME_MISBEHAVES" desc="Report a bug/problem type: Browser is misbehaving">
+          Chromium is misbehaving
+        </message>
+      </if>
+      <if expr="pp_ifdef('use_titlecase')">
+        <message name="IDS_BUGREPORT_CHROME_MISBEHAVES" desc="In Title Case: Report a bug/problem type: Browser is misbehaving">
+          Chromium is Misbehaving
+        </message>
+      </if>
       <message name="IDS_ABOUT_CHROME_TITLE" desc="Dialog title">
         About Chromium
       </message>
@@ -228,17 +256,20 @@ be available for now. -->
       <message name="IDS_FR_CUSTOMIZE_SHORTCUTS" desc="Create shortcuts preface text">
         Create Chromium shortcuts in these locations:
       </message>
-      <message name="IDS_NEW_TAB_MOST_VISITED_INTRO"
-               desc="Displayed to explain the Most Visited concept when there aren't enough most visited items.">
-        The "Most visited" area shows the websites that you use most often. After using Chromium for a while, you will see your most visited sites whenever you open a new tab. You can learn more about this and other features on the <ph name="BEGIN_LINK">&lt;a href="$1"&gt;</ph>Getting Started page<ph name="END_LINK">&lt;/a&gt;</ph>.
-      </message>
       <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
         Welcome to Chromium
       </message>
-      <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
-        Chromium needs to launch an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
-      </message>
+      <if expr="not pp_ifdef('chromeos')">
+        <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
+          Chromium needs to launch an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
+        </message>
+      </if>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
+          Chromium OS does not support launching an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
+        </message>
+      </if>
       <!-- Strings used to warn that an OS is not supported -->
       <message name="IDS_UNSUPPORTED_OS_WIN2000" desc="The text used to warn the user that Windows 2000 is not supported">
         Chromium does not support Windows 2000. Some features may not work.
@@ -266,6 +297,12 @@ be available for now. -->
       </message>
       <message name="IDS_PROFILE_TOO_NEW_ERROR" desc="Error displayed on startup when the profile is from a newer version of the product and can not be read">
         Your profile can not be used because it is from a newer version of Chromium.\n\nSome features may be unavailable. Please specify a different profile directory or use a newer version of Chromium.
+      </message>
+      <message name="IDS_PREFERENCES_UNREADABLE_ERROR" desc="Error displayed on startup when user preferences file can not be read">
+        Your preferences can not be read.\n\nSome features may be unavailable and changes to preferences won't be saved.
+      </message>
+      <message name="IDS_PREFERENCES_CORRUPT_ERROR" desc="Error displayed on startup when user preferences file can not be read">
+        Your preferences file is corrupt or invalid.\n\nChromium is unable to recover your settings.
       </message>
       <!-- Crash Recovery Dialog -->
       <message name="IDS_CRASH_RECOVERY_TITLE" desc="Title of dialog shown when the browser crashes.">
@@ -301,6 +338,9 @@ be available for now. -->
       <message name="IDS_INSTALL_FAILED" desc="Error displayed if installation fails due to some unknown error.">
         Installation failed due to unspecified error. If Chromium is currently running, please close it and try again.
       </message>
+      <message name="IDS_SAME_VERSION_REPAIR_FAILED" desc="Error displayed if installation fails due to Chrome running.">
+        Can not install the same Google Chrome version that is currently running. Please close Google Chrome and try again.
+      </message>
       <message name="IDS_SETUP_PATCH_FAILED" desc="Error message when setup.exe fails to patch itself.">
         Installation failed due to unspecified error. Please download Chromium again.
       </message>
@@ -328,12 +368,15 @@ be available for now. -->
       <message name="IDS_UNINSTALL_FAILED" desc="Error during uninstall if we can not find the installation directory from registry.">
         Chromium is not installed or it failed to find installation directory. Please download Chromium again.
       </message>
+      <message name="IDS_UNINSTALL_COMPLETE" desc="Text displayed on dialog that is shown when uninstall is complete and no reboot is required.">
+        Uninstallation complete.
+      </message>
       <message name="IDS_INSTALL_DIR_IN_USE" desc="Error during install if Chromium version is missing from registry but the installation directory exists and can not be deleted.">
         Chromium installation directory seems to be in use. Please reboot your computer and try again.
       </message>
       <!-- Options Dialog -->
       <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
-        Chromium may use web services to improve your browsing experience - you may optionally disable these services.
+        Chromium may use web services to improve your browsing experience. You may optionally disable these services.
       </message>
       <message name="IDS_IMPORT_BOOKMARKS" desc="Explanatory text for the importing progress dialog when importing a bookmarks.html file from the bookmark manager">
         Chromium is now importing Favorites/Bookmarks.
@@ -356,12 +399,29 @@ be available for now. -->
       <message name="IDS_UNINSTALL_BUTTON_TEXT" desc="Label for uninstall button on Uninstall confirmation dialog.">
         Uninstall
       </message>
-      <message name="IDS_DEFAULT_BROWSER_INFOBAR_TEXT" desc="Text to show in the default browser query infobar.">
-        Hooray, you're back! But Chromium isn't your default browser.
-      </message>
       <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
         Chromium isn't your default browser.
       </message>
+      <message name="IDS_AUTOFILL_INFOBAR_TEXT" desc="Text to show in the autofill request infobar.">
+        Chromium will store this information to make filling out forms easier.
+      </message>
+      <!-- Try Chrome Toast Dialog -->
+      <message name="IDS_TRY_TOAST_HEADING" desc="Top line of the try-chrome-again dialog">
+        There is a new version of Chromium available.
+      </message>
+      <message name="IDS_TRY_TOAST_ALT_HEADING" desc="Alternate top line of the try-chrome-again dialog">
+        There's a new version of Chromium available that includes extensions.
+      </message>      
+      <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
+        Try it out (already installed)
+      </message>
+      <message name="IDS_TRY_TOAST_CANCEL" desc="Try chrome again dialog Cancel button">
+        Don't bug me
+      </message>
+      <message name="IDS_TRY_TOAST_WHY" desc="Text of the url link that explains why this dialog is being shown">
+        Why am I seeing this?
+      </message>
+
       <if expr="os == 'darwin'">
         <message name="IDS_SHORT_PRODUCT_NAME" desc="The application's short name, used for the Mac's application menu, activity monitor, etc. This should be less than 16 characters. Example: Chrome, not Google Chrome.">
           Chromium

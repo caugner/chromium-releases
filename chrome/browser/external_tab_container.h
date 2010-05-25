@@ -11,10 +11,15 @@
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/automation/automation_profile_impl.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "chrome/browser/views/frame/browser_bubble_host.h"
+#include "chrome/browser/views/infobars/infobar_container.h"
+#include "chrome/browser/views/unhandled_keyboard_event_handler.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "views/accelerator.h"
 #include "views/widget/widget_win.h"
 
 class AutomationProvider;
@@ -33,22 +38,20 @@ struct NavigationInfo;
 class ExternalTabContainer : public TabContentsDelegate,
                              public NotificationObserver,
                              public views::WidgetWin,
-                             public base::RefCounted<ExternalTabContainer> {
+                             public base::RefCounted<ExternalTabContainer>,
+                             public views::AcceleratorTarget,
+                             public InfoBarContainer::Delegate,
+                             public BrowserBubbleHost {
  public:
-  typedef std::map<intptr_t, scoped_refptr<ExternalTabContainer> > PendingTabs;
+  typedef std::map<uintptr_t, scoped_refptr<ExternalTabContainer> > PendingTabs;
 
   ExternalTabContainer(AutomationProvider* automation,
       AutomationResourceMessageFilter* filter);
-  ~ExternalTabContainer();
 
   TabContents* tab_contents() const { return tab_contents_; }
 
   // Temporary hack so we can send notifications back
-  void set_tab_handle(int handle) {
-    tab_handle_ = handle;
-    if (automation_profile_.get())
-      automation_profile_->set_tab_handle(handle);
-  }
+  void SetTabHandle(int handle);
 
   int tab_handle() const {
     return tab_handle_;
@@ -61,7 +64,9 @@ class ExternalTabContainer : public TabContentsDelegate,
             bool load_requests_via_automation,
             bool handle_top_level_requests,
             TabContents* existing_tab_contents,
-            const GURL& initial_url);
+            const GURL& initial_url,
+            const GURL& referrer,
+            bool infobars_enabled);
 
   // Unhook the keystroke listener and notify about the closing TabContents.
   // This function gets called from three places, which is fine.
@@ -81,11 +86,17 @@ class ExternalTabContainer : public TabContentsDelegate,
   void ProcessUnhandledAccelerator(const MSG& msg);
 
   // See TabContents::FocusThroughTabTraversal.  Called from AutomationProvider.
-  void FocusThroughTabTraversal(bool reverse);
+  void FocusThroughTabTraversal(bool reverse, bool restore_focus_to_view);
 
   // A helper method that tests whether the given window is an
   // ExternalTabContainer window
   static bool IsExternalTabContainer(HWND window);
+
+  // A helper function that returns a pointer to the ExternalTabContainer
+  // instance associated with a native view.  Returns NULL if the window
+  // is not an ExternalTabContainer.
+  static ExternalTabContainer* GetExternalContainerFromNativeWindow(
+      gfx::NativeView native_window);
 
   // A helper method that retrieves the ExternalTabContainer object that
   // hosts the given tab window.
@@ -119,16 +130,28 @@ class ExternalTabContainer : public TabContentsDelegate,
   virtual bool IsExternalTabContainer() const {
     return true;
   };
+  virtual gfx::NativeWindow GetFrameNativeWindow();
 
-  virtual bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   virtual bool TakeFocus(bool reverse);
+
+  virtual bool CanDownload(int request_id);
+
   virtual bool OnGoToEntryOffset(int offset);
 
   virtual void ShowPageInfo(Profile* profile,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
+
+  virtual Browser* GetBrowser() { return browser_.get(); }
+
+  // Overriden from TabContentsDelegate::AutomationResourceRoutingDelegate
+  virtual void RegisterRenderViewHost(RenderViewHost* render_view_host);
+  virtual void UnregisterRenderViewHost(RenderViewHost* render_view_host);
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -153,7 +176,34 @@ class ExternalTabContainer : public TabContentsDelegate,
   // Returns the ExternalTabContainer instance associated with the cookie
   // passed in. It also erases the corresponding reference from the map.
   // Returns NULL if we fail to find the cookie in the map.
-  static ExternalTabContainer* RemovePendingTab(intptr_t cookie);
+  static scoped_refptr<ExternalTabContainer> RemovePendingTab(uintptr_t cookie);
+
+  // Enables extension automation (for e.g. UITests), with the current tab
+  // used as a conduit for the extension API messages being handled by the
+  // automation client.
+  void SetEnableExtensionAutomation(
+      const std::vector<std::string>& functions_enabled);
+
+  // Overridden from views::WidgetWin:
+  virtual views::Window* GetWindow();
+
+  // Handles the specified |accelerator| being pressed.
+  bool AcceleratorPressed(const views::Accelerator& accelerator);
+
+  bool pending() const {
+    return pending_;
+  }
+
+  void set_pending(bool pending) {
+    pending_ = pending;
+  }
+
+  // InfoBarContainer::Delegate overrides
+  virtual void InfoBarSizeChanged(bool is_animating);
+
+  virtual void TabContentsCreated(TabContents* new_contents);
+
+  virtual bool infobars_enabled();
 
  protected:
   // Overridden from views::WidgetWin:
@@ -166,11 +216,50 @@ class ExternalTabContainer : public TabContentsDelegate,
                           int relative_offset);
   void Navigate(const GURL& url, const GURL& referrer);
 
+  // Initializes the request context to be used for automation HTTP requests.
+  void InitializeAutomationRequestContext(int tab_handle);
+
  private:
+  friend class base::RefCounted<ExternalTabContainer>;
+
+  ~ExternalTabContainer();
+
+  // Helper resource automation registration method, allowing registration of
+  // pending RenderViewHosts.
+  void RegisterRenderViewHostForAutomation(RenderViewHost* render_view_host,
+                                           bool pending_view);
+
+  // Top level navigations received for a tab while it is waiting for an ack
+  // from the external host go here. Scenario is a window.open executes on a
+  // page in ChromeFrame. A new TabContents is created and the current
+  // ExternalTabContainer is notified via AddNewContents. At this point we
+  // send off an attach tab request to the host browser. Before the host
+  // browser sends over the ack, we receive a top level URL navigation for the
+  // new tab, which needs to be routed over the correct automation channel.
+  // We receive the automation channel only when the external host acks the
+  // attach tab request.
+  struct PendingTopLevelNavigation {
+    GURL url;
+    GURL referrer;
+    WindowOpenDisposition disposition;
+    PageTransition::Type transition;
+  };
+
   // Helper function for processing keystokes coming back from the renderer
   // process.
   bool ProcessUnhandledKeyStroke(HWND window, UINT message, WPARAM wparam,
                                  LPARAM lparam);
+
+  void LoadAccelerators();
+
+  // Sends over pending Open URL requests to the external host.
+  void ServicePendingOpenURLRequests();
+
+  // Scheduled as a task in ExternalTabContainer::Reinitialize
+  void OnReinitialize();
+
+  // Creates and initializes the view hierarchy for this ExternalTabContainer.
+  void SetupExternalTabView();
 
   TabContents* tab_contents_;
   scoped_refptr<AutomationProvider> automation_;
@@ -193,7 +282,8 @@ class ExternalTabContainer : public TabContentsDelegate,
   scoped_ptr<RenderViewContextMenuExternalWin> external_context_menu_;
 
   // A message filter to load resources via automation
-  AutomationResourceMessageFilter* automation_resource_message_filter_;
+  scoped_refptr<AutomationResourceMessageFilter>
+      automation_resource_message_filter_;
 
   // If all the url requests for this tab are to be loaded via automation.
   bool load_requests_via_automation_;
@@ -204,15 +294,44 @@ class ExternalTabContainer : public TabContentsDelegate,
   // Scoped browser object for this ExternalTabContainer instance.
   scoped_ptr<Browser> browser_;
 
-  // A customized profile for automation specific needs.
-  scoped_ptr<AutomationProfileImpl> automation_profile_;
-
   // Contains ExternalTabContainers that have not been connected to as yet.
   static PendingTabs pending_tabs_;
+
+  // True if this tab is currently the conduit for extension API automation.
+  bool enabled_extension_automation_;
 
   // Allows us to run tasks on the ExternalTabContainer instance which are
   // bound by its lifetime.
   ScopedRunnableMethodFactory<ExternalTabContainer> external_method_factory_;
+
+  // The URL request context to be used for this tab. Can be NULL.
+  scoped_refptr<ChromeURLRequestContextGetter> request_context_;
+
+  UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
+
+  // A mapping between accelerators and commands.
+  std::map<views::Accelerator, int> accelerator_table_;
+
+  // Set to true if the tab is waiting for the unload event to complete.
+  bool waiting_for_unload_event_;
+
+  // Pointer to the innermost ExternalTabContainer instance which is waiting
+  // for the unload event listeners to finish.
+  // Used to maintain a local global stack of containers.
+  static ExternalTabContainer* innermost_tab_for_unload_event_;
+
+  // Contains the list of URL requests which are pending waiting for an ack
+  // from the external host.
+  std::vector<PendingTopLevelNavigation> pending_open_url_requests_;
+
+  // Set to true if the ExternalTabContainer instance is waiting for an ack
+  // from the host.
+  bool pending_;
+
+  // Set to true if the ExternalTabContainer if infobars should be enabled.
+  bool infobars_enabled_;
+
+  views::FocusManager* focus_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainer);
 };

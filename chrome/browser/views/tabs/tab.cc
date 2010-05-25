@@ -1,18 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/tabs/tab.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
-#include "app/gfx/path.h"
 #include "app/l10n_util.h"
+#include "app/menus/simple_menu_model.h"
 #include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
-#include "base/gfx/size.h"
+#include "chrome/browser/tab_menu_model.h"
+#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/views/tabs/tab_strip.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/path.h"
+#include "gfx/size.h"
 #include "grit/generated_resources.h"
-#include "views/controls/menu/simple_menu_model.h"
+#include "views/controls/menu/menu_2.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget.h"
 
@@ -22,11 +26,10 @@ static const SkScalar kTabCapWidth = 15;
 static const SkScalar kTabTopCurveWidth = 4;
 static const SkScalar kTabBottomCurveWidth = 3;
 
-class Tab::TabContextMenuContents : public views::SimpleMenuModel,
-                                    public views::SimpleMenuModel::Delegate {
+class Tab::TabContextMenuContents : public menus::SimpleMenuModel::Delegate {
  public:
   explicit TabContextMenuContents(Tab* tab)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(SimpleMenuModel(this)),
+      : ALLOW_THIS_IN_INITIALIZER_LIST(model_(this)),
         tab_(tab),
         last_command_(TabStripModel::CommandFirst) {
     Build();
@@ -46,11 +49,11 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
       delegate->StopAllHighlighting();
   }
 
-  // Overridden from views::SimpleMenuModel::Delegate:
+  // Overridden from menus::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const {
     if (!tab_ || command_id != TabStripModel::CommandTogglePinned)
       return false;
-    return tab_->pinned();
+    return tab_->delegate()->IsTabPinned(tab_);
   }
   virtual bool IsCommandIdEnabled(int command_id) const {
     return tab_ && tab_->delegate()->IsCommandEnabledForTab(
@@ -59,7 +62,7 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
   }
   virtual bool GetAcceleratorForCommandId(
       int command_id,
-      views::Accelerator* accelerator) {
+      menus::Accelerator* accelerator) {
     return tab_->GetWidget()->GetAccelerator(command_id, accelerator);
   }
   virtual void CommandIdHighlighted(int command_id) {
@@ -80,29 +83,10 @@ class Tab::TabContextMenuContents : public views::SimpleMenuModel,
 
  private:
   void Build() {
-    AddItemWithStringId(TabStripModel::CommandNewTab, IDS_TAB_CXMENU_NEWTAB);
-    AddSeparator();
-    AddItemWithStringId(TabStripModel::CommandReload, IDS_TAB_CXMENU_RELOAD);
-    AddItemWithStringId(TabStripModel::CommandDuplicate,
-                        IDS_TAB_CXMENU_DUPLICATE);
-    AddCheckItemWithStringId(TabStripModel::CommandTogglePinned,
-                             IDS_TAB_CXMENU_PIN_TAB);
-    AddSeparator();
-    AddItemWithStringId(TabStripModel::CommandCloseTab,
-                        IDS_TAB_CXMENU_CLOSETAB);
-    AddItemWithStringId(TabStripModel::CommandCloseOtherTabs,
-                        IDS_TAB_CXMENU_CLOSEOTHERTABS);
-    AddItemWithStringId(TabStripModel::CommandCloseTabsToRight,
-                        IDS_TAB_CXMENU_CLOSETABSTORIGHT);
-    AddItemWithStringId(TabStripModel::CommandCloseTabsOpenedBy,
-                        IDS_TAB_CXMENU_CLOSETABSOPENEDBY);
-    AddSeparator();
-    AddItemWithStringId(TabStripModel::CommandRestoreTab, IDS_RESTORE_TAB);
-    AddItemWithStringId(TabStripModel::CommandBookmarkAllTabs,
-                        IDS_TAB_CXMENU_BOOKMARK_ALL_TABS);
-    menu_.reset(new views::Menu2(this));
+    menu_.reset(new views::Menu2(&model_));
   }
 
+  TabMenuModel model_;
   scoped_ptr<views::Menu2> menu_;
 
   // The Tab the context menu was brought up for. Set to NULL when the menu
@@ -123,6 +107,7 @@ Tab::Tab(TabDelegate* delegate)
     : TabRenderer(),
       delegate_(delegate),
       closing_(false) {
+  close_button()->SetTooltipText(l10n_util::GetString(IDS_TOOLTIP_CLOSE_TAB));
   close_button()->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_CLOSE));
   close_button()->SetAnimationDuration(0);
   SetContextMenuController(this);
@@ -155,8 +140,9 @@ bool Tab::OnMousePressed(const views::MouseEvent& event) {
     // able to drag foreground tabs, so we don't start dragging the tab if
     // it was in the background.
     bool just_selected = !IsSelected();
-    if (just_selected)
+    if (just_selected) {
       delegate_->SelectTab(this);
+    }
     delegate_->MaybeStartDrag(this, event);
   }
   return true;
@@ -183,7 +169,7 @@ void Tab::OnMouseReleased(const views::MouseEvent& event, bool canceled) {
     delegate_->CloseTab(this);
 }
 
-bool Tab::GetTooltipText(int x, int y, std::wstring* tooltip) {
+bool Tab::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
   std::wstring title = GetTitle();
   if (!title.empty()) {
     // Only show the tooltip if the title is truncated.
@@ -196,7 +182,7 @@ bool Tab::GetTooltipText(int x, int y, std::wstring* tooltip) {
   return false;
 }
 
-bool Tab::GetTooltipTextOrigin(int x, int y, gfx::Point* origin) {
+bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) {
   gfx::Font font;
   origin->set_x(title_bounds().x() + 10);
   origin->set_y(-views::TooltipManager::GetTooltipHeight() - 4);
@@ -210,19 +196,15 @@ bool Tab::GetAccessibleRole(AccessibilityTypes::Role* role) {
   return true;
 }
 
-bool Tab::GetAccessibleName(std::wstring* name) {
-  *name = GetTitle();
-  return !name->empty();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Tab, views::ContextMenuController implementation:
 
-void Tab::ShowContextMenu(views::View* source, int x, int y,
+void Tab::ShowContextMenu(views::View* source,
+                          const gfx::Point& p,
                           bool is_mouse_gesture) {
   if (!context_menu_contents_.get())
     context_menu_contents_.reset(new TabContextMenuContents(this));
-  context_menu_contents_->RunMenuAt(gfx::Point(x, y));
+  context_menu_contents_->RunMenuAt(p);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

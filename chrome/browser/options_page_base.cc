@@ -5,8 +5,8 @@
 #include "chrome/browser/options_page_base.h"
 
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_service.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsPageBase
@@ -18,9 +18,9 @@ OptionsPageBase::OptionsPageBase(Profile* profile)
 OptionsPageBase::~OptionsPageBase() {
 }
 
-void OptionsPageBase::UserMetricsRecordAction(const wchar_t* action,
+void OptionsPageBase::UserMetricsRecordAction(const UserMetricsAction& action,
                                               PrefService* prefs) {
-  UserMetrics::RecordComputedAction(action, profile());
+  UserMetrics::RecordAction(action, profile());
   if (prefs)
     prefs->ScheduleSavePersistentPrefs();
 }

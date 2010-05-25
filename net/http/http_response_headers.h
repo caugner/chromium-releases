@@ -154,6 +154,10 @@ class HttpResponseHeaders
   // Both name and value are compared case insensitively.
   bool HasHeaderValue(const std::string& name, const std::string& value) const;
 
+  // Returns true if the response contains the specified header.
+  // The name is compared case insensitively.
+  bool HasHeader(const std::string& name) const;
+
   // Get the mime type and charset values in lower case form from the headers.
   // Empty strings are returned if the values are not present.
   void GetMimeTypeAndCharset(std::string* mime_type,
@@ -170,6 +174,10 @@ class HttpResponseHeaders
   // Returns true if this response corresponds to a redirect.  The target
   // location of the redirect is optionally returned if location is non-null.
   bool IsRedirect(std::string* location) const;
+
+  // Returns true if the HTTP response code passed in corresponds to a
+  // redirect.
+  static bool IsRedirectResponseCode(int response_code);
 
   // Returns true if the response cannot be reused without validation.  The
   // result is relative to the current_time parameter, which is a parameter to
@@ -206,6 +214,10 @@ class HttpResponseHeaders
 
   // Determines if this response indicates a keep-alive connection.
   bool IsKeepAlive() const;
+
+  // Returns true if this response has a strong etag or last-modified header.
+  // See section 13.3.3 of RFC 2616.
+  bool HasStrongValidators() const;
 
   // Extracts the value of the Content-Length header or returns -1 if there is
   // no such header in the response.

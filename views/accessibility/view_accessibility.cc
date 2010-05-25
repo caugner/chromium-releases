@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ HRESULT ViewAccessibility::Initialize(views::View* view) {
   return S_OK;
 }
 
-// TODO(klink): Handle case where child View is not contained by parent.
+// TODO(ctguil): Handle case where child View is not contained by parent.
 STDMETHODIMP ViewAccessibility::accHitTest(LONG x_left, LONG y_top,
                                            VARIANT* child) {
   if (!child) {
@@ -379,12 +379,13 @@ STDMETHODIMP ViewAccessibility::get_accDescription(VARIANT var_id, BSTR* desc) {
   std::wstring temp_desc;
 
   if (var_id.lVal == CHILDID_SELF) {
-    view_->GetTooltipText(0, 0, &temp_desc);
+    view_->GetTooltipText(gfx::Point(), &temp_desc);
   } else {
     if (!IsValidChild((var_id.lVal - 1), view_)) {
       return E_INVALIDARG;
     }
-    view_->GetChildViewAt(var_id.lVal - 1)->GetTooltipText(0, 0, &temp_desc);
+    view_->GetChildViewAt(var_id.lVal - 1)->GetTooltipText(gfx::Point(),
+                                                           &temp_desc);
   }
   if (!temp_desc.empty()) {
     *desc = SysAllocString(temp_desc.c_str());
@@ -478,7 +479,7 @@ STDMETHODIMP ViewAccessibility::get_accName(VARIANT var_id, BSTR* name) {
   std::wstring temp_name;
 
   if (var_id.lVal == CHILDID_SELF) {
-    // Retrieve the parent view's name.
+    // Retrieve the current view's name.
     view_->GetAccessibleName(&temp_name);
   } else {
     if (!IsValidChild((var_id.lVal - 1), view_)) {
@@ -599,6 +600,39 @@ STDMETHODIMP ViewAccessibility::get_accState(VARIANT var_id, VARIANT* state) {
   return S_OK;
 }
 
+STDMETHODIMP ViewAccessibility::get_accValue(VARIANT var_id, BSTR* value) {
+  if (var_id.vt != VT_I4 || !value) {
+    return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
+  }
+
+  std::wstring temp_value;
+
+  if (var_id.lVal == CHILDID_SELF) {
+    // Retrieve the current view's value.
+    view_->GetAccessibleValue(&temp_value);
+  } else {
+    if (!IsValidChild((var_id.lVal - 1), view_)) {
+      return E_INVALIDARG;
+    }
+    // Retrieve the child view's value.
+    view_->GetChildViewAt(var_id.lVal - 1)->GetAccessibleValue(&temp_value);
+  }
+  if (!temp_value.empty()) {
+    // Return value retrieved.
+    *value = SysAllocString(temp_value.c_str());
+  } else {
+    // If view has no value, fall back into the default implementation.
+    *value = NULL;
+    return E_NOTIMPL;
+  }
+
+  return S_OK;
+}
+
 // Helper functions.
 
 bool ViewAccessibility::IsValidChild(int child_id, views::View* view) const {
@@ -665,7 +699,7 @@ void ViewAccessibility::SetState(VARIANT* msaa_state, views::View* view) {
   msaa_state->lVal |= MSAAState(state);
 }
 
-long ViewAccessibility::MSAARole(AccessibilityTypes::Role role) {
+int32 ViewAccessibility::MSAARole(AccessibilityTypes::Role role) {
   switch (role) {
     case AccessibilityTypes::ROLE_APPLICATION:
       return ROLE_SYSTEM_APPLICATION;
@@ -673,18 +707,40 @@ long ViewAccessibility::MSAARole(AccessibilityTypes::Role role) {
       return ROLE_SYSTEM_BUTTONDROPDOWN;
     case AccessibilityTypes::ROLE_BUTTONMENU:
       return ROLE_SYSTEM_BUTTONMENU;
+    case AccessibilityTypes::ROLE_CHECKBUTTON:
+      return ROLE_SYSTEM_CHECKBUTTON;
+    case AccessibilityTypes::ROLE_COMBOBOX:
+      return ROLE_SYSTEM_COMBOBOX;
     case AccessibilityTypes::ROLE_GRAPHIC:
       return ROLE_SYSTEM_GRAPHIC;
     case AccessibilityTypes::ROLE_GROUPING:
       return ROLE_SYSTEM_GROUPING;
+    case AccessibilityTypes::ROLE_LINK:
+      return ROLE_SYSTEM_LINK;
+    case AccessibilityTypes::ROLE_MENUITEM:
+      return ROLE_SYSTEM_MENUITEM;
+    case AccessibilityTypes::ROLE_MENUPOPUP:
+      return ROLE_SYSTEM_MENUPOPUP;
+    case AccessibilityTypes::ROLE_OUTLINE:
+      return ROLE_SYSTEM_OUTLINE;
+    case AccessibilityTypes::ROLE_OUTLINEITEM:
+      return ROLE_SYSTEM_OUTLINEITEM;
     case AccessibilityTypes::ROLE_PAGETAB:
       return ROLE_SYSTEM_PAGETAB;
     case AccessibilityTypes::ROLE_PAGETABLIST:
       return ROLE_SYSTEM_PAGETABLIST;
+    case AccessibilityTypes::ROLE_PANE:
+      return ROLE_SYSTEM_PANE;
+    case AccessibilityTypes::ROLE_PROGRESSBAR:
+      return ROLE_SYSTEM_PROGRESSBAR;
     case AccessibilityTypes::ROLE_PUSHBUTTON:
       return ROLE_SYSTEM_PUSHBUTTON;
+    case AccessibilityTypes::ROLE_SCROLLBAR:
+      return ROLE_SYSTEM_SCROLLBAR;
     case AccessibilityTypes::ROLE_SEPARATOR:
       return ROLE_SYSTEM_SEPARATOR;
+    case AccessibilityTypes::ROLE_STATICTEXT:
+      return ROLE_SYSTEM_STATICTEXT;
     case AccessibilityTypes::ROLE_TEXT:
       return ROLE_SYSTEM_TEXT;
     case AccessibilityTypes::ROLE_TITLEBAR:
@@ -700,27 +756,24 @@ long ViewAccessibility::MSAARole(AccessibilityTypes::Role role) {
   }
 }
 
-long ViewAccessibility::MSAAState(AccessibilityTypes::State state) {
-  switch (state) {
-    case AccessibilityTypes::STATE_HASPOPUP :
-      return STATE_SYSTEM_HASPOPUP;
-    case AccessibilityTypes::STATE_READONLY :
-      return STATE_SYSTEM_READONLY;
-    default :
-      // No default state in MSAA.
-      return 0;
-  }
+int32 ViewAccessibility::MSAAState(AccessibilityTypes::State state) {
+  int32 msaa_state = 0;
+  if (state & AccessibilityTypes::STATE_CHECKED)
+    msaa_state |= STATE_SYSTEM_CHECKED;
+  if (state & AccessibilityTypes::STATE_HASPOPUP)
+    msaa_state |= STATE_SYSTEM_HASPOPUP;
+  if (state & AccessibilityTypes::STATE_LINKED)
+    msaa_state |= STATE_SYSTEM_LINKED;
+  if (state & AccessibilityTypes::STATE_PROTECTED)
+    msaa_state |= STATE_SYSTEM_PROTECTED;
+  if (state & AccessibilityTypes::STATE_READONLY)
+    msaa_state |= STATE_SYSTEM_READONLY;
+  return msaa_state;
 }
 
 // IAccessible functions not supported.
 
 HRESULT ViewAccessibility::accDoDefaultAction(VARIANT var_id) {
-  return E_NOTIMPL;
-}
-
-STDMETHODIMP ViewAccessibility::get_accValue(VARIANT var_id, BSTR* value) {
-  if (value)
-    *value = NULL;
   return E_NOTIMPL;
 }
 

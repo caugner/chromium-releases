@@ -38,13 +38,16 @@ class PartialData {
 
   // Performs initialization of the object by parsing the request |headers|
   // and verifying that we can process the requested range. Returns true if
-  // we can process the requested range, and false otherwise. |new_headers| is
-  // a subset of the request extra headers, with byte-range related headers
-  // removed so that we can easily add any byte-range that we need.
-  bool Init(const std::string& headers, const std::string& new_headers);
+  // we can process the requested range, and false otherwise.
+  bool Init(const std::string& headers);
 
-  // Restores the byte-range header that was removed during Init(), by appending
-  // the data to the provided |headers|.
+  // Sets the headers that we should use to make byte range requests. This is a
+  // subset of the request extra headers, with byte-range related headers
+  // removed.
+  void SetHeaders(const std::string& headers);
+
+  // Restores the byte-range headers, by appending the byte range to the headers
+  // provided to SetHeaders().
   void RestoreHeaders(std::string* headers) const;
 
   // Builds the required |headers| to perform the proper cache validation for

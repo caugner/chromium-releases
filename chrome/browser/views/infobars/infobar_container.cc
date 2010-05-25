@@ -1,27 +1,31 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/infobars/infobar_container.h"
 
+#include "app/l10n_util.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/infobars/infobars.h"
 #include "chrome/common/notification_service.h"
+#include "grit/generated_resources.h"
 
 // InfoBarContainer, public: ---------------------------------------------------
 
-InfoBarContainer::InfoBarContainer(BrowserView* browser_view)
-    : browser_view_(browser_view),
+InfoBarContainer::InfoBarContainer(Delegate* delegate)
+    : delegate_(delegate),
       tab_contents_(NULL) {
+  SetID(VIEW_ID_INFO_BAR_CONTAINER);
+  SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_CONTAINER));
 }
 
 InfoBarContainer::~InfoBarContainer() {
   // We NULL this pointer before resetting the TabContents to prevent view
-  // hierarchy modifications from attempting to adjust the BrowserView, which is
-  // in the process of shutting down.
-  browser_view_ = NULL;
+  // hierarchy modifications from attempting to resize the delegate which
+  // could be in the process of shutting down.
+  delegate_ = NULL;
   ChangeTabContents(NULL);
 }
 
@@ -44,8 +48,8 @@ void InfoBarContainer::ChangeTabContents(TabContents* contents) {
 }
 
 void InfoBarContainer::InfoBarAnimated(bool completed) {
-  if (browser_view_)
-    browser_view_->SelectedTabToolbarSizeChanged(!completed);
+  if (delegate_)
+    delegate_->InfoBarSizeChanged(!completed);
 }
 
 void InfoBarContainer::RemoveDelegate(InfoBarDelegate* delegate) {
@@ -56,7 +60,7 @@ void InfoBarContainer::RemoveDelegate(InfoBarDelegate* delegate) {
 
 gfx::Size InfoBarContainer::GetPreferredSize() {
   // We do not have a preferred width (we will expand to fit the available width
-  // of the BrowserView). Our preferred height is the sum of the preferred
+  // of the delegate). Our preferred height is the sum of the preferred
   // heights of the InfoBars contained within us.
   int height = 0;
   for (int i = 0; i < GetChildViewCount(); ++i)
@@ -74,34 +78,22 @@ void InfoBarContainer::Layout() {
   }
 }
 
-bool InfoBarContainer::GetAccessibleName(std::wstring* name) {
-  DCHECK(name);
-
-  if (!accessible_name_.empty()) {
-    name->assign(accessible_name_);
-    return true;
-  }
-  return false;
-}
-
 bool InfoBarContainer::GetAccessibleRole(AccessibilityTypes::Role* role) {
   DCHECK(role);
 
-  *role = AccessibilityTypes::ROLE_TOOLBAR;
+  *role = AccessibilityTypes::ROLE_GROUPING;
   return true;
-}
-
-void InfoBarContainer::SetAccessibleName(const std::wstring& name) {
-  accessible_name_.assign(name);
 }
 
 void InfoBarContainer::ViewHierarchyChanged(bool is_add,
                                             views::View* parent,
                                             views::View* child) {
-  if (parent == this && child->GetParent() == this && browser_view_) {
-    // An InfoBar child was added or removed. Tell the BrowserView it needs to
-    // re-layout since our preferred size will have changed.
-    browser_view_->SelectedTabToolbarSizeChanged(false);
+  if (parent == this && child->GetParent() == this) {
+    if (delegate_) {
+      // An InfoBar child was added or removed. Tell the delegate it needs to
+      // re-layout since our preferred size will have changed.
+      delegate_->InfoBarSizeChanged(false);
+    }
   }
 }
 
@@ -149,18 +141,22 @@ void InfoBarContainer::AddInfoBar(InfoBarDelegate* delegate,
 
 void InfoBarContainer::RemoveInfoBar(InfoBarDelegate* delegate,
                                      bool use_animation) {
-  int index = 0;
-  for (; index < tab_contents_->infobar_delegate_count(); ++index) {
-    if (tab_contents_->GetInfoBarDelegateAt(index) == delegate)
+  // Search for infobar associated with |delegate| among child views.
+  // We cannot search for |delegate| in tab_contents, because an infobar remains
+  // a child view until its close animation completes, which can result in
+  // different number of infobars in container and infobar delegates in tab
+  // contents.
+  for (int i = 0; i < GetChildViewCount(); ++i) {
+    InfoBar* infobar = static_cast<InfoBar*>(GetChildViewAt(i));
+    if (infobar->delegate() == delegate) {
+      if (use_animation) {
+        // The View will be removed once the Close animation completes.
+        infobar->AnimateClose();
+      } else {
+        infobar->Close();
+      }
       break;
-  }
-
-  InfoBar* infobar = static_cast<InfoBar*>(GetChildViewAt(index));
-  if (use_animation) {
-    // The View will be removed once the Close animation completes.
-    infobar->AnimateClose();
-  } else {
-    infobar->Close();
+    }
   }
 }
 

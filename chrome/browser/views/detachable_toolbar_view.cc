@@ -4,10 +4,11 @@
 
 #include "chrome/browser/views/detachable_toolbar_view.h"
 
-#include "app/gfx/canvas.h"
+#include "app/resource_bundle.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "gfx/canvas.h"
+#include "gfx/skia_util.h"
 #include "grit/theme_resources.h"
-#include "skia/ext/skia_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkShader.h"
 
@@ -55,9 +56,8 @@ void DetachableToolbarView::CalculateContentArea(
 void DetachableToolbarView::PaintHorizontalBorder(gfx::Canvas* canvas,
                                                   DetachableToolbarView* view) {
   // Border can be at the top or at the bottom of the view depending on whether
-  // the view (bar/shelf) is at the top/at the bottom and whether it is attached
-  // or detached.
-  int y = view->IsOnTop() == !view->IsDetached() ? view->height() - 1 : 0;
+  // the view (bar/shelf) is attached or detached.
+  int y = !view->IsDetached() ? view->height() - 1 : 0;
   canvas->FillRectInt(ResourceBundle::toolbar_separator_color,
       0, y, view->width(), 1);
 }
@@ -98,10 +98,10 @@ void DetachableToolbarView::PaintVerticalDivider(
     const SkColor& bottom_color) {
   // Draw the upper half of the divider.
   SkPaint paint;
-  paint.setShader(skia::CreateGradientShader(vertical_padding + 1,
-                                             height / 2,
-                                             top_color,
-                                             middle_color))->safeUnref();
+  paint.setShader(gfx::CreateGradientShader(vertical_padding + 1,
+                                            height / 2,
+                                            top_color,
+                                            middle_color))->safeUnref();
   SkRect rc = { SkIntToScalar(x),
                 SkIntToScalar(vertical_padding + 1),
                 SkIntToScalar(x + 1),
@@ -110,10 +110,10 @@ void DetachableToolbarView::PaintVerticalDivider(
 
   // Draw the lower half of the divider.
   SkPaint paint_down;
-  paint_down.setShader(skia::CreateGradientShader(height / 2,
-                                                  height - vertical_padding,
-                                                  middle_color,
-                                                  bottom_color))->safeUnref();
+  paint_down.setShader(gfx::CreateGradientShader(height / 2,
+                                                 height - vertical_padding,
+                                                 middle_color,
+                                                 bottom_color))->safeUnref();
   SkRect rc_down = { SkIntToScalar(x),
                      SkIntToScalar(height / 2),
                      SkIntToScalar(x + 1),

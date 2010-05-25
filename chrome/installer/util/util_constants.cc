@@ -8,11 +8,17 @@ namespace installer_util {
 
 namespace switches {
 
+// Run the installer in Chrome Frame mode.
+const wchar_t kChromeFrame[] = L"chrome-frame";
+
+// Run the installer for Chrome SxS.
+const wchar_t kChromeSxS[] = L"chrome-sxs";
+
 // Create Desktop and QuickLaunch shortcuts
 const wchar_t kCreateAllShortcuts[] = L"create-all-shortcuts";
 
-// Delete user profile also. This param is useful only when specified with
-// kUninstall && kForceUninstall, otherwise it is silently ignored.
+// Delete user profile data. This param is useful only when specified with
+// kUninstall, otherwise it is silently ignored.
 const wchar_t kDeleteProfile[] = L"delete-profile";
 
 // Disable logging
@@ -55,6 +61,9 @@ const wchar_t kLogFile[] = L"log-file";
 // as default browser at system level, if running as non-admin we try to
 // register as default browser only for the current user.
 const wchar_t kMakeChromeDefault[] = L"make-chrome-default";
+
+// Tells installer to expect to be run as a subsidiary to an MSI.
+const wchar_t kMsi[] = L"msi";
 
 // Useful only when used with --update-setup-exe, otherwise ignored. It
 // specifies the full path where updated setup.exe will be stored.
@@ -102,18 +111,28 @@ const wchar_t kAltDesktopShortcut[] = L"alt-desktop-shortcut";
 // Perform the inactive user toast experiment.
 const wchar_t kInactiveUserToast[] = L"inactive-user-toast";
 
+// User toast experiment switch from system context to user context.
+const wchar_t kSystemLevelToast[] = L"system-level-toast";
+
 }  // namespace switches
 
+const wchar_t kGoogleChromeInstallSubDir1[] = L"Google";
+const wchar_t kGoogleChromeInstallSubDir2[] = L"Chrome";
 const wchar_t kInstallBinaryDir[] = L"Application";
 const wchar_t kInstallUserDataDir[] = L"User Data";
 const wchar_t kChromeExe[] = L"chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";
+const wchar_t kNaClExe[] = L"nacl64.exe";
 const wchar_t kChromeDll[] = L"chrome.dll";
+const wchar_t kChromeNaCl64Dll[] = L"nacl64.dll";
+const wchar_t kChromeFrameDll[] = L"npchrome_frame.dll";
 const wchar_t kSetupExe[] = L"setup.exe";
 const wchar_t kInstallerDir[] = L"Installer";
+const wchar_t kSxSSuffix[] = L" SxS";
 
 const wchar_t kUninstallStringField[] = L"UninstallString";
+const wchar_t kUninstallArgumentsField[] = L"UninstallArguments";
 const wchar_t kUninstallDisplayNameField[] = L"DisplayName";
 const wchar_t kUninstallMetricsName[] = L"uninstall_metrics";
 const wchar_t kUninstallInstallationDate[] = L"installation_date";

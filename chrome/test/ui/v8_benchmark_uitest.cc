@@ -40,7 +40,8 @@ class V8BenchmarkTest : public UITest {
     GURL test_url(net::FilePathToFileURL(test_path));
 
     scoped_refptr<TabProxy> tab(GetActiveTab());
-    tab->NavigateToURL(test_url);
+    ASSERT_TRUE(tab.get());
+    ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(test_url));
 
     // Wait for the test to finish.
     ASSERT_TRUE(WaitUntilTestCompletes(tab.get(), test_url));
@@ -60,7 +61,7 @@ class V8BenchmarkTest : public UITest {
   }
 
   bool WaitUntilTestCompletes(TabProxy* tab, const GURL& test_url) {
-    return WaitUntilCookieValue(tab, test_url, "__done", 1000,
+    return WaitUntilCookieValue(tab, test_url, "__done",
                                 UITest::test_timeout_ms(), "1");
   }
 

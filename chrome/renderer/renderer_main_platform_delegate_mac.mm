@@ -6,6 +6,9 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/chrome_application_mac.h"
+#include "base/command_line.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/sandbox_mac.h"
 #include "third_party/WebKit/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 
@@ -17,15 +20,16 @@ RendererMainPlatformDelegate::RendererMainPlatformDelegate(
 RendererMainPlatformDelegate::~RendererMainPlatformDelegate() {
 }
 
-// TODO(mac-port): Any code needed to initialize a process for
-// purposes of running a renderer needs to also be reflected in
-// chrome_dll_main.cc for --single-process support.
+// TODO(mac-port): Any code needed to initialize a process for purposes of
+// running a renderer needs to also be reflected in chrome_dll_main.cc for
+// --single-process support.
 void RendererMainPlatformDelegate::PlatformInitialize() {
+  // Initialize NSApplication using the custom subclass. Without this call,
+  // drawing of native UI elements (e.g. buttons) in WebKit will explode.
+  [CrApplication sharedApplication];
+
   // Load WebKit system interfaces.
   InitWebCoreSystemInterface();
-
-  // Warmup APIs before turning on the Sandbox.
-  sandbox::SandboxWarmup();
 
   if (![NSThread isMultiThreaded]) {
     NSString* string = @"";
@@ -33,10 +37,6 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
                              toTarget:string
                            withObject:nil];
   }
-
-  // Initialize Cocoa.  Without this call, drawing of native UI
-  // elements (e.g. buttons) in WebKit will explode.
-  [NSApplication sharedApplication];
 }
 
 void RendererMainPlatformDelegate::PlatformUninitialize() {
@@ -47,7 +47,10 @@ bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
 }
 
 bool RendererMainPlatformDelegate::EnableSandbox() {
-  return sandbox::EnableSandbox();
+  CommandLine* parsed_command_line = CommandLine::ForCurrentProcess();
+  SandboxInitWrapper sandbox_wrapper;
+  return sandbox_wrapper.InitializeSandbox(*parsed_command_line,
+                                           switches::kRendererProcess);
 }
 
 void RendererMainPlatformDelegate::RunSandboxTests() {

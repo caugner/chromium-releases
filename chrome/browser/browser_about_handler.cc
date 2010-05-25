@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/callback.h"
 #include "base/file_version_info.h"
 #include "base/histogram.h"
 #include "base/i18n/number_formatting.h"
@@ -21,20 +22,23 @@
 #include "base/tracked_objects.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
+#include "chrome/browser/google_service_auth_error.h"
 #include "chrome/browser/memory_details.h"
+#include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/sync/auth_error_state.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/jstemplate_builder.h"
+#include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/about_handler.h"
@@ -52,18 +56,16 @@
 #include "chrome/browser/views/about_ipc_dialog.h"
 #include "chrome/browser/views/about_network_dialog.h"
 #elif defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/chromeos_version_loader.h"
+#include "chrome/browser/chromeos/version_loader.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/cocoa/about_ipc_dialog.h"
 #endif
 
 #if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/tcmalloc/src/google/malloc_extension.h"
+#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 #endif
 
-#if defined(BROWSER_SYNC)
 using sync_api::SyncManager;
-#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -77,19 +79,26 @@ void AboutTcmallocRendererCallback(base::ProcessId pid, std::string output) {
 
 namespace {
 
-// The paths used for the about pages.
+// The (alphabetized) paths used for the about pages.
+const char kCreditsPath[] = "credits";
 const char kDnsPath[] = "dns";
 const char kHistogramsPath[] = "histograms";
-const char kObjectsPath[] = "objects";
 const char kMemoryRedirectPath[] = "memory-redirect";
 const char kMemoryPath[] = "memory";
-const char kTcmallocPath[] = "tcmalloc";
-const char kPluginsPath[] = "plugins";
 const char kStatsPath[] = "stats";
-const char kVersionPath[] = "version";
-const char kCreditsPath[] = "credits";
-const char kTermsPath[] = "terms";
 const char kSyncPath[] = "sync";
+const char kTasksPath[] = "tasks";
+const char kTcmallocPath[] = "tcmalloc";
+const char kTermsPath[] = "terms";
+const char kVersionPath[] = "version";
+
+#if defined(OS_LINUX)
+const char kLinuxProxyConfigPath[] = "linux-proxy-config";
+#endif
+
+#if defined(OS_CHROMEOS)
+const char kOSCreditsPath[] = "os-credits";
+#endif
 
 // Points to the singleton AboutSource object, if any.
 ChromeURLDataManager::DataSource* about_source = NULL;
@@ -113,11 +122,12 @@ class AboutSource : public ChromeURLDataManager::DataSource {
  public:
   // Creates our datasource.
   AboutSource();
-  virtual ~AboutSource();
 
   // Called when the network layer has requested a resource underneath
   // the path we registered.
-  virtual void StartDataRequest(const std::string& path, int request_id);
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_off_the_record,
+                                int request_id);
 
   virtual std::string GetMimeType(const std::string&) const {
     return "text/html";
@@ -127,18 +137,25 @@ class AboutSource : public ChromeURLDataManager::DataSource {
   void FinishDataRequest(const std::string& html, int request_id);
 
  private:
+  virtual ~AboutSource();
+
   DISALLOW_COPY_AND_ASSIGN(AboutSource);
 };
 
-// Handling about:memory is complicated enough to encapsulate it's
-// related methods into a single class.
+// Handling about:memory is complicated enough to encapsulate its related
+// methods into a single class. The user should create it (on the heap) and call
+// its |StartFetch()| method.
 class AboutMemoryHandler : public MemoryDetails {
  public:
-  AboutMemoryHandler(AboutSource* source, int request_id);
+  AboutMemoryHandler(AboutSource* source, int request_id)
+    : source_(source), request_id_(request_id) {}
+
 
   virtual void OnDetailsAvailable();
 
  private:
+  ~AboutMemoryHandler() {}
+
   void BindProcessMetrics(DictionaryValue* data,
                           ProcessMemoryInformation* info);
   void AppendProcess(ListValue* child_data, ProcessMemoryInformation* info);
@@ -158,8 +175,8 @@ class ChromeOSAboutVersionHandler {
  public:
   ChromeOSAboutVersionHandler(AboutSource* source, int request_id);
 
-  // Callback from ChromeOSVersionLoader giving the version.
-  void OnVersion(ChromeOSVersionLoader::Handle handle,
+  // Callback from chromeos::VersionLoader giving the version.
+  void OnVersion(chromeos::VersionLoader::Handle handle,
                  std::string version);
 
  private:
@@ -170,7 +187,7 @@ class ChromeOSAboutVersionHandler {
   int request_id_;
 
   // Handles asynchronously loading the version.
-  ChromeOSVersionLoader loader_;
+  chromeos::VersionLoader loader_;
 
   // Used to request the version.
   CancelableRequestConsumer consumer_;
@@ -189,11 +206,65 @@ std::string AboutCredits() {
   return credits_html;
 }
 
-std::string AboutDns() {
-  std::string data;
-  chrome_browser_net::DnsPrefetchGetHtmlInfo(&data);
-  return data;
+#if defined(OS_CHROMEOS)
+std::string AboutOSCredits() {
+  static const std::string os_credits_html =
+      ResourceBundle::GetSharedInstance().GetDataResource(
+          IDR_OS_CREDITS_HTML);
+
+  return os_credits_html;
 }
+#endif
+
+// AboutDnsHandler bounces the request back to the IO thread to collect
+// the DNS information.
+class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
+ public:
+  static void Start(AboutSource* source, int request_id) {
+    scoped_refptr<AboutDnsHandler> handler =
+        new AboutDnsHandler(source, request_id);
+    handler->StartOnUIThread();
+  }
+
+ private:
+  AboutDnsHandler(AboutSource* source, int request_id)
+      : source_(source),
+        request_id_(request_id) {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  }
+
+  // Calls FinishOnUIThread() on completion.
+  void StartOnUIThread() {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableMethod(this, &AboutDnsHandler::StartOnIOThread));
+  }
+
+  void StartOnIOThread() {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+
+    std::string data;
+    chrome_browser_net::DnsPrefetchGetHtmlInfo(&data);
+
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(this, &AboutDnsHandler::FinishOnUIThread, data));
+  }
+
+  void FinishOnUIThread(const std::string& data) {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    source_->FinishDataRequest(data, request_id_);
+  }
+
+  // Where the results are fed to.
+  scoped_refptr<AboutSource> source_;
+
+  // ID identifying the request.
+  int request_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(AboutDnsHandler);
+};
 
 #if defined(USE_TCMALLOC)
 std::string AboutTcmalloc(const std::string& query) {
@@ -252,47 +323,20 @@ std::string AboutHistograms(const std::string& query) {
 }
 
 void AboutMemory(AboutSource* source, int request_id) {
-  // The AboutMemoryHandler cleans itself up.
-  new AboutMemoryHandler(source, request_id);
+  // The AboutMemoryHandler cleans itself up, but |StartFetch()| will want the
+  // refcount to be greater than 0.
+  scoped_refptr<AboutMemoryHandler>
+      handler(new AboutMemoryHandler(source, request_id));
+  handler->StartFetch();
 }
 
-std::string AboutObjects(const std::string& query) {
+#ifdef TRACK_ALL_TASK_OBJECTS
+static std::string AboutObjects(const std::string& query) {
   std::string data;
   tracked_objects::ThreadData::WriteHTML(query, &data);
   return data;
 }
-
-std::string AboutPlugins() {
-  // Strings used in the JsTemplate file.
-  DictionaryValue localized_strings;
-  localized_strings.SetString(L"title",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_TITLE));
-  localized_strings.SetString(L"headingPlugs",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_HEADING_PLUGS));
-  localized_strings.SetString(L"headingNoPlugs",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_HEADING_NOPLUGS));
-  localized_strings.SetString(L"filename",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_FILENAME_LABEL));
-  localized_strings.SetString(L"mimetype",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_MIMETYPE_LABEL));
-  localized_strings.SetString(L"description",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_DESCRIPTION_LABEL));
-  localized_strings.SetString(L"suffixes",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_SUFFIX_LABEL));
-  localized_strings.SetString(L"enabled",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_ENABLED_LABEL));
-  localized_strings.SetString(L"enabled_yes",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_ENABLED_YES));
-  localized_strings.SetString(L"enabled_no",
-      l10n_util::GetString(IDS_ABOUT_PLUGINS_ENABLED_NO));
-
-  static const base::StringPiece plugins_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_ABOUT_PLUGINS_HTML));
-
-  return jstemplate_builder::GetTemplateHtml(
-      plugins_html, &localized_strings, "t" /* template root node id */);
-}
+#endif  // TRACK_ALL_TASK_OBJECTS
 
 std::string AboutStats() {
   // We keep the DictionaryValue tree live so that we can do delta
@@ -407,6 +451,20 @@ std::string AboutStats() {
   return data;
 }
 
+#if defined(OS_LINUX)
+std::string AboutLinuxProxyConfig() {
+  std::string data;
+  data.append("<!DOCTYPE HTML>\n");
+  data.append("<html><head><meta charset=\"utf-8\"><title>");
+  data.append(l10n_util::GetStringUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_TITLE));
+  data.append("</title></head><body>\n");
+  data.append(l10n_util::GetStringFUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_BODY,
+              l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  data.append("</body></html>\n");
+  return data;
+}
+#endif
+
 std::string AboutTerms() {
   static const std::string terms_html =
       ResourceBundle::GetSharedInstance().GetDataResource(
@@ -425,19 +483,20 @@ std::string AboutVersion(DictionaryValue* localized_strings) {
     return std::string();
   }
 
-  std::wstring webkit_version = UTF8ToWide(webkit_glue::GetWebKitVersion());
+  std::string webkit_version = webkit_glue::GetWebKitVersion();
 #ifdef CHROME_V8
-  const char* v8_vers = v8::V8::GetVersion();
-  std::wstring js_version = UTF8ToWide(v8_vers);
-  std::wstring js_engine = L"V8";
+  std::string js_version(v8::V8::GetVersion());
+  std::string js_engine = "V8";
 #else
-  std::wstring js_version = webkit_version;
-  std::wstring js_engine = L"JavaScriptCore";
+  std::string js_version = webkit_version;
+  std::string js_engine = "JavaScriptCore";
 #endif
 
   localized_strings->SetString(L"name",
       l10n_util::GetString(IDS_PRODUCT_NAME));
   localized_strings->SetString(L"version", version_info->file_version());
+  std::wstring mod = UTF16ToWide(platform_util::GetVersionStringModifier());
+  localized_strings->SetString(L"version_modifier", mod);
   localized_strings->SetString(L"js_engine", js_engine);
   localized_strings->SetString(L"js_version", js_version);
   localized_strings->SetString(L"webkit_version", webkit_version);
@@ -453,23 +512,32 @@ std::string AboutVersion(DictionaryValue* localized_strings) {
     localized_strings->SetString(L"official",
       l10n_util::GetString(IDS_ABOUT_VERSION_UNOFFICIAL));
   }
-  localized_strings->SetString(L"useragent",
-      UTF8ToWide(webkit_glue::GetUserAgent(GURL())));
+  localized_strings->SetString(L"user_agent_name",
+      l10n_util::GetString(IDS_ABOUT_VERSION_USER_AGENT));
+  localized_strings->SetString(L"useragent", webkit_glue::GetUserAgent(GURL()));
+  localized_strings->SetString(L"command_line_name",
+      l10n_util::GetString(IDS_ABOUT_VERSION_COMMAND_LINE));
+
+#if defined(OS_WIN)
+  localized_strings->SetString(L"command_line",
+      CommandLine::ForCurrentProcess()->command_line_string());
+#elif defined(OS_POSIX)
+  std::string command_line = "";
+  typedef std::vector<std::string> ArgvList;
+  const ArgvList& argv = CommandLine::ForCurrentProcess()->argv();
+  for (ArgvList::const_iterator iter = argv.begin(); iter != argv.end(); iter++)
+    command_line += " " + *iter;
+  localized_strings->SetString(L"command_line", command_line);
+#endif
 
   static const std::string version_html(
       ResourceBundle::GetSharedInstance().GetDataResource(
           IDR_ABOUT_VERSION_HTML));
 
-  std::string output = version_html;
-  jstemplate_builder::AppendJsonHtml(localized_strings, &output);
-  jstemplate_builder::AppendI18nTemplateSourceHtml(&output);
-  jstemplate_builder::AppendI18nTemplateProcessHtml(&output);
-  jstemplate_builder::AppendJsTemplateSourceHtml(&output);
-  jstemplate_builder::AppendJsTemplateProcessHtml("t", &output);
-  return output;
+  return jstemplate_builder::GetTemplatesHtml(
+      version_html, localized_strings, "t" /* template root node id */);
 }
 
-#if defined(BROWSER_SYNC)
 static void AddBoolSyncDetail(ListValue* details, const std::wstring& stat_name,
                               bool stat_value) {
   DictionaryValue* val = new DictionaryValue;
@@ -486,13 +554,14 @@ static void AddIntSyncDetail(ListValue* details, const std::wstring& stat_name,
   details->Append(val);
 }
 
-static std::wstring MakeSyncAuthErrorText(AuthErrorState state) {
+static std::wstring MakeSyncAuthErrorText(
+    const GoogleServiceAuthError::State& state) {
   switch (state) {
-    case AUTH_ERROR_INVALID_GAIA_CREDENTIALS:
+    case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
       return L"INVALID_GAIA_CREDENTIALS";
-    case AUTH_ERROR_USER_NOT_SIGNED_UP:
+    case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
       return L"USER_NOT_SIGNED_UP";
-    case AUTH_ERROR_CONNECTION_FAILED:
+    case GoogleServiceAuthError::CONNECTION_FAILED:
       return L"CONNECTION_FAILED";
     default:
       return std::wstring();
@@ -520,7 +589,7 @@ std::string AboutSync() {
     strings.Set(L"authenticated",
         new FundamentalValue(full_status.authenticated));
     strings.SetString(L"auth_problem",
-        MakeSyncAuthErrorText(service->GetAuthErrorState()));
+        MakeSyncAuthErrorText(service->GetAuthError().state()));
 
     strings.SetString(L"time_since_sync", service->GetLastSyncedTimeString());
 
@@ -560,7 +629,6 @@ std::string AboutSync() {
   return jstemplate_builder::GetTemplateHtml(
       sync_html, &strings , "t" /* template root node id */);
 }
-#endif  // defined(BROWSER_SYNC)
 
 // AboutSource -----------------------------------------------------------------
 
@@ -571,9 +639,12 @@ AboutSource::AboutSource()
   about_source = this;
 
   // Add us to the global URL handler on the IO thread.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
-          &ChromeURLDataManager::AddDataSource, this));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          Singleton<ChromeURLDataManager>::get(),
+          &ChromeURLDataManager::AddDataSource,
+          make_scoped_refptr(this)));
 }
 
 AboutSource::~AboutSource() {
@@ -581,7 +652,7 @@ AboutSource::~AboutSource() {
 }
 
 void AboutSource::StartDataRequest(const std::string& path_raw,
-                                   int request_id) {
+    bool is_off_the_record, int request_id) {
   std::string path = path_raw;
   std::string info;
   if (path.find("/") != std::string::npos) {
@@ -593,7 +664,8 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
 
   std::string response;
   if (path == kDnsPath) {
-    response = AboutDns();
+    AboutDnsHandler::Start(this, request_id);
+    return;
   } else if (path == kHistogramsPath) {
     response = AboutHistograms(info);
   } else if (path == kMemoryPath) {
@@ -601,10 +673,10 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
     return;
   } else if (path == kMemoryRedirectPath) {
     response = GetAboutMemoryRedirectResponse();
-  } else if (path == kObjectsPath) {
+#ifdef TRACK_ALL_TASK_OBJECTS
+  } else if (path == kTasksPath) {
     response = AboutObjects(info);
-  } else if (path == kPluginsPath) {
-    response = AboutPlugins();
+#endif
   } else if (path == kStatsPath) {
     response = AboutStats();
 #if defined(USE_TCMALLOC)
@@ -621,12 +693,18 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
 #endif
   } else if (path == kCreditsPath) {
     response = AboutCredits();
+#if defined(OS_CHROMEOS)
+  } else if (path == kOSCreditsPath) {
+    response = AboutOSCredits();
+#endif
   } else if (path == kTermsPath) {
     response = AboutTerms();
-  } else if (path == kSyncPath) {
-#if defined(BROWSER_SYNC)
-    response = AboutSync();
+#if defined(OS_LINUX)
+  } else if (path == kLinuxProxyConfigPath) {
+    response = AboutLinuxProxyConfig();
 #endif
+  } else if (path == kSyncPath) {
+    response = AboutSync();
   }
 
   FinishDataRequest(response, request_id);
@@ -641,12 +719,6 @@ void AboutSource::FinishDataRequest(const std::string& response,
 }
 
 // AboutMemoryHandler ----------------------------------------------------------
-
-AboutMemoryHandler::AboutMemoryHandler(AboutSource* source, int request_id)
-  : source_(source),
-    request_id_(request_id) {
-  StartFetch();
-}
 
 // Helper for AboutMemory to bind results from a ProcessMetrics object
 // to a DictionaryValue. Fills ws_usage and comm_usage so that the objects
@@ -757,6 +829,9 @@ void AboutMemoryHandler::OnDetailsAvailable() {
       AppendProcess(child_data, &process.processes[index]);
   }
 
+  root.SetBoolean(L"show_other_browsers",
+      browser_defaults::kShowOtherBrowsersInAboutMemory);
+
   // Get about_memory.html
   static const base::StringPiece memory_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
@@ -781,7 +856,7 @@ ChromeOSAboutVersionHandler::ChromeOSAboutVersionHandler(AboutSource* source,
 }
 
 void ChromeOSAboutVersionHandler::OnVersion(
-    ChromeOSVersionLoader::Handle handle,
+    chromeos::VersionLoader::Handle handle,
     std::string version) {
   DictionaryValue localized_strings;
   localized_strings.SetString(L"os_name",
@@ -842,6 +917,18 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
     return true;
   }
 
+  // Rewrite about:appcache-internals/* URLs to chrome://appcache/*
+  if (StartsWithAboutSpecifier(*url, chrome::kAboutAppCacheInternalsURL)) {
+    *url = RemapAboutURL(chrome::kAppCacheViewInternalsURL, *url);
+    return true;
+  }
+
+  // Rewrite about:plugins to chrome://plugins/.
+  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutPluginsURL)) {
+    *url = GURL(chrome::kChromeUIPluginsURL);
+    return true;
+  }
+
   // Handle URL to crash the browser process.
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutBrowserCrash)) {
     // Induce an intentional crash in the browser process.
@@ -895,7 +982,7 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
   }
 #endif
 
-#if !defined(OS_LINUX) && defined(IPC_MESSAGE_LOG_ENABLED)
+#if (defined(OS_MAC) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUIIPCURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
     AboutIPCDialog::RunDialog();

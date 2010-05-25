@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/json_reader.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
@@ -12,6 +13,19 @@
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+// Make failures easier to locate by using SCOPED_TRACE() to print out the line
+// number of a failing call to ExtensionAPIClientTest::ExpectJs(Pass|Fail) .
+// Sadly, a #define is the only reasonable way to get the line number.
+#define ExpectJsFail(js, expected_failure_message) {  \
+  SCOPED_TRACE(js);                                   \
+  ExpectJsFailInternal(js, expected_failure_message); \
+}
+
+#define ExpectJsPass(js, function, arg1) {  \
+  SCOPED_TRACE(js);                         \
+  ExpectJsPassInternal(js, function, arg1); \
+}
 
 class ExtensionAPIClientTest : public RenderViewTest {
  protected:
@@ -36,15 +50,17 @@ class ExtensionAPIClientTest : public RenderViewTest {
     }
   }
 
-  void ExpectJsFail(const std::string& js, const std::string& message) {
+  // Don't call this directly.  Use the macro ExpectJsFail.
+  void ExpectJsFailInternal(const std::string& js, const std::string& message) {
     ExecuteJavaScript(js.c_str());
     EXPECT_EQ(message, GetConsoleMessage());
     render_thread_.sink().ClearMessages();
   }
 
-  void ExpectJsPass(const std::string& js,
-                    const std::string& function,
-                    const std::string& arg1) {
+  // Don't call this directly.  Use the macro ExpectJsPass.
+  void ExpectJsPassInternal(const std::string& js,
+                            const std::string& function,
+                            const std::string& arg1) {
     ExecuteJavaScript(js.c_str());
     const IPC::Message* request_msg =
       render_thread_.sink().GetUniqueMessageMatching(
@@ -59,9 +75,18 @@ class ExtensionAPIClientTest : public RenderViewTest {
     ASSERT_TRUE(params.b.IsType(Value::TYPE_LIST));
     ASSERT_TRUE(static_cast<const ListValue*>(&params.b)->Get(0, &args));
 
-    JSONReader reader;
+    base::JSONReader reader;
     scoped_ptr<Value> arg1_value(reader.JsonToValue(arg1, false, false));
-    ASSERT_TRUE(args->Equals(arg1_value.get())) << js;
+    ASSERT_TRUE(arg1_value.get())
+        << "Failed to parse expected result as JSON: " << arg1;
+
+    std::string args_as_string;
+    base::JSONWriter::Write(args, false, &args_as_string);
+
+    ASSERT_TRUE(args->Equals(arg1_value.get()))
+        << js
+        << "\n Expected "<< arg1
+        << "\n Actual:  "<< args_as_string;
     render_thread_.sink().ClearMessages();
   }
 };
@@ -80,7 +105,7 @@ TEST_F(ExtensionAPIClientTest, CallbackDispatching) {
     "function callback(result) {"
     "  assert(typeof result == 'object', 'result not object');"
     "  assert(JSON.stringify(result) == '{\"id\":1,\"index\":1,\"windowId\":1,"
-                                        "\"selected\":true,"
+                                        "\"selected\":true,\"incognito\":false,"
                                         "\"url\":\"http://www.google.com/\"}',"
     "         'incorrect result');"
     "  console.log('pass')"
@@ -97,13 +122,13 @@ TEST_F(ExtensionAPIClientTest, CallbackDispatching) {
   ASSERT_TRUE(request_msg);
   ViewHostMsg_ExtensionRequest::Param params;
   ViewHostMsg_ExtensionRequest::Read(request_msg, &params);
-  int callback_id = params.c;
+  int callback_id = params.d;
   ASSERT_GE(callback_id, 0);
 
   // Now send the callback a response
   ExtensionProcessBindings::HandleResponse(
     callback_id, true, "{\"id\":1,\"index\":1,\"windowId\":1,\"selected\":true,"
-                       "\"url\":\"http://www.google.com/\"}", "");
+    "\"incognito\":false,\"url\":\"http://www.google.com/\"}", "");
 
   // And verify that it worked
   ASSERT_EQ("pass", GetConsoleMessage());
@@ -290,7 +315,6 @@ TEST_F(ExtensionAPIClientTest, GetTab) {
                "tabs.get", "2");
 }
 
-#if defined(OS_WIN)
 TEST_F(ExtensionAPIClientTest, DetectTabLanguage) {
   ExpectJsFail("chrome.tabs.detectLanguage(32, function(){}, 20);",
                "Uncaught Error: Too many arguments.");
@@ -306,7 +330,6 @@ TEST_F(ExtensionAPIClientTest, DetectTabLanguage) {
   ExpectJsPass("chrome.tabs.detectLanguage(null, function(){})",
                "tabs.detectLanguage", "null");
 }
-#endif
 
 TEST_F(ExtensionAPIClientTest, GetSelectedTab) {
   ExpectJsFail("chrome.tabs.getSelected(32, function(){}, 20);",
@@ -439,14 +462,67 @@ TEST_F(ExtensionAPIClientTest, RemoveTab) {
 
 TEST_F(ExtensionAPIClientTest, CaptureVisibleTab) {
   ExpectJsFail("chrome.tabs.captureVisibleTab(0);",
-               "Uncaught Error: Parameter 1 is required.");
+               "Uncaught Error: Parameter 2 is required.");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab(0, null);",
+               "Uncaught Error: Parameter 2 is required.");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab(null, {});",
+               "Uncaught Error: Parameter 2 is required.");
 
   ExpectJsFail("chrome.tabs.captureVisibleTab(function(){}, 0)",
                "Uncaught Error: Invalid value for argument 0. "
                "Expected 'integer' but got 'function'.");
 
-  ExpectJsPass("chrome.tabs.captureVisibleTab(null, function(img){});",
-               "tabs.captureVisibleTab", "null");
+  // Use old signiture.  Check that a null value of the options paramenter
+  // is added.
+  ExpectJsPass("chrome.tabs.captureVisibleTab(null, function(img){});", 
+               "tabs.captureVisibleTab", "[null, null]");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab(1, function(img){});",
+               "tabs.captureVisibleTab", "[1, null]");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab(null, null, function(img){});",
+               "tabs.captureVisibleTab", "[null, null]");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab("
+               "null, undefined, function(img){});",
+               "tabs.captureVisibleTab", "[null, null]");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab(null, {}, function(img){});",
+               "tabs.captureVisibleTab", "[null, {}]");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab(null, 42, function(img){});",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Expected 'object' but got 'integer'.");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab("
+               "null, {\"format\": \"jpeg\"}, function(img){});",
+               "tabs.captureVisibleTab", "[null, {\"format\": \"jpeg\"}]");
+
+  ExpectJsPass("chrome.tabs.captureVisibleTab("
+               "null, {\"quality\": 100}, function(img){});",
+               "tabs.captureVisibleTab", "[null, {\"quality\": 100}]");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab("
+               "null, {\"quality\": 101}, function(img){});",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Property 'quality': Value must not be greater than 100.");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab("
+               "null, {'not_a_param': 'jpeg'}, function(img){});",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Property 'not_a_param': Unexpected property.");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab("
+               "null, {'format': 'invalid'}, function(img){});",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Property 'format': Value must be one of: [jpeg, png].");
+
+  ExpectJsFail("chrome.tabs.captureVisibleTab("
+               "null, {'format': 42}, function(img){});",
+               "Uncaught Error: Invalid value for argument 1. "
+               "Property 'format': Value must be one of: [jpeg, png].");
 }
 
 // Bookmark API tests
@@ -487,6 +563,12 @@ TEST_F(ExtensionAPIClientTest, GetBookmarkChildren) {
   ExpectJsPass("chrome.bookmarks.getChildren('42', function(){});",
                "bookmarks.getChildren",
                "\"42\"");
+}
+
+TEST_F(ExtensionAPIClientTest, GetBookmarkRecent) {
+  ExpectJsPass("chrome.bookmarks.getRecent(5, function(){});",
+    "bookmarks.getRecent",
+    "5");
 }
 
 TEST_F(ExtensionAPIClientTest, GetBookmarkTree) {
@@ -614,7 +696,9 @@ TEST_F(ExtensionAPIClientTest, GetAcceptLanguages) {
                "i18n.getAcceptLanguages", "null");
 }
 
-TEST_F(ExtensionAPIClientTest, GetL10nMessage) {
+// TODO(cira): re-enable when we get validation going for
+// renderer_process_bindings.js
+TEST_F(ExtensionAPIClientTest, DISABLED_GetL10nMessage) {
   ExpectJsFail("chrome.i18n.getMessage()",
                "Uncaught Error: Parameter 0 is required.");
 

@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/mac_util.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 
 namespace {
@@ -37,6 +38,31 @@ void GetPluginPrivateDirectory(std::vector<FilePath>* plugin_dirs) {
   plugin_dirs->push_back(FilePath([plugin_path fileSystemRepresentation]));
 }
 
+// Returns true if the plugin should be prevented from loading.
+bool IsBlacklistedPlugin(const WebPluginInfo& info) {
+  std::string plugin_name = WideToUTF8(info.name);
+  // Non-functional, so it's better to let PDFs be downloaded.
+  if (plugin_name == "PDF Browser Plugin")
+    return true;
+
+  // We blacklist a couple of plugins by included MIME type, since those are
+  // more stable than their names. Be careful about adding any more plugins to
+  // this list though, since it's easy to accidentally blacklist plugins that
+  // support lots of MIME types.
+  for (std::vector<WebPluginMimeType>::const_iterator i =
+           info.mime_types.begin(); i != info.mime_types.end(); ++i) {
+    // The Gears plugin is Safari-specific, so don't load it.
+    if (i->mime_type == "application/x-googlegears")
+      return true;
+    // The current version of O3D doesn't work (and overrealeases our dummy
+    // window). Waiting for a new release with recent fixes.
+    if (i->mime_type == "application/vnd.o3d.auto")
+      return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 namespace NPAPI
@@ -57,24 +83,22 @@ void PluginList::GetPluginDirectories(std::vector<FilePath>* plugin_dirs) {
 }
 
 void PluginList::LoadPluginsFromDir(const FilePath &path,
-                                    std::vector<WebPluginInfo>* plugins) {
+                                    std::vector<WebPluginInfo>* plugins,
+                                    std::set<FilePath>* visited_plugins) {
   file_util::FileEnumerator enumerator(path,
                                        false, // not recursive
                                        file_util::FileEnumerator::DIRECTORIES);
   for (FilePath path = enumerator.Next(); !path.value().empty();
        path = enumerator.Next()) {
     LoadPlugin(path, plugins);
+    visited_plugins->insert(path);
   }
 }
 
 bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
                                   std::vector<WebPluginInfo>* plugins) {
-  // The Gears plugin is Safari-specific, and causes crashes, so don't load it.
-  for (std::vector<WebPluginMimeType>::const_iterator i =
-           info.mime_types.begin(); i != info.mime_types.end(); ++i) {
-    if (i->mime_type == "application/x-googlegears")
-      return false;
-  }
+  if (IsBlacklistedPlugin(info))
+    return false;
 
   // Hierarchy check
   // (we're loading plugins hierarchically from Library folders, so plugins we

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H
-#define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H
+#ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H_
+#define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H_
 
 #include <set>
 
@@ -14,12 +14,15 @@ class ListValue;
 
 // Class which caches notification preferences.
 // Construction occurs on the UI thread when the contents
-// of the profile preferences are initially cached.  Once constructed
-// this class should only be accessed on the IO thread.
-class NotificationsPrefsCache :
-    public base::RefCountedThreadSafe<NotificationsPrefsCache> {
+// of the profile preferences are initialized.  Once is_initialized() is set,
+// access can only be done from the IO thread.
+class NotificationsPrefsCache
+    : public base::RefCountedThreadSafe<NotificationsPrefsCache> {
  public:
-  NotificationsPrefsCache(ListValue* allowed, ListValue* denied);
+  NotificationsPrefsCache(const ListValue* allowed, const ListValue* denied);
+
+  void set_is_initialized(bool val) { is_initialized_ = val; }
+  bool is_initialized() { return is_initialized_; }
 
   // Checks to see if a given origin has permission to create desktop
   // notifications.  Returns a constant from WebNotificationPresenter
@@ -31,15 +34,26 @@ class NotificationsPrefsCache :
   void CacheDeniedOrigin(const GURL& origin);
 
  private:
+  friend class base::RefCountedThreadSafe<NotificationsPrefsCache>;
+
+  ~NotificationsPrefsCache() {}
+
   // Helper functions which read preferences.
   bool IsOriginAllowed(const GURL& origin);
   bool IsOriginDenied(const GURL& origin);
+
+  // Helper that ensures we are running on the expected thread.
+  void CheckThreadAccess();
 
   // Storage of the actual preferences.
   std::set<GURL> allowed_origins_;
   std::set<GURL> denied_origins_;
 
+  // Set to true once the initial cached settings have been completely read.
+  // Once this is done, the class can no longer be accessed on the UI thread.
+  bool is_initialized_;
+
   DISALLOW_COPY_AND_ASSIGN(NotificationsPrefsCache);
 };
 
-#endif  // #ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H
+#endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H_

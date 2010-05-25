@@ -6,6 +6,10 @@
 
 #include "build/build_config.h"
 
+#if defined(OS_LINUX)
+#include <gtk/gtk.h>
+#endif
+
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/process_util.h"
@@ -21,14 +25,25 @@
 #include "net/base/net_errors.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/plugins/webplugin_delegate_impl.h"
+
+#if defined(OS_MACOSX)
+#include <CoreFoundation/CoreFoundation.h>
+#include "app/l10n_util.h"
+#include "base/mac_util.h"
+#include "base/scoped_cftyperef.h"
+#include "base/sys_string_conversions.h"
+#include "grit/chromium_strings.h"
+#endif
 
 static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls(
     base::LINKER_INITIALIZED);
 
 PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL) {
-  plugin_path_ = FilePath::FromWStringHack(
-      CommandLine::ForCurrentProcess()->GetSwitchValue(switches::kPluginPath));
+  plugin_path_ =
+      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          switches::kPluginPath);
 
   lazy_tls.Pointer()->Set(this);
 #if defined(OS_LINUX)
@@ -47,7 +62,19 @@ PluginThread::PluginThread()
     }
     argv[argc] = NULL;
     char **argv_pointer = argv.get();
+
+    // Flash has problems receiving clicks with newer GTKs due to the
+    // client-side windows change.  To be safe, we just always set the
+    // backwards-compat environment variable.
+    setenv("GDK_NATIVE_WINDOWS", "1", 1);
+
     gtk_init(&argc, &argv_pointer);
+
+    // GTK after 2.18 resets the environment variable.  But if we're using
+    // nspluginwrapper, that means it'll spawn its subprocess without the
+    // environment variable!  So set it again.
+    setenv("GDK_NATIVE_WINDOWS", "1", 1);
+
     for (size_t i = 0; i < args.size(); ++i) {
       free(argv[i]);
     }
@@ -65,6 +92,17 @@ PluginThread::PluginThread()
       NPAPI::PluginLib::CreatePluginLib(plugin_path_);
   if (plugin.get()) {
     plugin->NP_Initialize();
+
+#if defined(OS_MACOSX)
+    scoped_cftyperef<CFStringRef> plugin_name(base::SysWideToCFStringRef(
+        plugin->plugin_info().name));
+    scoped_cftyperef<CFStringRef> app_name(base::SysUTF16ToCFStringRef(
+        l10n_util::GetStringUTF16(IDS_SHORT_PLUGIN_APP_NAME)));
+    scoped_cftyperef<CFStringRef> process_name(CFStringCreateWithFormat(
+        kCFAllocatorDefault, NULL, CFSTR("%@ (%@)"),
+        plugin_name.get(), app_name.get()));
+    mac_util::SetProcessName(process_name);
+#endif
   }
 
   // Certain plugins, such as flash, steal the unhandled exception filter
@@ -95,6 +133,12 @@ void PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PluginThread, msg)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_CreateChannel, OnCreateChannel)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginMessage, OnPluginMessage)
+    IPC_MESSAGE_HANDLER(PluginProcessMsg_NotifyRenderersOfPendingShutdown,
+                        OnNotifyRenderersOfPendingShutdown)
+#if defined(OS_MACOSX)
+  IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginFocusNotify,
+                      OnPluginFocusNotify)
+#endif
   IPC_END_MESSAGE_MAP()
 }
 
@@ -106,10 +150,8 @@ void PluginThread::OnCreateChannel(int renderer_id,
   if (channel.get()) {
     channel_handle.name = channel->channel_name();
 #if defined(OS_POSIX)
-    // On POSIX, pass the renderer-side FD. Also mark it as auto-close so that
-    // it gets closed after it has been sent.
-    int renderer_fd = channel->DisownRendererFd();
-    channel_handle.socket = base::FileDescriptor(renderer_fd, true);
+    // On POSIX, pass the renderer-side FD.
+    channel_handle.socket = base::FileDescriptor(channel->renderer_fd(), false);
 #endif
     channel->set_off_the_record(off_the_record);
   }
@@ -130,6 +172,25 @@ void PluginThread::OnPluginMessage(const std::vector<unsigned char> &data) {
   }
   ChildProcess::current()->ReleaseProcess();
 }
+
+void PluginThread::OnNotifyRenderersOfPendingShutdown() {
+  PluginChannel::NotifyRenderersOfPendingShutdown();
+}
+
+#if defined(OS_MACOSX)
+void PluginThread::OnPluginFocusNotify(uint32 instance_id) {
+  WebPluginDelegateImpl* focused_instance =
+      reinterpret_cast<WebPluginDelegateImpl*>(instance_id);
+  std::set<WebPluginDelegateImpl*> active_delegates =
+      WebPluginDelegateImpl::GetActiveDelegates();
+  for (std::set<WebPluginDelegateImpl*>::iterator iter =
+           active_delegates.begin();
+       iter != active_delegates.end(); iter++) {
+    WebPluginDelegateImpl* instance = *iter;
+    instance->FocusChanged(instance == focused_instance);
+  }
+}
+#endif
 
 namespace webkit_glue {
 
@@ -163,48 +224,6 @@ bool GetPluginFinderURL(std::string* plugin_finder_url) {
   DCHECK(!plugin_finder_url->empty());
   return true;
 }
-
-#if defined(OS_MACOSX)
-__attribute__((visibility("default")))
-void NotifyBrowserOfPluginSelectWindow(uint32 window_id, CGRect bounds) {
-  PluginThread* plugin_thread = PluginThread::current();
-  if (plugin_thread) {
-    gfx::Rect window_bounds(bounds);
-    plugin_thread->Send(
-        new PluginProcessHostMsg_PluginSelectWindow(window_id, window_bounds));
-  }
-}
-
-__attribute__((visibility("default")))
-void NotifyBrowserOfPluginShowWindow(uint32 window_id, CGRect bounds) {
-  PluginThread* plugin_thread = PluginThread::current();
-  if (plugin_thread) {
-    gfx::Rect window_bounds(bounds);
-    plugin_thread->Send(
-        new PluginProcessHostMsg_PluginShowWindow(window_id, window_bounds));
-  }
-}
-
-__attribute__((visibility("default")))
-void NotifyBrowserOfPluginHideWindow(uint32 window_id, CGRect bounds) {
-  PluginThread* plugin_thread = PluginThread::current();
-  if (plugin_thread) {
-    gfx::Rect window_bounds(bounds);
-    plugin_thread->Send(
-        new PluginProcessHostMsg_PluginHideWindow(window_id, window_bounds));
-  }
-}
-
-__attribute__((visibility("default")))
-void NotifyBrowserOfPluginDisposeWindow(uint32 window_id, CGRect bounds) {
-  PluginThread* plugin_thread = PluginThread::current();
-  if (plugin_thread) {
-    gfx::Rect window_bounds(bounds);
-    plugin_thread->Send(
-        new PluginProcessHostMsg_PluginDisposeWindow(window_id, window_bounds));
-  }
-}
-#endif
 
 bool IsDefaultPluginEnabled() {
 #if defined(OS_WIN)

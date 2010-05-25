@@ -1,27 +1,33 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
 
+#include <algorithm>
 #include <locale>
+#include <string>
+
+#include <richedit.h>
+#include <textserv.h>
 
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/os_exchange_data.h"
 #include "app/os_exchange_data_provider_win.h"
 #include "app/win_util.h"
+#include "base/auto_reset.h"
 #include "base/base_drag_source.h"
 #include "base/base_drop_target.h"
 #include "base/basictypes.h"
+#include "base/i18n/rtl.h"
 #include "base/iat_patch.h"
 #include "base/keyboard_codes.h"
 #include "base/lazy_instance.h"
 #include "base/ref_counted.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
@@ -39,6 +45,7 @@
 #include "chrome/common/gfx/utils.h"
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/url_util.h"
+#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/skia_utils_win.h"
@@ -47,19 +54,10 @@
 #include "views/widget/widget.h"
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
+#pragma comment(lib, "riched20.lib")  // Needed for the richedit control.
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditModel
-
-// A single AutocompleteController used solely for making synchronous calls to
-// determine how to deal with the clipboard contents for Paste And Go
-// functionality.  We avoid using the popup's controller here because we don't
-// want to interrupt in-progress queries or modify the popup state just
-// because the user right-clicked the edit.  We don't need a controller for
-// every edit because this will always be accessed on the main thread, so we
-// won't have thread-safety problems.
-static AutocompleteController* paste_and_go_controller = NULL;
-static int paste_and_go_controller_refcount = 0;
 
 namespace {
 
@@ -413,7 +411,12 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       initiated_drag_(false),
       drop_highlight_position_(-1),
       background_color_(0),
-      scheme_security_level_(ToolbarModel::NORMAL) {
+      scheme_security_level_(ToolbarModel::NORMAL),
+      text_object_model_(NULL) {
+  // Dummy call to a function exported by riched20.dll to ensure it sets up an
+  // import dependency on the dll.
+  CreateTextServices(NULL, NULL, NULL);
+
   model_->SetPopupModel(popup_view_->GetModel());
 
   saved_selection_for_focus_change_.cpMin = -1;
@@ -476,6 +479,11 @@ AutocompleteEditViewWin::~AutocompleteEditViewWin() {
       NotificationType::AUTOCOMPLETE_EDIT_DESTROYED,
       Source<AutocompleteEditViewWin>(this),
       NotificationService::NoDetails());
+
+  // Explicitly release the text object model now that we're done with it, and
+  // before we free the library. If the library gets unloaded before this
+  // released, it becomes garbage.
+  text_object_model_->Release();
 
   // We balance our reference count and unpatch when the last instance has
   // been destroyed.  This prevents us from relying on the AtExit or static
@@ -614,26 +622,6 @@ void AutocompleteEditViewWin::SetUserText(const std::wstring& text,
 
 void AutocompleteEditViewWin::SetWindowTextAndCaretPos(const std::wstring& text,
                                                        size_t caret_pos) {
-  HIMC imm_context = ImmGetContext(m_hWnd);
-  if (imm_context) {
-    // In Windows Vista, SetWindowText() automatically cancels any ongoing
-    // IME composition, and updates the text of the underlying edit control.
-    // In Windows XP, however, SetWindowText() gets applied to the IME
-    // composition string if it exists, and doesn't update the underlying edit
-    // control. To avoid this, we force the IME to cancel any outstanding
-    // compositions here.  This is harmless in Vista and in cases where the IME
-    // isn't composing.
-
-    // NOTE: We MUST ignore messages like WM_IME_COMPOSITION that may be sent as
-    // a result of doing this.  Until the SetWindowText() call below, the
-    // underlying edit (on XP) has out-of-date text in it; for problems this can
-    // cause, see OnImeComposition().
-    ignore_ime_messages_ = true;
-    ImmNotifyIME(imm_context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
-    ImmReleaseContext(m_hWnd, imm_context);
-    ignore_ime_messages_ = false;
-  }
-
   SetWindowText(text.c_str());
   PlaceCaretAt(caret_pos);
 }
@@ -800,9 +788,6 @@ bool AutocompleteEditViewWin::OnInlineAutocompleteTextMaybeChanged(
     return false;
 
   ScopedFreeze freeze(this, GetTextObjectModel());
-  // NOTE: We don't need the IME composition hack in SetWindowTextAndCaretPos()
-  // here, because UpdatePopup() disables inline autocomplete when a
-  // composition is in progress, thus preventing us from reaching this code.
   SetWindowText(display_text.c_str());
   // Set a reversed selection to keep the caret in the same position, which
   // avoids scrolling the user's text.
@@ -868,6 +853,10 @@ bool AutocompleteEditViewWin::OnAfterPossibleChange() {
 
 gfx::NativeView AutocompleteEditViewWin::GetNativeView() const {
   return m_hWnd;
+}
+
+CommandUpdater* AutocompleteEditViewWin::GetCommandUpdater() {
+  return command_updater_;
 }
 
 void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
@@ -948,13 +937,15 @@ bool AutocompleteEditViewWin::IsCommandIdEnabled(int command_id) const {
     case IDS_SELECT_ALL:   return !!CanSelectAll();
     case IDS_EDIT_SEARCH_ENGINES:
       return command_updater_->IsCommandEnabled(IDC_EDIT_SEARCH_ENGINES);
-    default:               NOTREACHED(); return false;
+    default:
+      NOTREACHED();
+      return false;
   }
 }
 
 bool AutocompleteEditViewWin::GetAcceleratorForCommandId(
     int command_id,
-    views::Accelerator* accelerator) {
+    menus::Accelerator* accelerator) {
   return parent_view_->GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
@@ -1201,7 +1192,7 @@ void AutocompleteEditViewWin::OnCopy() {
       else
         scw.WriteText(text);
       scw.WriteBookmark(text, url.spec());
-      scw.WriteHyperlink(EscapeForHTML(UTF16ToUTF8(text)), url.spec());
+      scw.WriteHyperlink(EscapeForHTML(text), url.spec());
       return;
     }
   }
@@ -1249,6 +1240,33 @@ LRESULT AutocompleteEditViewWin::OnImeComposition(UINT message,
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   LRESULT result = DefWindowProc(message, wparam, lparam);
+
+  // Some IMEs insert whitespace characters instead of input characters while
+  // they are composing text, and trimming these whitespace characters at the
+  // beginning of this control (in OnAfterPossibleChange()) prevents users from
+  // inputting text on these IMEs.
+  // To prevent this problem, we should not start auto-complete if the
+  // composition string starts with whitespace characters.
+  // (When we type a space key to insert a whitespace character, IMEs don't
+  // insert the whitespace character to their composition string but their
+  // result string. So, this code doesn't prevent us from updating autocomplete
+  // when we insert a whitespace character.)
+  if (lparam & GCS_COMPSTR) {
+    std::wstring text;
+    HIMC context = ImmGetContext(m_hWnd);
+    if (context) {
+      int size = ImmGetCompositionString(context, GCS_COMPSTR, NULL, 0);
+      if (size > 0) {
+        wchar_t* text_data = WriteInto(&text, size / sizeof(wchar_t) + 1);
+        if (text_data)
+          ImmGetCompositionString(context, GCS_COMPSTR, text_data, size);
+      }
+      ImmReleaseContext(m_hWnd, context);
+    }
+    if (!text.empty() && IsWhitespace(text[0]))
+      return result;
+  }
+
   if (!OnAfterPossibleChange() && (lparam & GCS_RESULTSTR)) {
     // The result string changed, but the text in the popup didn't actually
     // change.  This means the user finalized the composition.  Rerun
@@ -1303,6 +1321,31 @@ void AutocompleteEditViewWin::OnKeyUp(TCHAR key,
                                       UINT flags) {
   if (key == VK_CONTROL)
     model_->OnControlKeyChanged(false);
+
+  // On systems with RTL input languages, ctrl+shift toggles the reading order
+  // (depending on which shift key is pressed). But by default the CRichEditCtrl
+  // only changes the current reading order, and as soon as the user deletes all
+  // the text, or we call SetWindowText(), it reverts to the "default" order.
+  // To work around this, if the user hits ctrl+shift, we pass it to
+  // DefWindowProc() while the edit is empty, which toggles the default reading
+  // order; then we restore the user's input.
+  if (!(flags & KF_ALTDOWN) &&
+      (((key == VK_CONTROL) && (GetKeyState(VK_SHIFT) < 0)) ||
+       ((key == VK_SHIFT) && (GetKeyState(VK_CONTROL) < 0)))) {
+    ScopedFreeze freeze(this, GetTextObjectModel());
+
+    std::wstring saved_text(GetText());
+    CHARRANGE saved_sel;
+    GetSelection(saved_sel);
+
+    SetWindowText(L"");
+
+    DefWindowProc(WM_KEYUP, key, MAKELPARAM(repeat_count, flags));
+
+    SetWindowText(saved_text.c_str());
+    SetSelectionRange(saved_sel);
+    return;
+  }
 
   SetMsgHandled(false);
 }
@@ -1662,6 +1705,20 @@ void AutocompleteEditViewWin::OnSetFocus(HWND focus_wnd) {
   SetMsgHandled(false);
 }
 
+LRESULT AutocompleteEditViewWin::OnSetText(const wchar_t* text) {
+  // Ignore all IME messages while we process this WM_SETTEXT message.
+  // When SetWindowText() is called while an IME is composing text, the IME
+  // calls SendMessage() to send a WM_IME_COMPOSITION message. When we receive
+  // this WM_IME_COMPOSITION message, we update the omnibox and may call
+  // SetWindowText() again. To stop this recursive message-handler call, we
+  // stop updating the omnibox while we process a WM_SETTEXT message.
+  // We wouldn't need to do this update anyway, because either we're in the
+  // middle of updating the omnibox already or the caller of SetWindowText()
+  // is going to update the omnibox next.
+  AutoReset auto_reset_ignore_ime_messages(&ignore_ime_messages_, true);
+  return DefWindowProc(WM_SETTEXT, 0, reinterpret_cast<LPARAM>(text));
+}
+
 void AutocompleteEditViewWin::OnSysChar(TCHAR ch,
                                         UINT repeat_count,
                                         UINT flags) {
@@ -1940,7 +1997,7 @@ LONG AutocompleteEditViewWin::ClipXCoordToVisibleText(
   // paragraph.
   bool ltr_text_in_ltr_layout = true;
   if ((pf2.wEffects & PFE_RTLPARA) ||
-      l10n_util::StringContainsStrongRTLChars(GetText())) {
+      base::i18n::StringContainsStrongRTLChars(GetText())) {
     ltr_text_in_ltr_layout = false;
   }
   const int length = GetTextLength();
@@ -2227,8 +2284,11 @@ ITextDocument* AutocompleteEditViewWin::GetTextObjectModel() const {
     // constructor, in order to avoid hurting startup performance.
     ScopedComPtr<IRichEditOle, NULL> ole_interface;
     ole_interface.Attach(GetOleInterface());
-    if (ole_interface)
-      text_object_model_.QueryFrom(ole_interface);
+    if (ole_interface) {
+      ole_interface.QueryInterface(
+          __uuidof(ITextDocument),
+          reinterpret_cast<void**>(&text_object_model_));
+    }
   }
   return text_object_model_;
 }
@@ -2268,17 +2328,19 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
     drag_utils::SetURLAndDragImage(url, title, favicon, &data);
     data.SetURL(url, title);
     supported_modes |= DROPEFFECT_LINK;
-    UserMetrics::RecordAction(L"Omnibox_DragURL", model_->profile());
+    UserMetrics::RecordAction(UserMetricsAction("Omnibox_DragURL"),
+                              model_->profile());
   } else {
     supported_modes |= DROPEFFECT_MOVE;
-    UserMetrics::RecordAction(L"Omnibox_DragString", model_->profile());
+    UserMetrics::RecordAction(UserMetricsAction("Omnibox_DragString"),
+                              model_->profile());
   }
 
   data.SetString(GetSelectedText());
 
   scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
   DWORD dropped_mode;
-  in_drag_ = true;
+  AutoReset auto_reset_in_drag(&in_drag_, true);
   if (DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source,
                  supported_modes, &dropped_mode) == DRAGDROP_S_DROP) {
     if ((dropped_mode == DROPEFFECT_MOVE) && (start_text == GetText())) {
@@ -2316,7 +2378,6 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
                        (GetKeyState(VK_RBUTTON) != 0)));
   }
 
-  in_drag_ = false;
   initiated_drag_ = true;
   tracking_click_ = false;
 }
@@ -2359,10 +2420,10 @@ void AutocompleteEditViewWin::BuildContextMenu() {
   if (context_menu_contents_.get())
     return;
 
-  context_menu_contents_.reset(new views::SimpleMenuModel(this));
+  context_menu_contents_.reset(new menus::SimpleMenuModel(this));
   // Set up context menu.
   if (popup_window_mode_) {
-    context_menu_contents_->AddItemWithStringId(IDS_COPY, IDS_COPY);
+    context_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
   } else {
     context_menu_contents_->AddItemWithStringId(IDS_UNDO, IDS_UNDO);
     context_menu_contents_->AddSeparator();

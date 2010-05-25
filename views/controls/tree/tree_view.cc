@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,18 @@
 
 #include <vector>
 
-#include "app/gfx/canvas_paint.h"
-#include "app/gfx/icon_util.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/point.h"
+#include "base/i18n/rtl.h"
 #include "base/keyboard_codes.h"
 #include "base/stl_util-inl.h"
 #include "base/win_util.h"
+#include "gfx/canvas.h"
+#include "gfx/canvas_paint.h"
+#include "gfx/favicon_size.h"
+#include "gfx/icon_util.h"
+#include "gfx/point.h"
 #include "grit/app_resources.h"
 #include "views/focus/focus_manager.h"
 #include "views/widget/widget.h"
@@ -24,11 +27,13 @@ namespace views {
 TreeView::TreeView()
     : tree_view_(NULL),
       model_(NULL),
+      auto_expand_children_(false),
       editable_(true),
       next_id_(0),
       controller_(NULL),
       editing_node_(NULL),
       root_shown_(true),
+      lines_at_root_(false),
       process_enter_(false),
       show_context_menu_only_when_node_selected_(true),
       select_on_right_mouse_down_(true),
@@ -41,7 +46,7 @@ TreeView::TreeView()
 
 TreeView::~TreeView() {
   if (model_)
-    model_->SetObserver(NULL);
+    model_->RemoveObserver(this);
   // Both param_to_details_map_ and node_to_details_map_ have the same value,
   // as such only need to delete from one.
   STLDeleteContainerPairSecondPointers(id_to_details_map_.begin(),
@@ -50,17 +55,31 @@ TreeView::~TreeView() {
     ImageList_Destroy(image_list_);
 }
 
+bool TreeView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_OUTLINE;
+  return true;
+}
+
+bool TreeView::GetAccessibleState(AccessibilityTypes::State* state) {
+  DCHECK(state);
+ 
+  *state = AccessibilityTypes::STATE_READONLY;
+  return true;
+}
+
 void TreeView::SetModel(TreeModel* model) {
   if (model == model_)
     return;
   if (model_ && tree_view_)
     DeleteRootItems();
   if (model_)
-    model_->SetObserver(NULL);
+    model_->RemoveObserver(this);
   model_ = model;
   if (tree_view_ && model_) {
     CreateRootItems();
-    model_->SetObserver(this);
+    model_->AddObserver(this);
     HIMAGELIST last_image_list = image_list_;
     image_list_ = CreateImageList();
     TreeView_SetImageList(tree_view_, image_list_, TVSIL_NORMAL);
@@ -187,7 +206,7 @@ void TreeView::SetRootShown(bool root_shown) {
   if (root_shown_ == root_shown)
     return;
   root_shown_ = root_shown;
-  if (!model_)
+  if (!model_ || !tree_view_)
     return;
   // Repopulate the tree.
   DeleteRootItems();
@@ -199,7 +218,8 @@ void TreeView::TreeNodesAdded(TreeModel* model,
                               int start,
                               int count) {
   DCHECK(parent && start >= 0 && count > 0);
-  if (node_to_details_map_.find(parent) == node_to_details_map_.end()) {
+  if (node_to_details_map_.find(parent) == node_to_details_map_.end() &&
+      (root_shown_ || parent != model_->GetRoot())) {
     // User hasn't navigated to this entry yet. Ignore the change.
     return;
   }
@@ -231,8 +251,8 @@ void TreeView::TreeNodesAdded(TreeModel* model,
     } else {
       TreeModelNode* previous_sibling = model_->GetChild(parent, i + start - 1);
       CreateItem(parent_tree_item,
-                   GetNodeDetails(previous_sibling)->tree_item,
-                   model_->GetChild(parent, i + start));
+                 GetNodeDetails(previous_sibling)->tree_item,
+                 model_->GetChild(parent, i + start));
     }
   }
 }
@@ -242,16 +262,26 @@ void TreeView::TreeNodesRemoved(TreeModel* model,
                                 int start,
                                 int count) {
   DCHECK(parent && start >= 0 && count > 0);
-  HTREEITEM parent_tree_item = GetTreeItemForNodeDuringMutation(parent);
-  if (!parent_tree_item)
-    return;
+
+  HTREEITEM tree_item;
+  if (!root_shown_ && parent == model->GetRoot()) {
+    // NOTE: we can't call GetTreeItemForNodeDuringMutation here as in this
+    // configuration the root has no treeitem.
+    tree_item = TreeView_GetRoot(tree_view_);
+  } else {
+    HTREEITEM parent_tree_item = GetTreeItemForNodeDuringMutation(parent);
+    if (!parent_tree_item)
+      return;
+
+    tree_item = TreeView_GetChild(tree_view_, parent_tree_item);
+  }
 
   // Find the last item. Windows doesn't offer a convenient way to get the
   // TREEITEM at a particular index, so we iterate.
-  HTREEITEM tree_item = TreeView_GetChild(tree_view_, parent_tree_item);
   for (int i = 0; i < (start + count - 1); ++i) {
     tree_item = TreeView_GetNextSibling(tree_view_, tree_item);
   }
+
   // NOTE: the direction doesn't matter here. I've made it backwards to
   // reinforce we're deleting from the end forward.
   for (int i = count - 1; i >= 0; --i) {
@@ -339,6 +369,8 @@ HWND TreeView::CreateNativeControl(HWND parent_container) {
     style |= TVS_DISABLEDRAGDROP;
   if (editable_)
     style |= TVS_EDITLABELS;
+  if (lines_at_root_)
+    style |= TVS_LINESATROOT;
   tree_view_ = ::CreateWindowEx(WS_EX_CLIENTEDGE | GetAdditionalExStyle(),
                                 WC_TREEVIEW,
                                 L"",
@@ -353,7 +385,7 @@ HWND TreeView::CreateNativeControl(HWND parent_container) {
 
   if (model_) {
     CreateRootItems();
-    model_->SetObserver(this);
+    model_->AddObserver(this);
     image_list_ = CreateImageList();
     TreeView_SetImageList(tree_view_, image_list_, TVSIL_NORMAL);
   }
@@ -382,7 +414,7 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
 
         // Adjust the string direction if such adjustment is required.
         std::wstring localized_text;
-        if (l10n_util::AdjustStringForLocaleDirection(text, &localized_text))
+        if (base::i18n::AdjustStringForLocaleDirection(text, &localized_text))
           text.swap(localized_text);
 
         wcsncpy_s(info->item.pszText, info->item.cchTextMax, text.c_str(),
@@ -403,9 +435,12 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
           GetNodeDetailsByID(static_cast<int>(info->itemNew.lParam));
       if (!details->loaded_children) {
         details->loaded_children = true;
-        for (int i = 0; i < model_->GetChildCount(details->node); ++i)
+        for (int i = 0; i < model_->GetChildCount(details->node); ++i) {
           CreateItem(details->tree_item, TVI_LAST,
                        model_->GetChild(details->node, i));
+          if (auto_expand_children_)
+            Expand(model_->GetChild(details->node, i));
+        }
       }
       // Return FALSE to allow the item to be expanded.
       return FALSE;
@@ -450,7 +485,8 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
       if (controller_) {
         NMTVKEYDOWN* key_down_message =
             reinterpret_cast<NMTVKEYDOWN*>(l_param);
-        controller_->OnTreeViewKeyDown(key_down_message->wVKey);
+        controller_->OnTreeViewKeyDown(
+            win_util::WinToKeyboardCode(key_down_message->wVKey));
       }
       break;
 
@@ -499,8 +535,7 @@ void TreeView::OnContextMenu(const POINT& location) {
     TVHITTESTINFO hit_info;
     gfx::Point local_loc(location);
     ConvertPointToView(NULL, this, &local_loc);
-    hit_info.pt.x = local_loc.x();
-    hit_info.pt.y = local_loc.y();
+    hit_info.pt = local_loc.ToPOINT();
     HTREEITEM hit_item = TreeView_HitTest(tree_view_, &hit_info);
     if (!hit_item ||
         GetNodeDetails(GetSelectedNode())->tree_item != hit_item ||
@@ -509,7 +544,7 @@ void TreeView::OnContextMenu(const POINT& location) {
       return;
     }
   }
-  ShowContextMenu(location.x, location.y, true);
+  ShowContextMenu(gfx::Point(location), true);
 }
 
 TreeModelNode* TreeView::GetNodeForTreeItem(HTREEITEM tree_item) {
@@ -537,6 +572,7 @@ void TreeView::DeleteRootItems() {
 
 void TreeView::CreateRootItems() {
   DCHECK(model_);
+  DCHECK(tree_view_);
   TreeModelNode* root = model_->GetRoot();
   if (root_shown_) {
     CreateItem(NULL, TVI_LAST, root);
@@ -577,6 +613,9 @@ void TreeView::CreateItem(HTREEITEM parent_item,
   // we set the map entries before adding the item.
   NodeDetails* node_details = new NodeDetails(node_id, node);
 
+  DCHECK(node_to_details_map_.count(node) == 0);
+  DCHECK(id_to_details_map_.count(node_id) == 0);
+
   node_to_details_map_[node] = node_details;
   id_to_details_map_[node_id] = node_details;
 
@@ -589,9 +628,10 @@ void TreeView::RecursivelyDelete(NodeDetails* node) {
   DCHECK(item);
 
   // Recurse through children.
-  for (HTREEITEM child = TreeView_GetChild(tree_view_, item);
-       child ; child = TreeView_GetNextSibling(tree_view_, child)) {
+  for (HTREEITEM child = TreeView_GetChild(tree_view_, item); child ;) {
+    HTREEITEM next = TreeView_GetNextSibling(tree_view_, child);
     RecursivelyDelete(GetNodeDetailsByTreeItem(child));
+    child = next;
   }
 
   TreeView_DeleteItem(tree_view_, item);
@@ -642,7 +682,24 @@ HIMAGELIST TreeView::CreateImageList() {
     DestroyIcon(h_closed_icon);
     DestroyIcon(h_opened_icon);
     for (size_t i = 0; i < model_images.size(); ++i) {
-      HICON model_icon = IconUtil::CreateHICONFromSkBitmap(model_images[i]);
+      HICON model_icon;
+
+      // Need to resize the provided icons to be the same size as
+      // IDR_FOLDER_CLOSED if they aren't already.
+      if (model_images[i].width() != width ||
+          model_images[i].height() != height) {
+        gfx::Canvas canvas(width, height, false);
+        // Make the background completely transparent.
+        canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+
+        // Draw our icons into this canvas.
+        int height_offset = (height - model_images[i].height()) / 2;
+        int width_offset = (width - model_images[i].width()) / 2;
+        canvas.DrawBitmapInt(model_images[i], width_offset, height_offset);
+        model_icon = IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap());
+      } else {
+        model_icon = IconUtil::CreateHICONFromSkBitmap(model_images[i]);
+      }
       ImageList_AddIcon(image_list, model_icon);
       DestroyIcon(model_icon);
     }
@@ -687,7 +744,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
         return 0;
 
       HDC dc = canvas.beginPlatformPaint();
-      if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+      if (base::i18n::IsRTL()) {
         // gfx::Canvas ends up configuring the DC with a mode of GM_ADVANCED.
         // For some reason a graphics mode of ADVANCED triggers all the text
         // to be mirrored when RTL. Set the mode back to COMPATIBLE and
@@ -715,7 +772,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
                          -canvas.paintStruct().rcPaint.top, NULL);
       }
       SendMessage(window, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(dc), 0);
-      if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+      if (base::i18n::IsRTL()) {
         // Reset the origin of the dc back to 0. This way when we copy the bits
         // over we copy the right bits.
         SetViewportOrgEx(dc, 0, 0, NULL);

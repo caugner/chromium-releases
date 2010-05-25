@@ -17,7 +17,9 @@ static const char* kExpectedGupdateProtocol = "2.0";
 static const char* kExpectedGupdateXmlns =
     "http://www.google.com/update2/response";
 
-UpdateManifest::UpdateManifest() {}
+UpdateManifest::UpdateManifest() {
+  results_.daystart_elapsed_seconds = kNoDaystart;
+}
 
 UpdateManifest::~UpdateManifest() {}
 
@@ -30,6 +32,7 @@ void UpdateManifest::ParseError(const char* details, ...) {
     errors_ += "\r\n";
   }
   StringAppendV(&errors_, details, args);
+  va_end(args);
 }
 
 // Checks whether a given node's name matches |expected_name| and
@@ -75,6 +78,7 @@ static void XmlErrorFunc(void *context, const char *message, ...) {
   va_start(args, message);
   std::string* error = static_cast<std::string*>(context);
   StringAppendV(error, message, args);
+  va_end(args);
 }
 
 // Utility class for cleaning up the xml document when leaving a scope.
@@ -124,31 +128,39 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
   std::vector<xmlNode*> updates = GetChildren(app_node, xml_namespace,
                                               "updatecheck");
   if (updates.size() > 1) {
-    *error_detail = "Too many updatecheck tags on app (expecting only 1)";
+    *error_detail = "Too many updatecheck tags on app (expecting only 1).";
     return false;
   }
   if (updates.size() == 0) {
-    *error_detail = "Missing updatecheck on app";
+    *error_detail = "Missing updatecheck on app.";
     return false;
   }
   xmlNode *updatecheck = updates[0];
 
+  if (GetAttribute(updatecheck, "status") == "noupdate") {
+    return true;
+  }
+
   // Find the url to the crx file.
   result->crx_url = GURL(GetAttribute(updatecheck, "codebase"));
   if (!result->crx_url.is_valid()) {
-    *error_detail = "Invalid codebase url";
+    *error_detail = "Invalid codebase url: '";
+    *error_detail += GetAttribute(updatecheck, "codebase");
+    *error_detail += "'.";
     return false;
   }
 
   // Get the version.
   result->version = GetAttribute(updatecheck, "version");
   if (result->version.length() == 0) {
-    *error_detail = "Missing version for updatecheck";
+    *error_detail = "Missing version for updatecheck.";
     return false;
   }
   scoped_ptr<Version> version(Version::GetVersionFromString(result->version));
   if (!version.get()) {
-    *error_detail = "Invalid version";
+    *error_detail = "Invalid version: '";
+    *error_detail += result->version;
+    *error_detail += "'.";
     return false;
   }
 
@@ -158,7 +170,9 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
     scoped_ptr<Version> browser_min_version(
       Version::GetVersionFromString(result->browser_min_version));
     if (!browser_min_version.get()) {
-      *error_detail = "Invalid prodversionmin";
+      *error_detail = "Invalid prodversionmin: '";
+      *error_detail += result->browser_min_version;
+      *error_detail += "'.";
       return false;
     }
   }
@@ -172,9 +186,12 @@ static bool ParseSingleAppTag(xmlNode* app_node, xmlNs* xml_namespace,
 
 
 bool UpdateManifest::Parse(const std::string& manifest_xml) {
-  results_.resize(0);
+  results_.list.resize(0);
+  results_.daystart_elapsed_seconds = kNoDaystart;
+  errors_ = "";
 
   if (manifest_xml.length() < 1) {
+     ParseError("Empty xml");
     return false;
   }
 
@@ -185,7 +202,7 @@ bool UpdateManifest::Parse(const std::string& manifest_xml) {
   ScopedXmlDocument document(xmlParseDoc(
       reinterpret_cast<const xmlChar*>(manifest_xml.c_str())));
   if (!document.get()) {
-    ParseError(xml_errors.c_str());
+    ParseError("%s", xml_errors.c_str());
     return false;
   }
 
@@ -214,16 +231,27 @@ bool UpdateManifest::Parse(const std::string& manifest_xml) {
     return false;
   }
 
+  // Parse the first <daystart> if it's present.
+  std::vector<xmlNode*> daystarts = GetChildren(root, gupdate_ns, "daystart");
+  if (daystarts.size() > 0) {
+    xmlNode* first = daystarts[0];
+    std::string elapsed_seconds = GetAttribute(first, "elapsed_seconds");
+    int parsed_elapsed = kNoDaystart;
+    if (StringToInt(elapsed_seconds, &parsed_elapsed)) {
+      results_.daystart_elapsed_seconds = parsed_elapsed;
+    }
+  }
+
   // Parse each of the <app> tags.
   std::vector<xmlNode*> apps = GetChildren(root, gupdate_ns, "app");
   for (unsigned int i = 0; i < apps.size(); i++) {
     Result current;
     std::string error;
     if (!ParseSingleAppTag(apps[i], gupdate_ns, &current, &error)) {
-      ParseError(error.c_str());
-      return false;
+      ParseError("%s", error.c_str());
+    } else {
+      results_.list.push_back(current);
     }
-    results_.push_back(current);
   }
 
   return true;

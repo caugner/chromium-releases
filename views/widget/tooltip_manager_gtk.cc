@@ -1,13 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/widget/tooltip_manager_gtk.h"
 
-#include "app/gfx/font.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/font.h"
 #include "views/focus/focus_manager.h"
+#include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
 
@@ -29,9 +30,7 @@ static gfx::Font* LoadDefaultFont() {
   gtk_widget_realize(window);
 
   GtkStyle* style = gtk_widget_get_style(label);
-  PangoFontDescription* pfd = style->font_desc;
-  gfx::Font* font = new gfx::Font(gfx::Font::CreateFont(pfd));
-  pango_font_description_free(pfd);
+  gfx::Font* font = new gfx::Font(gfx::Font::CreateFont(style->font_desc));
 
   gtk_widget_destroy(window);
 
@@ -62,6 +61,16 @@ const std::wstring& TooltipManager::GetLineSeparator() {
   return *line_separator;
 }
 
+// static
+int TooltipManager::GetMaxWidth(int x, int y) {
+  gfx::Rect monitor_bounds =
+      Screen::GetMonitorAreaNearestPoint(gfx::Point(x, y));
+  // GtkLabel (gtk_label_ensure_layout) forces wrapping at this size. We mirror
+  // the size here otherwise tooltips wider than the size used by gtklabel end
+  // up with extraneous empty lines.
+  return monitor_bounds.width() == 0 ? 800 : (monitor_bounds.width() + 1) / 2;
+}
+
 // Callback from gtk_container_foreach. If |*label_p| is NULL and |widget| is
 // a GtkLabel, |*label_p| is set to |widget|. Used to find the first GtkLabel
 // in a container.
@@ -79,15 +88,25 @@ static void LabelLocatorCallback(GtkWidget* widget,
 // triggers continually hiding/showing the widget in that case.
 static void AdjustLabel(GtkTooltip* tooltip) {
   static const char kAdjustedLabelPropertyValue[] = "_adjusted_label_";
+  static const char kTooltipLabel[] = "_tooltip_label_";
   gpointer adjusted_value = g_object_get_data(G_OBJECT(tooltip),
                                               kAdjustedLabelPropertyValue);
-  if (adjusted_value)
+  if (adjusted_value) {
+    gpointer label_ptr = g_object_get_data(G_OBJECT(tooltip), kTooltipLabel);
+    if (label_ptr) {
+      // Setting the text in a label doesn't force recalculating wrap position.
+      // We force recalculating wrap position by resetting the max width.
+      gtk_label_set_max_width_chars(reinterpret_cast<GtkLabel*>(label_ptr),
+                                    2999);
+      gtk_label_set_max_width_chars(reinterpret_cast<GtkLabel*>(label_ptr),
+                                    3000);
+    }
     return;
+  }
 
   adjusted_value = reinterpret_cast<gpointer>(1);
   g_object_set_data(G_OBJECT(tooltip), kAdjustedLabelPropertyValue,
                     adjusted_value);
-
   GtkWidget* parent;
   {
     // Create a label so that we can get the parent. The Tooltip ends up taking
@@ -104,13 +123,9 @@ static void AdjustLabel(GtkTooltip* tooltip) {
     gtk_container_foreach(GTK_CONTAINER(parent), LabelLocatorCallback,
                           static_cast<gpointer>(&real_label));
     if (real_label) {
-      // For some reason I'm occasionally seeing a crash in trying to get font
-      // metrics. Explicitly setting the font avoids this.
-      PangoFontDescription* pfd =
-          gfx::Font::PangoFontFromGfxFont(gfx::Font());
-      gtk_widget_modify_font(GTK_WIDGET(real_label), pfd);
-      pango_font_description_free(pfd);
       gtk_label_set_max_width_chars(GTK_LABEL(real_label), 3000);
+      g_object_set_data(G_OBJECT(tooltip), kTooltipLabel,
+                        reinterpret_cast<gpointer>(real_label));
     }
   }
 }
@@ -145,7 +160,7 @@ bool TooltipManagerGtk::ShowTooltip(int x, int y, bool for_keyboard,
     return false;
 
   std::wstring text;
-  if (!view->GetTooltipText(view_loc.x(), view_loc.y(), &text))
+  if (!view->GetTooltipText(view_loc, &text))
     return false;
 
   AdjustLabel(tooltip);
@@ -153,7 +168,7 @@ bool TooltipManagerGtk::ShowTooltip(int x, int y, bool for_keyboard,
   // Sets the area of the tooltip. This way if different views in the same
   // widget have tooltips the tooltip doesn't get stuck at the same location.
   gfx::Rect vis_bounds = view->GetVisibleBounds();
-  gfx::Point widget_loc(vis_bounds.x(), vis_bounds.y());
+  gfx::Point widget_loc(vis_bounds.origin());
   View::ConvertPointToWidget(view, &widget_loc);
   GdkRectangle tip_area = { widget_loc.x(), widget_loc.y(),
                             vis_bounds.width(), vis_bounds.height() };
@@ -165,6 +180,7 @@ bool TooltipManagerGtk::ShowTooltip(int x, int y, bool for_keyboard,
   TrimTooltipToFit(&text, &max_width, &line_count, screen_loc.x(),
                    screen_loc.y());
   gtk_tooltip_set_text(tooltip, WideToUTF8(text).c_str());
+
 
   return true;
 }
@@ -192,7 +208,7 @@ void TooltipManagerGtk::ShowKeyboardTooltip(View* view) {
   HideKeyboardTooltip();
 
   std::wstring tooltip_text;
-  if (!view->GetTooltipText(0, 0, &tooltip_text))
+  if (!view->GetTooltipText(gfx::Point(), &tooltip_text))
     return;  // The view doesn't have a tooltip, nothing to do.
 
   keyboard_view_ = view;

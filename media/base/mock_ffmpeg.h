@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define MEDIA_BASE_MOCK_FFMPEG_H_
 
 // TODO(scherkus): See if we can remove ffmpeg_common from this file.
-#include "media/filters/ffmpeg_common.h"
+#include "media/ffmpeg/ffmpeg_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace media {
@@ -16,9 +16,12 @@ class MockFFmpeg {
   MockFFmpeg();
   virtual ~MockFFmpeg();
 
+  // TODO(ajwong): Organize this class, and make sure that all mock entrypoints
+  // are still used.
   MOCK_METHOD0(AVCodecInit, void());
   MOCK_METHOD1(AVRegisterProtocol, int(URLProtocol* protocol));
   MOCK_METHOD0(AVRegisterAll, void());
+  MOCK_METHOD1(AVRegisterLockManager, int(int (*cb)(void**, enum AVLockOp)));
 
   MOCK_METHOD1(AVCodecFindDecoder, AVCodec*(enum CodecID id));
   MOCK_METHOD2(AVCodecOpen, int(AVCodecContext* avctx, AVCodec* codec));
@@ -29,6 +32,14 @@ class MockFFmpeg {
   MOCK_METHOD4(AVCodecDecodeVideo2,
                int(AVCodecContext* avctx, AVFrame* picture,
                    int* got_picture_ptr, AVPacket* avpkt));
+  MOCK_METHOD1(AVBitstreamFilterInit,
+               AVBitStreamFilterContext*(const char *name));
+  MOCK_METHOD8(AVBitstreamFilterFilter,
+               int(AVBitStreamFilterContext* bsfc, AVCodecContext* avctx,
+                   const char* args, uint8_t** poutbuf, int* poutbuf_size,
+                   const uint8_t* buf, int buf_size, int keyframe));
+  MOCK_METHOD1(AVBitstreamFilterClose, void(AVBitStreamFilterContext* bsf));
+  MOCK_METHOD1(AVDestructPacket, void(AVPacket* packet));
 
   MOCK_METHOD5(AVOpenInputFile, int(AVFormatContext** format,
                                     const char* filename,
@@ -89,6 +100,18 @@ ACTION_P3(CreatePacket, stream_index, data, size) {
 
   // Increment number of packets allocated.
   MockFFmpeg::get()->inc_outstanding_packets();
+
+  return 0;
+}
+
+// Used for simulating av_read_frame().
+ACTION_P3(CreatePacketNoCount, stream_index, data, size) {
+  // Confirm we're dealing with AVPacket so we can safely const_cast<>.
+  ::testing::StaticAssertTypeEq<AVPacket*, arg1_type>();
+  memset(arg1, 0, sizeof(*arg1));
+  arg1->stream_index = stream_index;
+  arg1->data = const_cast<uint8*>(data);
+  arg1->size = size;
 
   return 0;
 }

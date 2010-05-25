@@ -1,29 +1,99 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include <list>
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/string16.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/autofill/autofill_profile.h"
+#include "chrome/browser/autofill/autofill_type.h"
+#include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/webdata/autofill_change.h"
+#include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_paths.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/autofill_form.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
+#include "webkit/glue/form_field.h"
 #include "webkit/glue/password_form.h"
 
 using base::Time;
 using base::TimeDelta;
-using webkit_glue::AutofillForm;
+using webkit_glue::FormField;
 using webkit_glue::PasswordForm;
+
+// So we can compare AutofillKeys with EXPECT_EQ().
+std::ostream& operator<<(std::ostream& os, const AutofillKey& key) {
+  return os << UTF16ToASCII(key.name()) << ", " << UTF16ToASCII(key.value());
+}
+
+// So we can compare AutofillChanges with EXPECT_EQ().
+std::ostream& operator<<(std::ostream& os, const AutofillChange& change) {
+  switch (change.type()) {
+    case AutofillChange::ADD: {
+      os << "ADD";
+      break;
+    }
+    case AutofillChange::UPDATE: {
+      os << "UPDATE";
+      break;
+    }
+    case AutofillChange::REMOVE: {
+      os << "REMOVE";
+      break;
+    }
+  }
+  return os << " " << change.key();
+}
+
+bool CompareAutofillEntries(const AutofillEntry& a, const AutofillEntry& b) {
+  std::set<base::Time> timestamps1(a.timestamps().begin(),
+                                    a.timestamps().end());
+  std::set<base::Time> timestamps2(b.timestamps().begin(),
+                                    b.timestamps().end());
+
+  int compVal = a.key().name().compare(b.key().name());
+  if (compVal != 0) {
+    return compVal < 0;
+  }
+
+  compVal = a.key().value().compare(b.key().value());
+  if (compVal != 0) {
+    return compVal < 0;
+  }
+
+  if (timestamps1.size() != timestamps2.size()) {
+    return timestamps1.size() < timestamps2.size();
+  }
+
+  std::set<base::Time>::iterator it;
+  for (it = timestamps1.begin(); it != timestamps1.end(); it++) {
+    timestamps2.erase(*it);
+  }
+
+  return timestamps2.size() != 0U;
+}
 
 class WebDatabaseTest : public testing::Test {
  protected:
-
+  typedef std::vector<AutofillChange> AutofillChangeList;
+  typedef std::set<AutofillEntry,
+    bool (*)(const AutofillEntry&, const AutofillEntry&)> AutofillEntrySet;
+  typedef std::set<AutofillEntry, bool (*)(const AutofillEntry&,
+    const AutofillEntry&)>::iterator AutofillEntrySetIterator;
   virtual void SetUp() {
     PathService::Get(chrome::DIR_TEST_DATA, &file_);
     const std::string test_db = "TestWebDatabase" +
@@ -57,8 +127,8 @@ class WebDatabaseTest : public testing::Test {
     DictionaryValue::key_iterator e(a.end_keys());
     std::wstring av, bv;
     while (i != e) {
-      if (!(a.GetString(*i, &av)) ||
-          !(b.GetString(*i, &bv)) ||
+      if (!(a.GetStringWithoutPathExpansion(*i, &av)) ||
+          !(b.GetStringWithoutPathExpansion(*i, &bv)) ||
           av != bv)
         return false;
 
@@ -81,13 +151,26 @@ class WebDatabaseTest : public testing::Test {
     url->set_prepopulate_id(id);
   }
 
+  static AutofillEntry MakeAutofillEntry(const char* name,
+                                         const char* value,
+                                         time_t timestamp0,
+                                         time_t timestamp1) {
+    std::vector<base::Time> timestamps;
+    if (timestamp0 >= 0)
+      timestamps.push_back(Time::FromTimeT(timestamp0));
+    if (timestamp1 >= 0)
+      timestamps.push_back(Time::FromTimeT(timestamp1));
+    return AutofillEntry(
+        AutofillKey(ASCIIToUTF16(name), ASCIIToUTF16(value)), timestamps);
+  }
+
   FilePath file_;
 };
 
 TEST_F(WebDatabaseTest, Keywords) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -148,7 +231,7 @@ TEST_F(WebDatabaseTest, Keywords) {
 TEST_F(WebDatabaseTest, KeywordMisc) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   ASSERT_EQ(0, db.GetDefaulSearchProviderID());
   ASSERT_EQ(0, db.GetBuitinKeywordVersion());
@@ -163,7 +246,7 @@ TEST_F(WebDatabaseTest, KeywordMisc) {
 TEST_F(WebDatabaseTest, UpdateKeyword) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -225,7 +308,7 @@ TEST_F(WebDatabaseTest, UpdateKeyword) {
 TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
@@ -252,7 +335,7 @@ TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
 TEST_F(WebDatabaseTest, Logins) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   std::vector<PasswordForm*> result;
 
@@ -264,11 +347,11 @@ TEST_F(WebDatabaseTest, Logins) {
   PasswordForm form;
   form.origin = GURL("http://www.google.com/accounts/LoginAuth");
   form.action = GURL("http://www.google.com/accounts/Login");
-  form.username_element = L"Email";
-  form.username_value = L"test@gmail.com";
-  form.password_element = L"Passwd";
-  form.password_value = L"test";
-  form.submit_element = L"signIn";
+  form.username_element = ASCIIToUTF16("Email");
+  form.username_value = ASCIIToUTF16("test@gmail.com");
+  form.password_element = ASCIIToUTF16("Passwd");
+  form.password_value = ASCIIToUTF16("test");
+  form.submit_element = ASCIIToUTF16("signIn");
   form.signon_realm = "http://www.google.com/";
   form.ssl_valid = false;
   form.preferred = false;
@@ -290,7 +373,7 @@ TEST_F(WebDatabaseTest, Logins) {
   // The example site changes...
   PasswordForm form2(form);
   form2.origin = GURL("http://www.google.com/new/accounts/LoginAuth");
-  form2.submit_element = L"reallySignIn";
+  form2.submit_element = ASCIIToUTF16("reallySignIn");
 
   // Match against an inexact copy
   EXPECT_TRUE(db.GetLogins(form2, &result));
@@ -355,7 +438,7 @@ TEST_F(WebDatabaseTest, Logins) {
 
   // User changes his password.
   PasswordForm form6(form5);
-  form6.password_value = L"test6";
+  form6.password_value = ASCIIToUTF16("test6");
   form6.preferred = true;
 
   // We update, and check to make sure it matches the
@@ -385,29 +468,43 @@ TEST_F(WebDatabaseTest, Logins) {
 TEST_F(WebDatabaseTest, Autofill) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   Time t1 = Time::Now();
 
   // Simulate the submission of a handful of entries in a field called "Name",
   // some more often than others.
-  EXPECT_TRUE(db.AddAutofillFormElement(
-      AutofillForm::Element(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"))));
+  AutofillChangeList changes;
+  EXPECT_TRUE(db.AddFormFieldValue(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes));
   std::vector<string16> v;
   for (int i = 0; i < 5; i++) {
-    EXPECT_TRUE(db.AddAutofillFormElement(
-        AutofillForm::Element(ASCIIToUTF16("Name"),
-                              ASCIIToUTF16("Clark Kent"))));
+    EXPECT_TRUE(db.AddFormFieldValue(
+        FormField(string16(),
+                  ASCIIToUTF16("Name"),
+                  ASCIIToUTF16("Clark Kent"),
+                  string16()),
+        &changes));
   }
   for (int i = 0; i < 3; i++) {
-    EXPECT_TRUE(db.AddAutofillFormElement(
-        AutofillForm::Element(ASCIIToUTF16("Name"),
-                              ASCIIToUTF16("Clark Sutter"))));
+    EXPECT_TRUE(db.AddFormFieldValue(
+        FormField(string16(),
+                  ASCIIToUTF16("Name"),
+                  ASCIIToUTF16("Clark Sutter"),
+                  string16()),
+        &changes));
   }
   for (int i = 0; i < 2; i++) {
-    EXPECT_TRUE(db.AddAutofillFormElement(
-        AutofillForm::Element(ASCIIToUTF16("Favorite Color"),
-                              ASCIIToUTF16("Green"))));
+    EXPECT_TRUE(db.AddFormFieldValue(
+        FormField(string16(),
+                  ASCIIToUTF16("Favorite Color"),
+                  ASCIIToUTF16("Green"),
+                  string16()),
+        &changes));
   }
 
   int count = 0;
@@ -416,7 +513,10 @@ TEST_F(WebDatabaseTest, Autofill) {
   // We have added the name Clark Kent 5 times, so count should be 5 and pair_id
   // should be somthing non-zero.
   EXPECT_TRUE(db.GetIDAndCountOfFormElement(
-      AutofillForm::Element(ASCIIToUTF16("Name"), ASCIIToUTF16("Clark Kent")),
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Clark Kent"),
+                string16()),
       &pair_id, &count));
   EXPECT_EQ(5, count);
   EXPECT_NE(0, pair_id);
@@ -424,13 +524,18 @@ TEST_F(WebDatabaseTest, Autofill) {
   // Storing in the data base should be case sensitive, so there should be no
   // database entry for clark kent lowercase.
   EXPECT_TRUE(db.GetIDAndCountOfFormElement(
-      AutofillForm::Element(ASCIIToUTF16("Name"), ASCIIToUTF16("clark kent")),
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("clark kent"),
+                string16()),
       &pair_id, &count));
   EXPECT_EQ(0, count);
 
   EXPECT_TRUE(db.GetIDAndCountOfFormElement(
-      AutofillForm::Element(ASCIIToUTF16("Favorite Color"),
-                            ASCIIToUTF16("Green")),
+      FormField(string16(),
+                ASCIIToUTF16("Favorite Color"),
+                ASCIIToUTF16("Green"),
+                string16()),
       &pair_id, &count));
   EXPECT_EQ(2, count);
 
@@ -468,10 +573,33 @@ TEST_F(WebDatabaseTest, Autofill) {
 
   // Removing all elements since the beginning of this function should remove
   // everything from the database.
-  EXPECT_TRUE(db.RemoveFormElementsAddedBetween(t1, Time()));
+  changes.clear();
+  EXPECT_TRUE(db.RemoveFormElementsAddedBetween(t1, Time(), &changes));
+
+  const AutofillChange expected_changes[] = {
+    AutofillChange(AutofillChange::REMOVE,
+                   AutofillKey(ASCIIToUTF16("Name"),
+                               ASCIIToUTF16("Superman"))),
+    AutofillChange(AutofillChange::REMOVE,
+                   AutofillKey(ASCIIToUTF16("Name"),
+                               ASCIIToUTF16("Clark Kent"))),
+    AutofillChange(AutofillChange::REMOVE,
+                   AutofillKey(ASCIIToUTF16("Name"),
+                               ASCIIToUTF16("Clark Sutter"))),
+    AutofillChange(AutofillChange::REMOVE,
+                   AutofillKey(ASCIIToUTF16("Favorite Color"),
+                               ASCIIToUTF16("Green"))),
+  };
+  EXPECT_EQ(arraysize(expected_changes), changes.size());
+  for (size_t i = 0; i < arraysize(expected_changes); i++) {
+    EXPECT_EQ(expected_changes[i], changes[i]);
+  }
 
   EXPECT_TRUE(db.GetIDAndCountOfFormElement(
-      AutofillForm::Element(ASCIIToUTF16("Name"), ASCIIToUTF16("Clark Kent")),
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Clark Kent"),
+                string16()),
       &pair_id, &count));
   EXPECT_EQ(0, count);
 
@@ -481,14 +609,26 @@ TEST_F(WebDatabaseTest, Autofill) {
 
   // Now add some values with empty strings.
   const string16 kValue = ASCIIToUTF16("  toto   ");
-  EXPECT_TRUE(db.AddAutofillFormElement(
-      AutofillForm::Element(ASCIIToUTF16("blank"), string16())));
-  EXPECT_TRUE(db.AddAutofillFormElement(
-      AutofillForm::Element(ASCIIToUTF16("blank"), ASCIIToUTF16(" "))));
-  EXPECT_TRUE(db.AddAutofillFormElement(
-      AutofillForm::Element(ASCIIToUTF16("blank"), ASCIIToUTF16("      "))));
-  EXPECT_TRUE(db.AddAutofillFormElement(
-      AutofillForm::Element(ASCIIToUTF16("blank"), kValue)));
+  EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
+                                             ASCIIToUTF16("blank"),
+                                             string16(),
+                                             string16()),
+                                   &changes));
+  EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
+                                             ASCIIToUTF16("blank"),
+                                             ASCIIToUTF16(" "),
+                                             string16()),
+                                   &changes));
+  EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
+                                             ASCIIToUTF16("blank"),
+                                             ASCIIToUTF16("      "),
+                                             string16()),
+                                   &changes));
+  EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
+                                             ASCIIToUTF16("blank"),
+                                             kValue,
+                                             string16()),
+                                   &changes));
 
   // They should be stored normally as the DB layer does not check for empty
   // values.
@@ -501,21 +641,255 @@ TEST_F(WebDatabaseTest, Autofill) {
   db.ClearAutofillEmptyValueElements();
 
   v.clear();
-  EXPECT_TRUE(db.GetFormValuesForElementName(ASCIIToUTF16("blank"), string16(), &v, 10));
+  EXPECT_TRUE(db.GetFormValuesForElementName(ASCIIToUTF16("blank"),
+      string16(), &v, 10));
   ASSERT_EQ(1U, v.size());
 
   EXPECT_EQ(kValue, v[0]);
 }
 
+TEST_F(WebDatabaseTest, Autofill_RemoveBetweenChanges) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  TimeDelta one_day(TimeDelta::FromDays(1));
+  Time t1 = Time::Now();
+  Time t2 = t1 + one_day;
+
+  AutofillChangeList changes;
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      t1));
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      t2));
+
+  changes.clear();
+  EXPECT_TRUE(db.RemoveFormElementsAddedBetween(t1, t2, &changes));
+  ASSERT_EQ(1U, changes.size());
+  EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
+                             AutofillKey(ASCIIToUTF16("Name"),
+                                         ASCIIToUTF16("Superman"))),
+            changes[0]);
+  changes.clear();
+
+  EXPECT_TRUE(db.RemoveFormElementsAddedBetween(t2, t2 + one_day, &changes));
+  ASSERT_EQ(1U, changes.size());
+  EXPECT_EQ(AutofillChange(AutofillChange::REMOVE,
+                             AutofillKey(ASCIIToUTF16("Name"),
+                                         ASCIIToUTF16("Superman"))),
+            changes[0]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_AddChanges) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  TimeDelta one_day(TimeDelta::FromDays(1));
+  Time t1 = Time::Now();
+  Time t2 = t1 + one_day;
+
+  AutofillChangeList changes;
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      t1));
+  ASSERT_EQ(1U, changes.size());
+  EXPECT_EQ(AutofillChange(AutofillChange::ADD,
+                             AutofillKey(ASCIIToUTF16("Name"),
+                                         ASCIIToUTF16("Superman"))),
+            changes[0]);
+
+  changes.clear();
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      t2));
+  ASSERT_EQ(1U, changes.size());
+  EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
+                             AutofillKey(ASCIIToUTF16("Name"),
+                                         ASCIIToUTF16("Superman"))),
+            changes[0]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_UpdateOneWithOneTimestamp) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, -1));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  FormField field(string16(),
+                  ASCIIToUTF16("foo"),
+                  ASCIIToUTF16("bar"),
+                  string16());
+  int64 pair_id;
+  int count;
+  ASSERT_TRUE(db.GetIDAndCountOfFormElement(field, &pair_id, &count));
+  EXPECT_LE(0, pair_id);
+  EXPECT_EQ(1, count);
+
+  std::vector<AutofillEntry> all_entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&all_entries));
+  ASSERT_EQ(1U, all_entries.size());
+  EXPECT_TRUE(entry == all_entries[0]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_UpdateOneWithTwoTimestamps) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, 2));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  FormField field(string16(),
+                  ASCIIToUTF16("foo"),
+                  ASCIIToUTF16("bar"),
+                  string16());
+  int64 pair_id;
+  int count;
+  ASSERT_TRUE(db.GetIDAndCountOfFormElement(field, &pair_id, &count));
+  EXPECT_LE(0, pair_id);
+  EXPECT_EQ(2, count);
+
+  std::vector<AutofillEntry> all_entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&all_entries));
+  ASSERT_EQ(1U, all_entries.size());
+  EXPECT_TRUE(entry == all_entries[0]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_GetAutofillTimestamps) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, 2));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  std::vector<base::Time> timestamps;
+  ASSERT_TRUE(db.GetAutofillTimestamps(ASCIIToUTF16("foo"),
+                                       ASCIIToUTF16("bar"),
+                                       &timestamps));
+  ASSERT_EQ(2U, timestamps.size());
+  EXPECT_TRUE(Time::FromTimeT(1) == timestamps[0]);
+  EXPECT_TRUE(Time::FromTimeT(2) == timestamps[1]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_UpdateTwo) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillEntry entry0(MakeAutofillEntry("foo", "bar0", 1, -1));
+  AutofillEntry entry1(MakeAutofillEntry("foo", "bar1", 2, 3));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry0);
+  entries.push_back(entry1);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  FormField field0(string16(),
+                  ASCIIToUTF16("foo"),
+                  ASCIIToUTF16("bar0"),
+                  string16());
+  int64 pair_id;
+  int count;
+  ASSERT_TRUE(db.GetIDAndCountOfFormElement(field0, &pair_id, &count));
+  EXPECT_LE(0, pair_id);
+  EXPECT_EQ(1, count);
+
+  FormField field1(string16(),
+                  ASCIIToUTF16("foo"),
+                  ASCIIToUTF16("bar1"),
+                  string16());
+  ASSERT_TRUE(db.GetIDAndCountOfFormElement(field1, &pair_id, &count));
+  EXPECT_LE(0, pair_id);
+  EXPECT_EQ(2, count);
+}
+
+TEST_F(WebDatabaseTest, Autofill_UpdateReplace) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillChangeList changes;
+  // Add a form field.  This will be replaced.
+  EXPECT_TRUE(db.AddFormFieldValue(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes));
+
+  AutofillEntry entry(MakeAutofillEntry("Name", "Superman", 1, 2));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  std::vector<AutofillEntry> all_entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&all_entries));
+  ASSERT_EQ(1U, all_entries.size());
+  EXPECT_TRUE(entry == all_entries[0]);
+}
+
+TEST_F(WebDatabaseTest, Autofill_UpdateDontReplace) {
+  WebDatabase db;
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  Time t = Time::Now();
+  AutofillEntry existing(
+      MakeAutofillEntry("Name", "Superman", t.ToTimeT(), -1));
+
+  AutofillChangeList changes;
+  // Add a form field.  This will NOT be replaced.
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                existing.key().name(),
+                existing.key().value(),
+                string16()),
+      &changes,
+      t));
+  AutofillEntry entry(MakeAutofillEntry("Name", "Clark Kent", 1, 2));
+  std::vector<AutofillEntry> entries;
+  entries.push_back(entry);
+  ASSERT_TRUE(db.UpdateAutofillEntries(entries));
+
+  std::vector<AutofillEntry> all_entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&all_entries));
+  ASSERT_EQ(2U, all_entries.size());
+  AutofillEntrySet expected_entries(all_entries.begin(),
+                                    all_entries.end(),
+                                    CompareAutofillEntries);
+  EXPECT_EQ(1U, expected_entries.count(existing));
+  EXPECT_EQ(1U, expected_entries.count(entry));
+}
+
 static bool AddTimestampedLogin(WebDatabase* db, std::string url,
-                                std::wstring unique_string, const Time& time) {
+                                const std::string& unique_string,
+                                const Time& time) {
   // Example password form.
   PasswordForm form;
   form.origin = GURL(url + std::string("/LoginAuth"));
-  form.username_element = unique_string.c_str();
-  form.username_value = unique_string.c_str();
-  form.password_element = unique_string.c_str();
-  form.submit_element = L"signIn";
+  form.username_element = ASCIIToUTF16(unique_string);
+  form.username_value = ASCIIToUTF16(unique_string);
+  form.password_element = ASCIIToUTF16(unique_string);
+  form.submit_element = ASCIIToUTF16("signIn");
   form.signon_realm = url;
   form.date_created = time;
   return db->AddLogin(form);
@@ -531,7 +905,7 @@ static void ClearResults(std::vector<PasswordForm*>* results) {
 TEST_F(WebDatabaseTest, ClearPrivateData_SavedPasswords) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   std::vector<PasswordForm*> result;
 
@@ -543,11 +917,11 @@ TEST_F(WebDatabaseTest, ClearPrivateData_SavedPasswords) {
   TimeDelta one_day = TimeDelta::FromDays(1);
 
   // Create one with a 0 time.
-  EXPECT_TRUE(AddTimestampedLogin(&db, "1", L"foo1", Time()));
+  EXPECT_TRUE(AddTimestampedLogin(&db, "1", "foo1", Time()));
   // Create one for now and +/- 1 day.
-  EXPECT_TRUE(AddTimestampedLogin(&db, "2", L"foo2", now - one_day));
-  EXPECT_TRUE(AddTimestampedLogin(&db, "3", L"foo3", now));
-  EXPECT_TRUE(AddTimestampedLogin(&db, "4", L"foo4", now + one_day));
+  EXPECT_TRUE(AddTimestampedLogin(&db, "2", "foo2", now - one_day));
+  EXPECT_TRUE(AddTimestampedLogin(&db, "3", "foo3", now));
+  EXPECT_TRUE(AddTimestampedLogin(&db, "4", "foo4", now + one_day));
 
   // Verify inserts worked.
   EXPECT_TRUE(db.GetAllLogins(&result, true));
@@ -573,7 +947,7 @@ TEST_F(WebDatabaseTest, ClearPrivateData_SavedPasswords) {
 TEST_F(WebDatabaseTest, BlacklistedLogins) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -584,9 +958,9 @@ TEST_F(WebDatabaseTest, BlacklistedLogins) {
   PasswordForm form;
   form.origin = GURL("http://www.google.com/accounts/LoginAuth");
   form.action = GURL("http://www.google.com/accounts/Login");
-  form.username_element = L"Email";
-  form.password_element = L"Passwd";
-  form.submit_element = L"signIn";
+  form.username_element = ASCIIToUTF16("Email");
+  form.password_element = ASCIIToUTF16("Passwd");
+  form.submit_element = ASCIIToUTF16("signIn");
   form.signon_realm = "http://www.google.com/";
   form.ssl_valid = false;
   form.preferred = true;
@@ -612,7 +986,7 @@ TEST_F(WebDatabaseTest, BlacklistedLogins) {
 TEST_F(WebDatabaseTest, WebAppHasAllImages) {
   WebDatabase db;
 
-  EXPECT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
   GURL url("http://google.com/");
 
   // Initial value for unknown web app should be false.
@@ -630,7 +1004,7 @@ TEST_F(WebDatabaseTest, WebAppHasAllImages) {
 TEST_F(WebDatabaseTest, WebAppImages) {
   WebDatabase db;
 
-  ASSERT_TRUE(db.Init(file_));
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
   GURL url("http://google.com/");
 
   // Web app should initially have no images.
@@ -659,7 +1033,7 @@ TEST_F(WebDatabaseTest, WebAppImages) {
   // Set some random pixels so that we can identify the image. We don't use
   // transparent images because of pre-multiplication rounding errors.
   SkColor test_pixel_1 = 0xffccbbaa;
-  SkColor test_pixel_2 = 0x00aabbaa;
+  SkColor test_pixel_2 = 0xffaabbaa;
   SkColor test_pixel_3 = 0xff339966;
   image.getAddr32(0, 1)[0] = test_pixel_1;
   image.getAddr32(0, 1)[1] = test_pixel_2;
@@ -699,4 +1073,296 @@ TEST_F(WebDatabaseTest, WebAppImages) {
     ASSERT_EQ(16, images[1].width());
     ASSERT_EQ(16, images[1].height());
   }
+}
+
+TEST_F(WebDatabaseTest, AutoFillProfile) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  // Add a 'Home' profile.
+  AutoFillProfile home_profile(ASCIIToUTF16("Home"), 17);
+  home_profile.SetInfo(AutoFillType(NAME_FIRST), ASCIIToUTF16("John"));
+  home_profile.SetInfo(AutoFillType(NAME_MIDDLE), ASCIIToUTF16("Q."));
+  home_profile.SetInfo(AutoFillType(NAME_LAST), ASCIIToUTF16("Smith"));
+  home_profile.SetInfo(AutoFillType(EMAIL_ADDRESS),
+                       ASCIIToUTF16("js@smith.xyz"));
+  home_profile.SetInfo(AutoFillType(COMPANY_NAME), ASCIIToUTF16("Google"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_LINE1),
+                       ASCIIToUTF16("1234 Apple Way"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_LINE2),
+                       ASCIIToUTF16("unit 5"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_CITY),
+                       ASCIIToUTF16("Los Angeles"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_STATE), ASCIIToUTF16("CA"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_ZIP), ASCIIToUTF16("90025"));
+  home_profile.SetInfo(AutoFillType(ADDRESS_HOME_COUNTRY), ASCIIToUTF16("US"));
+  home_profile.SetInfo(AutoFillType(PHONE_HOME_WHOLE_NUMBER),
+                       ASCIIToUTF16("18181234567"));
+  home_profile.SetInfo(AutoFillType(PHONE_FAX_WHOLE_NUMBER),
+                       ASCIIToUTF16("1915243678"));
+
+  EXPECT_TRUE(db.AddAutoFillProfile(home_profile));
+
+  // Get the 'Home' profile.
+  AutoFillProfile* db_profile;
+  ASSERT_TRUE(db.GetAutoFillProfileForLabel(ASCIIToUTF16("Home"), &db_profile));
+  EXPECT_EQ(home_profile, *db_profile);
+  delete db_profile;
+
+  // Add a 'Billing' profile.
+  AutoFillProfile billing_profile = home_profile;
+  billing_profile.set_label(ASCIIToUTF16("Billing"));
+  billing_profile.set_unique_id(13);
+  billing_profile.SetInfo(AutoFillType(ADDRESS_HOME_LINE1),
+                          ASCIIToUTF16("5678 Bottom Street"));
+  billing_profile.SetInfo(AutoFillType(ADDRESS_HOME_LINE2),
+                          ASCIIToUTF16("suite 3"));
+
+  EXPECT_TRUE(db.AddAutoFillProfile(billing_profile));
+  ASSERT_TRUE(db.GetAutoFillProfileForLabel(ASCIIToUTF16("Billing"),
+                                            &db_profile));
+  EXPECT_EQ(billing_profile, *db_profile);
+  delete db_profile;
+
+  // Update the 'Billing' profile.
+  billing_profile.SetInfo(AutoFillType(NAME_FIRST), ASCIIToUTF16("Jane"));
+  EXPECT_TRUE(db.UpdateAutoFillProfile(billing_profile));
+  ASSERT_TRUE(db.GetAutoFillProfileForLabel(ASCIIToUTF16("Billing"),
+                                            &db_profile));
+  EXPECT_EQ(billing_profile, *db_profile);
+  delete db_profile;
+
+  // Remove the 'Billing' profile.
+  EXPECT_TRUE(db.RemoveAutoFillProfile(billing_profile.unique_id()));
+  EXPECT_FALSE(db.GetAutoFillProfileForLabel(ASCIIToUTF16("Billing"),
+                                             &db_profile));
+}
+
+TEST_F(WebDatabaseTest, CreditCard) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  // Add a 'Work' credit card.
+  CreditCard work_creditcard(ASCIIToUTF16("Work"), 13);
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_NAME),
+                          ASCIIToUTF16("Jack Torrance"));
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_TYPE),
+                          ASCIIToUTF16("Visa"));
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_NUMBER),
+                          ASCIIToUTF16("1234567890123456"));
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_MONTH),
+                          ASCIIToUTF16("04"));
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
+                          ASCIIToUTF16("2013"));
+  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
+                          ASCIIToUTF16("987"));
+  work_creditcard.set_billing_address(ASCIIToUTF16("Overlook Hotel"));
+  work_creditcard.set_shipping_address(ASCIIToUTF16("Timberline Lodge"));
+
+  EXPECT_TRUE(db.AddCreditCard(work_creditcard));
+
+  // Get the 'Work' credit card.
+  CreditCard* db_creditcard;
+  ASSERT_TRUE(db.GetCreditCardForLabel(ASCIIToUTF16("Work"), &db_creditcard));
+  EXPECT_EQ(work_creditcard, *db_creditcard);
+  delete db_creditcard;
+
+  // Add a 'Target' profile.
+  CreditCard target_creditcard(ASCIIToUTF16("Target"), 7);
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_NAME),
+                            ASCIIToUTF16("Jack Torrance"));
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_TYPE),
+                            ASCIIToUTF16("Mastercard"));
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_NUMBER),
+                            ASCIIToUTF16("1111222233334444"));
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_MONTH),
+                            ASCIIToUTF16("06"));
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
+                            ASCIIToUTF16("2012"));
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
+                            ASCIIToUTF16("123"));
+  target_creditcard.set_billing_address(ASCIIToUTF16("Overlook Hotel"));
+  target_creditcard.set_shipping_address(string16());
+
+  EXPECT_TRUE(db.AddCreditCard(target_creditcard));
+  ASSERT_TRUE(db.GetCreditCardForLabel(ASCIIToUTF16("Target"),
+                                       &db_creditcard));
+  EXPECT_EQ(target_creditcard, *db_creditcard);
+  delete db_creditcard;
+
+  // Update the 'Target' profile.
+  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_NAME),
+                          ASCIIToUTF16("Charles Grady"));
+  EXPECT_TRUE(db.UpdateCreditCard(target_creditcard));
+  ASSERT_TRUE(db.GetCreditCardForLabel(ASCIIToUTF16("Target"), &db_creditcard));
+  EXPECT_EQ(target_creditcard, *db_creditcard);
+  delete db_creditcard;
+
+  // Remove the 'Billing' profile.
+  EXPECT_TRUE(db.RemoveCreditCard(target_creditcard.unique_id()));
+  EXPECT_FALSE(db.GetCreditCardForLabel(ASCIIToUTF16("Target"),
+                                        &db_creditcard));
+}
+
+TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_NoResults) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  std::vector<AutofillEntry> entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&entries));
+
+  EXPECT_EQ(0U, entries.size());
+}
+
+TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_OneResult) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillChangeList changes;
+  std::map<std::string, std::vector<base::Time> > name_value_times_map;
+
+  time_t start = 0;
+  std::vector<base::Time> timestamps1;
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      Time::FromTimeT(start)));
+  timestamps1.push_back(Time::FromTimeT(start));
+  std::string key1("NameSuperman");
+  name_value_times_map.insert(std::pair<std::string,
+    std::vector<base::Time> > (key1, timestamps1));
+
+  AutofillEntrySet expected_entries(CompareAutofillEntries);
+  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
+  AutofillEntry ae1(ak1, timestamps1);
+
+  expected_entries.insert(ae1);
+
+  std::vector<AutofillEntry> entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&entries));
+  AutofillEntrySet entry_set(entries.begin(), entries.end(),
+    CompareAutofillEntries);
+
+  // make sure the lists of entries match
+  ASSERT_EQ(expected_entries.size(), entry_set.size());
+  AutofillEntrySetIterator it;
+  for (it = entry_set.begin(); it != entry_set.end(); it++) {
+    expected_entries.erase(*it);
+  }
+
+  EXPECT_EQ(0U, expected_entries.size());
+}
+
+TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoDistinct) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillChangeList changes;
+  std::map<std::string, std::vector<base::Time> > name_value_times_map;
+  time_t start = 0;
+
+  std::vector<base::Time> timestamps1;
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Superman"),
+                string16()),
+      &changes,
+      Time::FromTimeT(start)));
+  timestamps1.push_back(Time::FromTimeT(start));
+  std::string key1("NameSuperman");
+  name_value_times_map.insert(std::pair<std::string,
+    std::vector<base::Time> > (key1, timestamps1));
+
+  start++;
+  std::vector<base::Time> timestamps2;
+  EXPECT_TRUE(db.AddFormFieldValueTime(
+      FormField(string16(),
+                ASCIIToUTF16("Name"),
+                ASCIIToUTF16("Clark Kent"),
+                string16()),
+      &changes,
+      Time::FromTimeT(start)));
+  timestamps2.push_back(Time::FromTimeT(start));
+  std::string key2("NameClark Kent");
+  name_value_times_map.insert(std::pair<std::string,
+    std::vector<base::Time> > (key2, timestamps2));
+
+  AutofillEntrySet expected_entries(CompareAutofillEntries);
+  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
+  AutofillKey ak2(ASCIIToUTF16("Name"), ASCIIToUTF16("Clark Kent"));
+  AutofillEntry ae1(ak1, timestamps1);
+  AutofillEntry ae2(ak2, timestamps2);
+
+  expected_entries.insert(ae1);
+  expected_entries.insert(ae2);
+
+  std::vector<AutofillEntry> entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&entries));
+  AutofillEntrySet entry_set(entries.begin(), entries.end(),
+    CompareAutofillEntries);
+
+  // make sure the lists of entries match
+  ASSERT_EQ(expected_entries.size(), entry_set.size());
+  AutofillEntrySetIterator it;
+  for (it = entry_set.begin(); it != entry_set.end(); it++) {
+    expected_entries.erase(*it);
+  }
+
+  EXPECT_EQ(0U, expected_entries.size());
+}
+
+TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoSame) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  AutofillChangeList changes;
+  std::map<std::string, std::vector<base::Time> > name_value_times_map;
+
+  time_t start = 0;
+  std::vector<base::Time> timestamps;
+  for (int i = 0; i < 2; i++) {
+    EXPECT_TRUE(db.AddFormFieldValueTime(
+        FormField(string16(),
+                  ASCIIToUTF16("Name"),
+                  ASCIIToUTF16("Superman"),
+                  string16()),
+        &changes,
+        Time::FromTimeT(start)));
+    timestamps.push_back(Time::FromTimeT(start));
+    start++;
+  }
+
+  std::string key("NameSuperman");
+  name_value_times_map.insert(std::pair<std::string,
+      std::vector<base::Time> > (key, timestamps));
+
+  AutofillEntrySet expected_entries(CompareAutofillEntries);
+  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
+  AutofillEntry ae1(ak1, timestamps);
+
+  expected_entries.insert(ae1);
+
+  std::vector<AutofillEntry> entries;
+  ASSERT_TRUE(db.GetAllAutofillEntries(&entries));
+  AutofillEntrySet entry_set(entries.begin(), entries.end(),
+    CompareAutofillEntries);
+
+  // make sure the lists of entries match
+  ASSERT_EQ(expected_entries.size(), entry_set.size());
+  AutofillEntrySetIterator it;
+  for (it = entry_set.begin(); it != entry_set.end(); it++) {
+    expected_entries.erase(*it);
+  }
+
+  EXPECT_EQ(0U, expected_entries.size());
 }

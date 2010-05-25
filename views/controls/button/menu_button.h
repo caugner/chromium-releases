@@ -5,8 +5,10 @@
 #ifndef VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
 #define VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
 
-#include "app/gfx/font.h"
+#include <string>
+
 #include "base/time.h"
+#include "gfx/font.h"
 #include "views/background.h"
 #include "views/controls/button/text_button.h"
 
@@ -25,6 +27,9 @@ class ViewMenuDelegate;
 ////////////////////////////////////////////////////////////////////////////////
 class MenuButton : public TextButton {
  public:
+  // The menu button's class name.
+  static const char kViewClassName[];
+
   //
   // Create a Button
   MenuButton(ButtonListener* listener,
@@ -35,6 +40,10 @@ class MenuButton : public TextButton {
 
   void set_menu_delegate(ViewMenuDelegate* delegate) {
     menu_delegate_ = delegate;
+  }
+
+  void set_menu_marker(const SkBitmap* menu_marker) {
+    menu_marker_ = menu_marker;
   }
 
   // Activate the button (called when the button is pressed).
@@ -55,6 +64,9 @@ class MenuButton : public TextButton {
   virtual bool GetAccessibleDefaultAction(std::wstring* action);
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
   virtual bool GetAccessibleState(AccessibilityTypes::State* state);
+
+  // Returns views/MenuButton.
+  virtual std::string GetClassName() const;
 
  protected:
   // True if the menu is currently visible.
@@ -80,6 +92,10 @@ class MenuButton : public TextButton {
 
   // Whether or not we're showing a drop marker.
   bool show_menu_marker_;
+
+  // The down arrow used to differentiate the menu button from normal
+  // text buttons.
+  const SkBitmap* menu_marker_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuButton);
 };

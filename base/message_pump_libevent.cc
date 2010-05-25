@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,16 @@
 #include <fcntl.h>
 
 #include "eintr_wrapper.h"
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#if defined(USE_SYSTEM_LIBEVENT)
+#include <event.h>
+#else
 #include "third_party/libevent/event.h"
+#endif
 
 // Lifecycle of struct event
 // Libevent uses two main data structures:
@@ -148,7 +153,7 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
                                               Mode mode,
                                               FileDescriptorWatcher *controller,
                                               Watcher *delegate) {
-  DCHECK(fd > 0);
+  DCHECK_GE(fd, 0);
   DCHECK(controller);
   DCHECK(delegate);
   DCHECK(mode == WATCH_READ || mode == WATCH_WRITE || mode == WATCH_READ_WRITE);
@@ -215,12 +220,20 @@ void MessagePumpLibevent::OnLibeventNotification(int fd, short flags,
   }
 }
 
+// Tell libevent to break out of inner loop.
+static void timer_callback(int fd, short events, void *context)
+{
+  event_base_loopbreak((struct event_base *)context);
+}
+
 // Reentrant!
 void MessagePumpLibevent::Run(Delegate* delegate) {
   DCHECK(keep_running_) << "Quit must have been called outside of Run!";
+  AutoReset auto_reset_in_run(&in_run_, true);
 
-  bool old_in_run = in_run_;
-  in_run_ = true;
+  // event_base_loopexit() + EVLOOP_ONCE is leaky, see http://crbug.com/25641.
+  // Instead, make our own timer and reuse it on each call to event_base_loop().
+  scoped_ptr<event> timer_event(new event);
 
   for (;;) {
     ScopedNSAutoreleasePool autorelease_pool;
@@ -253,8 +266,11 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
         struct timeval poll_tv;
         poll_tv.tv_sec = delay.InSeconds();
         poll_tv.tv_usec = delay.InMicroseconds() % Time::kMicrosecondsPerSecond;
-        event_base_loopexit(event_base_, &poll_tv);
+        event_set(timer_event.get(), -1, 0, timer_callback, event_base_);
+        event_base_set(event_base_, timer_event.get());
+        event_add(timer_event.get(), &poll_tv);
         event_base_loop(event_base_, EVLOOP_ONCE);
+        event_del(timer_event.get());
       } else {
         // It looks like delayed_work_time_ indicates a time in the past, so we
         // need to call DoDelayedWork now.
@@ -264,7 +280,6 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
   }
 
   keep_running_ = true;
-  in_run_ = old_in_run;
 }
 
 void MessagePumpLibevent::Quit() {

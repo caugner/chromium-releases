@@ -20,11 +20,12 @@ class Profile;
 class DOMUIFavIconSource : public ChromeURLDataManager::DataSource {
  public:
   explicit DOMUIFavIconSource(Profile* profile);
-  virtual ~DOMUIFavIconSource() { }
 
   // Called when the network layer has requested a resource underneath
   // the path we registered.
-  virtual void StartDataRequest(const std::string& path, int request_id);
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_off_the_record,
+                                int request_id);
 
   virtual std::string GetMimeType(const std::string&) const {
     // We need to explicitly return a mime type, otherwise if the user tries to
@@ -35,11 +36,13 @@ class DOMUIFavIconSource : public ChromeURLDataManager::DataSource {
   // Called when favicon data is available from the history backend.
   void OnFavIconDataAvailable(FaviconService::Handle request_handle,
                               bool know_favicon,
-                              scoped_refptr<RefCountedBytes> data,
+                              scoped_refptr<RefCountedMemory> data,
                               bool expired,
                               GURL url);
 
  private:
+  virtual ~DOMUIFavIconSource() {}
+
   Profile* profile_;
   CancelableRequestConsumerT<int, 0> cancelable_consumer_;
 

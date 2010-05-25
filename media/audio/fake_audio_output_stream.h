@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -19,16 +19,15 @@ class FakeAudioOutputStream : public AudioOutputStream {
   static AudioOutputStream* MakeFakeStream();
   static FakeAudioOutputStream* GetLastFakeStream();
 
-  virtual bool Open(size_t packet_size);
+  virtual bool Open(uint32 packet_size);
   virtual void Start(AudioSourceCallback* callback);
   virtual void Stop();
-  virtual void SetVolume(double left_level, double right_level);
-  virtual void GetVolume(double* left_level, double* right_level);
+  virtual void SetVolume(double volume);
+  virtual void GetVolume(double* volume);
   virtual void Close();
 
   char* buffer() { return buffer_.get(); }
-  double left_volume() { return left_volume_; }
-  double right_volume() { return right_volume_; }
+  double volume() { return volume_; }
 
  private:
   FakeAudioOutputStream();
@@ -38,13 +37,13 @@ class FakeAudioOutputStream : public AudioOutputStream {
   static bool has_created_fake_stream_;
   static FakeAudioOutputStream* last_fake_stream_;
 
-  double left_volume_;
-  double right_volume_;
+  double volume_;
   AudioSourceCallback* callback_;
   scoped_array<char> buffer_;
-  size_t packet_size_;
+  uint32 packet_size_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAudioOutputStream);
 };
 
 #endif  // MEDIA_AUDIO_FAKE_AUDIO_OUTPUT_STREAM_H_
+

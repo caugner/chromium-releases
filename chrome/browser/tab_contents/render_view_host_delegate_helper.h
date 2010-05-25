@@ -8,9 +8,10 @@
 #include <map>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
+#include "gfx/rect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -30,12 +31,13 @@ class RenderViewHostDelegateViewHelper {
  public:
   RenderViewHostDelegateViewHelper() {}
 
-  virtual void CreateNewWindow(int route_id,
-                               Profile* profile,
-                               SiteInstance* site,
-                               DOMUITypeID domui_type,
-                               TabContents* old_tab_contents);
-  virtual RenderWidgetHostView* CreateNewWidget(int route_id, bool activatable,
+  virtual TabContents* CreateNewWindow(int route_id,
+                                       Profile* profile,
+                                       SiteInstance* site,
+                                       DOMUITypeID domui_type,
+                                       TabContents* old_tab_contents);
+  virtual RenderWidgetHostView* CreateNewWidget(int route_id,
+                                                WebKit::WebPopupType popup_type,
                                                 RenderProcessHost* process);
   virtual TabContents* GetCreatedWindow(int route_id);
   virtual RenderWidgetHostView* GetCreatedWidget(int route_id);
@@ -60,7 +62,7 @@ class RenderViewHostDelegateViewHelper {
 // RenderViewHostDelegate methods.
 class RenderViewHostDelegateHelper {
  public:
-  static WebPreferences GetWebkitPrefs(PrefService* prefs, bool is_dom_ui);
+  static WebPreferences GetWebkitPrefs(Profile* profile, bool is_dom_ui);
 
  private:
   RenderViewHostDelegateHelper();

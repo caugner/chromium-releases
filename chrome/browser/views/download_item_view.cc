@@ -6,12 +6,13 @@
 
 #include <vector>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/text_elider.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "app/text_elider.h"
 #include "app/theme_provider.h"
+#include "base/callback.h"
 #include "base/file_path.h"
+#include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -19,10 +20,12 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/views/download_shelf_view.h"
+#include "gfx/canvas.h"
+#include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/controls/button/native_button.h"
-#include "views/controls/menu/menu.h"
+#include "views/controls/menu/menu_2.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 
@@ -58,7 +61,6 @@ static const int kButtonPadding = 5;  // Pixels.
 static const int kLabelPadding = 4;  // Pixels.
 
 static const SkColor kFileNameDisabledColor = SkColorSetRGB(171, 192, 212);
-static const SkColor kStatusColor = SkColorSetRGB(123, 141, 174);
 
 // How long the 'download complete' animation should last for.
 static const int kCompleteAnimationDurationMs = 2500;
@@ -67,86 +69,43 @@ static const int kCompleteAnimationDurationMs = 2500;
 // downloaded item.
 static const int kDisabledOnOpenDuration = 3000;
 
+// Darken light-on-dark download status text by 20% before drawing, thus
+// creating a "muted" version of title text for both dark-on-light and
+// light-on-dark themes.
+static const double kDownloadItemLuminanceMod = 0.8;
+
 // DownloadShelfContextMenuWin -------------------------------------------------
 
-class DownloadShelfContextMenuWin : public DownloadShelfContextMenu,
-                                    public views::Menu::Delegate {
+class DownloadShelfContextMenuWin : public DownloadShelfContextMenu {
  public:
-  DownloadShelfContextMenuWin(BaseDownloadItemModel* model)
+  explicit DownloadShelfContextMenuWin(BaseDownloadItemModel* model)
       : DownloadShelfContextMenu(model) {
     DCHECK(model);
   }
 
-  void Run(gfx::NativeView window, const gfx::Point& point) {
-    // The menu's anchor point is determined based on the UI layout.
-    views::Menu::AnchorPoint anchor_point;
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-      anchor_point = views::Menu::TOPRIGHT;
+  void Run(const gfx::Point& point) {
+    if (download_->state() == DownloadItem::COMPLETE)
+      menu_.reset(new views::Menu2(GetFinishedMenuModel()));
     else
-      anchor_point = views::Menu::TOPLEFT;
+      menu_.reset(new views::Menu2(GetInProgressMenuModel()));
 
-    scoped_ptr<views::Menu> context_menu(
-        views::Menu::Create(this, anchor_point, window));
-    if (download_->state() == DownloadItem::COMPLETE) {
-      context_menu->AppendMenuItem(OPEN_WHEN_COMPLETE, L"",
-                                   views::Menu::NORMAL);
-    } else {
-      context_menu->AppendMenuItem(OPEN_WHEN_COMPLETE, L"",
-                                   views::Menu::CHECKBOX);
-    }
-    context_menu->AppendMenuItem(ALWAYS_OPEN_TYPE, L"", views::Menu::CHECKBOX);
-    context_menu->AppendSeparator();
-    if (download_->state() == DownloadItem::IN_PROGRESS)
-      context_menu->AppendMenuItem(TOGGLE_PAUSE, L"", views::Menu::NORMAL);
-    context_menu->AppendMenuItem(SHOW_IN_FOLDER, L"", views::Menu::NORMAL);
-    context_menu->AppendSeparator();
-    context_menu->AppendMenuItem(CANCEL, L"", views::Menu::NORMAL);
-    context_menu->RunMenuAt(point.x(), point.y());
+    // The menu's alignment is determined based on the UI layout.
+    views::Menu2::Alignment alignment;
+    if (base::i18n::IsRTL())
+      alignment = views::Menu2::ALIGN_TOPRIGHT;
+    else
+      alignment = views::Menu2::ALIGN_TOPLEFT;
+    menu_->RunMenuAt(point, alignment);
   }
 
   // This method runs when the caller has been deleted and we should not attempt
   // to access |download_|.
   void Stop() {
     download_ = NULL;
-    model_ = NULL;
   }
 
-  // Menu::Delegate implementation ---------------------------------------------
-
-  virtual bool IsItemChecked(int id) const {
-    if (!download_)
-      return false;
-    return ItemIsChecked(id);
-  }
-
-  virtual bool IsItemDefault(int id) const {
-    if (!download_)
-      return false;
-    return ItemIsDefault(id);
-  }
-
-  virtual std::wstring GetLabel(int id) const {
-    if (!download_)
-      return std::wstring();
-    return GetItemLabel(id);
-  }
-
-  virtual bool SupportsCommand(int id) const {
-    if (!download_)
-      return false;
-    return id > 0 && id < MENU_LAST;
-  }
-
-  virtual bool IsCommandEnabled(int id) const {
-    if (!download_)
-      return false;
-    return IsItemCommandEnabled(id);
-  }
-
-  virtual void ExecuteCommand(int id) {
-    if (download_)
-      ExecuteItemCommand(id);
-  }
+ private:
+  scoped_ptr<views::Menu2> menu_;
 };
 
 // DownloadItemView ------------------------------------------------------------
@@ -172,8 +131,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     dangerous_download_label_sized_(false),
     disabled_while_opening_(false),
     creation_time_(base::Time::Now()),
-    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)),
-    active_menu_(NULL) {
+    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)) {
   DCHECK(download_);
   download_->AddObserver(this);
 
@@ -286,8 +244,9 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     drop_down_state_ = DANGEROUS;
 
     warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
-    save_button_ = new views::NativeButton(
-        this, l10n_util::GetString(IDS_SAVE_DOWNLOAD));
+    save_button_ = new views::NativeButton(this, l10n_util::GetString(
+        download->is_extension_install() ?
+            IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_SAVE_DOWNLOAD));
     save_button_->set_ignore_minimum_size(true);
     discard_button_ = new views::NativeButton(
         this, l10n_util::GetString(IDS_DISCARD_DOWNLOAD));
@@ -320,16 +279,15 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     if (extension.length() > kFileNameMaxLength / 2)
       ElideString(extension, kFileNameMaxLength / 2, &extension);
 
-    ElideString(rootname, kFileNameMaxLength - extension.length(), &rootname);
-    std::wstring filename = rootname + L"." + extension;
-    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-      l10n_util::WrapStringWithLTRFormatting(&filename);
-
     // The dangerous download label text is different for an extension file.
-    if (DownloadManager::IsExtensionInstall(download)) {
+    if (download->is_extension_install()) {
       dangerous_download_label_ = new views::Label(
           l10n_util::GetString(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION));
     } else {
+      ElideString(rootname, kFileNameMaxLength - extension.length(), &rootname);
+      std::wstring filename = rootname + L"." + extension;
+      if (base::i18n::IsRTL())
+        base::i18n::WrapStringWithLTRFormatting(&filename);
       dangerous_download_label_ = new views::Label(
           l10n_util::GetStringF(IDS_PROMPT_DANGEROUS_DOWNLOAD, filename));
     }
@@ -345,9 +303,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
 }
 
 DownloadItemView::~DownloadItemView() {
-  if (active_menu_) {
-    active_menu_->Stop();
-    active_menu_ = NULL;
+  if (context_menu_.get()) {
+    context_menu_->Stop();
   }
   icon_consumer_.CancelAllRequests();
   StopDownloadProgress();
@@ -523,6 +480,31 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
   if (center_width <= 0)
     return;
 
+  // Draw status before button image to effectively lighten text.
+  if (!IsDangerousMode()) {
+    if (show_status_text_) {
+      int mirrored_x = MirroredXWithWidthInsideView(
+          download_util::kSmallProgressIconSize, kTextWidth);
+      // Add font_.height() to compensate for title, which is drawn later.
+      int y = box_y_ + kVerticalPadding + font_.height() +
+              kVerticalTextPadding;
+      SkColor file_name_color = GetThemeProvider()->GetColor(
+          BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
+      // If text is light-on-dark, lightening it alone will do nothing.
+      // Therefore we mute luminance a wee bit before drawing in this case.
+      if (color_utils::RelativeLuminance(file_name_color) > 0.5)
+          file_name_color = SkColorSetRGB(
+              static_cast<int>(kDownloadItemLuminanceMod *
+                               SkColorGetR(file_name_color)),
+              static_cast<int>(kDownloadItemLuminanceMod *
+                               SkColorGetG(file_name_color)),
+              static_cast<int>(kDownloadItemLuminanceMod *
+                               SkColorGetB(file_name_color)));
+      canvas->DrawStringInt(status_text_, font_, file_name_color,
+                            mirrored_x, y, kTextWidth, font_.height());
+    }
+  }
+
   // Paint the background images.
   int x = kLeftPadding;
   bool rtl_ui = UILayoutIsRightToLeft();
@@ -643,28 +625,14 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
         download_util::kSmallProgressIconSize, kTextWidth);
     SkColor file_name_color = GetThemeProvider()->GetColor(
         BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
-    if (show_status_text_) {
-      int y = box_y_ + kVerticalPadding;
+    int y = box_y_ + (show_status_text_ ? kVerticalPadding :
+                                          (box_height_ - font_.height()) / 2);
 
-      // Draw the file's name.
-      canvas->DrawStringInt(filename, font_,
-                            IsEnabled() ? file_name_color :
-                                          kFileNameDisabledColor,
-                            mirrored_x, y, kTextWidth, font_.height());
-
-      y += font_.height() + kVerticalTextPadding;
-
-      canvas->DrawStringInt(status_text_, font_, kStatusColor, mirrored_x, y,
-                            kTextWidth, font_.height());
-    } else {
-      int y = box_y_ + (box_height_ - font_.height()) / 2;
-
-      // Draw the file's name.
-      canvas->DrawStringInt(filename, font_,
-                            IsEnabled() ? file_name_color :
-                                          kFileNameDisabledColor,
-                            mirrored_x, y, kTextWidth, font_.height());
-    }
+    // Draw the file's name.
+    canvas->DrawStringInt(filename, font_,
+                          IsEnabled() ? file_name_color :
+                                        kFileNameDisabledColor,
+                          mirrored_x, y, kTextWidth, font_.height());
   }
 
   // Paint the icon.
@@ -846,18 +814,14 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
       point.set_x(drop_down_x_left_);
 
     views::View::ConvertPointToScreen(this, &point);
-    DownloadShelfContextMenuWin menu(model_.get());
 
-    // Protect against deletion while the menu is running. This can happen if
-    // the menu is showing when an auto-opened download completes and the user
-    // chooses a menu entry.
-    active_menu_ = &menu;
-    menu.Run(GetWidget()->GetNativeView(), point);
+    if (!context_menu_.get())
+      context_menu_.reset(new DownloadShelfContextMenuWin(model_.get()));
+    context_menu_->Run(point);
 
     // If the menu action was to remove the download, this view will also be
     // invalid so we must not access 'this' in this case.
-    if (menu.download()) {
-      active_menu_ = NULL;
+    if (context_menu_->download()) {
       drop_down_pressed_ = false;
       // Showing the menu blocks. Here we revert the state.
       SetState(NORMAL, NORMAL);

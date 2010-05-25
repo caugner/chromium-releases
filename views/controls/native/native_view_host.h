@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef VIEWS_CONTROLS_NATIVE_VIEW_HOST_H_
-#define VIEWS_CONTROLS_NATIVE_VIEW_HOST_H_
+#ifndef VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
+#define VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_
 
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
+#include "gfx/native_widget_types.h"
 #include "views/view.h"
 
 namespace views {
@@ -22,6 +22,9 @@ class NativeViewHost : public View {
  public:
   // The NativeViewHost's class name.
   static const char kViewClassName[];
+
+  // Should views render the focus when on native controls?
+  static const bool kRenderNativeControlFocus;
 
   NativeViewHost();
   virtual ~NativeViewHost();
@@ -71,6 +74,7 @@ class NativeViewHost : public View {
   virtual void Paint(gfx::Canvas* canvas);
   virtual void VisibilityChanged(View* starting_from, bool is_visible);
   virtual void Focus();
+  virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
  protected:
   virtual void VisibleBoundsInRootChanged();
@@ -78,6 +82,10 @@ class NativeViewHost : public View {
   virtual std::string GetClassName() const;
 
  private:
+  // Detach the native view. |destroyed| is true if the native view is
+  // detached because it's being destroyed, or false otherwise.
+  void Detach(bool destroyed);
+
   // The attached native view.
   gfx::NativeView native_view_;
 
@@ -100,4 +108,4 @@ class NativeViewHost : public View {
 
 }  // namespace views
 
-#endif  // VIEWS_CONTROLS_NATIVE_VIEW_HOST_H_
+#endif  // VIEWS_CONTROLS_NATIVE_NATIVE_VIEW_HOST_H_

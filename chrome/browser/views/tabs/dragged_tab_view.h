@@ -6,10 +6,11 @@
 #define CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 
 #include "app/slide_animation.h"
-#include "base/gfx/point.h"
-#include "base/gfx/size.h"
+#include "base/callback.h"
 #include "base/task.h"
 #include "build/build_config.h"
+#include "gfx/point.h"
+#include "gfx/size.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/view.h"
 
@@ -33,7 +34,8 @@ class DraggedTabView : public views::View,
  public:
   DraggedTabView(TabContents* datasource,
                  const gfx::Point& mouse_tab_offset,
-                 const gfx::Size& contents_size);
+                 const gfx::Size& contents_size,
+                 bool mini);
   virtual ~DraggedTabView();
 
   // Moves the DraggedTabView to the appropriate location given the mouse
@@ -45,22 +47,11 @@ class DraggedTabView : public views::View,
     mouse_tab_offset_ = offset;
   }
 
-  // Sets the non-pinned tab width. The actual width of the dragged tab is the
-  // value last past to Attach or Resize. |tab_width| is used when Detach is
-  // invoked (which triggers resizing to |tab_width|), or when dragging within
-  // a tab strip and the dragged tab changes state from pinned to non-pinned.
-  void set_tab_width(int tab_width) { tab_width_ = tab_width; }
-  int tab_width() const { return tab_width_; }
-
   // Notifies the DraggedTabView that it has become attached to a TabStrip.
   void Attach(int selected_width);
 
   // Resizes the dragged tab to a width of |width|.
   void Resize(int width);
-
-  // Sets whether the tab is rendered pinned or not.
-  void set_pinned(bool pinned);
-  bool pinned() const;
 
   // Notifies the DraggedTabView that it has been detached from a TabStrip.
   void Detach(NativeViewPhotobooth* photobooth);
@@ -145,9 +136,6 @@ class DraggedTabView : public views::View,
   // The start and end bounds of the animation sequence.
   gfx::Rect animation_start_bounds_;
   gfx::Rect animation_end_bounds_;
-
-  // Non-pinned tab width. See description above setter for how this is used.
-  int tab_width_;
 
   DISALLOW_COPY_AND_ASSIGN(DraggedTabView);
 };

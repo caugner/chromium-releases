@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <gtk/gtk.h>
+
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/gtk/view_id_util.h"
@@ -17,7 +19,8 @@ class ViewIDTest : public InProcessBrowserTest {
       root_window_ = GTK_WIDGET(browser()->window()->GetNativeHandle());
 
     ASSERT_TRUE(root_window_);
-    EXPECT_EQ(should_have, !!ViewIDUtil::GetWidget(root_window_, id));
+    EXPECT_EQ(should_have, !!ViewIDUtil::GetWidget(root_window_, id))
+        << " Failed id=" << id;
   }
 
  private:
@@ -25,10 +28,25 @@ class ViewIDTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
+  // Make sure FindBar is created to test
+  // VIEW_ID_FIND_IN_PAGE_TEXT_FIELD and VIEW_ID_FIND_IN_PAGE.
+  browser()->ShowFindBar();
+
   for (int i = VIEW_ID_TOOLBAR; i < VIEW_ID_PREDEFINED_COUNT; ++i) {
     // http://crbug.com/21152
     if (i == VIEW_ID_BOOKMARK_MENU)
       continue;
+
+    // Extension shelf is being removed, http://crbug.com/25106.
+    if (i == VIEW_ID_DEV_EXTENSION_SHELF)
+      continue;
+
+    // The following ids are used only in views implementation.
+    if (i == VIEW_ID_CONTENTS_SPLIT ||
+        i == VIEW_ID_INFO_BAR_CONTAINER ||
+        i == VIEW_ID_DOWNLOAD_SHELF) {
+      continue;
+    }
 
     CheckViewID(static_cast<ViewID>(i), true);
   }

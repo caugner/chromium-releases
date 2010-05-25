@@ -2,127 +2,276 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import "chrome/browser/cocoa/bookmark_bubble_controller.h"
 #include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#import "chrome/browser/cocoa/bookmark_bubble_controller.h"
-#import "chrome/browser/cocoa/bookmark_bubble_window.h"
+#import "chrome/browser/cocoa/browser_window_controller.h"
+#import "chrome/browser/cocoa/info_bubble_view.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "grit/generated_resources.h"
 
+// An object to represent the ChooseAnotherFolder item in the pop up.
+@interface ChooseAnotherFolder : NSObject
+@end
 
-@interface BookmarkBubbleController(PrivateAPI)
-- (void)closeWindow;
+@implementation ChooseAnotherFolder
+@end
+
+@interface BookmarkBubbleController (PrivateAPI)
+- (void)updateBookmarkNode;
+- (void)fillInFolderList;
+- (void)parentWindowWillClose:(NSNotification*)notification;
 @end
 
 @implementation BookmarkBubbleController
 
-@synthesize delegate = delegate_;
-@synthesize folderComboBox = folderComboBox_;
+@synthesize node = node_;
 
-- (id)initWithDelegate:(id<BookmarkBubbleControllerDelegate>)delegate
-          parentWindow:(NSWindow*)parentWindow
-      topLeftForBubble:(NSPoint)topLeftForBubble
-                 model:(BookmarkModel*)model
-                  node:(const BookmarkNode*)node
++ (id)chooseAnotherFolderObject {
+  // Singleton object to act as a representedObject for the "choose another
+  // folder" item in the pop up.
+  static ChooseAnotherFolder* object = nil;
+  if (!object) {
+    object = [[ChooseAnotherFolder alloc] init];
+  }
+  return object;
+}
+
+- (id)initWithParentWindow:(NSWindow*)parentWindow
+                     model:(BookmarkModel*)model
+                      node:(const BookmarkNode*)node
      alreadyBookmarked:(BOOL)alreadyBookmarked {
-  if ((self = [super initWithNibName:@"BookmarkBubble"
-                              bundle:mac_util::MainAppBundle()])) {
-    // all these are weak...
-    delegate_ = delegate;
+  NSString* nibPath =
+      [mac_util::MainAppBundle() pathForResource:@"BookmarkBubble"
+                                          ofType:@"nib"];
+  if ((self = [super initWithWindowNibPath:nibPath owner:self])) {
     parentWindow_ = parentWindow;
-    topLeftForBubble_ = topLeftForBubble;
     model_ = model;
     node_ = node;
     alreadyBookmarked_ = alreadyBookmarked;
-    // But this is strong.
-    titleMapping_.reset([[NSMutableDictionary alloc] init]);
+
+    // Watch to see if the parent window closes, and if so, close this one.
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self
+               selector:@selector(parentWindowWillClose:)
+                   name:NSWindowWillCloseNotification
+                 object:parentWindow_];
   }
   return self;
 }
 
 - (void)dealloc {
-  [self closeWindow];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [super dealloc];
 }
 
-- (void)showWindow {
-  [self view];  // force nib load and window_ allocation
-  [window_ makeKeyAndOrderFront:self];
+// Close the bookmark bubble without changing anything.  Unlike a
+// typical dialog's OK/Cancel, where Cancel is "do nothing", all
+// buttons on the bubble have the capacity to change the bookmark
+// model.  This is an IBOutlet-looking entry point to remove the
+// dialog without touching the model.
+- (void)dismissWithoutEditing:(id)sender {
+  [self close];
 }
 
-// Actually close the window.  Do nothing else.
-- (void)closeWindow {
-  [parentWindow_ removeChildWindow:window_];
-  [window_ close];
+- (void)parentWindowWillClose:(NSNotification*)notification {
+  [self close];
 }
 
-- (void)awakeFromNib {
-  window_.reset([self createBubbleWindow]);
-  [parentWindow_ addChildWindow:window_ ordered:NSWindowAbove];
+- (void)windowWillClose:(NSNotification*)notification {
+  // We caught a close so we don't need to watch for the parent closing.
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  observer_.reset(NULL);
+  [self autorelease];
+}
 
-  // Fill in inital values for text, controls, ...
-
+// We want this to be a child of a browser window.  addChildWindow:
+// (called from this function) will bring the window on-screen;
+// unfortunately, [NSWindowController showWindow:] will also bring it
+// on-screen (but will cause unexpected changes to the window's
+// position).  We cannot have an addChildWindow: and a subsequent
+// showWindow:. Thus, we have our own version.
+- (void)showWindow:(id)sender {
+  BrowserWindowController* bwc =
+      [BrowserWindowController browserWindowControllerForWindow:parentWindow_];
+  [bwc lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
+  NSWindow* window = [self window];  // completes nib load
+  [bubble_ setArrowLocation:kTopLeft];
+  // Insure decent positioning even in the absence of a browser controller,
+  // which will occur for some unit tests.
+  NSPoint arrowtip = bwc ? [bwc pointForBubbleArrowTip] :
+      NSMakePoint([window frame].size.width, [window frame].size.height);
+  NSPoint origin = [parentWindow_ convertBaseToScreen:arrowtip];
+  NSPoint bubbleArrowtip = [bubble_ arrowTip];
+  bubbleArrowtip = [bubble_ convertPoint:bubbleArrowtip toView:nil];
+  origin.y -= bubbleArrowtip.y;
+  origin.x -= bubbleArrowtip.x;
+  [window setFrameOrigin:origin];
+  [parentWindow_ addChildWindow:window ordered:NSWindowAbove];
   // Default is IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK; "Bookmark".
   // If adding for the 1st time the string becomes "Bookmark Added!"
   if (!alreadyBookmarked_) {
     NSString* title =
-      l10n_util::GetNSString(IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED);
+        l10n_util::GetNSString(IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED);
     [bigTitle_ setStringValue:title];
   }
 
   [self fillInFolderList];
+
+  // Ping me when things change out from under us.  Unlike a normal
+  // dialog, the bookmark bubble's cancel: means "don't add this as a
+  // bookmark", not "cancel editing".  We must take extra care to not
+  // touch the bookmark in this selector.
+  observer_.reset(new BookmarkModelObserverForCocoa(
+                      node_, model_,
+                      self,
+                      @selector(dismissWithoutEditing:)));
+
+  [window makeKeyAndOrderFront:self];
+}
+
+- (void)close {
+  [[BrowserWindowController browserWindowControllerForWindow:parentWindow_]
+      releaseBarVisibilityForOwner:self withAnimation:YES delay:NO];
+  [parentWindow_ removeChildWindow:[self window]];
+
+  // If you quit while the bubble is open, sometimes we get a
+  // DidResignKey before we get our parent's WindowWillClose and
+  // sometimes not.  We protect against a multiple close (or reference
+  // to parentWindow_ at a bad time) by clearing it out once we're
+  // done, and by removing ourself from future notifications.
+  [[NSNotificationCenter defaultCenter]
+    removeObserver:self
+              name:NSWindowWillCloseNotification
+            object:parentWindow_];
+  parentWindow_ = nil;
+
+  [super close];
+}
+
+// Shows the bookmark editor sheet for more advanced editing.
+- (void)showEditor {
+  [self ok:self];
+  // Send the action up through the responder chain.
+  [NSApp sendAction:@selector(editBookmarkNode:) to:nil from:self];
 }
 
 - (IBAction)edit:(id)sender {
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Edit"),
+                            model_->profile());
+  [self showEditor];
+}
+
+- (IBAction)ok:(id)sender {
   [self updateBookmarkNode];
-  [self closeWindow];
-  [delegate_ editBookmarkNode:node_];
-  [delegate_ doneWithBubbleController:self];
+  [self close];
 }
 
-- (IBAction)close:(id)sender {
-  if (node_) {
-    // no node_ if the bookmark was just removed
-    [self updateBookmarkNode];
-  }
-  [self closeWindow];
-  [delegate_ doneWithBubbleController:self];
-}
-
-// By implementing this, ESC causes the window to go away.
+// By implementing this, ESC causes the window to go away. If clicking the
+// star was what prompted this bubble to appear (i.e., not already bookmarked),
+// remove the bookmark.
 - (IBAction)cancel:(id)sender {
-  [self close:sender];
+  if (!alreadyBookmarked_) {
+    // |-remove:| calls |-close| so don't do it.
+    [self remove:sender];
+  } else {
+    [self ok:sender];
+  }
 }
 
 - (IBAction)remove:(id)sender {
   model_->SetURLStarred(node_->GetURL(), node_->GetTitle(), false);
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"),
+                            model_->profile());
   node_ = NULL;  // no longer valid
-  [self close:self];
+  [self ok:sender];
 }
 
-// We are the delegate of the combo box so we can tell when "choose
-// another folder" was picked.
-- (void)comboBoxSelectionDidChange:(NSNotification*)notification {
-  NSString* selected = [folderComboBox_ objectValueOfSelectedItem];
-  if ([selected isEqual:chooseAnotherFolder_.get()]) {
-    [self edit:self];
+// The controller is  the target of the pop up button box action so it can
+// handle when "choose another folder" was picked.
+- (IBAction)folderChanged:(id)sender {
+  DCHECK([sender isEqual:folderPopUpButton_]);
+  // It is possible that due to model change our parent window has been closed
+  // but the popup is still showing and able to notify the controller of a
+  // folder change.  We ignore the sender in this case.
+  if (!parentWindow_)
+    return;
+  NSMenuItem* selected = [folderPopUpButton_ selectedItem];
+  ChooseAnotherFolder* chooseItem = [[self class] chooseAnotherFolderObject];
+  if ([[selected representedObject] isEqual:chooseItem]) {
+    UserMetrics::RecordAction(
+        UserMetricsAction("BookmarkBubble_EditFromCombobox"),
+        model_->profile());
+    [self showEditor];
   }
 }
 
-// We are the delegate of our own window so we know when we lose key.
-// When we lose key status we close, mirroring Windows behaivor.
+// The controller is the delegate of the window so it receives did resign key
+// notifications. When key is resigned mirror Windows behavior and close the
+// window.
 - (void)windowDidResignKey:(NSNotification*)notification {
+  NSWindow* window = [self window];
+  DCHECK_EQ([notification object], window);
+  if ([window isVisible]) {
+    // If the window isn't visible, it is already closed, and this notification
+    // has been sent as part of the closing operation, so no need to close.
+    [self ok:self];
+  }
+}
 
-  // If we get here, we are done with this window and controller.  The
-  // call of close: may destroy us which destroys the window.  But the
-  // window is in the middle of processing resignKeyWindow.  We
-  // retain/autorelease the window to insure it lasts until the end of
-  // this event.
-  [[window_ retain] autorelease];
+// Look at the dialog; if the user has changed anything, update the
+// bookmark node to reflect this.
+- (void)updateBookmarkNode {
+  if (!node_) return;
 
-  if ([window_ isVisible])
-    [self close:self];
+  // First the title...
+  NSString* oldTitle = base::SysWideToNSString(node_->GetTitle());
+  NSString* newTitle = [nameTextField_ stringValue];
+  if (![oldTitle isEqual:newTitle]) {
+    model_->SetTitle(node_, base::SysNSStringToWide(newTitle));
+    UserMetrics::RecordAction(
+        UserMetricsAction("BookmarkBubble_ChangeTitleInBubble"),
+        model_->profile());
+  }
+  // Then the parent folder.
+  const BookmarkNode* oldParent = node_->GetParent();
+  NSMenuItem* selectedItem = [folderPopUpButton_ selectedItem];
+  id representedObject = [selectedItem representedObject];
+  if ([representedObject isEqual:[[self class] chooseAnotherFolderObject]]) {
+    // "Choose another folder..."
+    return;
+  }
+  const BookmarkNode* newParent =
+      static_cast<const BookmarkNode*>([representedObject pointerValue]);
+  DCHECK(newParent);
+  if (oldParent != newParent) {
+    int index = newParent->GetChildCount();
+    model_->Move(node_, newParent, index);
+    UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_ChangeParent"),
+                              model_->profile());
+  }
+}
+
+// Fill in all information related to the folder pop up button.
+- (void)fillInFolderList {
+  [nameTextField_ setStringValue:base::SysWideToNSString(node_->GetTitle())];
+  DCHECK([folderPopUpButton_ numberOfItems] == 0);
+  [self addFolderNodes:model_->root_node()
+         toPopUpButton:folderPopUpButton_
+           indentation:0];
+  NSMenu* menu = [folderPopUpButton_ menu];
+  NSString* title = [[self class] chooseAnotherFolderString];
+  NSMenuItem *item = [menu addItemWithTitle:title
+                                     action:NULL
+                              keyEquivalent:@""];
+  ChooseAnotherFolder* obj = [[self class] chooseAnotherFolderObject];
+  [item setRepresentedObject:obj];
+  // Finally, select the current parent.
+  NSValue* parentValue = [NSValue valueWithPointer:node_->GetParent()];
+  NSInteger idx = [menu indexOfItemWithRepresentedObject:parentValue];
+  [folderPopUpButton_ selectItemAtIndex:idx];
 }
 
 @end  // BookmarkBubbleController
@@ -130,94 +279,54 @@
 
 @implementation BookmarkBubbleController(ExposedForUnitTesting)
 
-// Create and return a retained NSWindow for this bubble.
-- (NSWindow*)createBubbleWindow {
-  NSRect contentRect = [[self view] frame];
-  NSPoint origin = topLeftForBubble_;
-  origin.y -= contentRect.size.height;  // since it'll be our bottom-left
-  contentRect.origin = origin;
-  // Now convert to global coordinates since it'll be used for a window.
-  contentRect.origin = [parentWindow_ convertBaseToScreen:contentRect.origin];
-  NSWindow* window = [[BookmarkBubbleWindow alloc]
-                         initWithContentRect:contentRect];
-  [window setDelegate:self];
-  [window setContentView:[self view]];
-  return window;
-}
-
-// Fill in all information related to the folder combo box.
-//
-// TODO(jrg): make sure nested folders that have the same name are
-// handled properly.
-// http://crbug.com/19408
-- (void)fillInFolderList {
-  [nameTextField_ setStringValue:base::SysWideToNSString(node_->GetTitle())];
-  [self addFolderNodes:model_->root_node() toComboBox:folderComboBox_];
-
-  // Add "Choose another folder...".  Remember it for later to compare against.
-  chooseAnotherFolder_.reset(
-    [l10n_util::GetNSStringWithFixup(IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER)
-              retain]);
-  [folderComboBox_ addItemWithObjectValue:chooseAnotherFolder_.get()];
-
-  // Finally, select the current parent.
-  NSString* parentTitle = base::SysWideToNSString(
-    node_->GetParent()->GetTitle());
-  [folderComboBox_ selectItemWithObjectValue:parentTitle];
-}
-
-- (BOOL)windowHasBeenClosed {
-  return ![window_ isVisible];
++ (NSString*)chooseAnotherFolderString {
+  return l10n_util::GetNSStringWithFixup(
+      IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
 }
 
 // For the given folder node, walk the tree and add folder names to
-// the given combo box.
-//
-// TODO(jrg): no distinction is made among folders with the same name.
-- (void)addFolderNodes:(const BookmarkNode*)parent toComboBox:(NSComboBox*)box {
-  NSString* title = base::SysWideToNSString(parent->GetTitle());
-  if ([title length])  {  // no title if root
-    [box addItemWithObjectValue:title];
-    [titleMapping_ setValue:[NSValue valueWithPointer:parent] forKey:title];
+// the given pop up button.
+- (void)addFolderNodes:(const BookmarkNode*)parent
+         toPopUpButton:(NSPopUpButton*)button
+           indentation:(int)indentation {
+  if (!model_->is_root(parent))  {
+    NSString* title = base::SysWideToNSString(parent->GetTitle());
+    NSMenu* menu = [button menu];
+    NSMenuItem* item = [menu addItemWithTitle:title
+                                       action:NULL
+                                keyEquivalent:@""];
+    [item setRepresentedObject:[NSValue valueWithPointer:parent]];
+    [item setIndentationLevel:indentation];
+    ++indentation;
   }
   for (int i = 0; i < parent->GetChildCount(); i++) {
     const BookmarkNode* child = parent->GetChild(i);
     if (child->is_folder())
-      [self addFolderNodes:child toComboBox:box];
+      [self addFolderNodes:child
+             toPopUpButton:button
+               indentation:indentation];
   }
 }
 
-// Look at the dialog; if the user has changed anything, update the
-// bookmark node to reflect this.
-- (void)updateBookmarkNode {
-  // First the title...
-  NSString* oldTitle = base::SysWideToNSString(node_->GetTitle());
-  NSString* newTitle = [nameTextField_ stringValue];
-  if (![oldTitle isEqual:newTitle]) {
-    model_->SetTitle(node_, base::SysNSStringToWide(newTitle));
-  }
-  // Then the parent folder.
-  NSString* oldParentTitle = base::SysWideToNSString(
-    node_->GetParent()->GetTitle());
-  NSString* newParentTitle = [folderComboBox_ objectValueOfSelectedItem];
-  if (![oldParentTitle isEqual:newParentTitle]) {
-    const BookmarkNode* newParent = static_cast<const BookmarkNode*>(
-      [[titleMapping_ objectForKey:newParentTitle] pointerValue]);
-    if (newParent) {
-      // newParent should only ever possibly be NULL in a unit test.
-      int index = newParent->GetChildCount();
-      model_->Move(node_, newParent, index);
-    }
-  }
-}
-
-- (void)setTitle:(NSString*)title parentFolder:(NSString*)folder {
+- (void)setTitle:(NSString*)title parentFolder:(const BookmarkNode*)parent {
   [nameTextField_ setStringValue:title];
-  [folderComboBox_ selectItemWithObjectValue:folder];
+  [self setParentFolderSelection:parent];
 }
 
-- (NSString*)chooseAnotherFolderString {
-  return chooseAnotherFolder_.get();
+// Pick a specific parent node in the selection by finding the right
+// pop up button index.
+- (void)setParentFolderSelection:(const BookmarkNode*)parent {
+  // Expectation: There is a parent mapping for all items in the
+  // folderPopUpButton except the last one ("Choose another folder...").
+  NSMenu* menu = [folderPopUpButton_ menu];
+  NSValue* parentValue = [NSValue valueWithPointer:parent];
+  NSInteger idx = [menu indexOfItemWithRepresentedObject:parentValue];
+  DCHECK(idx != -1);
+  [folderPopUpButton_ selectItemAtIndex:idx];
+}
+
+- (NSPopUpButton*)folderPopUpButton {
+  return folderPopUpButton_;
 }
 
 @end  // implementation BookmarkBubbleController(ExposedForUnitTesting)

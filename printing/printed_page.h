@@ -5,10 +5,10 @@
 #ifndef PRINTING_PRINTED_PAGE_H_
 #define PRINTING_PRINTED_PAGE_H_
 
-#include "base/gfx/rect.h"
-#include "base/gfx/size.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "gfx/rect.h"
+#include "gfx/size.h"
 #include "printing/native_metafile.h"
 
 namespace printing {
@@ -24,7 +24,6 @@ class PrintedPage : public base::RefCountedThreadSafe<PrintedPage> {
   PrintedPage(int page_number,
               NativeMetafile* native_metafile,
               const gfx::Size& page_size);
-  ~PrintedPage();
 
   // Getters
   int page_number() const { return page_number_; }
@@ -32,6 +31,10 @@ class PrintedPage : public base::RefCountedThreadSafe<PrintedPage> {
   const gfx::Size& page_size() const { return page_size_; }
 
  private:
+  friend class base::RefCountedThreadSafe<PrintedPage>;
+
+  ~PrintedPage();
+
   // Page number inside the printed document.
   const int page_number_;
 
@@ -42,7 +45,7 @@ class PrintedPage : public base::RefCountedThreadSafe<PrintedPage> {
   // job.
   const gfx::Size page_size_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PrintedPage);
+  DISALLOW_COPY_AND_ASSIGN(PrintedPage);
 };
 
 }  // namespace printing

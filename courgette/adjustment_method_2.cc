@@ -15,8 +15,10 @@
 #include <iostream>
 
 #include "base/basictypes.h"
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/time.h"
 
 #include "courgette/assembly_program.h"
 #include "courgette/courgette.h"
@@ -461,8 +463,8 @@ std::string ToString(const Shingle* instance) {
     s += ToString(instance->at(i));
     sep = ", ";
   }
-  StringAppendF(&s, ">(%u)@{%d}", instance->exemplar_position_,
-                static_cast<int>(instance->position_count()));
+  StringAppendF(&s, ">(%" PRIuS ")@{%" PRIuS "}", instance->exemplar_position_,
+                instance->position_count());
   return s;
 }
 
@@ -578,7 +580,7 @@ std::string HistogramToString(const ShinglePattern::Histogram& histogram,
       s += " ...";
       break;
     }
-    StringAppendF(&s, " %d", p->count());
+    StringAppendF(&s, " %" PRIuS, p->count());
   }
   return s;
 }
@@ -598,7 +600,7 @@ std::string HistogramToStringFull(const ShinglePattern::Histogram& histogram,
       s += "...\n";
       break;
     }
-    StringAppendF(&s, "(%d) ", p->count());
+    StringAppendF(&s, "(%" PRIuS ") ", p->count());
     s += ToString(&(*p->instance()));
     s += "\n";
   }
@@ -633,9 +635,9 @@ std::string ShinglePatternToStringFull(const ShinglePattern* pattern,
   s += "\n";
   size_t model_size = pattern->model_histogram_.size();
   size_t program_size = pattern->program_histogram_.size();
-  StringAppendF(&s, "  model shingles %u\n", model_size);
+  StringAppendF(&s, "  model shingles %" PRIuS "\n", model_size);
   s += HistogramToStringFull(pattern->model_histogram_, "    ", max);
-  StringAppendF(&s, "  program shingles %u\n", program_size);
+  StringAppendF(&s, "  program shingles %" PRIuS "\n", program_size);
   s += HistogramToStringFull(pattern->program_histogram_, "    ", max);
   return s;
 }
@@ -1292,8 +1294,11 @@ class Adjuster : public AdjustmentMethod {
   }
 
   void Solve(const Trace& model, size_t model_end) {
+    base::Time start_time = base::Time::Now();
     AssignmentProblem a(model, model_end);
     a.Solve();
+    LOG(INFO) << " Adjuster::Solve "
+              << (base::Time::Now() - start_time).InSecondsF();
   }
 
   void ReferenceLabel(Trace* trace, Label* label, bool is_model) {

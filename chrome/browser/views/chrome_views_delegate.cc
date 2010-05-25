@@ -1,16 +1,17 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/browser/views/chrome_views_delegate.h"
 
 #include "app/clipboard/clipboard.h"
-#include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/window_sizer.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/common/chrome_constants.h"
+#include "gfx/rect.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // ChromeViewsDelegate, views::ViewsDelegate implementation:
@@ -76,7 +77,7 @@ bool ChromeViewsDelegate::GetSavedMaximizedState(
 
 #if defined(OS_WIN)
 HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
-  return LoadIcon(GetModuleHandle(L"chrome.dll"),
+  return LoadIcon(GetModuleHandle(chrome::kBrowserResourcesDll),
                   MAKEINTRESOURCE(IDR_MAINFRAME));
 }
 #endif

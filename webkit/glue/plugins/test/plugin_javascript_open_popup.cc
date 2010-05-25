@@ -5,7 +5,7 @@
 #include "build/build_config.h"
 #include "webkit/glue/plugins/test/plugin_javascript_open_popup.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 #include "third_party/npapi/bindings/npapi_x11.h"
 #endif
 #include "webkit/glue/plugins/test/plugin_client.h"
@@ -21,12 +21,15 @@ ExecuteJavascriptOpenPopupWithPluginTest::
 
 int16 ExecuteJavascriptOpenPopupWithPluginTest::SetWindow(
     NPWindow* window) {
+  if (window->window == NULL)
+    return NPERR_NO_ERROR;
+
   if (!popup_window_test_started_) {
     popup_window_test_started_ = true;
     HostFunctions()->geturl(
         id(), "popup_window_with_target_plugin.html", "_blank");
   }
-  return PluginTest::SetWindow(window);
+  return NPERR_NO_ERROR;
 }
 
 // ExecuteJavascriptPopupWindowTargetPluginTest member defines.
@@ -39,6 +42,9 @@ ExecuteJavascriptPopupWindowTargetPluginTest::
 
 int16 ExecuteJavascriptPopupWindowTargetPluginTest::SetWindow(
     NPWindow* window) {
+  if (window->window == NULL)
+    return NPERR_NO_ERROR;
+
   if (!test_completed_) {
     if (CheckWindow(window)) {
       SignalTestCompleted();
@@ -63,7 +69,7 @@ bool ExecuteJavascriptPopupWindowTargetPluginTest::CheckWindow(
   return false;
 }
 
-#elif defined(OS_LINUX)
+#elif defined(USE_X11)
 // This code blindly follows the same sorts of verifications done on
 // the Windows side.  Does it make sense on X?  Maybe not really, but
 // it can't hurt to do extra validations.

@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/lock.h"
 #include "build/build_config.h"
 #include "chrome/browser/sync/util/signin.h"
@@ -17,6 +18,10 @@
 extern "C" struct sqlite3;
 
 namespace browser_sync {
+
+void ExecOrDie(sqlite3* dbhandle, const char *query);
+std::string APEncode(const std::string& in);
+std::string APDecode(const std::string& in);
 
 class URLFactory;
 
@@ -27,7 +32,7 @@ class UserSettings {
   UserSettings();
   ~UserSettings();
   // Returns false (failure) if the db is a newer version.
-  bool Init(const PathString& settings_path);
+  bool Init(const FilePath& settings_path);
   void StoreHashedPassword(const std::string& email,
                            const std::string& password);
   bool VerifyAgainstStoredHash(const std::string& email,
@@ -59,8 +64,6 @@ class UserSettings {
 
   void RemoveAllGuestSettings();
 
-  void RemoveShare(const PathString& share_path);
-
   void StoreEmailForSignin(const std::string& signin,
                            const std::string& primary_email);
 
@@ -78,7 +81,7 @@ class UserSettings {
 
  protected:
   struct ScopedDBHandle {
-    ScopedDBHandle(UserSettings* settings);
+    explicit ScopedDBHandle(UserSettings* settings);
     inline sqlite3* get() const { return *handle_; }
     AutoLock mutex_lock_;
     sqlite3** const handle_;

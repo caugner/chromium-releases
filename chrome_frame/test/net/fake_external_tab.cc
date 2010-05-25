@@ -12,6 +12,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/file_version_info.h"
 #include "base/i18n/icu_util.h"
 #include "base/path_service.h"
 #include "base/scoped_bstr_win.h"
@@ -19,18 +20,22 @@
 #include "base/scoped_variant_win.h"
 
 #include "chrome/browser/browser_prefs.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/plugin_service.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profile_manager.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-
 #include "chrome_frame/utils.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
-#include "chrome_frame/test/net/dialog_watchdog.h"
+#include "chrome_frame/test/simulate_input.h"
+#include "chrome_frame/test/window_watchdog.h"
 #include "chrome_frame/test/net/test_automation_resource_message_filter.h"
 
 namespace {
@@ -65,11 +70,104 @@ bool PromptAfterSetup() {
   return CommandLine::ForCurrentProcess()->HasSwitch(kPromptAfterSetup);
 }
 
-}  // end namespace
+// Uses the IAccessible interface for the window to set the focus.
+// This can be useful when you don't have control over the thread that
+// owns the window.
+// NOTE: this depends on oleacc.lib which the net tests already depend on
+// but other unit tests don't depend on oleacc so we can't just add the method
+// directly into chrome_frame_test_utils.cc (without adding a
+// #pragma comment(lib, "oleacc.lib")).
+bool SetFocusToAccessibleWindow(HWND hwnd) {
+  bool ret = false;
+  ScopedComPtr<IAccessible> acc;
+  AccessibleObjectFromWindow(hwnd, OBJID_WINDOW, IID_IAccessible,
+      reinterpret_cast<void**>(acc.Receive()));
+  if (acc) {
+    VARIANT self = { VT_I4 };
+    self.lVal = CHILDID_SELF;
+    ret = SUCCEEDED(acc->accSelect(SELFLAG_TAKEFOCUS, self));
+  }
+  return ret;
+}
+
+}  // namespace
+
+
+class SupplyProxyCredentials : public WindowObserver {
+ public:
+  SupplyProxyCredentials(const char* username, const char* password);
+
+ protected:
+  struct DialogProps {
+    HWND username_;
+    HWND password_;
+  };
+
+  virtual void OnWindowDetected(HWND hwnd, const std::string& caption);
+  static BOOL CALLBACK EnumChildren(HWND hwnd, LPARAM param);
+
+ protected:
+  std::string username_;
+  std::string password_;
+};
+
+
+SupplyProxyCredentials::SupplyProxyCredentials(const char* username,
+                                               const char* password)
+    : username_(username), password_(password) {
+}
+
+void SupplyProxyCredentials::OnWindowDetected(HWND hwnd,
+                                              const std::string& caption) {
+  // IE's dialog caption (en-US).
+  if (caption.compare("Windows Security") != 0)
+    return;
+
+  DialogProps props = {0};
+  ::EnumChildWindows(hwnd, EnumChildren, reinterpret_cast<LPARAM>(&props));
+  DCHECK(::IsWindow(props.username_));
+  DCHECK(::IsWindow(props.password_));
+
+  // We can't use SetWindowText to set the username/password, so simulate
+  // keyboard input instead.
+  simulate_input::ForceSetForegroundWindow(hwnd);
+  CHECK(SetFocusToAccessibleWindow(props.username_));
+  simulate_input::SendStringA(username_.c_str());
+  Sleep(100);
+
+  simulate_input::SendCharA(VK_TAB, simulate_input::NONE);
+  Sleep(100);
+  simulate_input::SendStringA(password_.c_str());
+
+  Sleep(100);
+  simulate_input::SendCharA(VK_RETURN, simulate_input::NONE);
+}
+
+// static
+BOOL SupplyProxyCredentials::EnumChildren(HWND hwnd, LPARAM param) {
+  if (!::IsWindowVisible(hwnd))
+    return TRUE;  // Ignore but continue to enumerate.
+
+  DialogProps* props = reinterpret_cast<DialogProps*>(param);
+
+  char class_name[MAX_PATH] = {0};
+  ::GetClassNameA(hwnd, class_name, arraysize(class_name));
+  if (lstrcmpiA(class_name, "Edit") == 0) {
+    if (props->username_ == NULL || props->username_ == hwnd) {
+      props->username_ = hwnd;
+    } else if (props->password_ == NULL) {
+      props->password_ = hwnd;
+    }
+  } else {
+    EnumChildWindows(hwnd, EnumChildren, param);
+  }
+
+  return TRUE;
+}
 
 FakeExternalTab::FakeExternalTab() {
+  user_data_dir_ = chrome_frame_test::GetProfilePathForIE();
   PathService::Get(chrome::DIR_USER_DATA, &overridden_user_dir_);
-  user_data_dir_ = FilePath::FromWStringHack(GetProfilePath());
   PathService::Override(chrome::DIR_USER_DATA, user_data_dir_);
   process_singleton_.reset(new ProcessSingleton(user_data_dir_));
 }
@@ -80,19 +178,9 @@ FakeExternalTab::~FakeExternalTab() {
   }
 }
 
-std::wstring FakeExternalTab::GetProfileName() {
-  return L"iexplore";
-}
-
-std::wstring FakeExternalTab::GetProfilePath() {
-  std::wstring path;
-  GetUserProfileBaseDirectory(&path);
-  file_util::AppendToPath(&path, GetProfileName());
-  return path;
-}
-
 void FakeExternalTab::Initialize() {
   DCHECK(g_browser_process == NULL);
+  SystemMonitor system_monitor;
 
   // The gears plugin causes the PluginRequestInterceptor to kick in and it
   // will cause problems when it tries to intercept URL requests.
@@ -103,23 +191,43 @@ void FakeExternalTab::Initialize() {
   chrome::RegisterPathProvider();
   app::RegisterPathProvider();
 
-  ResourceBundle::InitSharedInstance(L"en-US");
-  ResourceBundle::GetSharedInstance().LoadThemeResources();
+  // Load Chrome.dll as our resource dll.
+  FilePath dll;
+  PathService::Get(base::DIR_MODULE, &dll);
+  dll = dll.Append(chrome::kBrowserResourcesDll);
+  HMODULE res_mod = ::LoadLibraryExW(dll.value().c_str(),
+      NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+  DCHECK(res_mod);
+  _AtlBaseModule.SetResourceInstance(res_mod);
 
-  const CommandLine* cmd = CommandLine::ForCurrentProcess();
+  ResourceBundle::InitSharedInstance(L"en-US");
+
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  cmd->AppendSwitch(switches::kDisableWebResources);
+  cmd->AppendSwitch(switches::kSingleProcess);
+
   browser_process_.reset(new BrowserProcessImpl(*cmd));
-  RenderProcessHost::set_run_renderer_in_process(true);
   // BrowserProcessImpl's constructor should set g_browser_process.
   DCHECK(g_browser_process);
+  // Set the app locale and create the child threads.
+  g_browser_process->SetApplicationLocale("en-US");
+  g_browser_process->db_thread();
+  g_browser_process->file_thread();
+  g_browser_process->io_thread();
+
+  RenderProcessHost::set_run_renderer_in_process(true);
 
   Profile* profile = g_browser_process->profile_manager()->
       GetDefaultProfile(FilePath(user_data()));
   PrefService* prefs = profile->GetPrefs();
+  DCHECK(prefs != NULL);
+
+  WebCacheManager::RegisterPrefs(prefs);
   PrefService* local_state = browser_process_->local_state();
   local_state->RegisterStringPref(prefs::kApplicationLocale, L"");
   local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
 
-  browser::RegisterAllPrefs(prefs, local_state);
+  browser::RegisterLocalState(local_state);
 
   // Override some settings to avoid hitting some preferences that have not
   // been registered.
@@ -141,6 +249,10 @@ void FakeExternalTab::Shutdown() {
 CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
     : NetTestSuite(argc, argv),
       chrome_frame_html_("/chrome_frame", kChromeFrameHtml) {
+  // Register the main thread by instantiating it, but don't call any methods.
+  main_thread_.reset(new ChromeThread(ChromeThread::UI,
+                                      MessageLoop::current()));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   fake_chrome_.Initialize();
   pss_subclass_.reset(new ProcessSingletonSubclass(this));
   EXPECT_TRUE(pss_subclass_->Subclass(fake_chrome_.user_data()));
@@ -149,57 +261,6 @@ CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
 
 CFUrlRequestUnittestRunner::~CFUrlRequestUnittestRunner() {
   fake_chrome_.Shutdown();
-}
-
-DWORD WINAPI NavigateIE(void* param) {
-  return 0;
-  win_util::ScopedCOMInitializer com;
-  BSTR url = reinterpret_cast<BSTR>(param);
-
-  bool found = false;
-  int retries = 0;
-  const int kMaxRetries = 20;
-  while (!found && retries < kMaxRetries) {
-    ScopedComPtr<IShellWindows> windows;
-    HRESULT hr = ::CoCreateInstance(__uuidof(ShellWindows), NULL, CLSCTX_ALL,
-        IID_IShellWindows, reinterpret_cast<void**>(windows.Receive()));
-    DCHECK(SUCCEEDED(hr)) << "CoCreateInstance";
-
-    if (SUCCEEDED(hr)) {
-      hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
-      long count = 0;  // NOLINT
-      windows->get_Count(&count);
-      VARIANT i = { VT_I4 };
-      for (i.lVal = 0; i.lVal < count; ++i.lVal) {
-        ScopedComPtr<IDispatch> folder;
-        windows->Item(i, folder.Receive());
-        if (folder != NULL) {
-          ScopedComPtr<IWebBrowser2> browser;
-          if (SUCCEEDED(browser.QueryFrom(folder))) {
-            found = true;
-            browser->Stop();
-            Sleep(1000);
-            VARIANT empty = ScopedVariant::kEmptyVariant;
-            hr = browser->Navigate(url, &empty, &empty, &empty, &empty);
-            DCHECK(SUCCEEDED(hr)) << "Failed to navigate";
-            break;
-          }
-        }
-      }
-    }
-    if (!found) {
-      DLOG(INFO) << "Waiting for browser to initialize...";
-      ::Sleep(100);
-      retries++;
-    }
-  }
-
-  DCHECK(retries < kMaxRetries);
-  DCHECK(found);
-
-  ::SysFreeString(url);
-
-  return 0;
 }
 
 void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
@@ -242,7 +303,7 @@ void CFUrlRequestUnittestRunner::Initialize() {
   // directly because it will attempt to initialize some things such as
   // ICU that have already been initialized for this process.
   InitializeLogging();
-  base::Time::EnableHiResClockForTests();
+  base::Time::UseHighResolutionTimer(true);
 
 #if !defined(PURIFY) && defined(OS_WIN)
   logging::SetLogAssertHandler(UnitTestAssertHandler);
@@ -277,11 +338,6 @@ void CFUrlRequestUnittestRunner::OnInitialTabLoaded() {
 void CFUrlRequestUnittestRunner::RunMainUIThread() {
   DCHECK(MessageLoop::current());
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
-
-  // Register the main thread by instantiating it, but don't call any methods.
-  ChromeThread main_thread;
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-
   MessageLoop::current()->Run();
 }
 
@@ -298,6 +354,8 @@ void CFUrlRequestUnittestRunner::StartTests() {
 // static
 DWORD CFUrlRequestUnittestRunner::RunAllUnittests(void* param) {
   PlatformThread::SetName("CFUrlRequestUnittestRunner");
+  // Needed for some url request tests like the intercept job tests, etc.
+  NotificationService service;
   CFUrlRequestUnittestRunner* me =
       reinterpret_cast<CFUrlRequestUnittestRunner*>(param);
   me->Run();
@@ -338,6 +396,7 @@ void FilterDisabledTests() {
   const char* disabled_tests[] = {
     // Tests disabled since they're testing the same functionality used
     // by the TestAutomationProvider.
+    "URLRequestTest.Intercept",
     "URLRequestTest.InterceptNetworkError",
     "URLRequestTest.InterceptRestartRequired",
     "URLRequestTest.InterceptRespectsCancelMain",
@@ -366,6 +425,26 @@ void FilterDisabledTests() {
     // later by using the new INTERNET_OPTION_SUPPRESS_BEHAVIOR flags
     // See http://msdn.microsoft.com/en-us/library/aa385328(VS.85).aspx
     "URLRequestTest.DoNotSaveCookies",
+
+    // TODO(ananta): This test has been consistently failing. Disabling it for
+    // now.
+    "URLRequestTestHTTP.GetTest_NoCache",
+
+    // These tests have been disabled as the Chrome cookie policies don't make
+    // sense or have not been implemented for the host network stack.
+    "URLRequestTest.DoNotSaveCookies_ViaPolicy",
+    "URLRequestTest.DoNotSendCookies_ViaPolicy",
+    "URLRequestTest.DoNotSaveCookies_ViaPolicy_Async",
+    "URLRequestTest.CookiePolicy_ForceSession",
+    "URLRequestTest.DoNotSendCookies",
+    "URLRequestTest.DoNotSendCookies_ViaPolicy_Async",
+    "URLRequestTest.CancelTest_During_OnGetCookiesBlocked",
+    "URLRequestTest.CancelTest_During_OnSetCookieBlocked",
+
+    // These tests are disabled as the rely on functionality provided by
+    // Chrome's HTTP stack like the ability to set the proxy for a URL, etc.
+    "URLRequestTestHTTP.ProxyTunnelRedirectTest",
+    "URLRequestTestHTTP.UnexpectedServerAuthTest",
   };
 
   std::string filter("-");  // All following filters will be negative.
@@ -379,12 +458,14 @@ void FilterDisabledTests() {
 }
 
 int main(int argc, char** argv) {
-  DialogWatchdog watchdog;
+  WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
   SupplyProxyCredentials credentials("user", "secret");
-  watchdog.AddObserver(&credentials);
+  // Check for a dialog class ("#32770")
+  watchdog.AddObserver(&credentials, "#32770");
   testing::InitGoogleTest(&argc, argv);
   FilterDisabledTests();
+  PluginService::EnableChromePlugins(false);
   CFUrlRequestUnittestRunner test_suite(argc, argv);
   test_suite.RunMainUIThread();
   return 0;

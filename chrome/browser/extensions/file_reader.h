@@ -7,8 +7,8 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/ref_counted.h"
-#include "base/task.h"
 #include "chrome/common/extensions/extension_resource.h"
 
 class MessageLoop;
@@ -29,6 +29,10 @@ class FileReader : public base::RefCountedThreadSafe<FileReader> {
   void Start();
 
  private:
+  friend class base::RefCountedThreadSafe<FileReader>;
+
+  ~FileReader() {}
+
   void ReadFileOnBackgroundThread();
   void RunCallback(bool success, const std::string& data);
 

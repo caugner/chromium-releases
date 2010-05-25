@@ -81,7 +81,6 @@ TEST_F(RendererTest, InitAndDestroyRenderer) {
 // TODO(apatrick): This test will not work as is with command buffers because
 //     it attempts to create a Renderer using the same ring buffer as the
 //     Renderer created in main.
-#if !defined(RENDERER_CB)
   scoped_ptr<Renderer> renderer(
       Renderer::CreateDefaultRenderer(service_locator()));
   EXPECT_TRUE(renderer->Init(*g_display_window, false));
@@ -93,6 +92,8 @@ TEST_F(RendererTest, InitAndDestroyRenderer) {
   // test that the Cg Context was correctly created
   RendererGL* gl_renderer = down_cast<RendererGL*>(renderer.get());
   EXPECT_TRUE(gl_renderer->cg_context() != NULL);
+#elif defined(RENDERER_GLES2)
+  RendererGLES2* gles2_renderer = down_cast<RendererGLES2*>(renderer.get());
 #endif
   // destroy the renderer
   renderer->Destroy();
@@ -103,8 +104,8 @@ TEST_F(RendererTest, InitAndDestroyRenderer) {
 #elif defined(RENDERER_GL)
   // check that the renderer no longer has a Cg Context.
   EXPECT_FALSE(gl_renderer->cg_context() != NULL);
+#elif defined(RENDERER_GLES2)
 #endif
-#endif  // RENDERER_CB
 }
 
 // Offscreen is only supported on D3D currently
@@ -180,3 +181,4 @@ TEST_F(RendererTest, SetViewport) {
 }
 
 }  // namespace o3d
+

@@ -5,26 +5,25 @@
 #ifndef NET_SOCKET_SSL_CLIENT_SOCKET_NSS_H_
 #define NET_SOCKET_SSL_CLIENT_SOCKET_NSS_H_
 
-// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
-// until NSS 3.12.2 comes out and we update to it.
-#define Lock FOO_NSS_Lock
 #include <certt.h>
-#undef Lock
 #include <keyt.h>
 #include <nspr.h>
 #include <nss.h>
 
 #include <string>
+#include <vector>
 
 #include "base/scoped_ptr.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_log.h"
 #include "net/base/nss_memio.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
+class BoundNetLog;
 class CertVerifier;
 class X509Certificate;
 
@@ -43,12 +42,14 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // SSLClientSocket methods:
   virtual void GetSSLInfo(SSLInfo* ssl_info);
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
+  virtual NextProtoStatus GetNextProto(std::string* proto);
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback);
+  virtual int Connect(CompletionCallback* callback, const BoundNetLog& net_log);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
+  virtual int GetPeerAddress(AddressList* address) const;
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -56,9 +57,15 @@ class SSLClientSocketNSS : public SSLClientSocket {
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
 
+  void set_handshake_callback_called() { handshake_callback_called_ = true; }
+
  private:
+  // Initializes NSS SSL options.  Returns a net error code.
+  int InitializeSSLOptions();
+
   void InvalidateSessionIfBadCertificate();
   X509Certificate* UpdateServerCert();
+  void CheckSecureRenegotiation() const;
   void DoReadCallback(int result);
   void DoWriteCallback(int result);
   void DoConnectCallback(int result);
@@ -120,17 +127,24 @@ class SSLClientSocketNSS : public SSLClientSocket {
   scoped_refptr<IOBuffer> user_write_buf_;
   int user_write_buf_len_;
 
-  // Set when handshake finishes.
+  // Set when handshake finishes.  The server certificate is first received
+  // from NSS as an NSS certificate handle (server_cert_nss_), and then
+  // converted into an X509Certificate object (server_cert_).
   scoped_refptr<X509Certificate> server_cert_;
+  CERTCertificate* server_cert_nss_;
   CertVerifyResult server_cert_verify_result_;
 
   // Stores client authentication information between ClientAuthHandler and
   // GetSSLCertRequestInfo calls.
-  CERTDistNames* client_auth_ca_names_;
+  std::vector<scoped_refptr<X509Certificate> > client_certs_;
   bool client_auth_cert_needed_;
 
   scoped_ptr<CertVerifier> verifier_;
 
+  // True if NSS has called HandshakeCallback.
+  bool handshake_callback_called_;
+
+  // True if the SSL handshake has been completed.
   bool completed_handshake_;
 
   enum State {
@@ -147,7 +161,17 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // Buffers for the network end of the SSL state machine
   memio_Private* nss_bufs_;
 
-  static bool nss_options_initialized_;
+  BoundNetLog net_log_;
+
+#if defined(OS_WIN)
+  // A CryptoAPI in-memory certificate store.  We use it for two purposes:
+  // 1. Import server certificates into this store so that we can verify and
+  //    display the certificates using CryptoAPI.
+  // 2. Copy client certificates from the "MY" system certificate store into
+  //    this store so that we can close the system store when we finish
+  //    searching for client certificates.
+  static HCERTSTORE cert_store_;
+#endif
 };
 
 }  // namespace net

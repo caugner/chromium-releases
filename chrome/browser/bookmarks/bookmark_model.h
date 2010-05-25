@@ -13,11 +13,10 @@
 #include "app/tree_node_model.h"
 #include "base/lock.h"
 #include "base/observer_list.h"
+#include "base/string16.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/browser/bookmarks/bookmark_storage.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
@@ -27,11 +26,17 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
+class BookmarkCodec;
 class BookmarkEditorView;
 class BookmarkIndex;
+class BookmarkLoadDetails;
 class BookmarkModel;
-class BookmarkCodec;
+class BookmarkStorage;
 class Profile;
+
+namespace bookmark_utils {
+struct TitleMatch;
+}
 
 // BookmarkNode ---------------------------------------------------------------
 
@@ -56,6 +61,8 @@ class BookmarkNode : public TreeNode<BookmarkNode> {
 
   // Returns the URL.
   const GURL& GetURL() const { return url_; }
+  // Sets the URL to the given value.
+  void SetURL(const GURL& url) { url_ = url; }
 
   // Returns a unique id for this node.
   // For bookmark nodes that are managed by the bookmark model, the IDs are
@@ -139,8 +146,8 @@ class BookmarkNode : public TreeNode<BookmarkNode> {
   HistoryService::Handle favicon_load_handle_;
 
   // The URL. BookmarkModel maintains maps off this URL, it is important that
-  // it not change once the node has been created.
-  const GURL url_;
+  // changes to the URL is done through the bookmark model.
+  GURL url_;
 
   // Type of node.
   BookmarkNode::Type type_;
@@ -200,6 +207,12 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
     observers_.RemoveObserver(observer);
   }
 
+  // Notify the observes that an import is about to happen, so they can
+  // delay any expensive UI updates until it is finished.
+  void BeginImportMode();
+  void EndImportMode();
+
+
   // Unstars or deletes the specified entry. Removing a group entry recursively
   // unstars all nodes. Observers are notified immediately.
   void Remove(const BookmarkNode* parent, int index);
@@ -209,15 +222,27 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
             const BookmarkNode* new_parent,
             int index);
 
+  // Duplicates a bookmark node and inserts it at a new location.
+  void Copy(const BookmarkNode* node,
+            const BookmarkNode* new_parent,
+            int index);
+
   // Returns the favicon for |node|. If the favicon has not yet been
   // loaded it is loaded and the observer of the model notified when done.
   const SkBitmap& GetFavIcon(const BookmarkNode* node);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
   // Sets the title of the specified node.
+#if !defined(WCHAR_T_IS_UTF16)
   void SetTitle(const BookmarkNode* node, const std::wstring& title);
+#endif
+  void SetTitle(const BookmarkNode* node, const string16& title);
+
+  // Sets the URL of the specified bookmark node.
+  void SetURL(const BookmarkNode* node, const GURL& url);
 
   // Returns true if the model finished loading.
-  bool IsLoaded() { return loaded_; }
+  virtual bool IsLoaded() { return loaded_; }
 
   // Returns the set of nodes with the specified URL.
   void GetNodesByURL(const GURL& url, std::vector<const BookmarkNode*>* nodes);
@@ -241,21 +266,42 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   // the specified id.
   const BookmarkNode* GetNodeByID(int64 id);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
   // Adds a new group node at the specified position.
+#if !defined(WCHAR_T_IS_UTF16)
   const BookmarkNode* AddGroup(const BookmarkNode* parent,
                                int index,
                                const std::wstring& title);
+#endif
+  const BookmarkNode* AddGroup(const BookmarkNode* parent,
+                               int index,
+                               const string16& title);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
   // Adds a url at the specified position.
+#if !defined(WCHAR_T_IS_UTF16)
   const BookmarkNode* AddURL(const BookmarkNode* parent,
                              int index,
                              const std::wstring& title,
                              const GURL& url);
+#endif
+  const BookmarkNode* AddURL(const BookmarkNode* parent,
+                             int index,
+                             const string16& title,
+                             const GURL& url);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
   // Adds a url with a specific creation date.
+#if !defined(WCHAR_T_IS_UTF16)
   const BookmarkNode* AddURLWithCreationTime(const BookmarkNode* parent,
                                              int index,
                                              const std::wstring& title,
+                                             const GURL& url,
+                                             const base::Time& creation_time);
+#endif
+  const BookmarkNode* AddURLWithCreationTime(const BookmarkNode* parent,
+                                             int index,
+                                             const string16& title,
                                              const GURL& url,
                                              const base::Time& creation_time);
 
@@ -263,20 +309,36 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   // BookmarkNodeChildrenReordered method.
   void SortChildren(const BookmarkNode* parent);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
   // This is the convenience that makes sure the url is starred or not starred.
   // If is_starred is false, all bookmarks for URL are removed. If is_starred is
   // true and there are no bookmarks for url, a bookmark is created.
+#if !defined(WCHAR_T_IS_UTF16)
   void SetURLStarred(const GURL& url,
                      const std::wstring& title,
                      bool is_starred);
+#endif
+  void SetURLStarred(const GURL& url,
+                     const string16& title,
+                     bool is_starred);
+
+  // Sets the date modified time of the specified node.
+  void SetDateGroupModified(const BookmarkNode* parent, const base::Time time);
 
   // Resets the 'date modified' time of the node to 0. This is used during
   // importing to exclude the newly created groups from showing up in the
   // combobox of most recently modified groups.
   void ResetDateGroupModified(const BookmarkNode* node);
 
+  // TODO(munjal): Remove wstring overload once all code is moved to string16.
+#if !defined(WCHAR_T_IS_UTF16)
   void GetBookmarksWithTitlesMatching(
       const std::wstring& text,
+      size_t max_count,
+      std::vector<bookmark_utils::TitleMatch>* matches);
+#endif
+  void GetBookmarksWithTitlesMatching(
+      const string16& text,
       size_t max_count,
       std::vector<bookmark_utils::TitleMatch>* matches);
 
@@ -329,7 +391,7 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
 
   // Invoked when loading is finished. Sets loaded_ and notifies observers.
   // BookmarkModel takes ownership of |details|.
-  void DoneLoading(BookmarkStorage::LoadDetails* details);
+  void DoneLoading(BookmarkLoadDetails* details);
 
   // Populates nodes_ordered_by_url_set_ from root.
   void PopulateNodesByURL(BookmarkNode* node);
@@ -352,9 +414,6 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   // Returns true if the parent and index are valid.
   bool IsValidIndex(const BookmarkNode* parent, int index, bool allow_end);
 
-  // Sets the date modified time of the specified node.
-  void SetDateGroupModified(const BookmarkNode* parent, const base::Time time);
-
   // Creates the bookmark bar/other nodes. These call into
   // CreateRootNodeFromStarredEntry.
   BookmarkNode* CreateBookmarkNode();
@@ -370,7 +429,7 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   void OnFavIconDataAvailable(
       FaviconService::Handle handle,
       bool know_favicon,
-      scoped_refptr<RefCountedBytes> data,
+      scoped_refptr<RefCountedMemory> data,
       bool expired,
       GURL icon_url);
 
@@ -397,9 +456,9 @@ class BookmarkModel : public NotificationObserver, public BookmarkService {
   // Records that the bookmarks file was changed externally.
   void SetFileChanged();
 
-  // Creates and returns a new LoadDetails. It's up to the caller to delete
-  // the returned object.
-  BookmarkStorage::LoadDetails* CreateLoadDetails();
+  // Creates and returns a new BookmarkLoadDetails. It's up to the caller to
+  // delete the returned object.
+  BookmarkLoadDetails* CreateLoadDetails();
 
   NotificationRegistrar registrar_;
 

@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/cocoa/infobar_gradient_view.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+
+#import "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/themed_window.h"
 
 const double kBackgroundColorTop[3] =
     {255.0 / 255.0, 242.0 / 255.0, 183.0 / 255.0};
@@ -11,26 +13,51 @@ const double kBackgroundColorBottom[3] =
     {250.0 / 255.0, 230.0 / 255.0, 145.0 / 255.0};
 
 @implementation InfoBarGradientView
+
+- (id)initWithFrame:(NSRect)frameRect {
+  if ((self = [super initWithFrame:frameRect])) {
+    NSColor* startingColor =
+        [NSColor colorWithCalibratedRed:kBackgroundColorTop[0]
+                                  green:kBackgroundColorTop[1]
+                                   blue:kBackgroundColorTop[2]
+                                  alpha:1.0];
+    NSColor* endingColor =
+        [NSColor colorWithCalibratedRed:kBackgroundColorBottom[0]
+                                  green:kBackgroundColorBottom[1]
+                                   blue:kBackgroundColorBottom[2]
+                                  alpha:1.0];
+    gradient_ =
+        [[NSGradient alloc] initWithStartingColor:startingColor
+                                       endingColor:endingColor];
+  }
+  return self;
+}
+
+- (void)dealloc {
+  [gradient_ release];
+  [super dealloc];
+}
+
+- (void)setGradient:(NSGradient*)gradient {
+  [gradient retain];
+  [gradient_ release];
+  gradient_ = gradient;
+}
+
 - (NSColor*)strokeColor {
-  return [[self gtm_theme] strokeColorForStyle:GTMThemeStyleToolBar
-                                         state:[[self window] isKeyWindow]];
+  ThemeProvider* themeProvider = [[self window] themeProvider];
+  if (!themeProvider)
+    return [NSColor blackColor];
+
+  BOOL active = [[self window] isMainWindow];
+  return themeProvider->GetNSColor(
+      active ? BrowserThemeProvider::COLOR_TOOLBAR_STROKE :
+               BrowserThemeProvider::COLOR_TOOLBAR_STROKE_INACTIVE,
+      true);
 }
 
 - (void)drawRect:(NSRect)rect {
-  NSColor* startingColor =
-      [NSColor colorWithCalibratedRed:kBackgroundColorTop[0]
-                                green:kBackgroundColorTop[1]
-                                 blue:kBackgroundColorTop[2]
-                                alpha:1.0];
-  NSColor* endingColor =
-      [NSColor colorWithCalibratedRed:kBackgroundColorBottom[0]
-                                green:kBackgroundColorBottom[1]
-                                 blue:kBackgroundColorBottom[2]
-                                alpha:1.0];
-  NSGradient* gradient =
-      [[[NSGradient alloc] initWithStartingColor:startingColor
-                                     endingColor:endingColor] autorelease];
-  [gradient drawInRect:[self bounds] angle:270];
+  [gradient_ drawInRect:[self bounds] angle:270];
 
   // Draw bottom stroke
   [[self strokeColor] set];
@@ -44,5 +71,16 @@ const double kBackgroundColorBottom[3] =
 }
 
 // This view is intentionally not opaque because it overlaps with the findbar.
+
+- (BOOL)accessibilityIsIgnored {
+  return NO;
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  if ([attribute isEqual:NSAccessibilityRoleAttribute])
+    return NSAccessibilityGroupRole;
+
+  return [super accessibilityAttributeValue:attribute];
+}
 
 @end

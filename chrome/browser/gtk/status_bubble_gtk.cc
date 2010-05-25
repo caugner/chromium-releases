@@ -6,16 +6,18 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
-#include "app/gfx/text_elider.h"
-#include "app/l10n_util.h"
+#include <algorithm>
+
+#include "app/text_elider.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/rounded_window.h"
 #include "chrome/browser/gtk/slide_animator_gtk.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/gtk_util.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -30,11 +32,22 @@ const int kCornerSize = 3;
 // Milliseconds before we hide the status bubble widget when you mouseout.
 const int kHideDelay = 250;
 
+// How close the mouse can get to the infobubble before it starts sliding
+// off-screen.
+const int kMousePadding = 20;
+
 }  // namespace
 
 StatusBubbleGtk::StatusBubbleGtk(Profile* profile)
     : theme_provider_(GtkThemeProvider::GetFrom(profile)),
-      timer_factory_(this) {
+      padding_(NULL),
+      label_(NULL),
+      timer_factory_(this),
+      flip_horizontally_(false),
+      y_offset_(0),
+      download_shelf_is_visible_(false),
+      last_mouse_location_(0, 0),
+      last_mouse_left_content_(false) {
   InitWidgets();
 
   theme_provider_->InitThemesFor(this);
@@ -87,7 +100,6 @@ void StatusBubbleGtk::Show() {
   timer_factory_.RevokeAll();
 
   gtk_widget_show_all(container_.get());
-
   if (container_->window)
     gdk_window_raise(container_->window);
 }
@@ -101,6 +113,14 @@ void StatusBubbleGtk::SetStatusTextTo(const std::string& status_utf8) {
     HideInASecond();
   } else {
     gtk_label_set_text(GTK_LABEL(label_), status_utf8.c_str());
+    if (!last_mouse_left_content_) {
+      // Show the padding and label to update our requisition and then
+      // re-process the last mouse event -- if the label was empty before or the
+      // text changed, our size will have changed and we may need to move
+      // ourselves away from the pointer now.
+      gtk_widget_show_all(padding_);
+      MouseMoved(last_mouse_location_, false);
+    }
     Show();
   }
 }
@@ -114,13 +134,80 @@ void StatusBubbleGtk::HideInASecond() {
       kHideDelay);
 }
 
-void StatusBubbleGtk::MouseMoved() {
-  // We can't do that fancy sliding behaviour where the status bubble slides
-  // out of the window because the window manager gets in the way. So totally
-  // ignore this message for now.
-  //
-  // TODO(erg): At least get some sliding behaviour so that it slides out of
-  // the way to hide the status bubble on mouseover.
+void StatusBubbleGtk::MouseMoved(
+    const gfx::Point& location, bool left_content) {
+  last_mouse_location_ = location;
+  last_mouse_left_content_ = left_content;
+
+  if (!GTK_WIDGET_REALIZED(container_.get()))
+    return;
+
+  GtkWidget* parent = gtk_widget_get_parent(container_.get());
+  if (!parent || !GTK_WIDGET_REALIZED(parent))
+    return;
+
+  int old_y_offset = y_offset_;
+  bool old_flip_horizontally = flip_horizontally_;
+
+  if (left_content) {
+    SetFlipHorizontally(false);
+    y_offset_ = 0;
+  } else {
+    GtkWidget* toplevel = gtk_widget_get_toplevel(container_.get());
+    if (!toplevel || !GTK_WIDGET_REALIZED(toplevel))
+      return;
+
+    bool ltr = !base::i18n::IsRTL();
+
+    GtkRequisition requisition;
+    gtk_widget_size_request(container_.get(), &requisition);
+
+    // Get our base position (that is, not including the current offset)
+    // relative to the origin of the root window.
+    gint toplevel_x = 0, toplevel_y = 0;
+    gdk_window_get_position(toplevel->window, &toplevel_x, &toplevel_y);
+    gfx::Rect parent_rect =
+        gtk_util::GetWidgetRectRelativeToToplevel(parent);
+    gfx::Rect bubble_rect(
+        toplevel_x + parent_rect.x() +
+          (ltr ? 0 : parent->allocation.width - requisition.width),
+        toplevel_y + parent_rect.y() +
+          parent->allocation.height - requisition.height,
+        requisition.width,
+        requisition.height);
+
+    int left_threshold =
+        bubble_rect.x() - bubble_rect.height() - kMousePadding;
+    int right_threshold =
+        bubble_rect.right() + bubble_rect.height() + kMousePadding;
+    int top_threshold = bubble_rect.y() - kMousePadding;
+
+    if (((ltr && location.x() < right_threshold) ||
+         (!ltr && location.x() > left_threshold)) &&
+        location.y() > top_threshold) {
+      if (download_shelf_is_visible_) {
+        SetFlipHorizontally(true);
+        y_offset_ = 0;
+      } else {
+        SetFlipHorizontally(false);
+        int distance = std::max(ltr ?
+                                  location.x() - right_threshold :
+                                  left_threshold - location.x(),
+                                top_threshold - location.y());
+        y_offset_ = std::min(-1 * distance, requisition.height);
+      }
+    } else {
+      SetFlipHorizontally(false);
+      y_offset_ = 0;
+    }
+  }
+
+  if (y_offset_ != old_y_offset || flip_horizontally_ != old_flip_horizontally)
+    gtk_widget_queue_resize_no_redraw(parent);
+}
+
+void StatusBubbleGtk::UpdateDownloadShelfVisibility(bool visible) {
+  download_shelf_is_visible_ = visible;
 }
 
 void StatusBubbleGtk::Observe(NotificationType type,
@@ -132,14 +219,16 @@ void StatusBubbleGtk::Observe(NotificationType type,
 }
 
 void StatusBubbleGtk::InitWidgets() {
+  bool ltr = !base::i18n::IsRTL();
+
   label_ = gtk_label_new(NULL);
 
-  GtkWidget* padding = gtk_alignment_new(0, 0, 1, 1);
-  gtk_alignment_set_padding(GTK_ALIGNMENT(padding),
+  padding_ = gtk_alignment_new(0, 0, 1, 1);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(padding_),
       kInternalTopBottomPadding, kInternalTopBottomPadding,
-      kInternalLeftRightPadding,
-      kInternalLeftRightPadding + kCornerSize);
-  gtk_container_add(GTK_CONTAINER(padding), label_);
+      kInternalLeftRightPadding + (ltr ? 0 : kCornerSize),
+      kInternalLeftRightPadding + (ltr ? kCornerSize : 0));
+  gtk_container_add(GTK_CONTAINER(padding_), label_);
 
   container_.Own(gtk_event_box_new());
   gtk_util::ActAsRoundedWindow(
@@ -147,7 +236,14 @@ void StatusBubbleGtk::InitWidgets() {
       gtk_util::ROUNDED_TOP_RIGHT,
       gtk_util::BORDER_TOP | gtk_util::BORDER_RIGHT);
   gtk_widget_set_name(container_.get(), "status-bubble");
-  gtk_container_add(GTK_CONTAINER(container_.get()), padding);
+  gtk_container_add(GTK_CONTAINER(container_.get()), padding_);
+
+  // We need to listen for mouse motion events, since a fast-moving pointer may
+  // enter our window without us getting any motion events on the browser near
+  // enough for us to run away.
+  gtk_widget_add_events(container_.get(), GDK_POINTER_MOTION_MASK);
+  g_signal_connect(container_.get(), "motion-notify-event",
+                   G_CALLBACK(HandleMotionNotifyThunk), this);
 
   UserChangedTheme();
 }
@@ -171,4 +267,34 @@ void StatusBubbleGtk::UserChangedTheme() {
 
   gtk_util::SetRoundedWindowBorderColor(container_.get(),
                                         theme_provider_->GetBorderColor());
+}
+
+void StatusBubbleGtk::SetFlipHorizontally(bool flip_horizontally) {
+  if (flip_horizontally == flip_horizontally_)
+    return;
+
+  flip_horizontally_ = flip_horizontally;
+
+  bool ltr = !base::i18n::IsRTL();
+  bool on_left = (ltr && !flip_horizontally) || (!ltr && flip_horizontally);
+
+  gtk_alignment_set_padding(GTK_ALIGNMENT(padding_),
+      kInternalTopBottomPadding, kInternalTopBottomPadding,
+      kInternalLeftRightPadding + (on_left ? 0 : kCornerSize),
+      kInternalLeftRightPadding + (on_left ? kCornerSize : 0));
+  // The rounded window code flips these arguments if we're RTL.
+  gtk_util::SetRoundedWindowEdgesAndBorders(
+      container_.get(),
+      kCornerSize,
+      flip_horizontally ?
+        gtk_util::ROUNDED_TOP_LEFT :
+        gtk_util::ROUNDED_TOP_RIGHT,
+      gtk_util::BORDER_TOP |
+        (flip_horizontally ? gtk_util::BORDER_LEFT : gtk_util::BORDER_RIGHT));
+  gtk_widget_queue_draw(container_.get());
+}
+
+gboolean StatusBubbleGtk::HandleMotionNotify(GdkEventMotion* event) {
+  MouseMoved(gfx::Point(event->x_root, event->y_root), false);
+  return FALSE;
 }

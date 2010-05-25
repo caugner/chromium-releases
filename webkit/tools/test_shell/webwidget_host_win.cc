@@ -1,19 +1,19 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved...........
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/tools/test_shell/webwidget_host.h"
 
-#include "base/gfx/rect.h"
 #include "base/logging.h"
 #include "base/win_util.h"
+#include "gfx/rect.h"
 #include "skia/ext/platform_canvas.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/api/public/WebPopupMenu.h"
-#include "webkit/api/public/WebScreenInfo.h"
-#include "webkit/api/public/WebSize.h"
-#include "webkit/api/public/win/WebInputEventFactory.h"
-#include "webkit/api/public/win/WebScreenInfoFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/win/WebScreenInfoFactory.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 using WebKit::WebInputEvent;
@@ -291,6 +291,7 @@ void WebWidgetHost::Resize(LPARAM lparam) {
 void WebWidgetHost::MouseEvent(UINT message, WPARAM wparam, LPARAM lparam) {
   const WebMouseEvent& event = WebInputEventFactory::mouseEvent(
       view_, message, wparam, lparam);
+  webwidget_->handleInputEvent(event);
   switch (event.type) {
     case WebInputEvent::MouseMove:
       TrackMouseLeave(true);
@@ -311,7 +312,6 @@ void WebWidgetHost::MouseEvent(UINT message, WPARAM wparam, LPARAM lparam) {
         ReleaseCapture();
       break;
   }
-  webwidget_->handleInputEvent(event);
 }
 
 void WebWidgetHost::WheelEvent(WPARAM wparam, LPARAM lparam) {

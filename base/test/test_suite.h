@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_TEST_SUITE_H_
-#define BASE_TEST_SUITE_H_
+#ifndef BASE_TEST_TEST_SUITE_H_
+#define BASE_TEST_TEST_SUITE_H_
 
 // Defines a basic test suite framework for running gtest based tests.  You can
 // instantiate this class in your main function and call its Run method to run
@@ -11,54 +11,44 @@
 
 #include "base/at_exit.h"
 #include "base/base_paths.h"
-#include "base/command_line.h"
 #include "base/debug_on_start.h"
 #include "base/debug_util.h"
-#include "base/file_path.h"
 #include "base/i18n/icu_util.h"
-#include "base/logging.h"
 #include "base/multiprocess_test.h"
+#include "base/nss_util.h"
+#include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
-#if defined(OS_POSIX)
-#include <signal.h>
-#endif
-
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <gtk/gtk.h>
 #endif
 
-#if defined(OS_POSIX)
-static void TestSuiteCrashHandler(int signal) {
-  StackTrace().PrintBacktrace();
-  _exit(1);
-}
-#endif  // OS_POSIX
-
-#if defined(OS_WIN)
-// Previous unhandled filter. Will be called if not NULL when we intercept an
-// exception.
-__declspec(selectany) LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
-
-// Prints the exception call stack.
-// This is the unit tests exception filter.
-inline long WINAPI UnitTestExceptionFilter(EXCEPTION_POINTERS* info) {
-  StackTrace(info).PrintBacktrace();
-  if (g_previous_filter)
-    return g_previous_filter(info);
-  return EXCEPTION_EXECUTE_HANDLER;
-}
-#endif  // OS_WIN
-
 // Match function used by the GetTestCount method.
 typedef bool (*TestMatch)(const testing::TestInfo&);
+
+// By setting up a shadow AtExitManager, this test event listener ensures that
+// no state is carried between tests (like singletons, lazy instances, etc).
+// Of course it won't help if the code under test corrupts memory.
+class TestIsolationEnforcer : public testing::EmptyTestEventListener {
+ public:
+  virtual void OnTestStart(const testing::TestInfo& test_info) {
+    ASSERT_FALSE(exit_manager_.get());
+    exit_manager_.reset(new base::ShadowingAtExitManager());
+  }
+
+  virtual void OnTestEnd(const testing::TestInfo& test_info) {
+    ASSERT_TRUE(exit_manager_.get());
+    exit_manager_.reset();
+  }
+
+ private:
+  scoped_ptr<base::ShadowingAtExitManager> exit_manager_;
+};
 
 class TestSuite {
  public:
@@ -66,10 +56,10 @@ class TestSuite {
     base::EnableTerminationOnHeapCorruption();
     CommandLine::Init(argc, argv);
     testing::InitGoogleTest(&argc, argv);
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
     g_thread_init(NULL);
     gtk_init_check(&argc, &argv);
-#endif
+#endif  // defined(OS_LINUX)
     // Don't add additional code to this constructor.  Instead add it to
     // Initialize().  See bug 6436.
   }
@@ -108,6 +98,13 @@ class TestSuite {
     }
 
     return count;
+  }
+
+  // TODO(phajdan.jr): Enforce isolation for all tests once it's stable.
+  void EnforceTestIsolation() {
+    testing::TestEventListeners& listeners =
+        testing::UnitTest::GetInstance()->listeners();
+    listeners.Append(new TestIsolationEnforcer);
   }
 
   // Don't add additional code to this method.  Instead add it to
@@ -150,14 +147,24 @@ class TestSuite {
   }
 
  protected:
-  // All fatal log messages (e.g. DCHECK failures) imply unit test failures.
+  // TODO(phajdan.jr): Clean this up.
+  // See http://crbug.com/29997
+
+  // By default, base::LogMessage::~LogMessage calls DebugUtil::BreakDebugger()
+  // when severity is LOG_FATAL. This results in error dialogs
+  // which are not friendly to buildbots.
+  // To avoid these problems, we override the LogMessage behaviour by
+  // replacing the assert handler with UnitTestAssertHandler.
   static void UnitTestAssertHandler(const std::string& str) {
+    // FAIL is a googletest macro, it marks the current test as failed.
+    // If throw_on_failure is set to true, it also ends the process.
+    ::testing::FLAGS_gtest_throw_on_failure = true;
     FAIL() << str;
   }
 
-#if defined(OS_WIN)
   // Disable crash dialogs so that it doesn't gum up the buildbot
   virtual void SuppressErrorDialogs() {
+#if defined(OS_WIN)
     UINT new_flags = SEM_FAILCRITICALERRORS |
                      SEM_NOGPFAULTERRORBOX |
                      SEM_NOOPENFILEERRORBOX;
@@ -166,8 +173,8 @@ class TestSuite {
     // http://blogs.msdn.com/oldnewthing/archive/2004/07/27/198410.aspx
     UINT existing_flags = SetErrorMode(new_flags);
     SetErrorMode(existing_flags | new_flags);
+#endif  // defined(OS_WIN)
   }
-#endif
 
   // Override these for custom initialization and shutdown handling.  Use these
   // instead of putting complex code in your constructor/destructor.
@@ -185,45 +192,30 @@ class TestSuite {
     // Note: temporarily enabled timestamps in an effort to catch bug 6361.
     logging::SetLogItems(true, true, true, true);
 
-#if defined(OS_POSIX)
-    // When running in an application, our code typically expects SIGPIPE
-    // to be ignored.  Therefore, when testing that same code, it should run
-    // with SIGPIPE ignored as well.
-    struct sigaction action;
-    action.sa_handler = SIG_IGN;
-    action.sa_flags = 0;
-    sigemptyset(&action.sa_mask);
-    CHECK(sigaction(SIGPIPE, &action, NULL) == 0);
-
-    // TODO(phajdan.jr): Catch other crashy signals, like SIGABRT.
-    CHECK(signal(SIGSEGV, &TestSuiteCrashHandler) != SIG_ERR);
-    CHECK(signal(SIGILL, &TestSuiteCrashHandler) != SIG_ERR);
-    CHECK(signal(SIGBUS, &TestSuiteCrashHandler) != SIG_ERR);
-    CHECK(signal(SIGFPE, &TestSuiteCrashHandler) != SIG_ERR);
-#endif  // OS_POSIX
-
+    CHECK(base::EnableInProcessStackDumping());
 #if defined(OS_WIN)
-    // For unit tests we turn on the high resolution timer and disable
-    // base::Time's use of SystemMonitor. Tests create and destroy the message
-    // loop, which causes a crash with SystemMonitor (http://crbug.com/12187).
-    base::Time::EnableHiResClockForTests();
-
-    // In some cases, we do not want to see standard error dialogs.
-    if (!IsDebuggerPresent() &&
-        !CommandLine::ForCurrentProcess()->HasSwitch("show-error-dialogs")) {
-      SuppressErrorDialogs();
-#if !defined(PURIFY)
-      // When the code in this file moved around, bug 6436 resurfaced.
-      // As a hack workaround, just #ifdef out this code for Purify builds.
-      logging::SetLogAssertHandler(UnitTestAssertHandler);
-#endif  // !defined(PURIFY)
-      // Add stack dumping support on exception on windows. Similar to OS_POSIX
-      // signal() handling above.
-      g_previous_filter = SetUnhandledExceptionFilter(&UnitTestExceptionFilter);
-    }
+    // Make sure we run with high resolution timer to minimize differences
+    // between production code and test code.
+    bool result = base::Time::UseHighResolutionTimer(true);
+    CHECK(result);
 #endif  // defined(OS_WIN)
 
+    // In some cases, we do not want to see standard error dialogs.
+    if (!DebugUtil::BeingDebugged() &&
+        !CommandLine::ForCurrentProcess()->HasSwitch("show-error-dialogs")) {
+      SuppressErrorDialogs();
+      logging::SetLogAssertHandler(UnitTestAssertHandler);
+    }
+
     icu_util::Initialize();
+
+#if defined(USE_NSS)
+    // Trying to repeatedly initialize and cleanup NSS and NSPR may result in
+    // a deadlock. Such repeated initialization will happen when using test
+    // isolation. Prevent problems by initializing NSS here, so that the cleanup
+    // will be done only on process exit.
+    base::EnsureNSSInit();
+#endif  // defined(USE_NSS)
   }
 
   virtual void Shutdown() {
@@ -234,4 +226,4 @@ class TestSuite {
   base::AtExitManager at_exit_manager_;
 };
 
-#endif  // BASE_TEST_SUITE_H_
+#endif  // BASE_TEST_TEST_SUITE_H_

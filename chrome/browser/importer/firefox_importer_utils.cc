@@ -5,10 +5,13 @@
 #include "chrome/browser/importer/firefox_importer_utils.h"
 
 #include <algorithm>
+#include <map>
+#include <string>
 
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
@@ -21,8 +24,8 @@ namespace {
 // the search URL when importing search engines.
 class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
  public:
-  FirefoxURLParameterFilter() { }
-  ~FirefoxURLParameterFilter() { }
+  FirefoxURLParameterFilter() {}
+  virtual ~FirefoxURLParameterFilter() {}
 
   // TemplateURLParser::ParameterFilter method.
   virtual bool KeepParameter(const std::string& key,
@@ -40,12 +43,11 @@ class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
 };
 }  // namespace
 
-bool GetFirefoxVersionAndPathFromProfile(const std::wstring& profile_path,
+bool GetFirefoxVersionAndPathFromProfile(const FilePath& profile_path,
                                          int* version,
-                                         std::wstring* app_path) {
+                                         FilePath* app_path) {
   bool ret = false;
-  std::wstring compatibility_file(profile_path);
-  file_util::AppendToPath(&compatibility_file, L"compatibility.ini");
+  FilePath compatibility_file = profile_path.AppendASCII("compatibility.ini");
   std::string content;
   file_util::ReadFileToString(compatibility_file, &content);
   ReplaceSubstringsAfterOffset(&content, 0, "\r\n", "\n");
@@ -63,14 +65,19 @@ bool GetFirefoxVersionAndPathFromProfile(const std::wstring& profile_path,
         *version = line.substr(equal + 1)[0] - '0';
         ret = true;
       } else if (key == "LastAppDir") {
-        *app_path = UTF8ToWide(line.substr(equal + 1));
+        // TODO(evanm): If the path in question isn't convertible to
+        // UTF-8, what does Firefox do?  If it puts raw bytes in the
+        // file, we could go straight from bytes -> filepath;
+        // otherwise, we're out of luck here.
+        *app_path = FilePath::FromWStringHack(
+            UTF8ToWide(line.substr(equal + 1)));
       }
     }
   }
   return ret;
 }
 
-void ParseProfileINI(std::wstring file, DictionaryValue* root) {
+void ParseProfileINI(const FilePath& file, DictionaryValue* root) {
   // Reads the whole INI file.
   std::string content;
   file_util::ReadFileToString(file, &content);
@@ -130,7 +137,7 @@ bool CanImportURL(const GURL& url) {
   return true;
 }
 
-void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
+void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
                                     std::vector<TemplateURL*>* search_engines) {
   DCHECK(search_engines);
 
@@ -139,7 +146,7 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
   // The first XML file represents the default search engine in Firefox 3, so we
   // need to keep it on top of the list.
   TemplateURL* default_turl = NULL;
-  for (std::vector<std::wstring>::const_iterator file_iter = xml_files.begin();
+  for (std::vector<FilePath>::const_iterator file_iter = xml_files.begin();
        file_iter != xml_files.end(); ++file_iter) {
     file_util::ReadFileToString(*file_iter, &content);
     TemplateURL* template_url = new TemplateURL();
@@ -183,30 +190,25 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
   }
 }
 
-bool ReadPrefFile(const std::wstring& path_name,
-                  const std::wstring& file_name,
-                  std::string* content) {
+bool ReadPrefFile(const FilePath& path, std::string* content) {
   if (content == NULL)
     return false;
 
-  std::wstring file = path_name;
-  file_util::AppendToPath(&file, file_name.c_str());
-
-  file_util::ReadFileToString(file, content);
+  file_util::ReadFileToString(path, content);
 
   if (content->empty()) {
-    NOTREACHED() << L"Firefox preference file " << file_name.c_str()
-                 << L" is empty.";
+    NOTREACHED() << "Firefox preference file " << path.value()
+                 << " is empty.";
     return false;
   }
 
   return true;
 }
 
-std::string ReadBrowserConfigProp(const std::wstring& app_path,
+std::string ReadBrowserConfigProp(const FilePath& app_path,
                                   const std::string& pref_key) {
   std::string content;
-  if (!ReadPrefFile(app_path, L"browserconfig.properties", &content))
+  if (!ReadPrefFile(app_path.AppendASCII("browserconfig.properties"), &content))
     return "";
 
   // This file has the syntax: key=value.
@@ -228,10 +230,10 @@ std::string ReadBrowserConfigProp(const std::wstring& app_path,
   return content.substr(start + 1, stop - start - 1);
 }
 
-std::string ReadPrefsJsValue(const std::wstring& profile_path,
+std::string ReadPrefsJsValue(const FilePath& profile_path,
                              const std::string& pref_key) {
   std::string content;
-  if (!ReadPrefFile(profile_path, L"prefs.js", &content))
+  if (!ReadPrefFile(profile_path.AppendASCII("prefs.js"), &content))
     return "";
 
   // This file has the syntax: user_pref("key", value);
@@ -262,7 +264,7 @@ std::string ReadPrefsJsValue(const std::wstring& profile_path,
 
 int GetFirefoxDefaultSearchEngineIndex(
     const std::vector<TemplateURL*>& search_engines,
-    const std::wstring& profile_path) {
+    const FilePath& profile_path) {
   // The default search engine is contained in the file prefs.js found in the
   // profile directory.
   // It is the "browser.search.selectedEngine" property.
@@ -296,7 +298,7 @@ int GetFirefoxDefaultSearchEngineIndex(
   return default_se_index;
 }
 
-GURL GetHomepage(const std::wstring& profile_path) {
+GURL GetHomepage(const FilePath& profile_path) {
   std::string home_page_list =
       ReadPrefsJsValue(profile_path, "browser.startup.homepage");
 
@@ -307,8 +309,7 @@ GURL GetHomepage(const std::wstring& profile_path) {
   return GURL(home_page_list.substr(0, seperator));
 }
 
-bool IsDefaultHomepage(const GURL& homepage,
-                       const std::wstring& app_path) {
+bool IsDefaultHomepage(const GURL& homepage, const FilePath& app_path) {
   if (!homepage.is_valid())
     return false;
 

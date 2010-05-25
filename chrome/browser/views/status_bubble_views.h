@@ -5,12 +5,15 @@
 #ifndef CHROME_BROWSER_VIEWS_STATUS_BUBBLE_VIEWS_H_
 #define CHROME_BROWSER_VIEWS_STATUS_BUBBLE_VIEWS_H_
 
-#include "base/gfx/rect.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/status_bubble.h"
+#include "gfx/rect.h"
 
 class GURL;
+namespace gfx {
+class Point;
+}
 namespace views {
 class Widget;
 }
@@ -44,7 +47,7 @@ class StatusBubbleViews : public StatusBubble {
   virtual void SetStatus(const std::wstring& status);
   virtual void SetURL(const GURL& url, const std::wstring& languages);
   virtual void Hide();
-  virtual void MouseMoved();
+  virtual void MouseMoved(const gfx::Point& location, bool left_content);
   virtual void UpdateDownloadShelfVisibility(bool visible);
 
  private:
@@ -55,7 +58,10 @@ class StatusBubbleViews : public StatusBubble {
 
   // Attempt to move the status bubble out of the way of the cursor, allowing
   // users to see links in the region normally occupied by the status bubble.
-  void AvoidMouse();
+  void AvoidMouse(const gfx::Point& location);
+
+  // Returns true if the frame_ is visible and not minimized.
+  bool IsFrameVisible();
 
   // The status text we want to display when there are no URLs to display.
   std::wstring status_text_;

@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H__
-#define WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H__
+#ifndef WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_
+#define WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_
 
 #include <string>
 #include <vector>
@@ -14,12 +14,11 @@
 #include "base/ref_counted.h"
 #include "build/build_config.h"
 #include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/webplugin.h"
 
 struct WebPluginInfo;
 
-namespace NPAPI
-{
+namespace NPAPI {
 
 class PluginInstance;
 
@@ -28,16 +27,15 @@ class PluginInstance;
 class PluginLib : public base::RefCounted<PluginLib> {
  public:
   static PluginLib* CreatePluginLib(const FilePath& filename);
-  virtual ~PluginLib();
 
   // Creates a WebPluginInfo structure given a plugin's path.  On success
   // returns true, with the information being put into "info".
   // Returns false if the library couldn't be found, or if it's not a plugin.
   static bool ReadWebPluginInfo(const FilePath& filename, WebPluginInfo* info);
 
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Parse the result of an NP_GetMIMEDescription() call.
-  // This API is only used on Linux, and is exposed here for testing.
+  // This API is only used on Unixes, and is exposed here for testing.
   static void ParseMIMEDescription(const std::string& description,
                                    std::vector<WebPluginMimeType>* mime_types);
 #endif
@@ -76,11 +74,19 @@ class PluginLib : public base::RefCounted<PluginLib> {
 
   int instance_count() const { return instance_count_; }
 
+  // Prevents the library code from being unload when Unload() is called (since
+  // some plugins crash if unloaded).
+  void PreventLibraryUnload();
+
  private:
+  friend class base::RefCounted<PluginLib>;
+
   // Creates a new PluginLib.
   // |entry_points| is non-NULL for internal plugins.
   PluginLib(const WebPluginInfo& info,
             const PluginEntryPoints* entry_points);
+
+  virtual ~PluginLib();
 
   // Attempts to load the plugin from the library.
   // Returns true if it is a legitimate plugin, false otherwise
@@ -94,19 +100,20 @@ class PluginLib : public base::RefCounted<PluginLib> {
 
  private:
   bool internal_;  // True for plugins that are built-in into chrome binaries.
-  WebPluginInfo web_plugin_info_;  // supported mime types, description
-  base::NativeLibrary library_;  // the opened library reference
-  NPPluginFuncs plugin_funcs_;  // the struct of plugin side functions
-  bool initialized_;  // is the plugin initialized
-  NPSavedData *saved_data_;  // persisted plugin info for NPAPI
-  int instance_count_;  // count of plugins in use
+  WebPluginInfo web_plugin_info_;  // Supported mime types, description
+  base::NativeLibrary library_;  // The opened library reference.
+  NPPluginFuncs plugin_funcs_;  // The struct of plugin side functions.
+  bool initialized_;  // Is the plugin initialized?
+  NPSavedData *saved_data_;  // Persisted plugin info for NPAPI.
+  int instance_count_;  // Count of plugins in use.
+  bool skip_unload_;  // True if library_ should not be unloaded.
 
   // Function pointers to entry points into the plugin.
   PluginEntryPoints entry_points_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginLib);
+  DISALLOW_COPY_AND_ASSIGN(PluginLib);
 };
 
-} // namespace NPAPI
+}  // namespace NPAPI
 
-#endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H__
+#endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_

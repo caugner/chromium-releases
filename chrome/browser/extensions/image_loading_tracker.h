@@ -1,78 +1,103 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_IMAGE_LOADING_TRACKER_H_
 #define CHROME_BROWSER_EXTENSIONS_IMAGE_LOADING_TRACKER_H_
 
+#include <map>
+
 #include "base/ref_counted.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class ExtensionResource;
 class SkBitmap;
 
 namespace gfx {
-class Size;
+  class Size;
 }
 
 // The views need to load their icons asynchronously but might be deleted before
-// the images have loaded. This class stays alive while the request is in
-// progress (manages its own lifetime) and keeps track of whether the view still
-// cares about the icon loading.
-// Consider abstracting out a FilePathProvider (ExtensionResource) and moving
-// back to chrome/browser/ if other subsystems want to use it.
-class ImageLoadingTracker
-  : public base::RefCountedThreadSafe<ImageLoadingTracker> {
+// the images have loaded. This class encapsulates a loader class that stays
+// alive while the request is in progress (manages its own lifetime) and keeps
+// track of whether the view still cares about the icon loading.
+//
+// To use this class, have your class derive from ImageLoadingTracker::Observer,
+// and add a member variable ImageLoadingTracker tracker_. Then override
+// Observer::OnImageLoaded and call:
+//   tracker_.LoadImage(extension, resource, max_size, false);
+// ... and wait for OnImageLoaded to be called back on you with a pointer to the
+// SkBitmap loaded.
+// NOTE: if the image is available already (or the resource is not valid), the
+// Observer is notified immediately from the call to LoadImage. In other words,
+// by the time LoadImage returns the observer has been notified.
+//
+class ImageLoadingTracker : public NotificationObserver {
  public:
+  enum CacheParam {
+    CACHE,
+    DONT_CACHE
+  };
+
   class Observer {
    public:
     // Will be called when the image with the given index has loaded.
     // The |image| is owned by the tracker, so the observer should make a copy
-    // if they need to access it after this call.
-    virtual void OnImageLoaded(SkBitmap* image, size_t index) = 0;
+    // if they need to access it after this call. |image| can be null if valid
+    // image was not found or it failed to decode. |resource| is the
+    // ExtensionResource where the |image| came from and the |index| represents
+    // the index of the image just loaded (starts at 0 and increments every
+    // time LoadImage is called).
+    virtual void OnImageLoaded(SkBitmap* image, ExtensionResource resource,
+                               int index) = 0;
   };
 
-  ImageLoadingTracker(Observer* observer, size_t image_count)
-    : observer_(observer), image_count_(image_count), posted_count_(0) {
-    AddRef();  // We hold on to a reference to ourself to make sure we don't
-               // get deleted until we get a response from image loading (see
-               // ImageLoadingDone).
-  }
-  ~ImageLoadingTracker() {}
+  explicit ImageLoadingTracker(Observer* observer);
+  ~ImageLoadingTracker();
 
-  // If there are remaining images to be loaded, the observing object should
-  // call this method on its destruction, so that the tracker will not attempt
-  // to make any more callbacks to it.
-  void StopTrackingImageLoad() {
-    observer_ = NULL;
-  }
-
-  // Specify image resource to load.  This method must be called a number of
-  // times equal to the |image_count| arugment to the constructor.  Calling it
-  // any more or less than that is an error. If the loaded image is larger than
+  // Specify image resource to load. If the loaded image is larger than
   // |max_size| it will be resized to those dimensions.
-  void PostLoadImageTask(const ExtensionResource& resource,
-                         const gfx::Size& max_size);
+  void LoadImage(Extension* extension,
+                 const ExtensionResource& resource,
+                 const gfx::Size& max_size,
+                 CacheParam cache);
 
  private:
-  class LoadImageTask;
+  typedef std::map<int, Extension*> LoadMap;
 
-  // When an image has finished loaded and scaled on the file thread, it is
-  // posted back to this method on the original thread.  This method then calls
-  // the observer's OnImageLoaded and deletes the ImageLoadingTracker if it was
-  // the last image in the list.
+  class ImageLoader;
+
+  // When an image has finished loaded and been resized on the file thread, it
+  // is posted back to this method on the original thread.  This method then
+  // calls the observer's OnImageLoaded and deletes the ImageLoadingTracker if
+  // it was the last image in the list.
   // |image| may be null if the file failed to decode.
-  void OnImageLoaded(SkBitmap* image, size_t index);
+  void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
+                     int id);
+
+  // NotificationObserver method. If an extension is uninstalled while we're
+  // waiting for the image we remove the entry from load_map_.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
   // The view that is waiting for the image to load.
   Observer* observer_;
 
-  // The number of images this ImageTracker should keep track of.  This is
-  // decremented as each image finishes loading, and the tracker will delete
-  // itself when it reaches zero.
-  size_t image_count_;
+  // ID to use for next image requested. This is an ever increasing integer.
+  int next_id_;
 
-  // The number of tasks that have been posted so far.
-  size_t posted_count_;
+  // The object responsible for loading the image on the File thread.
+  scoped_refptr<ImageLoader> loader_;
+
+  // If LoadImage is told to cache the result an entry is added here. The
+  // integer identifies the id assigned to the request. If the extension is
+  // deleted while fetching the image the entry is removed from the map.
+  LoadMap load_map_;
+
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageLoadingTracker);
 };

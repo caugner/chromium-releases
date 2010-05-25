@@ -1,14 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "chrome/common/extensions/url_pattern.h"
 #include "media/base/filter_host.h"
+#include "media/base/media_format.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
@@ -19,6 +20,7 @@ namespace {
 
 const char kHttpScheme[] = "http";
 const char kHttpsScheme[] = "https";
+const char kDataScheme[] = "data";
 const int64 kPositionNotSpecified = -1;
 const int kHttpOK = 200;
 const int kHttpPartialContent = 206;
@@ -42,14 +44,12 @@ const int kForwardWaitThreshold = 2 * kMegabyte;
 
 // Defines how long we should wait for more data before we declare a connection
 // timeout and start a new request.
-// TODO(hclam): Use this value when retry is implemented.
 // TODO(hclam): Set it to 5s, calibrate this value later.
 const int kTimeoutMilliseconds = 5000;
 
 // Defines how many times we should try to read from a buffered resource loader
 // before we declare a read error. After each failure of read from a buffered
 // resource loader, a new one is created to be read.
-// TODO(hclam): Use this value when retry is implemented.
 const int kReadTrials = 3;
 
 // BufferedDataSource has an intermediate buffer, this value governs the initial
@@ -60,6 +60,10 @@ const int kInitialReadBufferSize = 32768;
 // Returns true if |url| operates on HTTP protocol.
 bool IsHttpProtocol(const GURL& url) {
   return url.SchemeIs(kHttpScheme) || url.SchemeIs(kHttpsScheme);
+}
+
+bool IsDataProtocol(const GURL& url) {
+  return url.SchemeIs(kDataScheme);
 }
 
 }  // namespace
@@ -226,11 +230,15 @@ int64 BufferedResourceLoader::GetBufferedLastBytePosition() {
 //     webkit_glue::ResourceLoaderBridge::Peer implementations
 bool BufferedResourceLoader::OnReceivedRedirect(
     const GURL& new_url,
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
+    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    bool* has_new_first_party_for_cookies,
+    GURL* new_first_party_for_cookies) {
   DCHECK(bridge_.get());
 
   // Save the new URL.
   url_ = new_url;
+  // TODO(wtc): should we return a new first party for cookies URL?
+  *has_new_first_party_for_cookies = false;
 
   // The load may have been stopped and |start_callback| is destroyed.
   // In this case we shouldn't do anything.
@@ -490,6 +498,24 @@ void BufferedResourceLoader::DoneStart(int error) {
 void BufferedResourceLoader::NotifyNetworkEvent() {
   if (event_callback_.get())
     event_callback_->Run();
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// BufferedDataSource, static methods
+bool BufferedDataSource::IsMediaFormatSupported(
+    const media::MediaFormat& media_format) {
+  std::string mime_type;
+  std::string url;
+  if (media_format.GetAsString(media::MediaFormat::kMimeType, &mime_type) &&
+      media_format.GetAsString(media::MediaFormat::kURL, &url)) {
+    GURL gurl(url);
+
+    // This data source doesn't support data:// protocol, so reject it
+    // explicitly.
+    if (IsProtocolSupportedForMedia(gurl) && !IsDataProtocol(gurl))
+      return true;
+  }
+  return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////

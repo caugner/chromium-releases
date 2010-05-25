@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file defines a set of user experience metrics data recorded by
 // the MetricsService.  This is the unit of data that is sent to the server.
 
-#ifndef CHROME_BROWSER_METRICS_LOG_H__
-#define CHROME_BROWSER_METRICS_LOG_H__
+#ifndef CHROME_BROWSER_METRICS_METRICS_LOG_H_
+#define CHROME_BROWSER_METRICS_METRICS_LOG_H_
 
 #include <libxml/xmlwriter.h>
 
@@ -17,7 +17,7 @@
 #include "base/histogram.h"
 #include "base/time.h"
 #include "chrome/common/page_transition_types.h"
-#include "webkit/glue/webplugininfo.h"
+#include "webkit/glue/plugins/webplugininfo.h"
 
 struct AutocompleteLog;
 class DictionaryValue;
@@ -35,7 +35,7 @@ class MetricsLog {
   static void RegisterPrefs(PrefService* prefs);
 
   // Records a user-initiated action.
-  void RecordUserAction(const wchar_t* key);
+  void RecordUserAction(const char* key);
 
   enum WindowEventType {
     WINDOW_CREATE = 0,
@@ -106,6 +106,21 @@ class MetricsLog {
   // Get the current version of the application as a string.
   static std::string GetVersionString();
 
+  // Get the GMT buildtime for the current binary, expressed in seconds since
+  // Januray 1, 1970 GMT.
+  // The value is used to identify when a new build is run, so that previous
+  // reliability stats, from other builds, can be abandoned.
+  static int64 GetBuildTime();
+
+  // Get the amount of uptime in seconds since this function was last called.
+  // This updates the cumulative uptime metric for uninstall as a side effect.
+  static int64 GetIncrementalUptime(PrefService* pref);
+
+  // Use |extension| in all uploaded appversions in addition to the standard
+  // version string.
+  static void set_version_extension(const std::string& extension) {
+    version_extension_ = extension;
+  }
  protected:
   // Returns a string containing the current time.
   // Virtual so that it can be overridden for testing.
@@ -184,6 +199,9 @@ class MetricsLog {
   void WriteProfileMetrics(const std::wstring& key,
                            const DictionaryValue& profile_metrics);
 
+  // An extension that is appended to the appversion in each log.
+  static std::string version_extension_;
+
   base::Time start_time_;
   base::Time end_time_;
 
@@ -202,4 +220,4 @@ class MetricsLog {
   DISALLOW_EVIL_CONSTRUCTORS(MetricsLog);
 };
 
-#endif  // CHROME_BROWSER_METRICS_LOG_H__
+#endif  // CHROME_BROWSER_METRICS_METRICS_LOG_H_

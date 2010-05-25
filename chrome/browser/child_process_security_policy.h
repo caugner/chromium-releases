@@ -69,6 +69,10 @@ class ChildProcessSecurityPolicy {
   // upload the file to the web.
   void GrantUploadFile(int renderer_id, const FilePath& file);
 
+  // Grants the renderer process the capability to access URLs of the provided
+  // scheme.
+  void GrantScheme(int renderer_id, const std::string& scheme);
+
   // Whenever the browser processes commands the renderer to run web inspector,
   // it should call this method to grant the renderer process the capability to
   // run the inspector.
@@ -80,6 +84,12 @@ class ChildProcessSecurityPolicy {
   // Grant this renderer the ability to use extension Bindings.
   void GrantExtensionBindings(int renderer_id);
 
+  // Grant this renderer the ability to read raw cookies.
+  void GrantReadRawCookies(int renderer_id);
+
+  // Revoke read raw cookies permission.
+  void RevokeReadRawCookies(int renderer_id);
+
   // Before servicing a renderer's request for a URL, the browser should call
   // this method to determine whether the renderer has the capability to
   // request the URL.
@@ -90,15 +100,18 @@ class ChildProcessSecurityPolicy {
   // capability to upload the requested file.
   bool CanUploadFile(int renderer_id, const FilePath& file);
 
-  // Returns true of the specified renderer_id has been granted DOMUIBindings.
+  // Returns true if the specified renderer_id has been granted DOMUIBindings.
   // The browser should check this property before assuming the renderer is
   // allowed to use DOMUIBindings.
   bool HasDOMUIBindings(int renderer_id);
 
-  // Returns true of the specified renderer_id has been granted DOMUIBindings.
+  // Returns true if the specified renderer_id has been granted DOMUIBindings.
   // The browser should check this property before assuming the renderer is
   // allowed to use extension bindings.
   bool HasExtensionBindings(int renderer_id);
+
+  // Returns true if the specified renderer_id has been granted ReadRawCookies.
+  bool CanReadRawCookies(int renderer_id);
 
  private:
   friend class ChildProcessSecurityPolicyInProcessBrowserTest;

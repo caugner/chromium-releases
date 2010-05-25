@@ -8,8 +8,8 @@
 #include <gtk/gtk.h>
 #include <string>
 
-#include "base/gfx/rect.h"
 #include "base/logging.h"
+#include "gfx/rect.h"
 #include "views/controls/native/native_view_host_wrapper.h"
 
 namespace views {
@@ -28,7 +28,7 @@ class NativeViewHostGtk : public NativeViewHostWrapper {
 
   // Overridden from NativeViewHostWrapper:
   virtual void NativeViewAttached();
-  virtual void NativeViewDetaching();
+  virtual void NativeViewDetaching(bool destroyed);
   virtual void AddedToWidget();
   virtual void RemovedFromWidget();
   virtual void InstallClip(int x, int y, int w, int h);
@@ -50,6 +50,10 @@ class NativeViewHostGtk : public NativeViewHostWrapper {
   void DestroyFixed();
 
   WidgetGtk* GetHostWidget() const;
+
+  // Returns the descendant of fixed_ that has focus, or NULL if focus is not
+  // on a descendant of fixed_.
+  GtkWidget* GetFocusedDescendant();
 
   // Invoked from the 'destroy' signal.
   static void CallDestroy(GtkObject* object, NativeViewHostGtk* host);
@@ -86,4 +90,3 @@ class NativeViewHostGtk : public NativeViewHostWrapper {
 }  // namespace views
 
 #endif  // VIEWS_CONTROLS_NATIVE_HOST_VIEW_GTK_H_
-

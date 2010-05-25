@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en-US</string>
+	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>${EXECUTABLE_NAME}</string>
 	<key>CFBundleDocumentTypes</key>
@@ -186,8 +186,6 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>10.5.0</string>
-	<key>NSPrincipalClass</key>
-	<string>CrApplication</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

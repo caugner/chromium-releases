@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "net/base/io_buffer.h"
+#include "net/base/net_log.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_chunked_decoder.h"
 #include "net/http/http_response_info.h"
@@ -27,13 +28,15 @@ class HttpStreamParser {
   // buffer's offset will be set to the first free byte. |read_buffer| may
   // have its capacity changed.
   HttpStreamParser(ClientSocketHandle* connection,
-                   GrowableIOBuffer* read_buffer);
+                   GrowableIOBuffer* read_buffer,
+                   const BoundNetLog& net_log);
   ~HttpStreamParser() {}
 
   // These functions implement the interface described in HttpStream with
   // some additional functionality
   int SendRequest(const HttpRequestInfo* request, const std::string& headers,
-                  UploadDataStream* request_body, CompletionCallback* callback);
+                  UploadDataStream* request_body, HttpResponseInfo* response,
+                  CompletionCallback* callback);
 
   int ReadResponseHeaders(CompletionCallback* callback);
 
@@ -75,6 +78,9 @@ class HttpStreamParser {
   // response, the transaction will fail with ERR_RESPONSE_HEADERS_TOO_BIG.
   // Note: |kMaxHeaderBufSize| should be a multiple of |kHeaderBufInitialSize|.
   enum { kMaxHeaderBufSize = 256 * 1024 };  // 256 kilobytes.
+
+  // The maximum sane buffer size.
+  enum { kMaxBufSize = 2 * 1024 * 1024 };  // 2 megabytes.
 
   // Handle callbacks.
   void OnIOComplete(int result);
@@ -125,8 +131,8 @@ class HttpStreamParser {
   // -1 if not found yet.
   int response_header_start_offset_;
 
-  // The parsed response headers.
-  HttpResponseInfo response_;
+  // The parsed response headers.  Owned by the caller.
+  HttpResponseInfo* response_;
 
   // Indicates the content length.  If this value is less than zero
   // (and chunked_decoder_ is null), then we must read until the server
@@ -155,6 +161,8 @@ class HttpStreamParser {
 
   // The underlying socket.
   ClientSocketHandle* const connection_;
+
+  BoundNetLog net_log_;
 
   // Callback to be used when doing IO.
   CompletionCallbackImpl<HttpStreamParser> io_callback_;

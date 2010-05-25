@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <aclapi.h>
+#include <shlobj.h>
 
 #include <string>
 
@@ -26,6 +27,11 @@ enum WinVersion {
   WINVERSION_2008 = 5,
   WINVERSION_WIN7 = 6,
 };
+
+// Property key for System.AppUserModel.ID.
+// <http://msdn.microsoft.com/en-us/library/dd391569(VS.85).aspx>
+// TODO(xiyuan): Remove this once we compile with Win7 SDK.
+extern const PROPERTYKEY kPKEYAppUserModelID;
 
 void GetNonClientMetrics(NONCLIENTMETRICS* metrics);
 
@@ -109,6 +115,12 @@ std::wstring FormatLastWin32Error();
 // Methods to convert base::KeyboardCode/Windows virtual key type methods.
 WORD KeyboardCodeToWin(base::KeyboardCode keycode);
 base::KeyboardCode WinToKeyboardCode(WORD keycode);
+
+// Sets the application id in given IPropertyStore. The function is intended
+// for tagging application/chromium shortcut, browser window and jump list for
+// Win7.
+bool SetAppIdForPropertyStore(IPropertyStore* property_store,
+                              const wchar_t* app_id);
 
 }  // namespace win_util
 

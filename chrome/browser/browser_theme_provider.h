@@ -6,62 +6,37 @@
 #define CHROME_BROWSER_BROWSER_THEME_PROVIDER_H_
 
 #include <map>
+#include <set>
 #include <string>
-#include <vector>
 
-#include "app/gfx/color_utils.h"
-#include "app/resource_bundle.h"
 #include "app/theme_provider.h"
-#include "base/basictypes.h"
-#include "base/lock.h"
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 
-class Extension;
-class Profile;
+namespace color_utils {
+  struct HSL;
+}
+
+class BrowserThemePack;
+class BrowserThemeProviderTest;
 class DictionaryValue;
+class Extension;
+class FilePath;
 class PrefService;
+class Profile;
+class ResourceBundle;
+
+#ifdef __OBJC__
+@class NSString;
+// Sent whenever the browser theme changes.  Object => NSValue wrapping the
+// BrowserThemeProvider that changed.
+extern "C" NSString* const kBrowserThemeDidChangeNotification;
+#endif  // __OBJC__
 
 class BrowserThemeProvider : public NonThreadSafe,
                              public ThemeProvider {
  public:
   // Public constants used in BrowserThemeProvider and its subclasses:
-
-  // Strings used by themes to identify colors for different parts of our UI.
-  static const char* kColorFrame;
-  static const char* kColorFrameInactive;
-  static const char* kColorFrameIncognito;
-  static const char* kColorFrameIncognitoInactive;
-  static const char* kColorToolbar;
-  static const char* kColorTabText;
-  static const char* kColorBackgroundTabText;
-  static const char* kColorBookmarkText;
-  static const char* kColorNTPBackground;
-  static const char* kColorNTPText;
-  static const char* kColorNTPLink;
-  static const char* kColorNTPLinkUnderline;
-  static const char* kColorNTPHeader;
-  static const char* kColorNTPSection;
-  static const char* kColorNTPSectionText;
-  static const char* kColorNTPSectionLink;
-  static const char* kColorNTPSectionLinkUnderline;
-  static const char* kColorControlBackground;
-  static const char* kColorButtonBackground;
-
-  // Strings used by themes to identify tints to apply to different parts of
-  // our UI. The frame tints apply to the frame color and produce the
-  // COLOR_FRAME* colors.
-  static const char* kTintButtons;
-  static const char* kTintFrame;
-  static const char* kTintFrameInactive;
-  static const char* kTintFrameIncognito;
-  static const char* kTintFrameIncognitoInactive;
-  static const char* kTintBackgroundTab;
-
-  // Strings used by themes to identify miscellaneous numerical properties.
-  static const char* kDisplayPropertyNTPAlignment;
-  static const char* kDisplayPropertyNTPTiling;
-  static const char* kDisplayPropertyNTPInverseLogo;
 
   // Strings used in alignment properties.
   static const char* kAlignmentTop;
@@ -75,35 +50,11 @@ class BrowserThemeProvider : public NonThreadSafe,
   static const char* kTilingRepeatY;
   static const char* kTilingRepeat;
 
-  // Default colors.
-  static const SkColor kDefaultColorFrame;
-  static const SkColor kDefaultColorFrameInactive;
-  static const SkColor kDefaultColorFrameIncognito;
-  static const SkColor kDefaultColorFrameIncognitoInactive;
-  static const SkColor kDefaultColorToolbar;
-  static const SkColor kDefaultColorTabText;
-  static const SkColor kDefaultColorBackgroundTabText;
-  static const SkColor kDefaultColorBookmarkText;
-  static const SkColor kDefaultColorNTPBackground;
-  static const SkColor kDefaultColorNTPText;
-  static const SkColor kDefaultColorNTPLink;
-  static const SkColor kDefaultColorNTPHeader;
-  static const SkColor kDefaultColorNTPSection;
-  static const SkColor kDefaultColorNTPSectionText;
-  static const SkColor kDefaultColorNTPSectionLink;
-  static const SkColor kDefaultColorControlBackground;
-  static const SkColor kDefaultColorButtonBackground;
-
-  static const color_utils::HSL kDefaultTintButtons;
-  static const color_utils::HSL kDefaultTintFrame;
-  static const color_utils::HSL kDefaultTintFrameInactive;
-  static const color_utils::HSL kDefaultTintFrameIncognito;
-  static const color_utils::HSL kDefaultTintFrameIncognitoInactive;
-  static const color_utils::HSL kDefaultTintBackgroundTab;
-
   static const char* kDefaultThemeID;
 
- public:
+  // Returns true if the image is themeable.  Safe to call on any thread.
+  static bool IsThemeableImage(int resource_id);
+
   BrowserThemeProvider();
   virtual ~BrowserThemeProvider();
 
@@ -136,6 +87,21 @@ class BrowserThemeProvider : public NonThreadSafe,
     NTP_BACKGROUND_ALIGNMENT,
     NTP_BACKGROUND_TILING,
     NTP_LOGO_ALTERNATE
+#if defined(OS_MACOSX)
+    ,
+    COLOR_TOOLBAR_STROKE = 1000,
+    COLOR_TOOLBAR_STROKE_INACTIVE,
+    COLOR_TOOLBAR_BUTTON_STROKE,
+    COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
+    GRADIENT_FRAME_INCOGNITO,
+    GRADIENT_FRAME_INCOGNITO_INACTIVE,
+    GRADIENT_TOOLBAR,
+    GRADIENT_TOOLBAR_INACTIVE,
+    GRADIENT_TOOLBAR_BUTTON,
+    GRADIENT_TOOLBAR_BUTTON_INACTIVE,
+    GRADIENT_TOOLBAR_BUTTON_PRESSED,
+    GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE
+#endif  // OS_MACOSX
   };
 
   // A bitfield mask for alignments.
@@ -164,12 +130,16 @@ class BrowserThemeProvider : public NonThreadSafe,
   virtual bool HasCustomImage(int id) const;
   virtual RefCountedMemory* GetRawData(int id) const;
 #if defined(OS_LINUX)
+  // GdkPixbufs returned by GetPixbufNamed and GetRTLEnabledPixbufNamed are
+  // shared instances owned by the theme provider and should not be freed.
   virtual GdkPixbuf* GetPixbufNamed(int id) const;
   virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const;
 #elif defined(OS_MACOSX)
-  virtual NSImage* GetNSImageNamed(int id) const;
-  virtual NSColor* GetNSColor(int id) const;
-  virtual NSColor* GetNSColorTint(int id) const;
+  virtual NSImage* GetNSImageNamed(int id, bool allow_default) const;
+  virtual NSColor* GetNSImageColorNamed(int id, bool allow_default) const;
+  virtual NSColor* GetNSColor(int id, bool allow_default) const;
+  virtual NSColor* GetNSColorTint(int id, bool allow_default) const;
+  virtual NSGradient* GetNSGradient(int id) const;
 #endif
 
   // Set the current theme to the theme defined in |extension|.
@@ -186,9 +156,13 @@ class BrowserThemeProvider : public NonThreadSafe,
   // locally customized.)
   std::string GetThemeID() const;
 
-  // Reads the image data from the theme file into the specified vector. Returns
-  // true on success.
-  RefCountedMemory* ReadThemeFileData(int id) const;
+  // This class needs to keep track of the number of theme infobars so that we
+  // clean up unused themes.
+  void OnInfobarDisplayed();
+
+  // Decrements the number of theme infobars. If the last infobar has been
+  // destroyed, uninstalls all themes that aren't the currently selected.
+  void OnInfobarDestroyed();
 
   // Convert a bitfield alignment into a string like "top left". Public so that
   // it can be used to generate CSS values. Takes a bitfield of AlignmentMasks.
@@ -205,158 +179,68 @@ class BrowserThemeProvider : public NonThreadSafe,
   // Parse tiling values from something like "no-repeat" into a Tiling value.
   static int StringToTiling(const std::string& tiling);
 
-  // Lock on write to themed_image_cache_ in UI thread; lock on all cache
-  // access in File thread. This allows the File thread and UI thread to
-  // both read themed images at the same time, while preventing simultaneous
-  // File thread read and UI thread write.
-  static Lock themed_image_cache_lock_;
+  // Returns the default tint for the given tint |id| TINT_* enum value.
+  static color_utils::HSL GetDefaultTint(int id);
+
+  // Returns the default color for the given color |id| COLOR_* enum value.
+  static SkColor GetDefaultColor(int id);
+
+  // Returns true and sets |result| to the requested default property, if |id|
+  // is valid.
+  static bool GetDefaultDisplayProperty(int id, int* result);
+
+  // Returns the set of IDR_* resources that should be tinted.
+  static const std::set<int>& GetTintableToolbarButtons();
 
   // Save the images to be written to disk, mapping file path to id.
   typedef std::map<FilePath, int> ImagesDiskCache;
 
-  // Cached images. We cache all retrieved and generated bitmaps and keep
-  // track of the pointers. We own these and will delete them when we're done
-  // using them.
-  typedef std::map<int, SkBitmap*> ImageCache;
-
  protected:
-  // Sets an individual color value.
-  void SetColor(const char* id, const SkColor& color);
-
-  // Sets an individual tint value.
-  void SetTint(const char* id, const color_utils::HSL& tint);
-
   // Get the specified tint - |id| is one of the TINT_* enum values.
   color_utils::HSL GetTint(int id) const;
 
-  // Generate any frame colors that weren't specified.
-  void GenerateFrameColors();
-
-  // Generate any frame images that weren't specified. The resulting images
-  // will be stored in our cache and written to disk.  If images have already
-  // been generated and cached, load them from disk.
-  void GenerateFrameImages() const;
-
-  // Generate any tab images that weren't specified. The resulting images
-  // will be stored in our cache.
-  void GenerateTabImages() const;
-
   // Clears all the override fields and saves the dictionary.
-  void ClearAllThemeData();
+  virtual void ClearAllThemeData();
 
   // Load theme data from preferences.
   virtual void LoadThemePrefs();
 
   // Let all the browser views know that themes have changed.
-  virtual void NotifyThemeChanged();
+  // extension is NULL iff the theme is being set to the
+  // default/system theme.
+  virtual void NotifyThemeChanged(Extension* extension);
 
-  // Loads a bitmap from the theme, which may be tinted or
-  // otherwise modified, or an application default.
-  virtual SkBitmap* LoadThemeBitmap(int id) const;
-
-  // Save the modified bitmap at image_cache_[id].
-  virtual void SaveThemeBitmap(std::string resource_name, int id) const;
+#if defined(OS_MACOSX)
+  // Let all the browser views know that themes have changed in a platform way.
+  virtual void NotifyPlatformThemeChanged();
+#endif  // OS_MACOSX
 
   // Clears the platform-specific caches. Do not call directly; it's called
   // from ClearCaches().
   virtual void FreePlatformCaches();
 
-  // The implementation of GenerateTabBackgroundBitmap(). That function also
-  // must be locked and touches caches; this function only deals with image
-  // generation.
-  SkBitmap* GenerateTabBackgroundBitmapImpl(int id) const;
-
   Profile* profile() { return profile_; }
 
-  // Subclasses may need us to not use the on-disk image cache. The GTK
-  // interface needs to generate some images itself.
-  void force_process_images() { process_images_ = true; }
-
  private:
-  typedef std::map<const int, std::string> ImageMap;
-  typedef std::map<const std::string, SkColor> ColorMap;
-  typedef std::map<const std::string, color_utils::HSL> TintMap;
-  typedef std::map<const std::string, int> DisplayPropertyMap;
-  typedef std::map<const int, scoped_refptr<RefCountedMemory> > RawDataMap;
-  typedef std::map<const int, std::string> ResourceNameMap;
+  friend class BrowserThemeProviderTest;
 
-  // Returns the string key for the given tint |id| TINT_* enum value.
-  const std::string GetTintKey(int id) const;
-
-  // Returns the default tint for the given tint |id| TINT_* enum value.
-  color_utils::HSL GetDefaultTint(int id) const;
-
-  // Returns the string key for the given color |id| COLOR_* enum value.
-  const std::string GetColorKey(int id) const;
-
-  // Returns the default color for the given color |id| COLOR_* enum value.
-  SkColor GetDefaultColor(int id) const;
-
-  // Tint |bitmap| with the tint specified by |hsl_id|
-  SkBitmap TintBitmap(const SkBitmap& bitmap, int hsl_id) const;
-
-  // The following load data from specified dictionaries (either from
-  // preferences or from an extension manifest) and update our theme
-  // data appropriately.
-  // Allow any ResourceBundle image to be overridden. |images| should
-  // contain keys defined in ThemeResourceMap, and values as paths to
-  // the images on-disk.
-  void SetImageData(DictionaryValue* images, FilePath images_path);
-
-  // Set our theme colors. The keys of |colors| are any of the kColor*
-  // constants, and the values are a three-item list containing 8-bit
-  // RGB values.
-  void SetColorData(DictionaryValue* colors);
-
-  // Set tint data for our images and colors. The keys of |tints| are
-  // any of the kTint* contstants, and the values are a three-item list
-  // containing real numbers in the range 0-1 (and -1 for 'null').
-  void SetTintData(DictionaryValue* tints);
-
-  // Set miscellaneous display properties. While these can be defined as
-  // strings, they are currently stored as integers.
-  void SetDisplayPropertyData(DictionaryValue* display_properties);
-
-  // Create any images that aren't pregenerated (e.g. background tab images).
-  SkBitmap* GenerateTabBackgroundBitmap(int id) const;
-
-  // Save our data - when saving images we need the original dictionary
-  // from the extension because it contains the text ids that we want to save.
-  void SaveImageData(DictionaryValue* images) const;
-  void SaveColorData() const;
-  void SaveTintData() const;
-  void SaveDisplayPropertyData() const;
-
-  // Save the paths of data we have written to disk in prefs.
-  void SaveCachedImageData() const;
+  // Saves the filename of the cached theme pack.
+  void SavePackName(const FilePath& pack_path);
 
   // Save the id of the last theme installed.
   void SaveThemeID(const std::string& id);
 
-  // Frees generated images and clears the image cache.
-  void ClearCaches();
+  // Implementation of SetTheme() (and the fallback from LoadThemePrefs() in
+  // case we don't have a theme pack).
+  void BuildFromExtension(Extension* extension);
 
   // Remove preference values for themes that are no longer in use.
   void RemoveUnusedThemes();
-
-  // Encode image at image_cache_[id] as PNG and write to disk.
-  void WriteImagesToDisk() const;
-
-  // Do we have a custom frame image or custom tints?
-  bool ShouldTintFrames() const;
 
 #if defined(OS_LINUX)
   // Loads an image and flips it horizontally if |rtl_enabled| is true.
   GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled) const;
 #endif
-
-  mutable ImageCache image_cache_;
-
-  // Keep images generated for theme cache in their own place, so we can lock
-  // them on WRITE from UI thread and READ from file thread.  Read from UI
-  // thread will be allowed unlocked, because no other thread has write
-  // access to the cache.
-  mutable ImageCache themed_image_cache_;
 
 #if defined(OS_LINUX)
   typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
@@ -364,29 +248,22 @@ class BrowserThemeProvider : public NonThreadSafe,
 #elif defined(OS_MACOSX)
   typedef std::map<int, NSImage*> NSImageMap;
   mutable NSImageMap nsimage_cache_;
-  typedef std::map<int, NSColor*> NSColorMap;
-  mutable NSColorMap nscolor_cache_;
-#endif
 
-  mutable ImagesDiskCache images_disk_cache_;
+  // The bool member of the pair is whether the color is a default color.
+  typedef std::map<int, std::pair<NSColor*, bool> > NSColorMap;
+  mutable NSColorMap nscolor_cache_;
+
+  typedef std::map<int, NSGradient*> NSGradientMap;
+  mutable NSGradientMap nsgradient_cache_;
+#endif
 
   ResourceBundle& rb_;
   Profile* profile_;
 
-  ImageMap images_;
-  ColorMap colors_;
-  TintMap tints_;
-  mutable RawDataMap raw_data_;
-  DisplayPropertyMap display_properties_;
+  scoped_refptr<BrowserThemePack> theme_pack_;
 
-  // Reverse of theme_resources_map, so we can cache images properly.
-  ResourceNameMap resource_names_;
-
-  // If true, process all images; if false, just load from disk.
-  bool process_images_;
-
-  // Where we will store our generated images.
-  FilePath image_dir_;
+  // The number of infobars currently displayed.
+  int number_of_infobars_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserThemeProvider);
 };

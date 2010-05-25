@@ -9,7 +9,7 @@
 
 #include "base/scoped_nsobject.h"
 
-@class GTMTheme;
+class ThemeProvider;
 
 // Base class for button cells for toolbar and bookmark bar.
 //
@@ -43,15 +43,15 @@ typedef NSInteger ButtonType;
 // Turn off theming.  Temporary work-around.
 - (void)setShouldTheme:(BOOL)shouldTheme;
 
-- (void)drawBorderAndFillForTheme:(GTMTheme*)theme
+- (void)drawBorderAndFillForTheme:(ThemeProvider*)themeProvider
                       controlView:(NSView*)controlView
-                        outerPath:(NSBezierPath*)outerPath
                         innerPath:(NSBezierPath*)innerPath
               showClickedGradient:(BOOL)showClickedGradient
             showHighlightGradient:(BOOL)showHighlightGradient
                        hoverAlpha:(CGFloat)hoverAlpha
                            active:(BOOL)active
-                        cellFrame:(NSRect)cellFrame;
+                        cellFrame:(NSRect)cellFrame
+                  defaultGradient:(NSGradient*)defaultGradient;
 
 // An image to underlay beneath the existing image; not themed. May be nil.
 - (NSImage*)underlayImage;
@@ -60,6 +60,12 @@ typedef NSInteger ButtonType;
 // Let the view know when the mouse moves in and out. A timer will update
 // the current hoverAlpha_ based on these events.
 - (void)setMouseInside:(BOOL)flag animate:(BOOL)animate;
+
+// Gets the path which tightly bounds the outside of the button. This is needed
+// to produce images of clear buttons which only include the area inside, since
+// the background of the button is drawn by someone else.
+- (NSBezierPath*)clipPathForFrame:(NSRect)cellFrame
+                           inView:(NSView*)controlView;
 
 @property(assign, nonatomic)CGFloat hoverAlpha;
 @end

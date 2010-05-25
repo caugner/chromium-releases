@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,26 +10,30 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/gtk_util.h"
-#include "app/gfx/skbitmap_operations.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
+#include "base/singleton.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/encoding_menu_controller.h"
+#include "chrome/browser/gtk/accelerators_gtk.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/custom_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/gtk/nine_box.h"
 #include "chrome/browser/gtk/standard_menus.h"
 #include "chrome/browser/gtk/tabs/tab_strip_gtk.h"
+#include "chrome/browser/page_menu_model.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/gtk_util.h"
+#include "gfx/skbitmap_operations.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -39,17 +43,16 @@ namespace {
 // The space above the titlebars.
 const int kTitlebarHeight = 14;
 
+// The thickness in pixels of the tab border.
+const int kTabOuterThickness = 1;
+
+// Amount to offset the tab images relative to the background.
+const int kNormalVerticalOffset = kTitlebarHeight + kTabOuterThickness;
+
 // A linux specific menu item for toggling window decorations.
 const int kShowWindowDecorationsCommand = 200;
 
-// The following OTR constants copied from opaque_browser_frame_view.cc:
-// In maximized mode, the OTR avatar starts 2 px below the top of the screen, so
-// that it doesn't extend into the "3D edge" portion of the titlebar.
-const int kOTRMaximizedTopSpacing = 2;
-// The OTR avatar ends 2 px above the bottom of the tabstrip (which, given the
-// way the tabstrip draws its bottom edge, will appear like a 1 px gap to the
-// user).
-const int kOTRBottomSpacing = 2;
+const int kOTRBottomSpacing = 1;
 // There are 2 px on each side of the OTR avatar (between the frame border and
 // it on the left, and between it and the tabstrip on the right).
 const int kOTRSideSpacing = 2;
@@ -122,59 +125,6 @@ GdkColor PickLuminosityContrastingColor(const GdkColor* base,
     return *one;
 }
 
-MenuCreateMaterial g_favicon_menu[] = {
-  { MENU_NORMAL, IDC_BACK, IDS_CONTENT_CONTEXT_BACK, 0, NULL,
-    GDK_Left, GDK_MOD1_MASK, true },
-  { MENU_NORMAL, IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD, 0, NULL,
-    GDK_Right, GDK_MOD1_MASK, true },
-  { MENU_NORMAL, IDC_RELOAD, IDS_APP_MENU_RELOAD, 0, NULL,
-    GDK_R, GDK_CONTROL_MASK, true },
-  { MENU_SEPARATOR },
-  { MENU_NORMAL, IDC_RESTORE_TAB, IDS_APP_MENU_RELOAD, 0, NULL,
-    GDK_T, GDK_CONTROL_MASK | GDK_SHIFT_MASK, true },
-  { MENU_NORMAL, IDC_DUPLICATE_TAB, IDS_APP_MENU_DUPLICATE_APP_WINDOW },
-  { MENU_NORMAL, IDC_COPY_URL, IDS_APP_MENU_COPY_URL },
-  { MENU_NORMAL, IDC_SHOW_AS_TAB, IDS_SHOW_AS_TAB },
-  { MENU_NORMAL, IDC_NEW_TAB, IDS_APP_MENU_NEW_WEB_PAGE, 0, NULL,
-    GDK_T, GDK_CONTROL_MASK },
-};
-
-const MenuCreateMaterial* GetFaviconMenu(Profile* profile,
-                                         MenuGtk::Delegate* delegate) {
-  static bool favicon_menu_built = false;
-  static MenuCreateMaterial* favicon_menu;
-  if (!favicon_menu_built) {
-    const MenuCreateMaterial* standard_page =
-        GetStandardPageMenu(profile, delegate);
-    int standard_page_menu_length = 1;
-    // Don't include the Create App Shortcut menu item.
-    int start_offset = 0;
-    for (int i = 0; standard_page[i].type != MENU_END; ++i) {
-      if (standard_page[i].id == IDC_CREATE_SHORTCUTS) {
-        // Pass the separator as well.
-        start_offset = i + 2;
-        ++i;
-        continue;
-      } else if (start_offset == 0) {
-        // The Create App Shortcut menu item is the first menu item, and if that
-        // ever changes we'll probably have to re-evaluate this code.
-        NOTREACHED();
-        continue;
-      }
-
-      standard_page_menu_length++;
-    }
-    favicon_menu = new MenuCreateMaterial[arraysize(g_favicon_menu) +
-                                          standard_page_menu_length];
-    memcpy(favicon_menu, g_favicon_menu,
-           arraysize(g_favicon_menu) * sizeof(MenuCreateMaterial));
-    memcpy(favicon_menu + arraysize(g_favicon_menu),
-           standard_page + start_offset,
-           (standard_page_menu_length) * sizeof(MenuCreateMaterial));
-  }
-  return favicon_menu;
-}
-
 }  // namespace
 
 BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
@@ -221,8 +171,7 @@ void BrowserTitlebar::Init() {
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(container_), FALSE);
   gtk_container_add(GTK_CONTAINER(container_), container_hbox);
 
-  g_signal_connect(G_OBJECT(container_), "scroll-event",
-                   G_CALLBACK(OnScroll), this);
+  g_signal_connect(container_, "scroll-event", G_CALLBACK(OnScroll), this);
 
   g_signal_connect(window_, "window-state-event",
                    G_CALLBACK(OnWindowStateChanged), this);
@@ -234,7 +183,7 @@ void BrowserTitlebar::Init() {
     GtkWidget* spy_frame = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
     // We use this alignment rather than setting padding on the GtkImage because
     // the image's intrinsic padding doesn't clip the pixbuf during painting.
-    gtk_alignment_set_padding(GTK_ALIGNMENT(spy_frame), kOTRMaximizedTopSpacing,
+    gtk_alignment_set_padding(GTK_ALIGNMENT(spy_frame), 0,
         kOTRBottomSpacing, kOTRSideSpacing, kOTRSideSpacing);
     gtk_widget_set_size_request(spy_guy, -1, 0);
     gtk_container_add(GTK_CONTAINER(spy_frame), spy_guy);
@@ -305,14 +254,9 @@ void BrowserTitlebar::Init() {
   gtk_box_pack_start(GTK_BOX(titlebar_buttons_box_), buttons_hbox, FALSE,
                      FALSE, 0);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch("glen")) {
-    close_button_.reset(BuildTitlebarButton(IDR_GLEN, IDR_GLEN, IDR_GLEN,
-                                            buttons_hbox, IDS_GLEN));
-  } else {
-    close_button_.reset(BuildTitlebarButton(IDR_CLOSE, IDR_CLOSE_P, IDR_CLOSE_H,
-                                            buttons_hbox,
-                                            IDS_XPFRAME_CLOSE_TOOLTIP));
-  }
+  close_button_.reset(BuildTitlebarButton(IDR_CLOSE, IDR_CLOSE_P, IDR_CLOSE_H,
+                                          buttons_hbox,
+                                          IDS_XPFRAME_CLOSE_TOOLTIP));
 
   restore_button_.reset(BuildTitlebarButton(IDR_RESTORE, IDR_RESTORE_P,
                         IDR_RESTORE_H, buttons_hbox,
@@ -323,6 +267,9 @@ void BrowserTitlebar::Init() {
   minimize_button_.reset(BuildTitlebarButton(IDR_MINIMIZE, IDR_MINIMIZE_P,
                          IDR_MINIMIZE_H, buttons_hbox,
                          IDS_XPFRAME_MINIMIZE_TOOLTIP));
+
+  gtk_util::SetButtonClickableByMouseButtons(maximize_button_->widget(),
+                                             true, true, true);
 
   gtk_widget_size_request(close_button_->widget(), &close_button_req_);
   gtk_widget_size_request(minimize_button_->widget(), &minimize_button_req_);
@@ -345,8 +292,8 @@ CustomDrawButton* BrowserTitlebar::BuildTitlebarButton(int image,
   CustomDrawButton* button = new CustomDrawButton(image, image_pressed,
                                                   image_hot, 0);
   gtk_widget_add_events(GTK_WIDGET(button->widget()), GDK_POINTER_MOTION_MASK);
-  g_signal_connect(button->widget(), "clicked", G_CALLBACK(OnButtonClicked),
-                   this);
+  g_signal_connect(button->widget(), "clicked",
+                   G_CALLBACK(OnButtonClickedThunk), this);
   g_signal_connect(button->widget(), "motion-notify-event",
                    G_CALLBACK(OnMouseMoveEvent), browser_window_);
   std::string localized_tooltip = l10n_util::GetStringUTF8(tooltip);
@@ -373,7 +320,10 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
   string16 title = browser_window_->browser()->GetWindowTitleForCurrentTab();
   gtk_label_set_text(GTK_LABEL(app_mode_title_), UTF16ToUTF8(title).c_str());
 
-  if (browser_window_->browser()->type() == Browser::TYPE_APP) {
+  // Note: this isn't browser_window_->browser()->type() & Browser::TYPE_APP
+  // because we want to exclude Browser::TYPE_APP_POPUP.
+  if (browser_window_->browser()->type() == Browser::TYPE_APP ||
+      browser_window_->browser()->type() == Browser::TYPE_APP_PANEL) {
     // Update the system app icon.  We don't need to update the icon in the top
     // left of the custom frame, that will get updated when the throbber is
     // updated.
@@ -397,7 +347,11 @@ void BrowserTitlebar::UpdateThrobber(TabContents* tab_contents) {
     gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_), icon_pixbuf);
   } else {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    if (browser_window_->browser()->type() == Browser::TYPE_APP) {
+
+    // Note: this isn't browser_window_->browser()->type() & Browser::TYPE_APP
+    // because we want to exclude Browser::TYPE_APP_POPUP.
+    if (browser_window_->browser()->type() == Browser::TYPE_APP ||
+        browser_window_->browser()->type() == Browser::TYPE_APP_PANEL) {
       SkBitmap icon = browser_window_->browser()->GetCurrentPageIcon();
       if (icon.empty()) {
         // Fallback to the Chromium icon if the page has no icon.
@@ -424,6 +378,13 @@ void BrowserTitlebar::UpdateTitlebarAlignment() {
     } else {
       gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_alignment_), 0, 0,
                                 kTabStripLeftPadding, 0);
+    }
+
+    if (using_custom_frame_) {
+      browser_window_->tabstrip()->SetVerticalOffset(
+          browser_window_->IsMaximized() ? 0 : kNormalVerticalOffset);
+    } else {
+      browser_window_->tabstrip()->SetVerticalOffset(kNormalVerticalOffset);
     }
   } else {
     if (using_custom_frame_ && !browser_window_->IsFullscreen()) {
@@ -495,12 +456,43 @@ void BrowserTitlebar::UpdateTextColor() {
 }
 
 void BrowserTitlebar::ShowFaviconMenu(GdkEventButton* event) {
-  if (!favicon_menu_.get()) {
-    favicon_menu_.reset(new MenuGtk(this,
-        GetFaviconMenu(browser_window_->browser()->profile(), this), NULL));
+  if (!favicon_menu_model_.get()) {
+    favicon_menu_model_.reset(
+        new PopupPageMenuModel(this, browser_window_->browser()));
+
+    favicon_menu_.reset(new MenuGtk(NULL, favicon_menu_model_.get()));
   }
 
   favicon_menu_->Popup(app_mode_favicon_, reinterpret_cast<GdkEvent*>(event));
+}
+
+void BrowserTitlebar::MaximizeButtonClicked() {
+  GdkEvent* event = gtk_get_current_event();
+  if (event->button.button == 1) {
+    gtk_window_maximize(window_);
+  } else {
+    GtkWidget* widget = GTK_WIDGET(window_);
+    GdkScreen* screen = gtk_widget_get_screen(widget);
+    gint monitor = gdk_screen_get_monitor_at_window(screen, widget->window);
+    GdkRectangle screen_rect;
+    gdk_screen_get_monitor_geometry(screen, monitor, &screen_rect);
+
+    gint x, y;
+    gtk_window_get_position(window_, &x, &y);
+    gint width = widget->allocation.width;
+    gint height = widget->allocation.height;
+
+    if (event->button.button == 3) {
+      x = 0;
+      width = screen_rect.width;
+    } else if (event->button.button == 2) {
+      y = 0;
+      height = screen_rect.height;
+    }
+
+    browser_window_->SetBounds(gfx::Rect(x, y, width, height));
+  }
+  gdk_event_free(event);
 }
 
 // static
@@ -536,16 +528,15 @@ gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event,
 }
 
 // static
-void BrowserTitlebar::OnButtonClicked(GtkWidget* button,
-                                      BrowserTitlebar* titlebar) {
-  if (titlebar->close_button_->widget() == button) {
-    titlebar->browser_window_->Close();
-  } else if (titlebar->restore_button_->widget() == button) {
-    titlebar->browser_window_->UnMaximize();
-  } else if (titlebar->maximize_button_->widget() == button) {
-    gtk_window_maximize(titlebar->window_);
-  } else if (titlebar->minimize_button_->widget() == button) {
-    gtk_window_iconify(titlebar->window_);
+void BrowserTitlebar::OnButtonClicked(GtkWidget* button) {
+  if (close_button_->widget() == button) {
+    browser_window_->Close();
+  } else if (restore_button_->widget() == button) {
+    browser_window_->UnMaximize();
+  } else if (maximize_button_->widget() == button) {
+    MaximizeButtonClicked();
+  } else if (minimize_button_->widget() == button) {
+    gtk_window_iconify(window_);
   }
 }
 
@@ -562,29 +553,14 @@ gboolean BrowserTitlebar::OnButtonPressed(GtkWidget* widget,
 
 void BrowserTitlebar::ShowContextMenu() {
   if (!context_menu_.get()) {
-    static const MenuCreateMaterial context_menu_blueprint[] = {
-        { MENU_NORMAL, IDC_NEW_TAB, IDS_TAB_CXMENU_NEWTAB, 0, NULL,
-            GDK_t, GDK_CONTROL_MASK, true },
-        { MENU_NORMAL, IDC_RESTORE_TAB, IDS_RESTORE_TAB, 0, NULL,
-            GDK_t, GDK_CONTROL_MASK | GDK_SHIFT_MASK, true },
-        { MENU_SEPARATOR },
-        { MENU_NORMAL, IDC_TASK_MANAGER, IDS_TASK_MANAGER, 0, NULL,
-            GDK_Escape, GDK_SHIFT_MASK, true },
-#if !defined(OS_CHROMEOS)
-        { MENU_SEPARATOR },
-        { MENU_CHECKBOX, kShowWindowDecorationsCommand,
-            IDS_SHOW_WINDOW_DECORATIONS_MENU },
-#endif
-        { MENU_END },
-    };
-
-    context_menu_.reset(new MenuGtk(this, context_menu_blueprint, NULL));
+    context_menu_model_.reset(new ContextMenuModel(this));
+    context_menu_.reset(new MenuGtk(NULL, context_menu_model_.get()));
   }
 
   context_menu_->PopupAsContext(gtk_get_current_event_time());
 }
 
-bool BrowserTitlebar::IsCommandEnabled(int command_id) const {
+bool BrowserTitlebar::IsCommandIdEnabled(int command_id) const {
   if (command_id == kShowWindowDecorationsCommand)
     return true;
 
@@ -592,7 +568,7 @@ bool BrowserTitlebar::IsCommandEnabled(int command_id) const {
       IsCommandEnabled(command_id);
 }
 
-bool BrowserTitlebar::IsItemChecked(int command_id) const {
+bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
   if (command_id == kShowWindowDecorationsCommand) {
     PrefService* prefs = browser_window_->browser()->profile()->GetPrefs();
     return !prefs->GetBoolean(prefs::kUseCustomChromeFrame);
@@ -623,6 +599,16 @@ void BrowserTitlebar::ExecuteCommand(int command_id) {
   }
 
   browser_window_->browser()->ExecuteCommand(command_id);
+}
+
+bool BrowserTitlebar::GetAcceleratorForCommandId(
+    int command_id, menus::Accelerator* accelerator) {
+  const menus::AcceleratorGtk* accelerator_gtk =
+      Singleton<AcceleratorsGtk>()->GetPrimaryAcceleratorForCommand(
+          command_id);
+  if (accelerator_gtk)
+    *accelerator = *accelerator_gtk;
+  return accelerator_gtk;
 }
 
 void BrowserTitlebar::Observe(NotificationType type,
@@ -702,4 +688,16 @@ void BrowserTitlebar::Throbber::InitFrames() {
 
   g_throbber_waiting_frames = new std::vector<GdkPixbuf*>;
   MakeThrobberFrames(IDR_THROBBER_WAITING_LIGHT, g_throbber_waiting_frames);
+}
+
+BrowserTitlebar::ContextMenuModel::ContextMenuModel(
+    menus::SimpleMenuModel::Delegate* delegate)
+    : SimpleMenuModel(delegate) {
+  AddItemWithStringId(IDC_NEW_TAB, IDS_TAB_CXMENU_NEWTAB);
+  AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
+  AddSeparator();
+  AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
+  AddSeparator();
+  AddCheckItemWithStringId(kShowWindowDecorationsCommand,
+                           IDS_SHOW_WINDOW_DECORATIONS_MENU);
 }

@@ -1,10 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/string_util.h"
 #include "media/base/filters.h"
-#include "media/filters/ffmpeg_common.h"
+#include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_glue.h"
 
 namespace {
@@ -81,6 +81,30 @@ int CloseContext(URLContext* h) {
   return 0;
 }
 
+int LockManagerOperation(void** lock, enum AVLockOp op) {
+  switch (op) {
+    case AV_LOCK_CREATE:
+      *lock = new Lock();
+      if (!*lock)
+        return 1;
+      return 0;
+
+    case AV_LOCK_OBTAIN:
+      static_cast<Lock*>(*lock)->Acquire();
+      return 0;
+
+    case AV_LOCK_RELEASE:
+      static_cast<Lock*>(*lock)->Release();
+      return 0;
+
+    case AV_LOCK_DESTROY:
+      delete static_cast<Lock*>(*lock);
+      *lock = NULL;
+      return 0;
+  }
+  return 1;
+}
+
 }  // namespace
 
 //------------------------------------------------------------------------------
@@ -107,12 +131,14 @@ FFmpegGlue::FFmpegGlue() {
   // Register our protocol glue code with FFmpeg.
   avcodec_init();
   av_register_protocol(&kFFmpegURLProtocol);
+  av_lockmgr_register(&LockManagerOperation);
 
   // Now register the rest of FFmpeg.
   av_register_all();
 }
 
 FFmpegGlue::~FFmpegGlue() {
+  av_lockmgr_register(NULL);
 }
 
 std::string FFmpegGlue::AddProtocol(FFmpegURLProtocol* protocol) {
@@ -151,7 +177,7 @@ std::string FFmpegGlue::GetProtocolKey(FFmpegURLProtocol* protocol) {
   // Use the FFmpegURLProtocol's memory address to generate the unique string.
   // This also has the nice property that adding the same FFmpegURLProtocol
   // reference will not generate duplicate entries.
-  return StringPrintf("%s://0x%lx", kProtocol, static_cast<void*>(protocol));
+  return StringPrintf("%s://%p", kProtocol, static_cast<void*>(protocol));
 }
 
 }  // namespace media

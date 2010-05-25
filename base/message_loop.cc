@@ -20,7 +20,7 @@
 #include "base/message_pump_libevent.h"
 #include "base/third_party/valgrind/valgrind.h"
 #endif
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/message_pump_glib.h"
 #endif
 
@@ -72,7 +72,7 @@ static LPTOP_LEVEL_EXCEPTION_FILTER GetTopSEHFilter() {
 MessageLoop* MessageLoop::current() {
   // TODO(darin): sadly, we cannot enable this yet since people call us even
   // when they have no intention of using us.
-  //DCHECK(loop) << "Ouch, did you forget to initialize me?";
+  // DCHECK(loop) << "Ouch, did you forget to initialize me?";
   return lazy_tls_ptr.Pointer()->Get();
 }
 
@@ -99,9 +99,9 @@ MessageLoop::MessageLoop(Type type)
   if (type_ == TYPE_UI) {
 #if defined(OS_MACOSX)
     pump_ = base::MessagePumpMac::Create();
-#elif defined(OS_LINUX)
+#else
     pump_ = new base::MessagePumpForUI();
-#endif  // OS_LINUX
+#endif
   } else if (type_ == TYPE_IO) {
     pump_ = new base::MessagePumpLibevent();
   } else {
@@ -169,18 +169,24 @@ void MessageLoop::RunAllPending() {
 void MessageLoop::RunHandler() {
 #if defined(OS_WIN)
   if (exception_restoration_) {
-    LPTOP_LEVEL_EXCEPTION_FILTER current_filter = GetTopSEHFilter();
-    __try {
-      RunInternal();
-    } __except(SEHFilter(current_filter)) {
-    }
+    RunInternalInSEHFrame();
     return;
   }
 #endif
 
   RunInternal();
 }
-
+//------------------------------------------------------------------------------
+#if defined(OS_WIN)
+__declspec(noinline) void MessageLoop::RunInternalInSEHFrame() {
+  LPTOP_LEVEL_EXCEPTION_FILTER current_filter = GetTopSEHFilter();
+  __try {
+    RunInternal();
+  } __except(SEHFilter(current_filter)) {
+  }
+  return;
+}
+#endif
 //------------------------------------------------------------------------------
 
 void MessageLoop::RunInternal() {
@@ -188,7 +194,7 @@ void MessageLoop::RunInternal() {
 
   StartHistogrammer();
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if !defined(OS_MACOSX)
   if (state_->dispatcher && type() == TYPE_UI) {
     static_cast<base::MessagePumpForUI*>(pump_.get())->
         RunWithDispatcher(this, state_->dispatcher);
@@ -227,6 +233,15 @@ void MessageLoop::Quit() {
   }
 }
 
+void MessageLoop::QuitNow() {
+  DCHECK(current() == this);
+  if (state_) {
+    pump_->Quit();
+  } else {
+    NOTREACHED() << "Must be inside Run to call Quit";
+  }
+}
+
 void MessageLoop::PostTask(
     const tracked_objects::Location& from_here, Task* task) {
   PostTask_Helper(from_here, task, 0, true);
@@ -259,7 +274,7 @@ void MessageLoop::PostTask_Helper(
     pending_task.delayed_run_time =
         Time::Now() + TimeDelta::FromMilliseconds(delay_ms);
   } else {
-    DCHECK(delay_ms == 0) << "delay should not be negative";
+    DCHECK_EQ(delay_ms, 0) << "delay should not be negative";
   }
 
   // Warning: Don't try to short-circuit, and handle this thread's tasks more
@@ -481,7 +496,7 @@ MessageLoop::AutoRunState::AutoRunState(MessageLoop* loop) : loop_(loop) {
 
   // Initialize the other fields:
   quit_received = false;
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if !defined(OS_MACOSX)
   dispatcher = NULL;
 #endif
 }
@@ -525,12 +540,10 @@ void MessageLoop::StartHistogrammer() {
   if (enable_histogrammer_ && !message_histogram_.get()
       && StatisticsRecorder::WasStarted()) {
     DCHECK(!thread_name_.empty());
-    message_histogram_.reset(
-        new LinearHistogram(("MsgLoop:" + thread_name_).c_str(),
-                            kLeastNonZeroMessageId,
-                            kMaxMessageId,
-                            kNumberOfDistinctMessagesDisplayed));
-    message_histogram_->SetFlags(message_histogram_->kHexRangePrintingFlag);
+    message_histogram_ = LinearHistogram::FactoryGet("MsgLoop:" + thread_name_,
+        kLeastNonZeroMessageId, kMaxMessageId,
+        kNumberOfDistinctMessagesDisplayed,
+        message_histogram_->kHexRangePrintingFlag);
     message_histogram_->SetRangeDescriptions(event_descriptions_);
   }
 }
@@ -584,7 +597,7 @@ void MessageLoopForUI::PumpOutPendingPaintMessages() {
 
 #endif  // defined(OS_WIN)
 
-#if defined(OS_LINUX) || defined(OS_WIN)
+#if !defined(OS_MACOSX)
 void MessageLoopForUI::AddObserver(Observer* observer) {
   pump_ui()->AddObserver(observer);
 }
@@ -598,7 +611,7 @@ void MessageLoopForUI::Run(Dispatcher* dispatcher) {
   state_->dispatcher = dispatcher;
   RunHandler();
 }
-#endif  // defined(OS_LINUX) || defined(OS_WIN)
+#endif  // !defined(OS_MACOSX)
 
 //------------------------------------------------------------------------------
 // MessageLoopForIO

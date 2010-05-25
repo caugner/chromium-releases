@@ -6,7 +6,7 @@
 #define CHROME_COMMON_NATIVE_WEB_KEYBOARD_EVENT_H_
 
 #include "base/basictypes.h"
-#include "webkit/api/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -16,8 +16,8 @@
 #else
 class NSEvent;
 #endif  // __OBJC__
-#elif defined(OS_LINUX)
-#include <gdk/gdk.h>
+#elif defined(OS_POSIX)
+typedef struct _GdkEventKey GdkEventKey;
 #endif
 
 // Owns a platform specific event; used to pass own and pass event through
@@ -48,15 +48,16 @@ struct NativeWebKeyboardEvent : public WebKit::WebKeyboardEvent {
   MSG os_event;
 #elif defined(OS_MACOSX)
   NSEvent* os_event;
+#elif defined(OS_LINUX)
+  GdkEventKey* os_event;
+#endif
 
   // True if the browser should ignore this event if it's not handled by the
   // renderer. This happens for RawKeyDown events that are created while IME is
   // active and is necessary to prevent backspace from doing "history back" if
   // it is hit in ime mode.
+  // Currently, it's only used by Linux and Mac ports.
   bool skip_in_browser;
-#elif defined(OS_LINUX)
-  GdkEventKey* os_event;
-#endif
 };
 
 #endif  // CHROME_COMMON_NATIVE_WEB_KEYBOARD_EVENT_H_

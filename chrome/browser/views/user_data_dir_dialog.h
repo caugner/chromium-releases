@@ -5,14 +5,15 @@
 // A dialog box that tells the user that we can't write to the specified user
 // data directory.  Provides the user a chance to pick a different directory.
 
-#ifndef CHROME_BROWSER_USER_DATA_DIR_DIALOG_H__
-#define CHROME_BROWSER_USER_DATA_DIR_DIALOG_H__
+#ifndef CHROME_BROWSER_VIEWS_USER_DATA_DIR_DIALOG_H_
+#define CHROME_BROWSER_VIEWS_USER_DATA_DIR_DIALOG_H_
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "views/window/dialog_delegate.h"
 
+class FilePath;
 class MessageBoxView;
 namespace views {
 class Window;
@@ -26,10 +27,10 @@ class UserDataDirDialog : public views::DialogDelegate,
   // while the dialog is showing.  If the user picks a directory, this method
   // returns the chosen directory. |user_data_dir| is the value of the
   // directory we were not able to use.
-  static std::wstring RunUserDataDirDialog(const std::wstring& user_data_dir);
+  static FilePath RunUserDataDirDialog(const FilePath& user_data_dir);
   virtual ~UserDataDirDialog();
 
-  std::wstring user_data_dir() { return user_data_dir_; }
+  FilePath user_data_dir() const { return user_data_dir_; }
 
   // views::DialogDelegate Methods:
   virtual std::wstring GetDialogButtonLabel(
@@ -52,10 +53,10 @@ class UserDataDirDialog : public views::DialogDelegate,
   virtual void FileSelectionCanceled(void* params);
 
  private:
-  explicit UserDataDirDialog(const std::wstring& user_data_dir);
+  explicit UserDataDirDialog(const FilePath& user_data_dir);
 
   // Empty until the user picks a directory.
-  std::wstring user_data_dir_;
+  FilePath user_data_dir_;
 
   MessageBoxView* message_box_view_;
   scoped_refptr<SelectFileDialog> select_file_dialog_;
@@ -64,7 +65,7 @@ class UserDataDirDialog : public views::DialogDelegate,
   // waiting for the user to dismiss the dialog).
   bool is_blocking_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(UserDataDirDialog);
+  DISALLOW_COPY_AND_ASSIGN(UserDataDirDialog);
 };
 
-#endif // CHROME_BROWSER_USER_DATA_DIR_DIALOG_H__
+#endif  // CHROME_BROWSER_VIEWS_USER_DATA_DIR_DIALOG_H_

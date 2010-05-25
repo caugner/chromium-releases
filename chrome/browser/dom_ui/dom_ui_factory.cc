@@ -1,14 +1,21 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/dom_ui/app_launcher_ui.h"
+#include "chrome/browser/dom_ui/bookmarks_ui.h"
 #include "chrome/browser/dom_ui/downloads_ui.h"
 #include "chrome/browser/dom_ui/devtools_ui.h"
+#include "chrome/browser/dom_ui/filebrowse_ui.h"
 #include "chrome/browser/dom_ui/history_ui.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
+#include "chrome/browser/dom_ui/mediaplayer_ui.h"
+#include "chrome/browser/dom_ui/net_internals_ui.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "chrome/browser/dom_ui/plugins_ui.h"
 #include "chrome/browser/dom_ui/print_ui.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
@@ -34,10 +41,13 @@ DOMUI* NewDOMUI(TabContents* contents, const GURL& url) {
 // Special case for extensions.
 template<>
 DOMUI* NewDOMUI<ExtensionDOMUI>(TabContents* contents, const GURL& url) {
-  // Don't use a DOMUI for non-existent extensions.
+  // Don't use a DOMUI for non-existent extensions or for incognito tabs. The
+  // latter restriction is because we require extensions to run within a single
+  // process.
   ExtensionsService* service = contents->profile()->GetExtensionsService();
-  bool valid_extension = (service && service->GetExtensionById(url.host()));
-  if (valid_extension)
+  bool valid_extension =
+      (service && service->GetExtensionById(url.host(), false));
+  if (valid_extension && !contents->profile()->IsOffTheRecord())
     return new ExtensionDOMUI(contents);
   return NULL;
 }
@@ -79,14 +89,30 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
 
   // We must compare hosts only since some of the DOM UIs append extra stuff
   // after the host name.
-  if (url.host() == chrome::kChromeUIHistoryHost)
-    return &NewDOMUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUIAppsHost)
+    return &NewDOMUI<AppLauncherUI>;
+  if (url.host() == chrome::kChromeUIBookmarksHost)
+    return &NewDOMUI<BookmarksUI>;
+  if (url.host() == chrome::kChromeUIDevToolsHost)
+    return &NewDOMUI<DevToolsUI>;
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewDOMUI<DownloadsUI>;
   if (url.host() == chrome::kChromeUIExtensionsHost)
     return &NewDOMUI<ExtensionsUI>;
-  if (url.host() == chrome::kChromeUIDevToolsHost)
-    return &NewDOMUI<DevToolsUI>;
+  if (url.host() == chrome::kChromeUIHistoryHost)
+    return &NewDOMUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUINetInternalsHost)
+    return &NewDOMUI<NetInternalsUI>;
+  if (url.host() == chrome::kChromeUIPluginsHost)
+    return &NewDOMUI<PluginsUI>;
+
+#if defined(OS_CHROMEOS)
+  if (url.host() == chrome::kChromeUIFileBrowseHost)
+    return &NewDOMUI<FileBrowseUI>;
+
+  if (url.host() == chrome::kChromeUIMediaplayerHost)
+    return &NewDOMUI<MediaplayerUI>;
+#endif
 
   return NULL;
 }
@@ -120,16 +146,28 @@ DOMUI* DOMUIFactory::CreateDOMUIForURL(TabContents* tab_contents,
 }
 
 // static
-RefCountedMemory* DOMUIFactory::GetFaviconResourceBytes(
-    const GURL& page_url) {
+RefCountedMemory* DOMUIFactory::GetFaviconResourceBytes(Profile* profile,
+                                                        const GURL& page_url) {
+  if (page_url.SchemeIs(chrome::kExtensionScheme))
+    return ExtensionDOMUI::GetFaviconResourceBytes(profile, page_url);
+
   if (!HasDOMUIScheme(page_url))
     return NULL;
+
+  if (page_url.host() == chrome::kChromeUIBookmarksHost)
+    return BookmarksUI::GetFaviconResourceBytes();
+
+  if (page_url.host() == chrome::kChromeUIDownloadsHost)
+    return DownloadsUI::GetFaviconResourceBytes();
+
+  if (page_url.host() == chrome::kChromeUIExtensionsHost)
+    return ExtensionsUI::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes();
 
-  if (page_url.host() == chrome::kChromeUIDownloadsHost)
-    return DownloadsUI::GetFaviconResourceBytes();
+  if (page_url.host() == chrome::kChromeUIPluginsHost)
+    return PluginsUI::GetFaviconResourceBytes();
 
   return NULL;
 }

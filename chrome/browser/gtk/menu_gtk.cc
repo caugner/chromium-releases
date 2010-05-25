@@ -1,109 +1,220 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gtk/menu_gtk.h"
 
-#include "app/gfx/gtk_util.h"
+#include <map>
+
 #include "app/l10n_util.h"
+#include "app/menus/accelerator_gtk.h"
+#include "app/menus/menu_model.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/standard_menus.h"
-#include "chrome/common/gtk_util.h"
+#include "gfx/gtk_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 using gtk_util::ConvertAcceleratorsFromWindowsStyle;
 
 bool MenuGtk::block_activation_ = false;
 
+namespace {
+
+// Sets the ID of a menu item.
+void SetMenuItemID(GtkWidget* menu_item, int menu_id) {
+  DCHECK_GE(menu_id, 0);
+
+  // Add 1 to the menu_id to avoid setting zero (null) to "menu-id".
+  g_object_set_data(G_OBJECT(menu_item), "menu-id",
+                    GINT_TO_POINTER(menu_id + 1));
+}
+
+// Gets the ID of a menu item.
+// Returns true if the menu item has an ID.
+bool GetMenuItemID(GtkWidget* menu_item, int* menu_id) {
+  const MenuCreateMaterial* data =
+      reinterpret_cast<const MenuCreateMaterial*>(
+          g_object_get_data(G_OBJECT(menu_item), "menu-data"));
+
+  if (data) {
+    *menu_id = data->id;
+    return true;
+  }
+
+  gpointer id_ptr = g_object_get_data(G_OBJECT(menu_item), "menu-id");
+  if (id_ptr != NULL) {
+    *menu_id = GPOINTER_TO_INT(id_ptr) - 1;
+    return true;
+  }
+
+  return false;
+}
+
+menus::MenuModel* ModelForMenuItem(GtkMenuItem* menu_item) {
+  return reinterpret_cast<menus::MenuModel*>(
+      g_object_get_data(G_OBJECT(menu_item), "model"));
+}
+
+void OnSubmenuShow(GtkWidget* widget, gpointer user_data) {
+  gint index = GPOINTER_TO_INT(user_data);
+
+  GtkMenuItem* item =
+      GTK_MENU_ITEM(g_list_nth(GTK_MENU_SHELL(widget)->children, index)->data);
+  menus::MenuModel* model = ModelForMenuItem(item);
+  std::string label =
+      ConvertAcceleratorsFromWindowsStyle(
+          UTF16ToUTF8(model->GetLabelAt(index)));
+
+#if GTK_CHECK_VERSION(2, 16, 0)
+  gtk_menu_item_set_label(item, label.c_str());
+#else
+  gtk_label_set_label(GTK_LABEL(GTK_BIN(item)->child), label.c_str());
+#endif
+}
+
+// Popup menus may get squished if they open up too close to the bottom of the
+// screen. This function takes the size of the screen, the size of the menu,
+// an optional widget, the Y position of the mouse click, and adjusts the popup
+// menu's Y position to make it fit if it's possible to do so.
+// Returns the new Y position of the popup menu.
+int CalculateMenuYPosition(const GdkRectangle* screen_rect,
+                           const GtkRequisition* menu_req,
+                           const GtkWidget* widget, const int y) {
+  CHECK(screen_rect);
+  CHECK(menu_req);
+  // If the menu would run off the bottom of the screen, and there is enough
+  // screen space upwards to accommodate the menu, then pop upwards. If there
+  // is a widget, then also move the anchor point to the top of the widget
+  // rather than the bottom.
+  const int screen_top = screen_rect->y;
+  const int screen_bottom = screen_rect->y + screen_rect->height;
+  const int menu_bottom = y + menu_req->height;
+  int alternate_y = y - menu_req->height;
+  if (widget)
+    alternate_y -= widget->allocation.height;
+  if (menu_bottom >= screen_bottom && alternate_y >= screen_top)
+    return alternate_y;
+  return y;
+}
+
+}  // namespace
+
 MenuGtk::MenuGtk(MenuGtk::Delegate* delegate,
-                 const MenuCreateMaterial* menu_data,
-                 GtkAccelGroup* accel_group)
+                 const MenuCreateMaterial* menu_data)
     : delegate_(delegate),
+      model_(NULL),
       dummy_accel_group_(gtk_accel_group_new()),
       menu_(gtk_menu_new()),
       factory_(this) {
+  DCHECK(menu_data);
+  g_object_ref_sink(menu_);
   ConnectSignalHandlers();
-  BuildMenuIn(menu_.get(), menu_data, accel_group);
+  BuildMenuIn(menu_, menu_data);
 }
 
-MenuGtk::MenuGtk(MenuGtk::Delegate* delegate, bool load)
+MenuGtk::MenuGtk(MenuGtk::Delegate* delegate)
     : delegate_(delegate),
-      dummy_accel_group_(NULL),
+      model_(NULL),
+      dummy_accel_group_(gtk_accel_group_new()),
       menu_(gtk_menu_new()),
       factory_(this) {
+  g_object_ref_sink(menu_);
   ConnectSignalHandlers();
-  if (load)
-    BuildMenuFromDelegate();
+}
+
+MenuGtk::MenuGtk(MenuGtk::Delegate* delegate,
+                 menus::MenuModel* model)
+    : delegate_(delegate),
+      model_(model),
+      dummy_accel_group_(gtk_accel_group_new()),
+      menu_(gtk_menu_new()),
+      factory_(this) {
+  g_object_ref_sink(menu_);
+  DCHECK(model);
+  ConnectSignalHandlers();
+  if (model)
+    BuildMenuFromModel();
 }
 
 MenuGtk::~MenuGtk() {
-  menu_.Destroy();
+  Cancel();
+
+  gtk_widget_destroy(menu_);
+  g_object_unref(menu_);
+
   STLDeleteContainerPointers(submenus_we_own_.begin(), submenus_we_own_.end());
-  if (dummy_accel_group_)
-    g_object_unref(dummy_accel_group_);
+  g_object_unref(dummy_accel_group_);
 }
 
 void MenuGtk::ConnectSignalHandlers() {
   // We connect afterwards because OnMenuShow calls SetMenuItemInfo, which may
   // take a long time or even start a nested message loop.
-  g_signal_connect(menu_.get(), "show", G_CALLBACK(OnMenuShow), this);
-  g_signal_connect(menu_.get(), "hide", G_CALLBACK(OnMenuHidden), this);
+  g_signal_connect(menu_, "show", G_CALLBACK(OnMenuShow), this);
+  g_signal_connect(menu_, "hide", G_CALLBACK(OnMenuHidden), this);
 }
 
-void MenuGtk::AppendMenuItemWithLabel(int command_id,
-                                      const std::string& label) {
+GtkWidget* MenuGtk::AppendMenuItemWithLabel(int command_id,
+                                            const std::string& label) {
   std::string converted_label = ConvertAcceleratorsFromWindowsStyle(label);
   GtkWidget* menu_item =
       gtk_menu_item_new_with_mnemonic(converted_label.c_str());
-  AppendMenuItem(command_id, menu_item);
+  return AppendMenuItem(command_id, menu_item);
 }
 
-void MenuGtk::AppendMenuItemWithIcon(int command_id,
-                                     const std::string& label,
-                                     const SkBitmap& icon) {
-  GtkWidget* menu_item = BuildMenuItemWithImage(label, icon);
-  AppendMenuItem(command_id, menu_item);
+GtkWidget* MenuGtk::AppendMenuItemWithIcon(int command_id,
+                                           const std::string& label,
+                                           const SkBitmap& icon) {
+  std::string converted_label = ConvertAcceleratorsFromWindowsStyle(label);
+  GtkWidget* menu_item = BuildMenuItemWithImage(converted_label, icon);
+  return AppendMenuItem(command_id, menu_item);
 }
 
-void MenuGtk::AppendCheckMenuItemWithLabel(int command_id,
-                                           const std::string& label) {
+GtkWidget* MenuGtk::AppendCheckMenuItemWithLabel(int command_id,
+                                                 const std::string& label) {
   std::string converted_label = ConvertAcceleratorsFromWindowsStyle(label);
   GtkWidget* menu_item =
       gtk_check_menu_item_new_with_mnemonic(converted_label.c_str());
-  AppendMenuItem(command_id, menu_item);
+  return AppendMenuItem(command_id, menu_item);
 }
 
-void MenuGtk::AppendSeparator() {
+GtkWidget* MenuGtk::AppendSeparator() {
   GtkWidget* menu_item = gtk_separator_menu_item_new();
   gtk_widget_show(menu_item);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu_.get()), menu_item);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu_), menu_item);
+  return menu_item;
 }
 
-void MenuGtk::AppendMenuItem(int command_id, GtkWidget* menu_item) {
-  g_object_set_data(G_OBJECT(menu_item), "menu-id",
-                    reinterpret_cast<void*>(command_id));
+GtkWidget* MenuGtk::AppendMenuItem(int command_id, GtkWidget* menu_item) {
+  return AppendMenuItemToMenu(command_id, menu_item, menu_);
+}
 
-  g_signal_connect(G_OBJECT(menu_item), "activate",
+GtkWidget* MenuGtk::AppendMenuItemToMenu(int command_id,
+                                         GtkWidget* menu_item,
+                                         GtkWidget* menu) {
+  SetMenuItemID(menu_item, command_id);
+  g_signal_connect(menu_item, "activate",
                    G_CALLBACK(OnMenuItemActivated), this);
 
   gtk_widget_show(menu_item);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu_.get()), menu_item);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), menu_item);
+  return menu_item;
 }
 
 void MenuGtk::Popup(GtkWidget* widget, GdkEvent* event) {
   DCHECK(event->type == GDK_BUTTON_PRESS)
       << "Non-button press event sent to RunMenuAt";
 
-  GdkEventButton* event_button = reinterpret_cast<GdkEventButton*>(event);
-  Popup(widget, event_button->button, event_button->time);
+  Popup(widget, event->button.button, event->button.time);
 }
 
 void MenuGtk::Popup(GtkWidget* widget, gint button_type, guint32 timestamp) {
-  gtk_menu_popup(GTK_MENU(menu_.get()), NULL, NULL,
-                 MenuPositionFunc,
+  gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
+                 WidgetMenuPositionFunc,
                  widget,
                  button_type, timestamp);
 }
@@ -111,21 +222,25 @@ void MenuGtk::Popup(GtkWidget* widget, gint button_type, guint32 timestamp) {
 void MenuGtk::PopupAsContext(guint32 event_time) {
   // TODO(estade): |button| value of 3 (6th argument) is not strictly true,
   // but does it matter?
-  gtk_menu_popup(GTK_MENU(menu_.get()), NULL, NULL, NULL, NULL, 3, event_time);
+  gtk_menu_popup(GTK_MENU(menu_), NULL, NULL, NULL, NULL, 3, event_time);
+}
+
+void MenuGtk::PopupAsContextAt(guint32 event_time, gfx::Point point) {
+  gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
+                 PointMenuPositionFunc, &point, 3, event_time);
 }
 
 void MenuGtk::PopupAsFromKeyEvent(GtkWidget* widget) {
   Popup(widget, 0, gtk_get_current_event_time());
-  gtk_menu_shell_select_first(GTK_MENU_SHELL(menu_.get()), FALSE);
+  gtk_menu_shell_select_first(GTK_MENU_SHELL(menu_), FALSE);
 }
 
 void MenuGtk::Cancel() {
-  gtk_menu_popdown(GTK_MENU(menu_.get()));
+  gtk_menu_popdown(GTK_MENU(menu_));
 }
 
 void MenuGtk::BuildMenuIn(GtkWidget* menu,
-                          const MenuCreateMaterial* menu_data,
-                          GtkAccelGroup* accel_group) {
+                          const MenuCreateMaterial* menu_data) {
   // We keep track of the last menu item in order to group radio items.
   GtkWidget* last_menu_item = NULL;
   for (; menu_data->type != MENU_END; ++menu_data) {
@@ -169,22 +284,21 @@ void MenuGtk::BuildMenuIn(GtkWidget* menu,
 
     if (menu_data->submenu) {
       GtkWidget* submenu = gtk_menu_new();
-      BuildMenuIn(submenu, menu_data->submenu, accel_group);
+      BuildMenuIn(submenu, menu_data->submenu);
       gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_item), submenu);
     } else if (menu_data->custom_submenu) {
       gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_item),
-                                menu_data->custom_submenu->menu_.get());
+                                menu_data->custom_submenu->menu_);
       submenus_we_own_.push_back(menu_data->custom_submenu);
     }
 
-    if ((menu_data->only_show || accel_group) && menu_data->accel_key) {
+    if (menu_data->accel_key) {
       // If we ever want to let the user do any key remaping, we'll need to
       // change the following so we make a gtk_accel_map which keeps the actual
       // keys.
       gtk_widget_add_accelerator(menu_item,
                                  "activate",
-                                 menu_data->only_show ? dummy_accel_group_ :
-                                                        accel_group,
+                                 dummy_accel_group_,
                                  menu_data->accel_key,
                                  GdkModifierType(menu_data->accel_modifiers),
                                  GTK_ACCEL_VISIBLE);
@@ -193,7 +307,7 @@ void MenuGtk::BuildMenuIn(GtkWidget* menu,
     g_object_set_data(G_OBJECT(menu_item), "menu-data",
                       const_cast<MenuCreateMaterial*>(menu_data));
 
-    g_signal_connect(G_OBJECT(menu_item), "activate",
+    g_signal_connect(menu_item, "activate",
                      G_CALLBACK(OnMenuItemActivated), this);
 
     gtk_widget_show(menu_item);
@@ -204,35 +318,92 @@ void MenuGtk::BuildMenuIn(GtkWidget* menu,
 
 GtkWidget* MenuGtk::BuildMenuItemWithImage(const std::string& label,
                                            const SkBitmap& icon) {
-  std::string converted_label = ConvertAcceleratorsFromWindowsStyle(label);
   GtkWidget* menu_item =
-      gtk_image_menu_item_new_with_mnemonic(converted_label.c_str());
+      gtk_image_menu_item_new_with_mnemonic(label.c_str());
 
   GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
   gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
                                 gtk_image_new_from_pixbuf(pixbuf));
   g_object_unref(pixbuf);
-  if (delegate_->AlwaysShowImages())
+  if (delegate_ && delegate_->AlwaysShowImages())
     gtk_util::SetAlwaysShowImage(menu_item);
 
   return menu_item;
 }
 
-void MenuGtk::BuildMenuFromDelegate() {
-  // Note that the menu IDs start at 1, not 0.
-  for (int i = 1; i <= delegate_->GetItemCount(); ++i) {
-    GtkWidget* menu_item = NULL;
+void MenuGtk::BuildMenuFromModel() {
+  BuildSubmenuFromModel(model_, menu_);
+}
 
-    if (delegate_->IsItemSeparator(i)) {
-      menu_item = gtk_separator_menu_item_new();
-    } else if (delegate_->HasIcon(i)) {
-      const SkBitmap* icon = delegate_->GetIcon(i);
-      menu_item = BuildMenuItemWithImage(delegate_->GetLabel(i), *icon);
-    } else {
-      menu_item = gtk_menu_item_new_with_label(delegate_->GetLabel(i).c_str());
+void MenuGtk::BuildSubmenuFromModel(menus::MenuModel* model, GtkWidget* menu) {
+  std::map<int, GtkWidget*> radio_groups;
+  GtkWidget* menu_item = NULL;
+  for (int i = 0; i < model->GetItemCount(); ++i) {
+    SkBitmap icon;
+    std::string label =
+        ConvertAcceleratorsFromWindowsStyle(UTF16ToUTF8(model->GetLabelAt(i)));
+
+    switch (model->GetTypeAt(i)) {
+      case menus::MenuModel::TYPE_SEPARATOR:
+        menu_item = gtk_separator_menu_item_new();
+        break;
+
+      case menus::MenuModel::TYPE_CHECK:
+        menu_item = gtk_check_menu_item_new_with_mnemonic(label.c_str());
+        break;
+
+      case menus::MenuModel::TYPE_RADIO: {
+        std::map<int, GtkWidget*>::iterator iter =
+            radio_groups.find(model->GetGroupIdAt(i));
+
+        if (iter == radio_groups.end()) {
+          menu_item = gtk_radio_menu_item_new_with_mnemonic(
+              NULL, label.c_str());
+          radio_groups[model->GetGroupIdAt(i)] = menu_item;
+        } else {
+          menu_item = gtk_radio_menu_item_new_with_mnemonic_from_widget(
+              GTK_RADIO_MENU_ITEM(iter->second), label.c_str());
+        }
+        break;
+      }
+      case menus::MenuModel::TYPE_SUBMENU:
+      case menus::MenuModel::TYPE_COMMAND:
+        if (model->GetIconAt(i, &icon))
+          menu_item = BuildMenuItemWithImage(label, icon);
+        else
+          menu_item = gtk_menu_item_new_with_mnemonic(label.c_str());
+        break;
+
+      default:
+        NOTREACHED();
     }
 
-    AppendMenuItem(i, menu_item);
+    if (model->GetTypeAt(i) == menus::MenuModel::TYPE_SUBMENU) {
+      GtkWidget* submenu = gtk_menu_new();
+      BuildSubmenuFromModel(model->GetSubmenuModelAt(i), submenu);
+      gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_item), submenu);
+    }
+
+    menus::AcceleratorGtk accelerator;
+    if (model->GetAcceleratorAt(i, &accelerator)) {
+      gtk_widget_add_accelerator(menu_item,
+                                 "activate",
+                                 dummy_accel_group_,
+                                 accelerator.GetGdkKeyCode(),
+                                 accelerator.gdk_modifier_type(),
+                                 GTK_ACCEL_VISIBLE);
+    }
+
+    g_object_set_data(G_OBJECT(menu_item), "model",
+                      reinterpret_cast<void*>(model));
+    AppendMenuItemToMenu(i, menu_item, menu);
+
+    if (model->IsLabelDynamicAt(i)) {
+      g_signal_connect(menu, "show", G_CALLBACK(OnSubmenuShow),
+                       GINT_TO_POINTER(i));
+    }
+
+    menu_item = NULL;
   }
 }
 
@@ -246,29 +417,30 @@ void MenuGtk::OnMenuItemActivated(GtkMenuItem* menuitem, MenuGtk* menu) {
   if (gtk_menu_item_get_submenu(menuitem))
     return;
 
-  const MenuCreateMaterial* data =
-      reinterpret_cast<const MenuCreateMaterial*>(
-          g_object_get_data(G_OBJECT(menuitem), "menu-data"));
-
-  int id;
-  if (data) {
-    id = data->id;
-  } else {
-    id = reinterpret_cast<intptr_t>(g_object_get_data(G_OBJECT(menuitem),
-                                                      "menu-id"));
+  // The activate signal is sent to radio items as they get deselected;
+  // ignore it in this case.
+  if (GTK_IS_RADIO_MENU_ITEM(menuitem) &&
+      !gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(menuitem))) {
+    return;
   }
 
+  int id;
+  if (!GetMenuItemID(GTK_WIDGET(menuitem), &id))
+    return;
+
+  menus::MenuModel* model = ModelForMenuItem(menuitem);
+
   // The menu item can still be activated by hotkeys even if it is disabled.
-  if (menu->delegate_->IsCommandEnabled(id))
-    menu->delegate_->ExecuteCommand(id);
+  if (menu->IsCommandEnabled(model, id))
+    menu->ExecuteCommand(model, id);
 }
 
 // static
-void MenuGtk::MenuPositionFunc(GtkMenu* menu,
-                               int* x,
-                               int* y,
-                               gboolean* push_in,
-                               void* void_widget) {
+void MenuGtk::WidgetMenuPositionFunc(GtkMenu* menu,
+                                     int* x,
+                                     int* y,
+                                     gboolean* push_in,
+                                     void* void_widget) {
   GtkWidget* widget = GTK_WIDGET(void_widget);
   GtkRequisition menu_req;
 
@@ -290,24 +462,66 @@ void MenuGtk::MenuPositionFunc(GtkMenu* menu,
 
   bool start_align =
     !!g_object_get_data(G_OBJECT(widget), "left-align-popup");
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+  if (base::i18n::IsRTL())
     start_align = !start_align;
 
   if (!start_align)
     *x += widget->allocation.width - menu_req.width;
 
-  // If the menu would run off the bottom of the screen, and there is more
-  // screen space up than down, then pop upwards.
-  if (*y + menu_req.height >= screen_rect.height &&
-      *y > screen_rect.height / 2) {
-    *y -= menu_req.height;
-  }
+  *y = CalculateMenuYPosition(&screen_rect, &menu_req, widget, *y);
 
   *push_in = FALSE;
 }
 
+// static
+void MenuGtk::PointMenuPositionFunc(GtkMenu* menu,
+                                    int* x,
+                                    int* y,
+                                    gboolean* push_in,
+                                    gpointer userdata) {
+  *push_in = TRUE;
+
+  gfx::Point* point = reinterpret_cast<gfx::Point*>(userdata);
+  *x = point->x();
+  *y = point->y();
+
+  GtkRequisition menu_req;
+  gtk_widget_size_request(GTK_WIDGET(menu), &menu_req);
+  GdkScreen* screen;
+  gdk_display_get_pointer(gdk_display_get_default(), &screen, NULL, NULL, NULL);
+  gint monitor = gdk_screen_get_monitor_at_point(screen, *x, *y);
+
+  GdkRectangle screen_rect;
+  gdk_screen_get_monitor_geometry(screen, monitor, &screen_rect);
+
+  *y = CalculateMenuYPosition(&screen_rect, &menu_req, NULL, *y);
+}
+
 void MenuGtk::UpdateMenu() {
-  gtk_container_foreach(GTK_CONTAINER(menu_.get()), SetMenuItemInfo, this);
+  gtk_container_foreach(GTK_CONTAINER(menu_), SetMenuItemInfo, this);
+}
+
+// http://crbug.com/31365
+bool MenuGtk::IsCommandEnabled(menus::MenuModel* model, int id) {
+  return model ? model->IsEnabledAt(id) :
+                 delegate_->IsCommandEnabled(id);
+}
+
+// http://crbug.com/31365
+void MenuGtk::ExecuteCommand(menus::MenuModel* model, int id) {
+  if (delegate_)
+    delegate_->CommandWillBeExecuted();
+
+  if (model)
+    model->ActivatedAt(id);
+  else
+    delegate_->ExecuteCommandById(id);
+}
+
+// http://crbug.com/31365
+bool MenuGtk::IsItemChecked(menus::MenuModel* model, int id) {
+  return model ? model->IsItemCheckedAt(id) :
+                 delegate_->IsItemChecked(id);
 }
 
 // static
@@ -318,7 +532,8 @@ void MenuGtk::OnMenuShow(GtkWidget* widget, MenuGtk* menu) {
 
 // static
 void MenuGtk::OnMenuHidden(GtkWidget* widget, MenuGtk* menu) {
-  menu->delegate_->StoppedShowing();
+  if (menu->delegate_)
+    menu->delegate_->StoppedShowing();
 }
 
 // static
@@ -329,17 +544,12 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
     return;
   }
 
-  MenuGtk* menu = reinterpret_cast<MenuGtk*>(userdata);
   int id;
-  const MenuCreateMaterial* data =
-      reinterpret_cast<const MenuCreateMaterial*>(
-          g_object_get_data(G_OBJECT(widget), "menu-data"));
-  if (data) {
-    id = data->id;
-  } else {
-    id = reinterpret_cast<intptr_t>(g_object_get_data(G_OBJECT(widget),
-                                    "menu-id"));
-  }
+  if (!GetMenuItemID(widget, &id))
+    return;
+
+  MenuGtk* menu = reinterpret_cast<MenuGtk*>(userdata);
+  menus::MenuModel* model = ModelForMenuItem(GTK_MENU_ITEM(widget));
 
   if (GTK_IS_CHECK_MENU_ITEM(widget)) {
     GtkCheckMenuItem* item = GTK_CHECK_MENU_ITEM(widget);
@@ -355,13 +565,12 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
     // root of the MenuGtk and we want to disable *all* MenuGtks, including
     // submenus.
     block_activation_ = true;
-    gtk_check_menu_item_set_active(item, menu->delegate_->IsItemChecked(id));
+    gtk_check_menu_item_set_active(item, menu->IsItemChecked(model, id));
     block_activation_ = false;
   }
 
   if (GTK_IS_MENU_ITEM(widget)) {
-    gtk_widget_set_sensitive(
-        widget, menu->delegate_->IsCommandEnabled(id));
+    gtk_widget_set_sensitive(widget, menu->IsCommandEnabled(model, id));
 
     GtkWidget* submenu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(widget));
     if (submenu) {

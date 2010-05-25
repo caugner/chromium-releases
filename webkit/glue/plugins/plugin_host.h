@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "base/ref_counted.h"
-#include "webkit/glue/plugins/nphostapi.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "third_party/npapi/bindings/nphostapi.h"
 
 namespace NPAPI
 {
@@ -30,7 +30,6 @@ class PluginHost : public base::RefCounted<PluginHost> {
   // Access the single PluginHost instance.  Callers
   // must call deref() when finished with the object.
   static PluginHost *Singleton();
-  virtual ~PluginHost();
 
   // The table of functions provided to the plugin.
   NPNetscapeFuncs *host_functions() { return &host_funcs_; }
@@ -48,6 +47,10 @@ class PluginHost : public base::RefCounted<PluginHost> {
   void PatchNPNetscapeFuncs(NPNetscapeFuncs* overrides);
 
  private:
+  friend class base::RefCounted<PluginHost>;
+
+  virtual ~PluginHost();
+
   PluginHost();
   void InitializeHostFuncs();
   static scoped_refptr<PluginHost> singleton_;

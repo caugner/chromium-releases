@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/platform_thread.h"
 #include "chrome/common/notification_observer.h"
 
 // Aids in registering for notifications and ensures that all registered
@@ -39,6 +40,8 @@ class NotificationRegistrar {
   bool IsEmpty() const;
 
  private:
+  static void CheckCalledOnValidThread(PlatformThreadId thread_id);
+
   struct Record;
 
   // We keep registered notifications in a simple vector. This means we'll do

@@ -34,14 +34,23 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "gpu/pgl/pgl.h"
+
+#if defined(INDEPENDENT_PLUGIN)
+#include <iostream>
+#define LOG(x) std::cerr
+#else
 #include "base/logging.h"
 #include "base/string_util.h"
+#endif
+#include "third_party/npapi/bindings/nphostapi.h"
 #include "webkit/tools/pepper_test_plugin/plugin_object.h"
+#include "webkit/tools/pepper_test_plugin/event_handler.h"
 
-#ifdef WIN32
-#define NPAPI WINAPI
-#else
-#define NPAPI
+#if __GNUC__ >= 4
+#define EXPORT __attribute__ ((visibility("default")))
+#elif defined(_MSC_VER)
+#define EXPORT __declspec(dllexport)
 #endif
 
 namespace {
@@ -50,7 +59,12 @@ void Log(NPP instance, const char* format, ...) {
   va_list args;
   va_start(args, format);
   std::string message("PLUGIN: ");
+#if defined(INDEPENDENT_PLUGIN)
+  char msgbuf[100];
+  vsnprintf(msgbuf, sizeof(msgbuf), format, args);
+#else
   StringAppendV(&message, format, args);
+#endif
   va_end(args);
 
   NPObject* window_object = 0;
@@ -82,7 +96,7 @@ void Log(NPP instance, const char* format, ...) {
                        browser->getstringidentifier("log"),
                        &message_variant, 1, &result)) {
     fprintf(stderr, "Failed to invoke console.log while logging: %s\n",
-            message);
+            message.c_str());
     browser->releaseobject(console_object);
     browser->releaseobject(window_object);
     return;
@@ -98,31 +112,39 @@ void Log(NPP instance, const char* format, ...) {
 // Plugin entry points
 extern "C" {
 
-NPError NPAPI NP_Initialize(NPNetscapeFuncs* browser_funcs
-#if defined(OS_LINUX)
+EXPORT NPError API_CALL NP_Initialize(NPNetscapeFuncs* browser_funcs
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
                             , NPPluginFuncs* plugin_funcs
 #endif
                             );
-NPError NPAPI NP_GetEntryPoints(NPPluginFuncs* plugin_funcs);
+EXPORT NPError API_CALL NP_GetEntryPoints(NPPluginFuncs* plugin_funcs);
 
-void NPAPI NP_Shutdown() {
+EXPORT void API_CALL NP_Shutdown() {
+#if !defined(INDEPENDENT_PLUGIN)
+  pglTerminate();
+#endif
 }
 
-#if defined(OS_LINUX)
-NPError NP_GetValue(NPP instance, NPPVariable variable, void* value);
-const char* NP_GetMIMEDescription();
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+EXPORT NPError API_CALL NP_GetValue(NPP instance,
+                                    NPPVariable variable,
+                                    void* value);
+EXPORT const char* API_CALL NP_GetMIMEDescription();
 #endif
 
 }  // extern "C"
 
 // Plugin entry points
-NPError NPAPI NP_Initialize(NPNetscapeFuncs* browser_funcs
-#if defined(OS_LINUX)
+EXPORT NPError API_CALL NP_Initialize(NPNetscapeFuncs* browser_funcs
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
                             , NPPluginFuncs* plugin_funcs
 #endif
                             ) {
   browser = browser_funcs;
-#if defined(OS_LINUX)
+#if !defined(INDEPENDENT_PLUGIN)
+  pglInitialize();
+#endif
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   return NP_GetEntryPoints(plugin_funcs);
 #else
   return NPERR_NO_ERROR;
@@ -131,7 +153,7 @@ NPError NPAPI NP_Initialize(NPNetscapeFuncs* browser_funcs
 
 // Entrypoints -----------------------------------------------------------------
 
-NPError NPAPI NP_GetEntryPoints(NPPluginFuncs* plugin_funcs) {
+NPError API_CALL NP_GetEntryPoints(NPPluginFuncs* plugin_funcs) {
   plugin_funcs->version = 11;
   plugin_funcs->size = sizeof(plugin_funcs);
   plugin_funcs->newp = NPP_New;
@@ -160,10 +182,12 @@ NPError NPP_New(NPMIMEType pluginType,
     PluginObject* obj = reinterpret_cast<PluginObject*>(
         browser->createobject(instance, PluginObject::GetPluginClass()));
     instance->pdata = obj;
+    event_handler = new EventHandler(instance);
+
+    obj->New(pluginType, argc, argn, argv);
   }
 
-  // On Windows and Unix, plugins only get events if they are windowless.
-  return browser->setvalue(instance, NPPVpluginWindowBool, NULL);
+  return NPERR_NO_ERROR;
 }
 
 NPError NPP_Destroy(NPP instance, NPSavedData** save) {
@@ -176,6 +200,9 @@ NPError NPP_Destroy(NPP instance, NPSavedData** save) {
 }
 
 NPError NPP_SetWindow(NPP instance, NPWindow* window) {
+  PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+  if (obj)
+    obj->SetWindow(*window);
   return NPERR_NO_ERROR;
 }
 
@@ -211,7 +238,7 @@ void NPP_Print(NPP instance, NPPrint* platformPrint) {
 }
 
 int16 NPP_HandleEvent(NPP instance, void* event) {
-  return 0;
+  return event_handler->handle(event);
 }
 
 void NPP_URLNotify(NPP instance, const char* url, NPReason reason,
@@ -223,7 +250,7 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void* value) {
   NPError err = NPERR_NO_ERROR;
 
   switch (variable) {
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
     case NPPVpluginNameString:
       *((const char**)value) = "Pepper Test PlugIn";
       break;
@@ -255,12 +282,12 @@ NPError NPP_SetValue(NPP instance, NPNVariable variable, void* value) {
   return NPERR_GENERIC_ERROR;
 }
 
-#if defined(OS_LINUX)
-NPError NP_GetValue(NPP instance, NPPVariable variable, void* value) {
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+NPError API_CALL NP_GetValue(NPP instance, NPPVariable variable, void* value) {
   return NPP_GetValue(instance, variable, value);
 }
 
-const char* NP_GetMIMEDescription() {
-  return "pepper-application/x-pepper-test-plugin pepper test;";
+const char* API_CALL NP_GetMIMEDescription() {
+  return "pepper-application/x-pepper-test-plugin::Pepper Test";
 }
 #endif

@@ -42,25 +42,28 @@
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_
 
 #include <map>
+#include <string>
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/hash_tables.h"
+#include "base/linked_ptr.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/timer.h"
+#include "chrome/browser/power_save_blocker.h"
+#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/file_stream.h"
 
 namespace net {
 class IOBuffer;
 }
 struct DownloadCreateInfo;
 class DownloadManager;
-class MessageLoop;
 class ResourceDispatcherHost;
-class URLRequestContext;
+class URLRequestContextGetter;
 
 // DownloadBuffer --------------------------------------------------------------
 
@@ -77,6 +80,16 @@ struct DownloadBuffer {
   std::vector<Contents> contents;
 };
 
+// DownloadSaveInfo ------------------------------------------------------------
+
+// Holds the information about how to save a download file.
+struct DownloadSaveInfo {
+  FilePath file_path;
+  linked_ptr<net::FileStream> file_stream;
+
+  DownloadSaveInfo() { }
+};
+
 // DownloadFile ----------------------------------------------------------------
 
 // These objects live exclusively on the download thread and handle the writing
@@ -85,7 +98,7 @@ struct DownloadBuffer {
 // cancelled, the DownloadFile is destroyed.
 class DownloadFile {
  public:
-  DownloadFile(const DownloadCreateInfo* info);
+  explicit DownloadFile(const DownloadCreateInfo* info);
   ~DownloadFile();
 
   bool Initialize();
@@ -110,18 +123,18 @@ class DownloadFile {
   int render_view_id() const { return render_view_id_; }
   int request_id() const { return request_id_; }
   bool path_renamed() const { return path_renamed_; }
-  bool in_progress() const { return file_ != NULL; }
+  bool in_progress() const { return file_stream_ != NULL; }
   void set_in_progress(bool in_progress) { in_progress_ = in_progress; }
 
  private:
-  // Open or Close the OS file handle. The file is opened in the constructor
+  // Open or Close the OS file stream. The stream is opened in the constructor
   // based on creation information passed to it, and automatically closed in
   // the destructor.
   void Close();
-  bool Open(const char* open_mode);
+  bool Open();
 
-  // OS file handle for writing
-  FILE* file_;
+  // OS file stream for writing
+  linked_ptr<net::FileStream> file_stream_;
 
   // Source URL for the file being downloaded.
   GURL source_url_;
@@ -153,6 +166,12 @@ class DownloadFile {
   // Whether the download is still receiving data.
   bool in_progress_;
 
+  // RAII handle to keep the system from sleeping while we're downloading.
+  PowerSaveBlocker dont_sleep_;
+
+  // The provider used to save the download data.
+  DownloadSaveInfo save_info_;
+
   DISALLOW_COPY_AND_ASSIGN(DownloadFile);
 };
 
@@ -163,11 +182,9 @@ class DownloadFile {
 class DownloadFileManager
     : public base::RefCountedThreadSafe<DownloadFileManager> {
  public:
-  DownloadFileManager(MessageLoop* ui_loop, ResourceDispatcherHost* rdh);
-  ~DownloadFileManager();
+  explicit DownloadFileManager(ResourceDispatcherHost* rdh);
 
-  // Lifetime management functions, called on the UI thread.
-  void Initialize();
+  // Called on shutdown on the UI thread.
   void Shutdown();
 
   // Called on the IO thread
@@ -189,16 +206,20 @@ class DownloadFileManager
   // ResourceDispatcherHost on the IO thread.
   void DownloadUrl(const GURL& url,
                    const GURL& referrer,
+                   const std::string& referrer_charset,
+                   const DownloadSaveInfo& save_info,
                    int render_process_host_id,
                    int render_view_id,
-                   URLRequestContext* request_context);
+                   URLRequestContextGetter* request_context_getter);
 
   // Run on the IO thread to initiate the download of a URL.
   void OnDownloadUrl(const GURL& url,
                      const GURL& referrer,
+                     const std::string& referrer_charset,
+                     const DownloadSaveInfo& save_info,
                      int render_process_host_id,
                      int render_view_id,
-                     URLRequestContext* request_context);
+                     URLRequestContextGetter* request_context_getter);
 
   // Called on the UI thread to remove a download item or manager.
   void RemoveDownloadManager(DownloadManager* manager);
@@ -225,12 +246,14 @@ class DownloadFileManager
   // Timer notifications.
   void UpdateInProgressDownloads();
 
-  MessageLoop* file_loop() const { return file_loop_; }
-
   // Called by the download manager to delete non validated dangerous downloads.
   static void DeleteFile(const FilePath& path);
 
  private:
+  friend class base::RefCountedThreadSafe<DownloadFileManager>;
+
+  ~DownloadFileManager();
+
   // Timer helpers for updating the UI about the current progress of a download.
   void StartUpdateTimer();
   void StopUpdateTimer();
@@ -258,15 +281,6 @@ class DownloadFileManager
 
   // Throttle updates to the UI thread.
   base::RepeatingTimer<DownloadFileManager> update_timer_;
-
-  // The MessageLoop that the DownloadManagers live on.
-  MessageLoop* ui_loop_;
-
-  // The MessageLoop that the this objects primarily operates on.
-  MessageLoop* file_loop_;
-
-  // Used only for DCHECKs!
-  MessageLoop* io_loop_;
 
   ResourceDispatcherHost* resource_dispatcher_host_;
 

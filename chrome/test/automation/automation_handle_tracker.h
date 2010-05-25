@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
+#include "ipc/ipc_channel.h"
 
 // This represents a value that the app's AutomationProvider returns
 // when asked for a resource (like a window or tab).
@@ -27,11 +28,14 @@ class AutomationResourceProxy
   AutomationResourceProxy(AutomationHandleTracker* tracker,
                           AutomationMessageSender* sender,
                           AutomationHandle handle);
-  virtual ~AutomationResourceProxy();
 
   // Marks this proxy object as no longer valid; this generally means
   // that the corresponding resource on the app side is gone.
-  void Invalidate() { is_valid_ = false; }
+  void Invalidate() {
+    is_valid_ = false;
+    tracker_ = NULL;
+  }
+
   bool is_valid() const { return is_valid_; }
 
   // Returns the handle that the app has generated to refer to this resource.
@@ -39,14 +43,11 @@ class AutomationResourceProxy
 
  protected:
   friend class AutomationHandleTracker;
+  friend class base::RefCountedThreadSafe<AutomationResourceProxy>;
+
+  virtual ~AutomationResourceProxy();
 
   AutomationHandle handle_;
-
-  // Called by the tracker when it is being destroyed so we know not to call
-  // it back.
-  void TrackerGone() {
-    tracker_ = NULL;
-  }
 
   // Not owned by us, owned by the AutomationProxy object. May be NULL if the
   // tracker has been destroyed (and hence the object is invalid).
@@ -72,8 +73,7 @@ class AutomationResourceProxy
 // discard the handle.
 class AutomationHandleTracker {
  public:
-  AutomationHandleTracker(AutomationMessageSender* sender)
-      : sender_(sender) {}
+  explicit AutomationHandleTracker() : channel_(NULL) {}
   ~AutomationHandleTracker();
 
   // Adds the specified proxy object to the tracker.
@@ -92,15 +92,21 @@ class AutomationHandleTracker {
   void InvalidateHandle(AutomationHandle handle);
 
   AutomationResourceProxy* GetResource(AutomationHandle handle);
+
+  void put_channel(IPC::Channel* channel) {
+    channel_ = channel;
+  }
+
  private:
   typedef
-    std::map<AutomationHandle, AutomationResourceProxy*> HandleToObjectMap;
+    std::map<AutomationHandle, scoped_refptr<AutomationResourceProxy> >
+        HandleToObjectMap;
   typedef std::pair<AutomationHandle, AutomationResourceProxy*> MapEntry;
 
   HandleToObjectMap handle_to_object_;
 
-  AutomationMessageSender* sender_;
   Lock map_lock_;
+  IPC::Channel* channel_;
   DISALLOW_EVIL_CONSTRUCTORS(AutomationHandleTracker);
 };
 

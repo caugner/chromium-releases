@@ -22,6 +22,9 @@ class ConstrainedWindowGtkDelegate {
   // Tells the delegate to either delete itself or set up a task to delete
   // itself later.
   virtual void DeleteDelegate() = 0;
+
+ protected:
+  virtual ~ConstrainedWindowGtkDelegate() {}
 };
 
 // Constrained window implementation for the GTK port. Unlike the Win32 system,
@@ -32,6 +35,7 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   virtual ~ConstrainedWindowGtk();
 
   // Overridden from ConstrainedWindow:
+  virtual void ShowConstrainedWindow();
   virtual void CloseConstrainedWindow();
 
   // Returns the TabContents that constrains this Constrained Window.
@@ -57,6 +61,9 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
 
   // Delegate that provides the contents of this constrained window.
   ConstrainedWindowGtkDelegate* delegate_;
+
+  // Stores if |ShowConstrainedWindow()| has been called.
+  bool visible_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowGtk);
 };

@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/text_elider.h"
 #include "app/table_model.h"
+#include "app/text_elider.h"
 #include "base/string_util.h"
 #include "chrome/browser/history/history.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -49,7 +49,7 @@ class PossibleURLModel : public TableModel {
 
   virtual void OnFavIconAvailable(FaviconService::Handle h,
                                   bool fav_icon_available,
-                                  scoped_refptr<RefCountedBytes> data,
+                                  scoped_refptr<RefCountedMemory> data,
                                   bool expired,
                                   GURL icon_url);
 

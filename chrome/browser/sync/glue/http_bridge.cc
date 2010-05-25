@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #include "chrome/browser/sync/glue/http_bridge.h"
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/chrome_thread.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
+#include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
@@ -21,25 +21,39 @@
 
 namespace browser_sync {
 
+HttpBridge::RequestContextGetter::RequestContextGetter(
+    URLRequestContextGetter* baseline_context_getter)
+    : baseline_context_getter_(baseline_context_getter) {
+}
+
+URLRequestContext* HttpBridge::RequestContextGetter::GetURLRequestContext() {
+  // Lazily create the context.
+  if (!context_) {
+    URLRequestContext* baseline_context =
+        baseline_context_getter_->GetURLRequestContext();
+    context_ = new RequestContext(baseline_context);
+    baseline_context_getter_ = NULL;
+  }
+
+  // Apply the user agent which was set earlier.
+  if (is_user_agent_set())
+    context_->set_user_agent(user_agent_);
+
+  return context_;
+}
+
 HttpBridgeFactory::HttpBridgeFactory(
-    URLRequestContext* baseline_context) {
-  DCHECK(baseline_context != NULL);
-  request_context_ = new HttpBridge::RequestContext(baseline_context);
-  request_context_->AddRef();
+    URLRequestContextGetter* baseline_context_getter) {
+  DCHECK(baseline_context_getter != NULL);
+  request_context_getter_ =
+      new HttpBridge::RequestContextGetter(baseline_context_getter);
 }
 
 HttpBridgeFactory::~HttpBridgeFactory() {
-  if (request_context_) {
-    // Clean up request context on IO thread.
-    ChromeThread::GetMessageLoop(ChromeThread::IO)->ReleaseSoon(FROM_HERE,
-        request_context_);
-    request_context_ = NULL;
-  }
 }
 
 sync_api::HttpPostProviderInterface* HttpBridgeFactory::Create() {
-  HttpBridge* http = new HttpBridge(request_context_,
-      ChromeThread::GetMessageLoop(ChromeThread::IO));
+  HttpBridge* http = new HttpBridge(request_context_getter_);
   http->AddRef();
   return http;
 }
@@ -52,7 +66,7 @@ HttpBridge::RequestContext::RequestContext(URLRequestContext* baseline_context)
     : baseline_context_(baseline_context) {
 
   // Create empty, in-memory cookie store.
-  cookie_store_ = new net::CookieMonster();
+  cookie_store_ = new net::CookieMonster(NULL, NULL);
 
   // We don't use a cache for bridged loads, but we do want to share proxy info.
   host_resolver_ = baseline_context->host_resolver();
@@ -87,28 +101,23 @@ HttpBridge::RequestContext::~RequestContext() {
   delete http_transaction_factory_;
 }
 
-HttpBridge::HttpBridge(HttpBridge::RequestContext* context,
-                       MessageLoop* io_loop)
-    : context_for_request_(context),
+HttpBridge::HttpBridge(HttpBridge::RequestContextGetter* context_getter)
+    : context_getter_for_request_(context_getter),
       url_poster_(NULL),
       created_on_loop_(MessageLoop::current()),
-      io_loop_(io_loop),
       request_completed_(false),
       request_succeeded_(false),
       http_response_code_(-1),
-      http_post_completed_(false, false),
-      use_io_loop_for_testing_(false) {
-  context_for_request_->AddRef();
+      http_post_completed_(false, false) {
 }
 
 HttpBridge::~HttpBridge() {
-  io_loop_->ReleaseSoon(FROM_HERE, context_for_request_);
 }
 
 void HttpBridge::SetUserAgent(const char* user_agent) {
   DCHECK_EQ(MessageLoop::current(), created_on_loop_);
   DCHECK(!request_completed_);
-  context_for_request_->set_user_agent(user_agent);
+  context_getter_for_request_->set_user_agent(user_agent);
 }
 
 void HttpBridge::SetExtraRequestHeaders(const char * headers) {
@@ -153,10 +162,10 @@ bool HttpBridge::MakeSynchronousPost(int* os_error_code, int* response_code) {
   DCHECK(!request_completed_);
   DCHECK(url_for_request_.is_valid()) << "Invalid URL for request";
   DCHECK(!content_type_.empty()) << "Payload not set";
-  DCHECK(context_for_request_->is_user_agent_set()) << "User agent not set";
 
-  io_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-                                &HttpBridge::CallMakeAsynchronousPost));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &HttpBridge::CallMakeAsynchronousPost));
 
   if (!http_post_completed_.Wait())  // Block until network request completes.
     NOTREACHED();                    // See OnURLFetchComplete.
@@ -168,17 +177,13 @@ bool HttpBridge::MakeSynchronousPost(int* os_error_code, int* response_code) {
 }
 
 void HttpBridge::MakeAsynchronousPost() {
-  DCHECK_EQ(MessageLoop::current(), io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   DCHECK(!request_completed_);
 
   url_poster_ = new URLFetcher(url_for_request_, URLFetcher::POST, this);
-  url_poster_->set_request_context(context_for_request_);
+  url_poster_->set_request_context(context_getter_for_request_);
   url_poster_->set_upload_data(content_type_, request_content_);
   url_poster_->set_extra_request_headers(extra_headers_);
-
-  if (use_io_loop_for_testing_)
-    url_poster_->set_io_loop(io_loop_);
-
   url_poster_->Start();
 }
 
@@ -194,8 +199,14 @@ const char* HttpBridge::GetResponseContent() const {
   return response_content_.data();
 }
 
-URLRequestContext* HttpBridge::GetRequestContext() const {
-  return context_for_request_;
+const std::string HttpBridge::GetResponseHeaderValue(
+    const std::string& name) const {
+
+  DCHECK_EQ(MessageLoop::current(), created_on_loop_);
+  DCHECK(request_completed_);
+  std::string value;
+  response_headers_->EnumerateHeader(NULL, name, &value);
+  return value;
 }
 
 void HttpBridge::OnURLFetchComplete(const URLFetcher *source, const GURL &url,
@@ -203,7 +214,7 @@ void HttpBridge::OnURLFetchComplete(const URLFetcher *source, const GURL &url,
                                     int response_code,
                                     const ResponseCookies &cookies,
                                     const std::string &data) {
-  DCHECK_EQ(MessageLoop::current(), io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   request_completed_ = true;
   request_succeeded_ = (URLRequestStatus::SUCCESS == status.status());
@@ -211,11 +222,12 @@ void HttpBridge::OnURLFetchComplete(const URLFetcher *source, const GURL &url,
   os_error_code_ = status.os_error();
 
   response_content_ = data;
+  response_headers_ = source->response_headers();
 
-  // End of the line for url_poster_. It lives only on the io_loop.
+  // End of the line for url_poster_. It lives only on the IO loop.
   // We defer deletion because we're inside a callback from a component of the
   // URLFetcher, so it seems most natural / "polite" to let the stack unwind.
-  io_loop_->DeleteSoon(FROM_HERE, url_poster_);
+  MessageLoop::current()->DeleteSoon(FROM_HERE, url_poster_);
   url_poster_ = NULL;
 
   // Wake the blocked syncer thread in MakeSynchronousPost.
@@ -224,5 +236,3 @@ void HttpBridge::OnURLFetchComplete(const URLFetcher *source, const GURL &url,
 }
 
 }  // namespace browser_sync
-
-#endif  // defined(BROWSER_SYNC)

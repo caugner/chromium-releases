@@ -4,22 +4,19 @@
 
 #include "net/base/x509_certificate.h"
 
-// Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
-// until NSS 3.12.2 comes out and we update to it.
-#define Lock FOO_NSS_Lock
 #include <cert.h>
 #include <pk11pub.h>
+#include <prerror.h>
 #include <prtime.h>
 #include <secder.h>
 #include <secerr.h>
 #include <sechash.h>
 #include <sslerr.h>
-#undef Lock
 
 #include "base/logging.h"
 #include "base/pickle.h"
 #include "base/time.h"
-#include "base/nss_init.h"
+#include "base/nss_util.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/ev_root_ca_metadata.h"
@@ -120,6 +117,12 @@ class ScopedCERTValOutParam {
 // Map PORT_GetError() return values to our network error codes.
 int MapSecurityError(int err) {
   switch (err) {
+    case PR_DIRECTORY_LOOKUP_ERROR:  // DNS lookup error.
+      return ERR_NAME_NOT_RESOLVED;
+    case SEC_ERROR_INVALID_ARGS:
+      return ERR_INVALID_ARGUMENT;
+    case SSL_ERROR_BAD_CERT_DOMAIN:
+      return ERR_CERT_COMMON_NAME_INVALID;
     case SEC_ERROR_INVALID_TIME:
     case SEC_ERROR_EXPIRED_CERTIFICATE:
       return ERR_CERT_DATE_INVALID;
@@ -135,6 +138,7 @@ int MapSecurityError(int err) {
     case SEC_ERROR_CERT_NOT_VALID:
     // TODO(port): add an ERR_CERT_WRONG_USAGE error code.
     case SEC_ERROR_CERT_USAGES_INVALID:
+    case SEC_ERROR_POLICY_VALIDATION_FAILED:
       return ERR_CERT_INVALID;
     default:
       LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
@@ -166,6 +170,7 @@ int MapCertErrorToCertStatus(int err) {
     case SEC_ERROR_CERT_NOT_VALID:
     // TODO(port): add a CERT_STATUS_WRONG_USAGE error code.
     case SEC_ERROR_CERT_USAGES_INVALID:
+    case SEC_ERROR_POLICY_VALIDATION_FAILED:
       return CERT_STATUS_INVALID;
     default:
       return 0;
@@ -208,24 +213,6 @@ void GetCertChainInfo(CERTCertList* cert_list,
         break;
     }
   }
-}
-
-// TODO(port): Implement this more simply, and put it in the right place
-base::Time PRTimeToBaseTime(PRTime prtime) {
-  PRExplodedTime prxtime;
-  PR_ExplodeTime(prtime, PR_GMTParameters, &prxtime);
-
-  base::Time::Exploded exploded;
-  exploded.year         = prxtime.tm_year;
-  exploded.month        = prxtime.tm_month + 1;
-  exploded.day_of_week  = prxtime.tm_wday;
-  exploded.day_of_month = prxtime.tm_mday;
-  exploded.hour         = prxtime.tm_hour;
-  exploded.minute       = prxtime.tm_min;
-  exploded.second       = prxtime.tm_sec;
-  exploded.millisecond  = prxtime.tm_usec / 1000;
-
-  return base::Time::FromUTCExploded(exploded);
 }
 
 typedef char* (*CERTGetNameFunc)(CERTName* name);
@@ -291,12 +278,18 @@ void ParseDate(SECItem* der_date, base::Time* result) {
   PRTime prtime;
   SECStatus rv = DER_DecodeTimeChoice(&prtime, der_date);
   DCHECK(rv == SECSuccess);
-  *result = PRTimeToBaseTime(prtime);
+  *result = base::PRTimeToBaseTime(prtime);
 }
 
 void GetCertSubjectAltNamesOfType(X509Certificate::OSCertHandle cert_handle,
                                   CERTGeneralNameType name_type,
                                   std::vector<std::string>* result) {
+  // For future extension: We only support general names of types
+  // RFC822Name, DNSName or URI.
+  DCHECK(name_type == certRFC822Name ||
+         name_type == certDNSName ||
+         name_type == certURI);
+
   SECItem alt_name;
   SECStatus rv = CERT_FindCertExtension(cert_handle,
       SEC_OID_X509_SUBJECT_ALT_NAME, &alt_name);
@@ -312,11 +305,9 @@ void GetCertSubjectAltNamesOfType(X509Certificate::OSCertHandle cert_handle,
 
   CERTGeneralName* name = alt_name_list;
   while (name) {
-    // For future extension: We're assuming that these values are of types
-    // RFC822Name, DNSName or URI.  See the mac code for notes.
-    DCHECK(name->type == certRFC822Name ||
-           name->type == certDNSName ||
-           name->type == certURI);
+    // All of the general name types we support are encoded as
+    // IA5String. In general, we should be switching off
+    // |name->type| and doing type-appropriate conversions.
     if (name->type == name_type) {
       unsigned char* p = name->name.other.data;
       int len = name->name.other.len;
@@ -330,17 +321,24 @@ void GetCertSubjectAltNamesOfType(X509Certificate::OSCertHandle cert_handle,
   PORT_FreeArena(arena, PR_FALSE);
 }
 
+// Forward declarations.
+SECStatus RetryPKIXVerifyCertWithWorkarounds(
+    X509Certificate::OSCertHandle cert_handle, int num_policy_oids,
+    std::vector<CERTValInParam>* cvin, CERTValOutParam* cvout);
+SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle);
+
 // Call CERT_PKIXVerifyCert for the cert_handle.
 // Verification results are stored in an array of CERTValOutParam.
 // If policy_oids is not NULL and num_policy_oids is positive, policies
 // are also checked.
 // Caller must initialize cvout before calling this function.
 SECStatus PKIXVerifyCert(X509Certificate::OSCertHandle cert_handle,
+                         bool check_revocation,
                          const SECOidTag* policy_oids,
                          int num_policy_oids,
                          CERTValOutParam* cvout) {
-  bool use_crl = true;
-  bool use_ocsp = true;
+  bool use_crl = check_revocation;
+  bool use_ocsp = check_revocation;
 
   PRUint64 revocation_method_flags =
       CERT_REV_M_DO_NOT_TEST_USING_THIS_METHOD |
@@ -402,40 +400,160 @@ SECStatus PKIXVerifyCert(X509Certificate::OSCertHandle cert_handle,
   revocation_flags.chainTests.cert_rev_method_independent_flags =
       revocation_method_independent_flags;
 
-  CERTValInParam cvin[3];
-  int cvin_index = 0;
+  std::vector<CERTValInParam> cvin;
+  cvin.reserve(5);
+  CERTValInParam in_param;
   // No need to set cert_pi_trustAnchors here.
-  // TODO(ukai): use cert_pi_useAIACertFetch (new feature in NSS 3.12.1).
-  cvin[cvin_index].type = cert_pi_revocationFlags;
-  cvin[cvin_index].value.pointer.revocation = &revocation_flags;
-  cvin_index++;
-  std::vector<SECOidTag> policies;
+  in_param.type = cert_pi_revocationFlags;
+  in_param.value.pointer.revocation = &revocation_flags;
+  cvin.push_back(in_param);
   if (policy_oids && num_policy_oids > 0) {
-    cvin[cvin_index].type = cert_pi_policyOID;
-    cvin[cvin_index].value.arraySize = num_policy_oids;
-    cvin[cvin_index].value.array.oids = policy_oids;
-    cvin_index++;
+    in_param.type = cert_pi_policyOID;
+    in_param.value.arraySize = num_policy_oids;
+    in_param.value.array.oids = policy_oids;
+    cvin.push_back(in_param);
   }
-  cvin[cvin_index].type = cert_pi_end;
+  in_param.type = cert_pi_end;
+  cvin.push_back(in_param);
 
-  return CERT_PKIXVerifyCert(cert_handle, certificateUsageSSLServer,
-                             cvin, cvout, NULL);
+  SECStatus rv = CERT_PKIXVerifyCert(cert_handle, certificateUsageSSLServer,
+                                     &cvin[0], cvout, NULL);
+  if (rv != SECSuccess) {
+    rv = RetryPKIXVerifyCertWithWorkarounds(cert_handle, num_policy_oids,
+                                            &cvin, cvout);
+  }
+  return rv;
+}
+
+// PKIXVerifyCert calls this function to work around some bugs in
+// CERT_PKIXVerifyCert.  All the arguments of this function are either the
+// arguments or local variables of PKIXVerifyCert.
+SECStatus RetryPKIXVerifyCertWithWorkarounds(
+    X509Certificate::OSCertHandle cert_handle, int num_policy_oids,
+    std::vector<CERTValInParam>* cvin, CERTValOutParam* cvout) {
+  // We call this function when the first CERT_PKIXVerifyCert call in
+  // PKIXVerifyCert failed,  so we initialize |rv| to SECFailure.
+  SECStatus rv = SECFailure;
+  int nss_error = PORT_GetError();
+  CERTValInParam in_param;
+
+  // If we get SEC_ERROR_UNKNOWN_ISSUER, we may be missing an intermediate
+  // CA certificate, so we retry with cert_pi_useAIACertFetch.
+  // cert_pi_useAIACertFetch has several bugs in its error handling and
+  // error reporting (NSS bug 528743), so we don't use it by default.
+  // Note: When building a certificate chain, CERT_PKIXVerifyCert may
+  // incorrectly pick a CA certificate with the same subject name as the
+  // missing intermediate CA certificate, and  fail with the
+  // SEC_ERROR_BAD_SIGNATURE error (NSS bug 524013), so we also retry with
+  // cert_pi_useAIACertFetch on SEC_ERROR_BAD_SIGNATURE.
+  if (nss_error == SEC_ERROR_UNKNOWN_ISSUER ||
+      nss_error == SEC_ERROR_BAD_SIGNATURE) {
+    DCHECK_EQ(cvin->back().type,  cert_pi_end);
+    cvin->pop_back();
+    in_param.type = cert_pi_useAIACertFetch;
+    in_param.value.scalar.b = PR_TRUE;
+    cvin->push_back(in_param);
+    in_param.type = cert_pi_end;
+    cvin->push_back(in_param);
+    rv = CERT_PKIXVerifyCert(cert_handle, certificateUsageSSLServer,
+                             &(*cvin)[0], cvout, NULL);
+    if (rv == SECSuccess)
+      return rv;
+    int new_nss_error = PORT_GetError();
+    if (new_nss_error == SEC_ERROR_INVALID_ARGS ||
+        new_nss_error == SEC_ERROR_UNKNOWN_AIA_LOCATION_TYPE ||
+        new_nss_error == SEC_ERROR_BAD_HTTP_RESPONSE ||
+        new_nss_error == SEC_ERROR_BAD_LDAP_RESPONSE ||
+        !IS_SEC_ERROR(new_nss_error)) {
+      // Use the original error code because of cert_pi_useAIACertFetch's
+      // bad error reporting.
+      PORT_SetError(nss_error);
+      return rv;
+    }
+    nss_error = new_nss_error;
+  }
+
+  // If an intermediate CA certificate has requireExplicitPolicy in its
+  // policyConstraints extension, CERT_PKIXVerifyCert fails with
+  // SEC_ERROR_POLICY_VALIDATION_FAILED because we didn't specify any
+  // certificate policy (NSS bug 552775).  So we retry with the certificate
+  // policy found in the server certificate.
+  if (nss_error == SEC_ERROR_POLICY_VALIDATION_FAILED &&
+      num_policy_oids == 0) {
+    SECOidTag policy = GetFirstCertPolicy(cert_handle);
+    if (policy != SEC_OID_UNKNOWN) {
+      DCHECK_EQ(cvin->back().type,  cert_pi_end);
+      cvin->pop_back();
+      in_param.type = cert_pi_policyOID;
+      in_param.value.arraySize = 1;
+      in_param.value.array.oids = &policy;
+      cvin->push_back(in_param);
+      in_param.type = cert_pi_end;
+      cvin->push_back(in_param);
+      rv = CERT_PKIXVerifyCert(cert_handle, certificateUsageSSLServer,
+                               &(*cvin)[0], cvout, NULL);
+      if (rv != SECSuccess) {
+        // Use the original error code.
+        PORT_SetError(nss_error);
+      }
+    }
+  }
+
+  return rv;
+}
+
+// Decodes the certificatePolicies extension of the certificate.  Returns
+// NULL if the certificate doesn't have the extension or the extension can't
+// be decoded.  The returned value must be freed with a
+// CERT_DestroyCertificatePoliciesExtension call.
+CERTCertificatePolicies* DecodeCertPolicies(
+    X509Certificate::OSCertHandle cert_handle) {
+  SECItem policy_ext;
+  SECStatus rv = CERT_FindCertExtension(
+      cert_handle, SEC_OID_X509_CERTIFICATE_POLICIES, &policy_ext);
+  if (rv != SECSuccess)
+    return NULL;
+  CERTCertificatePolicies* policies =
+      CERT_DecodeCertificatePoliciesExtension(&policy_ext);
+  SECITEM_FreeItem(&policy_ext, PR_FALSE);
+  return policies;
+}
+
+// Returns the OID tag for the first certificate policy in the certificate's
+// certificatePolicies extension.  Returns SEC_OID_UNKNOWN if the certificate
+// has no certificate policy.
+SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle) {
+  CERTCertificatePolicies* policies = DecodeCertPolicies(cert_handle);
+  if (!policies)
+    return SEC_OID_UNKNOWN;
+  ScopedCERTCertificatePolicies scoped_policies(policies);
+  CERTPolicyInfo* policy_info = policies->policyInfos[0];
+  if (!policy_info)
+    return SEC_OID_UNKNOWN;
+  if (policy_info->oid != SEC_OID_UNKNOWN)
+    return policy_info->oid;
+
+  // The certificate policy is unknown to NSS.  We need to create a dynamic
+  // OID tag for the policy.
+  SECOidData od;
+  od.oid.len = policy_info->policyID.len;
+  od.oid.data = policy_info->policyID.data;
+  od.offset = SEC_OID_UNKNOWN;
+  // NSS doesn't allow us to pass an empty description, so I use a hardcoded,
+  // default description here.  The description doesn't need to be unique for
+  // each OID.
+  od.desc = "a certificate policy";
+  od.mechanism = CKM_INVALID_MECHANISM;
+  od.supportedExtension = INVALID_CERT_EXTENSION;
+  return SECOID_AddEntry(&od);
 }
 
 bool CheckCertPolicies(X509Certificate::OSCertHandle cert_handle,
                        SECOidTag ev_policy_tag) {
-  SECItem policy_ext;
-  SECStatus rv = CERT_FindCertExtension(
-      cert_handle, SEC_OID_X509_CERTIFICATE_POLICIES, &policy_ext);
-  if (rv != SECSuccess) {
-    LOG(ERROR) << "Cert has no policies extension.";
-    return false;
-  }
-  CERTCertificatePolicies* policies =
-      CERT_DecodeCertificatePoliciesExtension(&policy_ext);
-  SECITEM_FreeItem(&policy_ext, PR_FALSE);
+  CERTCertificatePolicies* policies = DecodeCertPolicies(cert_handle);
   if (!policies) {
-    LOG(ERROR) << "Failed to decode certificate policy.";
+    LOG(ERROR) << "Cert has no policies extension or extension couldn't be "
+                  "decoded.";
     return false;
   }
   ScopedCERTCertificatePolicies scoped_policies(policies);
@@ -462,9 +580,6 @@ void X509Certificate::Initialize() {
   ParseDate(&cert_handle_->validity.notAfter, &valid_expiry_);
 
   fingerprint_ = CalculateFingerprint(cert_handle_);
-
-  // Store the certificate in the cache in case we need it later.
-  X509Certificate::Cache::GetInstance()->Insert(this);
 }
 
 // static
@@ -523,8 +638,14 @@ int X509Certificate::Verify(const std::string& hostname,
   cvout[cvout_index].type = cert_po_end;
   ScopedCERTValOutParam scoped_cvout(cvout);
 
-  verify_result->cert_status |= net::CERT_STATUS_REV_CHECKING_ENABLED;
-  status = PKIXVerifyCert(cert_handle_, NULL, 0, cvout);
+  bool check_revocation = (flags & VERIFY_REV_CHECKING_ENABLED);
+  if (check_revocation) {
+    verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
+  } else {
+    // EV requires revocation checking.
+    flags &= ~VERIFY_EV_CERT;
+  }
+  status = PKIXVerifyCert(cert_handle_, check_revocation, NULL, 0, cvout);
   if (status != SECSuccess) {
     int err = PORT_GetError();
     LOG(ERROR) << "CERT_PKIXVerifyCert for " << hostname
@@ -534,8 +655,13 @@ int X509Certificate::Verify(const std::string& hostname,
     if (err == SEC_ERROR_CERT_NOT_VALID &&
         (verify_result->cert_status & CERT_STATUS_DATE_INVALID) != 0)
       err = SEC_ERROR_EXPIRED_CERTIFICATE;
-    verify_result->cert_status |= MapCertErrorToCertStatus(err);
-    return MapCertStatusToNetError(verify_result->cert_status);
+    int cert_status = MapCertErrorToCertStatus(err);
+    if (cert_status) {
+      verify_result->cert_status |= cert_status;
+      return MapCertStatusToNetError(verify_result->cert_status);
+    }
+    // |err| is not a certificate error.
+    return MapSecurityError(err);
   }
 
   GetCertChainInfo(cvout[cvout_cert_list_index].value.pointer.chain,
@@ -568,6 +694,7 @@ bool X509Certificate::VerifyEV() const {
   ScopedCERTValOutParam scoped_cvout(cvout);
 
   SECStatus status = PKIXVerifyCert(cert_handle_,
+                                    true,
                                     metadata->GetPolicyOIDs(),
                                     metadata->NumPolicyOIDs(),
                                     cvout);
@@ -595,11 +722,22 @@ X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
     const char* data, int length) {
   base::EnsureNSSInit();
 
-  SECItem der_cert;
-  der_cert.data = reinterpret_cast<unsigned char*>(const_cast<char*>(data));
-  der_cert.len = length;
-  return CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &der_cert,
-                                 NULL, PR_FALSE, PR_TRUE);
+  // Make a copy of |data| since CERT_DecodeCertPackage might modify it.
+  char* data_copy = new char[length];
+  memcpy(data_copy, data, length);
+
+  // Parse into a certificate structure.
+  CERTCertificate* cert = CERT_DecodeCertFromPackage(data_copy, length);
+  delete [] data_copy;
+  if (!cert)
+    LOG(ERROR) << "Couldn't parse a certificate from " << length << " bytes";
+  return cert;
+}
+
+// static
+X509Certificate::OSCertHandle X509Certificate::DupOSCertHandle(
+    OSCertHandle cert_handle) {
+  return CERT_DupCertificate(cert_handle);
 }
 
 // static

@@ -2,22 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
-#include "AXObjectCache.h"
-
-#undef LOG
-
 #include <vector>
 
-#include "base/logging.h"
-
-#include "webkit/api/public/WebAccessibilityObject.h"
-#include "webkit/api/public/WebFrame.h"
 #include "webkit/tools/test_shell/accessibility_controller.h"
-#include "webkit/tools/test_shell/test_shell.h"
-#include "webkit/glue/webview_impl.h"
 
+#include "base/logging.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityCache.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/tools/test_shell/test_shell.h"
+
+using WebKit::WebAccessibilityCache;
 using WebKit::WebAccessibilityObject;
 using WebKit::WebFrame;
 
@@ -39,7 +35,7 @@ AccessibilityController::AccessibilityController(TestShell* shell)
 
 void AccessibilityController::BindToJavascript(
     WebFrame* frame, const std::wstring& classname) {
-  WebCore::AXObjectCache::enableAccessibility();
+  WebAccessibilityCache::enableAccessibility();
   CppBoundClass::BindToJavascript(frame, classname);
 }
 

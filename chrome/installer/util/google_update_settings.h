@@ -23,9 +23,31 @@ class GoogleUpdateSettings {
   // false if the setting could not be recorded.
   static bool SetCollectStatsConsent(bool consented);
 
+  // Returns the metrics id set in the registry (that can be used in crash
+  // reports). If none found, returns empty string.
+  static bool GetMetricsId(std::wstring* metrics_id);
+
+  // Sets the metrics id to be used in crash reports.
+  static bool SetMetricsId(const std::wstring& metrics_id);
+
   // Sets the machine-wide EULA consented flag required on OEM installs.
   // Returns false if the setting could not be recorded.
   static bool SetEULAConsent(bool consented);
+
+  // Returns the last time chrome was run in days. It uses a recorded value
+  // set by SetLastRunTime(). Returns -1 if the value was not found or if
+  // the value is corrupted.
+  static int GetLastRunTime();
+
+  // Stores the time that this function was last called using an encoded
+  // form of the system local time. Retrieve the time using GetLastRunTime().
+  // Returns false if the value could not be stored.
+  static bool SetLastRunTime();
+
+  // Removes the storage used by SetLastRunTime() and SetLastRunTime(). Returns
+  // false if the operation failed. Returns true if the storage was freed or
+  // if it never existed in the first place.
+  static bool RemoveLastRunTime();
 
   // Returns in |browser| the browser used to download chrome as recorded
   // Google Update. Returns false if the information is not available.
@@ -55,6 +77,11 @@ class GoogleUpdateSettings {
   // Overwrites the current value of the referral with an empty string. Returns
   // true if this operation succeeded.
   static bool ClearReferral();
+
+  // Return a human readable modifier for the version string, e.g.
+  // the channel (dev, beta, stable). Returns true if this operation succeeded,
+  // on success, channel contains one of "", "unknown", "dev" or "beta".
+  static bool GetChromeChannel(bool system_install, std::wstring* channel);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

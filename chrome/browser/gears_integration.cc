@@ -4,15 +4,18 @@
 
 #include "chrome/browser/gears_integration.h"
 
-#include "app/gfx/codec/png_codec.h"
+#include <string>
+#include <vector>
+
+#include "base/base64.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/gears_api.h"
+#include "gfx/codec/png_codec.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/base64.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/dom_operations.h"
 
@@ -122,7 +125,7 @@ static GURL ConvertSkBitmapToDataURL(const SkBitmap& icon) {
   std::string icon_data_str(reinterpret_cast<char*>(&icon_data[0]),
                             icon_data.size());
   std::string icon_base64_encoded;
-  net::Base64Encode(icon_data_str, &icon_base64_encoded);
+  base::Base64Encode(icon_data_str, &icon_base64_encoded);
   GURL icon_url("data:image/png;base64," + icon_base64_encoded);
 
   return icon_url;
@@ -233,17 +236,17 @@ struct RunnableMethodTraits<CreateShortcutCommand> {
 
 void GearsCreateShortcut(
     const webkit_glue::WebApplicationInfo& app_info,
-    const std::wstring& fallback_name,
+    const string16& fallback_name,
     const GURL& fallback_url,
     const SkBitmap& fallback_icon,
     GearsCreateShortcutCallback* callback) {
-  std::wstring name =
+  string16 name =
       !app_info.title.empty() ? app_info.title : fallback_name;
-  std::string orig_name_utf8 = WideToUTF8(name);
+  std::string orig_name_utf8 = UTF16ToUTF8(name);
   EnsureStringValidPathComponent(name);
 
-  std::string name_utf8 = WideToUTF8(name);
-  std::string description_utf8 = WideToUTF8(app_info.description);
+  std::string name_utf8 = UTF16ToUTF8(name);
+  std::string description_utf8 = UTF16ToUTF8(app_info.description);
   const GURL& url =
       !app_info.app_url.is_empty() ? app_info.app_url : fallback_url;
 

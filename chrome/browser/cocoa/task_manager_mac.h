@@ -7,27 +7,44 @@
 
 #import <Cocoa/Cocoa.h>
 #include "base/scoped_nsobject.h"
+#include "chrome/browser/cocoa/table_row_nsimage_cache.h"
 #include "chrome/browser/task_manager.h"
+
+@class WindowSizeAutosaver;
+class TaskManagerMac;
 
 // This class is responsible for loading the task manager window and for
 // managing it.
 @interface TaskManagerWindowController : NSWindowController {
  @private
   IBOutlet NSTableView* tableView_;
+  IBOutlet NSButton* endProcessButton_;
+  TaskManagerMac* taskManagerObserver_;  // weak
+  TaskManager* taskManager_;  // weak
   TaskManagerModel* model_;  // weak
+
+  scoped_nsobject<WindowSizeAutosaver> size_saver_;
 }
 
 // Creates and shows the task manager's window.
-- (id)initWithModel:(TaskManagerModel*)model;
+- (id)initWithTaskManagerObserver:(TaskManagerMac*)taskManagerObserver;
 
 // Refreshes all data in the task manager table.
 - (void)reloadData;
 
+// Callback for "Stats for nerds" link.
 - (IBAction)statsLinkClicked:(id)sender;
+
+// Callback for "End process" button.
+- (IBAction)killSelectedProcesses:(id)sender;
+
+// Callback for double clicks on the table.
+- (void)selectDoubleClickedTab:(id)sender;
 @end
 
 // This class listens to task changed events sent by chrome.
-class TaskManagerMac : public TaskManagerModelObserver {
+class TaskManagerMac : public TaskManagerModelObserver,
+                       public TableRowNSImageCache::Table {
  public:
   TaskManagerMac();
   virtual ~TaskManagerMac();
@@ -38,19 +55,37 @@ class TaskManagerMac : public TaskManagerModelObserver {
   virtual void OnItemsAdded(int start, int length);
   virtual void OnItemsRemoved(int start, int length);
 
+  // Called by the cocoa window controller when its window closes and the
+  // controller destroyed itself. Informs the model to stop updating.
+  void WindowWasClosed();
+
+  // TableRowNSImageCache::Table
+  virtual int RowCount() const { return model_->ResourceCount(); }
+  virtual SkBitmap GetIcon(int r) const { return model_->GetResourceIcon(r); }
+
   // Creates the task manager if it doesn't exist; otherwise, it activates the
   // existing task manager window.
   static void Show();
 
+  // Returns the TaskManager observed by |this|.
+  TaskManager* task_manager() { return task_manager_; }
+
+  // Lazily converts the image at the given row and caches it in |icon_cache_|.
+  NSImage* GetImageForRow(int row);
+
  private:
   // The task manager.
-  TaskManager* task_manager_;  // weak
+   TaskManager* const task_manager_;  // weak
 
   // Our model.
-  TaskManagerModel* model_;  // weak
+  TaskManagerModel* const model_;  // weak
 
-  // Controller of our window.
-  scoped_nsobject<TaskManagerWindowController> window_controller_;
+  // Controller of our window, destroys itself when the task manager window
+  // is closed.
+  TaskManagerWindowController* window_controller_;  // weak
+
+  // Caches favicons for all rows. Needs to be initalized after |model_|.
+  TableRowNSImageCache icon_cache_;
 
   // An open task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.

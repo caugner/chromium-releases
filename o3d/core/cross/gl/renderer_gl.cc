@@ -202,19 +202,21 @@ bool InstallFramebufferObjects(const RenderSurface* surface,
     const RenderSurfaceGL *gl_surface =
         down_cast<const RenderSurfaceGL*>(surface);
     Texture *texture = gl_surface->texture();
+    GLuint handle = static_cast<GLuint>(reinterpret_cast<intptr_t>(
+        texture->GetTextureHandle()));
     if (texture->IsA(Texture2D::GetApparentClass())) {
       ::glFramebufferTexture2DEXT(
           GL_FRAMEBUFFER_EXT,
           GL_COLOR_ATTACHMENT0_EXT,
           GL_TEXTURE_2D,
-          reinterpret_cast<GLuint>(texture->GetTextureHandle()),
+          handle,
           gl_surface->mip_level());
     } else if (texture->IsA(TextureCUBE::GetApparentClass())) {
       ::glFramebufferTexture2DEXT(
           GL_FRAMEBUFFER_EXT,
           GL_COLOR_ATTACHMENT0_EXT,
           gl_surface->cube_face(),
-          reinterpret_cast<GLuint>(texture->GetTextureHandle()),
+          handle,
           gl_surface->mip_level());
     }
   }
@@ -822,7 +824,7 @@ Renderer::InitStatus GetWindowsPixelFormat(HWND window,
   }
 
   WNDCLASS intermediate_class;
-  intermediate_class.style = CS_HREDRAW | CS_VREDRAW;
+  intermediate_class.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
   intermediate_class.lpfnWndProc = IntermediateWindowProc;
   intermediate_class.cbClsExtra = 0;
   intermediate_class.cbWndExtra = 0;
@@ -1315,7 +1317,8 @@ void RendererGL::SetRenderSurfacesPlatformSpecific(
   if (!InstallFramebufferObjects(surface, surface_depth)) {
     O3D_ERROR(service_locator())
         << "Failed to bind OpenGL render target objects:"
-        << surface->name() <<", "<< surface_depth->name();
+        << (surface ? surface->name() : "(no surface)") << ", "
+        << (surface_depth ? surface_depth->name() : "(no depth surface)");
   }
   // RenderSurface rendering is performed with an inverted Y, so the front
   // face winding must be changed to clock-wise.  See comments for

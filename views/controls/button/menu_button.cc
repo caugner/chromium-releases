@@ -1,13 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/button/menu_button.h"
 
 #include "app/drag_drop_types.h"
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "grit/app_resources.h"
 #include "views/controls/button/button.h"
@@ -27,13 +27,12 @@ namespace views {
 // pressed event to show the menu.
 static const int64 kMinimumTimeBetweenButtonClicks = 100;
 
-// The down arrow used to differentiate the menu button from normal
-// text buttons.
-static const SkBitmap* kMenuMarker = NULL;
-
 // How much padding to put on the left and right of the menu marker.
 static const int kMenuMarkerPaddingLeft = 3;
 static const int kMenuMarkerPaddingRight = -1;
+
+// static
+const char MenuButton::kViewClassName[] = "views/MenuButton";
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -47,13 +46,10 @@ MenuButton::MenuButton(ButtonListener* listener,
                        bool show_menu_marker)
     : TextButton(listener, text),
       menu_visible_(false),
-      menu_closed_time_(),
       menu_delegate_(menu_delegate),
-      show_menu_marker_(show_menu_marker) {
-  if (kMenuMarker == NULL) {
-    kMenuMarker = ResourceBundle::GetSharedInstance()
-        .GetBitmapNamed(IDR_MENU_DROPARROW);
-  }
+      show_menu_marker_(show_menu_marker),
+      menu_marker_(ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          IDR_MENU_DROPARROW)) {
   set_alignment(TextButton::ALIGN_LEFT);
 }
 
@@ -69,7 +65,7 @@ MenuButton::~MenuButton() {
 gfx::Size MenuButton::GetPreferredSize() {
   gfx::Size prefsize = TextButton::GetPreferredSize();
   if (show_menu_marker_) {
-    prefsize.Enlarge(kMenuMarker->width() + kMenuMarkerPaddingLeft +
+    prefsize.Enlarge(menu_marker_->width() + kMenuMarkerPaddingLeft +
                          kMenuMarkerPaddingRight,
                      0);
   }
@@ -87,12 +83,12 @@ void MenuButton::Paint(gfx::Canvas* canvas, bool for_drag) {
     // regarding why we can not flip the canvas). Therefore, we need to
     // manually mirror the position of the down arrow.
     gfx::Rect arrow_bounds(width() - insets.right() -
-                           kMenuMarker->width() - kMenuMarkerPaddingRight,
-                           height() / 2 - kMenuMarker->height() / 2,
-                           kMenuMarker->width(),
-                           kMenuMarker->height());
+                           menu_marker_->width() - kMenuMarkerPaddingRight,
+                           height() / 2 - menu_marker_->height() / 2,
+                           menu_marker_->width(),
+                           menu_marker_->height());
     arrow_bounds.set_x(MirroredLeftPointForRect(arrow_bounds));
-    canvas->DrawBitmapInt(*kMenuMarker, arrow_bounds.x(), arrow_bounds.y());
+    canvas->DrawBitmapInt(*menu_marker_, arrow_bounds.x(), arrow_bounds.y());
   }
 }
 
@@ -176,7 +172,7 @@ bool MenuButton::OnMousePressed(const MouseEvent& e) {
     // If we're draggable (GetDragOperations returns a non-zero value), then
     // don't pop on press, instead wait for release.
     if (e.IsOnlyLeftMouseButton() && HitTest(e.location()) &&
-        GetDragOperations(e.x(), e.y()) == DragDropTypes::DRAG_NONE) {
+        GetDragOperations(e.location()) == DragDropTypes::DRAG_NONE) {
       TimeDelta delta = Time::Now() - menu_closed_time_;
       int64 delta_in_milliseconds = delta.InMilliseconds();
       if (delta_in_milliseconds > kMinimumTimeBetweenButtonClicks) {
@@ -189,7 +185,11 @@ bool MenuButton::OnMousePressed(const MouseEvent& e) {
 
 void MenuButton::OnMouseReleased(const MouseEvent& e,
                                  bool canceled) {
-  if (GetDragOperations(e.x(), e.y()) != DragDropTypes::DRAG_NONE &&
+  // Explicitly test for left mouse button to show the menu. If we tested for
+  // !IsTriggerableEvent it could lead to a situation where we end up showing
+  // the menu and context menu (this would happen if the right button is not
+  // triggerable and there's a context menu).
+  if (GetDragOperations(e.location()) != DragDropTypes::DRAG_NONE &&
       state() != BS_DISABLED && !canceled && !InDrag() &&
       e.IsOnlyLeftMouseButton() && HitTest(e.location())) {
     Activate();
@@ -247,6 +247,10 @@ bool MenuButton::GetAccessibleState(AccessibilityTypes::State* state) {
 
   *state = AccessibilityTypes::STATE_HASPOPUP;
   return true;
+}
+
+std::string MenuButton::GetClassName() const {
+  return kViewClassName;
 }
 
 }  // namespace views

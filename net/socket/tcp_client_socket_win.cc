@@ -6,14 +6,16 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/field_trial.h"  // for SlowStart trial
 #include "base/memory_debug.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/trace_event.h"
+#include "net/base/connection_type_histograms.h"
 #include "net/base/io_buffer.h"
+#include "net/base/net_log.h"
 #include "net/base/net_errors.h"
+#include "net/base/sys_addrinfo.h"
 #include "net/base/winsock_init.h"
 
 namespace net {
@@ -33,7 +35,7 @@ bool ResetEventIfSignaled(WSAEVENT hEvent) {
   DWORD wait_rv = WaitForSingleObject(hEvent, 0);
   if (wait_rv == WAIT_TIMEOUT)
     return false;  // The event object is not signaled.
-  CHECK(wait_rv == WAIT_OBJECT_0);
+  CHECK_EQ(WAIT_OBJECT_0, wait_rv);
   BOOL ok = WSAResetEvent(hEvent);
   CHECK(ok);
   return true;
@@ -41,10 +43,14 @@ bool ResetEventIfSignaled(WSAEVENT hEvent) {
 
 //-----------------------------------------------------------------------------
 
-int MapWinsockError(DWORD err) {
+int MapWinsockError(int os_error) {
   // There are numerous Winsock error codes, but these are the ones we thus far
   // find interesting.
-  switch (err) {
+  switch (os_error) {
+    // connect fails with WSAEACCES when Windows Firewall blocks the
+    // connection.
+    case WSAEACCES:
+      return ERR_ACCESS_DENIED;
     case WSAENETDOWN:
       return ERR_INTERNET_DISCONNECTED;
     case WSAETIMEDOUT:
@@ -73,17 +79,40 @@ int MapWinsockError(DWORD err) {
     case ERROR_SUCCESS:
       return OK;
     default:
-      LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
+      LOG(WARNING) << "Unknown error " << os_error
+                   << " mapped to net::ERR_FAILED";
       return ERR_FAILED;
   }
 }
 
-int MapConnectError(DWORD err) {
-  switch (err) {
+int MapConnectError(int os_error) {
+  switch (os_error) {
     case WSAETIMEDOUT:
       return ERR_CONNECTION_TIMED_OUT;
+    default: {
+      int net_error = MapWinsockError(os_error);
+      if (net_error == ERR_FAILED)
+        return ERR_CONNECTION_FAILED;  // More specific than ERR_FAILED.
+      return net_error;
+    }
+  }
+}
+
+// Given os_error, a WSAGetLastError() error code from a connect() attempt,
+// returns true if connect() should be retried with another address.
+bool ShouldTryNextAddress(int os_error) {
+  switch (os_error) {
+    case WSAEADDRNOTAVAIL:
+    case WSAEAFNOSUPPORT:
+    case WSAECONNREFUSED:
+    case WSAEACCES:
+    case WSAENETUNREACH:
+    case WSAEHOSTUNREACH:
+    case WSAENETDOWN:
+    case WSAETIMEDOUT:
+      return true;
     default:
-      return MapWinsockError(err);
+      return false;
   }
 }
 
@@ -99,7 +128,6 @@ int MapConnectError(DWORD err) {
 class TCPClientSocketWin::Core : public base::RefCounted<Core> {
  public:
   explicit Core(TCPClientSocketWin* socket);
-  ~Core();
 
   // Start watching for the end of a read or write operation.
   void WatchForRead();
@@ -119,13 +147,11 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
   WSABUF write_buffer_;
   scoped_refptr<IOBuffer> read_iobuffer_;
   scoped_refptr<IOBuffer> write_iobuffer_;
+  int write_buffer_length_;
 
   // Throttle the read size based on our current slow start state.
   // Returns the throttled read size.
   int ThrottleReadSize(int size) {
-    if (!use_slow_start_throttle_)
-      return size;
-
     if (slow_start_throttle_ < kMaxSlowStartThrottle) {
       size = std::min(size, slow_start_throttle_);
       slow_start_throttle_ *= 2;
@@ -134,6 +160,8 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
   }
 
  private:
+  friend class base::RefCounted<Core>;
+
   class ReadDelegate : public base::ObjectWatcher::Delegate {
    public:
     explicit ReadDelegate(Core* core) : core_(core) {}
@@ -158,6 +186,8 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
     Core* const core_;
   };
 
+  ~Core();
+
   // The socket that created this object.
   TCPClientSocketWin* socket_;
 
@@ -178,31 +208,18 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
   static const int kMaxSlowStartThrottle = 32 * kInitialSlowStartThrottle;
   int slow_start_throttle_;
 
-  static bool use_slow_start_throttle_;
-  static bool trial_initialized_;
-
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
-bool TCPClientSocketWin::Core::use_slow_start_throttle_ = false;
-bool TCPClientSocketWin::Core::trial_initialized_ = false;
-
 TCPClientSocketWin::Core::Core(
     TCPClientSocketWin* socket)
-    : socket_(socket),
+    : write_buffer_length_(0),
+      socket_(socket),
       ALLOW_THIS_IN_INITIALIZER_LIST(reader_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(writer_(this)),
       slow_start_throttle_(kInitialSlowStartThrottle) {
   memset(&read_overlapped_, 0, sizeof(read_overlapped_));
   memset(&write_overlapped_, 0, sizeof(write_overlapped_));
-
-  // Initialize the AsyncSlowStart FieldTrial.
-  if (!trial_initialized_) {
-    trial_initialized_ = true;
-    FieldTrial* trial = FieldTrialList::Find("AsyncSlowStart");
-    if (trial && trial->group_name() == "_AsyncSlowStart")
-      use_slow_start_throttle_ = true;
-  }
 }
 
 TCPClientSocketWin::Core::~Core() {
@@ -271,15 +288,41 @@ TCPClientSocketWin::~TCPClientSocketWin() {
   Disconnect();
 }
 
-int TCPClientSocketWin::Connect(CompletionCallback* callback) {
+int TCPClientSocketWin::Connect(CompletionCallback* callback,
+                                const BoundNetLog& net_log) {
   // If already connected, then just return OK.
   if (socket_ != INVALID_SOCKET)
     return OK;
+
+  DCHECK(!net_log_.net_log());
 
   static StatsCounter connects("tcp.connect");
   connects.Increment();
 
   TRACE_EVENT_BEGIN("socket.connect", this, "");
+
+  net_log.BeginEvent(NetLog::TYPE_TCP_CONNECT);
+
+  int rv = DoConnect();
+
+  if (rv == ERR_IO_PENDING) {
+    // Synchronous operation not supported.
+    DCHECK(callback);
+
+    net_log_ = net_log;
+    waiting_connect_ = true;
+    read_callback_ = callback;
+  } else {
+    TRACE_EVENT_END("socket.connect", this, "");
+    net_log.EndEvent(NetLog::TYPE_TCP_CONNECT);
+    if (rv == OK)
+      UpdateConnectionTypeHistograms(CONNECTION_ANY);
+  }
+
+  return rv;
+}
+
+int TCPClientSocketWin::DoConnect() {
   const struct addrinfo* ai = current_ai_;
   DCHECK(ai);
 
@@ -311,21 +354,17 @@ int TCPClientSocketWin::Connect(CompletionCallback* callback) {
     // and we don't know if it's correct.
     NOTREACHED();
 
-    if (ResetEventIfSignaled(core_->read_overlapped_.hEvent)) {
-      TRACE_EVENT_END("socket.connect", this, "");
+    if (ResetEventIfSignaled(core_->read_overlapped_.hEvent))
       return OK;
-    }
   } else {
-    DWORD err = WSAGetLastError();
-    if (err != WSAEWOULDBLOCK) {
-      LOG(ERROR) << "connect failed: " << err;
-      return MapConnectError(err);
+    int os_error = WSAGetLastError();
+    if (os_error != WSAEWOULDBLOCK) {
+      LOG(ERROR) << "connect failed: " << os_error;
+      return MapConnectError(os_error);
     }
   }
 
   core_->WatchForRead();
-  waiting_connect_ = true;
-  read_callback_ = callback;
   return ERR_IO_PENDING;
 }
 
@@ -398,6 +437,14 @@ bool TCPClientSocketWin::IsConnectedAndIdle() const {
   return true;
 }
 
+int TCPClientSocketWin::GetPeerAddress(AddressList* address) const {
+  DCHECK(address);
+  if (!current_ai_)
+    return ERR_FAILED;
+  address->Copy(current_ai_, false);
+  return OK;
+}
+
 int TCPClientSocketWin::Read(IOBuffer* buf,
                              int buf_len,
                              CompletionCallback* callback) {
@@ -413,7 +460,8 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
 
   TRACE_EVENT_BEGIN("socket.read", this, "");
   // TODO(wtc): Remove the CHECK after enough testing.
-  CHECK(WaitForSingleObject(core_->read_overlapped_.hEvent, 0) == WAIT_TIMEOUT);
+  CHECK_EQ(WAIT_TIMEOUT,
+           WaitForSingleObject(core_->read_overlapped_.hEvent, 0));
   DWORD num, flags = 0;
   int rv = WSARecv(socket_, &core_->read_buffer_, 1, &num, &flags,
                    &core_->read_overlapped_, NULL);
@@ -433,9 +481,9 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
       return static_cast<int>(num);
     }
   } else {
-    int err = WSAGetLastError();
-    if (err != WSA_IO_PENDING)
-      return MapWinsockError(err);
+    int os_error = WSAGetLastError();
+    if (os_error != WSA_IO_PENDING)
+      return MapWinsockError(os_error);
   }
   core_->WatchForRead();
   waiting_read_ = true;
@@ -458,25 +506,34 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
 
   core_->write_buffer_.len = buf_len;
   core_->write_buffer_.buf = buf->data();
+  core_->write_buffer_length_ = buf_len;
 
   TRACE_EVENT_BEGIN("socket.write", this, "");
   // TODO(wtc): Remove the CHECK after enough testing.
-  CHECK(
-      WaitForSingleObject(core_->write_overlapped_.hEvent, 0) == WAIT_TIMEOUT);
+  CHECK_EQ(WAIT_TIMEOUT,
+           WaitForSingleObject(core_->write_overlapped_.hEvent, 0));
   DWORD num;
   int rv = WSASend(socket_, &core_->write_buffer_, 1, &num, 0,
                    &core_->write_overlapped_, NULL);
   if (rv == 0) {
     if (ResetEventIfSignaled(core_->write_overlapped_.hEvent)) {
-      TRACE_EVENT_END("socket.write", this, StringPrintf("%d bytes", num));
+      rv = static_cast<int>(num);
+      if (rv > buf_len || rv < 0) {
+        // It seems that some winsock interceptors report that more was written
+        // than was available. Treat this as an error.  http://crbug.com/27870
+        LOG(ERROR) << "Detected broken LSP: Asked to write " << buf_len
+                   << " bytes, but " << rv << " bytes reported.";
+        return ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
+      }
+      TRACE_EVENT_END("socket.write", this, StringPrintf("%d bytes", rv));
       static StatsCounter write_bytes("tcp.write_bytes");
-      write_bytes.Add(num);
-      return static_cast<int>(num);
+      write_bytes.Add(rv);
+      return rv;
     }
   } else {
-    int err = WSAGetLastError();
-    if (err != WSA_IO_PENDING)
-      return MapWinsockError(err);
+    int os_error = WSAGetLastError();
+    if (os_error != WSA_IO_PENDING)
+      return MapWinsockError(os_error);
   }
   core_->WatchForWrite();
   waiting_write_ = true;
@@ -503,9 +560,9 @@ int TCPClientSocketWin::CreateSocket(const struct addrinfo* ai) {
   socket_ = WSASocket(ai->ai_family, ai->ai_socktype, ai->ai_protocol, NULL, 0,
                       WSA_FLAG_OVERLAPPED);
   if (socket_ == INVALID_SOCKET) {
-    DWORD err = WSAGetLastError();
-    LOG(ERROR) << "WSASocket failed: " << err;
-    return MapWinsockError(err);
+    int os_error = WSAGetLastError();
+    LOG(ERROR) << "WSASocket failed: " << os_error;
+    return MapWinsockError(os_error);
   }
 
   // Increase the socket buffer sizes from the default sizes for WinXP.  In
@@ -587,7 +644,6 @@ void TCPClientSocketWin::DidCompleteConnect() {
   DCHECK(waiting_connect_);
   int result;
 
-  TRACE_EVENT_END("socket.connect", this, "");
   waiting_connect_ = false;
 
   WSANETWORKEVENTS events;
@@ -597,29 +653,36 @@ void TCPClientSocketWin::DidCompleteConnect() {
     NOTREACHED();
     result = MapWinsockError(WSAGetLastError());
   } else if (events.lNetworkEvents & FD_CONNECT) {
-    DWORD error_code = static_cast<DWORD>(events.iErrorCode[FD_CONNECT_BIT]);
-    if (current_ai_->ai_next && (
-        error_code == WSAEADDRNOTAVAIL ||
-        error_code == WSAEAFNOSUPPORT ||
-        error_code == WSAECONNREFUSED ||
-        error_code == WSAENETUNREACH ||
-        error_code == WSAEHOSTUNREACH ||
-        error_code == WSAETIMEDOUT)) {
+    int os_error = events.iErrorCode[FD_CONNECT_BIT];
+    if (current_ai_->ai_next && ShouldTryNextAddress(os_error)) {
       // Try using the next address.
       const struct addrinfo* next = current_ai_->ai_next;
       Disconnect();
       current_ai_ = next;
-      result = Connect(read_callback_);
+      BoundNetLog net_log(net_log_);
+      net_log_ = BoundNetLog();
+      TRACE_EVENT_END("socket.connect", this, "");
+      net_log.EndEvent(NetLog::TYPE_TCP_CONNECT);
+      result = Connect(read_callback_, net_log);
     } else {
-      result = MapConnectError(error_code);
+      result = MapConnectError(os_error);
+      TRACE_EVENT_END("socket.connect", this, "");
+      net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT);
+      net_log_ = BoundNetLog();
     }
   } else {
     NOTREACHED();
     result = ERR_UNEXPECTED;
+    TRACE_EVENT_END("socket.connect", this, "");
+    net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT);
+    net_log_ = BoundNetLog();
   }
 
-  if (result != ERR_IO_PENDING)
+  if (result != ERR_IO_PENDING) {
+    if (result == OK)
+      UpdateConnectionTypeHistograms(CONNECTION_ANY);
     DoReadCallback(result);
+  }
 }
 
 void TCPClientSocketWin::DidCompleteRead() {
@@ -643,8 +706,22 @@ void TCPClientSocketWin::DidCompleteWrite() {
   WSAResetEvent(core_->write_overlapped_.hEvent);
   TRACE_EVENT_END("socket.write", this, StringPrintf("%d bytes", num_bytes));
   waiting_write_ = false;
+  int rv;
+  if (!ok) {
+    rv = MapWinsockError(WSAGetLastError());
+  } else {
+    rv = static_cast<int>(num_bytes);
+    if (rv > core_->write_buffer_length_ || rv < 0) {
+      // It seems that some winsock interceptors report that more was written
+      // than was available. Treat this as an error.  http://crbug.com/27870
+      LOG(ERROR) << "Detected broken LSP: Asked to write "
+                 << core_->write_buffer_length_ << " bytes, but " << rv
+                 << " bytes reported.";
+      rv = ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
+    }
+  }
   core_->write_iobuffer_ = NULL;
-  DoWriteCallback(ok ? num_bytes : MapWinsockError(WSAGetLastError()));
+  DoWriteCallback(rv);
 }
 
 }  // namespace net

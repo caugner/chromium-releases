@@ -25,6 +25,7 @@ class BufferedResourceHandler : public ResourceHandler {
   bool OnRequestRedirected(int request_id, const GURL& new_url,
                            ResourceResponse* response, bool* defer);
   bool OnResponseStarted(int request_id, ResourceResponse* response);
+  bool OnWillStart(int request_id, const GURL& url, bool* defer);
   bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
                   int min_size);
   bool OnReadCompleted(int request_id, int* bytes_read);
@@ -34,6 +35,8 @@ class BufferedResourceHandler : public ResourceHandler {
   void OnRequestClosed();
 
  private:
+  ~BufferedResourceHandler() {}
+
   // Returns true if we should delay OnResponseStarted forwarding.
   bool DelayResponse();
 
@@ -61,13 +64,13 @@ class BufferedResourceHandler : public ResourceHandler {
   // loaded.
   bool ShouldDownload(bool* need_plugin_list);
 
-  // Called on the file thread to load the list of plugins.
-  static void LoadPlugins(BufferedResourceHandler* handler,
-                          MessageLoop* main_message_loop);
+  // Informs the original ResourceHandler |real_handler_| that the response will
+  // be handled entirely by the new ResourceHandler |handler|.
+  // A reference to |handler| is acquired.
+  void UseAlternateResourceHandler(int request_id, ResourceHandler* handler);
 
-  // Runs on the main thread to notify the IO thread that plugins have been
-  // loaded.  This is needed since the file thread outlives the IO thread.
-  static void NotifyPluginsLoaded(BufferedResourceHandler* handler);
+  // Called on the file thread to load the list of plugins.
+  void LoadPlugins();
 
   // Called on the IO thread once the list of plugins has been loaded.
   void OnPluginsLoaded();

@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
+#include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
 
@@ -15,11 +16,18 @@ using std::vector;
 
 namespace browser_sync {
 
-UpdateApplicator::UpdateApplicator(SyncerSession* session,
-                                   const vi64iter& begin,
-                                   const vi64iter& end)
-    : session_(session), begin_(begin), end_(end), pointer_(begin),
-      progress_(false) {
+UpdateApplicator::UpdateApplicator(ConflictResolver* resolver,
+                                   const UpdateIterator& begin,
+                                   const UpdateIterator& end,
+                                   const ModelSafeRoutingInfo& routes,
+                                   ModelSafeGroup group_filter)
+    : resolver_(resolver),
+      begin_(begin),
+      end_(end),
+      pointer_(begin),
+      group_filter_(group_filter),
+      progress_(false),
+      routing_info_(routes) {
     size_t item_count = end - begin;
     LOG(INFO) << "UpdateApplicator created for " << item_count << " items.";
     successful_ids_.reserve(item_count);
@@ -41,25 +49,26 @@ bool UpdateApplicator::AttemptOneApplication(
 
     // Clear the tracked failures to avoid double-counting.
     conflicting_ids_.clear();
-    blocked_ids_.clear();
   }
+
+  syncable::Entry read_only(trans, syncable::GET_BY_HANDLE, *pointer_);
+  if (SkipUpdate(read_only)) {
+    Advance();
+    return true;
+  }
+
   syncable::MutableEntry entry(trans, syncable::GET_BY_HANDLE, *pointer_);
   UpdateAttemptResponse updateResponse =
-      SyncerUtil::AttemptToUpdateEntry(trans, &entry, session_);
+      SyncerUtil::AttemptToUpdateEntry(trans, &entry, resolver_);
   switch (updateResponse) {
     case SUCCESS:
-      --end_;
-      *pointer_ = *end_;
+      Advance();
       progress_ = true;
       successful_ids_.push_back(entry.Get(syncable::ID));
       break;
     case CONFLICT:
       pointer_++;
       conflicting_ids_.push_back(entry.Get(syncable::ID));
-      break;
-    case BLOCKED:
-      pointer_++;
-      blocked_ids_.push_back(entry.Get(syncable::ID));
       break;
     default:
       NOTREACHED();
@@ -71,30 +80,37 @@ bool UpdateApplicator::AttemptOneApplication(
   return true;
 }
 
-bool UpdateApplicator::AllUpdatesApplied() const {
-  return conflicting_ids_.empty() && blocked_ids_.empty() &&
-         begin_ == end_;
+void UpdateApplicator::Advance() {
+  --end_;
+  *pointer_ = *end_;
 }
 
-void UpdateApplicator::SaveProgressIntoSessionState() {
+bool UpdateApplicator::SkipUpdate(const syncable::Entry& entry) {
+  ModelSafeGroup g =
+      GetGroupForModelType(entry.GetServerModelType(), routing_info_);
+  if (g != group_filter_)
+    return true;
+  return false;
+}
+
+bool UpdateApplicator::AllUpdatesApplied() const {
+  return conflicting_ids_.empty() && begin_ == end_;
+}
+
+void UpdateApplicator::SaveProgressIntoSessionState(
+    sessions::ConflictProgress* conflict_progress,
+    sessions::UpdateProgress* update_progress) {
   DCHECK(begin_ == end_ || ((pointer_ == end_) && !progress_))
       << "SaveProgress called before updates exhausted.";
 
   vector<syncable::Id>::const_iterator i;
   for (i = conflicting_ids_.begin(); i != conflicting_ids_.end(); ++i) {
-    session_->EraseBlockedItem(*i);
-    session_->AddCommitConflict(*i);
-    session_->AddAppliedUpdate(CONFLICT, *i);
-  }
-  for (i = blocked_ids_.begin(); i != blocked_ids_.end(); ++i) {
-    session_->AddBlockedItem(*i);
-    session_->EraseCommitConflict(*i);
-    session_->AddAppliedUpdate(BLOCKED, *i);
+    conflict_progress->AddConflictingItemById(*i);
+    update_progress->AddAppliedUpdate(CONFLICT, *i);
   }
   for (i = successful_ids_.begin(); i != successful_ids_.end(); ++i) {
-    session_->EraseCommitConflict(*i);
-    session_->EraseBlockedItem(*i);
-    session_->AddAppliedUpdate(SUCCESS, *i);
+    conflict_progress->EraseConflictingItemById(*i);
+    update_progress->AddAppliedUpdate(SUCCESS, *i);
   }
 }
 

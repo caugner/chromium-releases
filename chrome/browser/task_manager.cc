@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/number_formatting.h"
+#include "base/i18n/rtl.h"
 #include "base/process_util.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
@@ -15,23 +16,36 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/net/url_request_tracking.h"
+#include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/task_manager_resource_providers.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
+#include "unicode/coll.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/mach_broker_mac.h"
+#endif
 
 namespace {
 
 // The delay between updates of the information (in ms).
+#if defined(OS_MACOSX)
+// Match Activity Monitor's default refresh rate.
+const int kUpdateTimeMs = 2000;
+#else
 const int kUpdateTimeMs = 1000;
+#endif
 
 template <class T>
 int ValueCompare(T value1, T value2) {
@@ -44,8 +58,8 @@ int ValueCompare(T value1, T value2) {
 
 std::wstring FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
   return l10n_util::GetStringF(IDS_TASK_MANAGER_CACHE_SIZE_CELL_TEXT,
-      FormatBytes(stat.size, DATA_UNITS_KILOBYTE, false),
-      FormatBytes(stat.liveSize, DATA_UNITS_KILOBYTE, false));
+      FormatBytes(stat.size, DATA_UNITS_KIBIBYTE, false),
+      FormatBytes(stat.liveSize, DATA_UNITS_KIBIBYTE, false));
 }
 
 }  // namespace
@@ -54,12 +68,8 @@ std::wstring FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
 // TaskManagerModel class
 ////////////////////////////////////////////////////////////////////////////////
 
-// static
-int TaskManagerModel::goats_teleported_ = 0;
-
 TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
-    : ui_loop_(MessageLoop::current()),
-      update_state_(IDLE) {
+    : update_state_(IDLE) {
 
   TaskManagerBrowserProcessResourceProvider* browser_provider =
       new TaskManagerBrowserProcessResourceProvider(task_manager);
@@ -77,6 +87,10 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       new TaskManagerExtensionProcessResourceProvider(task_manager);
   extension_process_provider->AddRef();
   providers_.push_back(extension_process_provider);
+  TaskManagerNotificationResourceProvider* notification_provider =
+      new TaskManagerNotificationResourceProvider(task_manager);
+  notification_provider->AddRef();
+  providers_.push_back(notification_provider);
 }
 
 TaskManagerModel::~TaskManagerModel() {
@@ -113,43 +127,42 @@ std::wstring TaskManagerModel::GetResourceNetworkUsage(int index) const {
   std::wstring net_byte =
       FormatSpeed(net_usage, GetByteDisplayUnits(net_usage), true);
   // Force number string to have LTR directionality.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
-    l10n_util::WrapStringWithLTRFormatting(&net_byte);
+  if (base::i18n::IsRTL())
+    base::i18n::WrapStringWithLTRFormatting(&net_byte);
   return net_byte;
 }
 
 std::wstring TaskManagerModel::GetResourceCPUUsage(int index) const {
   DCHECK(index < ResourceCount());
-  return IntToWString(GetCPUUsage(resources_[index]));
+  return StringPrintf(
+#if defined(OS_MACOSX)
+      // Activity Monitor shows %cpu with one decimal digit -- be
+      // consistent with that.
+      L"%.1f",
+#else
+      L"%.0f",
+#endif
+      GetCPUUsage(resources_[index]));
 }
 
 std::wstring TaskManagerModel::GetResourcePrivateMemory(int index) const {
-  DCHECK(index < ResourceCount());
-  // We report committed (working set + paged) private usage. This is NOT
-  // going to match what Windows Task Manager shows (which is working set).
-  MetricsMap::const_iterator iter =
-      metrics_map_.find(resources_[index]->GetProcess());
-  DCHECK(iter != metrics_map_.end());
-  base::ProcessMetrics* process_metrics = iter->second;
-  return GetMemCellText(GetPrivateMemory(process_metrics));
+  size_t private_mem;
+  if (!GetPrivateMemory(index, &private_mem))
+    return L"N/A";
+  return GetMemCellText(private_mem);
 }
 
 std::wstring TaskManagerModel::GetResourceSharedMemory(int index) const {
-  DCHECK(index < ResourceCount());
-  MetricsMap::const_iterator iter =
-      metrics_map_.find(resources_[index]->GetProcess());
-  DCHECK(iter != metrics_map_.end());
-  base::ProcessMetrics* process_metrics = iter->second;
-  return GetMemCellText(GetSharedMemory(process_metrics));
+  size_t shared_mem;
+  if (!GetSharedMemory(index, &shared_mem))
+      return L"N/A";
+  return GetMemCellText(shared_mem);
 }
 
 std::wstring TaskManagerModel::GetResourcePhysicalMemory(int index) const {
-  DCHECK(index < ResourceCount());
-  MetricsMap::const_iterator iter =
-      metrics_map_.find(resources_[index]->GetProcess());
-  DCHECK(iter != metrics_map_.end());
-  base::ProcessMetrics* process_metrics = iter->second;
-  return GetMemCellText(GetPhysicalMemory(process_metrics));
+  size_t phys_mem;
+  GetPhysicalMemory(index, &phys_mem);
+  return GetMemCellText(phys_mem);
 }
 
 std::wstring TaskManagerModel::GetResourceProcessId(int index) const {
@@ -164,9 +177,10 @@ std::wstring TaskManagerModel::GetResourceStatsValue(int index, int col_id)
 }
 
 std::wstring TaskManagerModel::GetResourceGoatsTeleported(int index) const {
+  // See design doc at http://go/at-teleporter for more information.
   DCHECK(index < ResourceCount());
-  goats_teleported_ += rand() & 4095;
-  return UTF16ToWide(base::FormatNumber(goats_teleported_));
+  int goats_teleported = rand() & 15;
+  return UTF16ToWide(base::FormatNumber(goats_teleported));
 }
 
 std::wstring TaskManagerModel::GetResourceWebCoreImageCacheSize(
@@ -203,7 +217,20 @@ std::wstring TaskManagerModel::GetResourceSqliteMemoryUsed(int index) const {
   DCHECK(index < ResourceCount());
   if (!resources_[index]->ReportsSqliteMemoryUsed())
     return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
-  return GetMemCellText(resources_[index]->SqliteMemoryUsedBytes() / 1024);
+  return GetMemCellText(resources_[index]->SqliteMemoryUsedBytes());
+}
+
+std::wstring TaskManagerModel::GetResourceV8MemoryAllocatedSize(
+    int index) const {
+  if (!resources_[index]->ReportsV8MemoryStats())
+    return l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT);
+  return l10n_util::GetStringF(IDS_TASK_MANAGER_CACHE_SIZE_CELL_TEXT,
+      FormatBytes(resources_[index]->GetV8MemoryAllocated(),
+                  DATA_UNITS_KIBIBYTE,
+                  false),
+      FormatBytes(resources_[index]->GetV8MemoryUsed(),
+                  DATA_UNITS_KIBIBYTE,
+                  false));
 }
 
 bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
@@ -238,10 +265,12 @@ std::pair<int, int> TaskManagerModel::GetGroupRangeForResource(int index)
   if (group->size() == 1) {
     return std::make_pair(index, 1);
   } else {
-    ResourceList::const_iterator iter =
-        std::find(resources_.begin(), resources_.end(), (*group)[0]);
-    DCHECK(iter != resources_.end());
-    return std::make_pair(iter - resources_.begin(), group->size());
+    for (int i = index; i >= 0; --i) {
+      if (resources_[i] == (*group)[0])
+        return std::make_pair(i, group->size());
+    }
+    NOTREACHED();
+    return std::make_pair(-1, -1);
   }
 }
 
@@ -277,24 +306,32 @@ int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
                                  GetNetworkUsage(resources_[row2]));
 
     case IDS_TASK_MANAGER_CPU_COLUMN:
-      return ValueCompare<int>(GetCPUUsage(resources_[row1]),
-                               GetCPUUsage(resources_[row2]));
+      return ValueCompare<double>(GetCPUUsage(resources_[row1]),
+                                  GetCPUUsage(resources_[row2]));
 
-    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
-    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
-    case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN: {
-      base::ProcessMetrics* pm1;
-      base::ProcessMetrics* pm2;
-      if (!GetProcessMetricsForRows(row1, row2, &pm1, &pm2))
+    case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN: {
+      size_t value1;
+      size_t value2;
+      if (!GetPrivateMemory(row1, &value1) || !GetPrivateMemory(row2, &value2))
         return 0;
-      if (col_id == IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) {
-        return ValueCompare<size_t>(GetPrivateMemory(pm1),
-                                    GetPrivateMemory(pm2));
-      }
-      if (col_id == IDS_TASK_MANAGER_SHARED_MEM_COLUMN)
-        return ValueCompare<size_t>(GetSharedMemory(pm1), GetSharedMemory(pm2));
-      return ValueCompare<size_t>(GetPhysicalMemory(pm1),
-                                  GetPhysicalMemory(pm2));
+      return ValueCompare<size_t>(value1, value2);
+    }
+
+    case IDS_TASK_MANAGER_SHARED_MEM_COLUMN: {
+      size_t value1;
+      size_t value2;
+      if (!GetSharedMemory(row1, &value1) || !GetSharedMemory(row2, &value2))
+        return 0;
+      return ValueCompare<size_t>(value1, value2);
+    }
+
+    case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN: {
+      size_t value1;
+      size_t value2;
+      if (!GetPhysicalMemory(row1, &value1) ||
+          !GetPhysicalMemory(row2, &value2))
+        return 0;
+      return ValueCompare<size_t>(value1, value2);
     }
 
     case IDS_TASK_MANAGER_PROCESS_ID_COLUMN: {
@@ -337,6 +374,11 @@ TabContents* TaskManagerModel::GetResourceTabContents(int index) const {
   return resources_[index]->GetTabContents();
 }
 
+const Extension* TaskManagerModel::GetResourceExtension(int index) const {
+  DCHECK(index < ResourceCount());
+  return resources_[index]->GetExtension();
+}
+
 int64 TaskManagerModel::GetNetworkUsage(TaskManager::Resource* resource)
     const {
   int64 net_usage = GetNetworkUsageForResource(resource);
@@ -345,7 +387,7 @@ int64 TaskManagerModel::GetNetworkUsage(TaskManager::Resource* resource)
   return net_usage;
 }
 
-int TaskManagerModel::GetCPUUsage(TaskManager::Resource* resource) const {
+double TaskManagerModel::GetCPUUsage(TaskManager::Resource* resource) const {
   CPUUsageMap::const_iterator iter =
       cpu_usage_map_.find(resource->GetProcess());
   if (iter == cpu_usage_map_.end())
@@ -353,27 +395,44 @@ int TaskManagerModel::GetCPUUsage(TaskManager::Resource* resource) const {
   return iter->second;
 }
 
-size_t TaskManagerModel::GetPrivateMemory(
-    const base::ProcessMetrics* process_metrics) const {
-  return process_metrics->GetPrivateBytes() / 1024;
+bool TaskManagerModel::GetPrivateMemory(int index, size_t* result) const {
+  *result = 0;
+  base::ProcessMetrics* process_metrics;
+  if (!GetProcessMetricsForRow(index, &process_metrics))
+    return false;
+  *result = process_metrics->GetPrivateBytes();
+  if (*result == 0)
+    return false;
+  return true;
 }
 
-size_t TaskManagerModel::GetSharedMemory(
-    const base::ProcessMetrics* process_metrics) const {
+bool TaskManagerModel::GetSharedMemory(int index, size_t* result) const {
+  *result = 0;
+  base::ProcessMetrics* process_metrics;
+  if (!GetProcessMetricsForRow(index, &process_metrics))
+    return false;
   base::WorkingSetKBytes ws_usage;
-  process_metrics->GetWorkingSetKBytes(&ws_usage);
-  return ws_usage.shared;
+  if (!process_metrics->GetWorkingSetKBytes(&ws_usage))
+    return false;
+  *result = ws_usage.shared * 1024;
+  return true;
 }
 
-size_t TaskManagerModel::GetPhysicalMemory(
-    const base::ProcessMetrics* process_metrics) const {
+bool TaskManagerModel::GetPhysicalMemory(int index, size_t* result) const {
+  *result = 0;
+  base::ProcessMetrics* process_metrics;
+  if (!GetProcessMetricsForRow(index, &process_metrics))
+    return false;
+  base::WorkingSetKBytes ws_usage;
+  if (!process_metrics->GetWorkingSetKBytes(&ws_usage))
+    return false;
+
   // Memory = working_set.private + working_set.shareable.
   // We exclude the shared memory.
-  size_t total_kbytes = process_metrics->GetWorkingSetSize() / 1024;
-  base::WorkingSetKBytes ws_usage;
-  process_metrics->GetWorkingSetKBytes(&ws_usage);
-  total_kbytes -= ws_usage.shared;
-  return total_kbytes;
+  size_t total_bytes = process_metrics->GetWorkingSetSize();
+  total_bytes -= ws_usage.shared * 1024;
+  *result = total_bytes;
+  return true;
 }
 
 int TaskManagerModel::GetStatsValue(const TaskManager::Resource* resource,
@@ -392,11 +451,18 @@ int TaskManagerModel::GetStatsValue(const TaskManager::Resource* resource,
 }
 
 std::wstring TaskManagerModel::GetMemCellText(int64 number) const {
-  std::wstring str = UTF16ToWide(base::FormatNumber(number));
+#if !defined(OS_MACOSX)
+  std::wstring str = UTF16ToWide(base::FormatNumber(number / 1024));
 
   // Adjust number string if necessary.
-  l10n_util::AdjustStringForLocaleDirection(str, &str);
+  base::i18n::AdjustStringForLocaleDirection(str, &str);
   return l10n_util::GetStringF(IDS_TASK_MANAGER_MEM_CELL_TEXT, str);
+#else
+  // System expectation is to show "100 KB", "200 MB", etc.
+  // TODO(thakis): Switch to metric units (as opposed to powers of two).
+  return FormatBytes(
+      number, GetByteDisplayUnits(number), /* show_units=*/true);
+#endif
 }
 
 void TaskManagerModel::StartUpdating() {
@@ -413,10 +479,10 @@ void TaskManagerModel::StartUpdating() {
 
   // Register jobs notifications so we can compute network usage (it must be
   // done from the IO thread).
-  base::Thread* thread = g_browser_process->io_thread();
-  if (thread)
-    thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &TaskManagerModel::RegisterForJobDoneNotifications));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+         this, &TaskManagerModel::RegisterForJobDoneNotifications));
 
   // Notify resource providers that we are updating.
   for (ResourceProviderList::iterator iter = providers_.begin();
@@ -436,10 +502,10 @@ void TaskManagerModel::StopUpdating() {
   }
 
   // Unregister jobs notification (must be done from the IO thread).
-  base::Thread* thread = g_browser_process->io_thread();
-  if (thread)
-    thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &TaskManagerModel::UnregisterForJobDoneNotifications));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          this, &TaskManagerModel::UnregisterForJobDoneNotifications));
 }
 
 void TaskManagerModel::AddResourceProvider(
@@ -497,7 +563,13 @@ void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
   // Create the ProcessMetrics for this process if needed (not in map).
   if (metrics_map_.find(process) == metrics_map_.end()) {
     base::ProcessMetrics* pm =
+#if !defined(OS_MACOSX)
         base::ProcessMetrics::CreateProcessMetrics(process);
+#else
+        base::ProcessMetrics::CreateProcessMetrics(process,
+                                                   MachBroker::instance());
+#endif
+
     metrics_map_[process] = pm;
   }
 
@@ -595,6 +667,17 @@ void TaskManagerModel::NotifyResourceTypeStats(
        it != resources_.end(); ++it) {
     if (base::GetProcId((*it)->GetProcess()) == renderer_id) {
       (*it)->NotifyResourceTypeStats(stats);
+    }
+  }
+}
+
+void TaskManagerModel::NotifyV8HeapStats(base::ProcessId renderer_id,
+                                         size_t v8_memory_allocated,
+                                         size_t v8_memory_used) {
+  for (ResourceList::iterator it = resources_.begin();
+       it != resources_.end(); ++it) {
+    if (base::GetProcId((*it)->GetProcess()) == renderer_id) {
+      (*it)->NotifyV8HeapStats(v8_memory_allocated, v8_memory_used);
     }
   }
 }
@@ -723,12 +806,12 @@ void TaskManagerModel::OnJobRemoved(URLRequestJob* job) {
 }
 
 void TaskManagerModel::OnJobDone(URLRequestJob* job,
-                                      const URLRequestStatus& status) {
+                                 const URLRequestStatus& status) {
 }
 
 void TaskManagerModel::OnJobRedirect(URLRequestJob* job,
-                                          const GURL& location,
-                                          int status_code) {
+                                     const GURL& location,
+                                     int status_code) {
 }
 
 void TaskManagerModel::OnBytesRead(URLRequestJob* job, int byte_count) {
@@ -739,34 +822,26 @@ void TaskManagerModel::OnBytesRead(URLRequestJob* job, int byte_count) {
   // This happens in the IO thread, post it to the UI thread.
   int origin_child_id =
       chrome_browser_net::GetOriginProcessUniqueIDForRequest(job->request());
-  ui_loop_->PostTask(FROM_HERE,
-                     NewRunnableMethod(
-                         this,
-                         &TaskManagerModel::BytesRead,
-                         BytesReadParam(origin_child_id,
-                                        render_process_host_child_id,
-                                        routing_id, byte_count)));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(
+          this,
+          &TaskManagerModel::BytesRead,
+          BytesReadParam(origin_child_id,
+          render_process_host_child_id,
+          routing_id, byte_count)));
 }
 
-bool TaskManagerModel::GetProcessMetricsForRows(
-    int row1, int row2,
-    base::ProcessMetrics** proc_metrics1,
-    base::ProcessMetrics** proc_metrics2) const {
-  DCHECK(row1 < ResourceCount() && row2 < ResourceCount());
-  *proc_metrics1 = NULL;
-  *proc_metrics2 = NULL;
+bool TaskManagerModel::GetProcessMetricsForRow(
+    int row, base::ProcessMetrics** proc_metrics) const {
+  DCHECK(row < ResourceCount());
+  *proc_metrics = NULL;
 
   MetricsMap::const_iterator iter =
-      metrics_map_.find(resources_[row1]->GetProcess());
+      metrics_map_.find(resources_[row]->GetProcess());
   if (iter == metrics_map_.end())
     return false;
-  *proc_metrics1 = iter->second;
-
-  iter = metrics_map_.find(resources_[row2]->GetProcess());
-  if (iter == metrics_map_.end())
-    return false;
-  *proc_metrics2 = iter->second;
-
+  *proc_metrics = iter->second;
   return true;
 }
 
@@ -838,17 +913,33 @@ TaskManager* TaskManager::GetInstance() {
 
 void TaskManager::OpenAboutMemory() {
   Browser* browser = BrowserList::GetLastActive();
-  DCHECK(browser);
-  browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_FOREGROUND_TAB,
-                   PageTransition::LINK);
-  // In case the browser window is minimzed, show it. If this is an application
-  // or popup, we can only have one tab, hence we need to process this in a
-  // tabbed browser window. Currently, |browser| is pointing to the application,
-  // popup window. Therefore, we have to retrieve the last active tab again,
-  // since a new window has been used.
-  if (browser->type() & Browser::TYPE_APP_POPUP) {
-    browser = BrowserList::GetLastActive();
-    DCHECK(browser);
+
+  if (!browser) {
+    // On OS X, the task manager can be open without any open browser windows.
+    if (!g_browser_process ||
+        !g_browser_process->profile_manager() ||
+        g_browser_process->profile_manager()->begin() ==
+            g_browser_process->profile_manager()->end())
+      return;
+    browser = Browser::Create(*g_browser_process->profile_manager()->begin());
+    browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_WINDOW,
+                     PageTransition::LINK);
+  } else {
+    browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_FOREGROUND_TAB,
+                     PageTransition::LINK);
+
+    // In case the browser window is minimzed, show it. If |browser| is a
+    // non-tabbed window, the call to OpenURL above will have opened a
+    // TabContents in a tabbed browser, so we need to grab it with GetLastActive
+    // before the call to show().
+    if (browser->type() & (Browser::TYPE_APP |
+                           Browser::TYPE_APP_PANEL |
+                           Browser::TYPE_DEVTOOLS |
+                           Browser::TYPE_POPUP)) {
+      browser = BrowserList::GetLastActive();
+      DCHECK(browser);
+    }
+
+    browser->window()->Show();
   }
-  browser->window()->Show();
 }

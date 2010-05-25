@@ -40,26 +40,31 @@ NativeLibrary LoadNativeLibrary(const FilePath& library_path) {
   NativeLibrary native_lib = new NativeLibraryStruct();
   native_lib->type = BUNDLE;
   native_lib->bundle = bundle;
+  native_lib->bundle_resource_ref = CFBundleOpenBundleResourceMap(bundle);
   return native_lib;
 }
 
 // static
 void UnloadNativeLibrary(NativeLibrary library) {
-  if (library->type == BUNDLE)
+  if (library->type == BUNDLE) {
+    CFBundleCloseBundleResourceMap(library->bundle,
+                                   library->bundle_resource_ref);
     CFRelease(library->bundle);
-  else
+  } else {
     dlclose(library->dylib);
+  }
   delete library;
 }
 
 // static
 void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
                                           const char* name) {
-  if (library->type == BUNDLE)
-    return CFBundleGetFunctionPointerForName(library->bundle,
+  if (library->type == BUNDLE) {
+    scoped_cftyperef<CFStringRef> symbol_name(
         CFStringCreateWithCString(kCFAllocatorDefault, name,
                                   kCFStringEncodingUTF8));
-
+    return CFBundleGetFunctionPointerForName(library->bundle, symbol_name);
+  }
   return dlsym(library->dylib, name);
 }
 

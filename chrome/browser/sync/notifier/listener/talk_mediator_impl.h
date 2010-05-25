@@ -14,8 +14,10 @@
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/sync/engine/auth_watcher.h"
+#include "chrome/browser/sync/notification_method.h"
 #include "chrome/browser/sync/notifier/listener/mediator_thread.h"
 #include "chrome/browser/sync/notifier/listener/talk_mediator.h"
+#include "talk/base/sigslot.h"
 #include "talk/xmpp/xmppclientsettings.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
@@ -31,7 +33,8 @@ class TalkMediatorImpl
     : public TalkMediator,
       public sigslot::has_slots<> {
  public:
-  TalkMediatorImpl();
+  TalkMediatorImpl(NotificationMethod notification_method,
+                   bool invalidate_xmpp_auth_token);
   explicit TalkMediatorImpl(MediatorThread* thread);
   virtual ~TalkMediatorImpl();
 
@@ -49,13 +52,15 @@ class TalkMediatorImpl
  private:
   struct TalkMediatorState {
     TalkMediatorState()
-        : started(0), connected(0), initialized(0), logged_in(0),
-          subscribed(0) {
+        : started(0), connected(0), initialized(0), logging_in(0),
+          logged_in(0), subscribed(0) {
     }
 
     unsigned int started : 1;      // Background thread has started.
     unsigned int connected : 1;    // Connected to the mediator thread signal.
     unsigned int initialized : 1;  // Initialized with login information.
+    unsigned int logging_in : 1;   // Logging in to the mediator's
+                                   // authenticator.
     unsigned int logged_in : 1;    // Logged in the mediator's authenticator.
     unsigned int subscribed : 1;   // Subscribed to the xmpp receiving channel.
   };
@@ -104,6 +109,8 @@ class TalkMediatorImpl
 
   // Channel through which to broadcast events.
   scoped_ptr<TalkMediatorChannel> channel_;
+
+  bool invalidate_xmpp_auth_token_;
 
   FRIEND_TEST(TalkMediatorImplTest, SetAuthTokenWithBadInput);
   FRIEND_TEST(TalkMediatorImplTest, SetAuthTokenWithGoodInput);

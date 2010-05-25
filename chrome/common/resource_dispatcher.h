@@ -34,24 +34,16 @@ class ResourceDispatcher {
   // Creates a ResourceLoaderBridge for this type of dispatcher, this is so
   // this can be tested regardless of the ResourceLoaderBridge::Create
   // implementation.
-  webkit_glue::ResourceLoaderBridge* CreateBridge(const std::string& method,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const GURL& referrer,
-    const std::string& frame_origin,
-    const std::string& main_frame_origin,
-    const std::string& headers,
-    int load_flags,
-    int origin_pid,
-    ResourceType::Type resource_type,
-    uint32 request_context /* used for plugin->browser requests */,
-    int appcache_host_id,
-    int routing_id);
+  webkit_glue::ResourceLoaderBridge* CreateBridge(
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
+      int host_renderer_id,
+      int host_render_view_id);
 
   // Adds a request from the pending_requests_ list, returning the new
   // requests' ID
   int AddPendingRequest(webkit_glue::ResourceLoaderBridge::Peer* callback,
-                        ResourceType::Type resource_type);
+                        ResourceType::Type resource_type,
+                        const GURL& request_url);
 
   // Removes a request from the pending_requests_ list, returning true if the
   // request was found and removed.
@@ -74,12 +66,13 @@ class ResourceDispatcher {
   struct PendingRequestInfo {
     PendingRequestInfo() { }
     PendingRequestInfo(webkit_glue::ResourceLoaderBridge::Peer* peer,
-                       ResourceType::Type resource_type)
+                       ResourceType::Type resource_type,
+                       const GURL& request_url)
         : peer(peer),
           resource_type(resource_type),
           filter_policy(FilterPolicy::DONT_FILTER),
           is_deferred(false),
-          is_cancelled(false) {
+          url(request_url) {
     }
     ~PendingRequestInfo() { }
     webkit_glue::ResourceLoaderBridge::Peer* peer;
@@ -87,7 +80,7 @@ class ResourceDispatcher {
     FilterPolicy::Type filter_policy;
     MessageQueue deferred_message_queue;
     bool is_deferred;
-    bool is_cancelled;
+    GURL url;
   };
   typedef base::hash_map<int, PendingRequestInfo> PendingRequestList;
 
@@ -127,7 +120,12 @@ class ResourceDispatcher {
   // handle in it that we should cleanup it up nicely. This method accepts any
   // message and determine whether the message is
   // ViewHostMsg_Resource_DataReceived and clean up the shared memory handle.
-  void ReleaseResourcesInDataMessage(const IPC::Message& message);
+  static void ReleaseResourcesInDataMessage(const IPC::Message& message);
+
+  // Iterate through a message queue and clean up the messages by calling
+  // ReleaseResourcesInDataMessage and removing them from the queue. Intended
+  // for use on deferred message queues that are no longer needed.
+  static void ReleaseResourcesInMessageQueue(MessageQueue* queue);
 
   IPC::Message::Sender* message_sender_;
 

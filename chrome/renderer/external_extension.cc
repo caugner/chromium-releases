@@ -4,7 +4,7 @@
 
 #include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/render_view.h"
-#include "webkit/api/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 
 using WebKit::WebFrame;
 using WebKit::WebView;
@@ -51,7 +51,7 @@ class ExternalExtensionWrapper : public v8::Extension {
     if (!renderview) return v8::Undefined();
 
     std::string name = std::string(*v8::String::Utf8Value(args[0]));
-    if (!name.length()) return v8::Undefined();;
+    if (!name.length()) return v8::Undefined();
 
     renderview->AddSearchProvider(name);
     return v8::Undefined();

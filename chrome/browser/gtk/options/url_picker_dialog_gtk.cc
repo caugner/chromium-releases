@@ -1,19 +1,23 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
+#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
+#include "chrome/browser/gtk/gtk_tree.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/url_picker_dialog_gtk.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/possible_url_model.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_tree.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/pref_names.h"
+#include "gfx/gtk_util.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -21,9 +25,6 @@
 #include "net/base/net_util.h"
 
 namespace {
-
-// Style for recent history label.
-const char kHistoryLabelMarkup[] = "<span weight='bold'>%s</span>";
 
 // Column ids for |history_list_store_|.
 enum {
@@ -40,13 +41,17 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
                                        GtkWindow* parent)
     : profile_(profile),
       callback_(callback) {
+  std::string dialog_name = l10n_util::GetStringUTF8(IDS_ASI_ADD_TITLE);
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_ASI_ADD_TITLE).c_str(),
+      dialog_name.c_str(),
       parent,
       static_cast<GtkDialogFlags>(GTK_DIALOG_MODAL | GTK_DIALOG_NO_SEPARATOR),
       GTK_STOCK_CANCEL,
       GTK_RESPONSE_CANCEL,
       NULL);
+  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
+      dialog_, profile));
+  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
 
   add_button_ = gtk_dialog_add_button(GTK_DIALOG(dialog_),
                                       GTK_STOCK_ADD, GTK_RESPONSE_OK);
@@ -61,9 +66,10 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
   gtk_box_pack_start(GTK_BOX(url_hbox), url_label,
                      FALSE, FALSE, 0);
   url_entry_ = gtk_entry_new();
+  accessible_widget_helper_->SetWidgetName(url_entry_, IDS_ASI_URL);
   gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
-  g_signal_connect(G_OBJECT(url_entry_), "changed",
-                   G_CALLBACK(OnUrlEntryChanged), this);
+  g_signal_connect(url_entry_, "changed",
+                   G_CALLBACK(OnUrlEntryChangedThunk), this);
   gtk_box_pack_start(GTK_BOX(url_hbox), url_entry_,
                      TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog_)->vbox), url_hbox,
@@ -72,15 +78,9 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
   // Recent history description label.
   GtkWidget* history_vbox = gtk_vbox_new(FALSE, gtk_util::kLabelSpacing);
   gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog_)->vbox), history_vbox);
-  GtkWidget* history_label = gtk_label_new(NULL);
-  char* markup = g_markup_printf_escaped(kHistoryLabelMarkup,
-      l10n_util::GetStringUTF8(IDS_ASI_DESCRIPTION).c_str());
-  gtk_label_set_markup(GTK_LABEL(history_label), markup);
-  g_free(markup);
-  GtkWidget* history_label_alignment = gtk_alignment_new(0.0, 0.5, 0.0, 0.0);
-  gtk_container_add(GTK_CONTAINER(history_label_alignment), history_label);
-  gtk_box_pack_start(GTK_BOX(history_vbox), history_label_alignment,
-                     FALSE, FALSE, 0);
+  GtkWidget* history_label = gtk_util::CreateBoldLabel(
+      l10n_util::GetStringUTF8(IDS_ASI_DESCRIPTION));
+  gtk_box_pack_start(GTK_BOX(history_vbox), history_label, FALSE, FALSE, 0);
 
   // Recent history list.
   GtkWidget* scroll_window = gtk_scrolled_window_new(NULL, NULL);
@@ -102,19 +102,21 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(history_list_sort_),
                                   COL_DISPLAY_URL, CompareURL, this, NULL);
   history_tree_ = gtk_tree_view_new_with_model(history_list_sort_);
+  accessible_widget_helper_->SetWidgetName(
+      history_tree_, IDS_ASI_DESCRIPTION);
   g_object_unref(history_list_store_);
   g_object_unref(history_list_sort_);
   gtk_container_add(GTK_CONTAINER(scroll_window), history_tree_);
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(history_tree_),
                                     TRUE);
-  g_signal_connect(G_OBJECT(history_tree_), "row-activated",
-                   G_CALLBACK(OnHistoryRowActivated), this);
+  g_signal_connect(history_tree_, "row-activated",
+                   G_CALLBACK(OnHistoryRowActivatedThunk), this);
 
   history_selection_ = gtk_tree_view_get_selection(
       GTK_TREE_VIEW(history_tree_));
   gtk_tree_selection_set_mode(history_selection_,
                               GTK_SELECTION_SINGLE);
-  g_signal_connect(G_OBJECT(history_selection_), "changed",
+  g_signal_connect(history_selection_, "changed",
                    G_CALLBACK(OnHistorySelectionChanged), this);
 
   // History list columns.
@@ -143,7 +145,7 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
 
   // Loading data, showing dialog.
   url_table_model_.reset(new PossibleURLModel());
-  url_table_adapter_.reset(new gtk_tree::ModelAdapter(this, history_list_store_,
+  url_table_adapter_.reset(new gtk_tree::TableAdapter(this, history_list_store_,
                                                       url_table_model_.get()));
   url_table_model_->Reload(profile_);
 
@@ -151,14 +153,13 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
 
   // Set the size of the dialog.
   gtk_widget_realize(dialog_);
-  int width = 1, height = 1;
-  gtk_util::GetWidgetSizeFromResources(
-      dialog_,
-      IDS_URLPICKER_DIALOG_WIDTH_CHARS,
-      IDS_URLPICKER_DIALOG_HEIGHT_LINES,
-      &width, &height);
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
+  gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
+                                       IDS_URLPICKER_DIALOG_WIDTH_CHARS,
+                                       IDS_URLPICKER_DIALOG_HEIGHT_LINES,
+                                       true);
+
   // Set the width of the first column as well.
+  int width;
   gtk_util::GetWidgetSizeFromResources(
       dialog_,
       IDS_URLPICKER_DIALOG_LEFT_COLUMN_WIDTH_CHARS, 0,
@@ -167,8 +168,8 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
 
   gtk_widget_show_all(dialog_);
 
-  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
-  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
+  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
+  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroyThunk), this);
 }
 
 UrlPickerDialogGtk::~UrlPickerDialogGtk() {
@@ -196,9 +197,8 @@ std::string UrlPickerDialogGtk::GetURLForPath(GtkTreePath* path) const {
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
   // Because the url_field_ is user-editable, we set the URL with
   // username:password and escaped path and query.
-  std::wstring formatted = net::FormatUrl(
-      url_table_model_->GetURL(row), languages,
-      false, UnescapeRule::NONE, NULL, NULL);
+  std::wstring formatted = net::FormatUrl(url_table_model_->GetURL(row),
+      languages, false, UnescapeRule::NONE, NULL, NULL, NULL);
   return WideToUTF8(formatted);
 }
 
@@ -237,10 +237,8 @@ gint UrlPickerDialogGtk::CompareURL(GtkTreeModel* model,
       CompareValues(row1, row2, IDS_ASI_URL_COLUMN);
 }
 
-// static
-void UrlPickerDialogGtk::OnUrlEntryChanged(GtkEditable* editable,
-                                           UrlPickerDialogGtk* window) {
-  window->EnableControls();
+void UrlPickerDialogGtk::OnUrlEntryChanged(GtkWidget* editable) {
+  EnableControls();
 }
 
 // static
@@ -258,26 +256,20 @@ void UrlPickerDialogGtk::OnHistorySelectionChanged(
   gtk_tree_path_free(path);
 }
 
-void UrlPickerDialogGtk::OnHistoryRowActivated(GtkTreeView* tree_view,
+void UrlPickerDialogGtk::OnHistoryRowActivated(GtkWidget* tree_view,
                                                GtkTreePath* path,
-                                               GtkTreeViewColumn* column,
-                                               UrlPickerDialogGtk* window) {
-  GURL url(URLFixerUpper::FixupURL(window->GetURLForPath(path), ""));
-  window->callback_->Run(url);
-  gtk_widget_destroy(window->dialog_);
+                                               GtkTreeViewColumn* column) {
+  GURL url(URLFixerUpper::FixupURL(GetURLForPath(path), ""));
+  callback_->Run(url);
+  gtk_widget_destroy(dialog_);
 }
 
-// static
-void UrlPickerDialogGtk::OnResponse(GtkDialog* dialog, int response_id,
-                                    UrlPickerDialogGtk* window) {
-  if (response_id == GTK_RESPONSE_OK) {
-    window->AddURL();
-  }
-  gtk_widget_destroy(window->dialog_);
+void UrlPickerDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
+  if (response_id == GTK_RESPONSE_OK)
+    AddURL();
+  gtk_widget_destroy(dialog_);
 }
 
-// static
-void UrlPickerDialogGtk::OnWindowDestroy(GtkWidget* widget,
-                                         UrlPickerDialogGtk* window) {
-  MessageLoop::current()->DeleteSoon(FROM_HERE, window);
+void UrlPickerDialogGtk::OnWindowDestroy(GtkWidget* widget) {
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }

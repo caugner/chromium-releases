@@ -1,17 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/autocomplete_text_field_cell.h"
 
-#include "app/gfx/font.h"
 #include "app/resource_bundle.h"
-#import "base/logging.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+#include "base/logging.h"
+#include "gfx/font.h"
 
 namespace {
 
-const NSInteger kBaselineAdjust = 2;
+const CGFloat kBaselineAdjust = 2.0;
 
 // How far to offset the keyword token into the field.
 const NSInteger kKeywordXOffset = 3;
@@ -36,16 +35,11 @@ const NSInteger kKeywordYInset = 4;
 // technique would be nice to have, though.
 const NSInteger kKeywordHintImageBaseline = -6;
 
-// Offset from the bottom of the field for drawing decoration text.
-// TODO(shess): Somehow determine the baseline for the text field and
-// use that.
-const NSInteger kBaselineOffset = 4;
-
-// The amount of padding on either side reserved for drawing the hint icon
-const NSInteger kHintIconHorizontalPad = 3;
+// The amount of padding on either side reserved for drawing an icon.
+const NSInteger kIconHorizontalPad = 3;
 
 // How far to shift bounding box of hint icon label down from top of field.
-const NSInteger kHintIconLabelYOffset = 7;
+const NSInteger kIconLabelYOffset = 5;
 
 // How far the editor insets itself, for purposes of determining if
 // decorations need to be trimmed.
@@ -62,9 +56,23 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
 
 }  // namespace
 
-@implementation AutocompleteTextFieldCell
+@implementation AutocompleteTextFieldIcon
 
-@synthesize fieldEditorNeedsReset = fieldEditorNeedsReset_;
+@synthesize rect = rect_;
+@synthesize view = view_;
+
++ (AutocompleteTextFieldIcon*)
+    iconWithRect:(NSRect)rect
+            view:(LocationBarViewMac::LocationBarImageView*)view {
+  AutocompleteTextFieldIcon* result = [[AutocompleteTextFieldIcon alloc] init];
+  [result setRect:rect];
+  [result setView:view];
+  return [result autorelease];
+}
+
+@end
+
+@implementation AutocompleteTextFieldCell
 
 // @synthesize doesn't seem to compile for this transition.
 - (NSAttributedString*)keywordString {
@@ -74,16 +82,16 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
   return hintString_.get();
 }
 
+- (CGFloat)baselineAdjust {
+  return kBaselineAdjust;
+}
+
 - (void)setKeywordString:(NSString*)fullString
            partialString:(NSString*)partialString
           availableWidth:(CGFloat)width {
   DCHECK(fullString != nil);
 
-  // Overriding |hintString_| always requires a reset.
-  if (hintString_) {
-    hintString_.reset();
-    fieldEditorNeedsReset_ = YES;
-  }
+  hintString_.reset();
 
   // Adjust for space between editor and decorations.
   width -= 2 * kEditorHorizontalInset;
@@ -98,14 +106,8 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
       s = partialString;
     }
   }
-  scoped_nsobject<NSAttributedString> as(
+  keywordString_.reset(
       [[NSAttributedString alloc] initWithString:s attributes:attributes]);
-
-  // If the value has changed, require a reset.
-  if (![keywordString_ isEqualToAttributedString:as]) {
-    keywordString_.reset([as retain]);
-    fieldEditorNeedsReset_ = YES;
-  }
 }
 
 // Convenience for the attributes used in the right-justified info
@@ -130,14 +132,10 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
   DCHECK(anImage != nil);
   DCHECK(suffixString != nil);
 
+  keywordString_.reset();
+
   // Adjust for space between editor and decorations.
   width -= 2 * kEditorHorizontalInset;
-
-  // Overriding |keywordString_| always requires a reset.
-  if (keywordString_) {
-    keywordString_.reset();
-    fieldEditorNeedsReset_ = YES;
-  }
 
   // If |hintString_| is now too wide, clear it so that we don't pass
   // the equality tests.
@@ -178,8 +176,6 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
 
     // If too wide, just show the image.
     hintString_.reset(WidthForHint(as) > width ? [is copy] : [as copy]);
-
-    fieldEditorNeedsReset_ = YES;
   }
 }
 
@@ -190,11 +186,7 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
   // Adjust for space between editor and decorations.
   width -= 2 * kEditorHorizontalInset;
 
-  // Overriding |keywordString_| always requires a reset.
-  if (keywordString_) {
-    keywordString_.reset();
-    fieldEditorNeedsReset_ = YES;
-  }
+  keywordString_.reset();
 
   // If |hintString_| is now too wide, clear it so that we don't pass
   // the equality tests.
@@ -209,99 +201,30 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
 
     // If too wide, don't keep the hint.
     hintString_.reset(WidthForHint(as) > width ? nil : [as copy]);
-
-    fieldEditorNeedsReset_ = YES;
   }
 }
 
 - (void)clearKeywordAndHint {
-  if (keywordString_ || hintString_) {
-    keywordString_.reset();
-    hintString_.reset();
-
-    fieldEditorNeedsReset_ = YES;
-  }
+  keywordString_.reset();
+  hintString_.reset();
 }
 
-- (void)setHintIcon:(NSImage*)icon
-              label:(NSString*)label
-              color:(NSColor*)color {
-  // Create an attributed string for the label, if a label was given.
-  NSAttributedString* as = nil;
-  if (label) {
-    DCHECK(color);
-    NSFont *baseFont = [self font];
-    NSFont *font = [NSFont fontWithDescriptor:[baseFont fontDescriptor]
-                                         size:[baseFont pointSize] - 2.0];
-    NSDictionary* attributes =
-        [NSDictionary dictionaryWithObjectsAndKeys:
-         color, NSForegroundColorAttributeName,
-         font, NSFontAttributeName,
-         NULL];
-    as = [[[NSAttributedString alloc] initWithString:label
-                                          attributes:attributes] autorelease];
-  }
-
-  // Did the icon change? Is there a label now but there wasn't before,
-  // or vice-versa? Did the label change?
-  if (icon != hintIcon_.get() || (as && !hintIconLabel_.get()) ||
-      (!as && hintIconLabel_.get()) ||
-      (as && ![hintIconLabel_.get() isEqualToAttributedString:as])) {
-    hintIconLabel_.reset([as retain]);
-    hintIcon_.reset([icon retain]);
-    if (!keywordString_ && !hintString_) {
-      // Redraw if the icon is visible.
-      fieldEditorNeedsReset_ = YES;
-    }
-  }
+- (void)setPageActionViewList:(LocationBarViewMac::PageActionViewList*)list {
+  page_action_views_ = list;
 }
 
-// TODO(shess): This code is manually drawing the cell's border area,
-// but otherwise the cell assumes -setBordered:YES for purposes of
-// calculating things like the editing area.  This is probably
-// incorrect.  I know that this affects -drawingRectForBounds:.
-
-- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
-  DCHECK([controlView isFlipped]);
-  [[NSColor colorWithCalibratedWhite:1.0 alpha:0.25] set];
-  NSFrameRectWithWidthUsingOperation(cellFrame,  1, NSCompositeSourceOver);
-
-  // TODO(shess): This inset is also reflected in ToolbarController
-  // -autocompletePopupPosition.
-  NSRect frame = NSInsetRect(cellFrame, 0, 1);
-  [[self backgroundColor] setFill];
-  NSRect innerFrame = NSInsetRect(frame, 1, 1);
-  NSRectFill(innerFrame);
-
-  NSRect shadowFrame, restFrame;
-  NSDivideRect(innerFrame, &shadowFrame, &restFrame, 1, NSMinYEdge);
-
-  BOOL isMainWindow = [[controlView window] isMainWindow];
-  GTMTheme *theme = [controlView gtm_theme];
-  NSColor* stroke = [theme strokeColorForStyle:GTMThemeStyleToolBarButton
-                                         state:isMainWindow];
-  [stroke set];
-  NSFrameRectWithWidthUsingOperation(frame, 1.0, NSCompositeSourceOver);
-
-  // Draw the shadow.
-  [[NSColor colorWithCalibratedWhite:0.0 alpha:0.05] setFill];
-  NSRectFillUsingOperation(shadowFrame, NSCompositeSourceOver);
-
-  if ([self showsFirstResponder]) {
-    [[[NSColor keyboardFocusIndicatorColor] colorWithAlphaComponent:0.5] set];
-    NSFrameRectWithWidthUsingOperation(NSInsetRect(frame, 0, 0), 2,
-                                       NSCompositeSourceOver);
-  }
-
-  [self drawInteriorWithFrame:cellFrame inView:controlView];
+- (void)setSecurityImageView:(LocationBarViewMac::SecurityImageView*)view {
+  security_image_view_ = view;
 }
 
-- (NSRect)textCursorFrameForFrame:(NSRect)cellFrame {
-  return NSInsetRect(cellFrame, 0, kBaselineAdjust);
+- (void)setContentSettingViewsList:
+    (LocationBarViewMac::ContentSettingViews*)views {
+  content_setting_views_ = views;
 }
 
+// Overriden to account for the hint strings and hint icons.
 - (NSRect)textFrameForFrame:(NSRect)cellFrame {
-  NSRect textFrame([self textCursorFrameForFrame:cellFrame]);
+  NSRect textFrame([super textFrameForFrame:cellFrame]);
 
   if (hintString_) {
     DCHECK(!keywordString_);
@@ -323,51 +246,87 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
       textFrame.origin.x += keywordWidth;
       textFrame.size.width = NSMaxX(cellFrame) - NSMinX(textFrame);
     }
-  } else if (hintIcon_) {
-    CGFloat width = [hintIcon_ size].width;
-    width += kHintIconHorizontalPad * 2;
-    if (hintIconLabel_) {
-      width += ceil([hintIconLabel_ size].width) + kHintXOffset;
-    }
-    if (width < NSWidth(cellFrame)) {
+  } else {
+    // Leave room for images on the right (lock icon etc).
+    NSArray* iconFrames = [self layedOutIcons:cellFrame];
+    CGFloat width = 0;
+    if ([iconFrames count] > 0)
+      width = NSMaxX(cellFrame) - NSMinX([[iconFrames lastObject] rect]);
+    if (width > 0)
+      width += kIconHorizontalPad;
+    if (width < NSWidth(cellFrame))
       textFrame.size.width -= width;
-    }
   }
 
   return textFrame;
 }
 
-// For NSTextFieldCell this is the area within the borders.  For our
-// purposes, we count the info decorations as being part of the
-// border.
-- (NSRect)drawingRectForBounds:(NSRect)theRect {
-  return [super drawingRectForBounds:[self textFrameForFrame:theRect]];
+// Returns a rect of size |imageSize| centered vertically and right-justified in
+// the |box|, with its top left corner |margin| pixels from the right end of the
+// box. (The image thus occupies part of the |margin|.)
+- (NSRect)rightJustifyImage:(NSSize)imageSize
+                     inRect:(NSRect)box
+                 withMargin:(CGFloat)margin {
+  box.origin.x += box.size.width - margin;
+  box.origin.y += floor((box.size.height - imageSize.height) / 2);
+  box.size = imageSize;
+  return box;
 }
 
-- (NSRect)hintImageFrameForFrame:(NSRect)cellFrame {
-  // We'll draw the entire image
-  const NSSize imageRect([hintIcon_ size]);
-
-  CGFloat labelWidth = 0;
-  if (hintIconLabel_) {
-    labelWidth = ceil([hintIconLabel_ size].width) + kHintXOffset;
+- (NSRect)securityImageFrameForFrame:(NSRect)cellFrame {
+  if (!security_image_view_ || !security_image_view_->IsVisible()) {
+    return NSZeroRect;
   }
 
-  // Move the rect that we're drawing into to the far right, minus
-  // enough space for the label (if present)
-  cellFrame.origin.x += cellFrame.size.width - imageRect.width;
-  cellFrame.origin.x -= labelWidth;
-  // Add back the padding
-  cellFrame.origin.x -= kHintIconHorizontalPad;
+  // Calculate the total width occupied by the image, label, and padding.
+  NSSize imageSize = [security_image_view_->GetImage() size];
+  CGFloat widthUsed = imageSize.width + kIconHorizontalPad;
+  NSAttributedString* label = security_image_view_->GetLabel();
+  if (label) {
+    widthUsed += ceil([label size].width) + kHintXOffset;
+  }
 
-  // Center the image vertically in the frame
-  cellFrame.origin.y +=
-      floor((cellFrame.size.height - imageRect.height) / 2);
+  return [self rightJustifyImage:imageSize
+                          inRect:cellFrame
+                      withMargin:widthUsed];
+}
 
-  // Set the drawing size to the image size
-  cellFrame.size = imageRect;
+- (size_t)pageActionCount {
+  // page_action_views_ may be NULL during testing, or if the
+  // containing LocationViewMac object has already been destructed
+  // (happens sometimes during window shutdown).
+  if (!page_action_views_)
+    return 0;
+  return page_action_views_->Count();
+}
 
-  return cellFrame;
+- (NSRect)pageActionFrameForIndex:(size_t)index inFrame:(NSRect)cellFrame {
+  LocationBarViewMac::PageActionImageView* view =
+      page_action_views_->ViewAt(index);
+
+  // When this method is called, all the icon images are still loading, so
+  // just check to see whether the view is visible when deciding whether
+  // its NSRect should be made available.
+  if (!view->IsVisible())
+    return NSZeroRect;
+
+  for (AutocompleteTextFieldIcon* icon in [self layedOutIcons:cellFrame]) {
+    if (view == [icon view])
+      return [icon rect];
+  }
+  NOTREACHED();
+  return NSZeroRect;
+}
+
+- (NSRect)pageActionFrameForExtensionAction:(ExtensionAction*)action
+                                    inFrame:(NSRect)cellFrame {
+  const size_t pageActionCount = [self pageActionCount];
+  size_t pos = 0;
+  while (pos < pageActionCount &&
+      action != page_action_views_->ViewAt(pos)->page_action())
+    ++pos;
+  return (pos == pageActionCount) ? NSZeroRect :
+      [self pageActionFrameForIndex:pos inFrame:cellFrame];
 }
 
 - (void)drawHintWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
@@ -411,28 +370,30 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
   [keywordString_.get() drawInRect:infoFrame];
 }
 
-- (void)drawHintIconWithFrame:(NSRect)cellFrame
-                       inView:(NSView*)controlView {
-  // If there's a label, draw it to the right of the icon.
-  CGFloat labelWidth = 0;
-  if (hintIconLabel_) {
-    labelWidth = ceil([hintIconLabel_ size].width) + kHintXOffset;
-    NSRect textFrame(NSMakeRect(NSMaxX(cellFrame) - labelWidth,
-                                cellFrame.origin.y + kHintIconLabelYOffset,
+- (void)drawImageView:(LocationBarViewMac::LocationBarImageView*)imageView
+              inFrame:(NSRect)imageFrame
+               inView:(NSView*)controlView {
+  // If there's a label, draw it to the right of the icon. The caller must have
+  // left sufficient space.
+  NSAttributedString* label = imageView->GetLabel();
+  if (label) {
+    CGFloat labelWidth = ceil([label size].width) + kHintXOffset;
+    NSRect textFrame(NSMakeRect(NSMaxX(imageFrame) + kIconHorizontalPad,
+                                imageFrame.origin.y + kIconLabelYOffset,
                                 labelWidth,
-                                cellFrame.size.height - kHintIconLabelYOffset));
-    [hintIconLabel_.get() drawInRect:textFrame];
+                                imageFrame.size.height - kIconLabelYOffset));
+    [label drawInRect:textFrame];
   }
 
-  // We'll draw the entire image
+  // Draw the entire image.
   NSRect imageRect = NSZeroRect;
-  imageRect.size = [hintIcon_ size];
-  const NSRect hintFrame([self hintImageFrameForFrame:cellFrame]);
-  [hintIcon_ setFlipped:[controlView isFlipped]];
-  [hintIcon_ drawInRect:hintFrame
-               fromRect:imageRect
-              operation:NSCompositeSourceOver
-               fraction:1.0];
+  NSImage* image = imageView->GetImage();
+  image.size = [image size];
+  [image setFlipped:[controlView isFlipped]];
+  [image drawInRect:imageFrame
+           fromRect:imageRect
+          operation:NSCompositeSourceOver
+           fraction:1.0];
 }
 
 - (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
@@ -440,16 +401,83 @@ CGFloat WidthForKeyword(NSAttributedString* keywordString) {
     [self drawHintWithFrame:cellFrame inView:controlView];
   } else if (keywordString_) {
     [self drawKeywordWithFrame:cellFrame inView:controlView];
-  } else if (hintIcon_) {
-    [self drawHintIconWithFrame:cellFrame inView:controlView];
+  } else {
+    for (AutocompleteTextFieldIcon* icon in [self layedOutIcons:cellFrame]) {
+      [self drawImageView:[icon view]
+                  inFrame:[icon rect]
+                   inView:controlView];
+    }
   }
 
   [super drawInteriorWithFrame:cellFrame inView:controlView];
 }
 
-- (void)resetCursorRect:(NSRect)cellFrame inView:(NSView *)controlView {
-  [super resetCursorRect:[self textCursorFrameForFrame:cellFrame]
-                  inView:controlView];
+- (NSArray*)layedOutIcons:(NSRect)cellFrame {
+  NSMutableArray* result = [NSMutableArray arrayWithCapacity:0];
+  NSRect iconFrame = cellFrame;
+  if (security_image_view_ && security_image_view_->IsVisible()) {
+    NSRect securityImageFrame = [self securityImageFrameForFrame:iconFrame];
+    [result addObject:
+        [AutocompleteTextFieldIcon iconWithRect:securityImageFrame
+                                           view:security_image_view_]];
+    iconFrame.size.width -= NSMaxX(iconFrame) - NSMinX(securityImageFrame);
+  }
+
+  const size_t pageActionCount = [self pageActionCount];
+  for (size_t i = 0; i < pageActionCount; ++i) {
+    LocationBarViewMac::PageActionImageView* view =
+        page_action_views_->ViewAt(i);
+    if (view->IsVisible()) {
+      // If this function is called right after a page action icon has been
+      // created, the images for all views will still be loading; in this case,
+      // each visible view will give us its default size.
+      NSSize iconSize = view->GetPreferredImageSize();
+      NSRect pageActionFrame =
+          [self rightJustifyImage:iconSize
+                           inRect:iconFrame
+                       withMargin:kIconHorizontalPad + iconSize.width];
+      [result addObject:
+          [AutocompleteTextFieldIcon iconWithRect:pageActionFrame view:view]];
+      iconFrame.size.width -= NSMaxX(iconFrame) - NSMinX(pageActionFrame);
+    }
+  }
+
+  if (content_setting_views_) {
+    // We use a reverse_iterator here because we're laying out the views from
+    // right to left but in the vector they're ordered left to right.
+    for (LocationBarViewMac::ContentSettingViews::const_reverse_iterator
+            it(content_setting_views_->rbegin());
+        it != const_cast<const LocationBarViewMac::ContentSettingViews*>(
+            content_setting_views_)->rend();
+        ++it) {
+      if ((*it)->IsVisible()) {
+        NSImage* image = (*it)->GetImage();
+        NSRect blockedContentFrame =
+            [self rightJustifyImage:[image size]
+                             inRect:iconFrame
+                         withMargin:[image size].width + kIconHorizontalPad];
+        [result addObject:
+            [AutocompleteTextFieldIcon iconWithRect:blockedContentFrame
+                                               view:*it]];
+        iconFrame.size.width -= NSMaxX(iconFrame) - NSMinX(blockedContentFrame);
+      }
+    }
+  }
+  return result;
+}
+
+- (NSMenu*)actionMenuForEvent:(NSEvent*)event
+                       inRect:(NSRect)cellFrame
+                       ofView:(NSView*)aView {
+  NSPoint location = [aView convertPoint:[event locationInWindow] fromView:nil];
+
+  const BOOL flipped = [aView isFlipped];
+  for (AutocompleteTextFieldIcon* icon in [self layedOutIcons:cellFrame]) {
+    if (NSMouseInRect(location, [icon rect], flipped)) {
+      return [icon view]->GetMenu();
+    }
+  }
+  return nil;
 }
 
 @end

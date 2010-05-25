@@ -1,9 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_SCROLL_VIEW_H_
 #define VIEWS_CONTROLS_SCROLL_VIEW_H_
+
+#include <string>
 
 #include "views/controls/scrollbar/scroll_bar.h"
 
@@ -53,7 +55,7 @@ class ScrollView : public View,
   //
   // Client code should use ScrollRectToVisible, which invokes this
   // appropriately.
-  void ScrollContentsRegionToBeVisible(int x, int y, int width, int height);
+  void ScrollContentsRegionToBeVisible(const gfx::Rect& rect);
 
   // ScrollBarController.
   // NOTE: this is intended to be invoked by the ScrollBar, and NOT general
@@ -129,7 +131,7 @@ class ScrollView : public View,
   // Resize corner.
   View* resize_corner_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ScrollView);
+  DISALLOW_COPY_AND_ASSIGN(ScrollView);
 };
 
 // VariableRowHeightScrollHelper is intended for views that contain rows of
@@ -178,7 +180,7 @@ class VariableRowHeightScrollHelper {
  private:
   Controller* controller_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(VariableRowHeightScrollHelper);
+  DISALLOW_COPY_AND_ASSIGN(VariableRowHeightScrollHelper);
 };
 
 // FixedRowHeightScrollHelper is intended for views that contain fixed height
@@ -199,7 +201,7 @@ class FixedRowHeightScrollHelper : public VariableRowHeightScrollHelper {
   int top_margin_;
   int row_height_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(FixedRowHeightScrollHelper);
+  DISALLOW_COPY_AND_ASSIGN(FixedRowHeightScrollHelper);
 };
 
 }  // namespace views

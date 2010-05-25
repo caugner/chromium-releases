@@ -123,6 +123,11 @@ class GaiaAuthenticator {
                     SaveCredentials should_save_credentials,
                     SignIn try_first);
 
+  // Pass the LSID to authenticate with. If the authentication succeeds, you can
+  // retrieve the authetication token via the respective accessors. Returns a
+  // boolean indicating whether authentication succeeded or not.
+  bool AuthenticateWithLsid(const std::string& lsid, bool long_lived_token);
+
   // Resets all stored cookies to their default values.
   void ResetCredentials();
 
@@ -131,6 +136,8 @@ class GaiaAuthenticator {
 
   void SetUsername(const std::string& username);
 
+  // Virtual for testing
+  virtual void RenewAuthToken(const std::string& auth_token);
   void SetAuthToken(const std::string& auth_token, SaveCredentials);
 
   struct AuthResults {
@@ -153,8 +160,14 @@ class GaiaAuthenticator {
     std::string captcha_url;
     SignIn signin;
 
-    AuthResults () : credentials_saved(DONT_SAVE_CREDENTIALS),
-                     auth_error(None) { }
+    // TODO(skrul): When auth fails, the "signin" field of the results
+    // struct never gets set, which causes valgrind to complain.  Give
+    // this field a value here so the error is suppressed. It turns
+    // out that the signin field has only one possible value, so the
+    // correct fix here would be to to remove it entirely.
+    AuthResults() : credentials_saved(DONT_SAVE_CREDENTIALS),
+                    auth_error(None),
+                    signin(GMAIL_SIGNIN) { }
   };
 
  protected:

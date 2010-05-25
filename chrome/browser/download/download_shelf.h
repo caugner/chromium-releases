@@ -7,8 +7,10 @@
 
 #include <string>
 
-#include "base/logging.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/basictypes.h"
+#include "base/logging.h"
+#include "base/scoped_ptr.h"
 
 class BaseDownloadItemModel;
 class Browser;
@@ -43,14 +45,11 @@ class DownloadShelf {
 
 // Logic for the download shelf context menu. Platform specific subclasses are
 // responsible for creating and running the menu.
-class DownloadShelfContextMenu {
+class DownloadShelfContextMenu : public menus::SimpleMenuModel::Delegate {
  public:
   virtual ~DownloadShelfContextMenu();
 
   virtual DownloadItem* download() const { return download_; }
-
- protected:
-  explicit DownloadShelfContextMenu(BaseDownloadItemModel* download_model);
 
   enum ContextMenuCommands {
     SHOW_IN_FOLDER = 1,  // Open a file explorer window with the item selected.
@@ -62,19 +61,31 @@ class DownloadShelfContextMenu {
   };
 
  protected:
-  bool ItemIsChecked(int id) const;
-  bool ItemIsDefault(int id) const;
-  std::wstring GetItemLabel(int id) const;
-  bool IsItemCommandEnabled(int id) const;
-  void ExecuteItemCommand(int id);
+  explicit DownloadShelfContextMenu(BaseDownloadItemModel* download_model);
 
+  menus::SimpleMenuModel* GetInProgressMenuModel();
+  menus::SimpleMenuModel* GetFinishedMenuModel();
   // Information source.
   DownloadItem* download_;
+
+  // menus::SimpleMenuModel::Delegate implementation:
+  virtual bool IsCommandIdEnabled(int command_id) const;
+  virtual bool IsCommandIdChecked(int command_id) const;
+  virtual void ExecuteCommand(int command_id);
+  virtual bool GetAcceleratorForCommandId(int command_id,
+                                          menus::Accelerator* accelerator);
+  virtual bool IsLabelForCommandIdDynamic(int command_id) const;
+  virtual string16 GetLabelForCommandId(int command_id) const;
 
   // A model to control the cancel behavior.
   BaseDownloadItemModel* model_;
 
  private:
+  // We show slightly different menus if the download is in progress vs. if the
+  // download has finished.
+  scoped_ptr<menus::SimpleMenuModel> in_progress_download_menu_model_;
+  scoped_ptr<menus::SimpleMenuModel> finished_download_menu_model_;
+
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfContextMenu);
 };
 

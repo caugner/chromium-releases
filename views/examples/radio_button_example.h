@@ -9,20 +9,25 @@
 #include "base/string_util.h"
 #include "views/controls/button/radio_button.h"
 #include "views/controls/button/text_button.h"
-#include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/examples/example_base.h"
 
 namespace examples {
 
-class RadioButtonExample : protected ExampleBase,
-                           private views::ButtonListener {
+class RadioButtonExample : public ExampleBase,
+                           public views::ButtonListener {
  public:
-  RadioButtonExample(views::TabbedPane* tabbed_pane, views::Label* message)
-      : ExampleBase(message),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            select_(new views::TextButton(this, L"Select"))),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            status_(new views::TextButton(this, L"Show Status"))) {
+  explicit RadioButtonExample(ExamplesMain* main): ExampleBase(main) {}
+
+  virtual ~RadioButtonExample() {}
+
+  virtual std::wstring GetExampleTitle() {
+    return L"Radio Button";
+  }
+
+  virtual void CreateExampleView(views::View* container) {
+    select_ = new views::TextButton(this, L"Select");
+    status_ = new views::TextButton(this, L"Show Status");
+
     int all = arraysize(radio_buttons_);
 
     // divide buttons into 2 groups
@@ -33,9 +38,6 @@ class RadioButtonExample : protected ExampleBase,
           StringPrintf(L"Radio %d in group %d", (i % group_count + 1), group),
           group);
     }
-
-    views::View* container = new views::View();
-    tabbed_pane->AddTab(L"Radio Button", container);
 
     views::GridLayout* layout = new views::GridLayout(container);
     container->SetLayoutManager(layout);
@@ -52,8 +54,6 @@ class RadioButtonExample : protected ExampleBase,
     layout->StartRow(0, 0);
     layout->AddView(status_);
   }
-
-  virtual ~RadioButtonExample() {}
 
  private:
   // Override from ButtonListener

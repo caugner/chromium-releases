@@ -4,14 +4,15 @@
 
 #include "chrome/browser/search_engines/template_url.h"
 
-#include "app/gfx/favicon_size.h"
 #include "app/l10n_util.h"
 #include "base/i18n/icu_string_conversions.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "gfx/favicon_size.h"
 #include "net/base/escape.h"
 
 #if defined(OS_WIN)
@@ -97,6 +98,7 @@ bool TemplateURLRef::ParseParameter(size_t start,
     length--;
   }
   std::wstring parameter(url->substr(start + 1, length));
+  std::wstring full_parameter(url->substr(start, end - start + 1));
   // Remove the parameter from the string.
   url->erase(start, end - start + 1);
   if (parameter == kSearchTermsParameter) {
@@ -137,9 +139,9 @@ bool TemplateURLRef::ParseParameter(size_t start,
   } else if (parameter == kGoogleUnescapedSearchTermsParameter) {
     replacements->push_back(Replacement(GOOGLE_UNESCAPED_SEARCH_TERMS,
                                         static_cast<int>(start)));
-  } else if (!optional) {
-    // Unknown required parameter. No idea what to replace this with,
-    // so fail.
+  } else {
+    // It can be some garbage but can also be a javascript block. Put it back.
+    url->insert(start, full_parameter);
     return false;
   }
   return true;
@@ -153,14 +155,22 @@ std::wstring TemplateURLRef::ParseURL(const std::wstring& url,
   for (size_t last = 0; last != std::string::npos; ) {
     last = parsed_url.find(kStartParameter, last);
     if (last != std::string::npos) {
-      size_t endTemplate = parsed_url.find(kEndParameter, last);
-      if (endTemplate != std::string::npos) {
-        if (!ParseParameter(last, endTemplate, &parsed_url, replacements)) {
-          // Not a valid parameter, return.
-          return std::wstring();
+      size_t template_end = parsed_url.find(kEndParameter, last);
+      if (template_end != std::string::npos) {
+        // Since we allow Javascript in the URL, {} pairs could be nested. Match
+        // only leaf pairs with supported parameters.
+        size_t next_template_start = parsed_url.find(kStartParameter, last + 1);
+        if (next_template_start == std::string::npos ||
+            next_template_start > template_end) {
+          // If successful, ParseParameter erases from the string as such no
+          // need to update |last|. If failed, move |last| to the end of pair.
+          if (!ParseParameter(last, template_end, &parsed_url, replacements)) {
+            // |template_end| + 1 may be beyond the end of the string.
+            last = template_end;
+          }
+        } else {
+          last = next_template_start;
         }
-        // ParseParamter erases from the string, as such we don't need
-        // to update last.
       } else {
         // Open brace without a closing brace, return.
         return std::wstring();
@@ -246,27 +256,52 @@ std::wstring TemplateURLRef::ReplaceSearchTerms(
   if (replacements_.empty())
     return parsed_url_;
 
-  // Encode the search terms so that we know the encoding.
-  const std::vector<std::string>& encodings = host.input_encodings();
-  std::wstring encoded_terms;
-  std::wstring encoded_original_query;
-  std::wstring input_encoding;
-  for (size_t i = 0; i < encodings.size(); ++i) {
-    if (EscapeQueryParamValue(terms, encodings[i].c_str(), &encoded_terms)) {
-      if (!original_query_for_suggestion.empty()) {
-        EscapeQueryParamValue(original_query_for_suggestion,
-                              encodings[i].c_str(), &encoded_original_query);
-      }
-      input_encoding = ASCIIToWide(encodings[i]);
+  // Determine if the search terms are in the query or before. We're escaping
+  // space as '+' in the former case and as '%20' in the latter case.
+  bool is_in_query = true;
+  for (Replacements::iterator i = replacements_.begin();
+       i != replacements_.end(); ++i) {
+    if (i->type == SEARCH_TERMS) {
+      std::wstring::size_type query_start = parsed_url_.find(L'?');
+      is_in_query = query_start != std::wstring::npos &&
+          (static_cast<std::wstring::size_type>(i->index) > query_start);
       break;
     }
   }
-  if (input_encoding.empty()) {
-    encoded_terms = EscapeQueryParamValueUTF8(terms);
-    if (!original_query_for_suggestion.empty()) {
-      encoded_original_query =
-          EscapeQueryParamValueUTF8(original_query_for_suggestion);
+
+  string16 encoded_terms;
+  string16 encoded_original_query;
+  std::wstring input_encoding;
+  // If the search terms are in query - escape them respecting the encoding.
+  if (is_in_query) {
+    // Encode the search terms so that we know the encoding.
+    const std::vector<std::string>& encodings = host.input_encodings();
+    for (size_t i = 0; i < encodings.size(); ++i) {
+      if (EscapeQueryParamValue(WideToUTF16Hack(terms),
+                                encodings[i].c_str(), true,
+                                &encoded_terms)) {
+        if (!original_query_for_suggestion.empty()) {
+          EscapeQueryParamValue(WideToUTF16Hack(original_query_for_suggestion),
+                                encodings[i].c_str(),
+                                true,
+                                &encoded_original_query);
+        }
+        input_encoding = ASCIIToWide(encodings[i]);
+        break;
+      }
     }
+    if (input_encoding.empty()) {
+      encoded_terms = WideToUTF16Hack(
+          EscapeQueryParamValueUTF8(terms, true));
+      if (!original_query_for_suggestion.empty()) {
+        encoded_original_query =
+            WideToUTF16Hack(EscapeQueryParamValueUTF8(
+            original_query_for_suggestion, true));
+      }
+      input_encoding = L"UTF-8";
+    }
+  } else {
+    encoded_terms = WideToUTF16Hack(UTF8ToWide(EscapePath(WideToUTF8(terms))));
     input_encoding = L"UTF-8";
   }
 
@@ -298,7 +333,8 @@ std::wstring TemplateURLRef::ReplaceSearchTerms(
 
       case GOOGLE_ORIGINAL_QUERY_FOR_SUGGESTION:
         if (accepted_suggestion >= 0)
-          url.insert(i->index, L"oq=" + encoded_original_query + L"&");
+          url.insert(i->index, L"oq=" +
+                     UTF16ToWideHack(encoded_original_query) + L"&");
         break;
 
       case GOOGLE_RLZ: {
@@ -333,7 +369,7 @@ std::wstring TemplateURLRef::ReplaceSearchTerms(
         break;
 
       case SEARCH_TERMS:
-        url.insert(i->index, encoded_terms);
+        url.insert(i->index, UTF16ToWideHack(encoded_terms));
         break;
 
       default:
@@ -511,8 +547,8 @@ bool TemplateURL::SupportsReplacement(const TemplateURL* turl) {
 
 std::wstring TemplateURL::AdjustedShortNameForLocaleDirection() const {
   std::wstring bidi_safe_short_name;
-  if (l10n_util::AdjustStringForLocaleDirection(short_name_,
-                                                &bidi_safe_short_name))
+  if (base::i18n::AdjustStringForLocaleDirection(short_name_,
+                                                 &bidi_safe_short_name))
     return bidi_safe_short_name;
   return short_name_;
 }

@@ -5,32 +5,43 @@
 #include "chrome/browser/renderer_host/download_resource_handler.h"
 
 #include "base/logging.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_file.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request_context.h"
 
-DownloadResourceHandler::DownloadResourceHandler(ResourceDispatcherHost* rdh,
-                                                 int render_process_host_id,
-                                                 int render_view_id,
-                                                 int request_id,
-                                                 const GURL& url,
-                                                 DownloadFileManager* manager,
-                                                 URLRequest* request,
-                                                 bool save_as)
+DownloadResourceHandler::DownloadResourceHandler(
+    ResourceDispatcherHost* rdh,
+    int render_process_host_id,
+    int render_view_id,
+    int request_id,
+    const GURL& url,
+    DownloadFileManager* manager,
+    URLRequest* request,
+    bool save_as,
+    const DownloadSaveInfo& save_info)
     : download_id_(-1),
-      global_id_(ResourceDispatcherHost::GlobalRequestID(render_process_host_id,
-                                                         request_id)),
+      global_id_(render_process_host_id, request_id),
       render_view_id_(render_view_id),
       url_(url),
       content_length_(0),
       download_manager_(manager),
       request_(request),
       save_as_(save_as),
+      save_info_(save_info),
       buffer_(new DownloadBuffer),
       rdh_(rdh),
       is_paused_(false) {
+}
+
+bool DownloadResourceHandler::OnUploadProgress(int request_id,
+                                               uint64 position,
+                                               uint64 size) {
+  return true;
 }
 
 // Not needed, as this event handler ought to be the final resource.
@@ -66,13 +77,20 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   info->request_id = global_id_.request_id;
   info->content_disposition = content_disposition_;
   info->mime_type = response->response_head.mime_type;
-  info->save_as = save_as_;
+  info->save_as = save_as_ && save_info_.file_path.empty();
   info->is_dangerous = false;
   info->referrer_charset = request_->context()->referrer_charset();
-  download_manager_->file_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(download_manager_,
-                        &DownloadFileManager::StartDownload,
-                        info));
+  info->save_info = save_info_;
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          download_manager_, &DownloadFileManager::StartDownload, info));
+  return true;
+}
+
+bool DownloadResourceHandler::OnWillStart(int request_id,
+                                          const GURL& url,
+                                          bool* defer) {
   return true;
 }
 
@@ -104,7 +122,8 @@ bool DownloadResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
   read_buffer_.swap(&buffer);
   buffer_->contents.push_back(std::make_pair(buffer, *bytes_read));
   if (need_update) {
-    download_manager_->file_loop()->PostTask(FROM_HERE,
+    ChromeThread::PostTask(
+        ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(download_manager_,
                           &DownloadFileManager::UpdateDownload,
                           download_id_,
@@ -123,7 +142,8 @@ bool DownloadResourceHandler::OnResponseCompleted(
     int request_id,
     const URLRequestStatus& status,
     const std::string& security_info) {
-  download_manager_->file_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
       NewRunnableMethod(download_manager_,
                         &DownloadFileManager::DownloadFinished,
                         download_id_,
@@ -133,6 +153,9 @@ bool DownloadResourceHandler::OnResponseCompleted(
   // 'buffer_' is deleted by the DownloadFileManager.
   buffer_ = NULL;
   return true;
+}
+
+void DownloadResourceHandler::OnRequestClosed() {
 }
 
 // If the content-length header is not present (or contains something other

@@ -46,18 +46,27 @@ NPError PluginGetURLTest::New(uint16 mode, int16 argc, const char* argn[],
   if (page_not_found_url) {
     page_not_found_url_ = page_not_found_url;
     expect_404_response_ = true;
-  } else {
-    const char* fail_write_url = GetArgValue("fail_write_url", argc,
-                                             argn, argv);
-    if (fail_write_url) {
-      fail_write_url_ = fail_write_url;
-    }
+  }
+
+  const char* fail_write_url = GetArgValue("fail_write_url", argc,
+                                           argn, argv);
+  if (fail_write_url) {
+    fail_write_url_ = fail_write_url;
+  }
+
+  const char* referrer_target_url = GetArgValue("ref_target", argc,
+                                                argn, argv);
+  if (referrer_target_url) {
+    referrer_target_url_ = referrer_target_url;
   }
 
   return PluginTest::New(mode, argc, argn, argv, saved);
 }
 
 NPError PluginGetURLTest::SetWindow(NPWindow* pNPWindow) {
+  if (pNPWindow->window == NULL)
+    return NPERR_NO_ERROR;
+
   if (!tests_started_) {
     tests_started_ = true;
 
@@ -68,6 +77,11 @@ NPError PluginGetURLTest::SetWindow(NPWindow* pNPWindow) {
       return NPERR_NO_ERROR;
     } else if (!fail_write_url_.empty()) {
       HostFunctions()->geturl(id(), fail_write_url_.c_str(), NULL);
+      return NPERR_NO_ERROR;
+    } else if (!referrer_target_url_.empty()) {
+      HostFunctions()->pushpopupsenabledstate(id(), true);
+      HostFunctions()->geturl(id(), referrer_target_url_.c_str(), "_blank");
+      HostFunctions()->poppopupsenabledstate(id());
       return NPERR_NO_ERROR;
     }
 
@@ -92,6 +106,10 @@ NPError PluginGetURLTest::NewStream(NPMIMEType type, NPStream* stream,
 
   if (test_completed()) {
     return PluginTest::NewStream(type, stream, seekable, stype);
+  }
+
+  if (!referrer_target_url_.empty()) {
+    return NPERR_NO_ERROR;
   }
 
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
@@ -137,7 +155,11 @@ NPError PluginGetURLTest::NewStream(NPMIMEType type, NPStream* stream,
           break;
         }
 
+#if defined(OS_WIN)
         filename = filename.substr(8);  // remove "file:///"
+#else
+        filename = filename.substr(7);  // remove "file://"
+#endif
 
         test_file_ = file_util::OpenFile(filename, "r");
         if (!test_file_) {
@@ -160,6 +182,10 @@ int32 PluginGetURLTest::WriteReady(NPStream *stream) {
     return PluginTest::WriteReady(stream);
   }
 
+  if (!referrer_target_url_.empty()) {
+    return STREAM_CHUNK;
+  }
+
   COMPILE_ASSERT(sizeof(unsigned long) <= sizeof(stream->notifyData),
                  cast_validity_check);
   unsigned long stream_id = reinterpret_cast<unsigned long>(
@@ -179,6 +205,10 @@ int32 PluginGetURLTest::Write(NPStream *stream, int32 offset, int32 len,
   if (!fail_write_url_.empty()) {
     SignalTestCompleted();
     return -1;
+  }
+
+  if (!referrer_target_url_.empty()) {
+    return len;
   }
 
   if (stream == NULL) {
@@ -241,6 +271,10 @@ NPError PluginGetURLTest::DestroyStream(NPStream *stream, NPError reason) {
     }
 
     SignalTestCompleted();
+    return NPERR_NO_ERROR;
+  }
+
+  if (!referrer_target_url_.empty()) {
     return NPERR_NO_ERROR;
   }
 

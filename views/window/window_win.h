@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,6 +74,7 @@ class WindowWin : public WidgetWin,
   virtual bool IsMinimized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
+  virtual void SetUseDragFrame(bool use_drag_frame);
   virtual void EnableClose(bool enable);
   virtual void DisableInactiveRendering();
   virtual void UpdateWindowTitle();
@@ -102,8 +103,10 @@ class WindowWin : public WidgetWin,
   // Sizes the window to the default size specified by its ClientView.
   virtual void SizeWindowToDefault();
 
-  // Shows the system menu at the specified screen point.
-  void RunSystemMenu(const gfx::Point& point);
+  // Returns the insets of the client area relative to the non-client area of
+  // the window. Override this function instead of OnNCCalcSize, which is
+  // crazily complicated.
+  virtual gfx::Insets GetClientAreaInsets() const;
 
   // Overridden from WidgetWin:
   virtual void OnActivate(UINT action, BOOL minimized, HWND window);
@@ -119,12 +122,11 @@ class WindowWin : public WidgetWin,
   virtual void OnInitMenu(HMENU menu);
   virtual void OnMouseLeave();
   virtual LRESULT OnNCActivate(BOOL active);
-  virtual LRESULT OnNCCalcSize(BOOL mode, LPARAM l_param);
+  LRESULT OnNCCalcSize(BOOL mode, LPARAM l_param);  // Don't override.
   virtual LRESULT OnNCHitTest(const CPoint& point);
   virtual void OnNCPaint(HRGN rgn);
   virtual void OnNCLButtonDown(UINT ht_component, const CPoint& point);
   virtual void OnNCRButtonDown(UINT ht_component, const CPoint& point);
-  virtual void OnNCRButtonUp(UINT ht_component, const CPoint& point);
   virtual void OnRButtonUp(UINT ht_component, const CPoint& point);
   virtual LRESULT OnNCUAHDrawCaption(UINT msg, WPARAM w_param, LPARAM l_param);
   virtual LRESULT OnNCUAHDrawFrame(UINT msg, WPARAM w_param, LPARAM l_param);
@@ -136,6 +138,7 @@ class WindowWin : public WidgetWin,
   virtual void OnWindowPosChanging(WINDOWPOS* window_pos);
   virtual Window* GetWindow() { return this; }
   virtual const Window* GetWindow() const { return this; }
+  virtual gfx::Size GetRootViewSize() const;
 
   // Accessor for disable_inactive_rendering_.
   bool disable_inactive_rendering() const {
@@ -230,7 +233,7 @@ class WindowWin : public WidgetWin,
   HWND owning_hwnd_;
 
   // The smallest size the window can be.
-  CSize minimum_size_;
+  gfx::Size minimum_size_;
 
   // Whether or not the window is modal. This comes from the delegate and is
   // cached at Init time to avoid calling back to the delegate from the
@@ -290,6 +293,10 @@ class WindowWin : public WidgetWin,
   // used to catch updates to the rect and work area and react accordingly.
   HMONITOR last_monitor_;
   gfx::Rect last_monitor_rect_, last_work_area_;
+
+  // The window styles before we modified them for the drag frame appearance.
+  DWORD drag_frame_saved_window_style_;
+  DWORD drag_frame_saved_window_ex_style_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowWin);
 };

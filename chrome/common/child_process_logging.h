@@ -5,6 +5,8 @@
 #ifndef CHROME_COMMON_CHILD_PROCESS_LOGGING_H_
 #define CHROME_COMMON_CHILD_PROCESS_LOGGING_H_
 
+#include <set>
+
 #include "base/basictypes.h"
 #include "googleurl/src/gurl.h"
 
@@ -13,6 +15,17 @@ namespace child_process_logging {
 // Sets the URL that is logged if the child process crashes. Use GURL() to clear
 // the URL.
 void SetActiveURL(const GURL& url);
+
+// Sets the Client ID that is used as GUID if a Chrome process crashes.
+void SetClientId(const std::string& client_id);
+
+// Sets the list of "active" extensions in this process. We overload "active" to
+// mean different things depending on the process type:
+// - browser: all enabled extensions
+// - renderer: the unique set of extension ids from all content scripts
+// - extension: the id of each extension running in this process (there can be
+//   multiple because of process collapsing).
+void SetActiveExtensions(const std::set<std::string>& extension_ids);
 
 // Simple wrapper class that sets the active URL in it's constructor and clears
 // the active URL in the destructor.

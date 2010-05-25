@@ -44,11 +44,15 @@
 #define _NPAPI_H_
 
 
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 
+#ifdef __native_client__
+#include <stdint.h>
+#else
 #include "base/basictypes.h"
+#endif  /* __native_client__ */
 
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 
 #ifdef INCLUDE_JAVA
 #include "jri.h"                /* Java Runtime Interface */
@@ -63,13 +67,13 @@
 #    endif /* XP_WIN */
 #endif /* _WIN32 */
 
-// BEGIN GOOGLE MODIFICATIONS
-// On Linux and Mac, be sure to set Mozilla-specific macros.
-#if defined(OS_LINUX) || defined(OS_FREEBSD)
+/* BEGIN GOOGLE MODIFICATIONS */
+/* On Linux and Mac, be sure to set Mozilla-specific macros. */
+#if defined(USE_X11)
 #define XP_UNIX 1
 #define MOZ_X11 1
 #endif
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 
 #ifdef __MWERKS__
 #    define _declspec __declspec
@@ -117,16 +121,16 @@
 
 #if defined(XP_UNIX) 
 #	include <stdio.h>
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 #if 0
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 #	if defined(MOZ_X11)
 #		include <X11/Xlib.h>
 #		include <X11/Xutil.h>
 #	endif
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 #endif
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 #endif
 
 #ifdef XP_WIN
@@ -138,9 +142,9 @@
 /*----------------------------------------------------------------------*/
 
 #define NP_VERSION_MAJOR 0
-// BEGIN GOOGLE MODIFICATIONS
-#define NP_VERSION_MINOR 22 // maximum version currently supported by Chromium
-// END GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
+#define NP_VERSION_MINOR 23 /* maximum version currently supported by Chromium */
+/* END GOOGLE MODIFICATIONS */
 
 
 /*----------------------------------------------------------------------*/
@@ -287,9 +291,9 @@ typedef struct
   int32 type;
 } NPAnyCallbackStruct;
 
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 typedef struct _NPSetWindowCallbackStruct NPSetWindowCallbackStruct;
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 
 typedef struct
 {
@@ -382,11 +386,11 @@ typedef enum {
   NPPVpluginWantsAllNetworkStreams = 18,
   
   /* Checks to see if the plug-in would like the browser to load the "src" attribute. */
-  NPPVpluginCancelSrcStream = 20,
+  NPPVpluginCancelSrcStream = 20
   
 #ifdef XP_MACOSX
   /* Used for negotiating drawing models */
-  NPPVpluginDrawingModel = 1000,
+  , NPPVpluginDrawingModel = 1000,
   /* Used for negotiating event models */
   NPPVpluginEventModel = 1001,
   /* In the NPDrawingModelCoreAnimation drawing model, the browser asks the plug-in for a Core Animation layer. */
@@ -437,15 +441,6 @@ typedef enum {
 #endif
   , NPNVsupportsCocoaBool = 3001 /* TRUE if the browser supports the Cocoa event model */
 #endif
-#ifdef PEPPER_APIS_ENABLED
-  /*
-   * Note: these APIs have not been ratified by Mozilla, et al.
-   * Until they are, they need to be distinct values from other enum
-   * elements here.
-   */
-  , NPNVInitializeRenderContextFunc = 4000 /* A pointer to the InitializeRenderContext function */
-  , NPNVFlushRenderContextFunc = 4001 /* A pointer to the FlushRenderContext function */
-#endif
 } NPNVariable;
 
 typedef enum {
@@ -453,7 +448,7 @@ typedef enum {
   NPNURLVProxy
 } NPNURLVariable;
 
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 /*
  * The type of Tookkit the widgets use
  */
@@ -461,7 +456,7 @@ typedef enum {
   NPNVGtk12 = 1,
   NPNVGtk2
 } NPNToolkitType;
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 
 /*
  * The type of a NPWindow - it specifies the type of the data structure
@@ -495,7 +490,7 @@ typedef enum {
 #ifndef NP_NO_CARBON
   NPEventModelCarbon = 0,
 #endif
-  NPEventModelCocoa = 1,
+  NPEventModelCocoa = 1
 } NPEventModel;
 
 typedef enum {
@@ -600,9 +595,9 @@ typedef struct _NPPrint
 } NPPrint;
 
 #ifdef XP_MACOSX
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 typedef struct _NPNSMenu NPNSMenu;
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 typedef NPNSMenu NPMenu;
 #else
 typedef void * NPMenu;
@@ -616,7 +611,6 @@ typedef enum {
   NPCoordinateSpaceFlippedScreen
 } NPCoordinateSpace;
 
-#if !defined(PEPPER_APIS_ENABLED)
 #if defined(XP_MAC) || defined(XP_MACOSX)
 
 #ifndef NP_NO_CARBON
@@ -631,9 +625,9 @@ typedef struct _NPEvent
   uint32 lParam;
 } NPEvent;
 #elif defined (XP_UNIX) && defined(MOZ_X11)
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
 typedef union _XEvent XEvent;
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 typedef XEvent NPEvent;
 #else
 typedef void*			NPEvent;
@@ -655,9 +649,9 @@ typedef CGPathRef NPCGRegion;
 #elif defined(XP_WIN)
 typedef HRGN NPRegion;
 #elif defined(XP_UNIX)
-// BEGIN GOOGLE MODIFICATIONS	
+/* BEGIN GOOGLE MODIFICATIONS */
 typedef struct _XRegion *Region;	
-// END GOOGLE MODIFICATIONS
+/* END GOOGLE MODIFICATIONS */
 typedef Region NPRegion;
 #else
 typedef void *NPRegion;
@@ -676,7 +670,7 @@ typedef struct NP_CGContext
 #ifdef NP_NO_CARBON
   NPNSWindow *window;
 #else
-  void *window; // Can be either an NSWindow or a WindowRef depending on the event model
+  void *window; /* Can be either an NSWindow or a WindowRef depending on the event model */
 #endif
 } NP_CGContext;
 
@@ -691,7 +685,7 @@ typedef struct NP_GLContext
 #ifdef NP_NO_CARBON
   NPNSWindow *window;
 #else
-  void *window; // Can be either an NSWindow or a WindowRef depending on the event model
+  void *window; /* Can be either an NSWindow or a WindowRef depending on the event model */
 #endif
 } NP_GLContext;
 
@@ -727,7 +721,8 @@ typedef struct NP_Port
 /*
  *  Non-standard event types that can be passed to HandleEvent
  */
-// BEGIN GOOGLE MODIFICATIONS
+/* BEGIN GOOGLE MODIFICATIONS */
+#ifndef NP_NO_CARBON
 enum NPEventType {
   NPEventType_GetFocusEvent = (osEvt + 16),
   NPEventType_LoseFocusEvent,
@@ -743,147 +738,10 @@ enum NPEventType {
 #define loseFocusEvent    (osEvt + 17)
 #define adjustCursorEvent (osEvt + 18)
 #endif
-// END GOOGLE MODIFICATIONS
+#endif /* NP_NO_CARBON */
+/* END GOOGLE MODIFICATIONS */
 
 #endif /* XP_MACOSX */
-
-/* Stub typedefs for interfaces requiring Pepper types. */
-typedef int NPRenderType;
-typedef struct _NPRenderContext NPRenderContext;
-
-#else  // defined(PEPPER_APIS_ENABLED)
-typedef enum {
-  NPMouseButton_None    = -1,
-  NPMouseButton_Left    = 0,
-  NPMouseButton_Middle  = 1,
-  NPMouseButton_Right   = 2,
-} NPMouseButtons;
-
-typedef enum {
-  NPEventType_Undefined   = -1,
-  NPEventType_MouseDown   = 0,
-  NPEventType_MouseUp     = 1,
-  NPEventType_MouseMove   = 2,
-  NPEventType_MouseEnter  = 3,
-  NPEventType_MouseLeave  = 4,
-  NPEventType_MouseWheel  = 5,
-  NPEventType_RawKeyDown  = 6,
-  NPEventType_KeyDown     = 7,
-  NPEventType_KeyUp       = 8,
-  NPEventType_Char        = 9,
-  NPEventType_Minimize    = 10,
-  NPEventType_Focus       = 11,
-  NPEventType_Device      = 12
-} NPEventTypes;
-
-typedef enum {
-  NPEventModifier_ShiftKey         = 1 << 0,
-  NPEventModifier_ControlKey       = 1 << 1,
-  NPEventModifier_AltKey           = 1 << 2,
-  NPEventModifier_MetaKey          = 1 << 3,
-  NPEventModifier_IsKeyPad         = 1 << 4,
-  NPEventModifier_IsAutoRepeat     = 1 << 5,
-  NPEventModifier_LeftButtonDown   = 1 << 6,
-  NPEventModifier_MiddleButtonDown = 1 << 7,
-  NPEventModifier_RightButtonDown  = 1 << 8
-} NPEventModifiers;
-
-typedef struct _NPKeyEvent
-{
-  uint32 modifier;
-  uint32 normalizedKeyCode;
-} NPKeyEvent;
-
-typedef struct _NPCharacterEvent
-{
-  uint32 modifier;
-  uint16 text[4];
-  uint16 unmodifiedText[4];
-} NPCharacterEvent;
-
-typedef struct _NPMouseEvent
-{
-  uint32 modifier;
-  int32 button;
-  int32 x;
-  int32 y;
-  int32 clickCount;
-} NPMouseEvent;
-
-typedef struct _NPMouseWheelEvent
-{
-  uint32 modifier;
-  float deltaX;
-  float deltaY;
-  float wheelTicksX;
-  float wheelTicksY;
-  uint32 scrollByPage;
-} NPMouseWheelEvent;
-
-typedef struct _NPDeviceEvent {
-  uint32 device_uid;
-  uint32 subtype;
-  // uint8 generic[0];
-} NPDeviceEvent;
-
-typedef struct _NPMinimizeEvent {
-  int32 value;
-} NPMinimizeEvent;
-
-typedef struct _NPFocusEvent {
-  int32 value;
-} NPFocusEvent;
-
-typedef struct _NPEvent
-{
-  uint32 size;
-  int32 type;
-  double timeStampSeconds;
-  union {
-    NPKeyEvent key;
-    NPCharacterEvent character;
-    NPMouseEvent mouse;
-    NPMouseWheelEvent wheel;
-    NPMinimizeEvent minimize;
-    NPFocusEvent focus;
-    NPDeviceEvent device;
-  } u;
-} NPEvent;
-
-typedef struct _NPRegion
-{
-  int32 x;
-  int32 y;
-  int32 w;
-  int32 h;
-} NPRegion;
-
-typedef enum _NPRenderType
-{
-  NPRenderGraphicsRGBA
-} NPRenderType;
-
-typedef struct _NPRenderContext
-{
-  union {
-    struct {
-      void* region;
-      int32 stride;
-    } graphicsRgba;
-  } u;
-} NPRenderContext;
-
-typedef void (*NPFlushRenderContextCallbackPtr)(NPRenderContext* context,
-												NPError err,
-                                                void* userData);
-typedef NPError (*NPInitializeRenderContextPtr)(NPP instance,
-                                                NPRenderType type,
-                                                NPRenderContext* context);
-typedef NPError (*NPFlushRenderContextPtr)(NPP instance,
-                                           NPRenderContext* context,
-                                           NPFlushRenderContextCallbackPtr callback,
-                                           void* userData);
-#endif  // defined(PEPPER_APIS_ENABLED)
 
 /*
  * Values for mode passed to NPP_New:

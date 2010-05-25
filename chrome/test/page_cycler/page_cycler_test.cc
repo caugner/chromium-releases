@@ -29,9 +29,14 @@
 #endif
 
 #ifndef NDEBUG
-#define TEST_ITERATIONS "2"
+#define TEST_ITERATIONS 2
+#define DATABASE_TEST_ITERATIONS 2
 #else
-#define TEST_ITERATIONS "10"
+#define TEST_ITERATIONS 10
+// For some unknown reason, the DB perf tests are much much slower on the
+// Vista perf bot, so we have to cut down the number of iterations to 5
+// to make sure each test finishes in less than 10 minutes.
+#define DATABASE_TEST_ITERATIONS 5
 #endif
 
 // URL at which data files may be found for HTTP tests.  The document root of
@@ -140,8 +145,8 @@ void PopulateUBC(const FilePath &test_dir) {
       int fd = open(path.value().c_str(), O_RDONLY);
       if (fd >= 0) {
         ++loaded;
-        while (HANDLE_EINTR(read(fd, buf, sizeof(buf))) > 0)
-          ;
+        while (HANDLE_EINTR(read(fd, buf, sizeof(buf))) > 0) {
+        }
         HANDLE_EINTR(close(fd));
       }
     }
@@ -151,13 +156,16 @@ void PopulateUBC(const FilePath &test_dir) {
 #endif  // defined(OS_MACOSX)
 
 class PageCyclerTest : public UITest {
-#if defined(OS_MACOSX)
  protected:
+  bool print_times_only_;
+#if defined(OS_MACOSX)
   rlim_t fd_limit_;
 #endif
  public:
-  PageCyclerTest() {
+  PageCyclerTest()
+      : print_times_only_(false) {
     show_window_ = true;
+
 
     // Expose garbage collection for the page cycler tests.
     launch_arguments_.AppendSwitchWithValue(switches::kJavaScriptFlags,
@@ -175,16 +183,30 @@ class PageCyclerTest : public UITest {
     UITest::SetUp();
   }
 
-  // For HTTP tests, the name must be safe for use in a URL without escaping.
-  void RunPageCycler(const char* name, std::wstring* pages,
-                     std::string* timings, bool use_http) {
+  virtual FilePath GetDataPath(const char* name) {
     // Make sure the test data is checked out
     FilePath test_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &test_path);
     test_path = test_path.Append(FILE_PATH_LITERAL("data"));
     test_path = test_path.Append(FILE_PATH_LITERAL("page_cycler"));
     test_path = test_path.AppendASCII(name);
-    ASSERT_TRUE(file_util::PathExists(test_path)) << "Missing test data";
+    return test_path;
+  }
+
+  virtual bool HasErrors(const std::string /*timings*/) {
+    return false;
+  }
+
+  virtual int GetTestIterations() {
+    return TEST_ITERATIONS;
+  }
+
+  // For HTTP tests, the name must be safe for use in a URL without escaping.
+  void RunPageCycler(const char* name, std::wstring* pages,
+                     std::string* timings, bool use_http) {
+    FilePath test_path = GetDataPath(name);
+    ASSERT_TRUE(file_util::DirectoryExists(test_path))
+        << "Missing test directory " << test_path.value();
 
 #if defined(OS_MACOSX)
     PopulateUBC(test_path);
@@ -200,19 +222,20 @@ class PageCyclerTest : public UITest {
 
     // run N iterations
     GURL::Replacements replacements;
-    const char query_string[] = "iterations=" TEST_ITERATIONS "&auto=1";
+    const std::string query_string =
+        "iterations=" + IntToString(GetTestIterations()) + "&auto=1";
     replacements.SetQuery(
-        query_string,
-        url_parse::Component(0, arraysize(query_string) - 1));
+        query_string.c_str(),
+        url_parse::Component(0, query_string.length()));
     test_url = test_url.ReplaceComponents(replacements);
 
     scoped_refptr<TabProxy> tab(GetActiveTab());
     ASSERT_TRUE(tab.get());
-    tab->NavigateToURL(test_url);
+    ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(test_url));
 
     // Wait for the test to finish.
     ASSERT_TRUE(WaitUntilCookieValue(tab.get(), test_url, "__pc_done",
-                                     3000, UITest::test_timeout_ms(), "1"));
+                                     UITest::test_timeout_ms(), "1"));
 
     std::string cookie;
     ASSERT_TRUE(tab->GetCookieByName(test_url, "__pc_pages", &cookie));
@@ -223,179 +246,35 @@ class PageCyclerTest : public UITest {
     ASSERT_FALSE(timings->empty());
   }
 
-  void PrintIOPerfInfo(const char* test_name) {
-    FilePath data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &data_dir);
-    int browser_process_pid = ChromeBrowserProcessId(data_dir);
-    ChromeProcessList chrome_processes(GetRunningChromeProcesses(data_dir));
-
-    ChromeProcessList::const_iterator it;
-    for (it = chrome_processes.begin(); it != chrome_processes.end(); ++it) {
-      base::ProcessHandle process_handle;
-      if (!base::OpenPrivilegedProcessHandle(*it, &process_handle)) {
-        NOTREACHED();
-      }
-
-      scoped_ptr<base::ProcessMetrics> process_metrics;
-      process_metrics.reset(
-          base::ProcessMetrics::CreateProcessMetrics(process_handle));
-      IoCounters io_counters;
-      memset(&io_counters, 0, sizeof(io_counters));
-
-      if (process_metrics.get()->GetIOCounters(&io_counters)) {
-        // Print out IO performance.  We assume that the values can be
-        // converted to size_t (they're reported as ULONGLONG, 64-bit numbers).
-        std::string chrome_name = (*it == browser_process_pid) ? "_b" : "_r";
-
-        PrintResult("read_op", chrome_name,
-                    "r_op" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.ReadOperationCount), "",
-                    false /* not important */);
-        PrintResult("write_op", chrome_name,
-                    "w_op" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.WriteOperationCount), "",
-                    false /* not important */);
-        PrintResult("other_op", chrome_name,
-                    "o_op" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.OtherOperationCount), "",
-                    false /* not important */);
-
-        size_t total = static_cast<size_t>(io_counters.ReadOperationCount +
-                                           io_counters.WriteOperationCount +
-                                           io_counters.OtherOperationCount);
-        PrintResult("total_op", chrome_name,
-                    "IO_op" + chrome_name + test_name,
-                    total, "", true /* important */);
-
-        PrintResult("read_byte", chrome_name,
-                    "r_b" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.ReadTransferCount / 1024),
-                    "kb", false /* not important */);
-        PrintResult("write_byte", chrome_name,
-                    "w_b" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.WriteTransferCount / 1024),
-                    "kb", false /* not important */);
-        PrintResult("other_byte", chrome_name,
-                    "o_b" + chrome_name + test_name,
-                    static_cast<size_t>(io_counters.OtherTransferCount / 1024),
-                    "kb", false /* not important */);
-
-        total = static_cast<size_t>((io_counters.ReadTransferCount +
-                                     io_counters.WriteTransferCount +
-                                     io_counters.OtherTransferCount) / 1024);
-        PrintResult("total_byte", chrome_name,
-                    "IO_b" + chrome_name + test_name,
-                    total, "kb", true /* important */);
-      }
-
-      base::CloseProcessHandle(process_handle);
-    }
-  }
-
-  void PrintMemoryUsageInfo(const char* test_name) {
-    FilePath data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &data_dir);
-    int browser_process_pid = ChromeBrowserProcessId(data_dir);
-    ChromeProcessList chrome_processes(GetRunningChromeProcesses(data_dir));
-
-#if !defined(OS_MACOSX)
-    ChromeProcessList::const_iterator it;
-    for (it = chrome_processes.begin(); it != chrome_processes.end(); ++it) {
-      base::ProcessHandle process_handle;
-      if (!base::OpenPrivilegedProcessHandle(*it, &process_handle)) {
-        NOTREACHED();
-      }
-
-      scoped_ptr<base::ProcessMetrics> process_metrics;
-      process_metrics.reset(
-          base::ProcessMetrics::CreateProcessMetrics(process_handle));
-
-      std::string chrome_name = (*it == browser_process_pid) ? "_b" : "_r";
-
-      std::string trace_name(test_name);
-#if defined(OS_WIN)
-      PrintResult("vm_peak", chrome_name,
-                  "vm_pk" + chrome_name + trace_name,
-                  process_metrics->GetPeakPagefileUsage(), "bytes",
-                  true /* important */);
-      PrintResult("vm_final", chrome_name,
-                  "vm_f" + chrome_name + trace_name,
-                  process_metrics->GetPagefileUsage(), "bytes",
-                  false /* not important */);
-      PrintResult("ws_peak", chrome_name,
-                  "ws_pk" + chrome_name + trace_name,
-                  process_metrics->GetPeakWorkingSetSize(), "bytes",
-                  true /* important */);
-      PrintResult("ws_final", chrome_name,
-                  "ws_f" + chrome_name + trace_name,
-                  process_metrics->GetWorkingSetSize(), "bytes",
-                  false /* not important */);
-#elif defined(OS_LINUX)
-      PrintResult("vm_size_final", chrome_name,
-                  "vm_size_f" + chrome_name + trace_name,
-                  process_metrics->GetPagefileUsage(), "bytes",
-                  true /* important */);
-      PrintResult("vm_rss_final", chrome_name,
-                  "vm_rss_f" + chrome_name + trace_name,
-                  process_metrics->GetWorkingSetSize(), "bytes",
-                  true /* important */);
-#else
-      NOTIMPLEMENTED();
-#endif
-      base::CloseProcessHandle(process_handle);
-    }
-
-#else  // !defined(OS_MACOSX)
-
-    // There is no way to get memory info from one process on another process
-    // without privileges, this means the base methods for doing this can't be
-    // made to work.  Instead we use a helper that invokes ps to collect the
-    // data so we have it for the unittest.
-
-    MacChromeProcessInfoList process_infos(
-                                  GetRunningMacProcessInfo(chrome_processes));
-    MacChromeProcessInfoList::const_iterator it;
-    for (it = process_infos.begin(); it != process_infos.end(); ++it) {
-      const MacChromeProcessInfo &process_info = *it;
-
-      std::string chrome_name =
-          (process_info.pid == browser_process_pid) ? "_b" : "_r";
-      std::string trace_name(test_name);
-
-      PrintResult("vm_size_final", chrome_name,
-                  "vm_size_f" + chrome_name + trace_name,
-                  static_cast<size_t>(process_info.vsz_in_kb) * 1024, "bytes",
-                  true /* important */);
-      PrintResult("vm_rss_final", chrome_name,
-                  "vm_rss_f" + chrome_name + trace_name,
-                  static_cast<size_t>(process_info.rsz_in_kb) * 1024, "bytes",
-                  true /* important */);
-    }
-
-#endif  // !defined(OS_MACOSX)
-  }
-
   // When use_http is true, the test name passed here will be used directly in
   // the path to the test data, so it must be safe for use in a URL without
   // escaping. (No pound (#), question mark (?), semicolon (;), non-ASCII, or
   // other funny stuff.)
-  void RunTestWithSuffix(const char* name, bool use_http, const char* suffix) {
+  void RunTestWithSuffix(const char* graph, const char* name, bool use_http,
+                         const char* suffix) {
     std::wstring pages;
     std::string timings;
+    size_t start_size = base::GetSystemCommitCharge();
     RunPageCycler(name, &pages, &timings, use_http);
-    if (timings.empty())
+    if (timings.empty() || HasErrors(timings))
       return;
+    size_t stop_size = base::GetSystemCommitCharge();
 
-    PrintMemoryUsageInfo(suffix);
-    PrintIOPerfInfo(suffix);
+    if (!print_times_only_) {
+      PrintMemoryUsageInfo(suffix);
+      PrintIOPerfInfo(suffix);
+      PrintSystemCommitCharge(suffix, stop_size - start_size,
+                              false /* not important */);
+    }
+
     std::string trace_name = "t" + std::string(suffix);
     wprintf(L"\nPages: [%ls]\n", pages.c_str());
-    PrintResultList("times", "", trace_name, timings, "ms",
+    PrintResultList(graph, "", trace_name, timings, "ms",
                     true /* important */);
   }
 
-  void RunTest(const char* name, bool use_http) {
-    RunTestWithSuffix(name, use_http, "");
+  void RunTest(const char* graph, const char* name, bool use_http) {
+    RunTestWithSuffix(graph, name, use_http, "");
   }
 };
 
@@ -422,17 +301,23 @@ class PageCyclerReferenceTest : public PageCyclerTest {
     PageCyclerTest::SetUp();
   }
 
-  void RunTest(const char* name, bool use_http) {
+  void RunTest(const char* graph, const char* name, bool use_http) {
     std::wstring pages;
     std::string timings;
+    size_t start_size = base::GetSystemCommitCharge();
     RunPageCycler(name, &pages, &timings, use_http);
     if (timings.empty())
       return;
+    size_t stop_size = base::GetSystemCommitCharge();
 
-    PrintMemoryUsageInfo("_ref");
-    PrintIOPerfInfo("_ref");
+    if (!print_times_only_) {
+      PrintMemoryUsageInfo("_ref");
+      PrintIOPerfInfo("_ref");
+      PrintSystemCommitCharge("_ref", stop_size - start_size,
+                              false /* not important */);
+    }
 
-    PrintResultList("times", "", "t_ref", timings, "ms",
+    PrintResultList(graph, "", "t_ref", timings, "ms",
                     true /* important */);
   }
 };
@@ -440,8 +325,8 @@ class PageCyclerReferenceTest : public PageCyclerTest {
 class PageCyclerExtensionTest : public PageCyclerTest {
  public:
   void SetUp() {}
-  void RunTest(const char* extension_profile, const char* output_suffix,
-               const char* name, bool use_http) {
+  void RunTest(const char* graph, const char* extension_profile,
+               const char* output_suffix, const char* name, bool use_http) {
     // Set up the extension profile directory.
     ASSERT_TRUE(extension_profile != NULL);
     FilePath data_dir;
@@ -453,34 +338,129 @@ class PageCyclerExtensionTest : public PageCyclerTest {
 
     // Now run the test.
     PageCyclerTest::SetUp();
-    PageCyclerTest::RunTestWithSuffix(name, use_http, output_suffix);
+    PageCyclerTest::RunTestWithSuffix(graph, name, use_http, output_suffix);
+  }
+};
+
+static FilePath GetDatabaseDataPath(const char* name) {
+  FilePath test_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &test_path);
+  test_path = test_path.Append(FILE_PATH_LITERAL("tools"));
+  test_path = test_path.Append(FILE_PATH_LITERAL("page_cycler"));
+  test_path = test_path.Append(FILE_PATH_LITERAL("database"));
+  test_path = test_path.AppendASCII(name);
+  return test_path;
+}
+
+static bool HasDatabaseErrors(const std::string timings) {
+  size_t pos = 0;
+  size_t new_pos = 0;
+  std::string time_str;
+  int time = 0;
+  do {
+    new_pos = timings.find(',', pos);
+    if (new_pos == std::string::npos)
+      new_pos = timings.length();
+    time_str = timings.substr(pos, new_pos - pos);
+    if (!StringToInt(time_str, &time)) {
+      LOG(ERROR) << "Invalid time reported: " << time_str;
+      return true;
+    }
+    if (time < 0) {
+      switch (time) {
+        case -1:
+          LOG(ERROR) << "Error while opening the database.";
+          break;
+        case -2:
+          LOG(ERROR) << "Error while setting up the database.";
+          break;
+        case -3:
+          LOG(ERROR) << "Error while running the transactions.";
+          break;
+        default:
+          LOG(ERROR) << "Unknown error: " << time;
+      }
+      return true;
+    }
+
+    pos = new_pos + 1;
+  } while (pos < timings.length());
+
+  return false;
+}
+
+class PageCyclerDatabaseTest : public PageCyclerTest {
+ public:
+  PageCyclerDatabaseTest() {
+    print_times_only_ = true;
+  }
+
+  virtual FilePath GetDataPath(const char* name) {
+    return GetDatabaseDataPath(name);
+  }
+
+  virtual bool HasErrors(const std::string timings) {
+    return HasDatabaseErrors(timings);
+  }
+
+  virtual int GetTestIterations() {
+    return DATABASE_TEST_ITERATIONS;
+  }
+};
+
+class PageCyclerDatabaseReferenceTest : public PageCyclerReferenceTest {
+ public:
+  PageCyclerDatabaseReferenceTest() {
+    print_times_only_ = true;
+  }
+
+  virtual FilePath GetDataPath(const char* name) {
+    return GetDatabaseDataPath(name);
+  }
+
+  virtual bool HasErrors(const std::string timings) {
+    return HasDatabaseErrors(timings);
+  }
+
+  virtual int GetTestIterations() {
+    return DATABASE_TEST_ITERATIONS;
   }
 };
 
 // This macro simplifies setting up regular and reference build tests.
 #define PAGE_CYCLER_TESTS(test, name, use_http) \
 TEST_F(PageCyclerTest, name) { \
-  RunTest(test, use_http); \
+  RunTest("times", test, use_http); \
 } \
 TEST_F(PageCyclerReferenceTest, name) { \
-  RunTest(test, use_http); \
+  RunTest("times", test, use_http); \
+}
+
+// This macro simplifies setting up regular and reference build tests
+// for HTML5 database tests.
+#define PAGE_CYCLER_DATABASE_TESTS(test, name) \
+TEST_F(PageCyclerDatabaseTest, Database##name##File) { \
+  RunTest(test, test, false); \
+} \
+TEST_F(PageCyclerDatabaseReferenceTest, Database##name##File) { \
+  RunTest(test, test, false); \
 }
 
 // These are shorthand for File vs. Http tests.
-#define PAGE_CYCLER_FILE_TESTS(test, name)\
+#define PAGE_CYCLER_FILE_TESTS(test, name) \
   PAGE_CYCLER_TESTS(test, name, false)
-#define PAGE_CYCLER_HTTP_TESTS(test, name)\
+#define PAGE_CYCLER_HTTP_TESTS(test, name) \
   PAGE_CYCLER_TESTS(test, name, true)
 
 // This macro lets us define tests with 1 and 10 extensions with 1 content
 // script each. The name for the 10-extension case is changed so as not
 // to run by default on the buildbots.
 #define PAGE_CYCLER_EXTENSIONS_FILE_TESTS(test, name) \
-TEST_F(PageCyclerExtensionTest, name) {  \
-  RunTest("content_scripts1", "_extcs1", test, false); \
+TEST_F(PageCyclerExtensionTest, name) { \
+  RunTest("times", "content_scripts1", "_extcs1", test, false); \
 } \
 TEST_F(PageCyclerExtensionTest, name##10) { \
-  RunTest("content_scripts10", "_extcs10", test, false); \
+  RunTest("times", "content_scripts10", "_extcs10", test, false); \
 }
 
 // file-URL tests
@@ -500,5 +480,20 @@ PAGE_CYCLER_HTTP_TESTS("intl2", Intl2Http);
 PAGE_CYCLER_HTTP_TESTS("dom", DomHttp);
 PAGE_CYCLER_HTTP_TESTS("bloat", BloatHttp);
 
+// HTML5 database tests
+PAGE_CYCLER_DATABASE_TESTS("select-transactions",
+                           SelectTransactions);
+PAGE_CYCLER_DATABASE_TESTS("select-readtransactions",
+                           SelectReadTransactions);
+PAGE_CYCLER_DATABASE_TESTS("select-readtransactions-read-results",
+                           SelectReadTransactionsReadResults);
+PAGE_CYCLER_DATABASE_TESTS("insert-transactions",
+                           InsertTransactions);
+PAGE_CYCLER_DATABASE_TESTS("update-transactions",
+                           UpdateTransactions);
+PAGE_CYCLER_DATABASE_TESTS("delete-transactions",
+                           DeleteTransactions);
+PAGE_CYCLER_DATABASE_TESTS("pseudo-random-transactions",
+                           PseudoRandomTransactions);
 
 }  // namespace

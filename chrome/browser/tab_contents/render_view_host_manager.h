@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_TAB_CONTENTS_RENDER_VIEW_HOST_MANAGER_H_
 
 #include "base/basictypes.h"
+#include "base/logging.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_observer.h"
@@ -18,6 +18,7 @@ class NavigationController;
 class NavigationEntry;
 class Profile;
 class RenderWidgetHostView;
+class RenderViewHost;
 class SiteInstance;
 
 // Manages RenderViewHosts for a TabContents. Normally there is only one and
@@ -59,6 +60,13 @@ class RenderViewHostManager
     // is none.
     virtual NavigationEntry*
         GetLastCommittedNavigationEntryForRenderManager() = 0;
+
+    // Returns true if the location bar should be focused by default rather than
+    // the page contents.
+    virtual bool FocusLocationBarByDefault() = 0;
+
+    // Focuses the location bar.
+    virtual void SetFocusToLocationBar(bool select_all) = 0;
   };
 
   // Both delegate pointers must be non-NULL and are not owned by this class.
@@ -86,11 +94,7 @@ class RenderViewHostManager
 
   // Returns the view associated with the current RenderViewHost, or NULL if
   // there is no current one.
-  RenderWidgetHostView* current_view() const {
-    if (!render_view_host_)
-      return NULL;
-    return render_view_host_->view();
-  }
+  RenderWidgetHostView* GetRenderWidgetHostView() const;
 
   // Returns the pending render view host, or NULL if there is no pending one.
   RenderViewHost* pending_render_view_host() const {
@@ -160,6 +164,9 @@ class RenderViewHostManager
   virtual void OnCrossSiteResponse(int new_render_process_host_id,
                                    int new_request_id);
   virtual void OnCrossSiteNavigationCanceled();
+
+  // Called when a RenderViewHost is about to be deleted.
+  void RenderViewDeleted(RenderViewHost* rvh);
 
  private:
   friend class TestTabContents;

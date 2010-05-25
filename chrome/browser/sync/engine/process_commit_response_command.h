@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/sync/engine/model_changing_syncer_command.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 
 namespace syncable {
@@ -26,21 +25,25 @@ class ProcessCommitResponseCommand : public ModelChangingSyncerCommand {
   ProcessCommitResponseCommand();
   virtual ~ProcessCommitResponseCommand();
 
-  virtual void ModelChangingExecuteImpl(SyncerSession* session);
+  // ModelChangingSyncerCommand implementation.
+  virtual bool ModelNeutralExecuteImpl(sessions::SyncSession* session);
+  virtual void ModelChangingExecuteImpl(sessions::SyncSession* session);
+
  private:
-  CommitResponse::RESPONSE_TYPE ProcessSingleCommitResponse(
+  CommitResponse::ResponseType ProcessSingleCommitResponse(
       syncable::WriteTransaction* trans,
       const sync_pb::CommitResponse_EntryResponse& pb_server_entry,
       const syncable::Id& pre_commit_id, std::set<syncable::Id>*
       conflicting_new_directory_ids,
-      std::set<syncable::Id>* deleted_folders,
-      SyncerSession* const session);
+      std::set<syncable::Id>* deleted_folders);
+
+  // Actually does the work of execute.
+  void ProcessCommitResponse(sessions::SyncSession* session);
 
   void ProcessSuccessfulCommitResponse(syncable::WriteTransaction* trans,
       const CommitResponse_EntryResponse& server_entry,
       const syncable::Id& pre_commit_id, syncable::MutableEntry* local_entry,
-      bool syncing_was_set, std::set<syncable::Id>* deleted_folders,
-      SyncerSession* const session);
+      bool syncing_was_set, std::set<syncable::Id>* deleted_folders);
 
   void PerformCommitTimeNameAside(
       syncable::WriteTransaction* trans,

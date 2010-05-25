@@ -32,7 +32,8 @@ typedef UITest ProcessSingletonLinuxTest;
 // A helper method to call ProcessSingleton::NotifyOtherProcess().
 // |url| will be added to CommandLine for current process, so that it can be
 // sent to browser process by ProcessSingleton::NotifyOtherProcess().
-ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url) {
+ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url,
+                                                  int timeout_ms) {
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
 
@@ -49,10 +50,8 @@ ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url) {
 
   ProcessSingleton process_singleton(user_data_dir);
 
-  // Use a short timeout to keep tests fast.
-  const int kTimeoutSeconds = 3;
-  return process_singleton.NotifyOtherProcessWithTimeout(new_cmd_line,
-                                                         kTimeoutSeconds);
+  return process_singleton.NotifyOtherProcessWithTimeout(
+      new_cmd_line, timeout_ms / 1000);
 }
 
 }  // namespace
@@ -81,20 +80,29 @@ TEST_F(ProcessSingletonLinuxTest, CheckSocketFile) {
   ASSERT_TRUE(S_ISSOCK(statbuf.st_mode));
 }
 
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+// The following tests in linux/view does not pass without a window manager,
+// which is true in build/try bots.
+// See http://crbug.com/30953.
+#define NotifyOtherProcessSuccess FLAKY_NotifyOtherProcessSuccess
+#define NotifyOtherProcessHostChanged FLAKY_NotifyOtherProcessHostChanged
+#endif
+
 // TODO(james.su@gmail.com): port following tests to Windows.
 // Test success case of NotifyOtherProcess().
 TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessSuccess) {
   std::string url("about:blank");
   int original_tab_count = GetTabCount();
 
-  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED, NotifyOtherProcess(url));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED,
+            NotifyOtherProcess(url, action_timeout_ms()));
   EXPECT_EQ(original_tab_count + 1, GetTabCount());
   EXPECT_EQ(url, GetActiveTabURL().spec());
 }
 
 // Test failure case of NotifyOtherProcess().
 TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessFailure) {
-  base::ProcessId pid = ChromeBrowserProcessId(user_data_dir());
+  base::ProcessId pid = browser_process_id();
 
   ASSERT_GE(pid, 1);
 
@@ -107,10 +115,11 @@ TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessFailure) {
   HANDLE_EINTR(waitpid(pid, 0, WUNTRACED));
 
   std::string url("about:blank");
-  EXPECT_EQ(ProcessSingleton::PROCESS_NONE, NotifyOtherProcess(url));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE,
+            NotifyOtherProcess(url, action_timeout_ms()));
 
   // Wait for a while to make sure the browser process is actually killed.
-  EXPECT_FALSE(CrashAwareSleep(1000));
+  EXPECT_FALSE(CrashAwareSleep(sleep_timeout_ms()));
 }
 
 // Test that we can still notify a process on the same host even after the
@@ -123,7 +132,8 @@ TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessHostChanged) {
   int original_tab_count = GetTabCount();
 
   std::string url("about:blank");
-  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED, NotifyOtherProcess(url));
+  EXPECT_EQ(ProcessSingleton::PROCESS_NOTIFIED,
+            NotifyOtherProcess(url, action_timeout_ms()));
   EXPECT_EQ(original_tab_count + 1, GetTabCount());
   EXPECT_EQ(url, GetActiveTabURL().spec());
 }
@@ -131,19 +141,20 @@ TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessHostChanged) {
 // Test that we fail when lock says process is on another host and we can't
 // notify it over the socket.
 TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessDifferingHost) {
-  base::ProcessId pid = ChromeBrowserProcessId(user_data_dir());
+  base::ProcessId pid = browser_process_id();
 
   ASSERT_GE(pid, 1);
 
   // Kill the browser process, so that it does not respond on the socket.
   kill(pid, SIGKILL);
   // Wait for a while to make sure the browser process is actually killed.
-  EXPECT_FALSE(CrashAwareSleep(1000));
+  EXPECT_FALSE(CrashAwareSleep(sleep_timeout_ms()));
 
   FilePath lock_path = user_data_dir().Append(chrome::kSingletonLockFilename);
   EXPECT_EQ(0, unlink(lock_path.value().c_str()));
   EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path.value().c_str()));
 
   std::string url("about:blank");
-  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE, NotifyOtherProcess(url));
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
+            NotifyOtherProcess(url, action_timeout_ms()));
 }

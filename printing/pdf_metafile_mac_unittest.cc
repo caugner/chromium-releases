@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/gfx/rect.h"
+#include "gfx/rect.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TEST(PdfMetafileTest, Pdf) {
@@ -29,7 +29,7 @@ TEST(PdfMetafileTest, Pdf) {
   pdf.Close();
 
   // Check data size.
-  unsigned int size = pdf.GetDataSize();
+  uint32 size = pdf.GetDataSize();
   EXPECT_GT(size, 0U);
 
   // Get resulting data.

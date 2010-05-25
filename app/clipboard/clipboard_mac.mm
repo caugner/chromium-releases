@@ -8,8 +8,12 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/mac_util.h"
+#include "base/scoped_cftyperef.h"
+#include "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/size.h"
 
 namespace {
 
@@ -60,7 +64,9 @@ void Clipboard::WriteHTML(const char* markup_data,
                           size_t markup_len,
                           const char* url_data,
                           size_t url_len) {
-  std::string html_fragment_str(markup_data, markup_len);
+  // We need to mark it as utf-8. (see crbug.com/11957)
+  std::string html_fragment_str("<meta charset='utf-8'>");
+  html_fragment_str.append(markup_data, markup_len);
   NSString *html_fragment = base::SysUTF8ToNSString(html_fragment_str);
 
   // TODO(avi): url_data?
@@ -94,29 +100,52 @@ void Clipboard::WriteBookmark(const char* title_data,
   [pb setString:title forType:kUTTypeURLName];
 }
 
-void Clipboard::WriteFiles(const char* file_data, size_t file_len) {
-  NSMutableArray* fileList = [NSMutableArray arrayWithCapacity:1];
+void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
+  const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
 
-  // Offset of current filename from start of file_data array.
-  size_t current_filename_offset = 0;
+  // Safe because the image goes away before the call returns.
+  scoped_cftyperef<CFDataRef> data(
+      CFDataCreateWithBytesNoCopy(kCFAllocatorDefault,
+                                  reinterpret_cast<const UInt8*>(pixel_data),
+                                  size->width()*size->height()*4,
+                                  kCFAllocatorNull));
 
-  // file_data is double null terminated (see table at top of clipboard.h).
-  // So this loop can ignore the second null terminator, thus file_len - 1.
-  // TODO(playmobil): If we need a loop like this on other platforms then split
-  // this out into a common function that outputs a std::vector<const char*>.
-  for (size_t i = 0; i < file_len - 1; ++i) {
-    if (file_data[i] == '\0') {
-      const char* filename = &file_data[current_filename_offset];
-      [fileList addObject:[NSString stringWithUTF8String:filename]];
+  scoped_cftyperef<CGDataProviderRef> data_provider(
+      CGDataProviderCreateWithCFData(data));
 
-      current_filename_offset = i + 1;
-      continue;
-    }
-  }
+  scoped_cftyperef<CGImageRef> cgimage(
+      CGImageCreate(size->width(),
+                    size->height(),
+                    8,
+                    32,
+                    size->width()*4,
+                    mac_util::GetSRGBColorSpace(),  // TODO(avi): do better
+                    kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                    data_provider,
+                    NULL,
+                    false,
+                    kCGRenderingIntentDefault));
+  // Aggressively free storage since image buffers can potentially be very
+  // large.
+  data_provider.reset();
+  data.reset();
 
+  scoped_nsobject<NSBitmapImageRep> bitmap(
+      [[NSBitmapImageRep alloc] initWithCGImage:cgimage]);
+  cgimage.reset();
+
+  scoped_nsobject<NSImage> image([[NSImage alloc] init]);
+  [image addRepresentation:bitmap];
+
+  // An API to ask the NSImage to write itself to the clipboard comes in 10.6 :(
+  // For now, spit out the image as a TIFF.
   NSPasteboard* pb = GetPasteboard();
-  [pb addTypes:[NSArray arrayWithObject:NSFilenamesPboardType] owner:nil];
-  [pb setPropertyList:fileList forType:NSFilenamesPboardType];
+  [pb addTypes:[NSArray arrayWithObject:NSTIFFPboardType] owner:nil];
+  NSData *tiff_data = [image TIFFRepresentation];
+  LOG_IF(ERROR, tiff_data == NULL) << "Failed to allocate image for clipboard";
+  if (tiff_data) {
+    [pb setData:tiff_data forType:NSTIFFPboardType];
+  }
 }
 
 // Write an extra flavor that signifies WebKit was the last to modify the
@@ -273,6 +302,12 @@ Clipboard::FormatType Clipboard::GetFilenameWFormatType() {
 // static
 Clipboard::FormatType Clipboard::GetHtmlFormatType() {
   static const std::string type = base::SysNSStringToUTF8(NSHTMLPboardType);
+  return type;
+}
+
+// static
+Clipboard::FormatType Clipboard::GetBitmapFormatType() {
+  static const std::string type = base::SysNSStringToUTF8(NSTIFFPboardType);
   return type;
 }
 

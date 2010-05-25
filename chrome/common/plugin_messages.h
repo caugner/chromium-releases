@@ -13,16 +13,16 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
-#include "base/gfx/rect.h"
 #include "base/basictypes.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/webkit_param_traits.h"
+#include "gfx/native_widget_types.h"
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/npapi/bindings/npapi.h"
-#include "webkit/api/public/WebBindings.h"
-#include "webkit/api/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/npruntime_util.h"
 
 // Name prefix of the event handle when a message box is displayed.
@@ -38,30 +38,25 @@ struct PluginMsg_Init_Params {
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_values;
   bool load_manually;
+  int host_render_view_routing_id;
+#if defined(OS_MACOSX)
+  gfx::Rect containing_window_frame;
+  gfx::Rect containing_content_frame;
+  bool containing_window_has_focus;
+#endif
 };
 
 struct PluginHostMsg_URLRequest_Params {
+  std::string url;
   std::string method;
-  bool is_javascript_url;
   std::string target;
   std::vector<char> buffer;
-  bool is_file_data;
-  bool notify;
-  std::string url;
-  intptr_t notify_data;
+  int notify_id;
   bool popups_allowed;
 };
 
-struct PluginMsg_URLRequestReply_Params {
-  int resource_id;
-  GURL url;
-  bool notify_needed;
-  intptr_t notify_data;
-  intptr_t stream;
-};
-
 struct PluginMsg_DidReceiveResponseParams {
-  int id;
+  unsigned long id;
   std::string mime_type;
   std::string headers;
   uint32 expected_length;
@@ -82,11 +77,11 @@ enum NPVariant_ParamEnum {
   NPVARIANT_PARAM_STRING,
   // Used when when the NPObject is running in the caller's process, so we
   // create an NPObjectProxy in the other process.
-  NPVARIANT_PARAM_OBJECT_ROUTING_ID,
+  NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID,
   // Used when the NPObject we're sending is running in the callee's process
   // (i.e. we have an NPObjectProxy for it).  In that case we want the callee
   // to just use the raw pointer.
-  NPVARIANT_PARAM_OBJECT_POINTER,
+  NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID,
 };
 
 struct NPVariant_Param {
@@ -96,7 +91,6 @@ struct NPVariant_Param {
   double double_value;
   std::string string_value;
   int npobject_routing_id;
-  intptr_t npobject_pointer;
 };
 
 struct PluginMsg_UpdateGeometry_Param {
@@ -104,6 +98,15 @@ struct PluginMsg_UpdateGeometry_Param {
   gfx::Rect clip_rect;
   TransportDIB::Handle windowless_buffer;
   TransportDIB::Handle background_buffer;
+  bool transparent;
+
+#if defined(OS_MACOSX)
+  // This field contains a key that the plug-in process is expected to return
+  // to the renderer in its ACK message, unless the value is -1, in which case
+  // no ACK message is required.  Other than the special -1 value, the values
+  // used in ack_key are opaque to the plug-in process.
+  int ack_key;
+#endif
 };
 
 
@@ -121,6 +124,12 @@ struct ParamTraits<PluginMsg_Init_Params> {
     WriteParam(m, p.arg_names);
     WriteParam(m, p.arg_values);
     WriteParam(m, p.load_manually);
+    WriteParam(m, p.host_render_view_routing_id);
+#if defined(OS_MACOSX)
+    WriteParam(m, p.containing_window_frame);
+    WriteParam(m, p.containing_content_frame);
+    WriteParam(m, p.containing_window_has_focus);
+#endif
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->containing_window) &&
@@ -128,7 +137,15 @@ struct ParamTraits<PluginMsg_Init_Params> {
            ReadParam(m, iter, &p->page_url) &&
            ReadParam(m, iter, &p->arg_names) &&
            ReadParam(m, iter, &p->arg_values) &&
-           ReadParam(m, iter, &p->load_manually);
+           ReadParam(m, iter, &p->load_manually) &&
+           ReadParam(m, iter, &p->host_render_view_routing_id)
+#if defined(OS_MACOSX)
+           &&
+           ReadParam(m, iter, &p->containing_window_frame) &&
+           ReadParam(m, iter, &p->containing_content_frame) &&
+           ReadParam(m, iter, &p->containing_window_has_focus)
+#endif
+           ;
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -143,6 +160,16 @@ struct ParamTraits<PluginMsg_Init_Params> {
     LogParam(p.arg_values, l);
     l->append(L", ");
     LogParam(p.load_manually, l);
+    l->append(L", ");
+    LogParam(p.host_render_view_routing_id, l);
+#if defined(OS_MACOSX)
+    l->append(L", ");
+    LogParam(p.containing_window_frame, l);
+    l->append(L", ");
+    LogParam(p.containing_content_frame, l);
+    l->append(L", ");
+    LogParam(p.containing_window_has_focus, l);
+#endif
     l->append(L")");
   }
 };
@@ -151,80 +178,35 @@ template <>
 struct ParamTraits<PluginHostMsg_URLRequest_Params> {
   typedef PluginHostMsg_URLRequest_Params param_type;
   static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.url);
     WriteParam(m, p.method);
-    WriteParam(m, p.is_javascript_url);
     WriteParam(m, p.target);
     WriteParam(m, p.buffer);
-    WriteParam(m, p.is_file_data);
-    WriteParam(m, p.notify);
-    WriteParam(m, p.url);
-    WriteParam(m, p.notify_data);
+    WriteParam(m, p.notify_id);
     WriteParam(m, p.popups_allowed);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return
+      ReadParam(m, iter, &p->url) &&
       ReadParam(m, iter, &p->method) &&
-      ReadParam(m, iter, &p->is_javascript_url) &&
       ReadParam(m, iter, &p->target) &&
       ReadParam(m, iter, &p->buffer) &&
-      ReadParam(m, iter, &p->is_file_data) &&
-      ReadParam(m, iter, &p->notify) &&
-      ReadParam(m, iter, &p->url) &&
-      ReadParam(m, iter, &p->notify_data) &&
+      ReadParam(m, iter, &p->notify_id) &&
       ReadParam(m, iter, &p->popups_allowed);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
-    LogParam(p.method, l);
+    LogParam(p.url, l);
     l->append(L", ");
-    LogParam(p.is_javascript_url, l);
+    LogParam(p.method, l);
     l->append(L", ");
     LogParam(p.target, l);
     l->append(L", ");
     LogParam(p.buffer, l);
     l->append(L", ");
-    LogParam(p.is_file_data, l);
-    l->append(L", ");
-    LogParam(p.notify, l);
-    l->append(L", ");
-    LogParam(p.url, l);
-    l->append(L", ");
-    LogParam(p.notify_data, l);
+    LogParam(p.notify_id, l);
     l->append(L", ");
     LogParam(p.popups_allowed, l);
-    l->append(L")");
-  }
-};
-
-template <>
-struct ParamTraits<PluginMsg_URLRequestReply_Params> {
-  typedef PluginMsg_URLRequestReply_Params param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.resource_id);
-    WriteParam(m, p.url);
-    WriteParam(m, p.notify_needed);
-    WriteParam(m, p.notify_data);
-    WriteParam(m, p.stream);
-  }
-  static bool Read(const Message* m, void** iter, param_type* p) {
-    return
-      ReadParam(m, iter, &p->resource_id) &&
-      ReadParam(m, iter, &p->url) &&
-      ReadParam(m, iter, &p->notify_needed) &&
-      ReadParam(m, iter, &p->notify_data) &&
-      ReadParam(m, iter, &p->stream);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"(");
-    LogParam(p.resource_id, l);
-    l->append(L", ");
-    LogParam(p.url, l);
-    l->append(L", ");
-    LogParam(p.notify_needed, l);
-    l->append(L", ");
-    LogParam(p.notify_data, l);
-    l->append(L", ");
-    LogParam(p.stream, l);
     l->append(L")");
   }
 };
@@ -340,15 +322,12 @@ struct ParamTraits<NPVariant_Param> {
       WriteParam(m, p.double_value);
     } else if (p.type == NPVARIANT_PARAM_STRING) {
       WriteParam(m, p.string_value);
-    } else if (p.type == NPVARIANT_PARAM_OBJECT_ROUTING_ID) {
+    } else if (p.type == NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID ||
+               p.type == NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID) {
       // This is the routing id used to connect NPObjectProxy in the other
-      // process with NPObjectStub in this process.
+      // process with NPObjectStub in this process or to identify the raw
+      // npobject pointer to be used in the callee process.
       WriteParam(m, p.npobject_routing_id);
-      // The actual NPObject pointer, in case it's passed back to this process.
-      WriteParam(m, p.npobject_pointer);
-    } else if (p.type == NPVARIANT_PARAM_OBJECT_POINTER) {
-      // The NPObject resides in the other process, so just send its pointer.
-      WriteParam(m, p.npobject_pointer);
     } else {
       DCHECK(p.type == NPVARIANT_PARAM_VOID || p.type == NPVARIANT_PARAM_NULL);
     }
@@ -368,12 +347,9 @@ struct ParamTraits<NPVariant_Param> {
       result = ReadParam(m, iter, &r->double_value);
     } else if (r->type == NPVARIANT_PARAM_STRING) {
       result = ReadParam(m, iter, &r->string_value);
-    } else if (r->type == NPVARIANT_PARAM_OBJECT_ROUTING_ID) {
-      result =
-          ReadParam(m, iter, &r->npobject_routing_id) &&
-          ReadParam(m, iter, &r->npobject_pointer);
-    } else if (r->type == NPVARIANT_PARAM_OBJECT_POINTER) {
-      result = ReadParam(m, iter, &r->npobject_pointer);
+    } else if (r->type == NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID ||
+               r->type == NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID) {
+      result = ReadParam(m, iter, &r->npobject_routing_id);
     } else if ((r->type == NPVARIANT_PARAM_VOID) ||
                (r->type == NPVARIANT_PARAM_NULL)) {
       result = true;
@@ -392,11 +368,9 @@ struct ParamTraits<NPVariant_Param> {
       LogParam(p.double_value, l);
     } else if (p.type == NPVARIANT_PARAM_STRING) {
       LogParam(p.string_value, l);
-    } else if (p.type == NPVARIANT_PARAM_OBJECT_ROUTING_ID) {
+    } else if (p.type == NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID ||
+               p.type == NPVARIANT_PARAM_RECEIVER_OBJECT_ROUTING_ID) {
       LogParam(p.npobject_routing_id, l);
-      LogParam(p.npobject_pointer, l);
-    } else if (p.type == NPVARIANT_PARAM_OBJECT_POINTER) {
-      LogParam(p.npobject_pointer, l);
     }
   }
 };
@@ -413,13 +387,23 @@ struct ParamTraits<PluginMsg_UpdateGeometry_Param> {
     WriteParam(m, p.clip_rect);
     WriteParam(m, p.windowless_buffer);
     WriteParam(m, p.background_buffer);
+    WriteParam(m, p.transparent);
+#if defined(OS_MACOSX)
+    WriteParam(m, p.ack_key);
+#endif
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     return
       ReadParam(m, iter, &r->window_rect) &&
       ReadParam(m, iter, &r->clip_rect) &&
       ReadParam(m, iter, &r->windowless_buffer) &&
-      ReadParam(m, iter, &r->background_buffer);
+      ReadParam(m, iter, &r->background_buffer) &&
+      ReadParam(m, iter, &r->transparent)
+#if defined(OS_MACOSX)
+      &&
+      ReadParam(m, iter, &r->ack_key)
+#endif
+      ;
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -430,6 +414,12 @@ struct ParamTraits<PluginMsg_UpdateGeometry_Param> {
     LogParam(p.windowless_buffer, l);
     l->append(L", ");
     LogParam(p.background_buffer, l);
+    l->append(L", ");
+    LogParam(p.transparent, l);
+#if defined(OS_MACOSX)
+    l->append(L", ");
+    LogParam(p.ack_key, l);
+#endif
     l->append(L")");
   }
 };

@@ -464,6 +464,10 @@ bool HttpResponseHeaders::HasHeaderValue(const std::string& name,
   return false;
 }
 
+bool HttpResponseHeaders::HasHeader(const std::string& name) const {
+  return FindHeader(0, name) != std::string::npos;
+}
+
 // Note: this implementation implicitly assumes that line_end points at a valid
 // sentinel character (such as '\0').
 // static
@@ -724,12 +728,7 @@ bool HttpResponseHeaders::GetCharset(std::string* charset) const {
 }
 
 bool HttpResponseHeaders::IsRedirect(std::string* location) const {
-  // Users probably want to see 300 (multiple choice) pages, so we don't count
-  // them as redirects that need to be followed.
-  if (!(response_code_ == 301 ||
-        response_code_ == 302 ||
-        response_code_ == 303 ||
-        response_code_ == 307))
+  if (!IsRedirectResponseCode(response_code_))
     return false;
 
   // If we lack a Location header, then we can't treat this as a redirect.
@@ -751,6 +750,16 @@ bool HttpResponseHeaders::IsRedirect(std::string* location) const {
   }
 
   return true;
+}
+
+// static
+bool HttpResponseHeaders::IsRedirectResponseCode(int response_code) {
+  // Users probably want to see 300 (multiple choice) pages, so we don't count
+  // them as redirects that need to be followed.
+  return (response_code == 301 ||
+          response_code == 302 ||
+          response_code == 303 ||
+          response_code == 307);
 }
 
 // From RFC 2616 section 13.2.4:
@@ -994,6 +1003,32 @@ bool HttpResponseHeaders::IsKeepAlive() const {
   }
 
   return keep_alive;
+}
+
+bool HttpResponseHeaders::HasStrongValidators() const {
+  std::string etag_value;
+  EnumerateHeader(NULL, "etag", &etag_value);
+  if (!etag_value.empty()) {
+    size_t slash = etag_value.find('/');
+    if (slash == std::string::npos || slash == 0)
+      return true;
+
+    std::string::const_iterator i = etag_value.begin();
+    std::string::const_iterator j = etag_value.begin() + slash;
+    HttpUtil::TrimLWS(&i, &j);
+    if (!LowerCaseEqualsASCII(i, j, "w"))
+      return true;
+  }
+
+  Time last_modified;
+  if (!GetLastModifiedValue(&last_modified))
+    return false;
+
+  Time date;
+  if (!GetDateValue(&date))
+    return false;
+
+  return ((date - last_modified).InSeconds() >= 60);
 }
 
 // From RFC 2616:

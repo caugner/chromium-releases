@@ -1,12 +1,13 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_BROWSER_WINDOW_H_
 
-#include "app/gfx/native_widget_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/common/content_settings_types.h"
+#include "gfx/native_widget_types.h"
 
 class Browser;
 class BrowserWindowTesting;
@@ -20,7 +21,9 @@ class StatusBubble;
 class TabContents;
 class TabContentsContainer;
 class TemplateURL;
+#if !defined(OS_MACOSX)
 class ToolbarView;
+#endif
 struct NativeWebKeyboardEvent;
 
 namespace gfx {
@@ -118,12 +121,15 @@ class BrowserWindow {
   virtual void SetFullscreen(bool fullscreen) = 0;
   virtual bool IsFullscreen() const = 0;
 
+  // Returns true if the fullscreen bubble is visible.
+  virtual bool IsFullscreenBubbleVisible() const = 0;
+
   // Returns the location bar.
   virtual LocationBar* GetLocationBar() const = 0;
 
   // Tries to focus the location bar.  Clears the window focus (to avoid
   // inconsistent state) if this fails.
-  virtual void SetFocusToLocationBar() = 0;
+  virtual void SetFocusToLocationBar(bool select_all) = 0;
 
   // Informs the view whether or not a load is in progress for the current tab.
   // The view can use this notification to update the go/stop button.
@@ -136,8 +142,19 @@ class BrowserWindow {
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
 
+  // Focuses the page and app menus like they were a menu bar.
+  //
+  // Not used on the Mac, which has a "normal" menu bar.
+  virtual void FocusPageAndAppMenus() = 0;
+
   // Returns whether the bookmark bar is visible or not.
   virtual bool IsBookmarkBarVisible() const = 0;
+
+  // Returns whether the bookmark bar is animating or not.
+  virtual bool IsBookmarkBarAnimating() const = 0;
+
+  // Returns whether the tool bar is visible or not.
+  virtual bool IsToolbarVisible() const = 0;
 
   // Returns the rect where the resize corner should be drawn by the render
   // widget host view (on top of what the renderer returns). We return an empty
@@ -205,8 +222,14 @@ class BrowserWindow {
   // Shows the repost form confirmation dialog box.
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) = 0;
 
-  // Shows a dialog to the user that the history is too new.
-  virtual void ShowHistoryTooNewDialog() = 0;
+  // Shows the Content Settings dialog box.
+  virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
+                                         Profile* profile) = 0;
+
+  // Shows a dialog to the user that something is wrong with the profile.
+  // |message_id| is the ID for a string in the string table which will be
+  // displayed in the dialog.
+  virtual void ShowProfileErrorDialog(int message_id) = 0;
 
   // Show the bubble that indicates to the user that a theme is being installed.
   virtual void ShowThemeInstallBubble() = 0;
@@ -259,9 +282,30 @@ class BrowserWindow {
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
 
-  // Returns the id of the keyboard accelerator associated with the given
-  // keyboard event if one exists, otherwise -1.
-  virtual int GetCommandId(const NativeWebKeyboardEvent& event) = 0;
+  // Allows the BrowserWindow object to handle the specified keyboard event
+  // before sending it to the renderer.
+  // Returns true if the |event| was handled. Otherwise, if the |event| would
+  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
+  // |*is_keyboard_shortcut| should be set to true.
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) = 0;
+
+  // Allows the BrowserWindow object to handle the specified keyboard event,
+  // if the renderer did not process it.
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) = 0;
+
+  // Shows the create web app shortcut dialog box.
+  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents) = 0;
+
+#if defined(OS_CHROMEOS)
+  // Toggles compact navigation bar.
+  virtual void ToggleCompactNavigationBar() = 0;
+#endif
+
+  // Clipboard commands applied to the whole browser window.
+  virtual void Cut() = 0;
+  virtual void Copy() = 0;
+  virtual void Paste() = 0;
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
@@ -273,9 +317,11 @@ class BrowserWindow {
   friend class BrowserList;
   friend class BrowserView;
   virtual void DestroyBrowser() = 0;
+
+  ~BrowserWindow() {}
 };
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
 class BookmarkBarView;
 class LocationBarView;
 
@@ -288,7 +334,7 @@ class View;
 // UI used only by UI test automation.
 class BrowserWindowTesting {
  public:
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(TOOLKIT_VIEWS)
   // Returns the BookmarkBarView.
   virtual BookmarkBarView* GetBookmarkBarView() const = 0;
 

@@ -2,12 +2,12 @@
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
-#include "app/gfx/gdi_util.h"
 #include "base/logging.h"
 #include "base/pickle.h"
+#include "gfx/gdi_util.h"
 #include "grit/webkit_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/api/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
 #include "webkit/glue/webcursor.h"
 
 using WebKit::WebCursorInfo;
@@ -203,12 +203,12 @@ void WebCursor::InitPlatformData() {
 bool WebCursor::SerializePlatformData(Pickle* pickle) const {
   // There are some issues with converting certain HCURSORS to bitmaps. The
   // HCURSOR being a user object can be marshaled as is.
-  return pickle->WriteIntPtr(reinterpret_cast<intptr_t>(external_cursor_));
+  // HCURSORs are always 32 bits on Windows, even on 64 bit systems.
+  return pickle->WriteUInt32(reinterpret_cast<uint32>(external_cursor_));
 }
 
 bool WebCursor::DeserializePlatformData(const Pickle* pickle, void** iter) {
-  return pickle->ReadIntPtr(iter,
-                            reinterpret_cast<intptr_t*>(&external_cursor_));
+  return pickle->ReadUInt32(iter, reinterpret_cast<uint32*>(&external_cursor_));
 }
 
 bool WebCursor::IsPlatformDataEqual(const WebCursor& other) const {

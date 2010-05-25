@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_VIEWS_INFOBARS_INFOBARS_H_
 
 #include "app/animation.h"
+#include "base/task.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "views/controls/button/button.h"
 #include "views/controls/link.h"
@@ -23,6 +24,19 @@ class NativeButton;
 // This file contains implementations for some general purpose InfoBars. See
 // chrome/browser/tab_contents/infobar_delegate.h for the delegate interface(s)
 // that you must implement to use these.
+
+class InfoBarBackground : public views::Background {
+ public:
+  explicit InfoBarBackground(InfoBarDelegate::Type infobar_type);
+
+  // Overridden from views::Background:
+  virtual void Paint(gfx::Canvas* canvas, views::View* view) const;
+
+ private:
+  scoped_ptr<views::Background> gradient_background_;
+
+  DISALLOW_COPY_AND_ASSIGN(InfoBarBackground);
+};
 
 class InfoBar : public views::View,
                 public views::ButtonListener,
@@ -52,11 +66,19 @@ class InfoBar : public views::View,
   // is called.
   void Close();
 
-  // The target height of the infobar, regardless of what its current height
+  // The target height of the InfoBar, regardless of what its current height
   // is (due to animation).
-  static const double kTargetHeight;
+  static const double kDefaultTargetHeight;
+
+  static const int kHorizontalPadding;
+  static const int kIconLabelSpacing;
+  static const int kButtonButtonSpacing;
+  static const int kEndOfLabelSpacing;
+  static const int kCloseButtonSpacing;
+  static const int kButtonInLabelSpacing;
 
   // Overridden from views::View:
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
 
@@ -74,14 +96,28 @@ class InfoBar : public views::View,
   // (Will lead to this InfoBar being closed).
   void RemoveInfoBar() const;
 
+  void set_target_height(double height) { target_height_ = height; }
+
+  SlideAnimation* animation() { return animation_.get(); }
+
+  // Returns a centered y-position of a control of height specified in
+  // |prefsize| within the standard InfoBar height. Stable during an animation.
+  int CenterY(const gfx::Size prefsize);
+
+  // Returns a centered y-position of a control of height specified in
+  // |prefsize| within the standard InfoBar height, adjusted according to the
+  // current amount of animation offset the |parent| InfoBar currently has.
+  // Changes during an animation.
+  int OffsetY(views::View* parent, const gfx::Size prefsize);
+
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
- private:
   // Overridden from AnimationDelegate:
   virtual void AnimationProgressed(const Animation* animation);
   virtual void AnimationEnded(const Animation* animation);
 
+ private:
   // Called when an InfoBar is added or removed from a view hierarchy to do
   // setup and shutdown.
   void InfoBarAdded();
@@ -95,6 +131,9 @@ class InfoBar : public views::View,
   // Deletes this object (called after a return to the message loop to allow
   // the stack in ViewHierarchyChanged to unwind).
   void DeleteSelf();
+
+  // Storage of string needed for accessibility.
+  std::wstring accessible_name_;
 
   // The InfoBar's container
   InfoBarContainer* container_;
@@ -114,6 +153,9 @@ class InfoBar : public views::View,
 
   // Used to delete this object after a return to the message loop.
   ScopedRunnableMethodFactory<InfoBar> delete_factory_;
+
+  // The target height for the InfoBar.
+  double target_height_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBar);
 };
@@ -162,10 +204,14 @@ class LinkInfoBar : public InfoBar,
   DISALLOW_COPY_AND_ASSIGN(LinkInfoBar);
 };
 
-class ConfirmInfoBar : public AlertInfoBar {
+class ConfirmInfoBar : public AlertInfoBar,
+                       public views::LinkController  {
  public:
   explicit ConfirmInfoBar(ConfirmInfoBarDelegate* delegate);
   virtual ~ConfirmInfoBar();
+
+  // Overridden from views::LinkController:
+  virtual void LinkActivated(views::Link* source, int event_flags);
 
   // Overridden from views::View:
   virtual void Layout();
@@ -189,6 +235,7 @@ class ConfirmInfoBar : public AlertInfoBar {
 
   views::NativeButton* ok_button_;
   views::NativeButton* cancel_button_;
+  views::Link* link_;
 
   bool initialized_;
 
@@ -196,4 +243,4 @@ class ConfirmInfoBar : public AlertInfoBar {
 };
 
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_INFOBARS_INFOBARS_H_
+#endif  // CHROME_BROWSER_VIEWS_INFOBARS_INFOBARS_H_

@@ -41,7 +41,7 @@ using talk_base::ConstantLabel;
 
 namespace buzz {
 
-#ifdef _DEBUG
+#if !defined(NDEBUG)
 const ConstantLabel XmppLoginTask::LOGINTASK_STATES[] = {
   KLABEL(LOGINSTATE_INIT),
   KLABEL(LOGINSTATE_STREAMSTART_SENT),
@@ -56,7 +56,7 @@ const ConstantLabel XmppLoginTask::LOGINTASK_STATES[] = {
   KLABEL(LOGINSTATE_DONE),
   LASTLABEL
 };
-#endif  // _DEBUG
+#endif  // !defined(NDEBUG)
 
 XmppLoginTask::XmppLoginTask(XmppEngineImpl * pctx) :
   pctx_(pctx),
@@ -100,10 +100,10 @@ XmppLoginTask::Advance() {
 
     const XmlElement * element = NULL;
 
-#if _DEBUG
+#if !defined(NDEBUG)
     LOG(LS_VERBOSE) << "XmppLoginTask::Advance - "
       << talk_base::ErrorName(state_, LOGINTASK_STATES);
-#endif  // _DEBUG
+#endif  // !defined(NDEBUG)
 
     switch (state_) {
 
@@ -216,7 +216,7 @@ XmppLoginTask::Advance() {
           return Failure(XmppEngine::ERROR_AUTH);
         }
 
-        auth->SetAttr(QN_GOOGLE_ALLOW_NON_GOOGLE_ID_XMPP_LOGIN, "true");
+        auth->SetAttr(QN_GOOGLE_ALLOW_GENERATED_JID_XMPP_LOGIN, "true");
         auth->SetAttr(QN_GOOGLE_AUTH_CLIENT_USES_FULL_BIND_RESULT, "true");
 
         pctx_->InternalSendStanza(auth);

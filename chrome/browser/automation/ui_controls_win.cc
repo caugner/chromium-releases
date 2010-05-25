@@ -24,8 +24,6 @@ class InputDispatcher : public base::RefCounted<InputDispatcher> {
  public:
   InputDispatcher(Task* task, WPARAM message_waiting_for);
 
-  ~InputDispatcher();
-
   // Invoked from the hook. If mouse_message matches message_waiting_for_
   // MatchingMessageFound is invoked.
   void DispatchedMessage(WPARAM mouse_message);
@@ -35,6 +33,10 @@ class InputDispatcher : public base::RefCounted<InputDispatcher> {
   void MatchingMessageFound();
 
  private:
+  friend class base::RefCounted<InputDispatcher>;
+
+  ~InputDispatcher();
+
    // Notifies the task and release this (which should delete it).
   void NotifyTask();
 
@@ -164,6 +166,21 @@ bool SendKeyPressImpl(base::KeyboardCode key,
   scoped_refptr<InputDispatcher> dispatcher(
       task ? new InputDispatcher(task, WM_KEYUP) : NULL);
 
+  // If a pop-up menu is open, it won't receive events sent using SendInput.
+  // Check for a pop-up menu using its window class (#32768) and if one
+  // exists, send the key event directly there.
+  HWND popup_menu = ::FindWindow(L"#32768", 0);
+  if (popup_menu != NULL && popup_menu == ::GetTopWindow(NULL)) {
+    WPARAM w_param = win_util::KeyboardCodeToWin(key);
+    LPARAM l_param = 0;
+    ::SendMessage(popup_menu, WM_KEYDOWN, w_param, l_param);
+    ::SendMessage(popup_menu, WM_KEYUP, w_param, l_param);
+
+    if (dispatcher.get())
+      dispatcher->AddRef();
+    return true;
+  }
+
   INPUT input[8] = { 0 }; // 8, assuming all the modifiers are activated
 
   int i = 0;
@@ -260,7 +277,7 @@ bool SendMouseEventsImpl(MouseButton type, int state, Task* task) {
   DWORD up_flags = MOUSEEVENTF_ABSOLUTE;
   UINT last_event;
 
-  switch(type) {
+  switch (type) {
     case LEFT:
       down_flags |= MOUSEEVENTF_LEFTDOWN;
       up_flags |= MOUSEEVENTF_LEFTUP;

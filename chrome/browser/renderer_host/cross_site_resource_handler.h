@@ -5,8 +5,11 @@
 #ifndef CHROME_BROWSER_RENDERER_HOST_CROSS_SITE_RESOURCE_HANDLER_H_
 #define CHROME_BROWSER_RENDERER_HOST_CROSS_SITE_RESOURCE_HANDLER_H_
 
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/resource_handler.h"
+#include "net/url_request/url_request_status.h"
+
+class ResourceDispatcherHost;
+struct GlobalRequestID;
 
 // Ensures that cross-site responses are delayed until the onunload handler of
 // the previous page is allowed to run.  This handler wraps an
@@ -21,28 +24,33 @@ class CrossSiteResourceHandler : public ResourceHandler {
                            ResourceDispatcherHost* resource_dispatcher_host);
 
   // ResourceHandler implementation:
+  bool OnUploadProgress(int request_id, uint64 position, uint64 size);
   bool OnRequestRedirected(int request_id, const GURL& new_url,
                            ResourceResponse* response, bool* defer);
   bool OnResponseStarted(int request_id,
                          ResourceResponse* response);
+  bool OnWillStart(int request_id, const GURL& url, bool* defer);
   bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
                   int min_size);
   bool OnReadCompleted(int request_id, int* bytes_read);
   bool OnResponseCompleted(int request_id,
                            const URLRequestStatus& status,
                            const std::string& security_info);
+  void OnRequestClosed();
 
   // We can now send the response to the new renderer, which will cause
   // TabContents to swap in the new renderer and destroy the old one.
   void ResumeResponse();
 
  private:
+  ~CrossSiteResourceHandler() {}
+
   // Prepare to render the cross-site response in a new RenderViewHost, by
   // telling the old RenderViewHost to run its onunload handler.
   void StartCrossSiteTransition(
       int request_id,
       ResourceResponse* response,
-      ResourceDispatcherHost::GlobalRequestID global_id);
+      const GlobalRequestID& global_id);
 
   scoped_refptr<ResourceHandler> next_handler_;
   int render_process_host_id_;

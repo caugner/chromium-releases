@@ -49,20 +49,29 @@ void NotificationObjectProxy::Close(bool by_user) {
   }
 }
 
+std::string NotificationObjectProxy::id() const {
+  return StringPrintf("%d:%d:%d:%d", process_id_, route_id_,
+                      notification_id_, worker_);
+}
+
+
 void NotificationObjectProxy::DeliverMessage(IPC::Message* message) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  MessageLoop* io_loop = ChromeThread::GetMessageLoop(ChromeThread::IO);
-  if (io_loop) {
-    io_loop->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &NotificationObjectProxy::Send, message));
-  }
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &NotificationObjectProxy::Send, message));
 }
 
 // Deferred method which runs on the IO thread and sends a message to the
 // proxied notification, routing it through the correct host in the browser.
 void NotificationObjectProxy::Send(IPC::Message* message) {
+  // Take ownership of the message; ownership will pass to a host if possible.
+  scoped_ptr<IPC::Message> owned_message(message);
+
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   RenderViewHost* host = RenderViewHost::FromID(process_id_, route_id_);
-  if (host)
-    host->Send(message);
+  if (host) {
+    // Pass ownership to the host.
+    host->Send(owned_message.release());
+  }
 }

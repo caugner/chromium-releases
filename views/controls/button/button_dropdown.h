@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 class ButtonDropDown : public ImageButton {
  public:
-  ButtonDropDown(ButtonListener* listener, Menu2Model* model);
+  ButtonDropDown(ButtonListener* listener, menus::MenuModel* model);
   virtual ~ButtonDropDown();
 
   // Accessibility accessors, overridden from View.
@@ -39,8 +39,7 @@ class ButtonDropDown : public ImageButton {
   // Overridden from View. Used to display the right-click menu, as triggered
   // by the keyboard, for instance. Using the member function ShowDropDownMenu
   // for the actual display.
-  virtual void ShowContextMenu(int x,
-                               int y,
+  virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture);
 
   // Overridden from CustomButton. Returns true if the button should become
@@ -53,7 +52,7 @@ class ButtonDropDown : public ImageButton {
   void ShowDropDownMenu(gfx::NativeView window);
 
   // The model that populates the attached menu.
-  Menu2Model* model_;
+  menus::MenuModel* model_;
   scoped_ptr<Menu2> menu_;
 
   // Y position of mouse when left mouse button is pressed

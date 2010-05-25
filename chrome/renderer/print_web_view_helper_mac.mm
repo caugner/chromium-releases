@@ -14,9 +14,9 @@
 #include "chrome/renderer/render_view.h"
 #include "grit/generated_resources.h"
 #include "printing/native_metafile.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebCanvas.h"
-#include "webkit/api/public/WebConsoleMessage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCanvas.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
 
 using WebKit::WebFrame;
 using WebKit::WebCanvas;
@@ -102,8 +102,10 @@ void PrintWebViewHelper::Print(WebFrame* frame, bool script_initiated) {
       params.has_selection = frame->hasSelection();
       params.expected_pages_count = expected_pages_count;
 
-      msg = new ViewHostMsg_ScriptedPrint(params, &print_settings);
-      if (render_view_->SendAndRunNestedMessageLoop(msg)) {
+      msg = new ViewHostMsg_ScriptedPrint(routing_id(), params,
+                                          &print_settings);
+      msg->EnableMessagePumping();
+      if (Send(msg)) {
         msg = NULL;
 
         // If the settings are invalid, early quit.
@@ -207,7 +209,7 @@ void PrintWebViewHelper::PrintPage(const ViewMsg_PrintPage_Params& params,
   base::SharedMemory shared_buf;
 
   // Ask the browser to create the shared memory for us.
-  unsigned int buf_size = metafile.GetDataSize();
+  uint32 buf_size = metafile.GetDataSize();
   base::SharedMemoryHandle shared_mem_handle;
   if (Send(new ViewHostMsg_AllocatePDFTransport(routing_id(), buf_size,
                                                 &shared_mem_handle))) {

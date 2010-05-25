@@ -4,17 +4,20 @@
 
 #include "chrome/browser/password_manager/password_manager.h"
 
+#include <vector>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -36,7 +39,7 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
       form_to_save_(form_to_save) {
   }
 
-   virtual ~SavePasswordInfoBarDelegate() { }
+  virtual ~SavePasswordInfoBarDelegate() { }
 
   // Overridden from ConfirmInfoBarDelegate:
   virtual void InfoBarClosed() {
@@ -240,8 +243,9 @@ void PasswordManager::Autofill(
     }
     default:
       if (observer_) {
-        observer_->OnAutofillDataAvailable(preferred_match->username_value,
-                                           preferred_match->password_value);
+        observer_->OnAutofillDataAvailable(
+            UTF16ToWideHack(preferred_match->username_value),
+            UTF16ToWideHack(preferred_match->password_value));
       }
   }
 }

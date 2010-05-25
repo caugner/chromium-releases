@@ -47,7 +47,7 @@ class StoppableHTTPServer(BaseHTTPServer.HTTPServer):
 
   def serve_forever(self):
     self.stop = False
-    self.nonce = None
+    self.nonce_time = None
     while not self.stop:
       self.handle_request()
     self.socket.close()
@@ -113,6 +113,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.DownloadHandler,
       self.DownloadFinishHandler,
       self.EchoHeader,
+      self.EchoHeaderOverride,
       self.EchoAllHandler,
       self.FileHandler,
       self.RealFileWithCommonHeaderHandler,
@@ -124,8 +125,14 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.ContentTypeHandler,
       self.ServerRedirectHandler,
       self.ClientRedirectHandler,
+      self.MultipartHandler,
       self.DefaultResponseHandler]
     self._post_handlers = [
+      self.WriteFile,
+      self.EchoTitleHandler,
+      self.EchoAllHandler,
+      self.EchoHandler] + self._get_handlers
+    self._put_handlers = [
       self.WriteFile,
       self.EchoTitleHandler,
       self.EchoAllHandler,
@@ -176,8 +183,11 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.send_header('Content-type', 'text/html')
     self.send_header('Cache-Control', 'max-age=0')
     self.end_headers()
-    self.wfile.write("Time to die")
-    self.server.stop = True
+    if options.never_die:
+      self.wfile.write('I cannot die!! BWAHAHA')
+    else:
+      self.wfile.write('Goodbye cruel world!')
+      self.server.stop = True
 
     return True
 
@@ -408,8 +418,23 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
   def EchoHeader(self):
     """This handler echoes back the value of a specific request header."""
+    """The only difference between this function and the EchoHeaderOverride"""
+    """function is in the parameter being passed to the helper function"""
+    return self.EchoHeaderHelper("/echoheader")
 
-    if not self._ShouldHandleRequest("/echoheader"):
+  def EchoHeaderOverride(self):
+    """This handler echoes back the value of a specific request header."""
+    """The UrlRequest unit tests also execute for ChromeFrame which uses"""
+    """IE to issue HTTP requests using the host network stack."""
+    """The Accept and Charset tests which expect the server to echo back"""
+    """the corresponding headers fail here as IE returns cached responses"""
+    """The EchoHeaderOverride parameter is an easy way to ensure that IE"""
+    """treats this request as a new request and does not cache it."""
+    return self.EchoHeaderHelper("/echoheaderoverride")
+
+  def EchoHeaderHelper(self, echo_header):
+    """This function echoes back the value of the request header passed in."""
+    if not self._ShouldHandleRequest(echo_header):
       return False
 
     query_char = self.path.find('?')
@@ -446,8 +471,8 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     return True
 
   def WriteFile(self):
-    """This is handler dumps the content of POST request to a disk file into
-    the data_dir/dump. Sub-directories are not supported."""
+    """This is handler dumps the content of POST/PUT request to a disk file
+    into the data_dir/dump. Sub-directories are not supported."""
 
     prefix='/writefile/'
     if not self.path.startswith(prefix):
@@ -504,7 +529,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       '<a href="http://localhost:8888/echo">back to referring page</a></div>'
       '<h1>Request Body:</h1><pre>')
 
-    if self.command == 'POST':
+    if self.command == 'POST' or self.command == 'PUT':
       length = int(self.headers.getheader('content-length'))
       qs = self.rfile.read(length)
       params = cgi.parse_qs(qs, keep_blank_values=1)
@@ -583,7 +608,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       return False
 
     # Consume a request body if present.
-    if self.command == 'POST':
+    if self.command == 'POST' or self.command == 'PUT' :
       self.rfile.read(int(self.headers.getheader('content-length')))
 
     file = self.path[len(prefix):]
@@ -618,9 +643,11 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.send_response(int(status_code))
 
       for line in f:
-        # "name: value"
-        name, value = re.findall('(\S+):\s*(.*)', line)[0]
-        self.send_header(name, value)
+        header_values = re.findall('(\S+):\s*(.*)', line)
+        if len(header_values) > 0:
+          # "name: value"
+          name, value = header_values[0]
+          self.send_header(name, value)
       f.close()
     else:
       # Could be more generic once we support mime-type sniffing, but for
@@ -787,27 +814,34 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     return True
 
-  def AuthDigestHandler(self):
-    """This handler tests 'Digest' authentication.  It just sends a page with
-    title 'user/pass' if you succeed."""
+  def GetNonce(self, force_reset=False):
+   """Returns a nonce that's stable per request path for the server's lifetime.
 
+   This is a fake implementation. A real implementation would only use a given
+   nonce a single time (hence the name n-once). However, for the purposes of
+   unittesting, we don't care about the security of the nonce.
+
+   Args:
+     force_reset: Iff set, the nonce will be changed. Useful for testing the
+         "stale" response.
+   """
+   if force_reset or not self.server.nonce_time:
+     self.server.nonce_time = time.time()
+   return _new_md5('privatekey%s%d' %
+                   (self.path, self.server.nonce_time)).hexdigest()
+
+  def AuthDigestHandler(self):
+    """This handler tests 'Digest' authentication.
+
+    It just sends a page with title 'user/pass' if you succeed.
+
+    A stale response is sent iff "stale" is present in the request path.
+    """
     if not self._ShouldHandleRequest("/auth-digest"):
       return False
 
-    # Periodically generate a new nonce.  Technically we should incorporate
-    # the request URL into this, but we don't care for testing.
-    nonce_life = 10
-    stale = False
-    if (not self.server.nonce or
-        (time.time() - self.server.nonce_time > nonce_life)):
-      if self.server.nonce:
-        stale = True
-      self.server.nonce_time = time.time()
-      self.server.nonce = \
-          _new_md5(time.ctime(self.server.nonce_time) +
-                   'privatekey').hexdigest()
-
-    nonce = self.server.nonce
+    stale = 'stale' in self.path
+    nonce = self.GetNonce(force_reset=stale)
     opaque = _new_md5('opaque').hexdigest()
     password = 'secret'
     realm = 'testrealm'
@@ -962,6 +996,28 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     return True
 
+  def MultipartHandler(self):
+    """Send a multipart response (10 text/html pages)."""
+    test_name = "/multipart"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+
+    num_frames = 10
+    bound = '12345'
+    self.send_response(200)
+    self.send_header('Content-type',
+                     'multipart/x-mixed-replace;boundary=' + bound)
+    self.end_headers()
+
+    for i in xrange(num_frames):
+      self.wfile.write('--' + bound + '\r\n')
+      self.wfile.write('Content-type: text/html\r\n\r\n')
+      self.wfile.write('<title>page ' + str(i) + '</title>')
+      self.wfile.write('page ' + str(i))
+
+    self.wfile.write('--' + bound + '--')
+    return True
+
   def DefaultResponseHandler(self):
     """This is the catch-all response handler for requests that aren't handled
     by one of the special handlers above.
@@ -1036,6 +1092,11 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       if handler():
         return
 
+  def do_PUT(self):
+    for handler in self._put_handlers:
+      if handler():
+        return
+
   # called by the redirect handling function when there is no parameter
   def sendRedirectHelp(self, redirect_name):
     self.send_response(200)
@@ -1046,9 +1107,9 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.wfile.write('</body></html>')
 
 def MakeDumpDir(data_dir):
-  """Create directory named 'dump' where uploaded data via HTTP POST request
-  will be stored. If the directory already exists all files and subdirectories
-  will be deleted."""
+  """Create directory named 'dump' where uploaded data via HTTP POST/PUT
+  requests will be stored. If the directory already exists all files and
+  subdirectories will be deleted."""
   dump_dir = os.path.join(data_dir, 'dump');
   if os.path.isdir(dump_dir):
     shutil.rmtree(dump_dir)
@@ -1146,20 +1207,25 @@ if __name__ == '__main__':
   option_parser.add_option("-f", '--ftp', action='store_const',
                            const=SERVER_FTP, default=SERVER_HTTP,
                            dest='server_type',
-                           help='FTP or HTTP server default HTTP')
+                           help='FTP or HTTP server: default is HTTP.')
   option_parser.add_option('--forking', action='store_true', default=False,
                            dest='forking',
-                           help='Serve each request in a separate process')
+                           help='Serve each request in a separate process.')
   option_parser.add_option('', '--port', default='8888', type='int',
-                           help='Port used by the server')
+                           help='Port used by the server.')
   option_parser.add_option('', '--data-dir', dest='data_dir',
-                           help='Directory from which to read the files')
+                           help='Directory from which to read the files.')
   option_parser.add_option('', '--https', dest='cert',
                            help='Specify that https should be used, specify '
                            'the path to the cert containing the private key '
-                           'the server should use')
+                           'the server should use.')
   option_parser.add_option('', '--file-root-url', default='/files/',
                            help='Specify a root URL for files served.')
+  option_parser.add_option('', '--never-die', default=False,
+                           action="store_true",
+                           help='Prevent the server from dying when visiting '
+                           'a /kill URL. Useful for manually running some '
+                           'tests.')
   options, args = option_parser.parse_args()
 
   sys.exit(main(options, args))

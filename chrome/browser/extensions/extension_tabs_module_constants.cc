@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,16 @@
 
 namespace extension_tabs_module_constants {
 
+const wchar_t kAllFramesKey[] = L"allFrames";
+const wchar_t kCodeKey[] = L"code";
 const wchar_t kFavIconUrlKey[] = L"favIconUrl";
+const wchar_t kFileKey[] = L"file";
 const wchar_t kFocusedKey[] = L"focused";
+const wchar_t kFormatKey[] = L"format";
 const wchar_t kFromIndexKey[] = L"fromIndex";
 const wchar_t kHeightKey[] = L"height";
 const wchar_t kIdKey[] = L"id";
+const wchar_t kIncognitoKey[] = L"incognito";
 const wchar_t kIndexKey[] = L"index";
 const wchar_t kLeftKey[] = L"left";
 const wchar_t kNewPositionKey[] = L"newPosition";
@@ -18,6 +23,7 @@ const wchar_t kNewWindowIdKey[] = L"newWindowId";
 const wchar_t kOldPositionKey[] = L"oldPosition";
 const wchar_t kOldWindowIdKey[] = L"oldWindowId";
 const wchar_t kPopulateKey[] = L"populate";
+const wchar_t kQualityKey[] = L"quality";
 const wchar_t kSelectedKey[] = L"selected";
 const wchar_t kStatusKey[] = L"status";
 const wchar_t kTabIdKey[] = L"tabId";
@@ -29,9 +35,20 @@ const wchar_t kTopKey[] = L"top";
 const wchar_t kUrlKey[] = L"url";
 const wchar_t kWidthKey[] = L"width";
 const wchar_t kWindowIdKey[] = L"windowId";
+const wchar_t kWindowTypeKey[] = L"type";
 
+const char kFormatValueJpeg[] = "jpeg";
+const char kFormatValuePng[] = "png";
+const char kMimeTypeJpeg[] = "image/jpg";
+const char kMimeTypePng[] = "image/png";
 const char kStatusValueComplete[] = "complete";
 const char kStatusValueLoading[] = "loading";
+
+// TODO(mpcomplete): should we expose more specific detail, like devtools, app
+// panel, etc?
+const char kWindowTypeValueNormal[] = "normal";
+const char kWindowTypeValuePopup[] = "popup";
+const char kWindowTypeValueApp[] = "app";
 
 const char kNoCurrentWindowError[] = "No current window";
 const char kNoLastFocusedWindowError[] = "No last-focused window";
@@ -42,13 +59,15 @@ const char kInvalidUrlError[] = "Invalid url: \"*\".";
 const char kInternalVisibleTabCaptureError[] =
     "Internal error while trying to capture visible region of the current tab";
 const char kNotImplementedError[] = "This call is not yet implemented";
-const char kCannotAccessPageError[] = "Cannot access contents of url \"*\". "
-    "Extension manifest must request permission to access this host.";
 const char kSupportedInWindowsOnlyError[] = "Supported in Windows only";
 
 const char kNoCodeOrFileToExecuteError[] = "No source code or file specified.";
-const char kMoreThanOneValuesError[] = "There should be only one value (either"
-                                       "code or file) in the second argument.";
+const char kMoreThanOneValuesError[] = "Code and file should not be specified "
+    "at the same time in the second argument.";
 const char kLoadFileError[] = "Failed to load file: \"*\". ";
+const char kCannotUpdatePinnedTab[] = "Cannot update pinned tabs";
+const char kCannotRemovePhantomTab[] = "Cannot remove phantom tabs";
+const char kCannotDetermineLanguageOfUnloadedTab[] =
+    "Cannot determine language: tab not loaded";
 
 }  // namespace extension_tabs_module_constants

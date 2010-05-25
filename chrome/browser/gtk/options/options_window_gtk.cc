@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,28 @@
 
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
+#include "chrome/browser/accessibility_events.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/advanced_page_gtk.h"
 #include "chrome/browser/gtk/options/content_page_gtk.h"
 #include "chrome/browser/gtk/options/general_page_gtk.h"
+#include "chrome/browser/pref_member.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_util.h"
-#include "chrome/common/pref_member.h"
+#include "chrome/browser/window_sizer.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/settings_page_view.h"
+#include "chrome/browser/chromeos/options/internet_page_view.h"
+#include "chrome/browser/chromeos/options/system_page_view.h"
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -64,6 +72,8 @@ class OptionsWindowGtk {
   // The last page the user was on when they opened the Options window.
   IntegerPrefMember last_selected_page_;
 
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
+
   DISALLOW_COPY_AND_ASSIGN(OptionsWindowGtk);
 };
 
@@ -81,13 +91,17 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
       general_page_(profile_),
       content_page_(profile_),
       advanced_page_(profile_) {
+
   // We don't need to observe changes in this value.
   last_selected_page_.Init(prefs::kOptionsWindowLastTabIndex,
                            g_browser_process->local_state(), NULL);
 
+  std::string dialog_name =
+      l10n_util::GetStringFUTF8(
+          IDS_OPTIONS_DIALOG_TITLE,
+          WideToUTF16(l10n_util::GetString(IDS_PRODUCT_NAME)));
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringFUTF8(IDS_OPTIONS_DIALOG_TITLE,
-          WideToUTF16(l10n_util::GetString(IDS_PRODUCT_NAME))).c_str(),
+      dialog_name.c_str(),
       // Prefs window is shared between all browser windows.
       NULL,
       // Non-modal.
@@ -95,6 +109,11 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
       GTK_STOCK_CLOSE,
       GTK_RESPONSE_CLOSE,
       NULL);
+
+  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
+      dialog_, profile));
+  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
+
   gtk_window_set_default_size(GTK_WINDOW(dialog_), 500, -1);
   // Allow browser windows to go in front of the options dialog in metacity.
   gtk_window_set_type_hint(GTK_WINDOW(dialog_), GDK_WINDOW_TYPE_HINT_NORMAL);
@@ -106,9 +125,15 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
 #if defined(OS_CHROMEOS)
   gtk_notebook_append_page(
       GTK_NOTEBOOK(notebook_),
-      (new SettingsPageView(profile_))->WrapInGtkWidget(),
+      (new chromeos::SystemPageView(profile_))->WrapInGtkWidget(),
       gtk_label_new(
-          l10n_util::GetStringUTF8(IDS_PRODUCT_OS_NAME).c_str()));
+          l10n_util::GetStringUTF8(IDS_OPTIONS_SYSTEM_TAB_LABEL).c_str()));
+
+  gtk_notebook_append_page(
+      GTK_NOTEBOOK(notebook_),
+      (new chromeos::InternetPageView(profile_))->WrapInGtkWidget(),
+      gtk_label_new(
+          l10n_util::GetStringUTF8(IDS_OPTIONS_INTERNET_TAB_LABEL).c_str()));
 #endif
 
   gtk_notebook_append_page(
@@ -134,10 +159,17 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
   DCHECK_EQ(
       gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook_)), OPTIONS_PAGE_COUNT);
 
-  // Need to show the notebook before connecting switch-page signal, otherwise
-  // we'll immediately get a signal switching to page 0 and overwrite our
-  // last_selected_page_ value.
-  gtk_widget_show_all(dialog_);
+  // Show the content so that we can compute full dialog size, both
+  // for centering and because we want to show the notebook before
+  // connecting switch-page signal, otherwise we'll immediately get a
+  // signal switching to page 0 and overwrite our last_selected_page_
+  // value.
+  gtk_widget_show_all(gtk_bin_get_child(GTK_BIN(dialog_)));
+
+  if (Browser* b = BrowserList::GetLastActive()) {
+    gtk_util::CenterOverWindow(GTK_WINDOW(dialog_),
+                               b->window()->GetNativeHandle());
+  }
 
   g_signal_connect(notebook_, "switch-page", G_CALLBACK(OnSwitchPage), this);
 
@@ -146,6 +178,8 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
   g_signal_connect(dialog_, "response", G_CALLBACK(gtk_widget_destroy), NULL);
 
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
+
+  gtk_widget_show(dialog_);
 }
 
 OptionsWindowGtk::~OptionsWindowGtk() {
@@ -153,10 +187,15 @@ OptionsWindowGtk::~OptionsWindowGtk() {
 
 void OptionsWindowGtk::ShowOptionsPage(OptionsPage page,
                                        OptionsGroup highlight_group) {
+  if (Browser* b = BrowserList::GetLastActive()) {
+    gtk_util::CenterOverWindow(GTK_WINDOW(dialog_),
+                               b->window()->GetNativeHandle());
+  }
+
   // Bring options window to front if it already existed and isn't already
   // in front
-  // TODO(mattm): docs say it's preferable to use gtk_window_present_with_time
-  gtk_window_present(GTK_WINDOW(dialog_));
+  gtk_window_present_with_time(GTK_WINDOW(dialog_),
+                               gtk_get_current_event_time());
 
   if (page == OPTIONS_PAGE_DEFAULT) {
     // Remember the last visited page from local state.
@@ -200,10 +239,20 @@ void ShowOptionsWindow(OptionsPage page,
                        OptionsGroup highlight_group,
                        Profile* profile) {
   DCHECK(profile);
+
   // If there's already an existing options window, activate it and switch to
   // the specified page.
   if (!options_window) {
+    // Creating and initializing a bunch of controls generates a bunch of
+    // spurious events as control values change. Temporarily suppress
+    // accessibility events until the window is created.
+    profile->PauseAccessibilityEvents();
+
+    // Create the options window.
     options_window = new OptionsWindowGtk(profile);
+
+    // Resume accessibility events.
+    profile->ResumeAccessibilityEvents();
   }
   options_window->ShowOptionsPage(page, highlight_group);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,21 @@
 #include <gdk/gdkkeysyms.h>
 #endif
 
-#include "app/gfx/insets.h"
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#include "base/win_util.h"
-#endif
+#include <string>
 
-#if defined(OS_LINUX)
-#include "base/keyboard_code_conversion_gtk.h"
-#endif
 #include "base/keyboard_codes.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/insets.h"
+#include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/widget/widget.h"
 
-#if defined(OS_WIN)
+#if defined(OS_LINUX)
+#include "base/keyboard_code_conversion_gtk.h"
+#elif defined(OS_WIN)
+#include "app/win_util.h"
+#include "base/win_util.h"
 // TODO(beng): this should be removed when the OS_WIN hack from
 // ViewHierarchyChanged is removed.
 #include "views/controls/textfield/native_textfield_win.h"
@@ -90,6 +90,15 @@ void Textfield::SetReadOnly(bool read_only) {
 
 bool Textfield::IsPassword() const {
   return style_ & STYLE_PASSWORD;
+}
+
+void Textfield::SetPassword(bool password) {
+  if (password)
+    style_ = static_cast<StyleFlags>(style_ | STYLE_PASSWORD);
+  else
+    style_ = static_cast<StyleFlags>(style_ & ~STYLE_PASSWORD);
+  if (native_wrapper_)
+    native_wrapper_->UpdateIsPassword();
 }
 
 bool Textfield::IsMultiLine() const {
@@ -175,10 +184,26 @@ void Textfield::RemoveBorder() {
     native_wrapper_->UpdateBorder();
 }
 
+void Textfield::UpdateAllProperties() {
+  if (native_wrapper_) {
+    native_wrapper_->UpdateText();
+    native_wrapper_->UpdateTextColor();
+    native_wrapper_->UpdateBackgroundColor();
+    native_wrapper_->UpdateReadOnly();
+    native_wrapper_->UpdateFont();
+    native_wrapper_->UpdateEnabled();
+    native_wrapper_->UpdateBorder();
+    native_wrapper_->UpdateIsPassword();
+  }
+}
 
 void Textfield::SyncText() {
   if (native_wrapper_)
     text_ = native_wrapper_->GetText();
+}
+
+bool Textfield::IsIMEComposing() const {
+  return native_wrapper_ && native_wrapper_->IsIMEComposing();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,6 +250,40 @@ bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   return false;
 }
 
+void Textfield::PaintFocusBorder(gfx::Canvas* canvas) {
+  if (NativeViewHost::kRenderNativeControlFocus)
+    View::PaintFocusBorder(canvas);
+}
+
+bool Textfield::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_TEXT;
+  return true;
+}
+
+bool Textfield::GetAccessibleState(AccessibilityTypes::State* state) {
+  DCHECK(state);
+
+  *state = 0;
+
+  if (read_only())
+    *state |= AccessibilityTypes::STATE_READONLY;
+  if (IsPassword())
+    *state |= AccessibilityTypes::STATE_PROTECTED;
+  return true;
+}
+
+bool Textfield::GetAccessibleValue(std::wstring* value) {
+  DCHECK(value);
+
+  if (!text_.empty()) {
+    *value = UTF16ToWide(text_);
+    return true;
+  }
+  return false;
+}
+
 void Textfield::SetEnabled(bool enabled) {
   View::SetEnabled(enabled);
   if (native_wrapper_)
@@ -252,13 +311,7 @@ void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     AddChildView(native_wrapper_->GetView());
     // TODO(beng): Move this initialization to NativeTextfieldWin once it
     //             subclasses NativeControlWin.
-    native_wrapper_->UpdateText();
-    native_wrapper_->UpdateTextColor();
-    native_wrapper_->UpdateBackgroundColor();
-    native_wrapper_->UpdateReadOnly();
-    native_wrapper_->UpdateFont();
-    native_wrapper_->UpdateEnabled();
-    native_wrapper_->UpdateBorder();
+    UpdateAllProperties();
 
 #if defined(OS_WIN)
     // TODO(beng): remove this once NativeTextfieldWin subclasses
@@ -274,20 +327,6 @@ void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
 std::string Textfield::GetClassName() const {
   return kViewClassName;
-}
-
-NativeTextfieldWrapper* Textfield::CreateWrapper() {
-  NativeTextfieldWrapper* native_wrapper =
-      NativeTextfieldWrapper::CreateWrapper(this);
-
-  native_wrapper->UpdateText();
-  native_wrapper->UpdateBackgroundColor();
-  native_wrapper->UpdateReadOnly();
-  native_wrapper->UpdateFont();
-  native_wrapper->UpdateEnabled();
-  native_wrapper->UpdateBorder();
-
-  return native_wrapper;
 }
 
 base::KeyboardCode Textfield::Keystroke::GetKeyboardCode() const {

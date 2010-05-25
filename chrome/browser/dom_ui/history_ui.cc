@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,24 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/callback.h"
 #include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
+#include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/time_format.h"
@@ -46,6 +51,7 @@ HistoryUIHTMLSource::HistoryUIHTMLSource()
 }
 
 void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
+                                           bool is_off_the_record,
                                            int request_id) {
   DictionaryValue localized_strings;
   localized_strings.SetString(L"loading",
@@ -72,9 +78,15 @@ void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetString(IDS_HISTORY_NO_RESULTS));
   localized_strings.SetString(L"noitems",
       l10n_util::GetString(IDS_HISTORY_NO_ITEMS));
-  localized_strings.SetString(L"deleteday",
-      l10n_util::GetString(IDS_HISTORY_DELETE_PRIOR_VISITS_LINK));
-  localized_strings.SetString(L"deletedaywarning",
+  localized_strings.SetString(L"edithistory",
+      l10n_util::GetString(IDS_HISTORY_START_EDITING_HISTORY));
+  localized_strings.SetString(L"doneediting",
+      l10n_util::GetString(IDS_HISTORY_STOP_EDITING_HISTORY));
+  localized_strings.SetString(L"removeselected",
+      l10n_util::GetString(IDS_HISTORY_REMOVE_SELECTED_ITEMS));
+  localized_strings.SetString(L"clearallhistory",
+      l10n_util::GetString(IDS_HISTORY_OPEN_CLEAR_BROWSING_DATA_DIALOG));
+  localized_strings.SetString(L"deletewarning",
       l10n_util::GetString(IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING));
 
   SetFontAndTextDirection(&localized_strings);
@@ -98,22 +110,21 @@ void HistoryUIHTMLSource::StartDataRequest(const std::string& path,
 //
 ////////////////////////////////////////////////////////////////////////////////
 BrowsingHistoryHandler::BrowsingHistoryHandler()
-    : search_text_(),
-      remover_(NULL) {
+    : search_text_() {
 }
 
 BrowsingHistoryHandler::~BrowsingHistoryHandler() {
   cancelable_consumer_.CancelAllRequests();
-  if (remover_)
-    remover_->RemoveObserver(this);
 }
 
 DOMMessageHandler* BrowsingHistoryHandler::Attach(DOMUI* dom_ui) {
   // Create our favicon data source.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
-      &ChromeURLDataManager::AddDataSource,
-      new DOMUIFavIconSource(dom_ui->GetProfile())));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          Singleton<ChromeURLDataManager>::get(),
+          &ChromeURLDataManager::AddDataSource,
+          make_scoped_refptr(new DOMUIFavIconSource(dom_ui->GetProfile()))));
 
   // Get notifications when history is cleared.
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
@@ -126,8 +137,10 @@ void BrowsingHistoryHandler::RegisterMessages() {
       NewCallback(this, &BrowsingHistoryHandler::HandleGetHistory));
   dom_ui_->RegisterMessageCallback("searchHistory",
       NewCallback(this, &BrowsingHistoryHandler::HandleSearchHistory));
-  dom_ui_->RegisterMessageCallback("deleteDay",
-      NewCallback(this, &BrowsingHistoryHandler::HandleDeleteDay));
+  dom_ui_->RegisterMessageCallback("removeURLsOnOneDay",
+      NewCallback(this, &BrowsingHistoryHandler::HandleRemoveURLsOnOneDay));
+  dom_ui_->RegisterMessageCallback("clearBrowsingData",
+      NewCallback(this, &BrowsingHistoryHandler::HandleClearBrowsingData));
 }
 
 void BrowsingHistoryHandler::HandleGetHistory(const Value* value) {
@@ -144,9 +157,6 @@ void BrowsingHistoryHandler::HandleGetHistory(const Value* value) {
   options.begin_time -= base::TimeDelta::FromDays(day);
   options.end_time = base::Time::Now().LocalMidnight();
   options.end_time -= base::TimeDelta::FromDays(day - 1);
-
-  // As we're querying per-day, we can turn entry repeats off.
-  options.most_recent_visit_only = true;
 
   // Need to remember the query string for our results.
   search_text_ = std::wstring();
@@ -171,10 +181,8 @@ void BrowsingHistoryHandler::HandleSearchHistory(const Value* value) {
   // Set the query ranges for the given month.
   history::QueryOptions options = CreateMonthQueryOptions(month);
 
-  // When searching, limit the number of results returned and only show the
-  // most recent matches.
+  // When searching, limit the number of results returned.
   options.max_count = kMaxSearchResults;
-  options.most_recent_visit_only = true;
 
   // Need to remember the query string for our results.
   search_text_ = query;
@@ -186,38 +194,50 @@ void BrowsingHistoryHandler::HandleSearchHistory(const Value* value) {
       NewCallback(this, &BrowsingHistoryHandler::QueryComplete));
 }
 
-void BrowsingHistoryHandler::HandleDeleteDay(const Value* value) {
-  if (BrowsingDataRemover::is_removing()) {
+void BrowsingHistoryHandler::HandleRemoveURLsOnOneDay(const Value* value) {
+  if (cancelable_consumer_.HasPendingRequests()) {
     dom_ui_->CallJavascriptFunction(L"deleteFailed");
     return;
   }
 
+  DCHECK(value && value->GetType() == Value::TYPE_LIST);
+
+  // Get day to delete data from.
+  int visit_time = 0;
+  ExtractIntegerValue(value, &visit_time);
+  base::Time::Exploded exploded;
+  base::Time::FromTimeT(
+      static_cast<time_t>(visit_time)).LocalExplode(&exploded);
+  exploded.hour = exploded.minute = exploded.second = exploded.millisecond = 0;
+  base::Time begin_time = base::Time::FromLocalExploded(exploded);
+  base::Time end_time = begin_time + base::TimeDelta::FromDays(1);
+
+  // Get URLs.
+  std::set<GURL> urls;
+  const ListValue* list_value = static_cast<const ListValue*>(value);
+  for (ListValue::const_iterator v = list_value->begin() + 1;
+       v != list_value->end(); ++v) {
+    if ((*v)->GetType() != Value::TYPE_STRING)
+      continue;
+    const StringValue* string_value = static_cast<const StringValue*>(*v);
+    string16 string16_value;
+    if (!string_value->GetAsUTF16(&string16_value))
+      continue;
+    urls.insert(GURL(string16_value));
+  }
+
+  HistoryService* hs =
+      dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  hs->ExpireHistoryBetween(urls, begin_time, end_time, &cancelable_consumer_,
+      NewCallback(this, &BrowsingHistoryHandler::RemoveComplete));
+}
+
+void BrowsingHistoryHandler::HandleClearBrowsingData(const Value* value) {
   // Anything in-flight is invalid.
   cancelable_consumer_.CancelAllRequests();
 
-  // Get time.
-  base::Time time;
-  bool success = base::Time::FromString(ExtractStringValue(value).c_str(),
-                                        &time);
-  DCHECK(success);
-
-  base::Time begin_time = time.LocalMidnight();
-  base::Time end_time = begin_time + base::TimeDelta::FromDays(1);
-
-  remover_ = new BrowsingDataRemover(dom_ui_->GetProfile(),
-                                     begin_time,
-                                     end_time);
-  remover_->AddObserver(this);
-  remover_->Remove(BrowsingDataRemover::REMOVE_HISTORY |
-                   BrowsingDataRemover::REMOVE_COOKIES |
-                   BrowsingDataRemover::REMOVE_CACHE);
-}
-
-void BrowsingHistoryHandler::OnBrowsingDataRemoverDone() {
-  dom_ui_->CallJavascriptFunction(L"deleteComplete");
-  // No need to remove ourselves as an observer as BrowsingDataRemover deletes
-  // itself after we return.
-  remover_ = NULL;
+  dom_ui_->tab_contents()->delegate()->GetBrowser()->
+      OpenClearBrowsingDataDialog();
 }
 
 void BrowsingHistoryHandler::QueryComplete(
@@ -273,6 +293,11 @@ void BrowsingHistoryHandler::QueryComplete(
   dom_ui_->CallJavascriptFunction(L"historyResult", info_value, results_value);
 }
 
+void BrowsingHistoryHandler::RemoveComplete() {
+  // Some Visits were deleted from history. Reload the list.
+  dom_ui_->CallJavascriptFunction(L"deleteComplete");
+}
+
 void BrowsingHistoryHandler::ExtractSearchHistoryArguments(const Value* value,
     int* month, std::wstring* query) {
   *month = 0;
@@ -294,9 +319,9 @@ void BrowsingHistoryHandler::ExtractSearchHistoryArguments(const Value* value,
         list_member->GetType() == Value::TYPE_STRING) {
       const StringValue* string_value =
         static_cast<const StringValue*>(list_member);
-      std::wstring wstring_value;
-      string_value->GetAsString(&wstring_value);
-      *month = StringToInt(WideToUTF16Hack(wstring_value));
+      string16 string16_value;
+      string_value->GetAsUTF16(&string16_value);
+      *month = StringToInt(string16_value);
     }
   }
 }
@@ -368,20 +393,22 @@ HistoryUI::HistoryUI(TabContents* contents) : DOMUI(contents) {
   HistoryUIHTMLSource* html_source = new HistoryUIHTMLSource();
 
   // Set up the chrome://history/ source.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
-          html_source));
+          make_scoped_refptr(html_source)));
 }
 
 // static
 const GURL HistoryUI::GetHistoryURLWithSearchText(const std::wstring& text) {
   return GURL(std::string(chrome::kChromeUIHistoryURL) + "#q=" +
-              EscapeQueryParamValue(WideToUTF8(text)));
+              EscapeQueryParamValue(WideToUTF8(text), true));
 }
 
 // static
 RefCountedMemory* HistoryUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
-      LoadImageResourceBytes(IDR_HISTORY_FAVICON);
+      LoadDataResourceBytes(IDR_HISTORY_FAVICON);
 }

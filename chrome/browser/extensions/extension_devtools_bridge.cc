@@ -17,7 +17,6 @@
 ExtensionDevToolsBridge::ExtensionDevToolsBridge(int tab_id,
                                                  Profile* profile)
     : tab_id_(tab_id),
-      inspected_rvh_(NULL),
       profile_(profile),
       on_page_event_name_(
           ExtensionDevToolsEvents::OnPageEventNameForTab(tab_id)),
@@ -37,12 +36,12 @@ bool ExtensionDevToolsBridge::RegisterAsDevToolsClientHost() {
   TabStripModel* tab_strip;
   TabContents* contents;
   int tab_index;
-  if (ExtensionTabUtil::GetTabById(tab_id_, profile_, &browser, &tab_strip,
+  if (ExtensionTabUtil::GetTabById(tab_id_, profile_, true,
+                                   &browser, &tab_strip,
                                    &contents, &tab_index)) {
-    inspected_rvh_ = contents->render_view_host();
     DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
     devtools_manager->RegisterDevToolsClientHostFor(
-        inspected_rvh_, this);
+        contents->render_view_host(), this);
     devtools_manager->ForwardToDevToolsAgent(
         this,
         DevToolsAgentMsg_SetApuAgentEnabled(true));
@@ -54,11 +53,7 @@ bool ExtensionDevToolsBridge::RegisterAsDevToolsClientHost() {
 void ExtensionDevToolsBridge::UnregisterAsDevToolsClientHost() {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
-  if (inspected_rvh_) {
-    DevToolsManager::GetInstance()->UnregisterDevToolsClientHostFor(
-        inspected_rvh_);
-    inspected_rvh_ = NULL;
-  }
+  NotifyCloseListener();
 }
 
 // If the tab we are looking at is going away then we fire a closing event at
@@ -69,8 +64,8 @@ void ExtensionDevToolsBridge::InspectedTabClosing() {
   // TODO(knorton): Remove this event in favor of the standard tabs.onRemoved
   // event in extensions.
   std::string json("[{}]");
-  profile_->GetExtensionMessageService()->
-      DispatchEventToRenderers(on_tab_close_event_name_, json);
+  profile_->GetExtensionMessageService()->DispatchEventToRenderers(
+      on_tab_close_event_name_, json, profile_->IsOffTheRecord());
 
   // This may result in this object being destroyed.
   extension_devtools_manager_->BridgeClosingForTab(tab_id_);
@@ -84,20 +79,16 @@ void ExtensionDevToolsBridge::SendMessageToClient(const IPC::Message& msg) {
 }
 
 static const char kApuAgentClassName[] = "ApuAgentDelegate";
-static const char kApuPageEventMessageName[] = "DispatchToApu";
+static const char kApuPageEventMessageName[] = "dispatchToApu";
 
-void ExtensionDevToolsBridge::OnRpcMessage(const std::string& class_name,
-                                           const std::string& message_name,
-                                           const std::string& param1,
-                                           const std::string& param2,
-                                           const std::string& param3) {
+void ExtensionDevToolsBridge::OnRpcMessage(const DevToolsMessageData& data) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
-  if (class_name == kApuAgentClassName
-      && message_name == kApuPageEventMessageName) {
-    std::string json = StringPrintf("[%s]", param1.c_str());
+  if (data.class_name == kApuAgentClassName
+      && data.method_name == kApuPageEventMessageName) {
+    std::string json = StringPrintf("[%s]", data.arguments[0].c_str());
     profile_->GetExtensionMessageService()->DispatchEventToRenderers(
-        on_page_event_name_, json);
+        on_page_event_name_, json, profile_->IsOffTheRecord());
   }
 }
 

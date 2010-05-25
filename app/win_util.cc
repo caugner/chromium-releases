@@ -6,19 +6,17 @@
 
 #include <commdlg.h>
 #include <dwmapi.h>
-#include <propvarutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
 
-#include "app/gfx/codec/png_codec.h"
-#include "app/gfx/gdi_util.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/registry.h"
@@ -27,8 +25,8 @@
 #include "base/scoped_handle_win.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
-#include "grit/app_strings.h"
-#include "net/base/mime_util.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/gdi_util.h"
 
 // Ensure that we pick up this link library.
 #pragma comment(lib, "dwmapi.lib")
@@ -46,61 +44,6 @@ const char kSHGetPropertyStoreForWindow[] = "SHGetPropertyStoreForWindow";
 typedef DECLSPEC_IMPORT HRESULT (STDAPICALLTYPE *SHGPSFW)(HWND hwnd,
                                                           REFIID riid,
                                                           void** ppv);
-
-EXTERN_C const PROPERTYKEY DECLSPEC_SELECTANY PKEY_AppUserModel_ID =
-    { { 0x9F4C2855, 0x9F79, 0x4B39,
-    { 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3, } }, 5 };
-
-// Enforce visible dialog box.
-UINT_PTR CALLBACK SaveAsDialogHook(HWND dialog, UINT message,
-                                   WPARAM wparam, LPARAM lparam) {
-  static const UINT kPrivateMessage = 0x2F3F;
-  switch (message) {
-    case WM_INITDIALOG: {
-      // Do nothing here. Just post a message to defer actual processing.
-      PostMessage(dialog, kPrivateMessage, 0, 0);
-      return TRUE;
-    }
-    case kPrivateMessage: {
-      // The dialog box is the parent of the current handle.
-      HWND real_dialog = GetParent(dialog);
-
-      // Retrieve the final size.
-      RECT dialog_rect;
-      GetWindowRect(real_dialog, &dialog_rect);
-
-      // Verify that the upper left corner is visible.
-      POINT point = { dialog_rect.left, dialog_rect.top };
-      HMONITOR monitor1 = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
-      point.x = dialog_rect.right;
-      point.y = dialog_rect.bottom;
-
-      // Verify that the lower right corner is visible.
-      HMONITOR monitor2 = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
-      if (monitor1 && monitor2)
-        return 0;
-
-      // Some part of the dialog box is not visible, fix it by moving is to the
-      // client rect position of the browser window.
-      HWND parent_window = GetParent(real_dialog);
-      if (!parent_window)
-        return 0;
-      WINDOWINFO parent_info;
-      parent_info.cbSize = sizeof(WINDOWINFO);
-      GetWindowInfo(parent_window, &parent_info);
-      SetWindowPos(real_dialog, NULL,
-                   parent_info.rcClient.left,
-                   parent_info.rcClient.top,
-                   0, 0,  // Size.
-                   SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSIZE |
-                   SWP_NOZORDER);
-
-      return 0;
-    }
-  }
-  return 0;
-}
-
 }  // namespace
 
 std::wstring FormatSystemTime(const SYSTEMTIME& time,
@@ -135,19 +78,6 @@ std::wstring FormatSystemDate(const SYSTEMTIME& date,
                 WriteInto(&output, buffer_size), buffer_size);
 
   return output;
-}
-
-bool ConvertToLongPath(const std::wstring& short_path,
-                       std::wstring* long_path) {
-  wchar_t long_path_buf[MAX_PATH];
-  DWORD return_value = GetLongPathName(short_path.c_str(), long_path_buf,
-                                       MAX_PATH);
-  if (return_value != 0 && return_value < MAX_PATH) {
-    *long_path = long_path_buf;
-    return true;
-  }
-
-  return false;
 }
 
 bool IsDoubleClick(const POINT& origin,
@@ -218,245 +148,6 @@ bool OpenItemWithExternalApp(const std::wstring& full_path) {
   sei.lpVerb = L"openas";
   sei.lpFile = full_path.c_str();
   return (TRUE == ::ShellExecuteExW(&sei));
-}
-
-// Get the file type description from the registry. This will be "Text Document"
-// for .txt files, "JPEG Image" for .jpg files, etc. If the registry doesn't
-// have an entry for the file type, we return false, true if the description was
-// found. 'file_ext' must be in form ".txt".
-static bool GetRegistryDescriptionFromExtension(const std::wstring& file_ext,
-                                                std::wstring* reg_description) {
-  DCHECK(reg_description);
-  RegKey reg_ext(HKEY_CLASSES_ROOT, file_ext.c_str(), KEY_READ);
-  std::wstring reg_app;
-  if (reg_ext.ReadValue(NULL, &reg_app) && !reg_app.empty()) {
-    RegKey reg_link(HKEY_CLASSES_ROOT, reg_app.c_str(), KEY_READ);
-    if (reg_link.ReadValue(NULL, reg_description))
-      return true;
-  }
-  return false;
-}
-
-std::wstring FormatFilterForExtensions(
-    const std::vector<std::wstring>& file_ext,
-    const std::vector<std::wstring>& ext_desc,
-    bool include_all_files) {
-  const std::wstring all_ext = L"*.*";
-  const std::wstring all_desc = l10n_util::GetString(IDS_APP_SAVEAS_ALL_FILES);
-
-  DCHECK(file_ext.size() >= ext_desc.size());
-
-  std::wstring result;
-
-  for (size_t i = 0; i < file_ext.size(); ++i) {
-    std::wstring ext = file_ext[i];
-    std::wstring desc;
-    if (i < ext_desc.size())
-      desc = ext_desc[i];
-
-    if (ext.empty()) {
-      // Force something reasonable to appear in the dialog box if there is no
-      // extension provided.
-      include_all_files = true;
-      continue;
-    }
-
-    if (desc.empty()) {
-      DCHECK(ext.find(L'.') != std::wstring::npos);
-      std::wstring first_extension = ext.substr(ext.find(L'.'));
-      size_t first_separator_index = first_extension.find(L';');
-      if (first_separator_index != std::wstring::npos)
-        first_extension = first_extension.substr(0, first_separator_index);
-
-      // Find the extension name without the preceeding '.' character.
-      std::wstring ext_name = first_extension;
-      size_t ext_index = ext_name.find_first_not_of(L'.');
-      if (ext_index != std::wstring::npos)
-        ext_name = ext_name.substr(ext_index);
-
-      if (!GetRegistryDescriptionFromExtension(first_extension, &desc)) {
-        // The extension doesn't exist in the registry. Create a description
-        // based on the unknown extension type (i.e. if the extension is .qqq,
-        // the we create a description "QQQ File (.qqq)").
-        include_all_files = true;
-        desc = l10n_util::GetStringF(IDS_APP_SAVEAS_EXTENSION_FORMAT,
-                                     l10n_util::ToUpper(ext_name),
-                                     ext_name);
-      }
-      if (desc.empty())
-        desc = L"*." + ext_name;
-    }
-
-    result.append(desc.c_str(), desc.size() + 1);  // Append NULL too.
-    result.append(ext.c_str(), ext.size() + 1);
-  }
-
-  if (include_all_files) {
-    result.append(all_desc.c_str(), all_desc.size() + 1);
-    result.append(all_ext.c_str(), all_ext.size() + 1);
-  }
-
-  result.append(1, '\0');  // Double NULL required.
-  return result;
-}
-
-bool SaveFileAs(HWND owner,
-                const std::wstring& suggested_name,
-                std::wstring* final_name) {
-  std::wstring file_ext = file_util::GetFileExtensionFromPath(suggested_name);
-  file_ext.insert(0, L"*.");
-  std::wstring filter = FormatFilterForExtensions(
-    std::vector<std::wstring>(1, file_ext),
-    std::vector<std::wstring>(),
-    true);
-  unsigned index = 1;
-  return SaveFileAsWithFilter(owner,
-                              suggested_name,
-                              filter,
-                              L"",
-                              false,
-                              &index,
-                              final_name);
-}
-
-bool SaveFileAsWithFilter(HWND owner,
-                          const std::wstring& suggested_name,
-                          const std::wstring& filter,
-                          const std::wstring& def_ext,
-                          bool ignore_suggested_ext,
-                          unsigned* index,
-                          std::wstring* final_name) {
-  DCHECK(final_name);
-  // Having an empty filter makes for a bad user experience. We should always
-  // specify a filter when saving.
-  DCHECK(!filter.empty());
-  std::wstring file_part = file_util::GetFilenameFromPath(suggested_name);
-
-  // The size of the in/out buffer in number of characters we pass to win32
-  // GetSaveFileName.  From MSDN "The buffer must be large enough to store the
-  // path and file name string or strings, including the terminating NULL
-  // character.  ... The buffer should be at least 256 characters long.".
-  // _IsValidPathComDlg does a copy expecting at most MAX_PATH, otherwise will
-  // result in an error of FNERR_INVALIDFILENAME.  So we should only pass the
-  // API a buffer of at most MAX_PATH.
-  wchar_t file_name[MAX_PATH];
-  base::wcslcpy(file_name, file_part.c_str(), arraysize(file_name));
-
-  OPENFILENAME save_as;
-  // We must do this otherwise the ofn's FlagsEx may be initialized to random
-  // junk in release builds which can cause the Places Bar not to show up!
-  ZeroMemory(&save_as, sizeof(save_as));
-  save_as.lStructSize = sizeof(OPENFILENAME);
-  save_as.hwndOwner = owner;
-  save_as.hInstance = NULL;
-
-  save_as.lpstrFilter = filter.empty() ? NULL : filter.c_str();
-
-  save_as.lpstrCustomFilter = NULL;
-  save_as.nMaxCustFilter = 0;
-  save_as.nFilterIndex = *index;
-  save_as.lpstrFile = file_name;
-  save_as.nMaxFile = arraysize(file_name);
-  save_as.lpstrFileTitle = NULL;
-  save_as.nMaxFileTitle = 0;
-
-  // Set up the initial directory for the dialog.
-  std::wstring directory = file_util::GetDirectoryFromPath(suggested_name);
-  save_as.lpstrInitialDir = directory.c_str();
-  save_as.lpstrTitle = NULL;
-  save_as.Flags = OFN_OVERWRITEPROMPT | OFN_EXPLORER | OFN_ENABLESIZING |
-                  OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST;
-  save_as.lpstrDefExt = &def_ext[0];
-  save_as.lCustData = NULL;
-
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
-    // The save as on Windows XP remembers its last position,
-    // and if the screen resolution changed, it will be off screen.
-    save_as.Flags |= OFN_ENABLEHOOK;
-    save_as.lpfnHook = &SaveAsDialogHook;
-  }
-
-  // Must be NULL or 0.
-  save_as.pvReserved = NULL;
-  save_as.dwReserved = 0;
-
-  if (!GetSaveFileName(&save_as)) {
-    // Zero means the dialog was closed, otherwise we had an error.
-    DWORD error_code = CommDlgExtendedError();
-    if (error_code != 0) {
-      NOTREACHED() << "GetSaveFileName failed with code: " << error_code;
-    }
-    return false;
-  }
-
-  // Return the user's choice.
-  final_name->assign(save_as.lpstrFile);
-  *index = save_as.nFilterIndex;
-
-  // Figure out what filter got selected from the vector with embedded nulls.
-  // NOTE: The filter contains a string with embedded nulls, such as:
-  // JPG Image\0*.jpg\0All files\0*.*\0\0
-  // The filter index is 1-based index for which pair got selected. So, using
-  // the example above, if the first index was selected we need to skip 1
-  // instance of null to get to "*.jpg".
-  std::vector<std::wstring> filters;
-  if (!filter.empty() && save_as.nFilterIndex > 0)
-    SplitString(filter, '\0', &filters);
-  std::wstring filter_selected;
-  if (!filters.empty())
-    filter_selected = filters[(2 * (save_as.nFilterIndex - 1)) + 1];
-
-  // Get the extension that was suggested to the user (when the Save As dialog
-  // was opened). For saving web pages, we skip this step since there may be
-  // 'extension characters' in the title of the web page.
-  std::wstring suggested_ext;
-  if (!ignore_suggested_ext)
-    suggested_ext = file_util::GetFileExtensionFromPath(suggested_name);
-
-  // If we can't get the extension from the suggested_name, we use the default
-  // extension passed in. This is to cover cases like when saving a web page,
-  // where we get passed in a name without an extension and a default extension
-  // along with it.
-  if (suggested_ext.empty())
-    suggested_ext = def_ext;
-
-  *final_name =
-      AppendExtensionIfNeeded(*final_name, filter_selected, suggested_ext);
-  return true;
-}
-
-std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
-                                     const std::wstring& filter_selected,
-                                     const std::wstring& suggested_ext) {
-  std::wstring return_value = filename;
-
-  // Get the extension the user ended up selecting.
-  std::wstring selected_ext = file_util::GetFileExtensionFromPath(filename);
-
-  if (filter_selected.empty() || filter_selected == L"*.*") {
-    // If the user selects 'All files' we respect any extension given to us from
-    // the File Save dialog. We also strip any trailing dots, which matches
-    // Windows Explorer and is needed because Windows doesn't allow filenames
-    // to have trailing dots. The GetSaveFileName dialog will not return a
-    // string with only one or more dots.
-    size_t index = return_value.find_last_not_of(L'.');
-    if (index < return_value.size() - 1)
-      return_value.resize(index + 1);
-  } else {
-    // User selected a specific filter (not *.*) so we need to check if the
-    // extension provided has the same mime type. If it doesn't we append the
-    // extension.
-    std::string suggested_mime_type, selected_mime_type;
-    if (suggested_ext != selected_ext &&
-        (!net::GetMimeTypeFromExtension(suggested_ext, &suggested_mime_type) ||
-         !net::GetMimeTypeFromExtension(selected_ext, &selected_mime_type) ||
-         suggested_mime_type != selected_mime_type)) {
-      return_value.append(L".");
-      return_value.append(suggested_ext);
-    }
-  }
-
-  return return_value;
 }
 
 // Adjust the window to fit, returning true if the window was resized or moved.
@@ -829,17 +520,17 @@ int MessageBox(HWND hwnd,
     return IDOK;
 
   UINT actual_flags = flags;
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+  if (base::i18n::IsRTL())
     actual_flags |= MB_RIGHT | MB_RTLREADING;
 
   std::wstring localized_text;
   const wchar_t* text_ptr = text.c_str();
-  if (l10n_util::AdjustStringForLocaleDirection(text, &localized_text))
+  if (base::i18n::AdjustStringForLocaleDirection(text, &localized_text))
     text_ptr = localized_text.c_str();
 
   std::wstring localized_caption;
   const wchar_t* caption_ptr = caption.c_str();
-  if (l10n_util::AdjustStringForLocaleDirection(caption, &localized_caption))
+  if (base::i18n::AdjustStringForLocaleDirection(caption, &localized_caption))
     caption_ptr = localized_caption.c_str();
 
   return ::MessageBox(hwnd, text_ptr, caption_ptr, actual_flags);
@@ -854,8 +545,8 @@ gfx::Font GetWindowTitleFont() {
 }
 
 void SetAppIdForWindow(const std::wstring& app_id, HWND hwnd) {
-  // This funcationality is only available on Win7+.
-  if (win_util::GetWinVersion() != win_util::WINVERSION_WIN7)
+  // This functionality is only available on Win7+.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
     return;
 
   // Load Shell32.dll into memory.
@@ -879,20 +570,15 @@ void SetAppIdForWindow(const std::wstring& app_id, HWND hwnd) {
   }
 
   // Set the application's name.
-  PROPVARIANT pv;
-  InitPropVariantFromString(app_id.c_str(), &pv);
-
   ScopedComPtr<IPropertyStore> pps;
   SHGPSFW SHGetPropertyStoreForWindow = static_cast<SHGPSFW>(function);
   HRESULT result = SHGetPropertyStoreForWindow(
       hwnd, __uuidof(*pps), reinterpret_cast<void**>(pps.Receive()));
   if (S_OK == result) {
-    if (S_OK == pps->SetValue(PKEY_AppUserModel_ID, pv))
-      pps->Commit();
+    SetAppIdForPropertyStore(pps, app_id.c_str());
   }
 
   // Cleanup.
-  PropVariantClear(&pv);
   base::UnloadNativeLibrary(shell32_library);
 }
 

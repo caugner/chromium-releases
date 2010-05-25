@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,24 +9,28 @@
 #include <set>
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/views/frame/browser_bubble_host.h"
+#include "chrome/browser/views/frame/browser_frame.h"
+#include "chrome/browser/views/infobars/infobar_container.h"
+#include "chrome/browser/views/tabs/tab_strip.h"
+#include "chrome/browser/views/tabs/base_tab_strip.h"
+#include "chrome/browser/views/unhandled_keyboard_event_handler.h"
+#include "gfx/native_widget_types.h"
+#include "views/window/client_view.h"
+#include "views/window/window_delegate.h"
+
 #if defined(OS_WIN)
 #include "chrome/browser/hang_monitor/hung_plugin_action.h"
 #include "chrome/browser/hang_monitor/hung_window_detector.h"
-#endif
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/views/frame/browser_frame.h"
-#if defined(OS_WIN)
 #include "views/controls/menu/native_menu_win.h"
 #endif
-#include "views/controls/menu/simple_menu_model.h"
-#include "views/window/client_view.h"
-#include "views/window/window_delegate.h"
 
 // NOTE: For more information about the objects and files in this directory,
 // view: http://dev.chromium.org/developers/design-documents/browser-window
@@ -34,23 +38,26 @@
 class BookmarkBarView;
 class Browser;
 class BrowserBubble;
+class BrowserExtender;
+class BrowserViewLayout;
 class DownloadShelfView;
 class EncodingMenuModel;
 class ExtensionShelf;
 class FullscreenExitBubble;
 class HtmlDialogUIDelegate;
 class InfoBarContainer;
-#if defined(OS_WIN)
-class JumpList;
-#endif
 class LocationBarView;
+class SideTabStrip;
 class StatusBubbleViews;
 class TabContentsContainer;
-class TabStripWrapper;
 class ToolbarView;
 class ZoomMenuModel;
-#if defined(OS_CHROMEOS)
-class BrowserExtender;
+
+#if defined(OS_WIN)
+class AeroPeekManager;
+class JumpList;
+#elif defined(OS_LINUX)
+class AccessibleWidgetHelper;
 #endif
 
 namespace views {
@@ -65,14 +72,19 @@ class SingleSplitView;
 //  A ClientView subclass that provides the contents of a browser window,
 //  including the TabStrip, toolbars, download shelves, the content area etc.
 //
-class BrowserView : public BrowserWindow,
+class BrowserView : public BrowserBubbleHost,
+                    public BrowserWindow,
                     public BrowserWindowTesting,
                     public NotificationObserver,
                     public TabStripModelObserver,
-                    public views::SimpleMenuModel::Delegate,
+                    public menus::SimpleMenuModel::Delegate,
                     public views::WindowDelegate,
-                    public views::ClientView {
+                    public views::ClientView,
+                    public InfoBarContainer::Delegate {
  public:
+  // The browser view's class name.
+  static const char kViewClassName[];
+
   // Explicitly sets how windows are shown. Use a value of -1 to give the
   // default behavior. This is used during testing and not generally useful
   // otherwise.
@@ -133,14 +145,16 @@ class BrowserView : public BrowserWindow,
   gfx::Rect GetTabStripBounds() const;
 
   // Accessor for the TabStrip.
-  TabStripWrapper* tabstrip() const { return tabstrip_; }
+  BaseTabStrip* tabstrip() const { return tabstrip_; }
 
   // Accessor for the ExtensionShelf.
   ExtensionShelf* extension_shelf() const { return extension_shelf_; }
 
   // Returns true if various window components are visible.
-  bool IsToolbarVisible() const;
   bool IsTabStripVisible() const;
+
+  // Returns true if the vertical tabstrip is in use.
+  bool UsingSideTabs() const;
 
   // Returns true if the profile associated with this Browser window is
   // off the record.
@@ -157,15 +171,12 @@ class BrowserView : public BrowserWindow,
   // command id. This can be used to provide menu item shortcut hints etc.
   // Returns true if an accelerator was found for the specified |cmd_id|, false
   // otherwise.
-  bool GetAccelerator(int cmd_id, views::Accelerator* accelerator);
+  bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
 
   // Shows the next app-modal dialog box, if there is one to be shown, or moves
   // an existing showing one to the front. Returns true if one was shown or
   // activated, false if none was shown.
   bool ActivateAppModalDialog() const;
-
-  // Called when the activation of the frame changes.
-  void ActivationChanged(bool activated);
 
   // Returns the selected TabContents. Used by our NonClientView's
   // TabIconView::TabContentsProvider implementations.
@@ -184,24 +195,50 @@ class BrowserView : public BrowserWindow,
   void PrepareToRunSystemMenu(HMENU menu);
 #endif
 
+  // Traverses to the next toolbar. |forward| when true, will navigate from left
+  // to right and vice versa when false.
+  void TraverseNextAccessibleToolbar(bool forward);
+
   // Returns true if the Browser object associated with this BrowserView is a
   // normal-type window (i.e. a browser window, not an app or popup).
   bool IsBrowserTypeNormal() const {
     return browser_->type() == Browser::TYPE_NORMAL;
   }
 
-  // Returns true if the frame containing this BrowserView should show the
-  // distributor logo.
-  bool ShouldShowDistributorLogo() const {
-    return browser_->ShouldShowDistributorLogo();
+  // Returns true if the Browser object associated with this BrowserView is a
+  // app panel window.
+  bool IsBrowserTypePanel() const {
+    return browser_->type() == Browser::TYPE_APP_PANEL;
+  }
+
+  // Returns true if the Browser object associated with this BrowserView is a
+  // popup window.
+  bool IsBrowserTypePopup() const {
+    return (browser_->type() & Browser::TYPE_POPUP) != 0;
   }
 
   // Register preferences specific to this view.
   static void RegisterBrowserViewPrefs(PrefService* prefs);
 
-  // Attach/Detach a BrowserBubble to the browser.
-  void AttachBrowserBubble(BrowserBubble *bubble);
-  void DetachBrowserBubble(BrowserBubble *bubble);
+  // Returns true if the specified point(BrowserView coordinates) is in
+  // in the window caption area of the browser window.
+  bool IsPositionInWindowCaption(const gfx::Point& point);
+
+  // Returns whether the fullscreen bubble is visible or not.
+  bool IsFullscreenBubbleVisible() const;
+
+  // Invoked from the frame when the full screen state changes. This is only
+  // used on Linux.
+  void FullScreenStateChanged();
+
+  // Restores the focused view. This is also used to set the initial focus
+  // when a new browser window is created.
+  void RestoreFocus();
+
+  // Called when the activation of the frame changes.
+  virtual void ActivationChanged(bool activated);
+
+  BrowserExtender* browser_extender() const { return browser_extender_.get(); }
 
   // Overridden from BrowserWindow:
   virtual void Show();
@@ -226,12 +263,15 @@ class BrowserView : public BrowserWindow,
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
   virtual LocationBar* GetLocationBar() const;
-  virtual void SetFocusToLocationBar();
+  virtual void SetFocusToLocationBar(bool select_all);
   virtual void UpdateStopGoState(bool is_loading, bool force);
   virtual void UpdateToolbar(TabContents* contents, bool should_restore_state);
   virtual void FocusToolbar();
+  virtual void FocusPageAndAppMenus();
   virtual void DestroyBrowser();
   virtual bool IsBookmarkBarVisible() const;
+  virtual bool IsBookmarkBarAnimating() const;
+  virtual bool IsToolbarVisible() const;
   virtual gfx::Rect GetRootWindowResizerRect() const;
   virtual void DisableInactiveFrame();
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
@@ -253,7 +293,9 @@ class BrowserView : public BrowserWindow,
   virtual void ShowSelectProfileDialog();
   virtual void ShowNewProfileDialog();
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
-  virtual void ShowHistoryTooNewDialog();
+  virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
+                                         Profile* profile);
+  virtual void ShowProfileErrorDialog(int message_id);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -268,7 +310,16 @@ class BrowserView : public BrowserWindow,
                             bool show_history);
   virtual void ShowAppMenu();
   virtual void ShowPageMenu();
-  virtual int GetCommandId(const NativeWebKeyboardEvent& event);
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents);
+#if defined(OS_CHROMEOS)
+  virtual void ToggleCompactNavigationBar();
+#endif  // defined(OS_CHROMEOS)
+  virtual void Cut();
+  virtual void Copy();
+  virtual void Paste();
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const;
@@ -290,11 +341,11 @@ class BrowserView : public BrowserWindow,
                              bool user_gesture);
   virtual void TabStripEmpty();
 
-  // Overridden from views::SimpleMenuModel::Delegate:
+  // Overridden from menus::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          views::Accelerator* accelerator);
+                                          menus::Accelerator* accelerator);
   virtual bool IsLabelForCommandIdDynamic(int command_id) const;
   virtual string16 GetLabelForCommandId(int command_id) const;
   virtual void ExecuteCommand(int command_id);
@@ -306,6 +357,7 @@ class BrowserView : public BrowserWindow,
   virtual std::wstring GetWindowTitle() const;
   virtual views::View* GetInitiallyFocusedView();
   virtual bool ShouldShowWindowTitle() const;
+  virtual SkBitmap GetWindowAppIcon();
   virtual SkBitmap GetWindowIcon();
   virtual bool ShouldShowWindowIcon() const;
   virtual bool ExecuteWindowsCommand(int command_id);
@@ -321,49 +373,44 @@ class BrowserView : public BrowserWindow,
   virtual bool CanClose() const;
   virtual int NonClientHitTest(const gfx::Point& point);
   virtual gfx::Size GetMinimumSize();
-  virtual std::string GetClassName() const;
 
-  // Overridden from views::View:
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleName(std::wstring* name);
-  virtual void SetAccessibleName(const std::wstring& name);
+  // InfoBarContainer::Delegate overrides
+  virtual void InfoBarSizeChanged(bool is_animating);
 
  protected:
   // Overridden from views::View:
+  virtual std::string GetClassName() const;
+  virtual void PaintChildren(gfx::Canvas* canvas);
   virtual void Layout();
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);
   virtual void ChildPreferredSizeChanged(View* child);
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+
+  // Factory Methods.
+  // Returns a new LayoutManager for this browser view. A subclass may
+  // override to implemnet different layout pocily.
+  virtual views::LayoutManager* CreateLayoutManager() const;
+
+  // Returns a new TabStrip for the browser view. A subclass may
+  // override to return a different TabStrip implementation.
+  virtual BaseTabStrip* CreateTabStrip(TabStripModel* tab_strip_model);
+
+  // Browser window related initializations.
+  virtual void Init();
 
  private:
-  // Browser window related initializations.
-  void Init();
+  friend class BrowserViewLayout;
 
 #if defined(OS_WIN)
   // Creates the system menu.
   void InitSystemMenu();
 #endif
 
-  // Layout the TabStrip, returns the coordinate of the bottom of the TabStrip,
-  // for laying out subsequent controls.
-  int LayoutTabStrip();
-  // Layout the following controls, starting at |top|, returns the coordinate
-  // of the bottom of the control, for laying out the next control.
-  int LayoutToolbar(int top);
-  int LayoutBookmarkAndInfoBars(int top);
-  int LayoutTopBar(int top);
-  int LayoutInfoBar(int top);
-  // Layout the TabContents container, between the coordinates |top| and
-  // |bottom|.
-  void LayoutTabContents(int top, int bottom);
-  int LayoutExtensionAndDownloadShelves();
-  // Layout the Extension Shelf, returns the coordinate of the top of the
-  // control, for laying out the previous control.
-  int LayoutExtensionShelf(int bottom);
-  // Layout the Download Shelf, returns the coordinate of the top of the
-  // control, for laying out the previous control.
-  int LayoutDownloadShelf(int bottom);
+  // Returns the BrowserViewLayout.
+  BrowserViewLayout* GetBrowserViewLayout() const;
+
   // Layout the Status Bubble.
   void LayoutStatusBubble(int top);
 
@@ -395,6 +442,13 @@ class BrowserView : public BrowserWindow,
   // Returns true if anything was changed, and a re-Layout is now required.
   bool UpdateChildViewAndLayout(views::View* new_view, views::View** old_view);
 
+  // Invoked to update the necessary things when our fullscreen state changes
+  // to |fullscreen|. On Windows this is invoked immediately when we toggle the
+  // full screen state. On Linux changing the fullscreen state is async, so we
+  // ask the window to change it's fullscreen state, then when we get
+  // notification that it succeeded this method is invoked.
+  void ProcessFullscreen(bool fullscreen);
+
   // Copy the accelerator table from the app resources into something we can
   // use.
   void LoadAccelerators();
@@ -402,7 +456,7 @@ class BrowserView : public BrowserWindow,
 #if defined(OS_WIN)
   // Builds the correct menu for when we have minimal chrome.
   void BuildSystemMenuForBrowserWindow();
-  void BuildSystemMenuForPopupWindow();
+  void BuildSystemMenuForAppOrPopupWindow(bool is_app);
 #endif
 
   // Retrieves the command id for the specified Windows app command.
@@ -413,6 +467,9 @@ class BrowserView : public BrowserWindow,
 
   // Initialize the hung plugin detector.
   void InitHangMonitor();
+
+  // Save the current focused view to view storage
+  void SaveFocusedView();
 
   // Initialize class statics.
   static void InitClass();
@@ -429,7 +486,7 @@ class BrowserView : public BrowserWindow,
   views::View* active_bookmark_bar_;
 
   // The TabStrip.
-  TabStripWrapper* tabstrip_;
+  BaseTabStrip* tabstrip_;
 
   // The Toolbar containing the navigation buttons, menus and the address bar.
   ToolbarView* toolbar_;
@@ -442,9 +499,6 @@ class BrowserView : public BrowserWindow,
 
   // The InfoBarContainer that contains InfoBars for the current tab.
   InfoBarContainer* infobar_container_;
-
-  // The distance the FindBar is from the top of the window, in pixels.
-  int find_bar_y_;
 
   // The view that contains the selected TabContents.
   TabContentsContainer* contents_container_;
@@ -475,12 +529,6 @@ class BrowserView : public BrowserWindow,
 
   scoped_ptr<FullscreenExitBubble> fullscreen_bubble_;
 
-  // The default favicon image.
-  static SkBitmap default_favicon_;
-
-  // The OTR avatar image.
-  static SkBitmap otr_avatar_;
-
 #if defined(OS_WIN)
   // The additional items we insert into the system menu.
   scoped_ptr<views::SystemMenuModel> system_menu_contents_;
@@ -504,6 +552,9 @@ class BrowserView : public BrowserWindow,
 
   // The custom JumpList for Windows 7.
   scoped_ptr<JumpList> jumplist_;
+
+  // The custom AeroPeek manager for Windows 7.
+  scoped_ptr<AeroPeekManager> aeropeek_manager_;
 #endif
 
   // The timer used to update frames for the Loading Animation.
@@ -512,15 +563,19 @@ class BrowserView : public BrowserWindow,
   // A bottom bar for showing extensions.
   ExtensionShelf* extension_shelf_;
 
-  typedef std::set<BrowserBubble*> BubbleSet;
-  BubbleSet browser_bubbles_;
-
   // The accessible name of this view.
   std::wstring accessible_name_;
 
-#if defined(OS_CHROMEOS)
   scoped_ptr<BrowserExtender> browser_extender_;
-#endif
+
+  // Last focused view that issued a tab traversal.
+  int last_focused_view_storage_id_;
+
+  UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
+
+ #if defined(OS_LINUX)
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
+ #endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

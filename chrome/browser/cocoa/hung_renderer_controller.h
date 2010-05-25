@@ -22,6 +22,7 @@
 #include <vector>
 
 #import "base/cocoa_protocols_mac.h"
+#import "base/scoped_nsobject.h"
 
 @class MultiKeyEquivalentButton;
 class TabContents;
@@ -38,9 +39,13 @@ class TabContents;
   // NULL while this dialog is open.
   TabContents* hungContents_;
 
-  // Backing data for |tableView_|.  Contains a list of all
-  // TabContents that share a renderer process with |hungContents_|.
-  std::vector<TabContents*> hungRenderers_;
+  // Backing data for |tableView_|.  Titles of each TabContents that
+  // shares a renderer process with |hungContents_|.
+  scoped_nsobject<NSArray> hungTitles_;
+
+  // Favicons of each TabContents that shares a renderer process with
+  // |hungContents_|.
+  scoped_nsobject<NSArray> hungFavicons_;
 }
 
 // Kills the hung renderers.

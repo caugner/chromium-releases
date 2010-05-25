@@ -1,48 +1,39 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/importer/importer.h"
 
-#include <map>
-#include <set>
-
-#include "app/gfx/favicon_size.h"
-#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
-#include "base/file_util.h"
-#include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/thread.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_instance.h"
-#include "chrome/browser/favicon_service.h"
-#include "chrome/browser/first_run.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/importer/firefox_profile_lock.h"
 #include "chrome/browser/importer/importer_bridge.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/favicon_size.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/image_operations.h"
 #include "webkit/glue/image_decoder.h"
-#include "webkit/glue/password_form.h"
 
 // TODO(port): Port these files.
 #if defined(OS_WIN)
 #include "app/win_util.h"
 #include "chrome/browser/views/importer_lock_view.h"
 #include "views/window/window.h"
-#elif defined(OS_LINUX)
-#include "chrome/browser/gtk/import_lock_dialog_gtk.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/cocoa/importer_lock_dialog.h"
+#elif defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/gtk/import_lock_dialog_gtk.h"
 #endif
 
 using webkit_glue::PasswordForm;
@@ -94,6 +85,11 @@ void ProfileWriter::AddBookmarkEntry(
 
   bool show_bookmark_toolbar = false;
   std::set<const BookmarkNode*> groups_added_to;
+  bool import_mode = false;
+  if (bookmark.size() > 1) {
+    model->BeginImportMode();
+    import_mode = true;
+  }
   for (std::vector<BookmarkEntry>::const_iterator it = bookmark.begin();
        it != bookmark.end(); ++it) {
     // Don't insert this url if it isn't valid.
@@ -149,6 +145,10 @@ void ProfileWriter::AddBookmarkEntry(
           groups_added_to.begin();
        i != groups_added_to.end(); ++i) {
     model->ResetDateGroupModified(*i);
+  }
+
+  if (import_mode) {
+    model->EndImportMode();
   }
 
   if (show_bookmark_toolbar)
@@ -374,6 +374,9 @@ Importer::Importer()
       import_to_bookmark_bar_(false) {
 }
 
+Importer::~Importer() {
+}
+
 // static
 bool Importer::ReencodeFavicon(const unsigned char* src_data, size_t src_len,
                                std::vector<unsigned char>* png_data) {
@@ -404,21 +407,6 @@ ImporterHost::ImporterHost()
       observer_(NULL),
       task_(NULL),
       importer_(NULL),
-      file_loop_(g_browser_process->file_thread()->message_loop()),
-      waiting_for_bookmarkbar_model_(false),
-      installed_bookmark_observer_(false),
-      is_source_readable_(true),
-      headless_(false),
-      parent_window_(NULL) {
-  importer_list_.DetectSourceProfiles();
-}
-
-ImporterHost::ImporterHost(MessageLoop* file_loop)
-    : profile_(NULL),
-      observer_(NULL),
-      task_(NULL),
-      importer_(NULL),
-      file_loop_(file_loop),
       waiting_for_bookmarkbar_model_(false),
       installed_bookmark_observer_(false),
       is_source_readable_(true),
@@ -468,10 +456,10 @@ void ImporterHost::ShowWarningDialog() {
 #if defined(OS_WIN)
     views::Window::CreateChromeWindow(GetActiveWindow(), gfx::Rect(),
                                       new ImporterLockView(this))->Show();
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_USES_GTK)
     ImportLockDialogGtk::Show(parent_window_, this);
 #else
-    ImportLockDialogCocoa(this);
+    ImportLockDialogCocoa::ShowWarning(this);
 #endif
   }
 }
@@ -498,11 +486,12 @@ void ImporterHost::OnLockViewEnd(bool is_continue) {
   }
 }
 
-void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
-                                       Profile* target_profile,
-                                       uint16 items,
-                                       ProfileWriter* writer,
-                                       bool first_run) {
+void ImporterHost::StartImportSettings(
+    const importer::ProfileInfo& profile_info,
+    Profile* target_profile,
+    uint16 items,
+    ProfileWriter* writer,
+    bool first_run) {
   DCHECK(!profile_);  // We really only support importing from one host at a
                       // time.
   profile_ = target_profile;
@@ -527,13 +516,13 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
   }
   importer_->set_import_to_bookmark_bar(import_to_bookmark_bar);
   scoped_refptr<ImporterBridge> bridge(
-      new InProcessImporterBridge(writer_.get(), file_loop_, this));
+      new InProcessImporterBridge(writer_.get(), this));
   task_ = NewRunnableMethod(importer_, &Importer::StartImport,
       profile_info, items, bridge);
 
   // We should lock the Firefox profile directory to prevent corruption.
-  if (profile_info.browser_type == FIREFOX2 ||
-      profile_info.browser_type == FIREFOX3) {
+  if (profile_info.browser_type == importer::FIREFOX2 ||
+      profile_info.browser_type == importer::FIREFOX3) {
     firefox_lock_.reset(new FirefoxProfileLock(profile_info.source_path));
     if (!firefox_lock_->HasAcquired()) {
       // If fail to acquire the lock, we set the source unreadable and
@@ -542,7 +531,7 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
       // import just the home page, then import anyway. The home page setting
       // is stored in an unlocked text file, so it is the only preference safe
       // to import even if Firefox is running.
-      if (items == HOME_PAGE && first_run && this->headless_) {
+      if (items == importer::HOME_PAGE && first_run && this->headless_) {
         AddRef();
         InvokeTaskIfDone();
         return;
@@ -555,7 +544,7 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
 #if defined(OS_WIN)
   // For google toolbar import, we need the user to log in and store their GAIA
   // credentials.
-  if (profile_info.browser_type == GOOGLE_TOOLBAR5) {
+  if (profile_info.browser_type == importer::GOOGLE_TOOLBAR5) {
     if (!toolbar_importer_utils::IsGoogleGAIACookieInstalled()) {
       win_util::MessageBox(
           NULL,
@@ -580,7 +569,7 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
 
   // BookmarkModel should be loaded before adding IE favorites. So we observe
   // the BookmarkModel if needed, and start the task after it has been loaded.
-  if ((items & FAVORITES) && !writer_->BookmarkModelIsLoaded()) {
+  if ((items & importer::FAVORITES) && !writer_->BookmarkModelIsLoaded()) {
     target_profile->GetBookmarkModel()->AddObserver(this);
     waiting_for_bookmarkbar_model_ = true;
     installed_bookmark_observer_ = true;
@@ -589,7 +578,7 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
   // Observes the TemplateURLModel if needed to import search engines from the
   // other browser. We also check to see if we're importing bookmarks because
   // we can import bookmark keywords from Firefox as search engines.
-  if ((items & SEARCH_ENGINES) || (items & FAVORITES)) {
+  if ((items & importer::SEARCH_ENGINES) || (items & importer::FAVORITES)) {
     if (!writer_->TemplateURLModelIsLoaded()) {
       TemplateURLModel* model = target_profile->GetTemplateURLModel();
       registrar_.Add(this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
@@ -615,15 +604,15 @@ void ImporterHost::InvokeTaskIfDone() {
   if (waiting_for_bookmarkbar_model_ || !registrar_.IsEmpty() ||
       !is_source_readable_)
     return;
-  file_loop_->PostTask(FROM_HERE, task_);
+  ChromeThread::PostTask(ChromeThread::FILE, FROM_HERE, task_);
 }
 
-void ImporterHost::ImportItemStarted(ImportItem item) {
+void ImporterHost::ImportItemStarted(importer::ImportItem item) {
   if (observer_)
     observer_->ImportItemStarted(item);
 }
 
-void ImporterHost::ImportItemEnded(ImportItem item) {
+void ImporterHost::ImportItemEnded(importer::ImportItem item) {
   if (observer_)
     observer_->ImportItemEnded(item);
 }

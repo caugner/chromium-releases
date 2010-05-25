@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,32 +6,31 @@
 
 #include "app/l10n_util.h"
 #include "base/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/values.h"
+#if defined(OS_WIN)
+#include "base/win_util.h"
+#endif
+#include "chrome/browser/appcache/view_appcache_internals_job_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/net/view_net_internals_job_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
+#include "grit/platform_locale_settings.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_view_net_internals_job.h"
-
-#include "grit/locale_settings.h"
-
-// The URL scheme used for internal chrome resources.
-// TODO(glen): Choose a better location for this.
-static const char kChromeURLScheme[] = "chrome";
-
-// The single global instance of ChromeURLDataManager.
-ChromeURLDataManager chrome_url_data_manager;
 
 // URLRequestChromeJob is a URLRequestJob that manages running chrome-internal
 // resource requests asynchronously.
@@ -40,7 +39,6 @@ ChromeURLDataManager chrome_url_data_manager;
 class URLRequestChromeJob : public URLRequestJob {
  public:
   explicit URLRequestChromeJob(URLRequest* request);
-  virtual ~URLRequestChromeJob();
 
   // URLRequestJob implementation.
   virtual void Start();
@@ -57,6 +55,8 @@ class URLRequestChromeJob : public URLRequestJob {
   }
 
  private:
+  virtual ~URLRequestChromeJob();
+
   // Helper for Start(), to let us start asynchronously.
   // (This pattern is shared by most URLRequestJob implementations.)
   void StartAsync();
@@ -84,33 +84,21 @@ class URLRequestChromeJob : public URLRequestJob {
 class URLRequestChromeFileJob : public URLRequestFileJob {
  public:
   URLRequestChromeFileJob(URLRequest* request, const FilePath& path);
-  virtual ~URLRequestChromeFileJob();
 
  private:
+  virtual ~URLRequestChromeFileJob();
+
   DISALLOW_EVIL_CONSTRUCTORS(URLRequestChromeFileJob);
 };
 
 void RegisterURLRequestChromeJob() {
-  // Being a standard scheme allows us to resolve relative paths. This method
-  // is invoked multiple times during testing, so only add the scheme once.
-  url_parse::Component url_scheme_component(0, arraysize(kChromeURLScheme) - 1);
-  if (!url_util::IsStandard(kChromeURLScheme, arraysize(kChromeURLScheme) - 1,
-                            url_scheme_component)) {
-    url_util::AddStandardScheme(kChromeURLScheme);
-  }
-
   FilePath inspector_dir;
   if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
-    // TODO(yurys): remove "inspector" source when new developer tools support
-    // all features of in-process Web Inspector and Console Debugger. For the
-    // time being we need to serve the same content from chrome://inspector
-    // for the Console Debugger and in-process Web Inspector.
-    chrome_url_data_manager.AddFileSource("inspector", inspector_dir);
-    chrome_url_data_manager.AddFileSource(chrome::kChromeUIDevToolsHost,
-                                          inspector_dir);
+    Singleton<ChromeURLDataManager>()->AddFileSource(
+        chrome::kChromeUIDevToolsHost, inspector_dir);
   }
 
-  URLRequest::RegisterProtocolFactory(kChromeURLScheme,
+  URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme,
                                       &ChromeURLDataManager::Factory);
   URLRequest::RegisterProtocolFactory(chrome::kPrintScheme,
                                       &ChromeURLDataManager::Factory);
@@ -119,8 +107,8 @@ void RegisterURLRequestChromeJob() {
 void UnregisterURLRequestChromeJob() {
   FilePath inspector_dir;
   if (PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir)) {
-    chrome_url_data_manager.RemoveFileSource("inspector");
-    chrome_url_data_manager.RemoveFileSource(chrome::kChromeUIDevToolsHost);
+    Singleton<ChromeURLDataManager>()->RemoveFileSource(
+        chrome::kChromeUIDevToolsHost);
   }
 }
 
@@ -128,7 +116,8 @@ void UnregisterURLRequestChromeJob() {
 void ChromeURLDataManager::URLToRequest(const GURL& url,
                                         std::string* source_name,
                                         std::string* path) {
-  DCHECK(url.SchemeIs(kChromeURLScheme) || url.SchemeIs(chrome::kPrintScheme));
+  DCHECK(url.SchemeIs(chrome::kChromeUIScheme) ||
+         url.SchemeIs(chrome::kPrintScheme));
 
   if (!url.is_valid()) {
     NOTREACHED();
@@ -161,11 +150,19 @@ bool ChromeURLDataManager::URLToFilePath(const GURL& url,
   // Parse the URL into a request for a source and path.
   std::string source_name;
   std::string relative_path;
-  URLToRequest(url, &source_name, &relative_path);
+
+  // Remove Query and Ref from URL.
+  GURL stripped_url;
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+  replacements.ClearRef();
+  stripped_url = url.ReplaceComponents(replacements);
+
+  URLToRequest(stripped_url, &source_name, &relative_path);
 
   FileSourceMap::const_iterator i(
-      chrome_url_data_manager.file_sources_.find(source_name));
-  if (i == chrome_url_data_manager.file_sources_.end())
+      Singleton<ChromeURLDataManager>()->file_sources_.find(source_name));
+  if (i == Singleton<ChromeURLDataManager>()->file_sources_.end())
     return false;
 
   *file_path = i->second.AppendASCII(relative_path);
@@ -226,19 +223,22 @@ bool ChromeURLDataManager::StartRequest(const GURL& url,
   // going to get called once we return.
   job->SetMimeType(source->GetMimeType(path));
 
+  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
+      job->request()->context());
+
   // Forward along the request to the data source.
   MessageLoop* target_message_loop = source->MessageLoopForRequestPath(path);
   if (!target_message_loop) {
     // The DataSource is agnostic to which thread StartDataRequest is called
     // on for this path.  Call directly into it from this thread, the IO
     // thread.
-    source->StartDataRequest(path, request_id);
+    source->StartDataRequest(path, context->is_off_the_record(), request_id);
   } else {
     // The DataSource wants StartDataRequest to be called on a specific thread,
     // usually the UI thread, for this path.
     target_message_loop->PostTask(FROM_HERE,
         NewRunnableMethod(source, &DataSource::StartDataRequest,
-                          path, request_id));
+                          path, context->is_off_the_record(), request_id));
   }
   return true;
 }
@@ -273,8 +273,9 @@ void ChromeURLDataManager::DataAvailable(
 void ChromeURLDataManager::DataSource::SendResponse(
     RequestID request_id,
     RefCountedMemory* bytes) {
-  ChromeThread::GetMessageLoop(ChromeThread::IO)->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
                         &ChromeURLDataManager::DataAvailable,
                         request_id, scoped_refptr<RefCountedMemory>(bytes)));
 }
@@ -289,41 +290,20 @@ void ChromeURLDataManager::DataSource::SetFontAndTextDirection(
     DictionaryValue* localized_strings) {
   localized_strings->SetString(L"fontfamily",
       l10n_util::GetString(IDS_WEB_FONT_FAMILY));
+
+  int web_font_size_id = IDS_WEB_FONT_SIZE;
+#if defined(OS_WIN)
+  // Some fonts used for some languages changed a lot in terms of the font
+  // metric in Vista. So, we need to use different size before Vista.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
+    web_font_size_id = IDS_WEB_FONT_SIZE_XP;
+#endif
   localized_strings->SetString(L"fontsize",
-      l10n_util::GetString(IDS_WEB_FONT_SIZE));
+      l10n_util::GetString(web_font_size_id));
 
   localized_strings->SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-       L"rtl" : L"ltr");
+      base::i18n::IsRTL() ? L"rtl" : L"ltr");
 }
-
-// This class describes how to form chrome://net-internals/DESCRIPTION
-// URLs, and conversely how to extract DESCRIPTION.
-//
-// This needs to be passed to URLRequestViewNetInternalsJob, which lives
-// in the network module and doesn't know anything about what URL protocol
-// it has been registered with.
-class NetInternalsURLFormat : public URLRequestViewNetInternalsJob::URLFormat {
- public:
-  virtual std::string GetDetails(const GURL& url) {
-    DCHECK(IsSupportedURL(url));
-    size_t start = strlen(chrome::kNetworkViewInternalsURL);
-    if (start >= url.spec().size())
-      return std::string();
-    return url.spec().substr(start);
-  }
-
-  virtual GURL MakeURL(const std::string& details) {
-    return GURL(std::string(chrome::kNetworkViewInternalsURL) + details);
-  }
-
-  static bool IsSupportedURL(const GURL& url) {
-    // Note that kNetworkViewInternalsURL is terminated by a '/'.
-    return StartsWithASCII(url.spec(),
-                           chrome::kNetworkViewInternalsURL,
-                           true /*case_sensitive*/);
-  }
-};
 
 URLRequestJob* ChromeURLDataManager::Factory(URLRequest* request,
                                              const std::string& scheme) {
@@ -333,10 +313,12 @@ URLRequestJob* ChromeURLDataManager::Factory(URLRequest* request,
     return new URLRequestChromeFileJob(request, path);
 
   // Next check for chrome://net-internals/, which uses its own job type.
-  if (NetInternalsURLFormat::IsSupportedURL(request->url())) {
-    static NetInternalsURLFormat url_format;
-    return new URLRequestViewNetInternalsJob(request, &url_format);
-  }
+  if (ViewNetInternalsJobFactory::IsSupportedURL(request->url()))
+    return ViewNetInternalsJobFactory::CreateJobForRequest(request);
+
+  // Next check for chrome://appcache-internals/, which uses its own job type.
+  if (ViewAppCacheInternalsJobFactory::IsSupportedURL(request->url()))
+    return ViewAppCacheInternalsJobFactory::CreateJobForRequest(request);
 
   // Fall back to using a custom handler
   return new URLRequestChromeJob(request);
@@ -349,7 +331,7 @@ URLRequestChromeJob::URLRequestChromeJob(URLRequest* request)
 }
 
 URLRequestChromeJob::~URLRequestChromeJob() {
-  CHECK(!chrome_url_data_manager.HasPendingJob(this));
+  CHECK(!Singleton<ChromeURLDataManager>()->HasPendingJob(this));
 }
 
 void URLRequestChromeJob::Start() {
@@ -360,7 +342,7 @@ void URLRequestChromeJob::Start() {
 }
 
 void URLRequestChromeJob::Kill() {
-  chrome_url_data_manager.RemoveRequest(this);
+  Singleton<ChromeURLDataManager>()->RemoveRequest(this);
 }
 
 bool URLRequestChromeJob::GetMimeType(std::string* mime_type) const {
@@ -420,7 +402,7 @@ void URLRequestChromeJob::StartAsync() {
   if (!request_)
     return;
 
-  if (chrome_url_data_manager.StartRequest(request_->url(), this)) {
+  if (Singleton<ChromeURLDataManager>()->StartRequest(request_->url(), this)) {
     NotifyHeadersComplete();
   } else {
     NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED,

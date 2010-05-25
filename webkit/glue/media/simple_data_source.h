@@ -34,6 +34,10 @@ class SimpleDataSource : public media::DataSource,
                                                         bridge_factory);
   }
 
+  // media::FilterFactoryImpl2 implementation.
+  static bool IsMediaFormatSupported(
+      const media::MediaFormat& media_format);
+
   // MediaFilter implementation.
   virtual void Stop();
 
@@ -51,14 +55,16 @@ class SimpleDataSource : public media::DataSource,
   virtual void OnUploadProgress(uint64 position, uint64 size);
   virtual bool OnReceivedRedirect(
       const GURL& new_url,
-      const webkit_glue::ResourceLoaderBridge::ResponseInfo& info);
+      const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+      bool* has_new_first_party_for_cookies,
+      GURL* new_first_party_for_cookies);
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
       bool content_filtered);
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnCompletedRequest(const URLRequestStatus& status,
                                   const std::string& security_info);
-  virtual std::string GetURLForDebugging();
+  virtual GURL GetURLForDebugging() const;
 
  private:
   friend class media::FilterFactoryImpl2<
@@ -78,6 +84,9 @@ class SimpleDataSource : public media::DataSource,
 
   // Cancels and deletes the resource loading on the render thread.
   void CancelTask();
+
+  // Perform initialization completion tasks under a lock.
+  void DoneInitialization_Locked(bool success);
 
   // Primarily used for asserting the bridge is loading on the render thread.
   MessageLoop* render_loop_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <atlmisc.h>
 
 #include "base/scoped_comptr_win.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/ime_input.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
@@ -27,6 +28,7 @@ class Message;
 
 class BackingStore;
 class RenderWidgetHost;
+class GpuViewHost;
 
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
@@ -49,15 +51,17 @@ static const wchar_t* const kRenderWidgetHostHWNDClass =
 //     If the render process dies, the RenderWidgetHostHWND goes away and all
 //     references to it must become NULL."
 //
-class RenderWidgetHostViewWin :
-  public CWindowImpl<RenderWidgetHostViewWin,
-                     CWindow,
-                     RenderWidgetHostHWNDTraits>,
-  public RenderWidgetHostView {
+class RenderWidgetHostViewWin
+    : public CWindowImpl<RenderWidgetHostViewWin,
+                         CWindow,
+                         RenderWidgetHostHWNDTraits>,
+      public RenderWidgetHostView {
  public:
   // The view will associate itself with the given widget.
   explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewWin();
+
+  void CreateWnd(HWND parent);
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -121,24 +125,29 @@ class RenderWidgetHostViewWin :
   virtual bool HasFocus();
   virtual void Show();
   virtual void Hide();
+  virtual bool IsShowing();
   virtual gfx::Rect GetViewBounds() const;
   virtual void UpdateCursor(const WebCursor& cursor);
   virtual void SetIsLoading(bool is_loading);
   virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
-  virtual void DidPaintRect(const gfx::Rect& rect);
-  virtual void DidScrollRect(const gfx::Rect& rect, int dx, int dy);
+  virtual void DidPaintBackingStoreRects(const std::vector<gfx::Rect>& rects);
+  virtual void DidScrollBackingStoreRect(const gfx::Rect& rect, int dx, int dy);
   virtual void RenderViewGone();
+  virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh);
   virtual void Destroy();
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
+  virtual VideoLayer* AllocVideoLayer(const gfx::Size& size);
   virtual void SetBackground(const SkBitmap& background);
+  virtual bool ContainsNativeView(gfx::NativeView native_view) const;
+  virtual void SetVisuallyDeemphasized(bool deemphasized);
 
  protected:
   // Windows Message Handlers
   LRESULT OnCreate(CREATESTRUCT* create_struct);
   void OnActivate(UINT, BOOL, HWND);
   void OnDestroy();
-  void OnPaint(HDC dc);
+  void OnPaint(HDC unused_dc);
   void OnNCPaint(HRGN update_region);
   LRESULT OnEraseBkgnd(HDC dc);
   LRESULT OnSetCursor(HWND window, UINT hittest_code, UINT mouse_message_id);
@@ -206,7 +215,7 @@ class RenderWidgetHostViewWin :
 
   // Redraws the window synchronously, and any child windows (i.e. plugins)
   // asynchronously.
-  void Redraw(const gfx::Rect& invalid_rect);
+  void Redraw();
 
   // Draw the resize corner bitmap on top of the given HDC, if it intersects the
   // given paint rect.
@@ -220,8 +229,15 @@ class RenderWidgetHostViewWin :
   // Create an intermediate window between the given HWND and its parent.
   HWND ReparentWindow(HWND window);
 
+  // Whether the window should be activated.
+  bool IsActivatable() const;
+
   // The associated Model.
   RenderWidgetHost* render_widget_host_;
+
+  // If we're doing out-of-process painting, this member will be non-NULL,
+  // indicating the gpu view we're using for the painting.
+  scoped_ptr<GpuViewHost> gpu_view_host_;
 
   // The cursor for the page. This is passed up from the renderer.
   WebCursor current_cursor_;
@@ -240,6 +256,9 @@ class RenderWidgetHostViewWin :
   // messages about the focused edit control from a renderer process.
   bool ime_notification_;
 
+  // true if Enter was hit when render widget host was in focus.
+  bool capture_enter_key_;
+
   // true if the View is not visible.
   bool is_hidden_;
 
@@ -251,6 +270,11 @@ class RenderWidgetHostViewWin :
   // true if the View should be closed when its HWND is deactivated (used to
   // support SELECT popups which are closed when they are deactivated).
   bool close_on_deactivate_;
+
+  // Whether Destroy() has been called.  Used to detect a crasher
+  // (http://crbug.com/24248) where render_view_host_ has been deleted when
+  // OnFinalMessage is called.
+  bool being_destroyed_;
 
   // Tooltips
   // The text to be shown in the tooltip, supplied by the renderer.
@@ -283,6 +307,13 @@ class RenderWidgetHostViewWin :
   // TODO(jcampan): http://b/issue?id=1432077 This is a temporary work-around
   // until that bug is fixed.
   bool renderer_accessible_;
+
+  // The time it took after this view was selected for it to be fully painted.
+  base::TimeTicks tab_switch_paint_time_;
+
+  // True if we are showing a constrained window. We will grey out the view
+  // whenever we paint.
+  bool visually_deemphasized_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

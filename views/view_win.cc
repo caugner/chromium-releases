@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/view.h"
 
 #include "app/drag_drop_types.h"
-#include "app/gfx/canvas.h"
-#include "app/gfx/path.h"
 #include "base/string_util.h"
+#include "gfx/canvas.h"
+#include "gfx/path.h"
 #include "views/accessibility/view_accessibility_wrapper.h"
 #include "views/border.h"
 #include "views/widget/root_view.h"
@@ -18,6 +18,14 @@ namespace views {
 // static
 int View::GetDoubleClickTimeMS() {
   return ::GetDoubleClickTime();
+}
+
+// static
+int View::GetMenuShowDelay() {
+  static DWORD delay = 0;
+  if (!delay && !SystemParametersInfo(SPI_GETMENUSHOWDELAY, 0, &delay, 0))
+    delay = View::kShowFolderDropMenuDelay;
+  return delay;
 }
 
 ViewAccessibilityWrapper* View::GetViewAccessibilityWrapper() {

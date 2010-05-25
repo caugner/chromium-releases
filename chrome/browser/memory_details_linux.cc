@@ -14,8 +14,9 @@
 #include "base/string_util.h"
 #include "base/process_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/common/child_process_host.h"
+#include "chrome/browser/zygote_host_linux.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
@@ -44,22 +45,22 @@ static const char kBrowserPrettyNames[][10] = {
 
 // A mapping from process name to the type of browser.
 static const struct {
-  const char process_name[17];
+  const char process_name[16];
   BrowserType browser;
   } kBrowserBinaryNames[] = {
   { "firefox", FIREFOX },
   { "firefox-3.5", FIREFOX },
   { "firefox-3.0", FIREFOX },
+  { "firefox-bin", FIREFOX },
   { "opera", OPERA },
   { "konqueror", KONQUEROR },
-  { "epiphany-browser", EPIPHANY },
+  { "epiphany-browse", EPIPHANY },
   { "epiphany", EPIPHANY },
   { "midori", MIDORI },
   { "", MAX_BROWSERS },
 };
 
-MemoryDetails::MemoryDetails()
-  : ui_loop_(NULL) {
+MemoryDetails::MemoryDetails() {
 }
 
 ProcessData* MemoryDetails::ChromeBrowser() {
@@ -164,17 +165,25 @@ static void GetProcessDataMemoryInformation(
 
 // Find all children of the given process.
 static void GetAllChildren(const std::vector<Process>& processes,
-                           pid_t root, std::vector<pid_t>* out) {
+                           const pid_t root, const pid_t zygote,
+                           std::vector<pid_t>* out) {
   out->clear();
   out->push_back(root);
 
   std::set<pid_t> wavefront, next_wavefront;
   wavefront.insert(root);
+  bool zygote_found = zygote ? false : true;
 
   while (wavefront.size()) {
     for (std::vector<Process>::const_iterator
          i = processes.begin(); i != processes.end(); ++i) {
-      if (wavefront.count(i->parent)) {
+      // Handle the zygote separately. With the SUID sandbox and a separate
+      // pid namespace, the zygote's parent process is not the browser.
+      if (!zygote_found && zygote == i->pid) {
+        zygote_found = true;
+        out->push_back(i->pid);
+        next_wavefront.insert(i->pid);
+      } else if (wavefront.count(i->parent)) {
         out->push_back(i->pid);
         next_wavefront.insert(i->pid);
       }
@@ -187,8 +196,7 @@ static void GetAllChildren(const std::vector<Process>& processes,
 
 void MemoryDetails::CollectProcessData(
     std::vector<ProcessMemoryInformation> child_info) {
-  DCHECK(MessageLoop::current() ==
-      ChromeThread::GetMessageLoop(ChromeThread::FILE));
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
   std::vector<Process> processes;
   GetProcesses(&processes);
@@ -223,7 +231,8 @@ void MemoryDetails::CollectProcessData(
   }
 
   std::vector<pid_t> current_browser_processes;
-  GetAllChildren(processes, getpid(), &current_browser_processes);
+  const pid_t zygote = Singleton<ZygoteHost>()->pid();
+  GetAllChildren(processes, getpid(), zygote, &current_browser_processes);
   ProcessData current_browser;
   GetProcessDataMemoryInformation(current_browser_processes, &current_browser);
   current_browser.name = chrome::kBrowserAppName;
@@ -235,7 +244,7 @@ void MemoryDetails::CollectProcessData(
   for (std::set<pid_t>::const_iterator
        i = browsers_found.begin(); i != browsers_found.end(); ++i) {
     std::vector<pid_t> browser_processes;
-    GetAllChildren(processes, *i, &browser_processes);
+    GetAllChildren(processes, *i, 0, &browser_processes);
     ProcessData browser;
     GetProcessDataMemoryInformation(browser_processes, &browser);
 
@@ -253,6 +262,7 @@ void MemoryDetails::CollectProcessData(
   }
 
   // Finally return to the browser thread.
-  ui_loop_->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnUIThread));
 }

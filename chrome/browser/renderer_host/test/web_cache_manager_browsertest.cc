@@ -20,7 +20,9 @@ class WebCacheManagerBrowserTest : public InProcessBrowserTest {
 // user navigates to another tab and back, the browser doesn't crash.
 // TODO(jam): http://crbug.com/15288 disabled because it fails on the build bot.
 IN_PROC_BROWSER_TEST_F(WebCacheManagerBrowserTest, DISABLED_CrashOnceOnly) {
-  GURL url(ui_test_utils::GetTestUrl(L"google", L"google.html"));
+  const FilePath kTestDir(FILE_PATH_LITERAL("google"));
+  const FilePath kTestFile(FILE_PATH_LITERAL("google.html"));
+  GURL url(ui_test_utils::GetTestUrl(kTestDir, kTestFile));
 
   ui_test_utils::NavigateToURL(browser(), url);
 
@@ -29,9 +31,8 @@ IN_PROC_BROWSER_TEST_F(WebCacheManagerBrowserTest, DISABLED_CrashOnceOnly) {
 
   TabContents* tab = browser()->GetTabContentsAt(0);
   ASSERT_TRUE(tab != NULL);
-  base::KillProcess(
-      tab->process()->process().handle(), base::PROCESS_END_KILLED_BY_USER,
-      true);
+  base::KillProcess(tab->GetRenderProcessHost()->GetHandle(),
+                    base::PROCESS_END_KILLED_BY_USER, true);
 
   browser()->SelectTabContentsAt(0, true);
   browser()->NewTab();

@@ -4,18 +4,18 @@
 
 #include "chrome/renderer/print_web_view_helper.h"
 
-#include "app/gfx/codec/jpeg_codec.h"
 #include "app/l10n_util.h"
 #include "base/logging.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_view.h"
+#include "gfx/codec/jpeg_codec.h"
 #include "grit/generated_resources.h"
 #include "printing/units.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebRect.h"
-#include "webkit/api/public/WebScreenInfo.h"
-#include "webkit/api/public/WebSize.h"
-#include "webkit/api/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebFrame;
@@ -29,7 +29,8 @@ PrepareFrameAndViewForPrint::PrepareFrameAndViewForPrint(
     const ViewMsg_Print_Params& print_params,
     WebFrame* frame,
     WebView* web_view)
-        : frame_(frame), web_view_(web_view), expected_pages_count_(0) {
+        : frame_(frame), web_view_(web_view), expected_pages_count_(0),
+          use_browser_overlays_(true) {
   print_canvas_size_.set_width(
       printing::ConvertUnit(print_params.printable_size.width(),
                             static_cast<int>(print_params.dpi),
@@ -53,7 +54,9 @@ PrepareFrameAndViewForPrint::PrepareFrameAndViewForPrint(
 
   web_view->resize(print_layout_size);
 
-  expected_pages_count_ = frame->printBegin(print_canvas_size_);
+  expected_pages_count_ = frame->printBegin(
+      print_canvas_size_, static_cast<int>(print_params.dpi),
+      &use_browser_overlays_);
 }
 
 PrepareFrameAndViewForPrint::~PrepareFrameAndViewForPrint() {
@@ -163,28 +166,4 @@ int32 PrintWebViewHelper::routing_id() {
 void PrintWebViewHelper::didStopLoading() {
   DCHECK(print_pages_params_.get() != NULL);
   PrintPages(*print_pages_params_.get(), print_web_view_->mainFrame());
-}
-
-WebString PrintWebViewHelper::autoCorrectWord(const WebString& word) {
-  return word;
-}
-
-WebRect PrintWebViewHelper::windowRect() {
-  NOTREACHED();
-  return WebRect();
-}
-
-WebRect PrintWebViewHelper::windowResizerRect() {
-  NOTREACHED();
-  return WebRect();
-}
-
-WebRect PrintWebViewHelper::rootWindowRect() {
-  NOTREACHED();
-  return WebRect();
-}
-
-WebScreenInfo PrintWebViewHelper::screenInfo() {
-  NOTREACHED();
-  return WebScreenInfo();
 }

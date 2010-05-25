@@ -6,11 +6,14 @@
 #include "base/file_util.h"
 #include "base/platform_thread.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
+#include "chrome/browser/view_ids.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/url_request/url_request_unittest.h"
+#include "views/event.h"
 
 const std::string NOLISTENERS_HTML =
     "<html><head><title>nolisteners</title></head><body></body></html>";
@@ -22,6 +25,14 @@ const std::string UNLOAD_HTML =
 const std::string BEFORE_UNLOAD_HTML =
     "<html><head><title>beforeunload</title></head><body>"
     "<script>window.onbeforeunload=function(e){return 'foo'}</script>"
+    "</body></html>";
+
+const std::string INNER_FRAME_WITH_FOCUS_HTML =
+    "<html><head><title>innerframewithfocus</title></head><body>"
+    "<script>window.onbeforeunload=function(e){return 'foo'}</script>"
+    "<iframe src=\"data:text/html,<html><head><script>window.onload="
+    "function(){document.getElementById('box').focus()}</script>"
+    "<body><input id='box'></input></body></html>\"></iframe>"
     "</body></html>";
 
 const std::string TWO_SECOND_BEFORE_UNLOAD_HTML =
@@ -94,7 +105,7 @@ class UnloadTest : public UITest {
 
   void WaitForBrowserClosed() {
     const int kCheckDelayMs = 100;
-    int max_wait_time = 5000;
+    int max_wait_time = action_max_timeout_ms();
     while (max_wait_time > 0) {
       max_wait_time -= kCheckDelayMs;
       PlatformThread::Sleep(kCheckDelayMs);
@@ -105,7 +116,7 @@ class UnloadTest : public UITest {
 
   void CheckTitle(const std::wstring& expected_title) {
     const int kCheckDelayMs = 100;
-    int max_wait_time = 5000;
+    int max_wait_time = action_max_timeout_ms();
     while (max_wait_time > 0) {
       max_wait_time -= kCheckDelayMs;
       PlatformThread::Sleep(kCheckDelayMs);
@@ -135,13 +146,9 @@ class UnloadTest : public UITest {
   // load is purposely async to test the case where the user loads another
   // page without waiting for the first load to complete.
   void NavigateToNolistenersFileTwiceAsync() {
-    // TODO(ojan): We hit a DCHECK in RenderViewHost::OnMsgShouldCloseACK
-    // if we don't sleep here.
-    PlatformThread::Sleep(400);
     NavigateToURLAsync(
         URLRequestMockHTTPJob::GetMockUrl(
             FilePath(FILE_PATH_LITERAL("title2.html"))));
-    PlatformThread::Sleep(400);
     NavigateToURL(
         URLRequestMockHTTPJob::GetMockUrl(
             FilePath(FILE_PATH_LITERAL("title2.html"))));
@@ -152,6 +159,7 @@ class UnloadTest : public UITest {
   void LoadUrlAndQuitBrowser(const std::string& html_content,
                              const std::wstring& expected_title = L"") {
     scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(browser.get());
     NavigateToDataURL(html_content, expected_title);
     bool application_closed = false;
     EXPECT_TRUE(CloseBrowser(browser.get(), &application_closed));
@@ -161,7 +169,7 @@ class UnloadTest : public UITest {
 #if defined(OS_WIN) || defined(OS_LINUX)
     bool modal_dialog_showing = false;
     MessageBoxFlags::DialogButton available_buttons;
-    EXPECT_TRUE(automation()->WaitForAppModalDialog(action_timeout_ms()));
+    EXPECT_TRUE(automation()->WaitForAppModalDialog());
     EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
         &available_buttons));
     ASSERT_TRUE(modal_dialog_showing);
@@ -176,9 +184,11 @@ class UnloadTest : public UITest {
 };
 
 // Navigate to a page with an infinite unload handler.
-// Then two two async crosssite requests to ensure
+// Then two async crosssite requests to ensure
 // we don't get confused and think we're closing the tab.
-TEST_F(UnloadTest, CrossSiteInfiniteUnloadAsync) {
+//
+// This test is flaky on the valgrind UI bots. http://crbug.com/39057
+TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteUnloadAsync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -190,7 +200,7 @@ TEST_F(UnloadTest, CrossSiteInfiniteUnloadAsync) {
 }
 
 // Navigate to a page with an infinite unload handler.
-// Then two two sync crosssite requests to ensure
+// Then two sync crosssite requests to ensure
 // we correctly nav to each one.
 TEST_F(UnloadTest, CrossSiteInfiniteUnloadSync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
@@ -203,10 +213,45 @@ TEST_F(UnloadTest, CrossSiteInfiniteUnloadSync) {
   ASSERT_TRUE(IsBrowserRunning());
 }
 
+// TODO(creis): This test is currently failing intermittently on one of the test
+// bots.  Investigating with crbug.com/34827.
+//
+// Navigate to a page with an infinite unload handler.
+// Then an async crosssite request followed by an input event to ensure that
+// the short unload timeout (not the long input event timeout) is used.
+// See crbug.com/11007.
+TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteUnloadAsyncInputEvent) {
+  // Tests makes no sense in single-process mode since the renderer is hung.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
+    return;
+
+  NavigateToDataURL(INFINITE_UNLOAD_HTML, L"infiniteunload");
+
+  // Navigate to a new URL asynchronously.
+  NavigateToURLAsync(
+      URLRequestMockHTTPJob::GetMockUrl(
+          FilePath(FILE_PATH_LITERAL("title2.html"))));
+
+  // Now send an input event while we're stalled on the unload handler.
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  ASSERT_TRUE(window.get());
+  gfx::Rect bounds;
+  ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_0, &bounds, false));
+  ASSERT_TRUE(browser->SimulateDrag(bounds.CenterPoint(), bounds.CenterPoint(),
+                                    views::Event::EF_LEFT_BUTTON_DOWN, false));
+
+  // The title should update before the timeout in CheckTitle.
+  CheckTitle(L"Title Of Awesomeness");
+  ASSERT_TRUE(IsBrowserRunning());
+}
+
 // Navigate to a page with an infinite beforeunload handler.
 // Then two two async crosssite requests to ensure
 // we don't get confused and think we're closing the tab.
-TEST_F(UnloadTest, CrossSiteInfiniteBeforeUnloadAsync) {
+// This test is flaky on the valgrind UI bots. http://crbug.com/39057
+TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteBeforeUnloadAsync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -246,6 +291,7 @@ TEST_F(UnloadTest, BrowserCloseUnload) {
 #if !defined(OS_LINUX)
 TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
   NavigateToDataURL(BEFORE_UNLOAD_HTML, L"beforeunload");
 
   CloseBrowserAsync(browser.get());
@@ -258,12 +304,27 @@ TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
 // CANCEL in the beforeunload confirm dialog.
 TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
   NavigateToDataURL(BEFORE_UNLOAD_HTML, L"beforeunload");
 
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_CANCEL);
   WaitForBrowserClosed();
   EXPECT_TRUE(IsBrowserRunning());
+
+  CloseBrowserAsync(browser.get());
+  ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);
+  WaitForBrowserClosed();
+  EXPECT_FALSE(IsBrowserRunning());
+}
+
+// Tests closing the browser and clicking OK in the beforeunload confirm dialog
+// if an inner frame has the focus.  See crbug.com/32615.
+TEST_F(UnloadTest, BrowserCloseWithInnerFocusedFrame) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  NavigateToDataURL(INNER_FRAME_WITH_FOCUS_HTML, L"innerframewithfocus");
 
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);

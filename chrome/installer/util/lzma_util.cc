@@ -5,7 +5,8 @@
 #include "chrome/installer/util/lzma_util.h"
 
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/logging.h"
+#include "base/utf_string_conversions.h"
 
 extern "C" {
 #include "third_party/lzma_sdk/Archive/7z/7zExtract.h"
@@ -48,7 +49,7 @@ SZ_RESULT SzFileSeekImp(void *object, CFileSize pos) {
   value.LowPart = SetFilePointer(s->File, value.LowPart, &value.HighPart,
                                  FILE_BEGIN);
   if (value.LowPart == 0xFFFFFFFF) {
-    if(GetLastError() != NO_ERROR) {
+    if (GetLastError() != NO_ERROR) {
       return SZE_FAIL;
     }
   }
@@ -172,13 +173,13 @@ DWORD LzmaUtil::UnPack(const std::wstring& location,
 
     // If archive entry is directory create it and move on to the next entry.
     if (f->IsDirectory) {
-      file_util::CreateDirectory(wfileName);
+      file_util::CreateDirectory(FilePath(wfileName));
       continue;
     }
 
     HANDLE hFile;
     std::wstring directory = file_util::GetDirectoryFromPath(wfileName);
-    file_util::CreateDirectory(directory);
+    file_util::CreateDirectory(FilePath(directory));
 
     hFile = CreateFile(wfileName.c_str(), GENERIC_WRITE, 0, NULL,
                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
